@@ -9,7 +9,7 @@ from app.services.safety_engine import score_change_request, SafetyReviewResult
 def make_asset(env=Environment.prod, crit=Criticality.high):
     return Asset(
         id=uuid.uuid4(), organization_id=uuid.uuid4(), name="Test Asset",
-        asset_type=AssetType.dns_zone, environment=env, criticality=crit, metadata={}
+        asset_type=AssetType.dns_zone, environment=env, criticality=crit, asset_metadata={}
     )
 
 

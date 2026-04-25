@@ -138,9 +138,9 @@ export function Assets() {
                       </div>
                       <RiskBadge level={asset.criticality} size="sm" />
                     </div>
-                    {Object.keys(asset.metadata).length > 0 && (
+                    {Object.keys(asset.asset_metadata).length > 0 && (
                       <div className="mt-2 pt-2 border-t border-slate-50">
-                        {Object.entries(asset.metadata).slice(0, 3).map(([k, v]) => (
+                        {Object.entries(asset.asset_metadata).slice(0, 3).map(([k, v]) => (
                           <div key={k} className="flex justify-between text-xs">
                             <span className="text-slate-400">{k}</span>
                             <span className="text-slate-600 font-mono">{String(v)}</span>

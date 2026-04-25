@@ -70,7 +70,7 @@ async def approver_user(db, org):
 async def prod_critical_asset(db, org):
     a = Asset(id=uuid.uuid4(), organization_id=org.id, name="Prod Critical App",
               asset_type=AssetType.application, environment=Environment.prod, criticality=Criticality.critical,
-              metadata={})
+              asset_metadata={})
     db.add(a)
     await db.flush()
     return a
@@ -80,7 +80,7 @@ async def prod_critical_asset(db, org):
 async def dev_low_asset(db, org):
     a = Asset(id=uuid.uuid4(), organization_id=org.id, name="Dev Low Asset",
               asset_type=AssetType.server, environment=Environment.dev, criticality=Criticality.low,
-              metadata={})
+              asset_metadata={})
     db.add(a)
     await db.flush()
     return a

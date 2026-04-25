@@ -9,7 +9,7 @@ class AssetCreate(BaseModel):
     asset_type: AssetType
     environment: Environment
     criticality: Criticality
-    metadata: dict = {}
+    asset_metadata: dict = {}
 
 
 class AssetRead(BaseModel):
@@ -21,5 +21,5 @@ class AssetRead(BaseModel):
     asset_type: AssetType
     environment: Environment
     criticality: Criticality
-    metadata: dict
+    asset_metadata: dict
     created_at: datetime

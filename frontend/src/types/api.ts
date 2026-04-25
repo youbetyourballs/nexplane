@@ -36,7 +36,7 @@ export interface Asset {
   asset_type: AssetType;
   environment: Environment;
   criticality: Criticality;
-  metadata: Record<string, unknown>;
+  asset_metadata: Record<string, unknown>;
   created_at: string;
 }
 
@@ -45,7 +45,7 @@ export interface AssetCreate {
   asset_type: AssetType;
   environment: Environment;
   criticality: Criticality;
-  metadata?: Record<string, unknown>;
+  asset_metadata?: Record<string, unknown>;
 }
 
 export type ConnectorType =

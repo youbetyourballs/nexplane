@@ -76,19 +76,19 @@ async def seed():
         assets = [
             Asset(id=ASSET_IDS["finance_app"], organization_id=ORG_ID, name="Prod Finance Application",
                   asset_type=AssetType.application, environment=Environment.prod, criticality=Criticality.critical,
-                  metadata={"owner": "finance-team", "region": "us-east-1", "tier": "tier-1"}),
+                  asset_metadata={"owner": "finance-team", "region": "us-east-1", "tier": "tier-1"}),
             Asset(id=ASSET_IDS["dns_zone"], organization_id=ORG_ID, name="Prod DNS Zone (acme.example)",
                   asset_type=AssetType.dns_zone, environment=Environment.prod, criticality=Criticality.high,
-                  metadata={"zone": "acme.example", "provider": "cloudflare", "records": 247}),
+                  asset_metadata={"zone": "acme.example", "provider": "cloudflare", "records": 247}),
             Asset(id=ASSET_IDS["aws_account"], organization_id=ORG_ID, name="AWS Prod Account",
                   asset_type=AssetType.cloud_account, environment=Environment.prod, criticality=Criticality.critical,
-                  metadata={"account_id": "123456789012", "region": "us-east-1"}),
+                  asset_metadata={"account_id": "123456789012", "region": "us-east-1"}),
             Asset(id=ASSET_IDS["paloalto_fw"], organization_id=ORG_ID, name="Palo Alto Prod Firewall",
                   asset_type=AssetType.firewall, environment=Environment.prod, criticality=Criticality.critical,
-                  metadata={"model": "PA-5220", "software": "PAN-OS 11.0"}),
+                  asset_metadata={"model": "PA-5220", "software": "PAN-OS 11.0"}),
             Asset(id=ASSET_IDS["linux_servers"], organization_id=ORG_ID, name="Linux Server Group (App Tier)",
                   asset_type=AssetType.server, environment=Environment.prod, criticality=Criticality.high,
-                  metadata={"count": 12, "os": "Ubuntu 22.04", "purpose": "app-tier"}),
+                  asset_metadata={"count": 12, "os": "Ubuntu 22.04", "purpose": "app-tier"}),
         ]
         db.add_all(assets)
 

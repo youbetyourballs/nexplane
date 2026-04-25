@@ -9,7 +9,7 @@ def make_asset(env=Environment.prod, crit=Criticality.critical):
     return Asset(
         id=uuid.uuid4(), organization_id=uuid.uuid4(),
         name="test", asset_type=AssetType.application,
-        environment=env, criticality=crit, metadata={}
+        environment=env, criticality=crit, asset_metadata={}
     )
 
 
