@@ -1,0 +1,68 @@
+import uuid
+from datetime import datetime
+from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import UUID
+import enum
+
+from app.database import Base
+
+
+class ChangeType(str, enum.Enum):
+    dns_update = "dns_update"
+    snapshot_asset = "snapshot_asset"
+    security_group_update = "security_group_update"
+    key_rotation = "key_rotation"
+    telemetry_agent_deploy = "telemetry_agent_deploy"
+    remote_command = "remote_command"
+    microsegmentation_policy = "microsegmentation_policy"
+
+
+class RiskLevel(str, enum.Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+    critical = "critical"
+
+
+class ChangeRequestStatus(str, enum.Enum):
+    draft = "draft"
+    planned = "planned"
+    safety_review = "safety_review"
+    awaiting_approval = "awaiting_approval"
+    approved = "approved"
+    executing = "executing"
+    verifying = "verifying"
+    completed = "completed"
+    failed = "failed"
+    rolled_back = "rolled_back"
+    rejected = "rejected"
+
+
+class ChangeRequest(Base):
+    __tablename__ = "change_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
+    requester_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    change_type: Mapped[ChangeType] = mapped_column(SAEnum(ChangeType, name="change_type"), nullable=False)
+    target_asset_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    desired_outcome: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    risk_level: Mapped[RiskLevel] = mapped_column(SAEnum(RiskLevel, name="risk_level"), default=RiskLevel.medium)
+    status: Mapped[ChangeRequestStatus] = mapped_column(
+        SAEnum(ChangeRequestStatus, name="change_request_status"),
+        default=ChangeRequestStatus.draft,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    organization: Mapped["Organization"] = relationship("Organization", back_populates="change_requests")
+    requester: Mapped["User"] = relationship("User", back_populates="change_requests")
+    change_plan: Mapped["ChangePlan"] = relationship("ChangePlan", back_populates="change_request", uselist=False)
+    approvals: Mapped[list["Approval"]] = relationship("Approval", back_populates="change_request")
+    execution_runs: Mapped[list["ExecutionRun"]] = relationship("ExecutionRun", back_populates="change_request")
+    audit_events: Mapped[list["AuditEvent"]] = relationship("AuditEvent", back_populates="change_request")

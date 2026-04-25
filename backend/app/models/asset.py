@@ -1,0 +1,45 @@
+import uuid
+from datetime import datetime
+from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import UUID
+import enum
+
+from app.database import Base
+
+
+class AssetType(str, enum.Enum):
+    server = "server"
+    cloud_account = "cloud_account"
+    dns_zone = "dns_zone"
+    firewall = "firewall"
+    identity_provider = "identity_provider"
+    application = "application"
+
+
+class Environment(str, enum.Enum):
+    dev = "dev"
+    staging = "staging"
+    prod = "prod"
+
+
+class Criticality(str, enum.Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+    critical = "critical"
+
+
+class Asset(Base):
+    __tablename__ = "assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    asset_type: Mapped[AssetType] = mapped_column(SAEnum(AssetType, name="asset_type"), nullable=False)
+    environment: Mapped[Environment] = mapped_column(SAEnum(Environment, name="environment"), nullable=False)
+    criticality: Mapped[Criticality] = mapped_column(SAEnum(Criticality, name="criticality"), nullable=False)
+    metadata: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    organization: Mapped["Organization"] = relationship("Organization", back_populates="assets")

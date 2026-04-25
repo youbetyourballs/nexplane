@@ -1,0 +1,215 @@
+from dataclasses import dataclass, field
+from typing import Any
+
+from app.models.asset import Asset, Environment, Criticality
+from app.models.change_request import ChangeRequest, ChangeType, RiskLevel
+
+
+APPROVED_COMMAND_TEMPLATES = {
+    "restart_service": {
+        "description": "Restart a named system service",
+        "parameters": ["service_name"],
+        "allowed_services": ["nginx", "apache2", "sshd", "auditd", "filebeat", "telegraf"],
+    },
+    "check_disk_usage": {
+        "description": "Report disk usage for a mount point",
+        "parameters": ["mount_point"],
+    },
+    "rotate_log": {
+        "description": "Force log rotation for a named log",
+        "parameters": ["log_name"],
+    },
+    "flush_dns_cache": {
+        "description": "Flush the system DNS resolver cache",
+        "parameters": [],
+    },
+    "collect_support_bundle": {
+        "description": "Collect a diagnostic support bundle",
+        "parameters": ["output_path"],
+    },
+}
+
+
+@dataclass
+class RiskFactor:
+    name: str
+    description: str
+    score: int
+
+
+@dataclass
+class SafetyReviewResult:
+    risk_level: RiskLevel
+    risk_score: int
+    risk_factors: list[RiskFactor] = field(default_factory=list)
+    blocking_issues: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    approved_template: dict[str, Any] | None = None
+
+    @property
+    def is_blocked(self) -> bool:
+        return len(self.blocking_issues) > 0
+
+
+def score_change_request(change_request: ChangeRequest, assets: list[Asset]) -> SafetyReviewResult:
+    score = 0
+    risk_factors: list[RiskFactor] = []
+    blocking_issues: list[str] = []
+    warnings: list[str] = []
+
+    prod_assets = [a for a in assets if a.environment == Environment.prod]
+    critical_assets = [a for a in assets if a.criticality == Criticality.critical]
+    high_assets = [a for a in assets if a.criticality == Criticality.high]
+
+    if prod_assets:
+        factor_score = 30 * len(prod_assets)
+        score += factor_score
+        risk_factors.append(RiskFactor(
+            name="production_environment",
+            description=f"{len(prod_assets)} production asset(s) targeted",
+            score=factor_score,
+        ))
+
+    if critical_assets:
+        factor_score = 35 * len(critical_assets)
+        score += factor_score
+        risk_factors.append(RiskFactor(
+            name="critical_asset",
+            description=f"{len(critical_assets)} critical asset(s) targeted",
+            score=factor_score,
+        ))
+    elif high_assets:
+        factor_score = 20 * len(high_assets)
+        score += factor_score
+        risk_factors.append(RiskFactor(
+            name="high_criticality_asset",
+            description=f"{len(high_assets)} high-criticality asset(s) targeted",
+            score=factor_score,
+        ))
+
+    if change_request.change_type == ChangeType.remote_command:
+        desired = change_request.desired_outcome or {}
+        template_id = desired.get("template_id")
+        if not template_id or template_id not in APPROVED_COMMAND_TEMPLATES:
+            blocking_issues.append(
+                "Remote command requests must use an approved command template. "
+                f"Available templates: {', '.join(APPROVED_COMMAND_TEMPLATES.keys())}"
+            )
+        elif desired.get("freeform_command"):
+            blocking_issues.append("Freeform shell commands are not permitted. Use a parameterized template.")
+        else:
+            score += 25
+            risk_factors.append(RiskFactor(
+                name="remote_command_execution",
+                description=f"Remote command using template '{template_id}'",
+                score=25,
+            ))
+
+    if change_request.change_type == ChangeType.microsegmentation_policy:
+        score += 20
+        risk_factors.append(RiskFactor(
+            name="microsegmentation_policy",
+            description="Policy change affects network segmentation",
+            score=20,
+        ))
+        if len(change_request.target_asset_ids) > 10:
+            score += 25
+            risk_factors.append(RiskFactor(
+                name="large_blast_radius",
+                description=f"{len(change_request.target_asset_ids)} assets targeted (>10)",
+                score=25,
+            ))
+
+    if change_request.change_type == ChangeType.security_group_update and prod_assets:
+        warnings.append("Security group changes in production require careful verification of inbound/outbound rules.")
+
+    if change_request.change_type == ChangeType.key_rotation:
+        warnings.append("Ensure all consumers of the rotated key are updated before revoking the old key.")
+
+    desired = change_request.desired_outcome or {}
+    rollback_strategy = desired.get("rollback_strategy")
+    if not rollback_strategy:
+        score += 30
+        risk_factors.append(RiskFactor(
+            name="no_rollback_strategy",
+            description="No rollback strategy specified in desired outcome",
+            score=30,
+        ))
+        if prod_assets or critical_assets:
+            blocking_issues.append(
+                "A rollback strategy is required for changes targeting production or critical assets."
+            )
+
+    dev_staging_only = all(a.environment in (Environment.dev, Environment.staging) for a in assets)
+    low_med_crit = all(a.criticality in (Criticality.low, Criticality.medium) for a in assets)
+    if dev_staging_only and low_med_crit and not assets:
+        score = max(score - 20, 0)
+
+    if score >= 90:
+        risk_level = RiskLevel.critical
+    elif score >= 60:
+        risk_level = RiskLevel.high
+    elif score >= 30:
+        risk_level = RiskLevel.medium
+    else:
+        risk_level = RiskLevel.low
+
+    return SafetyReviewResult(
+        risk_level=risk_level,
+        risk_score=score,
+        risk_factors=risk_factors,
+        blocking_issues=blocking_issues,
+        warnings=warnings,
+    )
+
+
+def check_approval_requirements(risk_level: RiskLevel, approvals: list) -> dict:
+    approved_decisions = [a for a in approvals if a.decision == "approved"]
+    approver_roles = {a.approver.role for a in approved_decisions}
+
+    requirements = {
+        RiskLevel.low: {
+            "min_approvals": 1,
+            "required_roles": ["security_operator", "admin"],
+            "description": "Requires approval from security operator or admin",
+        },
+        RiskLevel.medium: {
+            "min_approvals": 1,
+            "required_roles": ["approver", "admin"],
+            "description": "Requires approver or admin",
+        },
+        RiskLevel.high: {
+            "min_approvals": 2,
+            "required_roles": ["approver", "admin"],
+            "description": "Requires approver AND admin",
+            "must_include": ["approver", "admin"],
+        },
+        RiskLevel.critical: {
+            "min_approvals": 2,
+            "required_roles": ["approver", "admin"],
+            "description": "Requires two approvals; does not auto-execute",
+            "must_include": ["approver", "admin"],
+            "no_auto_execute": True,
+        },
+    }
+
+    req = requirements[risk_level]
+    met = len(approved_decisions) >= req["min_approvals"]
+
+    if "must_include" in req:
+        for role in req["must_include"]:
+            if role not in approver_roles:
+                met = False
+                break
+
+    return {
+        "satisfied": met,
+        "approvals_received": len(approved_decisions),
+        "approvals_required": req["min_approvals"],
+        "description": req["description"],
+        "no_auto_execute": req.get("no_auto_execute", False),
+    }
+
+
+def get_approved_command_templates() -> dict:
+    return APPROVED_COMMAND_TEMPLATES

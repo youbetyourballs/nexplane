@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    @apply text-slate-900 bg-slate-50;
+  }
+
+  pre, code {
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  }
+
+  input[type="checkbox"] {
+    @apply accent-brand-600;
+  }
+}

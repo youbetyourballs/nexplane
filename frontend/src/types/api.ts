@@ -1,0 +1,233 @@
+// Centralized API types — mirrors backend Pydantic schemas
+// In production: generate these from OpenAPI via `openapi-typescript`
+
+export type UserRole = "admin" | "security_operator" | "approver" | "auditor";
+
+export interface User {
+  id: string;
+  organization_id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  created_at: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export type AssetType =
+  | "server"
+  | "cloud_account"
+  | "dns_zone"
+  | "firewall"
+  | "identity_provider"
+  | "application";
+
+export type Environment = "dev" | "staging" | "prod";
+export type Criticality = "low" | "medium" | "high" | "critical";
+
+export interface Asset {
+  id: string;
+  organization_id: string;
+  name: string;
+  asset_type: AssetType;
+  environment: Environment;
+  criticality: Criticality;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AssetCreate {
+  name: string;
+  asset_type: AssetType;
+  environment: Environment;
+  criticality: Criticality;
+  metadata?: Record<string, unknown>;
+}
+
+export type ConnectorType =
+  | "aws_mock"
+  | "azure_mock"
+  | "cloudflare_mock"
+  | "okta_mock"
+  | "paloalto_mock"
+  | "ssh_runner_mock";
+
+export type ConnectorStatus = "active" | "inactive" | "error";
+
+export interface Connector {
+  id: string;
+  organization_id: string;
+  connector_type: ConnectorType;
+  name: string;
+  status: ConnectorStatus;
+  scoped_permissions: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ConnectorCreate {
+  connector_type: ConnectorType;
+  name: string;
+  scoped_permissions?: Record<string, unknown>;
+}
+
+export interface ConnectorTestResult {
+  success: boolean;
+  latency_ms: number;
+  message: string;
+  details: Record<string, unknown>;
+}
+
+export type ChangeType =
+  | "dns_update"
+  | "snapshot_asset"
+  | "security_group_update"
+  | "key_rotation"
+  | "telemetry_agent_deploy"
+  | "remote_command"
+  | "microsegmentation_policy";
+
+export type RiskLevel = "low" | "medium" | "high" | "critical";
+
+export type ChangeRequestStatus =
+  | "draft"
+  | "planned"
+  | "safety_review"
+  | "awaiting_approval"
+  | "approved"
+  | "executing"
+  | "verifying"
+  | "completed"
+  | "failed"
+  | "rolled_back"
+  | "rejected";
+
+export interface ChangeRequest {
+  id: string;
+  organization_id: string;
+  requester_id: string;
+  title: string;
+  description: string;
+  change_type: ChangeType;
+  target_asset_ids: string[];
+  desired_outcome: Record<string, unknown>;
+  risk_level: RiskLevel;
+  status: ChangeRequestStatus;
+  created_at: string;
+  updated_at: string;
+  requester: User;
+  change_plan: ChangePlan | null;
+  approvals: Approval[];
+  execution_runs: ExecutionRun[];
+}
+
+export interface ChangeRequestSummary {
+  id: string;
+  title: string;
+  change_type: ChangeType;
+  risk_level: RiskLevel;
+  status: ChangeRequestStatus;
+  created_at: string;
+  updated_at: string;
+  requester: User;
+}
+
+export interface ChangeRequestCreate {
+  title: string;
+  description?: string;
+  change_type: ChangeType;
+  target_asset_ids: string[];
+  desired_outcome: Record<string, unknown>;
+}
+
+export interface ChangePlanStep {
+  step_number: number;
+  name: string;
+  description: string;
+  connector_action: string;
+  parameters: Record<string, unknown>;
+  rollback_action?: string;
+  rollback_parameters?: Record<string, unknown>;
+  estimated_duration_seconds: number;
+}
+
+export interface PreflightCheck {
+  name: string;
+  description: string;
+  check_type: string;
+  expected_result: string;
+}
+
+export interface BlastRadius {
+  affected_assets: Array<{ id: string; name: string; type: string; env: string; criticality: string }>;
+  affected_environments: string[];
+  estimated_impact: string;
+  affected_services: string[];
+  recovery_time_estimate: string;
+  rollback_available: boolean;
+}
+
+export interface ChangePlan {
+  id: string;
+  change_request_id: string;
+  generated_steps: ChangePlanStep[];
+  preflight_checks: PreflightCheck[];
+  blast_radius: BlastRadius;
+  rollback_plan: Record<string, unknown>;
+  verification_plan: { checks: Array<{ name: string; description: string; method: string }>; success_criteria: string };
+  generated_by: "system" | "ai_mock" | "human";
+  created_at: string;
+}
+
+export type ApprovalDecision = "approved" | "rejected";
+
+export interface Approval {
+  id: string;
+  change_request_id: string;
+  approver_id: string;
+  decision: ApprovalDecision;
+  comment: string | null;
+  created_at: string;
+  approver: User;
+}
+
+export interface ApprovalCreate {
+  decision: ApprovalDecision;
+  comment?: string;
+}
+
+export type ExecutionStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "rolling_back"
+  | "rolled_back";
+
+export interface ExecutionRun {
+  id: string;
+  change_request_id: string;
+  workflow_id: string;
+  status: ExecutionStatus;
+  started_at: string;
+  completed_at: string | null;
+  result: Record<string, unknown>;
+}
+
+export interface AuditEvent {
+  id: string;
+  organization_id: string;
+  actor_id: string | null;
+  change_request_id: string | null;
+  event_type: string;
+  event_payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface Token {
+  access_token: string;
+  token_type: string;
+}
