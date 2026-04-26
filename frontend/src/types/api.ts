@@ -104,6 +104,7 @@ export interface ProjectMember {
 
 export interface ProjectDetail extends Project {
   members: ProjectMember[];
+  ai_context: Array<{ role: string; content: string }>;
 }
 
 export interface ProjectCreate {
@@ -128,6 +129,28 @@ export interface ProjectMemberCreate {
 export interface ProjectMemberUpdate {
   sequence_order?: number;
   depends_on?: string[];
+}
+
+export interface OrgSettings {
+  ai_configured: boolean;
+  updated_at: string | null;
+}
+
+export interface AIProposedCR {
+  title: string;
+  change_type: ChangeType;
+  suggested_assets: string[];
+  desired_outcome_sketch: Record<string, unknown>;
+  notes?: string;
+}
+
+export interface AIChatResponse {
+  reply: string;
+  proposed_crs: AIProposedCR[] | null;
+}
+
+export interface AIChatRequest {
+  message: string;
 }
 
 export type ConnectorType =

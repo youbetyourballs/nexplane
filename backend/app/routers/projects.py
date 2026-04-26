@@ -5,16 +5,32 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pydantic import BaseModel
 from app.database import get_db
 from app.models.project import Project, ProjectChangeRequest, ProjectStatus
 from app.models.change_request import ChangeRequest, ChangeRequestStatus
 from app.models.user import User
+from app.models.org_settings import OrganizationSettings
+from app.models.asset import Asset
 from app.routers import current_user
 from app.schemas.project import (
     ProjectCreate, ProjectUpdate, ProjectRead, ProjectSummary,
     ProjectMemberCreate, ProjectMemberUpdate, ProjectMemberRead, ProjectDetailRead,
 )
 from app.services.audit_service import record_event
+from app.services.ai_service import AIService
+from app.services.secrets_service import SecretsService
+from app.config import settings as app_settings
+
+
+class AIChatRequest(BaseModel):
+    message: str
+
+
+class AIChatResponse(BaseModel):
+    reply: str
+    proposed_crs: list[dict] | None = None
+
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
@@ -292,4 +308,76 @@ async def update_project_member(
     return _build_member_read(
         next(m for m in project.members if m.id == pcr_id),
         project.members,
+    )
+
+
+@router.post("/{project_id}/ai/chat", response_model=AIChatResponse)
+async def ai_chat(
+    project_id: uuid.UUID,
+    body: AIChatRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    project = await _get_project(db, project_id, user.organization_id)
+
+    # Get org API key
+    result = await db.execute(
+        select(OrganizationSettings).where(
+            OrganizationSettings.organization_id == user.organization_id
+        )
+    )
+    org_settings = result.scalar_one_or_none()
+    if not org_settings or not org_settings.anthropic_api_key_encrypted:
+        raise HTTPException(
+            status_code=402,
+            detail="AI not configured — add an Anthropic API key in Settings",
+        )
+
+    secrets = SecretsService(app_settings.SECRET_KEY)
+    api_key = secrets.decrypt(org_settings.anthropic_api_key_encrypted)
+
+    # Load asset context
+    assets_result = await db.execute(
+        select(Asset).where(Asset.organization_id == user.organization_id)
+    )
+    assets = assets_result.scalars().all()
+    asset_context = [
+        {
+            "name": a.name,
+            "asset_type": a.asset_type.value,
+            "environment": a.environment.value,
+            "tags": a.tags or [],
+        }
+        for a in assets
+    ]
+
+    # Append user message to conversation
+    conversation = list(project.ai_context or [])
+    conversation.append({"role": "user", "content": body.message})
+
+    # Call Claude
+    ai_service = AIService(secrets)
+    try:
+        result_dict = await ai_service.chat(
+            api_key=api_key,
+            conversation=conversation,
+            project_goal=project.goal or project.name,
+            asset_context=asset_context,
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).exception("AI service error for project %s", project_id)
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI service error: {str(exc)}",
+        )
+
+    # Append AI reply to conversation and save
+    conversation.append({"role": "assistant", "content": result_dict["reply"]})
+    project.ai_context = conversation
+    await db.commit()
+
+    return AIChatResponse(
+        reply=result_dict["reply"],
+        proposed_crs=result_dict["proposed_crs"],
     )

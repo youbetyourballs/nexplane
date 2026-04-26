@@ -2,12 +2,13 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Plus, X, ChevronUp, ChevronDown, Search,
+  ArrowLeft, Plus, X, ChevronUp, ChevronDown, Search, Sparkles,
 } from "lucide-react";
 import { projectsApi } from "../api/endpoints";
 import { changeRequestsApi } from "../api/endpoints";
 import { assetsApi } from "../api/endpoints";
 import { PageLoading } from "../components/LoadingSpinner";
+import { AIPanel } from "../components/AIPanel";
 import { StatusBadge } from "../components/StatusBadge";
 import type {
   ProjectDetail, ProjectMember, ProjectStatus, ChangeType,
@@ -56,6 +57,7 @@ export function ProjectDetail() {
   const [addSearch, setAddSearch] = useState("");
   const [showNewCrForm, setShowNewCrForm] = useState(false);
   const [depsPopoverFor, setDepsPopoverFor] = useState<string | null>(null);
+  const [showAIPanel, setShowAIPanel] = useState(false);
 
   const [newCrTitle, setNewCrTitle] = useState("");
   const [newCrType, setNewCrType] = useState<ChangeType>("dns_update");
@@ -273,6 +275,19 @@ export function ProjectDetail() {
           />
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {!isNew && isDraft && (
+            <button
+              onClick={() => setShowAIPanel(!showAIPanel)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border transition-colors ${
+                showAIPanel
+                  ? "bg-brand-50 border-brand-300 text-brand-700"
+                  : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              AI Assistant
+            </button>
+          )}
           {!isNew && (
             <select
               value={status}
@@ -309,6 +324,8 @@ export function ProjectDetail() {
           )}
 
           {/* Member list */}
+          <div className={`flex gap-4 ${showAIPanel ? "items-start" : ""}`}>
+            <div className={showAIPanel ? "flex-1 min-w-0" : "w-full"}>
           <div className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
             {members.length === 0 && (
               <div className="p-8 text-center text-slate-400 text-sm">
@@ -500,7 +517,7 @@ export function ProjectDetail() {
             )}
           </div>
 
-          {showNewCrForm && isDraft && (
+            {showNewCrForm && isDraft && (
             <div className="mt-3 bg-white border border-slate-200 rounded-lg p-5">
               <h3 className="text-sm font-semibold text-slate-900 mb-4">Create & Add Change Request</h3>
               <div className="grid grid-cols-2 gap-3 mb-3">
@@ -574,6 +591,18 @@ export function ProjectDetail() {
               </div>
             </div>
           )}
+            </div>
+            {showAIPanel && (
+              <div className="w-80 shrink-0 sticky top-4" style={{ height: "calc(100vh - 200px)" }}>
+                <AIPanel
+                  projectId={id!}
+                  projectGoal={project?.goal ?? ""}
+                  initialConversation={(project?.ai_context ?? []) as Array<{role: "user" | "assistant"; content: string}>}
+                  onClose={() => setShowAIPanel(false)}
+                />
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>

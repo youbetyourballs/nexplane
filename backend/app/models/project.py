@@ -31,6 +31,7 @@ class Project(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    ai_context: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     members: Mapped[list["ProjectChangeRequest"]] = relationship(
         "ProjectChangeRequest",

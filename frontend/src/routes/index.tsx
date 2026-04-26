@@ -10,6 +10,7 @@ import { AssetDetail } from "../pages/AssetDetail";
 import { Connectors } from "../pages/Connectors";
 import { Projects } from "../pages/Projects";
 import { ProjectDetail } from "../pages/ProjectDetail";
+import { Settings } from "../pages/Settings";
 import { useAuth } from "../hooks/useAuth";
 
 export function AppRoutes() {
@@ -32,6 +33,7 @@ export function AppRoutes() {
         <Route path="/assets" element={<Assets />} />
         <Route path="/assets/:id" element={<AssetDetail />} />
         <Route path="/connectors" element={<Connectors />} />
+        <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
   );

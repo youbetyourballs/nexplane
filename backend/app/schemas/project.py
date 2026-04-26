@@ -62,3 +62,4 @@ class ProjectMemberRead(BaseModel):
 
 class ProjectDetailRead(ProjectRead):
     members: list[ProjectMemberRead] = []
+    ai_context: list[dict] = []

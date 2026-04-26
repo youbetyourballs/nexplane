@@ -3,6 +3,7 @@ import type {
   Token, User, Asset, AssetCreate, AssetUpdate, AssetListParams, BulkTagBody,
   Project, ProjectSummary, ProjectDetail, ProjectMember,
   ProjectCreate, ProjectUpdate, ProjectMemberCreate, ProjectMemberUpdate,
+  OrgSettings, AIChatResponse, AIChatRequest,
   Connector, ConnectorCreate, ConnectorTestResult,
   ChangeRequest, ChangeRequestSummary, ChangeRequestCreate,
   ChangePlan, Approval, ApprovalCreate, ExecutionRun, AuditEvent,
@@ -48,6 +49,16 @@ export const projectsApi = {
     apiClient.delete(`/projects/${id}/members/${pcrId}`),
   updateMember: (id: string, pcrId: string, data: ProjectMemberUpdate) =>
     apiClient.patch<ProjectMember>(`/projects/${id}/members/${pcrId}`, data).then((r) => r.data),
+  aiChat: (id: string, data: AIChatRequest) =>
+    apiClient.post<AIChatResponse>(`/projects/${id}/ai/chat`, data).then((r) => r.data),
+};
+
+// Settings
+export const settingsApi = {
+  get: () =>
+    apiClient.get<OrgSettings>("/settings").then((r) => r.data),
+  updateAIKey: (api_key: string) =>
+    apiClient.put<OrgSettings>("/settings/ai-key", { api_key }).then((r) => r.data),
 };
 
 // Connectors

@@ -8,6 +8,7 @@ import {
   Server,
   ShieldCheck,
   FolderOpen,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 
@@ -18,6 +19,7 @@ const navItems = [
   { to: "/projects", label: "Projects", icon: FolderOpen },
   { to: "/assets", label: "Asset Inventory", icon: Server },
   { to: "/connectors", label: "Connectors", icon: Plug },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export function Sidebar() {
