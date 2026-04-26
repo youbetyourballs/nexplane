@@ -8,6 +8,8 @@ import { ApprovalsQueue } from "../pages/ApprovalsQueue";
 import { Assets } from "../pages/Assets";
 import { AssetDetail } from "../pages/AssetDetail";
 import { Connectors } from "../pages/Connectors";
+import { Projects } from "../pages/Projects";
+import { ProjectDetail } from "../pages/ProjectDetail";
 import { useAuth } from "../hooks/useAuth";
 
 export function AppRoutes() {
@@ -24,6 +26,9 @@ export function AppRoutes() {
         <Route path="/change-requests/new" element={<CreateChangeRequest />} />
         <Route path="/change-requests/:id" element={<ChangeRequestDetail />} />
         <Route path="/approvals" element={<ApprovalsQueue />} />
+        <Route path="/projects" element={<Projects />} />
+        <Route path="/projects/new" element={<ProjectDetail />} />
+        <Route path="/projects/:id" element={<ProjectDetail />} />
         <Route path="/assets" element={<Assets />} />
         <Route path="/assets/:id" element={<AssetDetail />} />
         <Route path="/connectors" element={<Connectors />} />

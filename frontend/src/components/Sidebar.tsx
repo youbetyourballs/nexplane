@@ -7,6 +7,7 @@ import {
   Plug,
   Server,
   ShieldCheck,
+  FolderOpen,
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 
@@ -14,6 +15,7 @@ const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/change-requests", label: "Change Requests", icon: FileStack },
   { to: "/approvals", label: "Approvals Queue", icon: CheckSquare },
+  { to: "/projects", label: "Projects", icon: FolderOpen },
   { to: "/assets", label: "Asset Inventory", icon: Server },
   { to: "/connectors", label: "Connectors", icon: Plug },
 ];

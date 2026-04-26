@@ -16,6 +16,8 @@ const STATUS_STYLES: Record<string, string> = {
   pending: "bg-slate-100 text-slate-600",
   running: "bg-blue-100 text-blue-800 animate-pulse",
   rolling_back: "bg-orange-100 text-orange-700 animate-pulse",
+  in_progress: "bg-brand-50 text-brand-700",
+  cancelled: "bg-slate-100 text-slate-500",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -33,6 +35,8 @@ const STATUS_LABELS: Record<string, string> = {
   pending: "Pending",
   running: "Running",
   rolling_back: "Rolling Back",
+  in_progress: "In Progress",
+  cancelled: "Cancelled",
 };
 
 interface Props {
