@@ -44,6 +44,7 @@ async def load_change_request_and_plan(change_request_id: str) -> dict:
             "target_asset_ids": cr.target_asset_ids,
             "risk_level": cr.risk_level.value,
             "plan_id": str(plan.id) if plan else None,
+            "generated_steps": plan.generated_steps if plan else [],
             "preflight_checks": plan.preflight_checks if plan else [],
             "rollback_plan": plan.rollback_plan if plan else {},
             "verification_plan": plan.verification_plan if plan else {},
@@ -106,27 +107,35 @@ async def activity_run_preflight_checks(
 
 async def activity_execute_change(
     change_request_id: str,
-    change_type: str,
-    desired_outcome: dict,
+    generated_steps: list[dict],
     asset_ids: list[str],
 ) -> dict:
-    from app.models.change_request import ChangeType
+    from app.services.connector_service import execute_action
 
-    async with AsyncSessionLocal() as db:
-        result_rows = await db.execute(
-            select(Connector).where(Connector.status == "active").limit(1)
-        )
-        connector = result_rows.scalar_one_or_none()
-        connector_type = connector.connector_type if connector else ConnectorType.aws_mock
+    step_results = []
 
-    result = await connector_service.execute_change(
-        ChangeType(change_type),
-        desired_outcome,
-        asset_ids,
-        connector_type,
-    )
-    logger.info("Execution for %s completed: %s", change_request_id, result)
-    return result
+    for step in generated_steps:
+        connector_type = step.get("connector_type", "")
+        action_id = step.get("action_id", "")
+        parameters = step.get("parameters", {})
+
+        try:
+            result = await execute_action(connector_type, action_id, parameters, asset_ids)
+        except Exception as exc:
+            logger.error("Step %s failed: %s", step.get("step_number"), exc)
+            raise
+
+        step_results.append({
+            "step_number": step["step_number"],
+            "generic_action": step.get("generic_action"),
+            "action_id": action_id,
+            "connector_type": connector_type,
+            "result": result,
+        })
+        logger.info("Step %s (%s) completed", step.get("step_number"), action_id)
+
+    logger.info("All steps completed for change request %s", change_request_id)
+    return {"steps": step_results}
 
 
 async def activity_run_verification(
@@ -141,13 +150,30 @@ async def activity_run_verification(
 
 async def activity_execute_rollback(
     change_request_id: str,
-    rollback_plan: dict,
+    generated_steps: list[dict],
     execution_result: dict,
 ) -> dict:
-    result = await connector_service.execute_rollback(
-        None,
-        rollback_plan,
-        execution_result,
-    )
-    logger.info("Rollback for %s: %s", change_request_id, result)
-    return result
+    from app.services.connector_service import execute_action
+
+    rollback_results = []
+
+    for step in reversed(generated_steps):
+        rollback_action = step.get("rollback_action")
+        rollback_connector = step.get("rollback_connector_type")
+        if not rollback_action or not rollback_connector:
+            continue
+
+        try:
+            result = await execute_action(rollback_connector, rollback_action, {}, [], None)
+        except Exception as exc:
+            logger.error("Rollback step %s failed: %s", step.get("step_number"), exc)
+            result = {"rolled_back": False, "error": str(exc)}
+
+        rollback_results.append({
+            "step_number": step["step_number"],
+            "rollback_action": rollback_action,
+            "result": result,
+        })
+
+    logger.info("Rollback complete for %s", change_request_id)
+    return {"rollback_steps": rollback_results}

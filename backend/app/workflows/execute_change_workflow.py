@@ -85,8 +85,7 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
     try:
         execution_result = await activity_execute_change(
             cr_id,
-            data["change_type"],
-            data["desired_outcome"],
+            data["generated_steps"],
             data["target_asset_ids"],
         )
     except Exception as exc:
@@ -165,7 +164,7 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
         if execution_run_id:
             await update_execution_run_status(execution_run_id, "rolling_back", {})
 
-        rollback_result = await activity_execute_rollback(cr_id, data["rollback_plan"], execution_result)
+        rollback_result = await activity_execute_rollback(cr_id, data["generated_steps"], execution_result)
 
         await update_change_request_status(cr_id, "rolled_back")
         if execution_run_id:
