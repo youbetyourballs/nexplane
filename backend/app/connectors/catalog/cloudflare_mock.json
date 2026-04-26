@@ -1,0 +1,84 @@
+{
+  "connector_type": "cloudflare_mock",
+  "display_name": "Cloudflare (Mock)",
+  "actions": [
+    {
+      "action_id": "capture_dns_record",
+      "generic_action": "capture_dns_record",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Capture DNS Record",
+      "description": "Reads the current DNS record value for rollback purposes",
+      "applicable_asset_types": ["dns_zone"],
+      "parameters": [
+        {"name": "record_name", "type": "string", "required": true},
+        {"name": "record_type", "type": "string", "required": false, "default": "A"}
+      ],
+      "executor": "cloudflare_mock.capture_dns_record",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "validate_dns_target",
+      "generic_action": "validate_dns_target",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Validate DNS Target",
+      "description": "Validates that the new DNS target value is reachable",
+      "applicable_asset_types": ["dns_zone"],
+      "parameters": [
+        {"name": "new_value", "type": "string", "required": true}
+      ],
+      "executor": "cloudflare_mock.validate_dns_target",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "update_dns_record",
+      "generic_action": "update_dns_record",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Update DNS Record",
+      "description": "Updates a DNS record via the Cloudflare API",
+      "applicable_asset_types": ["dns_zone"],
+      "parameters": [
+        {"name": "record_name", "type": "string", "required": true},
+        {"name": "record_type", "type": "string", "required": true},
+        {"name": "new_value", "type": "string", "required": true},
+        {"name": "ttl", "type": "integer", "required": false, "default": 300}
+      ],
+      "executor": "cloudflare_mock.update_dns_record",
+      "rollback_action": "restore_dns_record",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "dns_propagation_delay",
+      "safety_notes": ["TTL propagation may take up to 5 minutes"]
+    },
+    {
+      "action_id": "wait_dns_propagation",
+      "generic_action": "wait_dns_propagation",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Wait for DNS Propagation",
+      "description": "Waits for DNS record change to propagate across resolvers",
+      "applicable_asset_types": ["dns_zone"],
+      "parameters": [
+        {"name": "ttl", "type": "integer", "required": false, "default": 300}
+      ],
+      "executor": "cloudflare_mock.wait_dns_propagation",
+      "estimated_duration_seconds": 300
+    },
+    {
+      "action_id": "restore_dns_record",
+      "generic_action": "restore_dns_record",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Restore DNS Record",
+      "description": "Restores a DNS record to its previously captured value",
+      "applicable_asset_types": ["dns_zone"],
+      "parameters": [
+        {"name": "record_name", "type": "string", "required": true},
+        {"name": "previous_value", "type": "string", "required": true}
+      ],
+      "executor": "cloudflare_mock.restore_dns_record",
+      "estimated_duration_seconds": 10
+    }
+  ]
+}
