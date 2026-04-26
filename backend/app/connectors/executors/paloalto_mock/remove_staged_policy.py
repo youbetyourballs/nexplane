@@ -1,5 +1,7 @@
+from datetime import datetime, timezone
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
-    return {"action": "remove_staged_policy", "status": "stub"}
+    return {"action": "remove_staged_policy", "staged_policy_id": parameters.get("staged_policy_id"), "removed_at": datetime.now(timezone.utc).isoformat()}
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": True, "action": "remove_staged_policy_rollback", "status": "stub"}
+    return {"rolled_back": False, "reason": "removal has no rollback"}

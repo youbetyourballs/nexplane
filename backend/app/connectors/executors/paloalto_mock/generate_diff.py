@@ -1,5 +1,7 @@
+from datetime import datetime, timezone
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
-    return {"action": "generate_diff", "status": "stub"}
+    return {"action": "generate_diff", "rules_in_diff": len(parameters.get("policy_rules", [])), "generated_at": datetime.now(timezone.utc).isoformat()}
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": True, "action": "generate_diff_rollback", "status": "stub"}
+    return {"rolled_back": False, "reason": "diff generation has no rollback"}
