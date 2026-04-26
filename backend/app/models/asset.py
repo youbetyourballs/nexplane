@@ -40,6 +40,7 @@ class Asset(Base):
     environment: Mapped[Environment] = mapped_column(SAEnum(Environment, name="environment"), nullable=False)
     criticality: Mapped[Criticality] = mapped_column(SAEnum(Criticality, name="criticality"), nullable=False)
     asset_metadata: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="assets")
