@@ -73,6 +73,63 @@ export interface BulkTagBody {
   tags: string[];
 }
 
+export type ProjectStatus = "draft" | "in_progress" | "completed" | "cancelled";
+
+export interface Project {
+  id: string;
+  organization_id: string;
+  created_by: string;
+  name: string;
+  description: string;
+  goal: string;
+  status: ProjectStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectSummary extends Project {
+  member_count: number;
+  completed_count: number;
+}
+
+export interface ProjectMember {
+  id: string;
+  project_id: string;
+  change_request_id: string;
+  sequence_order: number;
+  depends_on: string[];
+  change_request: ChangeRequestSummary;
+  eligible: boolean;
+}
+
+export interface ProjectDetail extends Project {
+  members: ProjectMember[];
+}
+
+export interface ProjectCreate {
+  name: string;
+  description?: string;
+  goal?: string;
+}
+
+export interface ProjectUpdate {
+  name?: string;
+  description?: string;
+  goal?: string;
+  status?: ProjectStatus;
+}
+
+export interface ProjectMemberCreate {
+  change_request_id: string;
+  sequence_order?: number;
+  depends_on?: string[];
+}
+
+export interface ProjectMemberUpdate {
+  sequence_order?: number;
+  depends_on?: string[];
+}
+
 export type ConnectorType =
   | "aws_mock"
   | "azure_mock"
