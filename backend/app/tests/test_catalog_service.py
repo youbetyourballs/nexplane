@@ -26,3 +26,55 @@ def test_load_indexes_all_connectors():
     assert set(svc._catalog.keys()) == {
         "cloudflare_mock", "aws_mock", "okta_mock", "ssh_mock", "paloalto_mock"
     }
+
+
+def test_get_options_for_action_returns_sorted_by_tier():
+    svc = ActionCatalogService(CATALOG_DIR)
+    options = svc.get_options_for_action("execute_template")
+    assert len(options) == 1
+    assert options[0].connector_type == "ssh_mock"
+    assert options[0].execution_tier == 5
+
+
+def test_get_options_filters_by_asset_type():
+    svc = ActionCatalogService(CATALOG_DIR)
+    options = svc.get_options_for_action("update_dns_record", asset_types=["server"])
+    assert len(options) == 0
+
+    options = svc.get_options_for_action("update_dns_record", asset_types=["dns_zone"])
+    assert len(options) == 1
+
+
+def test_get_options_filters_by_active_connectors():
+    svc = ActionCatalogService(CATALOG_DIR)
+    options = svc.get_options_for_action("update_dns_record", active_connector_types=["aws_mock"])
+    assert len(options) == 0
+
+    options = svc.get_options_for_action("update_dns_record", active_connector_types=["cloudflare_mock"])
+    assert len(options) == 1
+
+
+def test_get_action_def_returns_correct_def():
+    svc = ActionCatalogService(CATALOG_DIR)
+    defn = svc.get_action_def("cloudflare_mock", "update_dns_record")
+    assert defn["executor"] == "cloudflare_mock.update_dns_record"
+    assert defn["rollback_action"] == "restore_dns_record"
+
+
+def test_get_action_def_raises_for_unknown():
+    svc = ActionCatalogService(CATALOG_DIR)
+    with pytest.raises(KeyError):
+        svc.get_action_def("cloudflare_mock", "does_not_exist")
+
+
+def test_list_generic_actions_change_only():
+    svc = ActionCatalogService(CATALOG_DIR)
+    actions = svc.list_generic_actions(action_type="change")
+    assert "update_dns_record" in actions
+    assert "capture_dns_record" in actions
+
+
+def test_list_generic_actions_all():
+    svc = ActionCatalogService(CATALOG_DIR)
+    all_actions = svc.list_generic_actions()
+    assert len(all_actions) > 0
