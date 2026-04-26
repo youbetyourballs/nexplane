@@ -1,0 +1,9 @@
+.worktrees/
+.superpowers/
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.env
+node_modules/
+dist/
