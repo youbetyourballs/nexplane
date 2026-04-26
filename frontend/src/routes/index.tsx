@@ -6,6 +6,7 @@ import { ChangeRequestDetail } from "../pages/ChangeRequestDetail";
 import { CreateChangeRequest } from "../pages/CreateChangeRequest";
 import { ApprovalsQueue } from "../pages/ApprovalsQueue";
 import { Assets } from "../pages/Assets";
+import { AssetDetail } from "../pages/AssetDetail";
 import { Connectors } from "../pages/Connectors";
 import { useAuth } from "../hooks/useAuth";
 
@@ -24,6 +25,7 @@ export function AppRoutes() {
         <Route path="/change-requests/:id" element={<ChangeRequestDetail />} />
         <Route path="/approvals" element={<ApprovalsQueue />} />
         <Route path="/assets" element={<Assets />} />
+        <Route path="/assets/:id" element={<AssetDetail />} />
         <Route path="/connectors" element={<Connectors />} />
       </Route>
     </Routes>
