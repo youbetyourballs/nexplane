@@ -50,6 +50,7 @@ async def list_change_requests(
     status: str | None = Query(None),
     risk_level: str | None = Query(None),
     change_type: str | None = Query(None),
+    asset_id: str | None = Query(None, description="Filter to CRs targeting this asset"),
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -65,7 +66,13 @@ async def list_change_requests(
         q = q.where(ChangeRequest.change_type == change_type)
 
     result = await db.execute(q)
-    return result.scalars().all()
+    crs = result.scalars().all()
+
+    # asset_id filter applied in Python (target_asset_ids is a JSON array of strings)
+    if asset_id:
+        crs = [cr for cr in crs if asset_id in (cr.target_asset_ids or [])]
+
+    return crs
 
 
 @router.post("", response_model=ChangeRequestRead, status_code=201)
