@@ -35,9 +35,14 @@ async def create_tables():
 
 @pytest_asyncio.fixture
 async def db():
-    async with TestSession() as session:
-        yield session
-        await session.rollback()
+    async with engine.connect() as conn:
+        await conn.begin()
+        session = AsyncSession(bind=conn, expire_on_commit=False)
+        try:
+            yield session
+        finally:
+            await session.close()
+            await conn.rollback()
 
 
 @pytest_asyncio.fixture

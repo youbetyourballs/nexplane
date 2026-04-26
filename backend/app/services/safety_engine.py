@@ -196,6 +196,11 @@ def check_approval_requirements(risk_level: RiskLevel, approvals: list) -> dict:
     req = requirements[risk_level]
     met = len(approved_decisions) >= req["min_approvals"]
 
+    if met and "must_include" not in req:
+        required_roles = req.get("required_roles", [])
+        if required_roles and not any(r in approver_roles for r in required_roles):
+            met = False
+
     if "must_include" in req:
         for role in req["must_include"]:
             if role not in approver_roles:

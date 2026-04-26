@@ -18,7 +18,7 @@ def make_cr(change_type=ChangeType.dns_update, desired=None, asset_ids=None):
         id=uuid.uuid4(), organization_id=uuid.uuid4(), requester_id=uuid.uuid4(),
         title="Test", description="", change_type=change_type,
         target_asset_ids=[str(a) for a in (asset_ids or [])],
-        desired_outcome=desired or {"rollback_strategy": "restore_previous_record"},
+        desired_outcome=desired if desired is not None else {"rollback_strategy": "restore_previous_record"},
         status=ChangeRequestStatus.draft,
     )
 
