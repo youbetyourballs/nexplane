@@ -1,0 +1,11 @@
+{
+  "change_type": "remote_command",
+  "display_name": "Remote Command",
+  "steps": [
+    {"generic_action": "validate_template", "purpose": "preflight_validate", "required": true},
+    {"generic_action": "execute_template",  "purpose": "execute",            "required": true},
+    {"generic_action": "collect_output",    "purpose": "verify",             "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"]
+}

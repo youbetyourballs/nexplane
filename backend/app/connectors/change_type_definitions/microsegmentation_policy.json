@@ -1,0 +1,12 @@
+{
+  "change_type": "microsegmentation_policy",
+  "display_name": "Microsegmentation Policy",
+  "steps": [
+    {"generic_action": "analyze_flows",   "purpose": "preflight_capture",  "required": true},
+    {"generic_action": "generate_diff",   "purpose": "preflight_validate", "required": true},
+    {"generic_action": "stage_policy",    "purpose": "execute",            "required": true},
+    {"generic_action": "validate_staged", "purpose": "verify",             "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["flow_test"]
+}

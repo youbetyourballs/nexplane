@@ -1,0 +1,12 @@
+{
+  "change_type": "telemetry_agent_deploy",
+  "display_name": "Telemetry Agent Deploy",
+  "steps": [
+    {"generic_action": "check_prerequisites", "purpose": "preflight_validate", "required": true},
+    {"generic_action": "download_package",    "purpose": "preflight_capture",  "required": true},
+    {"generic_action": "install_agent",       "purpose": "execute",            "required": true},
+    {"generic_action": "start_service",       "purpose": "verify",             "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["service_check", "health_check"]
+}

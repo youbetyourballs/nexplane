@@ -1,0 +1,12 @@
+{
+  "change_type": "key_rotation",
+  "display_name": "Key Rotation",
+  "steps": [
+    {"generic_action": "generate_key",    "purpose": "execute",  "required": true},
+    {"generic_action": "distribute_key",  "purpose": "execute",  "required": true},
+    {"generic_action": "verify_consumers","purpose": "verify",   "required": true},
+    {"generic_action": "schedule_revoke", "purpose": "execute",  "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["auth_test", "health_check"]
+}

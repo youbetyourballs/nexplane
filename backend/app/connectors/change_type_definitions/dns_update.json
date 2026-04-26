@@ -1,0 +1,12 @@
+{
+  "change_type": "dns_update",
+  "display_name": "DNS Record Update",
+  "steps": [
+    {"generic_action": "capture_dns_record",  "purpose": "preflight_capture",  "required": true},
+    {"generic_action": "validate_dns_target", "purpose": "preflight_validate", "required": true},
+    {"generic_action": "update_dns_record",   "purpose": "execute",            "required": true},
+    {"generic_action": "wait_dns_propagation","purpose": "verify",             "required": false}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["dns_lookup", "http_probe"]
+}
