@@ -1,6 +1,5 @@
 import asyncio
 import random
-import string
 from typing import Any
 
 from app.connectors.catalog_service import get_catalog_service
@@ -42,32 +41,11 @@ async def execute_action(
     connector: Any = None,
 ) -> dict:
     catalog = get_catalog_service()
-    executor = catalog.get_executor(connector_type, action_id)
+    try:
+        executor = catalog.get_executor(connector_type, action_id)
+    except (KeyError, ImportError, ValueError) as exc:
+        raise ConnectorError(str(exc), {"connector_type": connector_type, "action_id": action_id}) from exc
     return await executor.execute(parameters, asset_ids, connector)
-
-
-async def execute_rollback(
-    change_type: Any,
-    rollback_plan: dict,
-    execution_result: dict,
-) -> dict[str, Any]:
-    await asyncio.sleep(0.3)
-
-    strategy = rollback_plan.get("strategy", "manual")
-
-    if strategy == "rollback_unavailable":
-        return {
-            "rolled_back": False,
-            "reason": rollback_plan.get("description", "Rollback not available for this change type"),
-            "manual_steps_required": True,
-        }
-
-    from datetime import datetime, timezone
-    return {
-        "rolled_back": True,
-        "strategy": strategy,
-        "completed_at": datetime.now(timezone.utc).isoformat(),
-    }
 
 
 async def run_preflight_checks(preflight_checks: list[dict]) -> dict:

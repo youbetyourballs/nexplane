@@ -72,6 +72,7 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
             "rollback_action": None,
             "rollback_connector_type": None,
             "estimated_duration_seconds": 30,
+            "blast_radius_hint": None,
         }
     best = options[0]
     action_def = best.action_def

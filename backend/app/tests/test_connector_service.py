@@ -1,5 +1,5 @@
 import pytest
-from app.services.connector_service import execute_action, execute_rollback, run_preflight_checks, run_verification_checks, ConnectorError
+from app.services.connector_service import execute_action, run_preflight_checks, run_verification_checks, ConnectorError
 
 
 @pytest.mark.asyncio
