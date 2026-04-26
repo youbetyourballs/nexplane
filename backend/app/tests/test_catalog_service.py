@@ -78,3 +78,17 @@ def test_list_generic_actions_all():
     svc = ActionCatalogService(CATALOG_DIR)
     all_actions = svc.list_generic_actions()
     assert len(all_actions) > 0
+
+
+def test_get_executor_raises_before_executors_exist():
+    svc = ActionCatalogService(CATALOG_DIR)
+    with pytest.raises(ImportError):
+        svc.get_executor("cloudflare_mock", "update_dns_record")
+
+
+def test_singleton_init_and_get():
+    from app.connectors.catalog_service import init_catalog_service, get_catalog_service
+    init_catalog_service(CATALOG_DIR)
+    svc = get_catalog_service()
+    assert isinstance(svc, ActionCatalogService)
+    assert "cloudflare_mock" in svc._catalog
