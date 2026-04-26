@@ -1,6 +1,8 @@
 from __future__ import annotations
+import importlib
 import json
 import pathlib
+import types
 from dataclasses import dataclass
 
 
@@ -42,7 +44,7 @@ class ActionCatalogService:
         asset_types: list[str] | None = None,
         active_connector_types: list[str] | None = None,
     ) -> list[ActionOption]:
-        options = self._generic_index.get(generic_action, [])
+        options = list(self._generic_index.get(generic_action, []))
         if asset_types is not None:
             options = [
                 o for o in options
@@ -68,14 +70,17 @@ class ActionCatalogService:
                 result.add(generic)
         return list(result)
 
-    def get_executor(self, connector_type: str, action_id: str) -> object:
+    def get_executor(self, connector_type: str, action_id: str) -> types.ModuleType:
+        """Resolves executor reference to an importable module.
+        Caller accesses execute() and rollback() as module attributes.
+        Raises ImportError if the module does not exist yet.
+        """
         action_def = self.get_action_def(connector_type, action_id)
         executor_ref = action_def.get("executor", "")
         parts = executor_ref.split(".")
         if len(parts) != 2:
             raise ValueError(f"Invalid executor reference '{executor_ref}' — expected 'connector.module'")
         module_path = f"app.connectors.executors.{parts[0]}.{parts[1]}"
-        import importlib
         try:
             return importlib.import_module(module_path)
         except ModuleNotFoundError as exc:

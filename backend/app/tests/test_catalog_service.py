@@ -86,6 +86,19 @@ def test_get_executor_raises_before_executors_exist():
         svc.get_executor("cloudflare_mock", "update_dns_record")
 
 
+def test_get_options_returns_copy_not_internal_list():
+    svc = ActionCatalogService(CATALOG_DIR)
+    options = svc.get_options_for_action("update_dns_record")
+    original_len = len(svc._generic_index["update_dns_record"])
+    options.append(None)  # mutate the returned list
+    assert len(svc._generic_index["update_dns_record"]) == original_len  # internal list unchanged
+
+
+def test_list_generic_actions_unknown_type_returns_empty():
+    svc = ActionCatalogService(CATALOG_DIR)
+    assert svc.list_generic_actions(action_type="nonexistent") == []
+
+
 def test_singleton_init_and_get():
     from app.connectors.catalog_service import init_catalog_service, get_catalog_service
     init_catalog_service(CATALOG_DIR)
