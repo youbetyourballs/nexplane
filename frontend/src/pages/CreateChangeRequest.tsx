@@ -57,7 +57,7 @@ export function CreateChangeRequest() {
 
   const { data: assets } = useQuery({
     queryKey: ["assets"],
-    queryFn: assetsApi.list,
+    queryFn: () => assetsApi.list(),
   });
 
   const mutation = useMutation({
