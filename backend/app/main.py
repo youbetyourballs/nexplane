@@ -40,6 +40,13 @@ async def cr_audit_events(
     return await list_cr_audit_events(cr_id, user, db)
 
 
+@app.on_event("startup")
+async def startup_event():
+    from app.connectors.catalog_service import init_catalog_service
+    import pathlib
+    init_catalog_service(pathlib.Path(__file__).parent / "connectors" / "catalog")
+
+
 @app.get("/health", tags=["Health"])
 async def health():
     return {"status": "ok", "service": "nexplane"}

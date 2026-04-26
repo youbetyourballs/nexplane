@@ -218,3 +218,35 @@ def check_approval_requirements(risk_level: RiskLevel, approvals: list) -> dict:
 
 def get_approved_command_templates() -> dict:
     return APPROVED_COMMAND_TEMPLATES
+
+
+def adjust_for_execution_plan(
+    safety_result: SafetyReviewResult,
+    generated_steps: list[dict],
+) -> SafetyReviewResult:
+    """Adjusts risk score upward if any step uses execution tier 5 (raw remote command)."""
+    from dataclasses import replace
+    max_tier = max((s.get("execution_tier", 1) for s in generated_steps), default=1)
+    if max_tier < 5:
+        return safety_result
+
+    new_factors = list(safety_result.risk_factors) + [
+        RiskFactor(
+            name="raw_remote_command_tier",
+            description="One or more steps use raw remote command execution (tier 5)",
+            score=25,
+        )
+    ]
+    new_score = safety_result.risk_score + 25
+    new_level = _score_to_level(new_score)
+    return replace(safety_result, risk_score=new_score, risk_level=new_level, risk_factors=new_factors)
+
+
+def _score_to_level(score: int) -> RiskLevel:
+    if score >= 90:
+        return RiskLevel.critical
+    if score >= 60:
+        return RiskLevel.high
+    if score >= 30:
+        return RiskLevel.medium
+    return RiskLevel.low

@@ -93,3 +93,26 @@ def test_microsegmentation_large_blast_radius():
 def test_risk_level_enum_values():
     assert SRiskLevel.low.value == "low"
     assert SRiskLevel.critical.value == "critical"
+
+
+def test_ssh_tier5_steps_add_risk():
+    from app.connectors.catalog_service import init_catalog_service
+    import pathlib
+    init_catalog_service(pathlib.Path(__file__).parent.parent / "connectors" / "catalog")
+
+    from app.services.safety_engine import adjust_for_execution_plan
+
+    tier5_steps = [
+        {"generic_action": "execute_template", "execution_tier": 5, "connector_type": "ssh_mock"}
+    ]
+    tier1_steps = [
+        {"generic_action": "update_dns_record", "execution_tier": 1, "connector_type": "cloudflare_mock"}
+    ]
+
+    base_result = score_change_request(
+        make_cr(ChangeType.remote_command, {"template_id": "restart_service", "parameters": {}, "rollback_strategy": "manual"}),
+        [make_asset()],
+    )
+    adjusted_tier5 = adjust_for_execution_plan(base_result, tier5_steps)
+    adjusted_tier1 = adjust_for_execution_plan(base_result, tier1_steps)
+    assert adjusted_tier5.risk_score >= adjusted_tier1.risk_score
