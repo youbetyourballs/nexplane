@@ -1,0 +1,78 @@
+{
+  "connector_type": "okta_mock",
+  "display_name": "Okta (Mock)",
+  "actions": [
+    {
+      "action_id": "generate_key",
+      "generic_action": "generate_key",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Generate New Key",
+      "description": "Generates a new API key or credential",
+      "applicable_asset_types": ["identity_provider"],
+      "parameters": [
+        {"name": "service", "type": "string", "required": true},
+        {"name": "key_type", "type": "string", "required": false, "default": "api_key"}
+      ],
+      "executor": "okta_mock.generate_key",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "distribute_key",
+      "generic_action": "distribute_key",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Distribute New Key",
+      "description": "Distributes the new key to all registered consumers",
+      "applicable_asset_types": ["identity_provider"],
+      "parameters": [
+        {"name": "consumers", "type": "array", "required": true}
+      ],
+      "executor": "okta_mock.distribute_key",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "verify_consumers",
+      "generic_action": "verify_consumers",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Verify Consumer Health",
+      "description": "Confirms all consumers are operating correctly with the new key",
+      "applicable_asset_types": ["identity_provider"],
+      "parameters": [
+        {"name": "consumers", "type": "array", "required": true}
+      ],
+      "executor": "okta_mock.verify_consumers",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "schedule_revoke",
+      "generic_action": "schedule_revoke",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Schedule Old Key Revocation",
+      "description": "Schedules the old key for revocation after a grace period",
+      "applicable_asset_types": ["identity_provider"],
+      "parameters": [
+        {"name": "grace_period_hours", "type": "integer", "required": false, "default": 24}
+      ],
+      "executor": "okta_mock.schedule_revoke",
+      "rollback_action": "cancel_revoke",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "cancel_revoke",
+      "generic_action": "cancel_revoke",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Cancel Key Revocation",
+      "description": "Cancels a scheduled key revocation, restoring the old key to active status",
+      "applicable_asset_types": ["identity_provider"],
+      "parameters": [
+        {"name": "old_key_id", "type": "string", "required": true}
+      ],
+      "executor": "okta_mock.cancel_revoke",
+      "estimated_duration_seconds": 5
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "connector_type": "aws_mock",
+  "display_name": "Amazon Web Services (Mock)",
+  "actions": [
+    {
+      "action_id": "health_check",
+      "generic_action": "health_check",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Asset Health Check",
+      "description": "Verifies asset health before making changes",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [],
+      "executor": "aws_mock.health_check",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "create_snapshot",
+      "generic_action": "create_snapshot",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Create Asset Snapshot",
+      "description": "Creates a point-in-time snapshot of an asset",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "snapshot_tag", "type": "string", "required": false, "default": "nexplane-managed"}
+      ],
+      "executor": "aws_mock.create_snapshot",
+      "estimated_duration_seconds": 60,
+      "blast_radius_hint": "snapshot_io_impact"
+    },
+    {
+      "action_id": "verify_snapshot",
+      "generic_action": "verify_snapshot",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Verify Snapshot Integrity",
+      "description": "Verifies that a snapshot was created successfully and is complete",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [],
+      "executor": "aws_mock.verify_snapshot",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "export_security_group",
+      "generic_action": "export_security_group",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Export Security Group Rules",
+      "description": "Exports current security group rules for rollback purposes",
+      "applicable_asset_types": ["cloud_account", "firewall"],
+      "parameters": [
+        {"name": "group_id", "type": "string", "required": true}
+      ],
+      "executor": "aws_mock.export_security_group",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "validate_security_rules",
+      "generic_action": "validate_security_rules",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Validate Security Group Rules",
+      "description": "Validates proposed security group rule syntax before applying",
+      "applicable_asset_types": ["cloud_account", "firewall"],
+      "parameters": [
+        {"name": "rules", "type": "array", "required": true}
+      ],
+      "executor": "aws_mock.validate_security_rules",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "update_security_group",
+      "generic_action": "update_security_group",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Update Security Group",
+      "description": "Applies security group rule changes via the AWS API",
+      "applicable_asset_types": ["cloud_account", "firewall"],
+      "parameters": [
+        {"name": "group_id", "type": "string", "required": true},
+        {"name": "rules", "type": "array", "required": true}
+      ],
+      "executor": "aws_mock.update_security_group",
+      "rollback_action": "restore_security_group",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "network_access_change",
+      "safety_notes": ["Verify rules do not block critical management traffic"]
+    },
+    {
+      "action_id": "restore_security_group",
+      "generic_action": "restore_security_group",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Restore Security Group",
+      "description": "Restores security group rules from a previously captured snapshot",
+      "applicable_asset_types": ["cloud_account", "firewall"],
+      "parameters": [
+        {"name": "pre_change_snapshot_id", "type": "string", "required": true}
+      ],
+      "executor": "aws_mock.restore_security_group",
+      "estimated_duration_seconds": 15
+    }
+  ]
+}

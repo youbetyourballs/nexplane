@@ -1,0 +1,78 @@
+{
+  "connector_type": "paloalto_mock",
+  "display_name": "Palo Alto Networks (Mock)",
+  "actions": [
+    {
+      "action_id": "analyze_flows",
+      "generic_action": "analyze_flows",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Analyze Current Traffic Flows",
+      "description": "Analyzes existing traffic flows to understand current network behavior",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [],
+      "executor": "paloalto_mock.analyze_flows",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "generate_diff",
+      "generic_action": "generate_diff",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Generate Policy Diff",
+      "description": "Generates a diff between current and proposed firewall policies",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "policy_rules", "type": "array", "required": true}
+      ],
+      "executor": "paloalto_mock.generate_diff",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "stage_policy",
+      "generic_action": "stage_policy",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Stage Policy (Simulation Mode)",
+      "description": "Stages the new policy in simulation mode — no traffic is affected",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "policy_rules", "type": "array", "required": true},
+        {"name": "critical_flows", "type": "array", "required": false}
+      ],
+      "executor": "paloalto_mock.stage_policy",
+      "rollback_action": "remove_staged_policy",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "simulation_only",
+      "safety_notes": ["Simulation mode only — live enforcement requires a separate approval workflow"]
+    },
+    {
+      "action_id": "remove_staged_policy",
+      "generic_action": "remove_staged_policy",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Remove Staged Policy",
+      "description": "Removes a staged simulation-mode policy",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "staged_policy_id", "type": "string", "required": true}
+      ],
+      "executor": "paloalto_mock.remove_staged_policy",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "validate_staged",
+      "generic_action": "validate_staged",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Validate Staged Policy",
+      "description": "Validates that the staged policy does not block critical flows",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "critical_flows", "type": "array", "required": false}
+      ],
+      "executor": "paloalto_mock.validate_staged",
+      "estimated_duration_seconds": 10
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "connector_type": "ssh_mock",
+  "display_name": "SSH Runner (Mock)",
+  "actions": [
+    {
+      "action_id": "check_prerequisites",
+      "generic_action": "check_prerequisites",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Check Agent Prerequisites",
+      "description": "Verifies that host meets requirements for agent installation",
+      "applicable_asset_types": ["server"],
+      "parameters": [],
+      "executor": "ssh_mock.check_prerequisites",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "download_package",
+      "generic_action": "download_package",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Download Agent Package",
+      "description": "Downloads the agent installation package to the host",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "agent_type", "type": "string", "required": true},
+        {"name": "agent_version", "type": "string", "required": false, "default": "8.12.0"}
+      ],
+      "executor": "ssh_mock.download_package",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "install_agent",
+      "generic_action": "install_agent",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Install Agent",
+      "description": "Installs the telemetry or management agent on the host",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "agent_type", "type": "string", "required": true},
+        {"name": "agent_config", "type": "object", "required": false}
+      ],
+      "executor": "ssh_mock.install_agent",
+      "rollback_action": "uninstall_agent",
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "host_service_interruption"
+    },
+    {
+      "action_id": "uninstall_agent",
+      "generic_action": "uninstall_agent",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Uninstall Agent",
+      "description": "Removes the agent from the host",
+      "applicable_asset_types": ["server"],
+      "parameters": [],
+      "executor": "ssh_mock.uninstall_agent",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "start_service",
+      "generic_action": "start_service",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Start and Enable Service",
+      "description": "Starts the installed agent service and enables it on boot",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "agent_type", "type": "string", "required": true}
+      ],
+      "executor": "ssh_mock.start_service",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "validate_template",
+      "generic_action": "validate_template",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Validate Command Template",
+      "description": "Validates that the specified command template is approved and parameters are valid",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "template_id", "type": "string", "required": true},
+        {"name": "parameters", "type": "object", "required": false}
+      ],
+      "executor": "ssh_mock.validate_template",
+      "estimated_duration_seconds": 2
+    },
+    {
+      "action_id": "execute_template",
+      "generic_action": "execute_template",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Execute Approved Command Template",
+      "description": "Executes a pre-approved command template on target hosts. No freeform commands.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "template_id", "type": "string", "required": true},
+        {"name": "parameters", "type": "object", "required": false}
+      ],
+      "executor": "ssh_mock.execute_template",
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "host_service_interruption",
+      "safety_notes": ["Only approved templates may be executed — no freeform commands permitted"]
+    },
+    {
+      "action_id": "collect_output",
+      "generic_action": "collect_output",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Collect Execution Output",
+      "description": "Collects and aggregates output from remote command execution",
+      "applicable_asset_types": ["server"],
+      "parameters": [],
+      "executor": "ssh_mock.collect_output",
+      "estimated_duration_seconds": 5
+    }
+  ]
+}
