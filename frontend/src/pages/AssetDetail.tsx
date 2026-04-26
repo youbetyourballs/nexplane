@@ -41,20 +41,18 @@ export function AssetDetail() {
 
   const updateMutation = useMutation({
     mutationFn: () => {
-      let metadata: Record<string, unknown> | undefined;
-      if (editMetadata.trim()) {
-        try {
-          metadata = JSON.parse(editMetadata);
-        } catch {
-          setMetadataError("Invalid JSON");
-          throw new Error("Invalid JSON");
-        }
+      let metadata: Record<string, unknown>;
+      try {
+        metadata = editMetadata.trim() ? JSON.parse(editMetadata) : {};
+      } catch {
+        setMetadataError("Invalid JSON");
+        throw new Error("Invalid JSON");
       }
       return assetsApi.update(id!, {
         name: editName !== asset?.name ? editName : undefined,
         criticality: editCriticality !== asset?.criticality ? editCriticality : undefined,
         tags: editTags,
-        ...(metadata !== undefined && { asset_metadata: metadata }),
+        asset_metadata: metadata,
       });
     },
     onSuccess: () => {
@@ -101,7 +99,7 @@ export function AssetDetail() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/assets")}
+          <button onClick={() => navigate(-1)}
             className="p-1.5 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-100">
             <ArrowLeft className="w-5 h-5" />
           </button>

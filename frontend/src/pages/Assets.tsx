@@ -81,7 +81,7 @@ export function Assets() {
 
   const { data: allTags } = useQuery({
     queryKey: ["asset-tags"],
-    queryFn: assetsApi.tags,
+    queryFn: () => assetsApi.tags(),
   });
 
   const createMutation = useMutation({
