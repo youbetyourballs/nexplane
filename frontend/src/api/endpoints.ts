@@ -1,6 +1,8 @@
 import { apiClient } from "./client";
 import type {
   Token, User, Asset, AssetCreate, AssetUpdate, AssetListParams, BulkTagBody,
+  Project, ProjectSummary, ProjectDetail, ProjectMember,
+  ProjectCreate, ProjectUpdate, ProjectMemberCreate, ProjectMemberUpdate,
   Connector, ConnectorCreate, ConnectorTestResult,
   ChangeRequest, ChangeRequestSummary, ChangeRequestCreate,
   ChangePlan, Approval, ApprovalCreate, ExecutionRun, AuditEvent,
@@ -28,6 +30,24 @@ export const assetsApi = {
     apiClient.get<string[]>("/assets/tags").then((r) => r.data),
   bulkTag: (data: BulkTagBody) =>
     apiClient.patch<{ updated: number }>("/assets/bulk-tag", data).then((r) => r.data),
+};
+
+// Projects
+export const projectsApi = {
+  list: () =>
+    apiClient.get<ProjectSummary[]>("/projects").then((r) => r.data),
+  get: (id: string) =>
+    apiClient.get<ProjectDetail>(`/projects/${id}`).then((r) => r.data),
+  create: (data: ProjectCreate) =>
+    apiClient.post<Project>("/projects", data).then((r) => r.data),
+  update: (id: string, data: ProjectUpdate) =>
+    apiClient.patch<Project>(`/projects/${id}`, data).then((r) => r.data),
+  addMember: (id: string, data: ProjectMemberCreate) =>
+    apiClient.post<ProjectMember>(`/projects/${id}/members`, data).then((r) => r.data),
+  removeMember: (id: string, pcrId: string) =>
+    apiClient.delete(`/projects/${id}/members/${pcrId}`),
+  updateMember: (id: string, pcrId: string, data: ProjectMemberUpdate) =>
+    apiClient.patch<ProjectMember>(`/projects/${id}/members/${pcrId}`, data).then((r) => r.data),
 };
 
 // Connectors
