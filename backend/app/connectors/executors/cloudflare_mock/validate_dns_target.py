@@ -1,5 +1,12 @@
+from datetime import datetime, timezone
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
-    return {"action": "validate_dns_target", "status": "stub"}
+    return {
+        "action": "validate_dns_target",
+        "new_value": parameters.get("new_value"),
+        "reachable": True,
+        "validated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": True, "action": "validate_dns_target_rollback", "status": "stub"}
+    return {"rolled_back": False, "reason": "validation has no rollback"}
