@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import get_db
-from app.routers import auth, assets, connectors, change_requests, audit
+from app.routers import auth, assets, connectors, change_requests, audit, projects
 from app.routers import current_user
 from app.routers.audit import list_cr_audit_events
 
@@ -29,6 +29,7 @@ app.include_router(assets.router)
 app.include_router(connectors.router)
 app.include_router(change_requests.router)
 app.include_router(audit.router)
+app.include_router(projects.router)
 
 
 @app.get("/change-requests/{cr_id}/audit-events", tags=["Audit"])
