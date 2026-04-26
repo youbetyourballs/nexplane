@@ -37,6 +37,7 @@ export interface Asset {
   environment: Environment;
   criticality: Criticality;
   asset_metadata: Record<string, unknown>;
+  tags: string[];
   created_at: string;
 }
 
@@ -46,6 +47,30 @@ export interface AssetCreate {
   environment: Environment;
   criticality: Criticality;
   asset_metadata?: Record<string, unknown>;
+  tags?: string[];
+}
+
+export interface AssetUpdate {
+  name?: string;
+  criticality?: Criticality;
+  asset_metadata?: Record<string, unknown>;
+  tags?: string[];
+}
+
+export interface AssetListParams {
+  q?: string;
+  env?: string;
+  asset_type?: string;
+  criticality?: string;
+  tag?: string;
+}
+
+export type BulkTagOperation = "add" | "remove" | "set";
+
+export interface BulkTagBody {
+  asset_ids: string[];
+  operation: BulkTagOperation;
+  tags: string[];
 }
 
 export type ConnectorType =

@@ -1,6 +1,6 @@
 import { apiClient } from "./client";
 import type {
-  Token, User, Asset, AssetCreate,
+  Token, User, Asset, AssetCreate, AssetUpdate, AssetListParams, BulkTagBody,
   Connector, ConnectorCreate, ConnectorTestResult,
   ChangeRequest, ChangeRequestSummary, ChangeRequestCreate,
   ChangePlan, Approval, ApprovalCreate, ExecutionRun, AuditEvent,
@@ -16,9 +16,18 @@ export const authApi = {
 
 // Assets
 export const assetsApi = {
-  list: () => apiClient.get<Asset[]>("/assets").then((r) => r.data),
-  get: (id: string) => apiClient.get<Asset>(`/assets/${id}`).then((r) => r.data),
-  create: (data: AssetCreate) => apiClient.post<Asset>("/assets", data).then((r) => r.data),
+  list: (params?: AssetListParams) =>
+    apiClient.get<Asset[]>("/assets", { params }).then((r) => r.data),
+  get: (id: string) =>
+    apiClient.get<Asset>(`/assets/${id}`).then((r) => r.data),
+  create: (data: AssetCreate) =>
+    apiClient.post<Asset>("/assets", data).then((r) => r.data),
+  update: (id: string, data: AssetUpdate) =>
+    apiClient.patch<Asset>(`/assets/${id}`, data).then((r) => r.data),
+  tags: () =>
+    apiClient.get<string[]>("/assets/tags").then((r) => r.data),
+  bulkTag: (data: BulkTagBody) =>
+    apiClient.patch<{ updated: number }>("/assets/bulk-tag", data).then((r) => r.data),
 };
 
 // Connectors
@@ -31,7 +40,7 @@ export const connectorsApi = {
 
 // Change Requests
 export const changeRequestsApi = {
-  list: (params?: { status?: string; risk_level?: string; change_type?: string }) =>
+  list: (params?: { status?: string; risk_level?: string; change_type?: string; asset_id?: string }) =>
     apiClient.get<ChangeRequestSummary[]>("/change-requests", { params }).then((r) => r.data),
   get: (id: string) =>
     apiClient.get<ChangeRequest>(`/change-requests/${id}`).then((r) => r.data),
