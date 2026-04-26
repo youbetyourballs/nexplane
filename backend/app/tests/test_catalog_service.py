@@ -80,10 +80,11 @@ def test_list_generic_actions_all():
     assert len(all_actions) > 0
 
 
-def test_get_executor_raises_before_executors_exist():
+def test_get_executor_returns_module():
     svc = ActionCatalogService(CATALOG_DIR)
-    with pytest.raises(ImportError):
-        svc.get_executor("cloudflare_mock", "update_dns_record")
+    mod = svc.get_executor("cloudflare_mock", "update_dns_record")
+    assert hasattr(mod, "execute")
+    assert hasattr(mod, "rollback")
 
 
 def test_get_options_returns_copy_not_internal_list():
@@ -105,3 +106,15 @@ def test_singleton_init_and_get():
     svc = get_catalog_service()
     assert isinstance(svc, ActionCatalogService)
     assert "cloudflare_mock" in svc._catalog
+
+
+def test_all_catalog_executors_resolve():
+    import pathlib
+    catalog_dir = pathlib.Path(__file__).parent.parent / "connectors" / "catalog"
+    svc = ActionCatalogService(catalog_dir)
+    for connector_type, actions in svc._catalog.items():
+        for action in actions:
+            mod = svc.get_executor(connector_type, action["action_id"])
+            assert hasattr(mod, "execute"), (
+                f"{connector_type}.{action['action_id']} executor missing execute()"
+            )
