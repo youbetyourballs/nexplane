@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ShieldCheck } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 
 export function Login() {
@@ -26,14 +25,10 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-navy flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <div className="flex items-center justify-center gap-3 mb-8">
-          <ShieldCheck className="w-8 h-8 text-brand-400" />
-          <div>
-            <div className="text-white text-xl font-semibold tracking-wide">NEXPLANE</div>
-            <div className="text-slate-500 text-xs">Infrastructure Change Execution</div>
-          </div>
+        <div className="flex items-center justify-center mb-8">
+          <img src="/title_white.png" alt="Nexplane" className="h-10 w-auto" />
         </div>
 
         <div className="bg-white rounded-xl shadow-xl p-8">

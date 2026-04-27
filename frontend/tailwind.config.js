@@ -4,21 +4,39 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Brand blue — #2563EB family (official brand blue)
         brand: {
-          50: "#f0f4ff",
-          100: "#e0e9ff",
-          200: "#c7d7fe",
-          300: "#a4bcfc",
-          400: "#7e97f8",
-          500: "#5a72f3",
-          600: "#3d4fe8",
-          700: "#3340d4",
-          800: "#2c36ab",
-          900: "#2a3287",
-          950: "#1c2057",
+          50:  "#eff6ff",
+          100: "#dbeafe",
+          200: "#bfdbfe",
+          300: "#93c5fd",
+          400: "#60a5fa",
+          500: "#3b82f6",
+          600: "#2563eb",
+          700: "#1d4ed8",
+          800: "#1e40af",
+          900: "#1e3a8a",
+          950: "#172554",
         },
-        slate: {
-          925: "#0d1117",
+        // Brand teal — #14B8A6 family (official brand accent)
+        teal: {
+          50:  "#f0fdfa",
+          100: "#ccfbf1",
+          200: "#99f6e4",
+          300: "#5eead4",
+          400: "#2dd4bf",
+          500: "#14b8a6",
+          600: "#0d9488",
+          700: "#0f766e",
+          800: "#115e59",
+          900: "#134e4a",
+          950: "#042f2e",
+        },
+        // Brand navy — sidebar and dark surfaces
+        navy: {
+          DEFAULT: "#0b1220",
+          light:   "#111827",
+          border:  "#1e2d42",
         },
       },
       fontFamily: {

@@ -6,7 +6,6 @@ import {
   CheckSquare,
   Plug,
   Server,
-  ShieldCheck,
   FolderOpen,
   Settings as SettingsIcon,
 } from "lucide-react";
@@ -26,13 +25,9 @@ export function Sidebar() {
   const { user, logout } = useAuth();
 
   return (
-    <aside className="fixed inset-y-0 left-0 w-60 bg-slate-900 flex flex-col z-10">
-      <div className="flex items-center gap-2.5 px-5 py-5 border-b border-slate-800">
-        <ShieldCheck className="w-6 h-6 text-brand-400 flex-shrink-0" />
-        <div>
-          <div className="text-white font-semibold text-sm tracking-wide">NEXPLANE</div>
-          <div className="text-slate-500 text-xs">Infrastructure Change</div>
-        </div>
+    <aside className="fixed inset-y-0 left-0 w-60 bg-navy flex flex-col z-10">
+      <div className="flex items-center px-5 py-4 border-b border-navy-border">
+        <img src="/title_white.png" alt="Nexplane" className="h-8 w-auto" />
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-0.5">
@@ -46,7 +41,7 @@ export function Sidebar() {
                 "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
                 isActive
                   ? "bg-brand-600 text-white"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  : "text-slate-400 hover:text-white hover:bg-navy-light"
               )
             }
           >
@@ -56,7 +51,7 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="px-4 py-4 border-t border-slate-800">
+      <div className="px-4 py-4 border-t border-navy-border">
         {user && (
           <div className="mb-3">
             <div className="text-slate-300 text-sm font-medium truncate">{user.name}</div>
