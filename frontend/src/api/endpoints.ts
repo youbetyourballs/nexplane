@@ -4,7 +4,7 @@ import type {
   Project, ProjectSummary, ProjectDetail, ProjectMember,
   ProjectCreate, ProjectUpdate, ProjectMemberCreate, ProjectMemberUpdate,
   OrgSettings, AIChatResponse, AIChatRequest,
-  Connector, ConnectorCreate, ConnectorTestResult,
+  Connector, ConnectorCreate, ConnectorTestResult, IngestResponse,
   ChangeRequest, ChangeRequestSummary, ChangeRequestCreate,
   ChangePlan, Approval, ApprovalCreate, ExecutionRun, AuditEvent,
 } from "../types/api";
@@ -67,6 +67,8 @@ export const connectorsApi = {
   create: (data: ConnectorCreate) => apiClient.post<Connector>("/connectors", data).then((r) => r.data),
   test: (id: string) =>
     apiClient.post<ConnectorTestResult>(`/connectors/${id}/test`).then((r) => r.data),
+  ingest: (id: string, actionId: string) =>
+    apiClient.post<IngestResponse>(`/connectors/${id}/ingest/${actionId}`).then((r) => r.data),
 };
 
 // Change Requests

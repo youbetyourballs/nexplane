@@ -15,6 +15,9 @@ class ConnectorType(str, enum.Enum):
     okta_mock = "okta_mock"
     paloalto_mock = "paloalto_mock"
     ssh_runner_mock = "ssh_runner_mock"
+    active_directory_mock = "active_directory_mock"
+    crowdstrike_mock = "crowdstrike_mock"
+    tenable_mock = "tenable_mock"
 
 
 class ConnectorStatus(str, enum.Enum):

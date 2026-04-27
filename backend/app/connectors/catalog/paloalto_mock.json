@@ -73,6 +73,93 @@
       ],
       "executor": "paloalto_mock.validate_staged",
       "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "ingest_traffic_logs",
+      "generic_action": "ingest_traffic_logs",
+      "action_type": "ingest",
+      "display_name": "Ingest Traffic Logs",
+      "description": "Ingests observed traffic flows as application assets; tags high-volume flows and enriches existing server and firewall assets",
+      "produces_asset_types": ["application", "server", "firewall"],
+      "applicable_asset_types": [],
+      "executor": "paloalto_mock.ingest_traffic_logs",
+      "estimated_duration_seconds": 45
+    },
+    {
+      "action_id": "ingest_security_events",
+      "generic_action": "ingest_security_events",
+      "action_type": "ingest",
+      "display_name": "Ingest Security Events",
+      "description": "Tags existing assets with palo-threat-detected when the firewall logged a threat against them",
+      "produces_asset_types": ["server"],
+      "applicable_asset_types": [],
+      "executor": "paloalto_mock.ingest_security_events",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "enable_traffic_logging",
+      "generic_action": "enable_traffic_logging",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Enable Traffic Logging",
+      "description": "Enables enhanced traffic logging for a zone or policy rule",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "zone_name", "type": "string", "required": false},
+        {"name": "rule_name", "type": "string", "required": false}
+      ],
+      "executor": "paloalto_mock.enable_traffic_logging",
+      "rollback_action": "disable_traffic_logging",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "disable_traffic_logging",
+      "generic_action": "disable_traffic_logging",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Disable Traffic Logging",
+      "description": "Disables enhanced traffic logging (rollback for enable_traffic_logging)",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "zone_name", "type": "string", "required": false},
+        {"name": "rule_name", "type": "string", "required": false}
+      ],
+      "executor": "paloalto_mock.disable_traffic_logging",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "update_chokepoint_rule",
+      "generic_action": "update_chokepoint_rule",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Update Chokepoint Rule",
+      "description": "Modifies a policy rule at an identified traffic chokepoint",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "rule_name", "type": "string", "required": true},
+        {"name": "new_action", "type": "string", "required": true},
+        {"name": "destination_zones", "type": "array", "required": false}
+      ],
+      "executor": "paloalto_mock.update_chokepoint_rule",
+      "rollback_action": "restore_chokepoint_rule",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "network_access_change",
+      "safety_notes": ["Verify rule change does not block critical flows before applying"]
+    },
+    {
+      "action_id": "restore_chokepoint_rule",
+      "generic_action": "restore_chokepoint_rule",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Restore Chokepoint Rule",
+      "description": "Restores a chokepoint rule to its previous state",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "rule_name", "type": "string", "required": true},
+        {"name": "previous_state", "type": "object", "required": true}
+      ],
+      "executor": "paloalto_mock.restore_chokepoint_rule",
+      "estimated_duration_seconds": 10
     }
   ]
 }

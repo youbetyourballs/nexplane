@@ -115,6 +115,66 @@
       "parameters": [],
       "executor": "ssh_mock.collect_output",
       "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "apply_selinux_policy",
+      "generic_action": "apply_selinux_policy",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Apply SELinux Policy",
+      "description": "Applies a named SELinux policy module to a target host to restrict process permissions",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "policy_name", "type": "string", "required": true},
+        {"name": "policy_version", "type": "string", "required": false, "default": "latest"}
+      ],
+      "executor": "ssh_mock.apply_selinux_policy",
+      "rollback_action": "revert_selinux_policy",
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "host_service_interruption",
+      "safety_notes": ["Verify policy does not block required process access before applying to production"]
+    },
+    {
+      "action_id": "revert_selinux_policy",
+      "generic_action": "revert_selinux_policy",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Revert SELinux Policy",
+      "description": "Reverts SELinux policy to the previously active state",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "previous_policy_id", "type": "string", "required": true}],
+      "executor": "ssh_mock.revert_selinux_policy",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "containerize_workload",
+      "generic_action": "containerize_workload",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Containerize Workload",
+      "description": "Wraps a running process in a container namespace with cgroup and seccomp restrictions using an approved template",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "process_name", "type": "string", "required": true},
+        {"name": "template_id", "type": "string", "required": true}
+      ],
+      "executor": "ssh_mock.containerize_workload",
+      "rollback_action": "restore_bare_metal_service",
+      "estimated_duration_seconds": 60,
+      "blast_radius_hint": "host_service_interruption",
+      "safety_notes": ["Service will restart during containerization — schedule a maintenance window"]
+    },
+    {
+      "action_id": "restore_bare_metal_service",
+      "generic_action": "restore_bare_metal_service",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Restore Bare-Metal Service",
+      "description": "Removes container wrapper and restores the service as a bare-metal process",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "process_name", "type": "string", "required": true}],
+      "executor": "ssh_mock.restore_bare_metal_service",
+      "estimated_duration_seconds": 30
     }
   ]
 }

@@ -17,6 +17,7 @@ from app.models.change_plan import ChangePlan, PlanGeneratedBy
 from app.models.approval import Approval, ApprovalDecision
 from app.models.audit_event import AuditEvent
 from app.services.auth_service import hash_password
+from app.models.project import Project, ProjectStatus
 
 
 ORG_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -41,6 +42,26 @@ CONNECTOR_IDS = {
     "cloudflare": uuid.UUID("00000000-0000-0000-0002-000000000002"),
     "paloalto": uuid.UUID("00000000-0000-0000-0002-000000000003"),
     "ssh_runner": uuid.UUID("00000000-0000-0000-0002-000000000004"),
+}
+
+NEW_CONNECTOR_IDS = {
+    "active_directory": uuid.UUID("00000000-0000-0000-0002-000000000005"),
+    "crowdstrike": uuid.UUID("00000000-0000-0000-0002-000000000006"),
+    "tenable": uuid.UUID("00000000-0000-0000-0002-000000000007"),
+    "azure": uuid.UUID("00000000-0000-0000-0002-000000000008"),
+}
+
+PROJECT_IDS = {
+    "isolate_investigate": uuid.UUID("00000000-0000-0000-0004-000000000001"),
+    "deploy_edr": uuid.UUID("00000000-0000-0000-0004-000000000002"),
+    "remediate_cve": uuid.UUID("00000000-0000-0000-0004-000000000003"),
+    "offboard_employee": uuid.UUID("00000000-0000-0000-0004-000000000004"),
+    "azure_storage": uuid.UUID("00000000-0000-0000-0004-000000000005"),
+    "tighten_firewall": uuid.UUID("00000000-0000-0000-0004-000000000006"),
+    "mfa_enforcement": uuid.UUID("00000000-0000-0000-0004-000000000007"),
+    "microsegmentation": uuid.UUID("00000000-0000-0000-0004-000000000008"),
+    "workload_harden": uuid.UUID("00000000-0000-0000-0004-000000000009"),
+    "firewall_chokepoints": uuid.UUID("00000000-0000-0000-0004-000000000010"),
 }
 
 CR_IDS = {
@@ -323,5 +344,93 @@ async def seed():
         print("  auditor@acme.example   / auditor123")
 
 
+async def seed_expansion():
+    async with AsyncSessionLocal() as db:
+        existing = await db.get(Connector, NEW_CONNECTOR_IDS["crowdstrike"])
+        if existing:
+            print("Expansion seed already exists — skipping.")
+            return
+
+        new_connectors = [
+            Connector(id=NEW_CONNECTOR_IDS["active_directory"], organization_id=ORG_ID,
+                      connector_type=ConnectorType.active_directory_mock,
+                      name="Active Directory Mock Connector", status=ConnectorStatus.active,
+                      scoped_permissions={"ldap": ["read"], "accounts": ["disable", "enable", "reset"], "groups": ["read", "write"]}),
+            Connector(id=NEW_CONNECTOR_IDS["crowdstrike"], organization_id=ORG_ID,
+                      connector_type=ConnectorType.crowdstrike_mock,
+                      name="CrowdStrike Falcon Mock Connector", status=ConnectorStatus.active,
+                      scoped_permissions={"hosts": ["read", "isolate", "restore"], "sensors": ["deploy", "remove"], "rtr": ["execute"]}),
+            Connector(id=NEW_CONNECTOR_IDS["tenable"], organization_id=ORG_ID,
+                      connector_type=ConnectorType.tenable_mock,
+                      name="Tenable Mock Connector", status=ConnectorStatus.active,
+                      scoped_permissions={"scans": ["read", "launch"], "assets": ["read"], "vulnerabilities": ["read"]}),
+            Connector(id=NEW_CONNECTOR_IDS["azure"], organization_id=ORG_ID,
+                      connector_type=ConnectorType.azure_mock,
+                      name="Azure Mock Connector", status=ConnectorStatus.active,
+                      scoped_permissions={"compute": ["read"], "storage": ["read", "write"], "network": ["read", "write"]}),
+        ]
+        db.add_all(new_connectors)
+
+        projects = [
+            Project(id=PROJECT_IDS["isolate_investigate"], organization_id=ORG_ID,
+                    created_by=USER_IDS["operator"], status=ProjectStatus.draft,
+                    name="Isolate and Investigate Compromised Endpoint",
+                    description="Contain a suspected compromise on a production host.",
+                    goal="Isolate the compromised endpoint via CrowdStrike, disable the associated user account in Active Directory, and snapshot the machine in AWS for forensic review."),
+            Project(id=PROJECT_IDS["deploy_edr"], organization_id=ORG_ID,
+                    created_by=USER_IDS["operator"], status=ProjectStatus.draft,
+                    name="Deploy EDR to Unprotected Hosts",
+                    description="Close sensor coverage gaps identified in the CrowdStrike inventory.",
+                    goal="Discover all hosts missing CrowdStrike Falcon sensor coverage and deploy the sensor to every unprotected endpoint in the production environment."),
+            Project(id=PROJECT_IDS["remediate_cve"], organization_id=ORG_ID,
+                    created_by=USER_IDS["operator"], status=ProjectStatus.draft,
+                    name="Remediate Critical CVE Across Fleet",
+                    description="Patch a critical vulnerability identified in the latest Tenable scan.",
+                    goal="Identify all assets affected by a critical CVE, apply the patch via SSH remote command, and verify remediation with a follow-up Tenable scan."),
+            Project(id=PROJECT_IDS["offboard_employee"], organization_id=ORG_ID,
+                    created_by=USER_IDS["operator"], status=ProjectStatus.draft,
+                    name="Offboard Departed Employee",
+                    description="Remove access for a departed employee across all identity systems.",
+                    goal="Disable the user's Active Directory account, remove them from all security groups, and revoke their Okta API credentials."),
+            Project(id=PROJECT_IDS["azure_storage"], organization_id=ORG_ID,
+                    created_by=USER_IDS["operator"], status=ProjectStatus.draft,
+                    name="Remediate Public Azure Storage",
+                    description="Fix public blob access misconfiguration found in Azure posture scan.",
+                    goal="Discover all Azure storage accounts with public blob access enabled and disable public access on all affected accounts."),
+            Project(id=PROJECT_IDS["tighten_firewall"], organization_id=ORG_ID,
+                    created_by=USER_IDS["operator"], status=ProjectStatus.draft,
+                    name="Tighten Firewall After Vulnerability Scan",
+                    description="Reduce attack surface based on Tenable open port findings.",
+                    goal="Use Tenable scan findings to identify unnecessary open ports and tighten the corresponding AWS security group and Azure NSG rules."),
+            Project(id=PROJECT_IDS["mfa_enforcement"], organization_id=ORG_ID,
+                    created_by=USER_IDS["operator"], status=ProjectStatus.draft,
+                    name="MFA Enforcement for Non-Compliant Accounts",
+                    description="Enforce MFA across accounts identified as non-compliant in the AD audit.",
+                    goal="Discover all Active Directory identity assets without MFA enabled and enforce MFA enrollment across every non-compliant account."),
+            Project(id=PROJECT_IDS["microsegmentation"], organization_id=ORG_ID,
+                    created_by=USER_IDS["operator"], status=ProjectStatus.draft,
+                    name="Microsegmentation for Payments Subnet",
+                    description="Apply zero-trust segmentation between the payments app tier and database tier.",
+                    goal="Analyze current traffic flows to the payments subnet, generate a microsegmentation policy diff, stage and apply the new PaloAlto policy, and update AWS security groups to match."),
+            Project(id=PROJECT_IDS["workload_harden"], organization_id=ORG_ID,
+                    created_by=USER_IDS["operator"], status=ProjectStatus.draft,
+                    name="Harden Payments-API Workload Isolation",
+                    description="Reduce the blast radius of payments-api by applying OS-level controls.",
+                    goal="Snapshot the payments-api host, apply a SELinux policy to restrict process permissions, and containerize the application for workload isolation."),
+            Project(id=PROJECT_IDS["firewall_chokepoints"], organization_id=ORG_ID,
+                    created_by=USER_IDS["operator"], status=ProjectStatus.draft,
+                    name="Identify and Respond to Firewall Chokepoints",
+                    description="Use PaloAlto traffic data to find and remediate policy bottlenecks.",
+                    goal="Enable enhanced traffic logging on the production firewall, ingest flow data to identify high-volume chokepoints, analyze flows, and update policy rules at identified bottlenecks."),
+        ]
+        db.add_all(projects)
+        await db.commit()
+        print("Expansion seed (new connectors + example projects) created successfully.")
+
+
+async def main():
+    await seed()
+    await seed_expansion()
+
 if __name__ == "__main__":
-    asyncio.run(seed())
+    asyncio.run(main())

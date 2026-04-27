@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plug, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Plug, CheckCircle2, XCircle, Loader2, Download } from "lucide-react";
 import { connectorsApi } from "../api/endpoints";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
-import type { ConnectorType, ConnectorTestResult } from "../types/api";
+import type { ConnectorType, ConnectorTestResult, IngestResponse } from "../types/api";
 
 const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   aws_mock: "AWS Mock",
@@ -13,6 +13,9 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   okta_mock: "Okta Mock",
   paloalto_mock: "Palo Alto Mock",
   ssh_runner_mock: "SSH Runner Mock",
+  active_directory_mock: "Active Directory Mock",
+  crowdstrike_mock: "CrowdStrike Falcon Mock",
+  tenable_mock: "Tenable Mock",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -20,14 +23,27 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   azure_mock: "🔷",
   cloudflare_mock: "🟠",
   okta_mock: "🔐",
-  paloalto_mock: "🛡",
-  ssh_runner_mock: "🖥",
+  paloalto_mock: "🛡️",
+  ssh_runner_mock: "🖥️",
+  active_directory_mock: "🏢",
+  crowdstrike_mock: "🦅",
+  tenable_mock: "🔍",
+};
+
+// Ingest action IDs per connector type (connectors that support discovery)
+const INGEST_ACTIONS: Partial<Record<ConnectorType, string>> = {
+  active_directory_mock: "discover_computers",
+  crowdstrike_mock: "discover_endpoints",
+  tenable_mock: "discover_assets",
+  azure_mock: "discover_vms",
+  paloalto_mock: "ingest_traffic_logs",
 };
 
 export function Connectors() {
   const qc = useQueryClient();
   const [testResults, setTestResults] = useState<Record<string, ConnectorTestResult>>({});
   const [testing, setTesting] = useState<Record<string, boolean>>({});
+  const [ingestResults, setIngestResults] = useState<Record<string, IngestResponse>>({});
 
   const { data, isLoading } = useQuery({
     queryKey: ["connectors"],
@@ -44,6 +60,15 @@ export function Connectors() {
     }
   }
 
+  const ingestMutation = useMutation({
+    mutationFn: ({ id, actionId }: { id: string; actionId: string }) =>
+      connectorsApi.ingest(id, actionId),
+    onSuccess: (data, variables) => {
+      setIngestResults((prev) => ({ ...prev, [variables.id]: data }));
+      qc.invalidateQueries({ queryKey: ["assets"] });
+    },
+  });
+
   if (isLoading) return <PageLoading />;
 
   return (
@@ -57,6 +82,9 @@ export function Connectors() {
         {(data ?? []).map((connector) => {
           const testResult = testResults[connector.id];
           const isTesting = testing[connector.id];
+          const ingestResult = ingestResults[connector.id];
+          const ingestActionId = INGEST_ACTIONS[connector.connector_type];
+          const isIngesting = ingestMutation.isPending && ingestMutation.variables?.id === connector.id;
 
           return (
             <div key={connector.id} className="bg-white border border-slate-200 rounded-lg p-5">
@@ -104,18 +132,34 @@ export function Connectors() {
                 </div>
               )}
 
-              <button
-                onClick={() => testConnector(connector.id)}
-                disabled={isTesting}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 text-slate-700 text-sm rounded-md hover:bg-slate-50 disabled:opacity-50"
-              >
-                {isTesting ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Plug className="w-3.5 h-3.5" />
+              {ingestResult && (
+                <div className="mb-3 p-2.5 rounded border text-xs bg-brand-50 border-brand-200 text-brand-700">
+                  <span className="font-medium">Discovery complete — </span>
+                  {ingestResult.created} created, {ingestResult.updated} updated
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => testConnector(connector.id)}
+                  disabled={isTesting}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 text-slate-700 text-sm rounded-md hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {isTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plug className="w-3.5 h-3.5" />}
+                  {isTesting ? "Testing..." : "Test Connector"}
+                </button>
+
+                {ingestActionId && (
+                  <button
+                    onClick={() => ingestMutation.mutate({ id: connector.id, actionId: ingestActionId })}
+                    disabled={isIngesting}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-brand-200 text-brand-700 text-sm rounded-md hover:bg-brand-50 disabled:opacity-50"
+                  >
+                    {isIngesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    {isIngesting ? "Discovering..." : "Run Discovery"}
+                  </button>
                 )}
-                {isTesting ? "Testing..." : "Test Connector"}
-              </button>
+              </div>
             </div>
           );
         })}

@@ -15,6 +15,7 @@ class AssetType(str, enum.Enum):
     firewall = "firewall"
     identity_provider = "identity_provider"
     application = "application"
+    identity = "identity"
 
 
 class Environment(str, enum.Enum):

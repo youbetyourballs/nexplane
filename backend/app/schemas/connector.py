@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from pydantic import BaseModel
 from app.models.connector import ConnectorType, ConnectorStatus
+from app.schemas.asset import AssetRead
 
 
 class ConnectorCreate(BaseModel):
@@ -27,3 +28,9 @@ class ConnectorTestResult(BaseModel):
     latency_ms: int
     message: str
     details: dict = {}
+
+
+class IngestResponse(BaseModel):
+    created: int
+    updated: int
+    assets: list[AssetRead]

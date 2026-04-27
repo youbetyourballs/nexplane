@@ -24,7 +24,8 @@ def test_load_builds_generic_index():
 def test_load_indexes_all_connectors():
     svc = ActionCatalogService(CATALOG_DIR)
     assert set(svc._catalog.keys()) == {
-        "cloudflare_mock", "aws_mock", "okta_mock", "ssh_mock", "paloalto_mock"
+        "cloudflare_mock", "aws_mock", "okta_mock", "ssh_mock", "paloalto_mock",
+        "active_directory_mock", "crowdstrike_mock", "tenable_mock", "azure_mock",
     }
 
 

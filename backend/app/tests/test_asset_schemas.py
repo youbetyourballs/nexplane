@@ -48,3 +48,15 @@ def test_bulk_tag_operation_invalid_operation():
             operation="replace_all",
             tags=["x"],
         )
+
+
+def test_asset_type_includes_identity():
+    from app.models.asset import AssetType
+    assert AssetType.identity == "identity"
+
+
+def test_connector_type_includes_new_connectors():
+    from app.models.connector import ConnectorType
+    assert ConnectorType.active_directory_mock == "active_directory_mock"
+    assert ConnectorType.crowdstrike_mock == "crowdstrike_mock"
+    assert ConnectorType.tenable_mock == "tenable_mock"

@@ -1,0 +1,63 @@
+{
+  "connector_type": "tenable_mock",
+  "display_name": "Tenable Vulnerability Management (Mock)",
+  "actions": [
+    {
+      "action_id": "discover_assets",
+      "generic_action": "discover_assets",
+      "action_type": "ingest",
+      "display_name": "Discover Scanned Assets",
+      "description": "Discovers all hosts scanned by Tenable with IP, OS, and open ports",
+      "produces_asset_types": ["server"],
+      "applicable_asset_types": [],
+      "executor": "tenable_mock.discover_assets",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "discover_vulnerabilities",
+      "generic_action": "discover_vulnerabilities",
+      "action_type": "ingest",
+      "display_name": "Ingest Vulnerability Findings",
+      "description": "Enriches existing assets with CVE tags and severity ratings; creates application assets for vulnerable software",
+      "produces_asset_types": ["server", "application"],
+      "applicable_asset_types": [],
+      "executor": "tenable_mock.discover_vulnerabilities",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "discover_local_accounts",
+      "generic_action": "discover_local_accounts",
+      "action_type": "ingest",
+      "display_name": "Discover Local Accounts",
+      "description": "Discovers local OS accounts found on scanned hosts",
+      "produces_asset_types": ["identity"],
+      "applicable_asset_types": [],
+      "executor": "tenable_mock.discover_local_accounts",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "trigger_scan",
+      "generic_action": "trigger_scan",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Trigger Vulnerability Scan",
+      "description": "Launches a Tenable scan against target assets",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "scan_policy", "type": "string", "required": false, "default": "basic_network_scan"}],
+      "executor": "tenable_mock.trigger_scan",
+      "estimated_duration_seconds": 300
+    },
+    {
+      "action_id": "verify_remediation",
+      "generic_action": "verify_remediation",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Verify Remediation",
+      "description": "Re-scans a specific asset to confirm a vulnerability finding has been resolved",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "cve_id", "type": "string", "required": false}],
+      "executor": "tenable_mock.verify_remediation",
+      "estimated_duration_seconds": 120
+    }
+  ]
+}

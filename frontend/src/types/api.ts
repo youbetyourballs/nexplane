@@ -24,7 +24,8 @@ export type AssetType =
   | "dns_zone"
   | "firewall"
   | "identity_provider"
-  | "application";
+  | "application"
+  | "identity";
 
 export type Environment = "dev" | "staging" | "prod";
 export type Criticality = "low" | "medium" | "high" | "critical";
@@ -159,7 +160,10 @@ export type ConnectorType =
   | "cloudflare_mock"
   | "okta_mock"
   | "paloalto_mock"
-  | "ssh_runner_mock";
+  | "ssh_runner_mock"
+  | "active_directory_mock"
+  | "crowdstrike_mock"
+  | "tenable_mock";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 
@@ -184,6 +188,12 @@ export interface ConnectorTestResult {
   latency_ms: number;
   message: string;
   details: Record<string, unknown>;
+}
+
+export interface IngestResponse {
+  created: number;
+  updated: number;
+  assets: Asset[];
 }
 
 export type ChangeType =

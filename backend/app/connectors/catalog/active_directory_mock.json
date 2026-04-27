@@ -1,0 +1,110 @@
+{
+  "connector_type": "active_directory_mock",
+  "display_name": "Active Directory (Mock)",
+  "actions": [
+    {
+      "action_id": "discover_computers",
+      "generic_action": "discover_computers",
+      "action_type": "ingest",
+      "display_name": "Discover AD Computers",
+      "description": "Discovers all AD-joined computers with OU path, OS, and last logon metadata",
+      "produces_asset_types": ["server"],
+      "applicable_asset_types": [],
+      "executor": "active_directory_mock.discover_computers",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "discover_identities",
+      "generic_action": "discover_identities",
+      "action_type": "ingest",
+      "display_name": "Discover AD Identities",
+      "description": "Discovers users, service accounts, and admin accounts with group memberships and enabled status",
+      "produces_asset_types": ["identity"],
+      "applicable_asset_types": [],
+      "executor": "active_directory_mock.discover_identities",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "disable_account",
+      "generic_action": "disable_account",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Disable Account",
+      "description": "Disables a user or service account in Active Directory",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "username", "type": "string", "required": true}],
+      "executor": "active_directory_mock.disable_account",
+      "rollback_action": "enable_account",
+      "estimated_duration_seconds": 5,
+      "blast_radius_hint": "account_access_loss",
+      "safety_notes": ["Verify no critical services depend on this account before disabling"]
+    },
+    {
+      "action_id": "enable_account",
+      "generic_action": "enable_account",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Enable Account",
+      "description": "Re-enables a disabled Active Directory account",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "username", "type": "string", "required": true}],
+      "executor": "active_directory_mock.enable_account",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "reset_password",
+      "generic_action": "reset_password",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Reset Password",
+      "description": "Forces a password reset on next login for the specified account",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "username", "type": "string", "required": true}],
+      "executor": "active_directory_mock.reset_password",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "add_to_group",
+      "generic_action": "add_to_group",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Add to Group",
+      "description": "Adds an account to a security group",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true},
+        {"name": "group_name", "type": "string", "required": true}
+      ],
+      "executor": "active_directory_mock.add_to_group",
+      "rollback_action": "remove_from_group",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "remove_from_group",
+      "generic_action": "remove_from_group",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Remove from Group",
+      "description": "Removes an account from a security group",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true},
+        {"name": "group_name", "type": "string", "required": true}
+      ],
+      "executor": "active_directory_mock.remove_from_group",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "enforce_mfa",
+      "generic_action": "enforce_mfa",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Enforce MFA",
+      "description": "Flags the account for mandatory MFA enrollment on next login",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "username", "type": "string", "required": true}],
+      "executor": "active_directory_mock.enforce_mfa",
+      "estimated_duration_seconds": 5
+    }
+  ]
+}
