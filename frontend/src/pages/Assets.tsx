@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Plus, Search, Tag, X, ChevronRight } from "lucide-react";
@@ -67,6 +67,28 @@ export function Assets() {
   const [showBulkAdd, setShowBulkAdd] = useState(false);
   const [showBulkRemove, setShowBulkRemove] = useState(false);
   const [bulkTagInput, setBulkTagInput] = useState("");
+
+  // Local input state — decoupled from URL so keystrokes don't re-mount the DOM
+  const [inputValue, setInputValue] = useState(() => searchParams.get("search") ?? "");
+
+  // Sync URL → input when URL changes externally (browser back/forward)
+  useEffect(() => {
+    const urlValue = searchParams.get("search") ?? "";
+    if (urlValue !== inputValue) setInputValue(urlValue);
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounce input → URL so the query and layout switch fire after typing pauses
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (inputValue) {
+        setSearchParams({ search: inputValue });
+      } else {
+        setSearchParams({});
+      }
+      setSelected(new Set());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [inputValue]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Derive filter params from URL
   const rawSearch = searchParams.get("search") ?? "";
@@ -173,12 +195,12 @@ export function Assets() {
           <input
             type="text"
             placeholder="Search assets… or use env:prod tag:pci-scope"
-            value={rawSearch}
-            onChange={(e) => setSearch(e.target.value)}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
             className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
           {rawSearch && (
-            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+            <button onClick={() => setInputValue("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
               <X className="w-4 h-4" />
             </button>
           )}
