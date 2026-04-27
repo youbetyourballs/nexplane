@@ -28,7 +28,17 @@
       "Bash(python -c \"import sys,json; print\\(json.load\\(sys.stdin\\)\\)\")",
       "Bash(curl -s http://localhost:8000/health)",
       "Bash(curl -v http://localhost:8000/health)",
-      "Bash(curl -i http://localhost:8000/health)"
+      "Bash(curl -i http://localhost:8000/health)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d['connector_type'], '-', len\\(d['actions']\\), 'actions:', [a['action_id'] for a in d['actions']]\\)\")",
+      "Bash(xargs grep *)",
+      "Bash(git check-ignore *)",
+      "Bash(cp -r f:/Nexplane/nexplane/.worktrees/connectors-ingest/backend/app/connectors/executors/active_directory_mock f:/Nexplane/nexplane/backend/app/connectors/executors/)",
+      "Bash(cp -r f:/Nexplane/nexplane/.worktrees/connectors-ingest/backend/app/connectors/executors/crowdstrike_mock f:/Nexplane/nexplane/backend/app/connectors/executors/)",
+      "Bash(cp -r f:/Nexplane/nexplane/.worktrees/connectors-ingest/backend/app/connectors/executors/tenable_mock f:/Nexplane/nexplane/backend/app/connectors/executors/)",
+      "Bash(cp -r f:/Nexplane/nexplane/.worktrees/connectors-ingest/backend/app/connectors/executors/azure_mock f:/Nexplane/nexplane/backend/app/connectors/executors/)",
+      "Bash(python -m pytest backend/app/tests/test_catalog_service.py::test_load_indexes_all_connectors -v)",
+      "Bash(python -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(python3 -m pytest backend/app/tests/test_catalog_service.py::test_load_indexes_all_connectors -v)"
     ]
   }
 }
