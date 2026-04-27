@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker run *)",
+      "Bash(python -m pytest backend/app/tests/test_project_schemas.py -v)",
+      "Bash(pip install *)",
+      "Bash(docker compose *)",
+      "Bash(grep -v \"^$\\\\|warning\\\\|level\\\\|msg\")",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(python -m pytest backend/app/tests/ -v)",
+      "Bash(python -m pip list)",
+      "Bash(python3)",
+      "Bash(python)",
+      "Bash(curl -s -X POST http://localhost:8000/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"operator@acme.example\",\"password\":\"operator123\"}')",
+      "Bash(git -C \"f:/Nexplane/nexplane/.worktrees/projects-core\" status)",
+      "Bash(python3 -c ' *)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git stash *)",
+      "Bash(git clean *)",
+      "Bash(rm -rf .worktrees/projects-core)",
+      "Bash(git worktree *)",
+      "Bash(git branch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(curl -s -X POST http://localhost:8000/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@acme.example\",\"password\":\"admin123\"}')",
+      "Bash(python3 -c \"import sys,json; print\\(json.load\\(sys.stdin\\)\\)\")",
+      "Bash(python -c \"import sys,json; print\\(json.load\\(sys.stdin\\)\\)\")",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -v http://localhost:8000/health)",
+      "Bash(curl -i http://localhost:8000/health)"
+    ]
+  }
+}
