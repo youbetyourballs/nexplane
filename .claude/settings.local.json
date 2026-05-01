@@ -38,7 +38,32 @@
       "Bash(cp -r f:/Nexplane/nexplane/.worktrees/connectors-ingest/backend/app/connectors/executors/azure_mock f:/Nexplane/nexplane/backend/app/connectors/executors/)",
       "Bash(python -m pytest backend/app/tests/test_catalog_service.py::test_load_indexes_all_connectors -v)",
       "Bash(python -c \"import sys; print\\(sys.version\\)\")",
-      "Bash(python3 -m pytest backend/app/tests/test_catalog_service.py::test_load_indexes_all_connectors -v)"
+      "Bash(python3 -m pytest backend/app/tests/test_catalog_service.py::test_load_indexes_all_connectors -v)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/title_white.png)",
+      "Bash(curl -s -X POST http://localhost:8000/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"operator@acme.example\",\"password\":\"operator123\"}')",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('access_token','ERROR'\\)[:40]\\)\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\([{'id':p['id'],'name':p['name']} for p in d[:3]], indent=2\\)\\)\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(a['action_id'], '-', a.get\\('execution_tier','?'\\), '-', a['action_type']\\) for a in d['actions']]\")",
+      "Bash(python -c \"import json; d=json.load\\(open\\('f:/Nexplane/nexplane/backend/app/connectors/catalog/ssh_mock.json'\\)\\); [print\\(a['action_id'], '-', a.get\\('execution_tier','?'\\), '-', a['action_type']\\) for a in d['actions']]\")",
+      "Bash(python -m pytest app/tests/test_agent_models.py -v)",
+      "Bash(python -m pytest backend/app/tests/test_agent_router.py -v)",
+      "Bash(pip list *)",
+      "Bash(python3 -c \"import secrets; s = secrets.token_hex\\(24\\); print\\(f'Format: sk-agent-{s}'\\); print\\(f'Total length: {len\\(\\\\\"sk-agent-\\\\\" + s\\)}'\\); print\\(f'Entropy bits: {24 * 4}'\\)\")",
+      "Bash(grep -E \"test.*\\\\.py$\")",
+      "Bash(grep \"\\\\.json$\")",
+      "Bash(cat)",
+      "Bash(python /tmp/verify_executors.py)",
+      "Read(//tmp/**)",
+      "Bash(go version *)",
+      "PowerShell(Test-Path \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\"; Test-Path \"C:\\\\Go\\\\bin\\\\go.exe\"; Test-Path \"$env:USERPROFILE\\\\go\\\\bin\\\\go.exe\")",
+      "PowerShell(& \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" version)",
+      "PowerShell(New-Item -ItemType Directory -Path \"f:\\\\Nexplane\\\\nexplane\\\\.worktrees\\\\agent-binary\\\\agent\\\\config\" -Force)",
+      "PowerShell(Set-Location \"f:\\\\Nexplane\\\\nexplane\\\\.worktrees\\\\agent-binary\\\\agent\"; $env:GOOS=\"linux\"; $env:GOARCH=\"amd64\"; & \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" build -o \"$env:TEMP\\\\agent-test\" ./; $linuxResult = $?; Remove-Item \"$env:TEMP\\\\agent-test\" -ErrorAction SilentlyContinue; $env:GOOS=\"windows\"; $env:GOARCH=\"amd64\"; & \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" build -o \"$env:TEMP\\\\agent-test.exe\" ./; $winResult = $?; Remove-Item \"$env:TEMP\\\\agent-test.exe\" -ErrorAction SilentlyContinue; Remove-Item Env:\\\\GOOS; Remove-Item Env:\\\\GOARCH; \"linux/amd64: $linuxResult\"; \"windows/amd64: $winResult\")",
+      "Bash(go test *)",
+      "Bash(\"C:/Program Files/Go/bin/go.exe\" test ./fingerprint/... -v)",
+      "Bash(\"C:/Program Files/Go/bin/go.exe\" get golang.org/x/sys@latest)",
+      "PowerShell($env:GOOS=\"linux\"; $env:GOARCH=\"amd64\"; & \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" build -C \"f:/Nexplane/nexplane/.worktrees/agent-binary/agent\" -o \"$env:TEMP\\\\agent-fp-test\" ./; $exitCode = $LASTEXITCODE; Remove-Item \"$env:TEMP\\\\agent-fp-test\" -ErrorAction SilentlyContinue; Remove-Item Env:\\\\GOOS; Remove-Item Env:\\\\GOARCH; Write-Output \"Exit code: $exitCode\")",
+      "Bash(go build *)"
     ]
   }
 }
