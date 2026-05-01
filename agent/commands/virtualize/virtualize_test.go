@@ -1,9 +1,8 @@
-//go:build windows
-
 package virtualize_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"nexplane-agent/commands/virtualize"
@@ -20,7 +19,7 @@ func TestExecuteRequiresImagePath(t *testing.T) {
 
 func TestExecuteRequiresTargetMode(t *testing.T) {
 	_, err := virtualize.Execute(map[string]any{
-		"image_path": `C:\tmp\test.img`,
+		"image_path": filepath.Join(os.TempDir(), "test-nexplane.img"),
 	})
 	if err == nil {
 		t.Error("expected error for missing target_mode")
