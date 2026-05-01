@@ -180,8 +180,15 @@ func applyDebianInterfaces(iface, mode, ipVersion string, params map[string]any)
 	if mode == "dhcp" {
 		return runCmd("ifup", iface)
 	}
-	if v4, ok := params["new_ip_v4"].(string); ok && v4 != "" {
-		return runCmd("ip", "addr", "add", v4, "dev", iface)
+	if v4, ok := params["new_ip_v4"].(string); ok && v4 != "" && (ipVersion == "4" || ipVersion == "both") {
+		if err := runCmd("ip", "addr", "add", v4, "dev", iface); err != nil {
+			return err
+		}
+	}
+	if v6, ok := params["new_ip_v6"].(string); ok && v6 != "" && (ipVersion == "6" || ipVersion == "both") {
+		if err := runCmd("ip", "-6", "addr", "add", v6, "dev", iface); err != nil {
+			return err
+		}
 	}
 	return runCmd("ifup", iface)
 }
@@ -193,7 +200,7 @@ func applyRHELIfcfg(iface, mode, ipVersion string, params map[string]any) error 
 		content += "BOOTPROTO=dhcp\n"
 	} else {
 		content += "BOOTPROTO=static\n"
-		if v4, ok := params["new_ip_v4"].(string); ok && v4 != "" {
+		if v4, ok := params["new_ip_v4"].(string); ok && v4 != "" && (ipVersion == "4" || ipVersion == "both") {
 			parts := strings.SplitN(v4, "/", 2)
 			content += fmt.Sprintf("IPADDR=%s\n", parts[0])
 			if len(parts) > 1 {
@@ -202,6 +209,14 @@ func applyRHELIfcfg(iface, mode, ipVersion string, params map[string]any) error 
 		}
 		if gw, ok := params["new_gateway_v4"].(string); ok && gw != "" {
 			content += fmt.Sprintf("GATEWAY=%s\n", gw)
+		}
+		if v6, ok := params["new_ip_v6"].(string); ok && v6 != "" && (ipVersion == "6" || ipVersion == "both") {
+			parts := strings.SplitN(v6, "/", 2)
+			content += fmt.Sprintf("IPV6ADDR=%s\n", parts[0])
+			if len(parts) > 1 {
+				content += fmt.Sprintf("IPV6PREFIX=%s\n", parts[1])
+			}
+			content += "IPV6INIT=yes\n"
 		}
 	}
 	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {

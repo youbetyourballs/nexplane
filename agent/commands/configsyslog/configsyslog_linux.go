@@ -81,11 +81,18 @@ func rollbackOS(params map[string]any) (map[string]any, error) {
 	if !ok {
 		return nil, fmt.Errorf("config_backup is required for rollback")
 	}
-	_, cfgPath := detectSyslogDaemon()
+	daemon, cfgPath := detectSyslogDaemon()
 	if err := os.WriteFile(cfgPath, []byte(backup), 0644); err != nil {
 		return nil, fmt.Errorf("restoring config: %w", err)
 	}
-	return map[string]any{"rolled_back": true}, nil
+	svc := "rsyslog"
+	if daemon == "syslog-ng" {
+		svc = "syslog-ng"
+	}
+	if err := exec.Command("systemctl", "restart", svc).Run(); err != nil {
+		return nil, fmt.Errorf("restarting %s after rollback: %w", svc, err)
+	}
+	return map[string]any{"rolled_back": true, "service_restarted": true}, nil
 }
 
 func detectSyslogDaemon() (string, string) {
