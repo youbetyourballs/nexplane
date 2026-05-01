@@ -13,9 +13,9 @@ import { useAuth } from "../hooks/useAuth";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { to: "/projects", label: "Projects", icon: FolderOpen },
   { to: "/change-requests", label: "Change Requests", icon: FileStack },
   { to: "/approvals", label: "Approvals Queue", icon: CheckSquare },
-  { to: "/projects", label: "Projects", icon: FolderOpen },
   { to: "/assets", label: "Asset Inventory", icon: Server },
   { to: "/connectors", label: "Connectors", icon: Plug },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
@@ -69,3 +69,4 @@ export function Sidebar() {
     </aside>
   );
 }
+

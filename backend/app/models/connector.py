@@ -18,6 +18,7 @@ class ConnectorType(str, enum.Enum):
     active_directory_mock = "active_directory_mock"
     crowdstrike_mock = "crowdstrike_mock"
     tenable_mock = "tenable_mock"
+    nexplane_agent = "nexplane_agent"
 
 
 class ConnectorStatus(str, enum.Enum):

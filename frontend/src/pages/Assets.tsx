@@ -15,6 +15,7 @@ const ASSET_TYPE_ICONS: Record<AssetType, string> = {
   firewall: "🛡",
   identity_provider: "🔑",
   application: "📦",
+  identity: "👤",
 };
 
 // Parses "payments env:prod tag:pci-scope" into { q: "payments", filters: { env: "prod", tag: "pci-scope" } }

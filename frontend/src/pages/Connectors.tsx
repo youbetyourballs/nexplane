@@ -16,6 +16,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   active_directory_mock: "Active Directory Mock",
   crowdstrike_mock: "CrowdStrike Falcon Mock",
   tenable_mock: "Tenable Mock",
+  nexplane_agent: "Nexplane Agent",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -28,6 +29,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   active_directory_mock: "🏢",
   crowdstrike_mock: "🦅",
   tenable_mock: "🔍",
+  nexplane_agent: "🤖",
 };
 
 // Ingest action IDs per connector type (connectors that support discovery)

@@ -59,6 +59,8 @@ export const settingsApi = {
     apiClient.get<OrgSettings>("/settings").then((r) => r.data),
   updateAIKey: (api_key: string) =>
     apiClient.put<OrgSettings>("/settings/ai-key", { api_key }).then((r) => r.data),
+  generateAgentSecret: () =>
+    apiClient.post<OrgSettings>("/settings/agent-secret").then((r) => r.data),
 };
 
 // Connectors

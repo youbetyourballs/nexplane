@@ -26,6 +26,7 @@ def test_load_indexes_all_connectors():
     assert set(svc._catalog.keys()) == {
         "cloudflare_mock", "aws_mock", "okta_mock", "ssh_mock", "paloalto_mock",
         "active_directory_mock", "crowdstrike_mock", "tenable_mock", "azure_mock",
+        "nexplane_agent_mock",
     }
 
 

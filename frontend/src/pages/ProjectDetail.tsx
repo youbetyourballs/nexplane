@@ -69,7 +69,8 @@ export function ProjectDetail() {
     queryKey: ["project", id],
     queryFn: () => projectsApi.get(id!),
     enabled: !isNew && !!id,
-    refetchInterval: (data) => {
+    refetchInterval: (query) => {
+      const data = (query as { state: { data?: typeof project } }).state?.data;
       if (!data) return false;
       const active = data.members.some((m) =>
         ["executing", "verifying"].includes(m.change_request.status)

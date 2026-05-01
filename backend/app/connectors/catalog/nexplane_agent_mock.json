@@ -1,0 +1,107 @@
+{
+  "connector_type": "nexplane_agent_mock",
+  "display_name": "Nexplane Agent (Mock)",
+  "actions": [
+    {
+      "action_id": "estimate_image_size",
+      "generic_action": "estimate_image_size",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Estimate Image Size & Check Space",
+      "description": "Checks source disk size and available destination space. Run this before virtualize_for_migration to prevent filling the disk.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "source_device", "type": "string", "required": false},
+        {"name": "destination_path", "type": "string", "required": true}
+      ],
+      "executor": "nexplane_agent_mock.estimate_image_size",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "change_ip",
+      "generic_action": "change_ip",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Change IP Address",
+      "description": "Changes the IP address on a network interface. Supports IPv4, IPv6, static, and DHCP modes.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "interface", "type": "string", "required": true},
+        {"name": "mode", "type": "string", "required": true},
+        {"name": "ip_version", "type": "string", "required": false, "default": "4"},
+        {"name": "new_ip_v4", "type": "string", "required": false},
+        {"name": "new_ip_v6", "type": "string", "required": false},
+        {"name": "new_gateway_v4", "type": "string", "required": false},
+        {"name": "new_gateway_v6", "type": "string", "required": false},
+        {"name": "dns_servers", "type": "array", "required": false}
+      ],
+      "executor": "nexplane_agent_mock.change_ip",
+      "rollback_action": "change_ip",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "network_connectivity_loss",
+      "safety_notes": ["Changing IP may temporarily disconnect the agent from the control plane"]
+    },
+    {
+      "action_id": "configure_syslog",
+      "generic_action": "configure_syslog",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Configure Syslog Forwarding",
+      "description": "Configures rsyslog/syslog-ng (Linux) or NXLog/WEF (Windows) to forward logs to a remote collector.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "destination_host", "type": "string", "required": true},
+        {"name": "destination_port", "type": "integer", "required": true},
+        {"name": "protocol", "type": "string", "required": true},
+        {"name": "facility", "type": "string", "required": false, "default": "*"}
+      ],
+      "executor": "nexplane_agent_mock.configure_syslog",
+      "rollback_action": "configure_syslog",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "virtualize_for_migration",
+      "generic_action": "virtualize_for_migration",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Virtualize Machine for Migration",
+      "description": "Creates a disk image of the machine and pre-configures the target IP inside the image. Run estimate_image_size first.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "image_path", "type": "string", "required": true},
+        {"name": "target_mode", "type": "string", "required": true},
+        {"name": "target_ip_v4", "type": "string", "required": false},
+        {"name": "target_ip_v6", "type": "string", "required": false},
+        {"name": "target_gateway_v4", "type": "string", "required": false},
+        {"name": "target_gateway_v6", "type": "string", "required": false},
+        {"name": "target_dns_servers", "type": "array", "required": false},
+        {"name": "target_interface", "type": "string", "required": false},
+        {"name": "source_device", "type": "string", "required": false}
+      ],
+      "executor": "nexplane_agent_mock.virtualize_for_migration",
+      "rollback_action": "virtualize_for_migration",
+      "estimated_duration_seconds": 3600,
+      "blast_radius_hint": "disk_io_impact",
+      "safety_notes": ["Run estimate_image_size first to verify sufficient disk space"]
+    },
+    {
+      "action_id": "upload_image",
+      "generic_action": "upload_image",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Upload Image to Object Storage",
+      "description": "Uploads a disk image to S3 (or compatible object storage) using multipart upload.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "image_path", "type": "string", "required": true},
+        {"name": "destination_uri", "type": "string", "required": true},
+        {"name": "region", "type": "string", "required": false},
+        {"name": "access_key_id", "type": "string", "required": false},
+        {"name": "secret_access_key", "type": "string", "required": false}
+      ],
+      "executor": "nexplane_agent_mock.upload_image",
+      "rollback_action": "upload_image",
+      "estimated_duration_seconds": 1800
+    }
+  ]
+}

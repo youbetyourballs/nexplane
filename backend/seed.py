@@ -49,6 +49,7 @@ NEW_CONNECTOR_IDS = {
     "crowdstrike": uuid.UUID("00000000-0000-0000-0002-000000000006"),
     "tenable": uuid.UUID("00000000-0000-0000-0002-000000000007"),
     "azure": uuid.UUID("00000000-0000-0000-0002-000000000008"),
+    "nexplane_agent": uuid.UUID("00000000-0000-0000-0002-000000000009"),
 }
 
 PROJECT_IDS = {
@@ -368,6 +369,14 @@ async def seed_expansion():
                       connector_type=ConnectorType.azure_mock,
                       name="Azure Mock Connector", status=ConnectorStatus.active,
                       scoped_permissions={"compute": ["read"], "storage": ["read", "write"], "network": ["read", "write"]}),
+            Connector(
+                id=NEW_CONNECTOR_IDS["nexplane_agent"],
+                organization_id=ORG_ID,
+                connector_type=ConnectorType.nexplane_agent,
+                name="Nexplane Agent Mock Connector",
+                status=ConnectorStatus.active,
+                scoped_permissions={"commands": ["estimate_image_size", "change_ip", "configure_syslog", "virtualize_for_migration", "upload_image"]},
+            ),
         ]
         db.add_all(new_connectors)
 

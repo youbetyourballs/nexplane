@@ -15,6 +15,7 @@ class OrganizationSettings(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, unique=True
     )
     anthropic_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    agent_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

@@ -134,7 +134,9 @@ export interface ProjectMemberUpdate {
 
 export interface OrgSettings {
   ai_configured: boolean;
+  agent_configured: boolean;
   updated_at: string | null;
+  agent_secret_plaintext?: string | null;
 }
 
 export interface AIProposedCR {
@@ -163,7 +165,8 @@ export type ConnectorType =
   | "ssh_runner_mock"
   | "active_directory_mock"
   | "crowdstrike_mock"
-  | "tenable_mock";
+  | "tenable_mock"
+  | "nexplane_agent";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 

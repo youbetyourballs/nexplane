@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Key } from "lucide-react";
+import { Check, Key, Terminal, Copy } from "lucide-react";
 import { settingsApi } from "../api/endpoints";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
@@ -12,6 +12,8 @@ export function Settings() {
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [saved, setSaved] = useState(false);
+  const [generatedSecret, setGeneratedSecret] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ["settings"],
@@ -29,18 +31,32 @@ export function Settings() {
     },
   });
 
+  const generateSecret = useMutation({
+    mutationFn: () => settingsApi.generateAgentSecret(),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      setGeneratedSecret(data.agent_secret_plaintext ?? null);
+    },
+  });
+
   const isAdmin = user?.role === "admin";
+
+  function copySecret() {
+    if (generatedSecret) {
+      navigator.clipboard.writeText(generatedSecret);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }
 
   if (isLoading) return <PageLoading />;
 
   return (
     <div className="p-8 max-w-2xl">
-      <PageHeader
-        title="Settings"
-        subtitle="Organization configuration"
-      />
+      <PageHeader title="Settings" subtitle="Organization configuration" />
 
-      <div className="bg-white border border-slate-200 rounded-lg p-6">
+      {/* AI Configuration */}
+      <div className="bg-white border border-slate-200 rounded-lg p-6 mb-4">
         <div className="flex items-center gap-2 mb-1">
           <Key className="w-4 h-4 text-slate-400" />
           <h2 className="text-sm font-semibold text-slate-900">AI Configuration</h2>
@@ -48,7 +64,6 @@ export function Settings() {
         <p className="text-xs text-slate-500 mb-4">
           Anthropic API key for AI-assisted project planning. Key is encrypted at rest and never displayed.
         </p>
-
         <div className="flex items-center gap-3 mb-3">
           {settings?.ai_configured ? (
             <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600">
@@ -63,21 +78,13 @@ export function Settings() {
           ) : (
             <span className="text-sm text-slate-400">Not configured</span>
           )}
-
           {isAdmin && !showKeyInput && (
-            <button
-              onClick={() => setShowKeyInput(true)}
-              className="text-sm text-brand-600 hover:underline"
-            >
+            <button onClick={() => setShowKeyInput(true)} className="text-sm text-brand-600 hover:underline">
               {settings?.ai_configured ? "Update key" : "Add key"}
             </button>
           )}
-
-          {saved && (
-            <span className="text-sm text-emerald-600">✓ Saved</span>
-          )}
+          {saved && <span className="text-sm text-emerald-600">✓ Saved</span>}
         </div>
-
         {isAdmin && showKeyInput && (
           <div className="flex gap-2 items-start">
             <input
@@ -103,10 +110,71 @@ export function Settings() {
             </button>
           </div>
         )}
-
         {!isAdmin && !settings?.ai_configured && (
           <p className="text-xs text-amber-600">
             AI is not configured. Ask an administrator to add an Anthropic API key.
+          </p>
+        )}
+      </div>
+
+      {/* Agent Configuration */}
+      <div className="bg-white border border-slate-200 rounded-lg p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <Terminal className="w-4 h-4 text-slate-400" />
+          <h2 className="text-sm font-semibold text-slate-900">Agent Configuration</h2>
+        </div>
+        <p className="text-xs text-slate-500 mb-4">
+          Shared secret used by Nexplane agents to authenticate with the control plane.
+          The secret is shown only once when generated — store it securely.
+        </p>
+        <div className="flex items-center gap-3 mb-3">
+          {settings?.agent_configured ? (
+            <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600">
+              <Check className="w-4 h-4" />
+              Configured
+            </span>
+          ) : (
+            <span className="text-sm text-slate-400">Not configured</span>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => { setGeneratedSecret(null); generateSecret.mutate(); }}
+              disabled={generateSecret.isPending}
+              className="text-sm text-brand-600 hover:underline disabled:opacity-50"
+            >
+              {generateSecret.isPending
+                ? "Generating…"
+                : settings?.agent_configured
+                ? "Rotate secret"
+                : "Generate secret"}
+            </button>
+          )}
+        </div>
+
+        {generatedSecret && (
+          <div className="bg-slate-50 border border-slate-200 rounded-md p-3">
+            <p className="text-xs text-amber-600 mb-2 font-medium">
+              ⚠ Copy this secret now — it will not be shown again.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs font-mono text-slate-800 break-all">{generatedSecret}</code>
+              <button
+                onClick={copySecret}
+                className="shrink-0 p-1.5 text-slate-400 hover:text-slate-600 rounded border border-slate-200 hover:bg-white"
+                title="Copy to clipboard"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mt-2">
+              Pass to the agent: <code className="font-mono">--secret {generatedSecret}</code>
+            </p>
+          </div>
+        )}
+
+        {!isAdmin && !settings?.agent_configured && (
+          <p className="text-xs text-amber-600">
+            Agent is not configured. Ask an administrator to generate an agent secret.
           </p>
         )}
       </div>
