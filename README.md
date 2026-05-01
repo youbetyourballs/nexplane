@@ -151,7 +151,7 @@ Each connector card in the UI shows a **Run Discovery** button for connectors th
 | Palo Alto | Traffic logs, security events | microsegmentation policy, chokepoint rules, traffic logging |
 | Okta | — | key generation, distribution, revocation |
 | SSH | — | agent install, SELinux policy, workload containerization |
-| Nexplane Agent | — | change IP, configure syslog, virtualize for migration, upload image |
+| Nexplane Agent | Users/groups, privesc findings, software inventory, scheduled tasks, OS security posture | change IP, configure syslog, virtualize for migration, upload image, Linux/Windows security hardening, TLS certificate management, DNS resolver, instance upgrade |
 
 ### Nexplane Agent
 
@@ -162,15 +162,70 @@ A cross-platform Go binary that reverses the connection direction: the agent run
 - Each job payload signed with HMAC-SHA256; agent verifies before executing
 - Agent registers itself — the managed machine appears as an Asset automatically
 
-**Generic commands with rollback:**
+**Commands with rollback — infrastructure operations:**
+
+| Command | What it does | Platform | Rollback |
+|---------|-------------|---------|---------|
+| `estimate_image_size` | Checks available disk space before imaging | Both | Read-only |
+| `change_ip` | Changes interface IP (IPv4/IPv6/DHCP) | Both | Restore snapshot |
+| `configure_syslog` | Forwards logs to a remote collector | Both | Restore config |
+| `virtualize_for_migration` | Creates disk image with target IP pre-configured | Both | Delete image |
+| `upload_image` | Uploads image to S3 (multipart, credential chain) | Both | Delete S3 object |
+| `upgrade_linux_instance` | In-place package/kernel upgrade or containerize-and-migrate for major OS upgrades | Linux | Cloud or dd snapshot restore |
+
+**Commands with rollback — Linux security hardening:**
 
 | Command | What it does | Rollback |
 |---------|-------------|---------|
-| `estimate_image_size` | Checks available disk space before imaging | Read-only |
-| `change_ip` | Changes interface IP (IPv4/IPv6/DHCP) | Restore snapshot |
-| `configure_syslog` | Forwards logs to a remote collector | Restore config |
-| `virtualize_for_migration` | Creates disk image with target IP pre-configured | Delete image |
-| `upload_image` | Uploads image to S3 (multipart, credential chain) | Delete S3 object |
+| `configure_selinux` | Set SELinux mode; install/generate policy modules | Restore mode + unload modules |
+| `configure_apparmor` | Load profile; set enforce/complain/disable mode | Restore previous profile state |
+| `configure_seccomp` | Apply seccomp filter to systemd service or container | Remove drop-in, reload service |
+| `apply_sysctl_hardening` | Apply CIS/STIG sysctl parameters (IP forward, SYN cookies, etc.) | Remove drop-in file, restore values |
+| `configure_host_firewall` | Add/remove iptables/nftables/firewalld rules | Restore ruleset snapshot |
+| `blacklist_kernel_modules` | Prevent loading of unnecessary/dangerous modules | Remove blacklist file |
+| `harden_mount_options` | Apply noexec/nosuid/nodev to /tmp, /dev/shm | Restore fstab options |
+| `deploy_auditd_rules` | Install CIS/STIG/custom auditd rule sets | Remove rules, reload auditd |
+| `setup_file_integrity_monitoring` | Initialize AIDE/Tripwire baseline; run diff | Remove integrity database |
+| `deploy_ebpf_policy` | Load and attach eBPF programs (kprobe, tc, XDP, LSM) | Detach and unload program |
+| `configure_ebpf_security_policy` | Apply Cilium/Falco/Tetragon declarative policy | Delete/disable policy |
+| `configure_pam` | Password complexity, account lockout, session limits | Restore PAM config backup |
+| `harden_ssh` | Disable root login, key-only auth, cipher allowlist | Restore sshd_config, reload |
+| `manage_ca_certificates` | Install/remove CA cert to OS trust store | Remove cert, re-run trust update |
+| `configure_ntp` | Configure chrony/timesyncd/ntpd time sources | Restore config, restart service |
+
+**Commands with rollback — Windows security hardening:**
+
+| Command | What it does | Rollback |
+|---------|-------------|---------|
+| `configure_laps` | Enable/disable LAPS for local admin password rotation | Restore registry |
+| `enable_credential_guard` | Enable VBS credential isolation | Restore registry (reboot required) |
+| `enforce_powershell_clm` | Enforce PowerShell Constrained Language Mode | Restore registry or WDAC policy |
+| `deploy_applocker_policy` | Deploy AppLocker allowlist (audit or enforce mode) | Restore previous effective policy |
+| `harden_smb` | Disable SMBv1, require signing, disable guest access | Restore SMB configuration |
+| `enable_bitlocker` | Enable BitLocker full disk encryption | Disable BitLocker (decrypt) |
+| `configure_windows_firewall` | Add/remove firewall rules, set default actions | Restore full firewall policy export |
+| `harden_tls_protocols` | Disable SSL/TLS 1.0/1.1, enforce cipher suite order | Restore SCHANNEL registry |
+| `harden_rdp` | Require NLA, set encryption level, idle timeout | Restore RDP registry settings |
+| `configure_windows_audit_policy` | Apply CIS/STIG/custom auditpol settings | Restore per-subcategory settings |
+| `harden_registry` | Disable autorun, LM hash, WDigest, NTLMv1, etc. | Restore registry export |
+
+**Commands with rollback — cross-platform:**
+
+| Command | What it does | Platform | Rollback |
+|---------|-------------|---------|---------|
+| `manage_tls_certificates` | Deploy/renew/validate TLS certs (ACME, internal CA, manual) | Both | Restore previous cert files |
+| `configure_dns_resolver` | Configure DoH/DoT/plain DNS resolvers | Both | Restore resolver config |
+
+**Read-only ingest commands (no rollback needed):**
+
+| Command | What it collects | Platform |
+|---------|-----------------|---------|
+| `audit_os_security_posture` | SELinux/AppArmor/seccomp state and active denials | Linux |
+| `audit_ebpf_posture` | Loaded eBPF programs and attachment points | Linux |
+| `audit_users_and_groups` | No-expiry accounts, UID 0 non-root, empty passwords, sudo members | Linux |
+| `audit_privesc_vulnerabilities` | PwnKit, DirtyPipe, unexpected SUID, writable cron, sudo misconfig | Linux |
+| `audit_scheduled_tasks` | All scheduled tasks; flags third-party, privileged, hidden, writable-binary tasks | Windows |
+| `audit_software_inventory` | Installed packages, Store apps, features (dpkg/rpm/winget) | Both |
 
 **Full migration workflow:**
 ```
@@ -219,7 +274,13 @@ nexplane/
 │       ├── changip/                # IP change (nmcli/systemd-networkd/ifcfg/netsh)
 │       ├── configsyslog/           # Syslog forwarding (rsyslog/syslog-ng/NXLog/WEF)
 │       ├── virtualize/             # Disk imaging (dd/losetup/mount/VHD/robocopy)
-│       └── uploadimage/            # S3 multipart upload (AWS SDK v2)
+│       ├── uploadimage/            # S3 multipart upload (AWS SDK v2)
+│       ├── ossecurity/             # Linux MAC/kernel/integrity hardening (Spec 5a)
+│       ├── ebpf/                   # Linux eBPF program management (Spec 5a)
+│       ├── linuxauth/              # Linux PAM, SSH, user audit, privesc audit, CA certs, NTP (Spec 5b)
+│       ├── winharden/              # Windows security hardening suite (Spec 5c)
+│       ├── crossplatform/          # Cross-platform TLS, DNS, software inventory (Spec 5d)
+│       └── linuxupgrade/           # Linux in-place and containerize-and-migrate upgrade (Spec 5e)
 │
 ├── backend/
 │   ├── app/
@@ -267,7 +328,7 @@ nexplane/
 │       └── types/api.ts            # Centralized TypeScript API types
 │
 ├── docs/superpowers/
-│   ├── specs/                      # Design specs (Specs 1–4)
+│   ├── specs/                      # Design specs (Specs 1–5e)
 │   └── plans/                      # Implementation plans
 │
 └── docker-compose.yml
