@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '../api/client';
 import type { ConnectorRead } from '../types/api';
 
 const INTERVAL_OPTIONS = [
@@ -17,22 +18,19 @@ interface ScheduleData {
 interface Props {
   connector: ConnectorRead;
   existing: ScheduleData | null;
-  token: string;
   onClose: () => void;
 }
 
-export default function ScheduleModal({ connector, existing, token, onClose }: Props) {
+export default function ScheduleModal({ connector, existing, onClose }: Props) {
   const [intervalHours, setIntervalHours] = useState(existing?.interval_hours ?? 24);
   const queryClient = useQueryClient();
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
   const saveMutation = useMutation({
     mutationFn: () =>
-      fetch(`/connectors/${connector.id}/schedule`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ interval_hours: intervalHours, action_id: existing?.action_id ?? 'ingest' }),
-      }).then(r => { if (!r.ok) throw new Error('Save failed'); return r.json(); }),
+      apiClient.put(`/connectors/${connector.id}/schedule`, {
+        interval_hours: intervalHours,
+        action_id: existing?.action_id ?? 'ingest',
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['schedule', connector.id] });
       onClose();
@@ -41,7 +39,7 @@ export default function ScheduleModal({ connector, existing, token, onClose }: P
 
   const deleteMutation = useMutation({
     mutationFn: () =>
-      fetch(`/connectors/${connector.id}/schedule`, { method: 'DELETE', headers }),
+      apiClient.delete(`/connectors/${connector.id}/schedule`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['schedule', connector.id] });
       onClose();

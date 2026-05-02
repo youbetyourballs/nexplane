@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plug, CheckCircle2, XCircle, Loader2, Download, Trash2 } from "lucide-react";
 import { connectorsApi } from "../api/endpoints";
+import { apiClient } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
 import CredentialModal from "../components/CredentialModal";
@@ -113,21 +114,17 @@ const INTERVAL_LABELS: Record<number, string> = {
 
 function ConnectorScheduleBadge({
   connector,
-  token,
   onConfigure,
 }: {
   connector: ConnectorRead;
-  token: string;
   onConfigure: (s: any) => void;
 }) {
   const { data: schedule } = useQuery({
     queryKey: ["schedule", connector.id],
     queryFn: () =>
-      fetch(`/connectors/${connector.id}/schedule`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then((r) => (r.status === 404 || r.status === 204 ? null : r.json()))
-        .catch(() => null),
+      apiClient.get(`/connectors/${connector.id}/schedule`)
+        .then((r) => r.data)
+        .catch((e) => (e.response?.status === 404 || e.response?.status === 204 ? null : Promise.reject(e))),
     staleTime: 30000,
   });
 
@@ -161,19 +158,15 @@ function ConnectorScheduleBadge({
 
 function ConnectorCredentialBadge({
   connector,
-  token,
   onConfigure,
 }: {
   connector: ConnectorRead;
-  token: string;
   onConfigure: () => void;
 }) {
   const { data } = useQuery({
     queryKey: ["credentials", connector.id],
     queryFn: () =>
-      fetch(`/connectors/${connector.id}/credentials`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).then((r) => r.json()),
+      apiClient.get(`/connectors/${connector.id}/credentials`).then((r) => r.data),
     staleTime: 30000,
   });
 
@@ -272,13 +265,11 @@ export function Connectors() {
                     <div className="text-xs text-slate-400">{CONNECTOR_LABELS[connector.connector_type]}</div>
                     <ConnectorCredentialBadge
                       connector={connector}
-                      token={token}
                       onConfigure={() => setCredModalConnector(connector)}
                     />
                     {ingestActionId && (
                       <ConnectorScheduleBadge
                         connector={connector}
-                        token={token}
                         onConfigure={(existing) => setScheduleModal({ connector, existing })}
                       />
                     )}
@@ -386,7 +377,6 @@ export function Connectors() {
       {credModalConnector && (
         <CredentialModal
           connector={credModalConnector}
-          token={token}
           onClose={() => setCredModalConnector(null)}
         />
       )}
@@ -394,7 +384,6 @@ export function Connectors() {
         <ScheduleModal
           connector={scheduleModal.connector}
           existing={scheduleModal.existing}
-          token={token}
           onClose={() => setScheduleModal(null)}
         />
       )}

@@ -1,21 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '../api/client';
 import type { ConnectorRead, CredentialField, CredentialStatus } from '../types/api';
 
 interface Props {
   connector: ConnectorRead;
-  token: string;
   onClose: () => void;
 }
 
-export default function CredentialModal({ connector, token, onClose }: Props) {
+export default function CredentialModal({ connector, onClose }: Props) {
   const queryClient = useQueryClient();
-  const headers = { Authorization: `Bearer ${token}` };
 
   const { data: credStatus, isLoading } = useQuery<CredentialStatus>({
     queryKey: ['credentials', connector.id],
     queryFn: () =>
-      fetch(`/connectors/${connector.id}/credentials`, { headers }).then(r => r.json()),
+      apiClient.get(`/connectors/${connector.id}/credentials`).then(r => r.data),
   });
 
   const fields: CredentialField[] = credStatus?.fields ?? [];
@@ -29,11 +28,7 @@ export default function CredentialModal({ connector, token, onClose }: Props) {
 
   const saveMutation = useMutation({
     mutationFn: () =>
-      fetch(`/connectors/${connector.id}/credentials`, {
-        method: 'PUT',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credentials: values }),
-      }).then(r => { if (!r.ok) throw new Error('Save failed'); return r.json(); }),
+      apiClient.put(`/connectors/${connector.id}/credentials`, { credentials: values }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['credentials', connector.id] });
       onClose();
@@ -42,8 +37,7 @@ export default function CredentialModal({ connector, token, onClose }: Props) {
 
   const clearMutation = useMutation({
     mutationFn: () =>
-      fetch(`/connectors/${connector.id}/credentials`, { method: 'DELETE', headers })
-        .then(r => { if (!r.ok && r.status !== 204) throw new Error('Delete failed'); }),
+      apiClient.delete(`/connectors/${connector.id}/credentials`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['credentials', connector.id] });
       onClose();
