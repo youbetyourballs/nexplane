@@ -1,6 +1,10 @@
 {
   "connector_type": "cloudflare_mock",
   "display_name": "Cloudflare (Mock)",
+  "credential_fields": [
+    {"name": "api_token", "label": "API Token", "type": "password", "required": true},
+    {"name": "zone_id", "label": "Zone ID", "type": "string", "required": true}
+  ],
   "actions": [
     {
       "action_id": "capture_dns_record",

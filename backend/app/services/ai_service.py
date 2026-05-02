@@ -3,6 +3,19 @@ import re
 from app.services.secrets_service import SecretsService
 
 
+def _resolve_api_key(settings, secrets_svc: SecretsService) -> str:
+    """Resolve AI API key from ai_providers_encrypted or legacy anthropic_api_key_encrypted."""
+    if settings.ai_providers_encrypted:
+        data = secrets_svc.decrypt_json(settings.ai_providers_encrypted)
+        default = data.get("default", "anthropic")
+        providers = data.get("providers", {})
+        if default in providers and providers[default].get("api_key"):
+            return providers[default]["api_key"]
+    if settings.anthropic_api_key_encrypted:
+        return secrets_svc.decrypt(settings.anthropic_api_key_encrypted)
+    raise ValueError("No AI provider configured")
+
+
 _SYSTEM_PROMPT_TEMPLATE = """You are a planning assistant for Nexplane, a secure infrastructure change management platform.
 
 The operator is planning a project with this goal: {goal}

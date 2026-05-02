@@ -21,6 +21,12 @@ class IngestService:
         if action_def.get("action_type") != "ingest":
             raise ValueError(f"'{action_id}' is not an ingest action")
 
+        from app.services.connector_service import _attach_credentials
+        try:
+            await _attach_credentials(connector, db)
+        except Exception:
+            connector.credentials = {}
+
         executor = self._catalog.get_executor(connector.connector_type, action_id)
         payloads: list[dict] = await executor.execute({}, [], connector)
 

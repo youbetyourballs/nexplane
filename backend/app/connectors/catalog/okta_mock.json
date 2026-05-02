@@ -1,6 +1,10 @@
 {
   "connector_type": "okta_mock",
   "display_name": "Okta (Mock)",
+  "credential_fields": [
+    {"name": "org_url", "label": "Org URL (e.g. https://acme.okta.com)", "type": "string", "required": true},
+    {"name": "api_token", "label": "API Token", "type": "password", "required": true}
+  ],
   "actions": [
     {
       "action_id": "generate_key",

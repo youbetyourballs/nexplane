@@ -1,6 +1,13 @@
 {
   "connector_type": "ssh_mock",
   "display_name": "SSH Runner (Mock)",
+  "credential_fields": [
+    {"name": "hostname", "label": "Hostname/IP", "type": "string", "required": true},
+    {"name": "port", "label": "Port", "type": "string", "required": false, "default": "22"},
+    {"name": "username", "label": "Username", "type": "string", "required": true},
+    {"name": "private_key", "label": "Private Key (PEM)", "type": "password", "required": false},
+    {"name": "password", "label": "Password", "type": "password", "required": false}
+  ],
   "actions": [
     {
       "action_id": "check_prerequisites",

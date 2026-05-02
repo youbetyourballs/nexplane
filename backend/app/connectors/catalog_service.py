@@ -17,6 +17,7 @@ class ActionOption:
 class ActionCatalogService:
     def __init__(self, catalog_dir: pathlib.Path):
         self._catalog: dict[str, list[dict]] = {}
+        self._raw: dict[str, dict] = {}
         self._generic_index: dict[str, list[ActionOption]] = {}
         self._load(catalog_dir)
 
@@ -26,6 +27,7 @@ class ActionCatalogService:
             connector_type = data["connector_type"]
             actions = data.get("actions", [])
             self._catalog[connector_type] = actions
+            self._raw[connector_type] = data
             for action_def in actions:
                 generic = action_def["generic_action"]
                 option = ActionOption(
@@ -69,6 +71,12 @@ class ActionCatalogService:
             if any(o.action_def.get("action_type") == action_type for o in options):
                 result.add(generic)
         return list(result)
+
+    def get_connector_catalog(self, connector_type: str) -> dict:
+        """Return the full raw catalog dict for a connector type."""
+        if connector_type not in self._raw:
+            raise KeyError(f"Connector type '{connector_type}' not found in catalog")
+        return self._raw[connector_type]
 
     def get_executor(self, connector_type: str, action_id: str) -> types.ModuleType:
         """Resolves executor reference to an importable module.

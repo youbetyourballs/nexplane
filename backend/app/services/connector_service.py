@@ -33,13 +33,34 @@ async def test_connector(connector_type: str) -> dict:
     }
 
 
+async def _attach_credentials(connector, db) -> None:
+    """Decrypt and attach credentials dict to connector object."""
+    from sqlalchemy import select
+    from app.models.connector_credential import ConnectorCredential
+    from app.services.secrets_service import SecretsService
+    from app import config as app_config
+
+    result = await db.execute(
+        select(ConnectorCredential).where(ConnectorCredential.connector_id == connector.id)
+    )
+    cred_row = result.scalar_one_or_none()
+    if cred_row:
+        svc = SecretsService(app_config.settings.SECRET_KEY)
+        connector.credentials = svc.decrypt_json(cred_row.credentials_encrypted)
+    else:
+        connector.credentials = {}
+
+
 async def execute_action(
     connector_type: str,
     action_id: str,
     parameters: dict,
     asset_ids: list[str],
     connector: Any = None,
+    db=None,
 ) -> dict:
+    if connector is not None and db is not None:
+        await _attach_credentials(connector, db)
     catalog = get_catalog_service()
     try:
         executor = catalog.get_executor(connector_type, action_id)

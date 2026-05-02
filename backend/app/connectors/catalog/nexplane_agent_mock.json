@@ -1,6 +1,7 @@
 {
   "connector_type": "nexplane_agent_mock", 
-  "display_name": "Nexplane Agent (Mock)", 
+  "display_name": "Nexplane Agent (Mock)",
+  "credential_fields": [],
   "actions": [
     {
       "display_name": "Estimate Image Size & Check Space", 

@@ -1,6 +1,11 @@
 {
   "connector_type": "paloalto_mock",
   "display_name": "Palo Alto Networks (Mock)",
+  "credential_fields": [
+    {"name": "hostname", "label": "Firewall Hostname/IP", "type": "string", "required": true},
+    {"name": "username", "label": "Username", "type": "string", "required": true},
+    {"name": "password", "label": "Password", "type": "password", "required": true}
+  ],
   "actions": [
     {
       "action_id": "analyze_flows",

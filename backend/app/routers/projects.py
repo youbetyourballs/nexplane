@@ -327,14 +327,15 @@ async def ai_chat(
         )
     )
     org_settings = result.scalar_one_or_none()
-    if not org_settings or not org_settings.anthropic_api_key_encrypted:
+    if not org_settings or (not org_settings.anthropic_api_key_encrypted and not org_settings.ai_providers_encrypted):
         raise HTTPException(
             status_code=402,
-            detail="AI not configured — add an Anthropic API key in Settings",
+            detail="AI not configured — add an AI provider API key in Settings",
         )
 
+    from app.services.ai_service import _resolve_api_key
     secrets = SecretsService(app_settings.SECRET_KEY)
-    api_key = secrets.decrypt(org_settings.anthropic_api_key_encrypted)
+    api_key = _resolve_api_key(org_settings, secrets)
 
     # Load asset context
     assets_result = await db.execute(

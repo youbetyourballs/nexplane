@@ -1,6 +1,12 @@
 {
   "connector_type": "aws_mock",
   "display_name": "Amazon Web Services (Mock)",
+  "credential_fields": [
+    {"name": "access_key_id", "label": "AWS Access Key ID", "type": "string", "required": true},
+    {"name": "secret_access_key", "label": "AWS Secret Access Key", "type": "password", "required": true},
+    {"name": "region", "label": "AWS Region", "type": "string", "required": false, "default": "us-east-1"},
+    {"name": "session_token", "label": "Session Token (optional)", "type": "password", "required": false}
+  ],
   "actions": [
     {
       "action_id": "health_check",

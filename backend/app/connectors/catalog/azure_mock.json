@@ -1,6 +1,12 @@
 {
   "connector_type": "azure_mock",
   "display_name": "Microsoft Azure (Mock)",
+  "credential_fields": [
+    {"name": "tenant_id", "label": "Tenant ID", "type": "string", "required": true},
+    {"name": "client_id", "label": "Client ID", "type": "string", "required": true},
+    {"name": "client_secret", "label": "Client Secret", "type": "password", "required": true},
+    {"name": "subscription_id", "label": "Subscription ID", "type": "string", "required": true}
+  ],
   "actions": [
     {
       "action_id": "discover_vms",

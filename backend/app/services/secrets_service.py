@@ -1,4 +1,5 @@
 import hashlib
+import json
 from base64 import urlsafe_b64encode
 from cryptography.fernet import Fernet
 
@@ -21,3 +22,11 @@ class SecretsService:
 
     def decrypt(self, encrypted: str) -> str:
         return self._fernet.decrypt(encrypted.encode()).decode()
+
+    def encrypt_json(self, data: dict) -> str:
+        """Serialize dict to JSON then encrypt."""
+        return self.encrypt(json.dumps(data))
+
+    def decrypt_json(self, encrypted: str) -> dict:
+        """Decrypt then deserialize JSON to dict."""
+        return json.loads(self.decrypt(encrypted))

@@ -9,10 +9,12 @@ from app.models.user import User
 from app.routers import current_user
 from app.schemas.connector import ConnectorCreate, ConnectorRead, ConnectorTestResult, IngestResponse
 from app.schemas.asset import AssetRead
+from app.schemas.credential import CredentialRead, CredentialWrite, CredentialField
 from app.services.connector_service import test_connector
 from app.services.audit_service import record_event
 from app.services.ingest_service import IngestService
 from app.connectors.catalog_service import get_catalog_service
+from app.models.connector_credential import ConnectorCredential
 
 router = APIRouter(prefix="/connectors", tags=["Connectors"])
 
@@ -87,3 +89,109 @@ async def run_ingest(
         raise HTTPException(status_code=400, detail=str(exc))
     except (KeyError, ImportError) as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/{connector_id}/credentials", response_model=CredentialRead)
+async def get_credentials(
+    connector_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Connector).where(
+            Connector.id == connector_id,
+            Connector.organization_id == user.organization_id,
+        )
+    )
+    connector = result.scalar_one_or_none()
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    catalog_svc = get_catalog_service()
+    catalog = catalog_svc.get_connector_catalog(connector.connector_type.value)
+    fields = [CredentialField(**f) for f in catalog.get("credential_fields", [])]
+
+    cred_result = await db.execute(
+        select(ConnectorCredential).where(ConnectorCredential.connector_id == connector.id)
+    )
+    cred_row = cred_result.scalar_one_or_none()
+    return CredentialRead(
+        configured=cred_row is not None,
+        fields=fields,
+        updated_at=cred_row.updated_at if cred_row else None,
+    )
+
+
+@router.put("/{connector_id}/credentials", status_code=200)
+async def upsert_credentials(
+    connector_id: uuid.UUID,
+    body: CredentialWrite,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Connector).where(
+            Connector.id == connector_id,
+            Connector.organization_id == user.organization_id,
+        )
+    )
+    connector = result.scalar_one_or_none()
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    from app.services.secrets_service import SecretsService
+    from app import config as app_config
+
+    catalog_svc = get_catalog_service()
+    catalog = catalog_svc.get_connector_catalog(connector.connector_type.value)
+    required_fields = [f["name"] for f in catalog.get("credential_fields", []) if f.get("required")]
+    missing = [f for f in required_fields if not body.credentials.get(f)]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Missing required credential fields: {missing}")
+
+    svc = SecretsService(app_config.settings.SECRET_KEY)
+    encrypted = svc.encrypt_json(body.credentials)
+
+    cred_result = await db.execute(
+        select(ConnectorCredential).where(ConnectorCredential.connector_id == connector.id)
+    )
+    cred_row = cred_result.scalar_one_or_none()
+    if cred_row:
+        cred_row.credentials_encrypted = encrypted
+        cred_row.updated_by = user.id
+    else:
+        cred_row = ConnectorCredential(
+            connector_id=connector.id,
+            organization_id=user.organization_id,
+            credentials_encrypted=encrypted,
+            updated_by=user.id,
+        )
+        db.add(cred_row)
+
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/{connector_id}/credentials", status_code=204)
+async def delete_credentials(
+    connector_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Connector).where(
+            Connector.id == connector_id,
+            Connector.organization_id == user.organization_id,
+        )
+    )
+    connector = result.scalar_one_or_none()
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    cred_result = await db.execute(
+        select(ConnectorCredential).where(ConnectorCredential.connector_id == connector.id)
+    )
+    cred_row = cred_result.scalar_one_or_none()
+    if cred_row:
+        await db.delete(cred_row)
+        await db.commit()

@@ -1,6 +1,14 @@
 {
   "connector_type": "active_directory_mock",
   "display_name": "Active Directory (Mock)",
+  "credential_fields": [
+    {"name": "server", "label": "Server Hostname/IP", "type": "string", "required": true},
+    {"name": "port", "label": "Port", "type": "string", "required": false, "default": "389"},
+    {"name": "base_dn", "label": "Base DN", "type": "string", "required": true},
+    {"name": "bind_dn", "label": "Bind DN", "type": "string", "required": true},
+    {"name": "bind_password", "label": "Bind Password", "type": "password", "required": true},
+    {"name": "use_ssl", "label": "Use SSL/TLS", "type": "string", "required": false, "default": "false"}
+  ],
   "actions": [
     {
       "action_id": "discover_computers",
