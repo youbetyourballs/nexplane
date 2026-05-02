@@ -1,0 +1,15 @@
+{
+  "connector_type": "helm",
+  "display_name": "Helm",
+  "credential_fields": [
+    {"name": "kubeconfig", "label": "Kubeconfig (base64-encoded)", "type": "password", "required": true},
+    {"name": "context", "label": "Context (optional)", "type": "string", "required": false},
+    {"name": "namespace", "label": "Namespace (optional)", "type": "string", "required": false}
+  ],
+  "actions": [
+    {"action_id": "discover_releases", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Releases", "description": "All Helm releases: name, namespace, chart, version, status", "applicable_asset_types": ["server"], "parameters": [], "executor": "helm.discover_releases", "estimated_duration_seconds": 15},
+    {"action_id": "discover_release_history", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Release History", "description": "Revision history for a release", "applicable_asset_types": ["server"], "parameters": [{"name": "release_name", "type": "string", "required": true}, {"name": "namespace", "type": "string", "required": true}], "executor": "helm.discover_release_history", "estimated_duration_seconds": 10},
+    {"action_id": "rollback_release", "generic_action": "rollback", "action_type": "change", "execution_tier": 2, "display_name": "Rollback Release", "description": "Roll back a Helm release to a specific revision.", "applicable_asset_types": ["server"], "parameters": [{"name": "release_name", "type": "string", "required": true}, {"name": "namespace", "type": "string", "required": true}, {"name": "revision", "type": "integer", "required": false}], "executor": "helm.rollback_release", "estimated_duration_seconds": 30},
+    {"action_id": "uninstall_release", "generic_action": "destroy", "action_type": "change", "execution_tier": 3, "display_name": "Uninstall Release", "description": "Uninstall a Helm release.", "applicable_asset_types": ["server"], "parameters": [{"name": "release_name", "type": "string", "required": true}, {"name": "namespace", "type": "string", "required": true}], "executor": "helm.uninstall_release", "estimated_duration_seconds": 30, "blast_radius_hint": "destructive"}
+  ]
+}

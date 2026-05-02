@@ -1,0 +1,18 @@
+{
+  "connector_type": "splunk",
+  "display_name": "Splunk",
+  "credential_fields": [
+    {"name": "base_url", "label": "Splunk Base URL", "type": "string", "required": true, "placeholder": "https://splunk.example.com:8089"},
+    {"name": "token", "label": "API Token", "type": "password", "required": true},
+    {"name": "hec_url", "label": "HEC URL (optional)", "type": "string", "required": false}
+  ],
+  "actions": [
+    {"action_id": "search", "generic_action": "query", "action_type": "ingest", "execution_tier": 1, "display_name": "Search", "description": "Run a Splunk SPL search and return results.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "query", "type": "string", "required": true}, {"name": "earliest", "type": "string", "required": false}, {"name": "latest", "type": "string", "required": false}], "executor": "splunk.search", "estimated_duration_seconds": 60},
+    {"action_id": "discover_saved_searches", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Saved Searches", "description": "All saved searches: name, schedule, last run", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "splunk.discover_saved_searches", "estimated_duration_seconds": 15},
+    {"action_id": "discover_notable_events", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Notable Events", "description": "Active ES notable events: event_id, urgency, status, owner", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "splunk.discover_notable_events", "estimated_duration_seconds": 30},
+    {"action_id": "send_event", "generic_action": "send_event", "action_type": "change", "execution_tier": 2, "display_name": "Send Event", "description": "Send an event to Splunk HEC.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "event", "type": "object", "required": true}, {"name": "source", "type": "string", "required": false}, {"name": "sourcetype", "type": "string", "required": false}, {"name": "index", "type": "string", "required": false}], "executor": "splunk.send_event", "estimated_duration_seconds": 5},
+    {"action_id": "create_alert", "generic_action": "create_alert", "action_type": "change", "execution_tier": 2, "display_name": "Create Alert", "description": "Create a scheduled Splunk alert.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "name", "type": "string", "required": true}, {"name": "search", "type": "string", "required": true}, {"name": "cron_schedule", "type": "string", "required": false}], "executor": "splunk.create_alert", "estimated_duration_seconds": 10},
+    {"action_id": "suppress_notable", "generic_action": "dismiss_alert", "action_type": "change", "execution_tier": 2, "display_name": "Suppress Notable Event", "description": "Suppress a notable event in Splunk ES.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "event_id", "type": "string", "required": true}, {"name": "comment", "type": "string", "required": false}], "executor": "splunk.suppress_notable", "estimated_duration_seconds": 5},
+    {"action_id": "run_adaptive_response", "generic_action": "run_playbook", "action_type": "change", "execution_tier": 2, "display_name": "Run Adaptive Response", "description": "Trigger an adaptive response action on a notable event.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "event_id", "type": "string", "required": true}, {"name": "action_name", "type": "string", "required": true}], "executor": "splunk.run_adaptive_response", "estimated_duration_seconds": 30}
+  ]
+}

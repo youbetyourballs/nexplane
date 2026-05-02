@@ -23,6 +23,32 @@ class ConnectorType(str, enum.Enum):
     runzero = "runzero"
     wiz = "wiz"
     entra_id = "entra_id"
+    # 6c: security tools
+    sentinelone = "sentinelone"
+    defender_endpoint = "defender_endpoint"
+    hashicorp_vault = "hashicorp_vault"
+    github = "github"
+    kubernetes = "kubernetes"
+    snyk = "snyk"
+    qualys = "qualys"
+    # 6d: IaC
+    terraform = "terraform"
+    ansible = "ansible"
+    cloudformation = "cloudformation"
+    pulumi = "pulumi"
+    helm = "helm"
+    bicep = "bicep"
+    checkov = "checkov"
+    saltstack = "saltstack"
+    chef_inspec = "chef_inspec"
+    # 6e: workflow/observability
+    jira = "jira"
+    pagerduty = "pagerduty"
+    servicenow = "servicenow"
+    splunk = "splunk"
+    datadog = "datadog"
+    zscaler = "zscaler"
+    google_workspace = "google_workspace"
 
 
 class ConnectorStatus(str, enum.Enum):

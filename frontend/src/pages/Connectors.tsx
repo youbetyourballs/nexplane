@@ -24,6 +24,32 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   runzero: "RunZero",
   wiz: "Wiz",
   entra_id: "Microsoft Entra ID",
+  // 6c
+  sentinelone: "SentinelOne",
+  defender_endpoint: "Microsoft Defender for Endpoint",
+  hashicorp_vault: "HashiCorp Vault",
+  github: "GitHub",
+  kubernetes: "Kubernetes",
+  snyk: "Snyk",
+  qualys: "Qualys",
+  // 6d
+  terraform: "Terraform (HCP)",
+  ansible: "Ansible (AWX)",
+  cloudformation: "AWS CloudFormation",
+  pulumi: "Pulumi",
+  helm: "Helm",
+  bicep: "Azure Bicep",
+  checkov: "Checkov",
+  saltstack: "SaltStack",
+  chef_inspec: "Chef InSpec",
+  // 6e
+  jira: "Jira",
+  pagerduty: "PagerDuty",
+  servicenow: "ServiceNow",
+  splunk: "Splunk",
+  datadog: "Datadog",
+  zscaler: "Zscaler",
+  google_workspace: "Google Workspace",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -41,6 +67,32 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   runzero: "🌐",
   wiz: "🛡️",
   entra_id: "👥",
+  // 6c
+  sentinelone: "🛡️",
+  defender_endpoint: "🛡️",
+  hashicorp_vault: "🔒",
+  github: "🐙",
+  kubernetes: "⎈",
+  snyk: "🐛",
+  qualys: "🔍",
+  // 6d
+  terraform: "🏗️",
+  ansible: "⚙️",
+  cloudformation: "☁️",
+  pulumi: "🏗️",
+  helm: "⎈",
+  bicep: "🔷",
+  checkov: "✅",
+  saltstack: "🧂",
+  chef_inspec: "👨‍🍳",
+  // 6e
+  jira: "🎫",
+  pagerduty: "🔔",
+  servicenow: "❄️",
+  splunk: "📊",
+  datadog: "🐕",
+  zscaler: "🛡️",
+  google_workspace: "🌐",
 };
 
 // Ingest action IDs per connector type (connectors that support discovery)

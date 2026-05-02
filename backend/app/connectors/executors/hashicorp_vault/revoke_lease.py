@@ -1,0 +1,15 @@
+import asyncio
+
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    creds = getattr(connector, "credentials", {})
+    lease_id = parameters["lease_id"]
+    if not creds:
+        return {"action": "revoke_lease", "lease_id": lease_id, "revoked": True}
+    from ._client import get_vault_client
+    loop = asyncio.get_event_loop()
+    client = get_vault_client(creds)
+    await loop.run_in_executor(None, lambda: client.sys.revoke_lease(lease_id=lease_id))
+    return {"action": "revoke_lease", "lease_id": lease_id, "revoked": True}
+
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    return {"rolled_back": False, "reason": "revoked leases cannot be restored"}

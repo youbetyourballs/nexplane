@@ -1,0 +1,21 @@
+{
+  "connector_type": "zscaler",
+  "display_name": "Zscaler",
+  "credential_fields": [
+    {"name": "cloud", "label": "Cloud (e.g. zscaler.net)", "type": "string", "required": true},
+    {"name": "api_key", "label": "API Key", "type": "password", "required": true},
+    {"name": "username", "label": "Username", "type": "string", "required": true},
+    {"name": "password", "label": "Password", "type": "password", "required": true}
+  ],
+  "actions": [
+    {"action_id": "discover_users", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Users", "description": "All ZIA users: name, email, department, groups", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "zscaler.discover_users", "estimated_duration_seconds": 30},
+    {"action_id": "discover_policies", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Policies", "description": "URL filtering policies", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "zscaler.discover_policies", "estimated_duration_seconds": 15},
+    {"action_id": "discover_locations", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Locations", "description": "Network locations: name, IP ranges, subnets", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "zscaler.discover_locations", "estimated_duration_seconds": 15},
+    {"action_id": "discover_zpa_applications", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover ZPA Applications", "description": "Zero Trust Application Segment definitions", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "zscaler.discover_zpa_applications", "estimated_duration_seconds": 15},
+    {"action_id": "block_url", "generic_action": "block_url", "action_type": "change", "execution_tier": 2, "display_name": "Block URL", "description": "Add a URL to the custom block category.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "url", "type": "string", "required": true}], "executor": "zscaler.block_url", "estimated_duration_seconds": 10},
+    {"action_id": "block_ip", "generic_action": "block_ip", "action_type": "change", "execution_tier": 2, "display_name": "Block IP", "description": "Add an IP to the deny list.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "ip_address", "type": "string", "required": true}], "executor": "zscaler.block_ip", "estimated_duration_seconds": 10},
+    {"action_id": "suspend_user", "generic_action": "suspend_user", "action_type": "change", "execution_tier": 2, "display_name": "Suspend User", "description": "Suspend a ZIA user account.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "user_id", "type": "string", "required": true}], "executor": "zscaler.suspend_user", "estimated_duration_seconds": 5},
+    {"action_id": "activate_user", "generic_action": "unsuspend_user", "action_type": "change", "execution_tier": 2, "display_name": "Activate User", "description": "Reactivate a suspended ZIA user.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "user_id", "type": "string", "required": true}], "executor": "zscaler.activate_user", "estimated_duration_seconds": 5},
+    {"action_id": "update_url_category", "generic_action": "update_policy", "action_type": "change", "execution_tier": 2, "display_name": "Update URL Category", "description": "Update a custom URL category (add/remove URLs).", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "category_id", "type": "string", "required": true}, {"name": "urls_to_add", "type": "array", "required": false}, {"name": "urls_to_remove", "type": "array", "required": false}], "executor": "zscaler.update_url_category", "estimated_duration_seconds": 10}
+  ]
+}

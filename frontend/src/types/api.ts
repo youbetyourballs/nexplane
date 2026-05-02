@@ -170,7 +170,30 @@ export type ConnectorType =
   | "gcp"
   | "runzero"
   | "wiz"
-  | "entra_id";
+  | "entra_id"
+  | "sentinelone"
+  | "defender_endpoint"
+  | "hashicorp_vault"
+  | "github"
+  | "kubernetes"
+  | "snyk"
+  | "qualys"
+  | "terraform"
+  | "ansible"
+  | "cloudformation"
+  | "pulumi"
+  | "helm"
+  | "bicep"
+  | "checkov"
+  | "saltstack"
+  | "chef_inspec"
+  | "jira"
+  | "pagerduty"
+  | "servicenow"
+  | "splunk"
+  | "datadog"
+  | "zscaler"
+  | "google_workspace";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 

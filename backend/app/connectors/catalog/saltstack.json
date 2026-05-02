@@ -1,0 +1,19 @@
+{
+  "connector_type": "saltstack",
+  "display_name": "SaltStack",
+  "credential_fields": [
+    {"name": "api_url", "label": "Salt API URL", "type": "string", "required": true, "placeholder": "https://salt-master:8080"},
+    {"name": "username", "label": "Username", "type": "string", "required": true},
+    {"name": "password", "label": "Password", "type": "password", "required": true},
+    {"name": "eauth", "label": "EAuth Method", "type": "string", "required": false, "default": "pam"}
+  ],
+  "actions": [
+    {"action_id": "discover_minions", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Minions", "description": "All managed minions: ID, OS, IP, kernel", "applicable_asset_types": ["server"], "parameters": [], "executor": "saltstack.discover_minions", "estimated_duration_seconds": 30},
+    {"action_id": "discover_jobs", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Jobs", "description": "Recent Salt jobs: JID, function, target, start time", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "saltstack.discover_jobs", "estimated_duration_seconds": 15},
+    {"action_id": "run_state", "generic_action": "apply_state", "action_type": "change", "execution_tier": 2, "display_name": "Run State", "description": "Apply a Salt state to target minions (async).", "applicable_asset_types": ["server"], "parameters": [{"name": "target", "type": "string", "required": true}, {"name": "state", "type": "string", "required": false}], "executor": "saltstack.run_state", "estimated_duration_seconds": 60},
+    {"action_id": "run_function", "generic_action": "run_command", "action_type": "change", "execution_tier": 2, "display_name": "Run Function", "description": "Run an allowlisted Salt function. Allowed: sys.doc, test.ping, pkg.list_pkgs, service.status.", "applicable_asset_types": ["server"], "parameters": [{"name": "target", "type": "string", "required": true}, {"name": "function", "type": "string", "required": true}], "executor": "saltstack.run_function", "estimated_duration_seconds": 30},
+    {"action_id": "sync_minion", "generic_action": "sync", "action_type": "change", "execution_tier": 2, "display_name": "Sync Minion", "description": "Sync all Salt modules and states to target minions.", "applicable_asset_types": ["server"], "parameters": [{"name": "target", "type": "string", "required": true}], "executor": "saltstack.sync_minion", "estimated_duration_seconds": 30},
+    {"action_id": "accept_key", "generic_action": "approve_resource", "action_type": "change", "execution_tier": 2, "display_name": "Accept Key", "description": "Accept a pending minion key. Rollback: reject.", "applicable_asset_types": ["server"], "parameters": [{"name": "minion_id", "type": "string", "required": true}], "executor": "saltstack.accept_key", "estimated_duration_seconds": 5},
+    {"action_id": "reject_key", "generic_action": "revoke_credential", "action_type": "change", "execution_tier": 2, "display_name": "Reject Key", "description": "Reject/delete a minion key.", "applicable_asset_types": ["server"], "parameters": [{"name": "minion_id", "type": "string", "required": true}], "executor": "saltstack.reject_key", "estimated_duration_seconds": 5}
+  ]
+}
