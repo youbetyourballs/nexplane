@@ -4,7 +4,8 @@ import { Plug, CheckCircle2, XCircle, Loader2, Download } from "lucide-react";
 import { connectorsApi } from "../api/endpoints";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
-import type { ConnectorType, ConnectorTestResult, IngestResponse } from "../types/api";
+import CredentialModal from "../components/CredentialModal";
+import type { ConnectorRead, ConnectorType, ConnectorTestResult, IngestResponse } from "../types/api";
 
 const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   aws_mock: "AWS Mock",
@@ -41,11 +42,46 @@ const INGEST_ACTIONS: Partial<Record<ConnectorType, string>> = {
   paloalto_mock: "ingest_traffic_logs",
 };
 
+function ConnectorCredentialBadge({
+  connector,
+  token,
+  onConfigure,
+}: {
+  connector: ConnectorRead;
+  token: string;
+  onConfigure: () => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ["credentials", connector.id],
+    queryFn: () =>
+      fetch(`/connectors/${connector.id}/credentials`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then((r) => r.json()),
+    staleTime: 30000,
+  });
+
+  if (!data || data.fields?.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-2 mt-1">
+      <span className={`text-xs ${data.configured ? "text-green-600" : "text-amber-500"}`}>
+        {data.configured ? "🔒 Credentials configured" : "🔓 No credentials"}
+      </span>
+      <button onClick={onConfigure} className="text-xs text-indigo-600 hover:underline">
+        {data.configured ? "Update" : "Configure"}
+      </button>
+    </div>
+  );
+}
+
 export function Connectors() {
   const qc = useQueryClient();
   const [testResults, setTestResults] = useState<Record<string, ConnectorTestResult>>({});
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [ingestResults, setIngestResults] = useState<Record<string, IngestResponse>>({});
+  const [credModalConnector, setCredModalConnector] = useState<ConnectorRead | null>(null);
+
+  const token = localStorage.getItem("nexplane_token") ?? "";
 
   const { data, isLoading } = useQuery({
     queryKey: ["connectors"],
@@ -96,6 +132,11 @@ export function Connectors() {
                   <div>
                     <div className="text-sm font-semibold text-slate-900">{connector.name}</div>
                     <div className="text-xs text-slate-400">{CONNECTOR_LABELS[connector.connector_type]}</div>
+                    <ConnectorCredentialBadge
+                      connector={connector}
+                      token={token}
+                      onConfigure={() => setCredModalConnector(connector)}
+                    />
                   </div>
                 </div>
                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -166,6 +207,14 @@ export function Connectors() {
           );
         })}
       </div>
+
+      {credModalConnector && (
+        <CredentialModal
+          connector={credModalConnector}
+          token={token}
+          onClose={() => setCredModalConnector(null)}
+        />
+      )}
     </div>
   );
 }

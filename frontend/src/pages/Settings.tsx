@@ -5,6 +5,7 @@ import { settingsApi } from "../api/endpoints";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
 import { useAuth } from "../hooks/useAuth";
+import type { AIProviders } from "../types/api";
 
 export function Settings() {
   const { user } = useAuth();
@@ -14,10 +15,20 @@ export function Settings() {
   const [saved, setSaved] = useState(false);
   const [generatedSecret, setGeneratedSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<string | null>(null);
+  const [apiKeyInput, setApiKeyInput] = useState("");
+
+  const token = localStorage.getItem("nexplane_token") ?? "";
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ["settings"],
     queryFn: () => settingsApi.get(),
+  });
+
+  const { data: aiProviders, refetch: refetchAIProviders } = useQuery<AIProviders>({
+    queryKey: ["ai-providers"],
+    queryFn: () =>
+      fetch("/settings/ai-providers", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
   });
 
   const updateKey = useMutation({
@@ -39,6 +50,30 @@ export function Settings() {
     },
   });
 
+  const setProviderMutation = useMutation({
+    mutationFn: ({ provider, key }: { provider: string; key: string }) =>
+      fetch(`/settings/ai-providers/${provider}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: key }),
+      }).then((r) => { if (!r.ok) throw new Error("Failed"); return r.json(); }),
+    onSuccess: () => {
+      refetchAIProviders();
+      setEditingProvider(null);
+      setApiKeyInput("");
+    },
+  });
+
+  const setDefaultMutation = useMutation({
+    mutationFn: (provider: string) =>
+      fetch("/settings/ai-providers/default", {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      }),
+    onSuccess: () => refetchAIProviders(),
+  });
+
   const isAdmin = user?.role === "admin";
 
   function copySecret() {
@@ -55,11 +90,80 @@ export function Settings() {
     <div className="p-8 max-w-2xl">
       <PageHeader title="Settings" subtitle="Organization configuration" />
 
-      {/* AI Configuration */}
+      {/* AI Providers */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 mb-4">
+        <h3 className="text-sm font-semibold text-gray-900 mb-1">AI Providers</h3>
+        <p className="text-xs text-gray-500 mb-4">Configure API keys for AI planning assistance. Select the default provider.</p>
+        <div className="space-y-3">
+          {(["anthropic", "openai"] as const).map((provider) => {
+            const info = aiProviders?.providers?.[provider];
+            const isDefault = aiProviders?.default === provider;
+            const isEditing = editingProvider === provider;
+            return (
+              <div key={provider} className="flex items-start gap-3 py-2 border-b border-gray-50 last:border-0">
+                <input
+                  type="radio"
+                  name="default-provider"
+                  checked={isDefault}
+                  disabled={!info?.configured}
+                  onChange={() => setDefaultMutation.mutate(provider)}
+                  className="mt-1 accent-indigo-600"
+                  title="Set as default"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium capitalize">
+                      {provider === "anthropic" ? "Anthropic (Claude)" : "OpenAI"}
+                    </span>
+                    {isDefault && (
+                      <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">Default</span>
+                    )}
+                    <span className={`text-xs ${info?.configured ? "text-green-600" : "text-gray-400"}`}>
+                      {info?.configured ? "● Configured" : "○ Not configured"}
+                    </span>
+                  </div>
+                  {isEditing && (
+                    <div className="flex gap-2 mt-2">
+                      <input
+                        type="password"
+                        value={apiKeyInput}
+                        onChange={(e) => setApiKeyInput(e.target.value)}
+                        placeholder={provider === "anthropic" ? "sk-ant-..." : "sk-..."}
+                        className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-indigo-500"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => setProviderMutation.mutate({ provider, key: apiKeyInput })}
+                        disabled={setProviderMutation.isPending || !apiKeyInput}
+                        className="text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                      <button onClick={() => setEditingProvider(null)} className="text-xs text-gray-500">
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {!isEditing && (
+                  <button
+                    onClick={() => { setEditingProvider(provider); setApiKeyInput(""); }}
+                    className="text-xs text-indigo-600 hover:underline mt-0.5"
+                  >
+                    {info?.configured ? "Update" : "Add key"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Legacy AI Configuration (Anthropic only) */}
       <div className="bg-white border border-slate-200 rounded-lg p-6 mb-4">
         <div className="flex items-center gap-2 mb-1">
           <Key className="w-4 h-4 text-slate-400" />
-          <h2 className="text-sm font-semibold text-slate-900">AI Configuration</h2>
+          <h2 className="text-sm font-semibold text-slate-900">AI Configuration (Legacy)</h2>
         </div>
         <p className="text-xs text-slate-500 mb-4">
           Anthropic API key for AI-assisted project planning. Key is encrypted at rest and never displayed.

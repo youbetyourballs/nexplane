@@ -180,6 +180,8 @@ export interface Connector {
   created_at: string;
 }
 
+export type ConnectorRead = Connector;
+
 export interface ConnectorCreate {
   connector_type: ConnectorType;
   name: string;
@@ -348,4 +350,27 @@ export interface AuditEvent {
 export interface Token {
   access_token: string;
   token_type: string;
+}
+
+export interface CredentialField {
+  name: string;
+  label: string;
+  type: 'string' | 'password';
+  required: boolean;
+  default?: string;
+}
+
+export interface CredentialStatus {
+  configured: boolean;
+  fields: CredentialField[];
+  updated_at: string | null;
+}
+
+export interface AIProviderInfo {
+  configured: boolean;
+}
+
+export interface AIProviders {
+  default: string | null;
+  providers: Record<string, AIProviderInfo>;
 }
