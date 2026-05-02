@@ -1,4 +1,4 @@
-﻿{
+{
     "connector_type":  "ssh",
     "display_name":  "SSH Runner",
     "credential_fields":  [

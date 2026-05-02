@@ -1,4 +1,4 @@
-﻿{
+{
     "connector_type":  "nexplane_agent",
     "display_name":  "Nexplane Agent",
     "credential_fields":  [

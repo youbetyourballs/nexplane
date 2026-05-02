@@ -1,5 +1,4 @@
 import asyncio
-from kubernetes import client as k8s_client
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})
@@ -8,6 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "create_network_policy", "namespace": namespace, "created": True}
     from ._client import get_k8s_clients
+    from kubernetes import client as k8s_client
     loop = asyncio.get_event_loop()
     clients = get_k8s_clients(creds)
     body = k8s_client.V1NetworkPolicy(**policy_manifest)

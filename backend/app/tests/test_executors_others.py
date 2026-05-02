@@ -1,21 +1,20 @@
 ﻿import pytest
-from app.connectors.executors.okta import generate_key, distribute_key, verify_consumers, schedule_revoke, cancel_revoke
+from app.connectors.executors.okta import suspend_user, unsuspend_user, deactivate_user, revoke_sessions, reset_mfa_factors
 from app.connectors.executors.ssh import validate_template, execute_template, collect_output, install_agent, uninstall_agent, check_prerequisites, download_package, start_service
 from app.connectors.executors.paloalto import analyze_flows, generate_diff, stage_policy, remove_staged_policy, validate_staged
 
 
 @pytest.mark.asyncio
-async def test_generate_key_returns_new_key_id():
-    result = await generate_key.execute({"service": "payment-api", "key_type": "api_key"}, [], None)
-    assert result["action"] == "generate_key"
-    assert result["new_key_id"].startswith("key-")
+async def test_okta_suspend_user_returns_suspended():
+    result = await suspend_user.execute({"user_id": "test-user"}, [], type("C", (), {"credentials": {}})())
+    assert result["action"] == "suspend_user"
+    assert result["user_id"] == "test-user"
 
 
 @pytest.mark.asyncio
-async def test_schedule_revoke_rollback_cancels():
-    result = await schedule_revoke.rollback({}, {"old_key_id": "key-old-123"}, None)
-    assert result["rolled_back"] is True
-    assert result["old_key_id"] == "key-old-123"
+async def test_okta_suspend_rollback_returns_not_rolled_back():
+    result = await suspend_user.rollback({"user_id": "test-user"}, {}, type("C", (), {"credentials": {}})())
+    assert result["rolled_back"] is False
 
 
 @pytest.mark.asyncio

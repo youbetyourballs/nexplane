@@ -1,5 +1,4 @@
 import asyncio
-from azure.mgmt.resource.resources.models import Deployment, DeploymentProperties, DeploymentMode
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})
@@ -9,6 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "create_deployment", "deployment_name": deployment_name, "status": "Succeeded"}
     from ._client import get_client
+    from azure.mgmt.resource.resources.models import Deployment, DeploymentProperties, DeploymentMode
     loop = asyncio.get_event_loop()
     client = get_client(creds)
     props = DeploymentProperties(mode=DeploymentMode.incremental, template=template, parameters=parameters.get("parameters", {}))

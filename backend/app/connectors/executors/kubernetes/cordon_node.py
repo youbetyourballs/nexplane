@@ -1,5 +1,4 @@
 import asyncio
-from kubernetes import client as k8s_client
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})

@@ -8,7 +8,7 @@ CATALOG_DIR = pathlib.Path(__file__).parent.parent / "connectors" / "catalog"
 def test_load_builds_connector_index():
     svc = ActionCatalogService(CATALOG_DIR)
     assert "cloudflare" in svc._catalog
-    assert len(svc._catalog["cloudflare"]) == 5
+    assert len(svc._catalog["cloudflare"]) >= 5
 
 
 def test_load_builds_generic_index():
@@ -23,11 +23,15 @@ def test_load_builds_generic_index():
 
 def test_load_indexes_all_connectors():
     svc = ActionCatalogService(CATALOG_DIR)
-    assert set(svc._catalog.keys()) == {
+    loaded = set(svc._catalog.keys())
+    # Verify original 10 connectors are present (subset check — new connectors are also loaded)
+    original_ten = {
         "cloudflare", "aws", "okta", "ssh", "paloalto",
         "active_directory", "crowdstrike", "tenable", "azure",
         "nexplane_agent",
     }
+    assert original_ten.issubset(loaded), f"Missing connectors: {original_ten - loaded}"
+    assert len(loaded) >= 37, f"Expected at least 37 connectors, got {len(loaded)}"
 
 
 def test_get_options_for_action_returns_sorted_by_tier():

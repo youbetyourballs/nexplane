@@ -532,7 +532,7 @@ npm run dev
 ### Running Tests
 
 ```bash
-# Backend (116 tests)
+# Backend (138 tests)
 cd backend
 pytest
 
