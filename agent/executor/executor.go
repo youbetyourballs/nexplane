@@ -6,6 +6,7 @@ import (
 	"nexplane-agent/commands/changip"
 	"nexplane-agent/commands/configsyslog"
 	"nexplane-agent/commands/estimatesize"
+	"nexplane-agent/commands/linuxauth"
 	"nexplane-agent/commands/uploadimage"
 	"nexplane-agent/commands/virtualize"
 )
@@ -26,6 +27,12 @@ var commands = map[string]CommandFunc{
 	"configure_syslog":         configsyslog.Execute,
 	"virtualize_for_migration": virtualize.Execute,
 	"upload_image":             uploadimage.Execute,
+	"configure_pam":                 linuxauth.ConfigurePAMExecute,
+	"harden_ssh":                    linuxauth.HardenSSHExecute,
+	"audit_users_and_groups":        linuxauth.AuditUsersAndGroupsExecute,
+	"audit_privesc_vulnerabilities": linuxauth.AuditPrivescVulnerabilitiesExecute,
+	"manage_ca_certificates":        linuxauth.ManageCACertificatesExecute,
+	"configure_ntp":                 linuxauth.ConfigureNTPExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -33,6 +40,10 @@ var rollbacks = map[string]CommandFunc{
 	"configure_syslog":         configsyslog.Rollback,
 	"virtualize_for_migration": virtualize.Rollback,
 	"upload_image":             uploadimage.Rollback,
+	"configure_pam":          linuxauth.ConfigurePAMRollback,
+	"harden_ssh":             linuxauth.HardenSSHRollback,
+	"manage_ca_certificates": linuxauth.ManageCACertificatesRollback,
+	"configure_ntp":          linuxauth.ConfigureNTPRollback,
 }
 
 // Dispatch routes a command to its implementation.
