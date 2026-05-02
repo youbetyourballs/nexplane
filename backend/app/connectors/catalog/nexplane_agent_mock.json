@@ -205,6 +205,207 @@
       "safety_notes": [
         "NTP misconfiguration causes clock drift which invalidates audit log timestamps"
       ]
+    },
+    {
+      "action_id": "configure_selinux",
+      "generic_action": "configure_selinux",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Configure SELinux",
+      "description": "Set SELinux mode (enforcing/permissive/disabled), install policy modules, or generate policy from audit log denials.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "mode", "type": "string", "required": false},
+        {"name": "policy_module_path", "type": "string", "required": false},
+        {"name": "generate_from_audit_log", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent_mock.configure_selinux",
+      "rollback_action": "configure_selinux",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "configure_apparmor",
+      "generic_action": "configure_apparmor",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Configure AppArmor",
+      "description": "Load AppArmor profiles and set enforce/complain/disable mode.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "profile_name", "type": "string", "required": false},
+        {"name": "profile_content", "type": "string", "required": false},
+        {"name": "mode", "type": "string", "required": false}
+      ],
+      "executor": "nexplane_agent_mock.configure_apparmor",
+      "rollback_action": "configure_apparmor",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "configure_seccomp",
+      "generic_action": "configure_seccomp",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Configure Seccomp Filter",
+      "description": "Apply a seccomp filter profile to a systemd service via drop-in override.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "service_name", "type": "string", "required": true},
+        {"name": "profile", "type": "string", "required": true}
+      ],
+      "executor": "nexplane_agent_mock.configure_seccomp",
+      "rollback_action": "configure_seccomp",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "apply_sysctl_hardening",
+      "generic_action": "apply_sysctl_hardening",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Apply Sysctl Hardening",
+      "description": "Apply CIS-level sysctl parameters: disable IP forwarding, enable SYN cookies, disable ICMP redirects, enable source route validation. Writes /etc/sysctl.d/99-nexplane-hardening.conf.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "settings", "type": "object", "required": false}
+      ],
+      "executor": "nexplane_agent_mock.apply_sysctl_hardening",
+      "rollback_action": "apply_sysctl_hardening",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "configure_host_firewall",
+      "generic_action": "configure_host_firewall",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Configure Host Firewall",
+      "description": "Add or remove iptables/nftables/firewalld rules on the host. Auto-detects firewall tool.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "rule", "type": "object", "required": false}
+      ],
+      "executor": "nexplane_agent_mock.configure_host_firewall",
+      "rollback_action": "configure_host_firewall",
+      "estimated_duration_seconds": 10,
+      "safety_notes": ["Incorrect firewall rules can lock out remote management access"]
+    },
+    {
+      "action_id": "blacklist_kernel_modules",
+      "generic_action": "blacklist_kernel_modules",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Blacklist Kernel Modules",
+      "description": "Prevent loading of specified kernel modules via /etc/modprobe.d/nexplane-blacklist.conf.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "modules", "type": "array", "required": true}
+      ],
+      "executor": "nexplane_agent_mock.blacklist_kernel_modules",
+      "rollback_action": "blacklist_kernel_modules",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "harden_mount_options",
+      "generic_action": "harden_mount_options",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Harden Mount Options",
+      "description": "Apply noexec/nosuid/nodev to /tmp, /dev/shm, /var/tmp via /etc/fstab. Remounts affected filesystems.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "targets", "type": "object", "required": false}
+      ],
+      "executor": "nexplane_agent_mock.harden_mount_options",
+      "rollback_action": "harden_mount_options",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "deploy_auditd_rules",
+      "generic_action": "deploy_auditd_rules",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Deploy Auditd Rules",
+      "description": "Install CIS Level 1/2 or custom auditd rule sets to /etc/audit/rules.d/. Reloads auditd.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "profile", "type": "string", "required": false},
+        {"name": "rules", "type": "string", "required": false}
+      ],
+      "executor": "nexplane_agent_mock.deploy_auditd_rules",
+      "rollback_action": "deploy_auditd_rules",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "setup_file_integrity_monitoring",
+      "generic_action": "setup_file_integrity_monitoring",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Setup File Integrity Monitoring",
+      "description": "Initialize AIDE or Tripwire baseline database (init), or run a check against the baseline (check).",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "action", "type": "string", "required": false, "default": "init"}
+      ],
+      "executor": "nexplane_agent_mock.setup_file_integrity_monitoring",
+      "rollback_action": "setup_file_integrity_monitoring",
+      "estimated_duration_seconds": 120
+    },
+    {
+      "action_id": "audit_os_security_posture",
+      "generic_action": "audit_os_security_posture",
+      "action_type": "ingest",
+      "execution_tier": 3,
+      "display_name": "Audit OS Security Posture",
+      "description": "Read-only: reports current SELinux mode, AppArmor profiles, auditd status, and recent MAC denials.",
+      "applicable_asset_types": ["server"],
+      "parameters": [],
+      "executor": "nexplane_agent_mock.audit_os_security_posture",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "deploy_ebpf_policy",
+      "generic_action": "deploy_ebpf_policy",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Deploy eBPF Policy",
+      "description": "Load and attach a compiled eBPF program to a kernel hook (kprobe, tracepoint, tc, xdp, cgroup, lsm).",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "program_path", "type": "string", "required": true},
+        {"name": "attach_type", "type": "string", "required": false},
+        {"name": "attach_target", "type": "string", "required": false}
+      ],
+      "executor": "nexplane_agent_mock.deploy_ebpf_policy",
+      "rollback_action": "deploy_ebpf_policy",
+      "estimated_duration_seconds": 30,
+      "safety_notes": ["Requires kernel 5.8+ and CAP_BPF capability"]
+    },
+    {
+      "action_id": "configure_ebpf_security_policy",
+      "generic_action": "configure_ebpf_security_policy",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Configure eBPF Security Policy",
+      "description": "Apply a declarative security policy via an installed eBPF framework (Cilium, Falco, Tetragon, bpfd).",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "framework", "type": "string", "required": true},
+        {"name": "policy", "type": "string", "required": true}
+      ],
+      "executor": "nexplane_agent_mock.configure_ebpf_security_policy",
+      "rollback_action": "configure_ebpf_security_policy",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "audit_ebpf_posture",
+      "generic_action": "audit_ebpf_posture",
+      "action_type": "ingest",
+      "execution_tier": 3,
+      "display_name": "Audit eBPF Posture",
+      "description": "Read-only: lists all loaded eBPF programs and network attachments. Flags programs not deployed by Nexplane.",
+      "applicable_asset_types": ["server"],
+      "parameters": [],
+      "executor": "nexplane_agent_mock.audit_ebpf_posture",
+      "estimated_duration_seconds": 10
     }
   ]
 }
