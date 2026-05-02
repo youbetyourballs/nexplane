@@ -16,7 +16,20 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     name = parameters.get('name', 'nexplane-instance')
     if not creds:
         mock_id = _mock_instance_id()
-        return {"action": "launch_instance", "instance_id": mock_id, "state": "pending", "private_ip": "10.0.1.100"}
+        return {
+            "action": "launch_instance",
+            "instance_id": mock_id,
+            "state": "pending",
+            "private_ip": "10.0.1.100",
+            "_auto_asset": {
+                "name": name,
+                "asset_type": "server",
+                "environment": "prod",
+                "criticality": "medium",
+                "asset_metadata": {"instance_id": mock_id, "instance_type": instance_type, "private_ip": "10.0.1.100"},
+                "tags": ["ec2", "nexplane-launched"],
+            },
+        }
     from ._client import get_ec2_client
     ec2 = get_ec2_client(creds)
     loop = asyncio.get_event_loop()
@@ -33,11 +46,27 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         }],
     ))
     inst = resp['Instances'][0]
+    instance_id = inst['InstanceId']
+    private_ip = inst.get('PrivateIpAddress')
     return {
         "action": "launch_instance",
-        "instance_id": inst['InstanceId'],
+        "instance_id": instance_id,
         "state": inst['State']['Name'],
-        "private_ip": inst.get('PrivateIpAddress'),
+        "private_ip": private_ip,
+        "_auto_asset": {
+            "name": name,
+            "asset_type": "server",
+            "environment": "prod",
+            "criticality": "medium",
+            "asset_metadata": {
+                "instance_id": instance_id,
+                "instance_type": instance_type,
+                "ami_id": ami_id,
+                "subnet_id": subnet_id,
+                "private_ip": private_ip,
+            },
+            "tags": ["ec2", "nexplane-launched"],
+        },
     }
 
 

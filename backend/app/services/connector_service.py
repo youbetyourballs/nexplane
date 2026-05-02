@@ -70,7 +70,36 @@ async def execute_action(
         executor = catalog.get_executor(connector_type, action_id)
     except (KeyError, ImportError, ValueError) as exc:
         raise ConnectorError(str(exc), {"connector_type": connector_type, "action_id": action_id}) from exc
-    return await executor.execute(parameters, asset_ids, connector)
+    result = await executor.execute(parameters, asset_ids, connector)
+    if "_auto_asset" in result and connector is not None and db is not None:
+        await _upsert_auto_asset(result.pop("_auto_asset"), connector.organization_id, db)
+    return result
+
+
+async def _upsert_auto_asset(payload: dict, organization_id, db) -> None:
+    from sqlalchemy import select
+    from app.models.asset import Asset, AssetType, Environment, Criticality
+    name = payload.get("name", "unnamed")
+    result = await db.execute(
+        select(Asset).where(Asset.organization_id == organization_id, Asset.name == name)
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        existing.asset_metadata = {**existing.asset_metadata, **payload.get("asset_metadata", {})}
+        existing.tags = list(set(existing.tags or []) | set(payload.get("tags", [])))
+        db.add(existing)
+    else:
+        asset = Asset(
+            organization_id=organization_id,
+            name=name,
+            asset_type=AssetType(payload.get("asset_type", "server")),
+            environment=Environment(payload.get("environment", "prod")),
+            criticality=Criticality(payload.get("criticality", "medium")),
+            asset_metadata=payload.get("asset_metadata", {}),
+            tags=payload.get("tags", []),
+        )
+        db.add(asset)
+        await db.flush()
 
 
 async def run_preflight_checks(preflight_checks: list[dict]) -> dict:
