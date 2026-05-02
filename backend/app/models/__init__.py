@@ -7,6 +7,7 @@ from app.models.change_plan import ChangePlan
 from app.models.approval import Approval
 from app.models.execution_run import ExecutionRun
 from app.models.audit_event import AuditEvent
+from app.models.connector_credential import ConnectorCredential
 
 __all__ = [
     "Organization",
@@ -18,4 +19,5 @@ __all__ = [
     "Approval",
     "ExecutionRun",
     "AuditEvent",
+    "ConnectorCredential",
 ]
