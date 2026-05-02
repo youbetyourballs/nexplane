@@ -41,6 +41,53 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
     description: "Stage a network microsegmentation policy (simulation mode)",
     outcomeTemplate: JSON.stringify({ policy_rules: [{ src: "app-tier", dst: "db-tier", port: 5432, action: "allow" }, { src: "app-tier", dst: "internet", port: "any", action: "deny" }], critical_flows: [{ name: "app-to-db", src: "app-tier", dst: "db-tier", port: 5432 }], rollback_strategy: "remove_staged_policy" }, null, 2),
   },
+  ec2_stop: {
+    label: "Stop EC2 Instance",
+    description: "Gracefully stop a running instance. Takes an EBS snapshot first as a safety net.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "i-0123456789abcdef0",
+      snapshot_tag: "pre-stop-nexplane",
+    }, null, 2),
+  },
+  ec2_start: {
+    label: "Start EC2 Instance",
+    description: "Start a stopped EC2 instance.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "i-0123456789abcdef0",
+    }, null, 2),
+  },
+  ec2_reboot: {
+    label: "Reboot EC2 Instance",
+    description: "Soft reboot — stays on the same host, keeps its public IP.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "i-0123456789abcdef0",
+    }, null, 2),
+  },
+  ec2_stop_start: {
+    label: "Restart EC2 Instance",
+    description: "Full power cycle (stop then start). Instance may get a new public IP if not using an Elastic IP.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "i-0123456789abcdef0",
+    }, null, 2),
+  },
+  ec2_launch: {
+    label: "Launch EC2 Instance",
+    description: "Launch a new instance. Set mode to 'quick' (free-tier defaults), 'clone' (copy existing), or 'spec' (full parameters).",
+    outcomeTemplate: JSON.stringify({
+      mode: "quick",
+      name: "my-new-instance",
+      os: "amazon_linux",
+    }, null, 2),
+  },
+  ec2_terminate: {
+    label: "Terminate EC2 Instance",
+    description: "Permanently terminate an instance. Takes a mandatory snapshot first. Irreversible.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "i-0123456789abcdef0",
+      snapshot_tag: "pre-terminate-nexplane",
+      confirm_terminate: true,
+    }, null, 2),
+  },
 };
 
 export function CreateChangeRequest() {

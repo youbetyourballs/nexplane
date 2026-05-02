@@ -235,7 +235,13 @@ export type ChangeType =
   | "key_rotation"
   | "telemetry_agent_deploy"
   | "remote_command"
-  | "microsegmentation_policy";
+  | "microsegmentation_policy"
+  | "ec2_stop"
+  | "ec2_start"
+  | "ec2_reboot"
+  | "ec2_stop_start"
+  | "ec2_launch"
+  | "ec2_terminate";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
