@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 _HOSTS = [
@@ -8,7 +9,8 @@ _HOSTS = [
     ("legacy-app-01", "10.0.4.10", [22, 80, 8443, 21]),
 ]
 
-async def execute(parameters: dict, asset_ids: list, connector) -> list:
+
+def _mock_response():
     now = datetime.now(timezone.utc).isoformat()
     return [
         {
@@ -27,3 +29,38 @@ async def execute(parameters: dict, asset_ids: list, connector) -> list:
         }
         for hostname, ip, ports in _HOSTS
     ]
+
+
+async def _real_execute(creds: dict) -> list:
+    from ._client import get_tio
+    tio = get_tio(creds)
+    loop = asyncio.get_event_loop()
+    assets = await loop.run_in_executor(None, lambda: list(tio.assets.list()))
+    now = datetime.now(timezone.utc).isoformat()
+    results = []
+    for asset in assets:
+        hostname = asset.get("fqdn", [None])[0] or asset.get("hostname", [None])[0] or asset.get("id", "unknown")
+        ipv4 = asset.get("ipv4", [None])[0]
+        results.append({
+            "name": hostname,
+            "asset_type": "server",
+            "environment": "prod",
+            "criticality": "high",
+            "tags": ["tenable-scanned"],
+            "asset_metadata": {
+                "ip_address": ipv4,
+                "open_ports": [],
+                "os": asset.get("operating_system", ["unknown"])[0] if asset.get("operating_system") else "unknown",
+                "last_scanned": asset.get("last_seen", now),
+                "tenable_source": "tenable",
+                "asset_id": asset.get("id"),
+            },
+        })
+    return results if results else _mock_response()
+
+
+async def execute(parameters: dict, asset_ids: list, connector) -> list:
+    creds = getattr(connector, "credentials", {})
+    if not creds:
+        return _mock_response()
+    return await _real_execute(creds)
