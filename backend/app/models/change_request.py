@@ -16,6 +16,12 @@ class ChangeType(str, enum.Enum):
     telemetry_agent_deploy = "telemetry_agent_deploy"
     remote_command = "remote_command"
     microsegmentation_policy = "microsegmentation_policy"
+    ec2_stop = "ec2_stop"
+    ec2_start = "ec2_start"
+    ec2_reboot = "ec2_reboot"
+    ec2_stop_start = "ec2_stop_start"
+    ec2_launch = "ec2_launch"
+    ec2_terminate = "ec2_terminate"
 
 
 class RiskLevel(str, enum.Enum):
