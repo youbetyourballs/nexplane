@@ -33,13 +33,14 @@ func auditPrivescOS(_ map[string]any) (map[string]any, error) {
 	})
 
 	// CVE-2022-0847 DirtyPipe
-	dirtyPipe := major < 5 || (major == 5 && (minor < 10 ||
-		(minor == 10 && patch < 102) ||
-		(minor == 15 && patch < 25) ||
-		(minor == 16 && patch < 11)))
+	dirtyPipe := major == 5 && minor >= 8 &&
+		!((minor == 10 && patch >= 102) ||
+			(minor == 15 && patch >= 25) ||
+			(minor == 16 && patch >= 11) ||
+			minor >= 17)
 	findings = append(findings, map[string]any{
 		"cve_id": "CVE-2022-0847", "severity": "high", "condition_present": dirtyPipe,
-		"description": fmt.Sprintf("DirtyPipe: kernel %d.%d.%d may be vulnerable", major, minor, patch),
+		"description": fmt.Sprintf("DirtyPipe: kernel %d.%d.%d may be vulnerable (introduced in 5.8, fixed in 5.10.102+/5.15.25+/5.16.11+)", major, minor, patch),
 		"remediation": "Upgrade kernel to 5.16.11+, 5.15.25+, or 5.10.102+",
 	})
 
