@@ -44,7 +44,7 @@ Nexplane gives security teams a governed execution layer:
 │  │   Tier 1: direct_api  ·  Tier 3: agent  ·  Tier 5: ssh  │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                  │
-│  Mock Connectors                                                 │
+│  Connectors (real API + mock fallback)                           │
 │  aws · azure · cloudflare · okta · paloalto · ssh               │
 │  active_directory · crowdstrike · tenable · nexplane_agent      │
 │                                                                  │
@@ -79,9 +79,12 @@ Nexplane gives security teams a governed execution layer:
 | Migrations | Alembic |
 | Workflow | Temporal-pattern abstraction (asyncio MVP, Temporal-ready) |
 | Auth | JWT + bcrypt |
-| AI | Anthropic Claude (claude-sonnet-4-6) via `anthropic` SDK |
+| AI | Anthropic Claude + OpenAI (multi-provider, default configurable) |
 | Secrets | `cryptography.fernet` (AES-256); abstracted for HSM/Vault swap-out |
 | Agent | Go 1.22+, AWS SDK v2, `golang.org/x/sys` |
+| Connector SDKs | boto3, azure-sdk, ldap3, falconpy, pytenable, pan-os-python, okta, paramiko |
+| Scheduler | APScheduler 3.x (in-process async, recurring ingest) |
+| Graph | React Flow 11 + @dagrejs/dagre (project dependency visualization) |
 | Deployment | Docker Compose |
 
 ---
@@ -130,7 +133,7 @@ Available on draft projects. Opens a conversational panel where an operator desc
 2. Proposes a structured change plan as `<nexplane-proposal>` blocks
 3. Lets operators add proposed CRs to the project with one click
 
-Requires an Anthropic API key configured in Settings (admin only, encrypted at rest).
+Supports **Anthropic** (Claude) and **OpenAI** as AI providers. Configure API keys in Settings → AI Providers (admin only, encrypted at rest). Select the default provider per organization.
 
 ### Connectors and Ingest
 
@@ -138,20 +141,27 @@ Connectors come in two action types:
 - **change** — push a configuration change to an external system
 - **ingest** — pull asset and identity data into Nexplane's inventory
 
-Each connector card in the UI shows a **Run Discovery** button for connectors that support ingest. Discovered assets (servers, identities, applications, firewalls, cloud accounts) are upserted into the asset inventory by `(organization_id, name)` deduplication.
+Each connector card in the UI shows:
+- **Run Discovery** button for connectors that support ingest
+- **Configure Credentials** button to store real API credentials (encrypted via SecretsService)
+- **Schedule** button to set up recurring discovery (every 1h / 6h / 24h / weekly via APScheduler)
 
-| Connector | Ingest | Change actions |
-|-----------|--------|----------------|
-| AWS | VMs, snapshots | security groups, snapshots, key rotation |
-| Azure | VMs, storage, NSGs | NSG rules, public blob access, storage keys |
-| Cloudflare | — | DNS records |
-| Active Directory | Computers, identities | disable/enable account, reset password, MFA enforcement |
-| CrowdStrike | Endpoints, users, applications | deploy sensor, isolate host, contain process |
-| Tenable | Assets, vulnerabilities, local accounts | trigger scan, verify remediation |
-| Palo Alto | Traffic logs, security events | microsegmentation policy, chokepoint rules, traffic logging |
-| Okta | — | key generation, distribution, revocation |
-| SSH | — | agent install, SELinux policy, workload containerization |
-| Nexplane Agent | Users/groups, privesc findings, software inventory, scheduled tasks, OS security posture | change IP, configure syslog, virtualize for migration, upload image, Linux/Windows security hardening, TLS certificate management, DNS resolver, instance upgrade |
+Discovered assets (servers, identities, applications, firewalls, cloud accounts) are upserted into the asset inventory by `(organization_id, name)` deduplication.
+
+All connectors make **real API calls** when credentials are configured, and fall back to mock responses for demo mode when no credentials are set.
+
+| Connector | SDK | Ingest | Change actions |
+|-----------|-----|--------|----------------|
+| AWS | boto3 | VMs, snapshots | security groups, snapshots, IAM key rotation |
+| Azure | azure-sdk | VMs, storage, NSGs | NSG rules, public blob access, storage key rotation |
+| Cloudflare | httpx | — | DNS records (list, create, update, delete) |
+| Active Directory | ldap3 | Computers, identities | disable/enable account, reset password, group membership |
+| CrowdStrike | falconpy | Endpoints, users, applications | deploy sensor, isolate host, lift containment |
+| Tenable | pytenable | Assets, vulnerabilities | trigger scan, get scan results, verify remediation |
+| Palo Alto | pan-os-python | Traffic logs, security events | microsegmentation policy, chokepoint rules, traffic logging |
+| Okta | httpx | — | suspend/unsuspend user, deactivate, reset MFA, force password reset |
+| SSH | paramiko | — | execute approved commands, check service status, install agent |
+| Nexplane Agent | (internal) | Users/groups, privesc findings, software inventory, scheduled tasks, OS security posture | change IP, configure syslog, virtualize for migration, upload image, Linux/Windows security hardening, TLS certificate management, DNS resolver, instance upgrade |
 
 ### Nexplane Agent
 
@@ -286,46 +296,59 @@ nexplane/
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── models/
-│   │   │   ├── asset.py            # AssetType includes: server, identity, application, ...
-│   │   │   ├── connector.py        # ConnectorType includes all 10 connectors
-│   │   │   ├── project.py          # Project + ProjectChangeRequest (dependency graph)
-│   │   │   ├── agent.py            # AgentRegistration + AgentJob
-│   │   │   └── org_settings.py     # Anthropic API key + agent secret (Fernet-encrypted)
+│   │   │   ├── asset.py              # AssetType: server, identity, application, ...
+│   │   │   ├── connector.py          # ConnectorType: all 10 connectors
+│   │   │   ├── connector_credential.py # Per-connector encrypted credential storage
+│   │   │   ├── project.py            # Project + ProjectChangeRequest (dependency graph)
+│   │   │   ├── agent.py              # AgentRegistration + AgentJob
+│   │   │   ├── scheduled_ingest.py   # Recurring ingest schedule (APScheduler)
+│   │   │   └── org_settings.py       # AI provider keys + agent secret (Fernet-encrypted)
 │   │   ├── schemas/
+│   │   │   ├── credential.py         # CredentialRead/Write, AIProvidersRead/Write
+│   │   │   └── scheduled_ingest.py   # ScheduledIngestRead/Write
 │   │   ├── routers/
-│   │   │   ├── agent.py            # /agent/register, /agent/jobs/next, /agent/jobs/{id}/result
-│   │   │   ├── projects.py         # Projects CRUD + /projects/{id}/ai/chat
-│   │   │   ├── settings.py         # GET/PUT /settings/ai-key, POST /settings/agent-secret
-│   │   │   └── connectors.py       # Connectors + POST /connectors/{id}/ingest/{action_id}
+│   │   │   ├── agent.py              # /agent/register, /agent/jobs/next, /agent/jobs/{id}/result
+│   │   │   ├── projects.py           # Projects CRUD + /projects/{id}/ai/chat
+│   │   │   ├── settings.py           # /settings/ai-providers, /settings/agent-secret
+│   │   │   └── connectors.py         # Connectors + credentials + schedule + ingest
 │   │   ├── services/
-│   │   │   ├── ai_service.py       # Claude API integration + <nexplane-proposal> parsing
-│   │   │   ├── ingest_service.py   # Asset upsert pipeline for ingest connectors
-│   │   │   ├── agent_hmac.py       # Job signing (matches agent/agenthmac)
-│   │   │   ├── secrets_service.py  # Fernet AES-256 (Vault/HSM-swappable interface)
+│   │   │   ├── ai_service.py         # Multi-provider AI integration + <nexplane-proposal> parsing
+│   │   │   ├── ingest_service.py     # Asset upsert pipeline for ingest connectors
+│   │   │   ├── scheduler_service.py  # APScheduler wrapper for recurring ingest jobs
+│   │   │   ├── agent_hmac.py         # Job signing (matches agent/agenthmac)
+│   │   │   ├── secrets_service.py    # Fernet AES-256 + JSON helpers (Vault/HSM-swappable)
 │   │   │   ├── safety_engine.py
 │   │   │   ├── planning_engine.py
-│   │   │   └── connector_service.py
+│   │   │   └── connector_service.py  # Executor dispatch + credential injection
 │   │   ├── connectors/
-│   │   │   ├── catalog/            # Per-connector JSON action catalogs (10 connectors)
-│   │   │   └── executors/          # Per-action executor modules
-│   │   └── tests/                  # 116 passing tests
-│   ├── alembic/versions/           # 006 migrations (001→006)
-│   └── seed.py                     # Demo data (org, users, assets, connectors, projects)
+│   │   │   ├── catalog/              # Per-connector JSON catalogs with credential_fields
+│   │   │   └── executors/            # Real API implementations (mock fallback if no creds)
+│   │   └── tests/                    # 116 passing tests
+│   ├── alembic/versions/             # 008 migrations (001→008)
+│   └── seed.py                       # Demo data (org, users, assets, connectors, projects)
 │
 ├── frontend/
 │   └── src/
 │       ├── pages/
-│       │   ├── Projects.tsx        # Project list
-│       │   ├── ProjectDetail.tsx   # Member management + AI panel + execution view
-│       │   ├── Settings.tsx        # AI key + Agent secret management
-│       │   ├── Connectors.tsx      # Connector cards + Test + Run Discovery
-│       │   ├── Assets.tsx          # Asset inventory with tag search
-│       │   └── AssetDetail.tsx     # Full asset detail + edit
+│       │   ├── Projects.tsx          # Project list
+│       │   ├── ProjectDetail.tsx     # Member management + AI panel + List/Graph tab toggle
+│       │   ├── Settings.tsx          # AI Providers (Anthropic/OpenAI) + Agent secret
+│       │   ├── Connectors.tsx        # Connector cards + credentials + schedule + Run Discovery
+│       │   ├── Assets.tsx            # Asset inventory with tag search
+│       │   └── AssetDetail.tsx       # Full asset detail + edit
 │       ├── components/
-│       │   ├── AIPanel.tsx         # Conversational AI planning panel
+│       │   ├── AIPanel.tsx           # Conversational AI planning panel
+│       │   ├── CredentialModal.tsx   # Per-connector credential configuration modal
+│       │   ├── ScheduleModal.tsx     # Recurring ingest interval picker (1h/6h/24h/weekly)
+│       │   ├── ProjectGraph/         # Dependency DAG (React Flow + Dagre auto-layout)
+│       │   │   ├── index.tsx         # Graph wrapper with ReactFlowProvider
+│       │   │   ├── CRNode.tsx        # Status-colored CR nodes
+│       │   │   ├── AssetNode.tsx     # Type-colored asset pill nodes
+│       │   │   ├── useGraphLayout.ts # Dagre layout hook + asset data fetching
+│       │   │   └── graphUtils.ts     # Color maps and layout constants
 │       │   ├── Sidebar.tsx
-│       │   └── LogoMark.tsx        # SVG logo mark
-│       └── types/api.ts            # Centralized TypeScript API types
+│       │   └── LogoMark.tsx          # SVG logo mark
+│       └── types/api.ts              # Centralized TypeScript API types
 │
 ├── docs/superpowers/
 │   ├── specs/                      # Design specs (Specs 1–5e)
@@ -406,10 +429,11 @@ Start-Service NexplaneAgent
 
 | Setting | Who can configure | Notes |
 |---------|------------------|-------|
-| Anthropic API key | Admin only | Required for AI planning assistant. Encrypted at rest, never returned in API responses. |
+| AI Providers (Anthropic, OpenAI) | Admin only | Configure API keys for each provider; select default. Encrypted at rest. |
 | Agent secret | Admin only | Shared HMAC secret for agent authentication. Shown once on generation — store securely. |
+| Connector credentials | Operator+ | Per-connector API credentials (AWS keys, Okta tokens, AD bind password, etc.). Encrypted at rest, never returned in GET responses. |
 
-Both secrets use the same `SecretsService` (Fernet AES-256), designed as a swappable interface for future HashiCorp Vault, AWS Secrets Manager, or HSM integration.
+All secrets use `SecretsService` (Fernet AES-256), designed as a swappable interface for future HashiCorp Vault, AWS Secrets Manager, or HSM integration.
 
 ---
 
@@ -510,5 +534,7 @@ Key endpoint groups:
 - `/projects/*` — project CRUD, member management, AI chat
 - `/change-requests/*` — full CR lifecycle (plan → approve → execute → verify → rollback)
 - `/agent/*` — agent registration, job dispatch, result reporting
-- `/settings/*` — AI key, agent secret
+- `/settings/*` — AI provider keys (Anthropic/OpenAI), agent secret
+- `/connectors/{id}/credentials` — per-connector credential CRUD
+- `/connectors/{id}/schedule` — recurring ingest schedule CRUD
 - `/audit-events/*` — immutable audit trail
