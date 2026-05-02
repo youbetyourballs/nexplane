@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plug, CheckCircle2, XCircle, Loader2, Download } from "lucide-react";
+import { Plug, CheckCircle2, XCircle, Loader2, Download, Trash2 } from "lucide-react";
 import { connectorsApi } from "../api/endpoints";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
@@ -157,6 +157,16 @@ export function Connectors() {
     }
   }
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => connectorsApi.delete(id),
+    onSuccess: (_: unknown, id: string) => {
+      setDeletingId(null);
+      qc.invalidateQueries({ queryKey: ["connectors"] });
+    },
+  });
+
   const ingestMutation = useMutation({
     mutationFn: ({ id, actionId }: { id: string; actionId: string }) =>
       connectorsApi.ingest(id, actionId),
@@ -214,15 +224,45 @@ export function Connectors() {
                     )}
                   </div>
                 </div>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                  connector.status === "active"
-                    ? "bg-emerald-50 text-emerald-700"
-                    : connector.status === "error"
-                    ? "bg-red-50 text-red-700"
-                    : "bg-slate-100 text-slate-500"
-                }`}>
-                  {connector.status}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                    connector.status === "active"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : connector.status === "error"
+                      ? "bg-red-50 text-red-700"
+                      : "bg-slate-100 text-slate-500"
+                  }`}>
+                    {connector.status}
+                  </span>
+
+                  {deletingId === connector.id ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => deleteMutation.mutate(connector.id)}
+                        disabled={deleteMutation.isPending}
+                        className="text-xs text-red-600 font-medium hover:text-red-800 disabled:opacity-50"
+                      >
+                        {deleteMutation.isPending && deleteMutation.variables === connector.id
+                          ? "Deleting…"
+                          : "Confirm delete"}
+                      </button>
+                      <button
+                        onClick={() => setDeletingId(null)}
+                        className="text-xs text-slate-400 hover:text-slate-600"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setDeletingId(connector.id)}
+                      className="text-slate-300 hover:text-red-400 transition-colors"
+                      title="Delete connector"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="mb-3">

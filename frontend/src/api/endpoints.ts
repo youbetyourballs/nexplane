@@ -67,6 +67,7 @@ export const settingsApi = {
 export const connectorsApi = {
   list: () => apiClient.get<Connector[]>("/connectors").then((r) => r.data),
   create: (data: ConnectorCreate) => apiClient.post<Connector>("/connectors", data).then((r) => r.data),
+  delete: (id: string) => apiClient.delete(`/connectors/${id}`),
   test: (id: string) =>
     apiClient.post<ConnectorTestResult>(`/connectors/${id}/test`).then((r) => r.data),
   ingest: (id: string, actionId: string) =>
