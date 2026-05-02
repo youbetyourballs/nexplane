@@ -18,7 +18,7 @@ Nexplane gives security teams a governed execution layer:
 - **AI Planning Assistant** — describe your goal, get a structured change plan with proposed change requests
 - **Change Requests** — safety-reviewed, approval-gated, audited, with automatic rollback
 - **Asset Inventory** — servers, cloud accounts, firewalls, identities, applications — discoverable via connectors
-- **Connectors** — integrations with AWS, Azure, Active Directory, CrowdStrike, Tenable, Palo Alto, Cloudflare, Okta, SSH
+- **Connectors** — 38 integrations spanning cloud, identity, EDR, IaC, ticketing, and observability — with real API calls when credentials are configured
 - **Nexplane Agent** — a cross-platform Go binary that runs on managed machines, reaches out to the control plane, and executes signed commands — no inbound SSH required
 
 ---
@@ -82,7 +82,7 @@ Nexplane gives security teams a governed execution layer:
 | AI | Anthropic Claude + OpenAI (multi-provider, default configurable) |
 | Secrets | `cryptography.fernet` (AES-256); abstracted for HSM/Vault swap-out |
 | Agent | Go 1.22+, AWS SDK v2, `golang.org/x/sys` |
-| Connector SDKs | boto3, azure-sdk, ldap3, falconpy, pytenable, pan-os-python, okta, paramiko |
+| Connector SDKs | boto3, azure-sdk, google-cloud-*, msal, hvac, kubernetes, falconpy, pytenable, pan-os-python, httpx, paramiko, checkov, google-api-python-client |
 | Scheduler | APScheduler 3.x (in-process async, recurring ingest) |
 | Graph | React Flow 11 + @dagrejs/dagre (project dependency visualization) |
 | Deployment | Docker Compose |
@@ -150,18 +150,78 @@ Discovered assets (servers, identities, applications, firewalls, cloud accounts)
 
 All connectors make **real API calls** when credentials are configured, and fall back to mock responses for demo mode when no credentials are set.
 
-| Connector | SDK | Ingest | Change actions |
-|-----------|-----|--------|----------------|
-| AWS | boto3 | VMs, snapshots | security groups, snapshots, IAM key rotation |
-| Azure | azure-sdk | VMs, storage, NSGs | NSG rules, public blob access, storage key rotation |
-| Cloudflare | httpx | — | DNS records (list, create, update, delete) |
-| Active Directory | ldap3 | Computers, identities | disable/enable account, reset password, group membership |
-| CrowdStrike | falconpy | Endpoints, users, applications | deploy sensor, isolate host, lift containment |
-| Tenable | pytenable | Assets, vulnerabilities | trigger scan, get scan results, verify remediation |
-| Palo Alto | pan-os-python | Traffic logs, security events | microsegmentation policy, chokepoint rules, traffic logging |
-| Okta | httpx | — | suspend/unsuspend user, deactivate, reset MFA, force password reset |
-| SSH | paramiko | — | execute approved commands, check service status, install agent |
-| Nexplane Agent | (internal) | Users/groups, privesc findings, software inventory, scheduled tasks, OS security posture | change IP, configure syslog, virtualize for migration, upload image, Linux/Windows security hardening, TLS certificate management, DNS resolver, instance upgrade |
+**Cloud & Infrastructure (10 connectors)**
+
+| Connector | SDK | Key capabilities |
+|-----------|-----|-----------------|
+| AWS | boto3 | Discover EC2/IAM/S3/SGs; stop/start/terminate; enforce IMDSv2; GuardDuty; CloudTrail; rotate IAM keys |
+| Azure | azure-sdk, msal | Discover VMs/NSGs/Entra users; disable accounts; revoke sessions; Defender alerts; policy compliance |
+| GCP | google-cloud-* | Discover compute/IAM/storage/firewall/SAs; SCC findings; stop/start/delete; block public buckets |
+| Cloudflare | httpx | Discover WAF/firewall/access policies; block IP; WAF rule actions; SSL mode |
+| Palo Alto | pan-os-python | Discover address objects/rules/zones; create/delete firewall rules; block IP; commit |
+| Active Directory | ldap3 | Discover domain admins/stale accounts/SPNs/GPOs; disable stale accounts; move OU |
+| CrowdStrike | falconpy | Discover endpoints/alerts/vulns; isolate host; RTR commands; prevention policy updates |
+| Tenable | pytenable | Discover assets/vulns/scan policies; launch/pause/resume scans; export reports |
+| SSH | paramiko | Execute approved commands; check service status; tail logs |
+| Nexplane Agent | (internal) | Full OS security hardening (Linux + Windows); migration; TLS; DNS; software inventory |
+
+**Identity & Access (4 connectors)**
+
+| Connector | SDK | Key capabilities |
+|-----------|-----|-----------------|
+| Okta | httpx | Discover users/groups/apps; suspend/deactivate; reset MFA/password; revoke sessions; force enrollment |
+| Microsoft Entra ID | msal, httpx | Discover users/groups/apps/CA policies/privileged roles; disable/enable; reset MFA; block sign-in |
+| HashiCorp Vault | hvac | Discover secret engines/auth methods/policies/leases; rotate secrets; revoke leases; seal vault |
+| GitHub | httpx | Discover repos/alerts/Dependabot/org members; branch protection; suspend member; secret scanning |
+
+**Security Tools / EDR (4 connectors)**
+
+| Connector | SDK | Key capabilities |
+|-----------|-----|-----------------|
+| SentinelOne | httpx | Discover agents/threats/groups; isolate/reconnect; kill process; quarantine file; initiate scan |
+| Microsoft Defender for Endpoint | msal, httpx | Discover machines/alerts/vulns/software; isolate; AV scan; initiate investigation |
+| Snyk | httpx | Discover projects/issues/dependencies/container images; trigger tests; ignore issues |
+| Qualys | httpx | Discover hosts/vulns/scan schedules/asset groups; launch scans; verify remediation |
+
+**Container & Kubernetes (2 connectors)**
+
+| Connector | SDK | Key capabilities |
+|-----------|-----|-----------------|
+| Kubernetes | kubernetes | Discover nodes/pods/workloads/RBAC/network policies; delete pod; cordon/drain node; patch deployment |
+| Helm | kubernetes | Discover releases/history; rollback release; uninstall release |
+
+**Cloud Security & Discovery (3 connectors)**
+
+| Connector | SDK | Key capabilities |
+|-----------|-----|-----------------|
+| RunZero | httpx | Discover all network assets/services/wireless (finds unmanaged IoT/OT); trigger scans |
+| Wiz | httpx (GraphQL) | Discover cloud resources; ingest issues/vulnerabilities/attack paths; resolve issues; accept risk |
+| Zscaler | httpx | Discover users/policies/locations/ZPA apps; block URLs/IPs; suspend users; URL categories |
+
+**IaC & Configuration Management (9 connectors)**
+
+| Connector | SDK | Key capabilities |
+|-----------|-----|-----------------|
+| Terraform (HCP) | httpx | Discover workspaces/runs/state; plan/apply/destroy; lock/unlock; set variables |
+| Ansible (AWX) | httpx | Discover inventories/hosts/job templates/jobs; launch jobs; ad-hoc commands; sync inventory |
+| AWS CloudFormation | boto3 | Discover stacks/resources; drift detection; create/execute change sets; termination protection |
+| Pulumi | httpx | Discover stacks/resources/history; cancel update; import resource; refresh stack |
+| Helm | kubernetes | (see above) |
+| Azure Bicep | azure-mgmt-resource | Discover deployments/operations; validate template; create/cancel/delete deployments |
+| Checkov | subprocess | IaC security scan; secrets detection; compliance summary (CIS/NIST/PCI-DSS) |
+| SaltStack | httpx | Discover minions/jobs; run states; allowlisted exec module functions; accept/reject keys |
+| Chef InSpec | httpx | Discover nodes/compliance profiles/results; run compliance scans; assign profiles |
+
+**Workflow & Observability (7 connectors)**
+
+| Connector | SDK | Key capabilities |
+|-----------|-----|-----------------|
+| Jira | httpx | Discover projects/issues; create/transition issues; add comments; link issues; assign |
+| PagerDuty | httpx | Discover services/incidents/on-call; create/resolve/acknowledge incidents; Events API |
+| ServiceNow | httpx | Discover incidents/change requests/CMDB; create/update/resolve incidents; sync CMDB |
+| Splunk | httpx | SPL search; discover saved searches/notables; send events to HEC; create alerts; suppress notables |
+| Datadog | httpx | Discover hosts/monitors/security signals/log indexes; mute/unmute; create monitors; send events |
+| Google Workspace | google-api-python-client | Discover users/groups/devices/admin roles/audit logs; suspend; reset password; revoke tokens; wipe device |
 
 ### Nexplane Agent
 
@@ -297,7 +357,7 @@ nexplane/
 │   │   ├── main.py
 │   │   ├── models/
 │   │   │   ├── asset.py              # AssetType: server, identity, application, ...
-│   │   │   ├── connector.py          # ConnectorType: all 10 connectors
+│   │   │   ├── connector.py          # ConnectorType: 38 connectors across 6 categories
 │   │   │   ├── connector_credential.py # Per-connector encrypted credential storage
 │   │   │   ├── project.py            # Project + ProjectChangeRequest (dependency graph)
 │   │   │   ├── agent.py              # AgentRegistration + AgentJob
@@ -324,7 +384,7 @@ nexplane/
 │   │   │   ├── catalog/              # Per-connector JSON catalogs with credential_fields
 │   │   │   └── executors/            # Real API implementations (mock fallback if no creds)
 │   │   └── tests/                    # 116 passing tests
-│   ├── alembic/versions/             # 008 migrations (001→008)
+│   ├── alembic/versions/             # 013 migrations (001→013)
 │   └── seed.py                       # Demo data (org, users, assets, connectors, projects)
 │
 ├── frontend/
