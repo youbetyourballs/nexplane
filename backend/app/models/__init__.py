@@ -8,6 +8,7 @@ from app.models.approval import Approval
 from app.models.execution_run import ExecutionRun
 from app.models.audit_event import AuditEvent
 from app.models.connector_credential import ConnectorCredential
+from app.models.scheduled_ingest import ScheduledIngest
 
 __all__ = [
     "Organization",
@@ -20,4 +21,5 @@ __all__ = [
     "ExecutionRun",
     "AuditEvent",
     "ConnectorCredential",
+    "ScheduledIngest",
 ]

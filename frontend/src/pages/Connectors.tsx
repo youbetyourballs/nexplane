@@ -5,6 +5,7 @@ import { connectorsApi } from "../api/endpoints";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
 import CredentialModal from "../components/CredentialModal";
+import ScheduleModal from "../components/ScheduleModal";
 import type { ConnectorRead, ConnectorType, ConnectorTestResult, IngestResponse } from "../types/api";
 
 const CONNECTOR_LABELS: Record<ConnectorType, string> = {
@@ -41,6 +42,61 @@ const INGEST_ACTIONS: Partial<Record<ConnectorType, string>> = {
   azure_mock: "discover_vms",
   paloalto_mock: "ingest_traffic_logs",
 };
+
+const INTERVAL_LABELS: Record<number, string> = {
+  1: "every hour",
+  6: "every 6 hours",
+  24: "every 24 hours",
+  168: "weekly",
+};
+
+function ConnectorScheduleBadge({
+  connector,
+  token,
+  onConfigure,
+}: {
+  connector: ConnectorRead;
+  token: string;
+  onConfigure: (s: any) => void;
+}) {
+  const { data: schedule } = useQuery({
+    queryKey: ["schedule", connector.id],
+    queryFn: () =>
+      fetch(`/connectors/${connector.id}/schedule`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((r) => (r.status === 404 || r.status === 204 ? null : r.json()))
+        .catch(() => null),
+    staleTime: 30000,
+  });
+
+  const intervalLabel = schedule
+    ? (INTERVAL_LABELS[schedule.interval_hours] ?? `every ${schedule.interval_hours}h`)
+    : null;
+
+  return (
+    <div className="flex items-center gap-2 mt-1">
+      {schedule ? (
+        <>
+          <span className="text-xs text-green-600">&#x23F0; {intervalLabel}</span>
+          {schedule.last_run_status === "error" && (
+            <span className="text-xs text-red-500">&#x2717; Last failed</span>
+          )}
+          {schedule.last_run_status === "success" && (
+            <span className="text-xs text-gray-400">&#x2713; Synced</span>
+          )}
+          <button onClick={() => onConfigure(schedule)} className="text-xs text-indigo-600 hover:underline">
+            Edit
+          </button>
+        </>
+      ) : (
+        <button onClick={() => onConfigure(null)} className="text-xs text-gray-400 hover:text-indigo-600">
+          + Schedule sync
+        </button>
+      )}
+    </div>
+  );
+}
 
 function ConnectorCredentialBadge({
   connector,
@@ -80,6 +136,7 @@ export function Connectors() {
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [ingestResults, setIngestResults] = useState<Record<string, IngestResponse>>({});
   const [credModalConnector, setCredModalConnector] = useState<ConnectorRead | null>(null);
+  const [scheduleModal, setScheduleModal] = useState<{ connector: ConnectorRead; existing: any } | null>(null);
 
   const token = localStorage.getItem("nexplane_token") ?? "";
 
@@ -137,6 +194,13 @@ export function Connectors() {
                       token={token}
                       onConfigure={() => setCredModalConnector(connector)}
                     />
+                    {ingestActionId && (
+                      <ConnectorScheduleBadge
+                        connector={connector}
+                        token={token}
+                        onConfigure={(existing) => setScheduleModal({ connector, existing })}
+                      />
+                    )}
                   </div>
                 </div>
                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -213,6 +277,14 @@ export function Connectors() {
           connector={credModalConnector}
           token={token}
           onClose={() => setCredModalConnector(null)}
+        />
+      )}
+      {scheduleModal && (
+        <ScheduleModal
+          connector={scheduleModal.connector}
+          existing={scheduleModal.existing}
+          token={token}
+          onClose={() => setScheduleModal(null)}
         />
       )}
     </div>

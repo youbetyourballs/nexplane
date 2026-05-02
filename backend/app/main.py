@@ -1,14 +1,28 @@
 import uuid
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal
 from app.routers import auth, assets, connectors, change_requests, audit, projects
 from app.routers import settings as settings_router
 from app.routers import agent as agent_router
 from app.routers import current_user
 from app.routers.audit import list_cr_audit_events
+from app.services import scheduler_service
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.connectors.catalog_service import init_catalog_service
+    import pathlib
+    init_catalog_service(pathlib.Path(__file__).parent / "connectors" / "catalog")
+    scheduler_service.init_scheduler(lambda: AsyncSessionLocal())
+    await scheduler_service.start()
+    yield
+    scheduler_service.stop()
+
 
 app = FastAPI(
     title="Nexplane API",
@@ -16,6 +30,7 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -44,12 +59,6 @@ async def cr_audit_events(
 ):
     return await list_cr_audit_events(cr_id, user, db)
 
-
-@app.on_event("startup")
-async def startup_event():
-    from app.connectors.catalog_service import init_catalog_service
-    import pathlib
-    init_catalog_service(pathlib.Path(__file__).parent / "connectors" / "catalog")
 
 
 @app.get("/health", tags=["Health"])

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,11 +11,14 @@ from app.routers import current_user
 from app.schemas.connector import ConnectorCreate, ConnectorRead, ConnectorTestResult, IngestResponse
 from app.schemas.asset import AssetRead
 from app.schemas.credential import CredentialRead, CredentialWrite, CredentialField
+from app.schemas.scheduled_ingest import ScheduledIngestRead, ScheduledIngestWrite
 from app.services.connector_service import test_connector
 from app.services.audit_service import record_event
 from app.services.ingest_service import IngestService
+from app.services import scheduler_service
 from app.connectors.catalog_service import get_catalog_service
 from app.models.connector_credential import ConnectorCredential
+from app.models.scheduled_ingest import ScheduledIngest
 
 router = APIRouter(prefix="/connectors", tags=["Connectors"])
 
@@ -170,6 +174,73 @@ async def upsert_credentials(
 
     await db.commit()
     return {"status": "ok"}
+
+
+@router.get("/{connector_id}/schedule", response_model=ScheduledIngestRead | None)
+async def get_schedule(
+    connector_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    connector = await db.get(Connector, connector_id)
+    if not connector or connector.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    result = await db.execute(
+        select(ScheduledIngest).where(ScheduledIngest.connector_id == connector_id)
+    )
+    return result.scalar_one_or_none()
+
+
+@router.put("/{connector_id}/schedule", response_model=ScheduledIngestRead)
+async def upsert_schedule(
+    connector_id: uuid.UUID,
+    body: ScheduledIngestWrite,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    connector = await db.get(Connector, connector_id)
+    if not connector or connector.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    result = await db.execute(
+        select(ScheduledIngest).where(ScheduledIngest.connector_id == connector_id)
+    )
+    schedule = result.scalar_one_or_none()
+    if schedule:
+        schedule.interval_hours = body.interval_hours
+        schedule.action_id = body.action_id
+        schedule.next_run_at = datetime.now(timezone.utc) + timedelta(hours=body.interval_hours)
+    else:
+        schedule = ScheduledIngest(
+            connector_id=connector_id,
+            organization_id=user.organization_id,
+            action_id=body.action_id,
+            interval_hours=body.interval_hours,
+            next_run_at=datetime.now(timezone.utc) + timedelta(hours=body.interval_hours),
+        )
+        db.add(schedule)
+    await db.commit()
+    await db.refresh(schedule)
+    await scheduler_service.upsert_schedule(schedule)
+    return schedule
+
+
+@router.delete("/{connector_id}/schedule", status_code=204)
+async def delete_schedule(
+    connector_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    connector = await db.get(Connector, connector_id)
+    if not connector or connector.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    result = await db.execute(
+        select(ScheduledIngest).where(ScheduledIngest.connector_id == connector_id)
+    )
+    schedule = result.scalar_one_or_none()
+    if schedule:
+        await scheduler_service.remove_schedule(schedule.id)
+        await db.delete(schedule)
+        await db.commit()
 
 
 @router.delete("/{connector_id}/credentials", status_code=204)
