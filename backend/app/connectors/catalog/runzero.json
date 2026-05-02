@@ -1,0 +1,15 @@
+{
+  "connector_type": "runzero",
+  "display_name": "RunZero",
+  "credential_fields": [
+    {"name": "api_token", "label": "API Token", "type": "password", "required": true},
+    {"name": "org_id", "label": "Organization UUID", "type": "string", "required": true}
+  ],
+  "actions": [
+    {"action_id": "discover_assets", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Assets", "description": "All network assets: IP, MAC, OS fingerprint, open ports, services, hostname, first/last seen, tags", "applicable_asset_types": ["server", "network_device"], "parameters": [], "executor": "runzero.discover_assets", "estimated_duration_seconds": 60},
+    {"action_id": "discover_services", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Services", "description": "Detected network services per asset: port, protocol, service name, banner", "applicable_asset_types": ["server", "network_device"], "parameters": [], "executor": "runzero.discover_services", "estimated_duration_seconds": 30},
+    {"action_id": "discover_wireless_networks", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Wireless Networks", "description": "Detected WiFi networks: SSID, BSSID, encryption, signal", "applicable_asset_types": ["network_device"], "parameters": [], "executor": "runzero.discover_wireless_networks", "estimated_duration_seconds": 15},
+    {"action_id": "trigger_scan", "generic_action": "trigger_scan", "action_type": "change", "execution_tier": 2, "display_name": "Trigger Scan", "description": "Start a RunZero scan task against a target CIDR or asset group. Returns task ID.", "applicable_asset_types": ["network_device", "server"], "parameters": [{"name": "targets", "type": "string", "required": true, "description": "CIDR range or asset group name"}], "executor": "runzero.trigger_scan", "estimated_duration_seconds": 10},
+    {"action_id": "get_scan_status", "generic_action": "get_status", "action_type": "change", "execution_tier": 1, "display_name": "Get Scan Status", "description": "Check status of a running scan task.", "applicable_asset_types": ["network_device", "server"], "parameters": [{"name": "task_id", "type": "string", "required": true}], "executor": "runzero.get_scan_status", "estimated_duration_seconds": 5}
+  ]
+}
