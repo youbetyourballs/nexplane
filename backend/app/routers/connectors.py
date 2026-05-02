@@ -49,6 +49,33 @@ async def create_connector(
     return connector
 
 
+@router.delete("/{connector_id}", status_code=204)
+async def delete_connector(
+    connector_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Connector).where(
+            Connector.id == connector_id,
+            Connector.organization_id == user.organization_id,
+        )
+    )
+    connector = result.scalar_one_or_none()
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    await db.delete(connector)
+    await db.flush()
+    await record_event(
+        db,
+        user.organization_id,
+        "connector.deleted",
+        {"connector_id": str(connector_id)},
+        actor_id=user.id,
+    )
+    await db.commit()
+
+
 @router.post("/{connector_id}/test", response_model=ConnectorTestResult)
 async def test_connector_endpoint(
     connector_id: uuid.UUID,
