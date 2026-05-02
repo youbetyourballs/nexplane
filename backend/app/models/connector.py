@@ -19,6 +19,10 @@ class ConnectorType(str, enum.Enum):
     crowdstrike = "crowdstrike"
     tenable = "tenable"
     nexplane_agent = "nexplane_agent"
+    gcp = "gcp"
+    runzero = "runzero"
+    wiz = "wiz"
+    entra_id = "entra_id"
 
 
 class ConnectorStatus(str, enum.Enum):
