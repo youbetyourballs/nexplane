@@ -1,0 +1,163 @@
+{
+  "connector_type": "okta",
+  "display_name": "Okta",
+  "credential_fields": [
+    {"name": "org_url", "label": "Org URL (e.g. https://acme.okta.com)", "type": "string", "required": true},
+    {"name": "api_token", "label": "API Token", "type": "password", "required": true}
+  ],
+  "actions": [
+    {
+      "action_id": "discover_users",
+      "generic_action": "discover_users",
+      "action_type": "ingest",
+      "display_name": "Discover Okta Users",
+      "description": "Discovers all Okta users with status, MFA enrollment, and group memberships",
+      "produces_asset_types": ["identity"],
+      "applicable_asset_types": [],
+      "executor": "okta.discover_users",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "discover_groups",
+      "generic_action": "discover_groups",
+      "action_type": "ingest",
+      "display_name": "Discover Okta Groups",
+      "description": "Discovers all Okta groups with member counts and type",
+      "produces_asset_types": ["identity"],
+      "applicable_asset_types": [],
+      "executor": "okta.discover_groups",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "discover_applications",
+      "generic_action": "discover_applications",
+      "action_type": "ingest",
+      "display_name": "Discover Okta Applications",
+      "description": "Discovers all Okta applications with status and assigned user count",
+      "produces_asset_types": ["application"],
+      "applicable_asset_types": [],
+      "executor": "okta.discover_applications",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "suspend_user",
+      "generic_action": "suspend_user",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Suspend User",
+      "description": "Suspends an Okta user, preventing all sign-ins",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "user_id", "type": "string", "required": true}],
+      "executor": "okta.suspend_user",
+      "rollback_action": "unsuspend_user",
+      "estimated_duration_seconds": 5,
+      "blast_radius_hint": "account_access_loss",
+      "safety_notes": ["User will be unable to sign in to any Okta-connected application"]
+    },
+    {
+      "action_id": "unsuspend_user",
+      "generic_action": "unsuspend_user",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Unsuspend User",
+      "description": "Restores an Okta user from suspended status",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "user_id", "type": "string", "required": true}],
+      "executor": "okta.unsuspend_user",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "deactivate_user",
+      "generic_action": "deactivate_user",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Deactivate User",
+      "description": "Deactivates an Okta user, revoking all sessions and tokens",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "user_id", "type": "string", "required": true}],
+      "executor": "okta.deactivate_user",
+      "rollback_action": "reactivate_user",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "account_access_loss"
+    },
+    {
+      "action_id": "reactivate_user",
+      "generic_action": "reactivate_user",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Reactivate User",
+      "description": "Reactivates a deactivated Okta user",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "user_id", "type": "string", "required": true}],
+      "executor": "okta.reactivate_user",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "reset_password",
+      "generic_action": "reset_password",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Reset Password",
+      "description": "Forces a password reset email for the Okta user",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "user_id", "type": "string", "required": true}],
+      "executor": "okta.reset_password",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "reset_mfa_factors",
+      "generic_action": "reset_mfa_factors",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Reset MFA Factors",
+      "description": "Resets all enrolled MFA factors for the user, requiring re-enrollment on next login",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "user_id", "type": "string", "required": true}],
+      "executor": "okta.reset_mfa_factors",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "revoke_sessions",
+      "generic_action": "revoke_sessions",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Revoke All Sessions",
+      "description": "Revokes all active Okta sessions for the user",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "user_id", "type": "string", "required": true}],
+      "executor": "okta.revoke_sessions",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "force_mfa_enrollment",
+      "generic_action": "force_mfa_enrollment",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Force MFA Enrollment",
+      "description": "Requires the user to enroll in MFA on next login via policy assignment",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "user_id", "type": "string", "required": true},
+        {"name": "policy_id", "type": "string", "required": false}
+      ],
+      "executor": "okta.force_mfa_enrollment",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "deprovision_from_app",
+      "generic_action": "deprovision_from_app",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Deprovision from Application",
+      "description": "Removes a user's assignment from an Okta application",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "user_id", "type": "string", "required": true},
+        {"name": "app_id", "type": "string", "required": true}
+      ],
+      "executor": "okta.deprovision_from_app",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "account_access_loss"
+    }
+  ]
+}

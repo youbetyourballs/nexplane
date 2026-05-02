@@ -1,4 +1,4 @@
-import uuid
+﻿import uuid
 import pytest
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +32,7 @@ async def _setup_test_data(db: AsyncSession):
         id=uuid.uuid4(),
         organization_id=org.id,
         name="Test Connector",
-        connector_type=ConnectorType.aws_mock,
+        connector_type=ConnectorType.aws,
         status=ConnectorStatus.active,
         scoped_permissions={},
     )
@@ -103,3 +103,4 @@ async def test_delete_connector_404_for_wrong_id(db: AsyncSession):
         assert resp.status_code == 404
     finally:
         app.dependency_overrides.pop(get_db, None)
+

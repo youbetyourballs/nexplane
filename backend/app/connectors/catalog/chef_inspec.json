@@ -1,0 +1,15 @@
+{
+  "connector_type": "chef_inspec",
+  "display_name": "Chef InSpec",
+  "credential_fields": [
+    {"name": "automate_url", "label": "Chef Automate URL", "type": "string", "required": true, "placeholder": "https://automate.example.com"},
+    {"name": "api_token", "label": "API Token", "type": "password", "required": true}
+  ],
+  "actions": [
+    {"action_id": "discover_nodes", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Nodes", "description": "All Chef-managed nodes: name, platform, environment, run list", "applicable_asset_types": ["server"], "parameters": [], "executor": "chef_inspec.discover_nodes", "estimated_duration_seconds": 30},
+    {"action_id": "discover_compliance_profiles", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Compliance Profiles", "description": "Available InSpec compliance profiles", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "chef_inspec.discover_compliance_profiles", "estimated_duration_seconds": 15},
+    {"action_id": "discover_compliance_results", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Compliance Results", "description": "Latest compliance scan results per node", "applicable_asset_types": ["server"], "parameters": [], "executor": "chef_inspec.discover_compliance_results", "estimated_duration_seconds": 30},
+    {"action_id": "run_compliance_scan", "generic_action": "scan", "action_type": "change", "execution_tier": 2, "display_name": "Run Compliance Scan", "description": "Trigger a compliance scan on a node.", "applicable_asset_types": ["server"], "parameters": [{"name": "node_id", "type": "string", "required": true}, {"name": "profile_id", "type": "string", "required": true}], "executor": "chef_inspec.run_compliance_scan", "estimated_duration_seconds": 60},
+    {"action_id": "assign_profile", "generic_action": "update_policy", "action_type": "change", "execution_tier": 2, "display_name": "Assign Profile", "description": "Assign a compliance profile to a node.", "applicable_asset_types": ["server"], "parameters": [{"name": "node_id", "type": "string", "required": true}, {"name": "profile_id", "type": "string", "required": true}], "executor": "chef_inspec.assign_profile", "estimated_duration_seconds": 10}
+  ]
+}

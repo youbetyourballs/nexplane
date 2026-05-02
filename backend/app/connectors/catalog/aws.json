@@ -1,0 +1,329 @@
+{
+  "connector_type": "aws",
+  "display_name": "Amazon Web Services",
+  "credential_fields": [
+    {"name": "access_key_id", "label": "AWS Access Key ID", "type": "string", "required": true},
+    {"name": "secret_access_key", "label": "AWS Secret Access Key", "type": "password", "required": true},
+    {"name": "region", "label": "AWS Region", "type": "string", "required": false, "default": "us-east-1"},
+    {"name": "session_token", "label": "Session Token (optional)", "type": "password", "required": false}
+  ],
+  "actions": [
+    {
+      "action_id": "health_check",
+      "generic_action": "health_check",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Asset Health Check",
+      "description": "Verifies asset health before making changes",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [],
+      "executor": "aws.health_check",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "create_snapshot",
+      "generic_action": "create_snapshot",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Create Asset Snapshot",
+      "description": "Creates a point-in-time snapshot of an asset",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "snapshot_tag", "type": "string", "required": false, "default": "nexplane-managed"}
+      ],
+      "executor": "aws.create_snapshot",
+      "estimated_duration_seconds": 60,
+      "blast_radius_hint": "snapshot_io_impact"
+    },
+    {
+      "action_id": "verify_snapshot",
+      "generic_action": "verify_snapshot",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Verify Snapshot Integrity",
+      "description": "Verifies that a snapshot was created successfully and is complete",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [],
+      "executor": "aws.verify_snapshot",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "export_security_group",
+      "generic_action": "export_security_group",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Export Security Group Rules",
+      "description": "Exports current security group rules for rollback purposes",
+      "applicable_asset_types": ["cloud_account", "firewall"],
+      "parameters": [
+        {"name": "group_id", "type": "string", "required": true}
+      ],
+      "executor": "aws.export_security_group",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "validate_security_rules",
+      "generic_action": "validate_security_rules",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Validate Security Group Rules",
+      "description": "Validates proposed security group rule syntax before applying",
+      "applicable_asset_types": ["cloud_account", "firewall"],
+      "parameters": [
+        {"name": "rules", "type": "array", "required": true}
+      ],
+      "executor": "aws.validate_security_rules",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "update_security_group",
+      "generic_action": "update_security_group",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Update Security Group",
+      "description": "Applies security group rule changes via the AWS API",
+      "applicable_asset_types": ["cloud_account", "firewall"],
+      "parameters": [
+        {"name": "group_id", "type": "string", "required": true},
+        {"name": "rules", "type": "array", "required": true}
+      ],
+      "executor": "aws.update_security_group",
+      "rollback_action": "restore_security_group",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "network_access_change",
+      "safety_notes": ["Verify rules do not block critical management traffic"]
+    },
+    {
+      "action_id": "restore_security_group",
+      "generic_action": "restore_security_group",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Restore Security Group",
+      "description": "Restores security group rules from a previously captured snapshot",
+      "applicable_asset_types": ["cloud_account", "firewall"],
+      "parameters": [
+        {"name": "pre_change_snapshot_id", "type": "string", "required": true}
+      ],
+      "executor": "aws.restore_security_group",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "discover_ec2_instances",
+      "generic_action": "discover_ec2_instances",
+      "action_type": "ingest",
+      "display_name": "Discover EC2 Instances",
+      "description": "Discovers all EC2 instances with instance type, AMI, state, public IP, and tags",
+      "produces_asset_types": ["server"],
+      "applicable_asset_types": [],
+      "executor": "aws.discover_ec2_instances",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "discover_iam_users",
+      "generic_action": "discover_iam_users",
+      "action_type": "ingest",
+      "display_name": "Discover IAM Users",
+      "description": "Discovers IAM users with MFA status, last login, and attached policies",
+      "produces_asset_types": ["identity"],
+      "applicable_asset_types": [],
+      "executor": "aws.discover_iam_users",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "discover_s3_buckets",
+      "generic_action": "discover_s3_buckets",
+      "action_type": "ingest",
+      "display_name": "Discover S3 Buckets",
+      "description": "Discovers S3 buckets and flags those with public access enabled",
+      "produces_asset_types": ["cloud_account"],
+      "applicable_asset_types": [],
+      "executor": "aws.discover_s3_buckets",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "discover_rds_instances",
+      "generic_action": "discover_rds_instances",
+      "action_type": "ingest",
+      "display_name": "Discover RDS Instances",
+      "description": "Discovers RDS database instances with engine, version, and publicly accessible status",
+      "produces_asset_types": ["server"],
+      "applicable_asset_types": [],
+      "executor": "aws.discover_rds_instances",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "discover_elbs",
+      "generic_action": "discover_elbs",
+      "action_type": "ingest",
+      "display_name": "Discover Load Balancers",
+      "description": "Discovers Application and Network Load Balancers with listeners and target groups",
+      "produces_asset_types": ["server"],
+      "applicable_asset_types": [],
+      "executor": "aws.discover_elbs",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "attach_iam_policy",
+      "generic_action": "attach_iam_policy",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Attach IAM Policy",
+      "description": "Attaches a managed IAM policy to a user, group, or role",
+      "applicable_asset_types": ["identity", "cloud_account"],
+      "parameters": [
+        {"name": "principal_type", "type": "string", "required": true},
+        {"name": "principal_name", "type": "string", "required": true},
+        {"name": "policy_arn", "type": "string", "required": true}
+      ],
+      "executor": "aws.attach_iam_policy",
+      "rollback_action": "detach_iam_policy",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "permission_change",
+      "safety_notes": ["Verify policy ARN is correct before attaching"]
+    },
+    {
+      "action_id": "detach_iam_policy",
+      "generic_action": "detach_iam_policy",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Detach IAM Policy",
+      "description": "Detaches a managed IAM policy from a user, group, or role",
+      "applicable_asset_types": ["identity", "cloud_account"],
+      "parameters": [
+        {"name": "principal_type", "type": "string", "required": true},
+        {"name": "principal_name", "type": "string", "required": true},
+        {"name": "policy_arn", "type": "string", "required": true}
+      ],
+      "executor": "aws.detach_iam_policy",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "disable_iam_user",
+      "generic_action": "disable_iam_user",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Disable IAM User",
+      "description": "Disables an IAM user by removing all login profiles and deactivating access keys",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true}
+      ],
+      "executor": "aws.disable_iam_user",
+      "rollback_action": "enable_iam_user",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "account_access_loss",
+      "safety_notes": ["Verify no critical services use this IAM user before disabling"]
+    },
+    {
+      "action_id": "enable_iam_user",
+      "generic_action": "enable_iam_user",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Enable IAM User",
+      "description": "Re-enables a disabled IAM user by restoring login profile and activating access keys",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true}
+      ],
+      "executor": "aws.enable_iam_user",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "rotate_iam_key",
+      "generic_action": "rotate_iam_key",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Rotate IAM Access Key",
+      "description": "Creates a new IAM access key and deactivates the old one",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true},
+        {"name": "old_access_key_id", "type": "string", "required": false}
+      ],
+      "executor": "aws.rotate_iam_key",
+      "estimated_duration_seconds": 15,
+      "safety_notes": ["Distribute the new key to consumers before deactivating the old key"]
+    },
+    {
+      "action_id": "block_s3_public_access",
+      "generic_action": "block_s3_public_access",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Block S3 Public Access",
+      "description": "Enables all S3 block public access settings on a bucket",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "bucket_name", "type": "string", "required": true}
+      ],
+      "executor": "aws.block_s3_public_access",
+      "rollback_action": "restore_s3_public_access",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "public_access_loss"
+    },
+    {
+      "action_id": "restore_s3_public_access",
+      "generic_action": "restore_s3_public_access",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Restore S3 Public Access",
+      "description": "Restores S3 public access settings to a previously captured state",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "bucket_name", "type": "string", "required": true},
+        {"name": "previous_settings", "type": "object", "required": true}
+      ],
+      "executor": "aws.restore_s3_public_access",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "put_bucket_policy",
+      "generic_action": "put_bucket_policy",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Put S3 Bucket Policy",
+      "description": "Applies a JSON bucket policy to an S3 bucket",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "bucket_name", "type": "string", "required": true},
+        {"name": "policy", "type": "object", "required": true}
+      ],
+      "executor": "aws.put_bucket_policy",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "permission_change",
+      "safety_notes": ["Verify policy does not inadvertently deny all access"]
+    },
+    {
+      "action_id": "tag_resource",
+      "generic_action": "tag_resource",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Tag AWS Resource",
+      "description": "Adds or updates tags on an AWS resource",
+      "applicable_asset_types": ["server", "cloud_account", "firewall"],
+      "parameters": [
+        {"name": "resource_arn", "type": "string", "required": true},
+        {"name": "tags", "type": "object", "required": true}
+      ],
+      "executor": "aws.tag_resource",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "run_ssm_command",
+      "generic_action": "run_ssm_command",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Run SSM Command",
+      "description": "Runs an approved SSM document on a target EC2 instance via AWS Systems Manager",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true},
+        {"name": "document_name", "type": "string", "required": true},
+        {"name": "parameters", "type": "object", "required": false}
+      ],
+      "executor": "aws.run_ssm_command",
+      "estimated_duration_seconds": 60,
+      "blast_radius_hint": "host_service_interruption",
+      "safety_notes": ["Only approved SSM documents may be executed"]
+    }
+  ]
+}

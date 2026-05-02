@@ -1,0 +1,15 @@
+{
+  "connector_type": "pulumi",
+  "display_name": "Pulumi",
+  "credential_fields": [
+    {"name": "api_token", "label": "API Token", "type": "password", "required": true},
+    {"name": "organization", "label": "Organization", "type": "string", "required": true}
+  ],
+  "actions": [
+    {"action_id": "discover_stacks", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Stacks", "description": "All Pulumi stacks: name, project, last update, resource count", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "pulumi.discover_stacks", "estimated_duration_seconds": 15},
+    {"action_id": "discover_stack_resources", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Stack Resources", "description": "Resources in a stack", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "project", "type": "string", "required": true}, {"name": "stack", "type": "string", "required": true}], "executor": "pulumi.discover_stack_resources", "estimated_duration_seconds": 15},
+    {"action_id": "discover_stack_history", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Stack History", "description": "Update history for a stack", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "project", "type": "string", "required": true}, {"name": "stack", "type": "string", "required": true}], "executor": "pulumi.discover_stack_history", "estimated_duration_seconds": 15},
+    {"action_id": "cancel_update", "generic_action": "cancel_job", "action_type": "change", "execution_tier": 2, "display_name": "Cancel Update", "description": "Cancel an in-progress stack update.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "project", "type": "string", "required": true}, {"name": "stack", "type": "string", "required": true}], "executor": "pulumi.cancel_update", "estimated_duration_seconds": 10},
+    {"action_id": "refresh_stack", "generic_action": "sync", "action_type": "change", "execution_tier": 2, "display_name": "Refresh Stack", "description": "Refresh stack state from cloud provider.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "project", "type": "string", "required": true}, {"name": "stack", "type": "string", "required": true}], "executor": "pulumi.refresh_stack", "estimated_duration_seconds": 30}
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "connector_type": "crowdstrike",
+  "display_name": "CrowdStrike Falcon",
+  "credential_fields": [
+    {"name": "client_id", "label": "Client ID", "type": "string", "required": true},
+    {"name": "client_secret", "label": "Client Secret", "type": "password", "required": true},
+    {"name": "base_url", "label": "Base URL", "type": "string", "required": false, "default": "https://api.crowdstrike.com"}
+  ],
+  "actions": [
+    {
+      "action_id": "discover_endpoints",
+      "generic_action": "discover_endpoints",
+      "action_type": "ingest",
+      "display_name": "Discover Endpoints",
+      "description": "Discovers all managed and unprotected endpoints with OS, sensor version, open ports, and running processes",
+      "produces_asset_types": ["server"],
+      "applicable_asset_types": [],
+      "executor": "crowdstrike.discover_endpoints",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "discover_endpoint_users",
+      "generic_action": "discover_endpoint_users",
+      "action_type": "ingest",
+      "display_name": "Discover Endpoint Users",
+      "description": "Discovers the last logged-in user per endpoint",
+      "produces_asset_types": ["identity"],
+      "applicable_asset_types": [],
+      "executor": "crowdstrike.discover_endpoint_users",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "discover_applications",
+      "generic_action": "discover_applications",
+      "action_type": "ingest",
+      "display_name": "Discover Applications",
+      "description": "Discovers installed software across all managed endpoints",
+      "produces_asset_types": ["application"],
+      "applicable_asset_types": [],
+      "executor": "crowdstrike.discover_applications",
+      "estimated_duration_seconds": 45
+    },
+    {
+      "action_id": "discover_detections",
+      "generic_action": "discover_detections",
+      "action_type": "ingest",
+      "display_name": "Discover Detections",
+      "description": "Ingests recent Falcon detections and enriches affected assets with threat tags",
+      "produces_asset_types": ["server"],
+      "applicable_asset_types": [],
+      "executor": "crowdstrike.discover_detections",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "deploy_sensor",
+      "generic_action": "deploy_sensor",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Deploy Falcon Sensor",
+      "description": "Installs the CrowdStrike Falcon sensor on the target host via SSH",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "sensor_version", "type": "string", "required": false, "default": "7.14.0"}],
+      "executor": "crowdstrike.deploy_sensor",
+      "rollback_action": "remove_sensor",
+      "estimated_duration_seconds": 120,
+      "blast_radius_hint": "host_service_interruption"
+    },
+    {
+      "action_id": "remove_sensor",
+      "generic_action": "remove_sensor",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "Remove Falcon Sensor",
+      "description": "Uninstalls the CrowdStrike Falcon sensor from the target host",
+      "applicable_asset_types": ["server"],
+      "parameters": [],
+      "executor": "crowdstrike.remove_sensor",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "isolate_host",
+      "generic_action": "isolate_host",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Isolate Host",
+      "description": "Network-isolates an endpoint via the Falcon API",
+      "applicable_asset_types": ["server"],
+      "parameters": [],
+      "executor": "crowdstrike.isolate_host",
+      "rollback_action": "restore_host",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "host_network_isolation",
+      "safety_notes": ["Host will lose all network connectivity except CrowdStrike management channel"]
+    },
+    {
+      "action_id": "restore_host",
+      "generic_action": "restore_host",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Restore Host Network",
+      "description": "Lifts network isolation from a previously isolated host",
+      "applicable_asset_types": ["server"],
+      "parameters": [],
+      "executor": "crowdstrike.restore_host",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "contain_process",
+      "generic_action": "contain_process",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Contain Process",
+      "description": "Kills a named process on the target endpoint via Falcon RTR",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "process_name", "type": "string", "required": true}],
+      "executor": "crowdstrike.contain_process",
+      "estimated_duration_seconds": 5,
+      "safety_notes": ["Verify process name is correct — killing the wrong process may destabilize the host"]
+    }
+  ]
+}

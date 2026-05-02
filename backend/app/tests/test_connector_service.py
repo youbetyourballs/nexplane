@@ -1,11 +1,11 @@
-import pytest
+﻿import pytest
 from app.services.connector_service import execute_action, run_preflight_checks, run_verification_checks, ConnectorError
 
 
 @pytest.mark.asyncio
 async def test_dns_update_returns_previous_value():
     result = await execute_action(
-        "cloudflare_mock", "update_dns_record",
+        "cloudflare", "update_dns_record",
         {"record_name": "api.example.com", "record_type": "A", "new_value": "1.2.3.4", "ttl": 300},
         ["asset-1"],
     )
@@ -18,7 +18,7 @@ async def test_dns_update_returns_previous_value():
 @pytest.mark.asyncio
 async def test_snapshot_returns_snapshot_ids():
     result = await execute_action(
-        "aws_mock", "create_snapshot",
+        "aws", "create_snapshot",
         {"snapshot_tag": "test"},
         ["asset-1", "asset-2"],
     )
@@ -30,7 +30,7 @@ async def test_snapshot_returns_snapshot_ids():
 @pytest.mark.asyncio
 async def test_remote_command_approved_template_succeeds():
     result = await execute_action(
-        "ssh_mock", "execute_template",
+        "ssh", "execute_template",
         {"template_id": "restart_service", "parameters": {"service_name": "nginx"}},
         ["host-1"],
     )
@@ -42,7 +42,7 @@ async def test_remote_command_approved_template_succeeds():
 async def test_remote_command_unapproved_template_raises():
     with pytest.raises((ValueError, ConnectorError)):
         await execute_action(
-            "ssh_mock", "execute_template",
+            "ssh", "execute_template",
             {"template_id": "rm_everything", "parameters": {}},
             ["host-1"],
         )
@@ -51,7 +51,7 @@ async def test_remote_command_unapproved_template_raises():
 @pytest.mark.asyncio
 async def test_microsegmentation_staged_only():
     result = await execute_action(
-        "paloalto_mock", "stage_policy",
+        "paloalto", "stage_policy",
         {"policy_rules": [{"src": "a", "dst": "b", "port": 443}]},
         ["asset-1"],
     )
@@ -82,8 +82,10 @@ async def test_verification_passes_for_mock():
 @pytest.mark.asyncio
 async def test_rollback_dns_via_execute_action():
     result = await execute_action(
-        "cloudflare_mock", "restore_dns_record",
+        "cloudflare", "restore_dns_record",
         {"record_name": "api.example.com", "previous_value": "10.0.0.1"},
         [],
     )
     assert result["restored_value"] == "10.0.0.1"
+
+

@@ -1,0 +1,19 @@
+{
+  "connector_type": "qualys",
+  "display_name": "Qualys",
+  "credential_fields": [
+    {"name": "api_url", "label": "API URL", "type": "string", "required": true, "placeholder": "https://qualysapi.qualys.com"},
+    {"name": "username", "label": "Username", "type": "string", "required": true},
+    {"name": "password", "label": "Password", "type": "password", "required": true}
+  ],
+  "actions": [
+    {"action_id": "discover_hosts", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Hosts", "description": "All Qualys-managed hosts: IP, hostname, OS, last scan date", "applicable_asset_types": ["server"], "parameters": [], "executor": "qualys.discover_hosts", "estimated_duration_seconds": 60},
+    {"action_id": "discover_vulnerabilities", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Vulnerabilities", "description": "Vulnerability findings: QID, severity, CVE, host, status", "applicable_asset_types": ["server"], "parameters": [], "executor": "qualys.discover_vulnerabilities", "estimated_duration_seconds": 120},
+    {"action_id": "discover_scan_schedules", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Scan Schedules", "description": "Scheduled scan configurations", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "qualys.discover_scan_schedules", "estimated_duration_seconds": 15},
+    {"action_id": "discover_asset_groups", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Asset Groups", "description": "Asset groups and their IP ranges", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "qualys.discover_asset_groups", "estimated_duration_seconds": 15},
+    {"action_id": "launch_scan", "generic_action": "scan", "action_type": "change", "execution_tier": 2, "display_name": "Launch Scan", "description": "Launch a vulnerability scan against specified IPs or asset group.", "applicable_asset_types": ["server"], "parameters": [{"name": "target_ips", "type": "string", "required": false}, {"name": "asset_group_ids", "type": "string", "required": false}, {"name": "option_profile_id", "type": "string", "required": false}], "executor": "qualys.launch_scan", "estimated_duration_seconds": 30},
+    {"action_id": "launch_compliance_scan", "generic_action": "compliance_check", "action_type": "change", "execution_tier": 2, "display_name": "Launch Compliance Scan", "description": "Launch a policy compliance scan.", "applicable_asset_types": ["server"], "parameters": [{"name": "policy_id", "type": "string", "required": true}, {"name": "target_ips", "type": "string", "required": false}], "executor": "qualys.launch_compliance_scan", "estimated_duration_seconds": 30},
+    {"action_id": "verify_remediation", "generic_action": "verify_fix", "action_type": "change", "execution_tier": 2, "display_name": "Verify Remediation", "description": "Run a targeted re-scan to verify a vulnerability was fixed.", "applicable_asset_types": ["server"], "parameters": [{"name": "host_ip", "type": "string", "required": true}, {"name": "qid", "type": "string", "required": true}], "executor": "qualys.verify_remediation", "estimated_duration_seconds": 60},
+    {"action_id": "patch_vulnerability", "generic_action": "patch", "action_type": "change", "execution_tier": 3, "display_name": "Patch Vulnerability", "description": "Trigger Qualys Patch Management for a host/vulnerability.", "applicable_asset_types": ["server"], "parameters": [{"name": "host_id", "type": "string", "required": true}, {"name": "qid", "type": "string", "required": true}], "executor": "qualys.patch_vulnerability", "estimated_duration_seconds": 120, "blast_radius_hint": "patch_deployment"}
+  ]
+}

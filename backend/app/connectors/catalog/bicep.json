@@ -1,0 +1,18 @@
+{
+  "connector_type": "bicep",
+  "display_name": "Azure Bicep",
+  "credential_fields": [
+    {"name": "tenant_id", "label": "Tenant ID", "type": "string", "required": true},
+    {"name": "client_id", "label": "Client ID", "type": "string", "required": true},
+    {"name": "client_secret", "label": "Client Secret", "type": "password", "required": true},
+    {"name": "subscription_id", "label": "Subscription ID", "type": "string", "required": true}
+  ],
+  "actions": [
+    {"action_id": "discover_deployments", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Deployments", "description": "All ARM deployments: name, status, mode, timestamp", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "bicep.discover_deployments", "estimated_duration_seconds": 30},
+    {"action_id": "discover_deployment_operations", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Deployment Operations", "description": "Operations within a specific deployment", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "deployment_name", "type": "string", "required": true}, {"name": "resource_group", "type": "string", "required": true}], "executor": "bicep.discover_deployment_operations", "estimated_duration_seconds": 15},
+    {"action_id": "validate_template", "generic_action": "plan", "action_type": "change", "execution_tier": 2, "display_name": "Validate Template", "description": "Validate an ARM/Bicep template without deploying.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "resource_group", "type": "string", "required": true}, {"name": "template", "type": "object", "required": true}], "executor": "bicep.validate_template", "estimated_duration_seconds": 15},
+    {"action_id": "create_deployment", "generic_action": "apply", "action_type": "change", "execution_tier": 3, "display_name": "Create Deployment", "description": "Deploy an ARM/Bicep template.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "resource_group", "type": "string", "required": true}, {"name": "deployment_name", "type": "string", "required": true}, {"name": "template", "type": "object", "required": true}, {"name": "parameters", "type": "object", "required": false}], "executor": "bicep.create_deployment", "estimated_duration_seconds": 120, "blast_radius_hint": "infrastructure_change"},
+    {"action_id": "delete_deployment", "generic_action": "destroy", "action_type": "change", "execution_tier": 3, "display_name": "Delete Deployment", "description": "Delete an ARM deployment record.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "resource_group", "type": "string", "required": true}, {"name": "deployment_name", "type": "string", "required": true}], "executor": "bicep.delete_deployment", "estimated_duration_seconds": 30},
+    {"action_id": "cancel_deployment", "generic_action": "cancel_job", "action_type": "change", "execution_tier": 2, "display_name": "Cancel Deployment", "description": "Cancel an in-progress deployment.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "resource_group", "type": "string", "required": true}, {"name": "deployment_name", "type": "string", "required": true}], "executor": "bicep.cancel_deployment", "estimated_duration_seconds": 10}
+  ]
+}

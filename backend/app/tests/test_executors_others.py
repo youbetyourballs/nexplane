@@ -1,7 +1,7 @@
-import pytest
-from app.connectors.executors.okta_mock import generate_key, distribute_key, verify_consumers, schedule_revoke, cancel_revoke
-from app.connectors.executors.ssh_mock import validate_template, execute_template, collect_output, install_agent, uninstall_agent, check_prerequisites, download_package, start_service
-from app.connectors.executors.paloalto_mock import analyze_flows, generate_diff, stage_policy, remove_staged_policy, validate_staged
+﻿import pytest
+from app.connectors.executors.okta import generate_key, distribute_key, verify_consumers, schedule_revoke, cancel_revoke
+from app.connectors.executors.ssh import validate_template, execute_template, collect_output, install_agent, uninstall_agent, check_prerequisites, download_package, start_service
+from app.connectors.executors.paloalto import analyze_flows, generate_diff, stage_policy, remove_staged_policy, validate_staged
 
 
 @pytest.mark.asyncio
@@ -61,3 +61,5 @@ async def test_stage_policy_rollback_removes():
     result = await stage_policy.rollback({}, {"staged_policy_id": "pol-abc123"}, None)
     assert result["rolled_back"] is True
     assert result["policy_id"] == "pol-abc123"
+
+

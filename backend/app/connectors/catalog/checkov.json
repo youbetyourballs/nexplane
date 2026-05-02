@@ -1,0 +1,13 @@
+{
+  "connector_type": "checkov",
+  "display_name": "Checkov",
+  "credential_fields": [
+    {"name": "repo_path", "label": "IaC Repository Path", "type": "string", "required": true, "placeholder": "/app/iac-repos/myrepo"},
+    {"name": "framework", "label": "Framework", "type": "string", "required": false, "default": "all", "description": "terraform, cloudformation, kubernetes, arm, or all"}
+  ],
+  "actions": [
+    {"action_id": "scan_iac", "generic_action": "scan", "action_type": "ingest", "execution_tier": 1, "display_name": "Scan IaC", "description": "Run Checkov against repo_path, return findings: check ID, severity, resource, file, guideline", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "checkov.scan_iac", "estimated_duration_seconds": 120},
+    {"action_id": "scan_secrets", "generic_action": "scan", "action_type": "ingest", "execution_tier": 1, "display_name": "Scan for Secrets", "description": "Run Checkov secrets detection across all files.", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "checkov.scan_secrets", "estimated_duration_seconds": 120},
+    {"action_id": "get_compliance_summary", "generic_action": "compliance_check", "action_type": "ingest", "execution_tier": 1, "display_name": "Get Compliance Summary", "description": "Return pass/fail counts by compliance framework (CIS, NIST, PCI-DSS).", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "checkov.get_compliance_summary", "estimated_duration_seconds": 120}
+  ]
+}

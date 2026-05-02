@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from pydantic import ValidationError
 from app.schemas.asset import AssetUpdate, BulkTagOperation
 
@@ -57,6 +57,7 @@ def test_asset_type_includes_identity():
 
 def test_connector_type_includes_new_connectors():
     from app.models.connector import ConnectorType
-    assert ConnectorType.active_directory_mock == "active_directory_mock"
-    assert ConnectorType.crowdstrike_mock == "crowdstrike_mock"
-    assert ConnectorType.tenable_mock == "tenable_mock"
+    assert ConnectorType.active_directory == "active_directory"
+    assert ConnectorType.crowdstrike == "crowdstrike"
+    assert ConnectorType.tenable == "tenable"
+

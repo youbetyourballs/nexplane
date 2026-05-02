@@ -1,4 +1,4 @@
-import pathlib
+﻿import pathlib
 import uuid
 import pytest
 from app.models.asset import Asset, AssetType, Environment, Criticality
@@ -57,7 +57,7 @@ def test_dns_step_3_has_rollback_action():
     plan = generate_plan(cr, assets, safety)
     execute_step = plan.generated_steps[2]  # update_dns_record
     assert execute_step["rollback_action"] == "restore_dns_record"
-    assert execute_step["rollback_connector_type"] == "cloudflare_mock"
+    assert execute_step["rollback_connector_type"] == "cloudflare"
 
 
 def test_snapshot_generates_three_steps():
@@ -120,3 +120,4 @@ def test_verification_plan_has_checks():
     plan = generate_plan(cr, assets, safety)
     assert "checks" in plan.verification_plan
     assert len(plan.verification_plan["checks"]) >= 1
+
