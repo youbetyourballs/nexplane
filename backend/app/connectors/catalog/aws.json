@@ -324,6 +324,136 @@
       "estimated_duration_seconds": 60,
       "blast_radius_hint": "host_service_interruption",
       "safety_notes": ["Only approved SSM documents may be executed"]
+    },
+    {
+      "action_id": "capture_instance_state",
+      "generic_action": "capture_instance_state",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Capture Instance State",
+      "description": "Record current EC2 instance state, IPs, and config for rollback reference",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true, "description": "EC2 instance ID"}
+      ],
+      "executor": "aws.capture_instance_state",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "stop_instance",
+      "generic_action": "stop_instance",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Stop EC2 Instance",
+      "description": "Gracefully stop a running EC2 instance. Rollback: start the instance.",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true, "description": "EC2 instance ID"}
+      ],
+      "executor": "aws.stop_instance",
+      "estimated_duration_seconds": 30,
+      "rollback_action": "start_instance"
+    },
+    {
+      "action_id": "start_instance",
+      "generic_action": "start_instance",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Start EC2 Instance",
+      "description": "Start a stopped EC2 instance. Rollback: stop the instance.",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true, "description": "EC2 instance ID"}
+      ],
+      "executor": "aws.start_instance",
+      "estimated_duration_seconds": 30,
+      "rollback_action": "stop_instance"
+    },
+    {
+      "action_id": "reboot_instance",
+      "generic_action": "reboot_instance",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Reboot EC2 Instance",
+      "description": "Soft reboot. Instance stays on the same host and keeps its IP.",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true, "description": "EC2 instance ID"}
+      ],
+      "executor": "aws.reboot_instance",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "wait_instance_state",
+      "generic_action": "wait_instance_state",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Wait for Instance State",
+      "description": "Poll until EC2 instance reaches the target state (running or stopped).",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true},
+        {"name": "target_state", "type": "string", "required": true, "description": "running or stopped"}
+      ],
+      "executor": "aws.wait_instance_state",
+      "estimated_duration_seconds": 120
+    },
+    {
+      "action_id": "resolve_launch_config",
+      "generic_action": "resolve_launch_config",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Resolve Launch Configuration",
+      "description": "Build EC2 launch parameters from mode: quick (free-tier defaults), clone (copy source instance), or spec (operator-provided).",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "mode", "type": "string", "required": true, "description": "quick, clone, or spec"},
+        {"name": "name", "type": "string", "required": true},
+        {"name": "os", "type": "string", "required": false, "description": "amazon_linux or ubuntu (quick mode only)"},
+        {"name": "source_instance_id", "type": "string", "required": false, "description": "EC2 instance to clone (clone mode only)"},
+        {"name": "ami_id", "type": "string", "required": false},
+        {"name": "instance_type", "type": "string", "required": false},
+        {"name": "subnet_id", "type": "string", "required": false},
+        {"name": "security_group_ids", "type": "array", "required": false}
+      ],
+      "executor": "aws.resolve_launch_config",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "launch_instance",
+      "generic_action": "launch_instance",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Launch EC2 Instance",
+      "description": "Launch a new EC2 instance using resolved config. Rollback: terminate the launched instance.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "ami_id", "type": "string", "required": true},
+        {"name": "instance_type", "type": "string", "required": true},
+        {"name": "subnet_id", "type": "string", "required": true},
+        {"name": "security_group_ids", "type": "array", "required": true},
+        {"name": "name", "type": "string", "required": true}
+      ],
+      "executor": "aws.launch_instance",
+      "estimated_duration_seconds": 30,
+      "rollback_action": "terminate_instance",
+      "blast_radius_hint": "new_resource"
+    },
+    {
+      "action_id": "terminate_instance",
+      "generic_action": "terminate_instance",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Terminate EC2 Instance",
+      "description": "Permanently terminate an EC2 instance. Requires confirm_terminate=true. Irreversible.",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true},
+        {"name": "confirm_terminate", "type": "boolean", "required": true}
+      ],
+      "executor": "aws.terminate_instance",
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "destructive"
     }
   ]
 }
