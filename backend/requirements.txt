@@ -16,3 +16,17 @@ aiosqlite==0.20.0
 greenlet==3.1.1
 anthropic>=0.40.0
 cryptography>=43.0.0
+boto3>=1.35.0
+azure-identity>=1.19.0
+azure-mgmt-network>=27.0.0
+azure-mgmt-compute>=33.0.0
+azure-mgmt-storage>=22.0.0
+azure-storage-blob>=12.23.0
+ldap3>=2.9.1
+crowdstrike-falconpy>=1.4.0
+pytenable>=1.5.0
+pan-os-python>=1.12.0
+okta>=2.9.0
+paramiko>=3.5.0
+apscheduler>=3.10.0
+reactflow
