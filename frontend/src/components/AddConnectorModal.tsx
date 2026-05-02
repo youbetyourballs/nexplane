@@ -4,28 +4,28 @@ import { connectorsApi } from "../api/endpoints";
 import type { ConnectorRead, ConnectorType } from "../types/api";
 
 const CONNECTOR_LABELS: Record<ConnectorType, string> = {
-  aws_mock: "AWS",
-  azure_mock: "Azure",
-  cloudflare_mock: "Cloudflare",
-  okta_mock: "Okta",
-  paloalto_mock: "Palo Alto",
-  ssh_runner_mock: "SSH Runner",
-  active_directory_mock: "Active Directory",
-  crowdstrike_mock: "CrowdStrike Falcon",
-  tenable_mock: "Tenable",
+  aws: "Amazon Web Services",
+  azure: "Microsoft Azure",
+  cloudflare: "Cloudflare",
+  okta: "Okta",
+  paloalto: "Palo Alto Networks",
+  ssh: "SSH Runner",
+  active_directory: "Active Directory",
+  crowdstrike: "CrowdStrike Falcon",
+  tenable: "Tenable",
   nexplane_agent: "Nexplane Agent",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
-  aws_mock: "☁️",
-  azure_mock: "🔷",
-  cloudflare_mock: "🟠",
-  okta_mock: "🔐",
-  paloalto_mock: "🛡️",
-  ssh_runner_mock: "🖥️",
-  active_directory_mock: "🏢",
-  crowdstrike_mock: "🦅",
-  tenable_mock: "🔍",
+  aws: "☁️",
+  azure: "🔷",
+  cloudflare: "🟠",
+  okta: "🔐",
+  paloalto: "🛡️",
+  ssh: "🖥️",
+  active_directory: "🏢",
+  crowdstrike: "🦅",
+  tenable: "🔍",
   nexplane_agent: "🤖",
 };
 
@@ -38,8 +38,8 @@ interface Props {
 }
 
 export default function AddConnectorModal({ token, onClose, onCreated }: Props) {
-  const [connectorType, setConnectorType] = useState<ConnectorType>("aws_mock");
-  const [name, setName] = useState<string>(CONNECTOR_LABELS["aws_mock"]);
+  const [connectorType, setConnectorType] = useState<ConnectorType>("aws");
+  const [name, setName] = useState<string>(CONNECTOR_LABELS["aws"]);
 
   function handleTypeChange(type: ConnectorType) {
     setConnectorType(type);

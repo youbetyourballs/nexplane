@@ -1,4 +1,4 @@
-import pathlib
+﻿import pathlib
 import pytest
 from app.connectors.catalog_service import ActionCatalogService, ActionOption
 
@@ -7,8 +7,8 @@ CATALOG_DIR = pathlib.Path(__file__).parent.parent / "connectors" / "catalog"
 
 def test_load_builds_connector_index():
     svc = ActionCatalogService(CATALOG_DIR)
-    assert "cloudflare_mock" in svc._catalog
-    assert len(svc._catalog["cloudflare_mock"]) == 5
+    assert "cloudflare" in svc._catalog
+    assert len(svc._catalog["cloudflare"]) == 5
 
 
 def test_load_builds_generic_index():
@@ -16,7 +16,7 @@ def test_load_builds_generic_index():
     assert "update_dns_record" in svc._generic_index
     options = svc._generic_index["update_dns_record"]
     assert len(options) == 1
-    assert options[0].connector_type == "cloudflare_mock"
+    assert options[0].connector_type == "cloudflare"
     assert options[0].action_id == "update_dns_record"
     assert options[0].execution_tier == 1
 
@@ -24,9 +24,9 @@ def test_load_builds_generic_index():
 def test_load_indexes_all_connectors():
     svc = ActionCatalogService(CATALOG_DIR)
     assert set(svc._catalog.keys()) == {
-        "cloudflare_mock", "aws_mock", "okta_mock", "ssh_mock", "paloalto_mock",
-        "active_directory_mock", "crowdstrike_mock", "tenable_mock", "azure_mock",
-        "nexplane_agent_mock",
+        "cloudflare", "aws", "okta", "ssh", "paloalto",
+        "active_directory", "crowdstrike", "tenable", "azure",
+        "nexplane_agent",
     }
 
 
@@ -34,7 +34,7 @@ def test_get_options_for_action_returns_sorted_by_tier():
     svc = ActionCatalogService(CATALOG_DIR)
     options = svc.get_options_for_action("execute_template")
     assert len(options) == 1
-    assert options[0].connector_type == "ssh_mock"
+    assert options[0].connector_type == "ssh"
     assert options[0].execution_tier == 5
 
 
@@ -49,24 +49,24 @@ def test_get_options_filters_by_asset_type():
 
 def test_get_options_filters_by_active_connectors():
     svc = ActionCatalogService(CATALOG_DIR)
-    options = svc.get_options_for_action("update_dns_record", active_connector_types=["aws_mock"])
+    options = svc.get_options_for_action("update_dns_record", active_connector_types=["aws"])
     assert len(options) == 0
 
-    options = svc.get_options_for_action("update_dns_record", active_connector_types=["cloudflare_mock"])
+    options = svc.get_options_for_action("update_dns_record", active_connector_types=["cloudflare"])
     assert len(options) == 1
 
 
 def test_get_action_def_returns_correct_def():
     svc = ActionCatalogService(CATALOG_DIR)
-    defn = svc.get_action_def("cloudflare_mock", "update_dns_record")
-    assert defn["executor"] == "cloudflare_mock.update_dns_record"
+    defn = svc.get_action_def("cloudflare", "update_dns_record")
+    assert defn["executor"] == "cloudflare.update_dns_record"
     assert defn["rollback_action"] == "restore_dns_record"
 
 
 def test_get_action_def_raises_for_unknown():
     svc = ActionCatalogService(CATALOG_DIR)
     with pytest.raises(KeyError):
-        svc.get_action_def("cloudflare_mock", "does_not_exist")
+        svc.get_action_def("cloudflare", "does_not_exist")
 
 
 def test_list_generic_actions_change_only():
@@ -84,7 +84,7 @@ def test_list_generic_actions_all():
 
 def test_get_executor_returns_module():
     svc = ActionCatalogService(CATALOG_DIR)
-    mod = svc.get_executor("cloudflare_mock", "update_dns_record")
+    mod = svc.get_executor("cloudflare", "update_dns_record")
     assert hasattr(mod, "execute")
     assert hasattr(mod, "rollback")
 
@@ -107,7 +107,7 @@ def test_singleton_init_and_get():
     init_catalog_service(CATALOG_DIR)
     svc = get_catalog_service()
     assert isinstance(svc, ActionCatalogService)
-    assert "cloudflare_mock" in svc._catalog
+    assert "cloudflare" in svc._catalog
 
 
 def test_all_catalog_executors_resolve():
@@ -120,3 +120,5 @@ def test_all_catalog_executors_resolve():
             assert hasattr(mod, "execute"), (
                 f"{connector_type}.{action['action_id']} executor missing execute()"
             )
+
+

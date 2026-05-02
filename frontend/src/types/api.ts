@@ -157,15 +157,15 @@ export interface AIChatRequest {
 }
 
 export type ConnectorType =
-  | "aws_mock"
-  | "azure_mock"
-  | "cloudflare_mock"
-  | "okta_mock"
-  | "paloalto_mock"
-  | "ssh_runner_mock"
-  | "active_directory_mock"
-  | "crowdstrike_mock"
-  | "tenable_mock"
+  | "aws"
+  | "azure"
+  | "cloudflare"
+  | "okta"
+  | "paloalto"
+  | "ssh"
+  | "active_directory"
+  | "crowdstrike"
+  | "tenable"
   | "nexplane_agent";
 
 export type ConnectorStatus = "active" | "inactive" | "error";

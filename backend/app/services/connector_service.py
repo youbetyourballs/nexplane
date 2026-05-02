@@ -14,12 +14,16 @@ class ConnectorError(Exception):
 async def test_connector(connector_type: str) -> dict:
     await asyncio.sleep(0.1)
     endpoint_map = {
-        "aws_mock": "https://mock.aws.nexplane.local",
-        "azure_mock": "https://mock.azure.nexplane.local",
-        "cloudflare_mock": "https://mock.cloudflare.nexplane.local",
-        "okta_mock": "https://mock.okta.nexplane.local",
-        "paloalto_mock": "https://mock.paloalto.nexplane.local",
-        "ssh_mock": "ssh://mock.runner.nexplane.local",
+        "aws": "https://ec2.amazonaws.com",
+        "azure": "https://management.azure.com",
+        "cloudflare": "https://api.cloudflare.com",
+        "okta": "https://api.okta.com",
+        "paloalto": "https://firewall.local",
+        "ssh": "ssh://runner.local",
+        "active_directory": "ldap://ad.local",
+        "crowdstrike": "https://api.crowdstrike.com",
+        "tenable": "https://cloud.tenable.com",
+        "nexplane_agent": "agent://local",
     }
     return {
         "success": True,

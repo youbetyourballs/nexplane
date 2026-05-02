@@ -1,5 +1,5 @@
-"""
-Seed script — idempotent (skips if org already exists).
+﻿"""
+Seed script â€” idempotent (skips if org already exists).
 Run: python seed.py
 """
 import asyncio
@@ -77,7 +77,7 @@ async def seed():
     async with AsyncSessionLocal() as db:
         existing = await db.get(Organization, ORG_ID)
         if existing:
-            print("Seed data already exists — skipping.")
+            print("Seed data already exists â€” skipping.")
             return
 
         org = Organization(id=ORG_ID, name="Acme Security Corp")
@@ -115,22 +115,22 @@ async def seed():
         db.add_all(assets)
 
         connectors = [
-            Connector(id=CONNECTOR_IDS["aws"], organization_id=ORG_ID, connector_type=ConnectorType.aws_mock,
+            Connector(id=CONNECTOR_IDS["aws"], organization_id=ORG_ID, connector_type=ConnectorType.aws,
                       name="AWS Mock Connector", status=ConnectorStatus.active,
                       scoped_permissions={"ec2": ["describe", "snapshot"], "iam": ["rotate-keys"], "sg": ["read", "write"]}),
-            Connector(id=CONNECTOR_IDS["cloudflare"], organization_id=ORG_ID, connector_type=ConnectorType.cloudflare_mock,
+            Connector(id=CONNECTOR_IDS["cloudflare"], organization_id=ORG_ID, connector_type=ConnectorType.cloudflare,
                       name="Cloudflare Mock Connector", status=ConnectorStatus.active,
                       scoped_permissions={"dns": ["read", "write"], "zones": ["read"]}),
-            Connector(id=CONNECTOR_IDS["paloalto"], organization_id=ORG_ID, connector_type=ConnectorType.paloalto_mock,
+            Connector(id=CONNECTOR_IDS["paloalto"], organization_id=ORG_ID, connector_type=ConnectorType.paloalto,
                       name="Palo Alto Mock Connector", status=ConnectorStatus.active,
                       scoped_permissions={"policy": ["read", "stage"], "flows": ["read"]}),
-            Connector(id=CONNECTOR_IDS["ssh_runner"], organization_id=ORG_ID, connector_type=ConnectorType.ssh_runner_mock,
+            Connector(id=CONNECTOR_IDS["ssh_runner"], organization_id=ORG_ID, connector_type=ConnectorType.ssh,
                       name="SSH Runner Mock Connector", status=ConnectorStatus.active,
                       scoped_permissions={"templates": ["restart_service", "check_disk_usage", "flush_dns_cache"]}),
         ]
         db.add_all(connectors)
 
-        # CR 1: DNS update — awaiting approval
+        # CR 1: DNS update â€” awaiting approval
         cr1 = ChangeRequest(
             id=CR_IDS["dns_awaiting"],
             organization_id=ORG_ID,
@@ -184,7 +184,7 @@ async def seed():
         )
         db.add(plan1)
 
-        # CR 2: Snapshot — completed
+        # CR 2: Snapshot â€” completed
         cr2 = ChangeRequest(
             id=CR_IDS["snapshot_completed"],
             organization_id=ORG_ID,
@@ -229,7 +229,7 @@ async def seed():
         )
         db.add(approval2)
 
-        # CR 3: Remote command — rejected
+        # CR 3: Remote command â€” rejected
         cr3 = ChangeRequest(
             id=CR_IDS["remote_rejected"],
             organization_id=ORG_ID,
@@ -252,7 +252,7 @@ async def seed():
         )
         db.add(approval3)
 
-        # CR 4: Microsegmentation — planned
+        # CR 4: Microsegmentation â€” planned
         cr4 = ChangeRequest(
             id=CR_IDS["microseg_planned"],
             organization_id=ORG_ID,
@@ -292,7 +292,7 @@ async def seed():
                     {"id": str(ASSET_IDS["paloalto_fw"]), "name": "Palo Alto Prod Firewall", "env": "prod", "criticality": "critical"},
                 ],
                 "affected_environments": ["prod"],
-                "estimated_impact": "Simulation mode only — no live traffic impact",
+                "estimated_impact": "Simulation mode only â€” no live traffic impact",
                 "affected_services": [],
                 "recovery_time_estimate": "None (staged)",
                 "rollback_available": True,
@@ -349,24 +349,24 @@ async def seed_expansion():
     async with AsyncSessionLocal() as db:
         existing = await db.get(Connector, NEW_CONNECTOR_IDS["crowdstrike"])
         if existing:
-            print("Expansion seed already exists — skipping.")
+            print("Expansion seed already exists â€” skipping.")
             return
 
         new_connectors = [
             Connector(id=NEW_CONNECTOR_IDS["active_directory"], organization_id=ORG_ID,
-                      connector_type=ConnectorType.active_directory_mock,
+                      connector_type=ConnectorType.active_directory,
                       name="Active Directory Mock Connector", status=ConnectorStatus.active,
                       scoped_permissions={"ldap": ["read"], "accounts": ["disable", "enable", "reset"], "groups": ["read", "write"]}),
             Connector(id=NEW_CONNECTOR_IDS["crowdstrike"], organization_id=ORG_ID,
-                      connector_type=ConnectorType.crowdstrike_mock,
+                      connector_type=ConnectorType.crowdstrike,
                       name="CrowdStrike Falcon Mock Connector", status=ConnectorStatus.active,
                       scoped_permissions={"hosts": ["read", "isolate", "restore"], "sensors": ["deploy", "remove"], "rtr": ["execute"]}),
             Connector(id=NEW_CONNECTOR_IDS["tenable"], organization_id=ORG_ID,
-                      connector_type=ConnectorType.tenable_mock,
+                      connector_type=ConnectorType.tenable,
                       name="Tenable Mock Connector", status=ConnectorStatus.active,
                       scoped_permissions={"scans": ["read", "launch"], "assets": ["read"], "vulnerabilities": ["read"]}),
             Connector(id=NEW_CONNECTOR_IDS["azure"], organization_id=ORG_ID,
-                      connector_type=ConnectorType.azure_mock,
+                      connector_type=ConnectorType.azure,
                       name="Azure Mock Connector", status=ConnectorStatus.active,
                       scoped_permissions={"compute": ["read"], "storage": ["read", "write"], "network": ["read", "write"]}),
             Connector(
@@ -443,3 +443,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

@@ -10,38 +10,38 @@ import AddConnectorModal from "../components/AddConnectorModal";
 import type { ConnectorRead, ConnectorType, ConnectorTestResult, IngestResponse } from "../types/api";
 
 const CONNECTOR_LABELS: Record<ConnectorType, string> = {
-  aws_mock: "AWS Mock",
-  azure_mock: "Azure Mock",
-  cloudflare_mock: "Cloudflare Mock",
-  okta_mock: "Okta Mock",
-  paloalto_mock: "Palo Alto Mock",
-  ssh_runner_mock: "SSH Runner Mock",
-  active_directory_mock: "Active Directory Mock",
-  crowdstrike_mock: "CrowdStrike Falcon Mock",
-  tenable_mock: "Tenable Mock",
+  aws: "Amazon Web Services",
+  azure: "Microsoft Azure",
+  cloudflare: "Cloudflare",
+  okta: "Okta",
+  paloalto: "Palo Alto Networks",
+  ssh: "SSH Runner",
+  active_directory: "Active Directory",
+  crowdstrike: "CrowdStrike Falcon",
+  tenable: "Tenable",
   nexplane_agent: "Nexplane Agent",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
-  aws_mock: "☁️",
-  azure_mock: "🔷",
-  cloudflare_mock: "🟠",
-  okta_mock: "🔐",
-  paloalto_mock: "🛡️",
-  ssh_runner_mock: "🖥️",
-  active_directory_mock: "🏢",
-  crowdstrike_mock: "🦅",
-  tenable_mock: "🔍",
+  aws: "☁️",
+  azure: "🔷",
+  cloudflare: "🟠",
+  okta: "🔐",
+  paloalto: "🛡️",
+  ssh: "🖥️",
+  active_directory: "🏢",
+  crowdstrike: "🦅",
+  tenable: "🔍",
   nexplane_agent: "🤖",
 };
 
 // Ingest action IDs per connector type (connectors that support discovery)
 const INGEST_ACTIONS: Partial<Record<ConnectorType, string>> = {
-  active_directory_mock: "discover_computers",
-  crowdstrike_mock: "discover_endpoints",
-  tenable_mock: "discover_assets",
-  azure_mock: "discover_vms",
-  paloalto_mock: "ingest_traffic_logs",
+  active_directory: "discover_computers",
+  crowdstrike: "discover_endpoints",
+  tenable: "discover_assets",
+  azure: "discover_vms",
+  paloalto: "ingest_traffic_logs",
 };
 
 const INTERVAL_LABELS: Record<number, string> = {

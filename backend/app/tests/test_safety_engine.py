@@ -1,4 +1,4 @@
-import uuid
+﻿import uuid
 import pytest
 from app.models.asset import Asset, AssetType, Environment, Criticality
 from app.models.change_request import ChangeRequest, ChangeType, RiskLevel, ChangeRequestStatus
@@ -103,10 +103,10 @@ def test_ssh_tier5_steps_add_risk():
     from app.services.safety_engine import adjust_for_execution_plan
 
     tier5_steps = [
-        {"generic_action": "execute_template", "execution_tier": 5, "connector_type": "ssh_mock"}
+        {"generic_action": "execute_template", "execution_tier": 5, "connector_type": "ssh"}
     ]
     tier1_steps = [
-        {"generic_action": "update_dns_record", "execution_tier": 1, "connector_type": "cloudflare_mock"}
+        {"generic_action": "update_dns_record", "execution_tier": 1, "connector_type": "cloudflare"}
     ]
 
     base_result = score_change_request(
@@ -116,3 +116,5 @@ def test_ssh_tier5_steps_add_risk():
     adjusted_tier5 = adjust_for_execution_plan(base_result, tier5_steps)
     adjusted_tier1 = adjust_for_execution_plan(base_result, tier1_steps)
     assert adjusted_tier5.risk_score >= adjusted_tier1.risk_score
+
+

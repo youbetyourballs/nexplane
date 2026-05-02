@@ -1,0 +1,175 @@
+{
+  "connector_type": "paloalto",
+  "display_name": "Palo Alto Networks",
+  "credential_fields": [
+    {"name": "hostname", "label": "Firewall Hostname/IP", "type": "string", "required": true},
+    {"name": "username", "label": "Username", "type": "string", "required": true},
+    {"name": "password", "label": "Password", "type": "password", "required": true}
+  ],
+  "actions": [
+    {
+      "action_id": "discover_firewall",
+      "generic_action": "discover_firewall",
+      "action_type": "ingest",
+      "display_name": "Discover Firewall",
+      "description": "Discovers the PAN-OS firewall as an asset with model, OS version, and HA status",
+      "produces_asset_types": ["firewall"],
+      "applicable_asset_types": [],
+      "executor": "paloalto.discover_firewall",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "ingest_traffic_logs",
+      "generic_action": "ingest_traffic_logs",
+      "action_type": "ingest",
+      "display_name": "Ingest Traffic Logs",
+      "description": "Ingests observed traffic flows as application assets; tags high-volume flows and enriches existing server and firewall assets",
+      "produces_asset_types": ["application", "server", "firewall"],
+      "applicable_asset_types": [],
+      "executor": "paloalto.ingest_traffic_logs",
+      "estimated_duration_seconds": 45
+    },
+    {
+      "action_id": "ingest_security_events",
+      "generic_action": "ingest_security_events",
+      "action_type": "ingest",
+      "display_name": "Ingest Security Events",
+      "description": "Tags existing assets with palo-threat-detected when the firewall logged a threat against them",
+      "produces_asset_types": ["server"],
+      "applicable_asset_types": [],
+      "executor": "paloalto.ingest_security_events",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "analyze_flows",
+      "generic_action": "analyze_flows",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Analyze Current Traffic Flows",
+      "description": "Analyzes existing traffic flows to understand current network behavior",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [],
+      "executor": "paloalto.analyze_flows",
+      "estimated_duration_seconds": 20
+    },
+    {
+      "action_id": "generate_diff",
+      "generic_action": "generate_diff",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Generate Policy Diff",
+      "description": "Generates a diff between current and proposed firewall policies",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [{"name": "policy_rules", "type": "array", "required": true}],
+      "executor": "paloalto.generate_diff",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "stage_policy",
+      "generic_action": "stage_policy",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Stage Policy (Simulation Mode)",
+      "description": "Stages the new policy in simulation mode — no traffic is affected",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "policy_rules", "type": "array", "required": true},
+        {"name": "critical_flows", "type": "array", "required": false}
+      ],
+      "executor": "paloalto.stage_policy",
+      "rollback_action": "remove_staged_policy",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "simulation_only",
+      "safety_notes": ["Simulation mode only — live enforcement requires a separate approval workflow"]
+    },
+    {
+      "action_id": "remove_staged_policy",
+      "generic_action": "remove_staged_policy",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Remove Staged Policy",
+      "description": "Removes a staged simulation-mode policy",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [{"name": "staged_policy_id", "type": "string", "required": true}],
+      "executor": "paloalto.remove_staged_policy",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "validate_staged",
+      "generic_action": "validate_staged",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Validate Staged Policy",
+      "description": "Validates that the staged policy does not block critical flows",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [{"name": "critical_flows", "type": "array", "required": false}],
+      "executor": "paloalto.validate_staged",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "enable_traffic_logging",
+      "generic_action": "enable_traffic_logging",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Enable Traffic Logging",
+      "description": "Enables enhanced traffic logging for a zone or policy rule",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "zone_name", "type": "string", "required": false},
+        {"name": "rule_name", "type": "string", "required": false}
+      ],
+      "executor": "paloalto.enable_traffic_logging",
+      "rollback_action": "disable_traffic_logging",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "disable_traffic_logging",
+      "generic_action": "disable_traffic_logging",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Disable Traffic Logging",
+      "description": "Disables enhanced traffic logging (rollback for enable_traffic_logging)",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "zone_name", "type": "string", "required": false},
+        {"name": "rule_name", "type": "string", "required": false}
+      ],
+      "executor": "paloalto.disable_traffic_logging",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "update_chokepoint_rule",
+      "generic_action": "update_chokepoint_rule",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Update Chokepoint Rule",
+      "description": "Modifies a policy rule at an identified traffic chokepoint",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "rule_name", "type": "string", "required": true},
+        {"name": "new_action", "type": "string", "required": true},
+        {"name": "destination_zones", "type": "array", "required": false}
+      ],
+      "executor": "paloalto.update_chokepoint_rule",
+      "rollback_action": "restore_chokepoint_rule",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "network_access_change",
+      "safety_notes": ["Verify rule change does not block critical flows before applying"]
+    },
+    {
+      "action_id": "restore_chokepoint_rule",
+      "generic_action": "restore_chokepoint_rule",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Restore Chokepoint Rule",
+      "description": "Restores a chokepoint rule to its previous state",
+      "applicable_asset_types": ["firewall"],
+      "parameters": [
+        {"name": "rule_name", "type": "string", "required": true},
+        {"name": "previous_state", "type": "object", "required": true}
+      ],
+      "executor": "paloalto.restore_chokepoint_rule",
+      "estimated_duration_seconds": 10
+    }
+  ]
+}

@@ -9,15 +9,15 @@ from app.database import Base
 
 
 class ConnectorType(str, enum.Enum):
-    aws_mock = "aws_mock"
-    azure_mock = "azure_mock"
-    cloudflare_mock = "cloudflare_mock"
-    okta_mock = "okta_mock"
-    paloalto_mock = "paloalto_mock"
-    ssh_runner_mock = "ssh_runner_mock"
-    active_directory_mock = "active_directory_mock"
-    crowdstrike_mock = "crowdstrike_mock"
-    tenable_mock = "tenable_mock"
+    aws = "aws"
+    azure = "azure"
+    cloudflare = "cloudflare"
+    okta = "okta"
+    paloalto = "paloalto"
+    ssh = "ssh"
+    active_directory = "active_directory"
+    crowdstrike = "crowdstrike"
+    tenable = "tenable"
     nexplane_agent = "nexplane_agent"
 
 

@@ -1,5 +1,5 @@
-import pytest
-from app.connectors.executors.cloudflare_mock import (
+﻿import pytest
+from app.connectors.executors.cloudflare import (
     capture_dns_record,
     validate_dns_target,
     update_dns_record,
@@ -62,3 +62,4 @@ async def test_wait_dns_propagation_succeeds():
     result = await wait_dns_propagation.execute({"ttl": 300}, [], None)
     assert result["action"] == "wait_dns_propagation"
     assert result["propagated"] is True
+
