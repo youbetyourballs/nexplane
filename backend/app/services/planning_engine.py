@@ -48,6 +48,29 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
         "stage_policy": {"policy_rules": desired.get("policy_rules", []), "critical_flows": desired.get("critical_flows", [])},
         "remove_staged_policy": {},
         "validate_staged": {"critical_flows": desired.get("critical_flows", [])},
+        "capture_instance_state": {"instance_id": desired.get("instance_id", "")},
+        "stop_instance":          {"instance_id": desired.get("instance_id", "")},
+        "start_instance":         {"instance_id": desired.get("instance_id", "")},
+        "reboot_instance":        {"instance_id": desired.get("instance_id", "")},
+        "wait_instance_state":    {"instance_id": desired.get("instance_id", ""), "target_state": desired.get("target_state", "running")},
+        "resolve_launch_config":  {
+            "mode": desired.get("mode", "quick"),
+            "name": desired.get("name", "nexplane-instance"),
+            "os": desired.get("os", "amazon_linux"),
+            "source_instance_id": desired.get("source_instance_id"),
+            "ami_id": desired.get("ami_id"),
+            "instance_type": desired.get("instance_type"),
+            "subnet_id": desired.get("subnet_id"),
+            "security_group_ids": desired.get("security_group_ids", []),
+        },
+        "launch_instance":        {
+            "ami_id": desired.get("ami_id", ""),
+            "instance_type": desired.get("instance_type", "t2.micro"),
+            "subnet_id": desired.get("subnet_id", ""),
+            "security_group_ids": desired.get("security_group_ids", []),
+            "name": desired.get("name", "nexplane-instance"),
+        },
+        "terminate_instance":     {"instance_id": desired.get("instance_id", ""), "confirm_terminate": desired.get("confirm_terminate", False)},
     }
     return resolvers.get(generic_action, {})
 
@@ -160,6 +183,12 @@ def _generate_rollback_plan(ct: ChangeType, desired: dict) -> dict:
         ChangeType.telemetry_agent_deploy: ("uninstall_agent", True),
         ChangeType.remote_command: ("manual", False),
         ChangeType.microsegmentation_policy: ("remove_staged_policy", True),
+        ChangeType.ec2_stop:       ("start_instance",     True),
+        ChangeType.ec2_start:      ("stop_instance",      True),
+        ChangeType.ec2_reboot:     ("none",               False),
+        ChangeType.ec2_stop_start: ("stop_if_running",    True),
+        ChangeType.ec2_launch:     ("terminate_instance", True),
+        ChangeType.ec2_terminate:  ("manual",             False),
     }
     strategy, automatic = strategies.get(ct, ("manual", False))
     return {"strategy": strategy, "description": f"Rollback via {strategy}", "estimated_duration_seconds": 30, "automatic": automatic}

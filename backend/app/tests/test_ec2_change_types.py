@@ -118,3 +118,86 @@ async def test_terminate_instance_mock_with_confirm():
     result = await execute({"instance_id": "i-abc123", "confirm_terminate": True}, [], _mock_connector())
     assert result["action"] == "terminate_instance"
     assert result["instance_id"] == "i-abc123"
+
+
+import pathlib
+import uuid
+from app.models.asset import Asset, AssetType, Environment, Criticality
+from app.models.change_request import ChangeRequest, ChangeRequestStatus
+from app.services.planning_engine import generate_plan
+from app.services.safety_engine import score_change_request
+from app.connectors.catalog_service import init_catalog_service
+
+CATALOG_DIR = pathlib.Path(__file__).parent.parent / "connectors" / "catalog"
+
+
+def setup_module(module):
+    init_catalog_service(CATALOG_DIR)
+
+
+def _make_server_asset():
+    return Asset(
+        id=uuid.uuid4(), organization_id=uuid.uuid4(), name="web-server-1",
+        asset_type=AssetType.server, environment=Environment.prod,
+        criticality=Criticality.high, asset_metadata={},
+    )
+
+
+def _make_cr(change_type, desired):
+    cr = ChangeRequest(
+        id=uuid.uuid4(), organization_id=uuid.uuid4(), requester_id=uuid.uuid4(),
+        title="Test", description="", change_type=change_type,
+        target_asset_ids=[], desired_outcome=desired, status=ChangeRequestStatus.draft,
+    )
+    return cr, [_make_server_asset()]
+
+
+def test_ec2_stop_generates_four_steps():
+    from app.models.change_request import ChangeType
+    cr, assets = _make_cr(ChangeType.ec2_stop, {"instance_id": "i-abc123", "snapshot_tag": "pre-stop"})
+    plan = generate_plan(cr, assets, score_change_request(cr, assets))
+    assert len(plan.generated_steps) == 4
+    assert plan.generated_steps[0]["generic_action"] == "capture_instance_state"
+    assert plan.generated_steps[2]["generic_action"] == "stop_instance"
+    assert plan.generated_steps[3]["generic_action"] == "wait_instance_state"
+
+
+def test_ec2_start_generates_three_steps():
+    from app.models.change_request import ChangeType
+    cr, assets = _make_cr(ChangeType.ec2_start, {"instance_id": "i-abc123"})
+    plan = generate_plan(cr, assets, score_change_request(cr, assets))
+    assert len(plan.generated_steps) == 3
+    assert plan.generated_steps[1]["generic_action"] == "start_instance"
+
+
+def test_ec2_stop_start_generates_five_steps():
+    from app.models.change_request import ChangeType
+    cr, assets = _make_cr(ChangeType.ec2_stop_start, {"instance_id": "i-abc123"})
+    plan = generate_plan(cr, assets, score_change_request(cr, assets))
+    assert len(plan.generated_steps) == 5
+    actions = [s["generic_action"] for s in plan.generated_steps]
+    assert actions == ["capture_instance_state", "stop_instance", "wait_instance_state", "start_instance", "wait_instance_state"]
+
+
+def test_ec2_launch_generates_three_steps():
+    from app.models.change_request import ChangeType
+    cr, assets = _make_cr(ChangeType.ec2_launch, {"mode": "quick", "name": "new-server", "os": "amazon_linux"})
+    plan = generate_plan(cr, assets, score_change_request(cr, assets))
+    assert len(plan.generated_steps) == 3
+    assert plan.generated_steps[0]["generic_action"] == "resolve_launch_config"
+    assert plan.generated_steps[1]["generic_action"] == "launch_instance"
+
+
+def test_ec2_launch_rollback_strategy_is_automatic():
+    from app.models.change_request import ChangeType
+    cr, assets = _make_cr(ChangeType.ec2_launch, {"mode": "quick", "name": "test"})
+    plan = generate_plan(cr, assets, score_change_request(cr, assets))
+    assert plan.rollback_plan["automatic"] is True
+
+
+def test_ec2_terminate_generates_three_steps():
+    from app.models.change_request import ChangeType
+    cr, assets = _make_cr(ChangeType.ec2_terminate, {"instance_id": "i-abc123", "confirm_terminate": True, "snapshot_tag": "pre-terminate"})
+    plan = generate_plan(cr, assets, score_change_request(cr, assets))
+    assert len(plan.generated_steps) == 3
+    assert plan.generated_steps[2]["generic_action"] == "terminate_instance"
