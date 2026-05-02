@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Key, Terminal, Copy } from "lucide-react";
 import { settingsApi } from "../api/endpoints";
+import { apiClient } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
 import { useAuth } from "../hooks/useAuth";
@@ -18,8 +19,6 @@ export function Settings() {
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
 
-  const token = localStorage.getItem("nexplane_token") ?? "";
-
   const { data: settings, isLoading } = useQuery({
     queryKey: ["settings"],
     queryFn: () => settingsApi.get(),
@@ -27,8 +26,7 @@ export function Settings() {
 
   const { data: aiProviders, refetch: refetchAIProviders } = useQuery<AIProviders>({
     queryKey: ["ai-providers"],
-    queryFn: () =>
-      fetch("/settings/ai-providers", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
+    queryFn: () => apiClient.get("/settings/ai-providers").then((r) => r.data),
   });
 
   const updateKey = useMutation({
@@ -52,11 +50,7 @@ export function Settings() {
 
   const setProviderMutation = useMutation({
     mutationFn: ({ provider, key }: { provider: string; key: string }) =>
-      fetch(`/settings/ai-providers/${provider}`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: key }),
-      }).then((r) => { if (!r.ok) throw new Error("Failed"); return r.json(); }),
+      apiClient.put(`/settings/ai-providers/${provider}`, { api_key: key }),
     onSuccess: () => {
       refetchAIProviders();
       setEditingProvider(null);
@@ -66,11 +60,7 @@ export function Settings() {
 
   const setDefaultMutation = useMutation({
     mutationFn: (provider: string) =>
-      fetch("/settings/ai-providers/default", {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ provider }),
-      }),
+      apiClient.put("/settings/ai-providers/default", { provider }),
     onSuccess: () => refetchAIProviders(),
   });
 
