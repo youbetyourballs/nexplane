@@ -11,6 +11,7 @@ import (
 	"nexplane-agent/commands/ossecurity"
 	"nexplane-agent/commands/uploadimage"
 	"nexplane-agent/commands/virtualize"
+	"nexplane-agent/commands/winharden"
 )
 
 // Result is the outcome of a command execution.
@@ -50,6 +51,19 @@ var commands = map[string]CommandFunc{
 	"deploy_ebpf_policy":              ebpf.DeployEBPFPolicyExecute,
 	"configure_ebpf_security_policy":  ebpf.ConfigureEBPFSecurityPolicyExecute,
 	"audit_ebpf_posture":              ebpf.AuditEBPFPostureExecute,
+	// Windows hardening (Spec 5c)
+	"configure_laps":                 winharden.ConfigureLAPSExecute,
+	"enable_credential_guard":        winharden.EnableCredentialGuardExecute,
+	"enforce_powershell_clm":         winharden.EnforcePowerShellCLMExecute,
+	"deploy_applocker_policy":        winharden.DeployAppLockerPolicyExecute,
+	"harden_smb":                     winharden.HardenSMBExecute,
+	"enable_bitlocker":               winharden.EnableBitLockerExecute,
+	"configure_windows_firewall":     winharden.ConfigureWindowsFirewallExecute,
+	"harden_tls_protocols":           winharden.HardenTLSProtocolsExecute,
+	"harden_rdp":                     winharden.HardenRDPExecute,
+	"configure_windows_audit_policy": winharden.ConfigureWindowsAuditPolicyExecute,
+	"audit_scheduled_tasks":          winharden.AuditScheduledTasksExecute,
+	"harden_registry":                winharden.HardenRegistryExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -74,6 +88,18 @@ var rollbacks = map[string]CommandFunc{
 	// eBPF (Spec 5a)
 	"deploy_ebpf_policy":              ebpf.DeployEBPFPolicyRollback,
 	"configure_ebpf_security_policy":  ebpf.ConfigureEBPFSecurityPolicyRollback,
+	// Windows hardening (Spec 5c)
+	"configure_laps":                 winharden.ConfigureLAPSRollback,
+	"enable_credential_guard":        winharden.EnableCredentialGuardRollback,
+	"enforce_powershell_clm":         winharden.EnforcePowerShellCLMRollback,
+	"deploy_applocker_policy":        winharden.DeployAppLockerPolicyRollback,
+	"harden_smb":                     winharden.HardenSMBRollback,
+	"enable_bitlocker":               winharden.EnableBitLockerRollback,
+	"configure_windows_firewall":     winharden.ConfigureWindowsFirewallRollback,
+	"harden_tls_protocols":           winharden.HardenTLSProtocolsRollback,
+	"harden_rdp":                     winharden.HardenRDPRollback,
+	"configure_windows_audit_policy": winharden.ConfigureWindowsAuditPolicyRollback,
+	"harden_registry":                winharden.HardenRegistryRollback,
 }
 
 // Dispatch routes a command to its implementation.
