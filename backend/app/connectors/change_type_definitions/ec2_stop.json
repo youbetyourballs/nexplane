@@ -1,0 +1,12 @@
+{
+  "change_type": "ec2_stop",
+  "display_name": "Stop EC2 Instance",
+  "steps": [
+    {"generic_action": "capture_instance_state", "purpose": "preflight_capture",  "required": true},
+    {"generic_action": "create_snapshot",        "purpose": "preflight_capture",  "required": true},
+    {"generic_action": "stop_instance",          "purpose": "execute",            "required": true},
+    {"generic_action": "wait_instance_state",    "purpose": "verify",             "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["api_check"]
+}

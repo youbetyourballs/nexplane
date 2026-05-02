@@ -1,0 +1,11 @@
+{
+  "change_type": "ec2_launch",
+  "display_name": "Launch EC2 Instance",
+  "steps": [
+    {"generic_action": "resolve_launch_config", "purpose": "preflight_validate", "required": true},
+    {"generic_action": "launch_instance",       "purpose": "execute",            "required": true},
+    {"generic_action": "wait_instance_state",   "purpose": "verify",             "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "no_concurrent_changes"],
+  "verification_methods": ["api_check"]
+}
