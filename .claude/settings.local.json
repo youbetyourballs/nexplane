@@ -1,6 +1,8 @@
 {
   "permissions": {
     "allow": [
+      "Bash(*)",
+      "PowerShell(*)",
       "Bash(docker run *)",
       "Bash(python -m pytest backend/app/tests/test_project_schemas.py -v)",
       "Bash(pip install *)",
@@ -63,7 +65,12 @@
       "Bash(\"C:/Program Files/Go/bin/go.exe\" test ./fingerprint/... -v)",
       "Bash(\"C:/Program Files/Go/bin/go.exe\" get golang.org/x/sys@latest)",
       "PowerShell($env:GOOS=\"linux\"; $env:GOARCH=\"amd64\"; & \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" build -C \"f:/Nexplane/nexplane/.worktrees/agent-binary/agent\" -o \"$env:TEMP\\\\agent-fp-test\" ./; $exitCode = $LASTEXITCODE; Remove-Item \"$env:TEMP\\\\agent-fp-test\" -ErrorAction SilentlyContinue; Remove-Item Env:\\\\GOOS; Remove-Item Env:\\\\GOARCH; Write-Output \"Exit code: $exitCode\")",
-      "Bash(go build *)"
+      "Bash(go build *)",
+      "Read",
+      "Glob",
+      "Grep",
+      "Edit",
+      "Write"
     ]
   }
 }
