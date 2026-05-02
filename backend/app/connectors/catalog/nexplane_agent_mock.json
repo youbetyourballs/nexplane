@@ -102,6 +102,109 @@
       "executor": "nexplane_agent_mock.upload_image",
       "rollback_action": "upload_image",
       "estimated_duration_seconds": 1800
+    },
+    {
+      "action_id": "configure_pam",
+      "generic_action": "configure_pam",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Configure PAM Hardening",
+      "description": "Applies CIS/STIG PAM policies: password complexity, account lockout, session timeout. Supports pam_pwquality and pam_faillock (modern) or pam_cracklib and pam_tally2 (legacy).",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "profile", "type": "string", "required": false, "default": "cis_level1"},
+        {"name": "params", "type": "object", "required": false}
+      ],
+      "executor": "nexplane_agent_mock.configure_pam",
+      "rollback_action": "configure_pam",
+      "estimated_duration_seconds": 15,
+      "safety_notes": [
+        "Misconfigured PAM can lock out all users including root — test in non-production first",
+        "lockout_duration_seconds applies to all accounts; ensure break-glass access exists"
+      ]
+    },
+    {
+      "action_id": "harden_ssh",
+      "generic_action": "harden_ssh",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Harden SSH Configuration",
+      "description": "Writes /etc/ssh/sshd_config.d/99-nexplane-hardening.conf with secure defaults: no root login, key-only auth, cipher/MAC allowlist, idle timeout. Validates with sshd -t before reloading.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "settings", "type": "object", "required": false}
+      ],
+      "executor": "nexplane_agent_mock.harden_ssh",
+      "rollback_action": "harden_ssh",
+      "estimated_duration_seconds": 10,
+      "safety_notes": [
+        "Disabling password_authentication requires key-based auth to be working first",
+        "Changing SSH port requires updating external firewall rules before reloading"
+      ]
+    },
+    {
+      "action_id": "audit_users_and_groups",
+      "generic_action": "audit_users_and_groups",
+      "action_type": "ingest",
+      "execution_tier": 3,
+      "display_name": "Audit Users and Groups",
+      "description": "Read-only audit: surfaces accounts with no password expiry, UID 0 non-root accounts, service accounts with interactive shells, empty passwords, and sudo group members.",
+      "applicable_asset_types": ["server", "identity"],
+      "parameters": [],
+      "executor": "nexplane_agent_mock.audit_users_and_groups",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "audit_privesc_vulnerabilities",
+      "generic_action": "audit_privesc_vulnerabilities",
+      "action_type": "ingest",
+      "execution_tier": 3,
+      "display_name": "Audit Privilege Escalation Vulnerabilities",
+      "description": "Detection-only check for known Linux LPE conditions: PwnKit (CVE-2021-4034), DirtyPipe (CVE-2022-0847), Dirty COW (CVE-2016-5195), unexpected SUID binaries, writable cron/service files, misconfigured sudo rules.",
+      "applicable_asset_types": ["server"],
+      "parameters": [],
+      "executor": "nexplane_agent_mock.audit_privesc_vulnerabilities",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "manage_ca_certificates",
+      "generic_action": "manage_ca_certificates",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Manage CA Certificates",
+      "description": "Installs or removes CA certificates in the OS trust store. Detects Debian (update-ca-certificates) vs RHEL (update-ca-trust extract). Validates PEM before installing.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "certificate", "type": "string", "required": false},
+        {"name": "cert_name", "type": "string", "required": true}
+      ],
+      "executor": "nexplane_agent_mock.manage_ca_certificates",
+      "rollback_action": "manage_ca_certificates",
+      "estimated_duration_seconds": 10,
+      "safety_notes": [
+        "Installing an untrusted CA certificate compromises TLS security for all processes on this host"
+      ]
+    },
+    {
+      "action_id": "configure_ntp",
+      "generic_action": "configure_ntp",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Configure NTP Time Sources",
+      "description": "Configures NTP servers via chrony, systemd-timesyncd, or ntpd (auto-detected). Critical for audit log timestamp integrity. Supports iburst and chrony makestep.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "servers", "type": "array", "required": true},
+        {"name": "require_iburst", "type": "boolean", "required": false, "default": true},
+        {"name": "makestep", "type": "string", "required": false, "default": "1.0 3"}
+      ],
+      "executor": "nexplane_agent_mock.configure_ntp",
+      "rollback_action": "configure_ntp",
+      "estimated_duration_seconds": 10,
+      "safety_notes": [
+        "NTP misconfiguration causes clock drift which invalidates audit log timestamps"
+      ]
     }
   ]
 }
