@@ -12,6 +12,8 @@ import (
 	"nexplane-agent/commands/uploadimage"
 	"nexplane-agent/commands/virtualize"
 	"nexplane-agent/commands/winharden"
+	"nexplane-agent/commands/crossplatform"
+	"nexplane-agent/commands/linuxupgrade"
 )
 
 // Result is the outcome of a command execution.
@@ -64,6 +66,12 @@ var commands = map[string]CommandFunc{
 	"configure_windows_audit_policy": winharden.ConfigureWindowsAuditPolicyExecute,
 	"audit_scheduled_tasks":          winharden.AuditScheduledTasksExecute,
 	"harden_registry":                winharden.HardenRegistryExecute,
+	// Cross-platform (Spec 5d)
+	"manage_tls_certificates":  crossplatform.ManageTLSCertificatesExecute,
+	"configure_dns_resolver":   crossplatform.ConfigureDNSResolverExecute,
+	"audit_software_inventory": crossplatform.AuditSoftwareInventoryExecute,
+	// Linux upgrade (Spec 5e)
+	"upgrade_linux_instance":   linuxupgrade.UpgradeLinuxInstanceExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -100,6 +108,9 @@ var rollbacks = map[string]CommandFunc{
 	"harden_rdp":                     winharden.HardenRDPRollback,
 	"configure_windows_audit_policy": winharden.ConfigureWindowsAuditPolicyRollback,
 	"harden_registry":                winharden.HardenRegistryRollback,
+	"manage_tls_certificates": crossplatform.ManageTLSCertificatesRollback,
+	"configure_dns_resolver":  crossplatform.ConfigureDNSResolverRollback,
+	"upgrade_linux_instance":  linuxupgrade.UpgradeLinuxInstanceRollback,
 }
 
 // Dispatch routes a command to its implementation.
