@@ -6,6 +6,7 @@ import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
 import CredentialModal from "../components/CredentialModal";
 import ScheduleModal from "../components/ScheduleModal";
+import AddConnectorModal from "../components/AddConnectorModal";
 import type { ConnectorRead, ConnectorType, ConnectorTestResult, IngestResponse } from "../types/api";
 
 const CONNECTOR_LABELS: Record<ConnectorType, string> = {
@@ -137,6 +138,7 @@ export function Connectors() {
   const [ingestResults, setIngestResults] = useState<Record<string, IngestResponse>>({});
   const [credModalConnector, setCredModalConnector] = useState<ConnectorRead | null>(null);
   const [scheduleModal, setScheduleModal] = useState<{ connector: ConnectorRead; existing: any } | null>(null);
+  const [addModalOpen, setAddModalOpen] = useState(false);
 
   const token = localStorage.getItem("nexplane_token") ?? "";
 
@@ -168,10 +170,19 @@ export function Connectors() {
 
   return (
     <div className="p-8">
-      <PageHeader
-        title="Connectors"
-        subtitle="Mock connectors for infrastructure target systems"
-      />
+      <div className="flex items-center justify-between mb-6">
+        <PageHeader
+          title="Connectors"
+          subtitle="Integrations with infrastructure target systems"
+        />
+        <button
+          onClick={() => setAddModalOpen(true)}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700"
+        >
+          <span className="text-base leading-none">+</span>
+          Add Connector
+        </button>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {(data ?? []).map((connector) => {
@@ -285,6 +296,17 @@ export function Connectors() {
           existing={scheduleModal.existing}
           token={token}
           onClose={() => setScheduleModal(null)}
+        />
+      )}
+      {addModalOpen && (
+        <AddConnectorModal
+          token={token}
+          onClose={() => setAddModalOpen(false)}
+          onCreated={(connector) => {
+            setAddModalOpen(false);
+            qc.invalidateQueries({ queryKey: ["connectors"] });
+            setCredModalConnector(connector);
+          }}
         />
       )}
     </div>
