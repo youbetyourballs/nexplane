@@ -14,6 +14,10 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   crowdstrike: "CrowdStrike Falcon",
   tenable: "Tenable",
   nexplane_agent: "Nexplane Agent",
+  gcp: "Google Cloud Platform",
+  runzero: "RunZero",
+  wiz: "Wiz",
+  entra_id: "Microsoft Entra ID",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -27,6 +31,10 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   crowdstrike: "🦅",
   tenable: "🔍",
   nexplane_agent: "🤖",
+  gcp: "☁️",
+  runzero: "🌐",
+  wiz: "🛡️",
+  entra_id: "👥",
 };
 
 const ALL_TYPES = Object.keys(CONNECTOR_LABELS) as ConnectorType[];

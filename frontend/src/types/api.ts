@@ -166,7 +166,11 @@ export type ConnectorType =
   | "active_directory"
   | "crowdstrike"
   | "tenable"
-  | "nexplane_agent";
+  | "nexplane_agent"
+  | "gcp"
+  | "runzero"
+  | "wiz"
+  | "entra_id";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 
