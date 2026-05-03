@@ -13,7 +13,7 @@ from app.routers import agent as agent_router
 from app.routers import vulnerability as vulnerability_router
 from app.routers import compliance as compliance_router
 from app.routers import runbooks as runbooks_router
-from app.routers import access_reviews as access_reviews_router
+from app.routers import review_campaigns as review_campaigns_router
 from app.routers import maintenance_windows as maintenance_windows_router
 from app.routers import ir as ir_router
 from app.routers import current_user
@@ -65,7 +65,7 @@ app.include_router(vulnerability_router.router)
 app.include_router(compliance_router.router)
 app.include_router(runbooks_router.router)
 app.include_router(runbooks_router.execution_router)
-app.include_router(access_reviews_router.router)
+app.include_router(review_campaigns_router.router)
 app.include_router(maintenance_windows_router.router)
 app.include_router(ir_router.router)
 
