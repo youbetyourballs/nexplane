@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // CheckAndUpdate fetches the server version and, if different from currentVersion,
@@ -21,7 +22,9 @@ import (
 // Returns (false, nil) if already up to date.
 // Returns (false, err) if anything failed — caller should log and continue.
 func CheckAndUpdate(ctx context.Context, controlPlaneURL, currentVersion string) (bool, error) {
-	serverVersion, err := FetchVersion(ctx, controlPlaneURL)
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	serverVersion, err := FetchVersion(checkCtx, controlPlaneURL)
 	if err != nil {
 		return false, fmt.Errorf("version check failed: %w", err)
 	}

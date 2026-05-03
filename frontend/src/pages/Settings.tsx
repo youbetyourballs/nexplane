@@ -323,7 +323,7 @@ export function Settings() {
           const agentBin = agentPlatform === "windows" ? "nexplane-agent.exe" : "nexplane-agent";
 
           const linuxDownload = `curl -fsSL ${downloadBase}/downloads/${binaryName} -o ${agentBin} && chmod +x ${agentBin}`;
-          const linuxVerify = `curl -fsSL ${downloadBase}/downloads/${binaryName}.sha256 | sha256sum -c`;
+          const linuxVerify = `curl -fsSL ${downloadBase}/downloads/${binaryName}.sha256 | awk '{print $1 "  ${agentBin}"}' | sha256sum -c`;
           const linuxEphemeral = `./${agentBin} \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode ephemeral`;
           const linuxService = `sudo ./${agentBin} \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode service \\\n  --poll-interval 30s`;
           const linuxSystemd = `[Unit]\nDescription=Nexplane Agent\nAfter=network.target\n\n[Service]\nExecStart=/usr/local/bin/nexplane-agent \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode service \\\n  --poll-interval 30s\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target`;
