@@ -30,6 +30,9 @@ class ChangeType(str, enum.Enum):
     generic_remediation = "generic_remediation"
     notify_only = "notify_only"
     suppress = "suppress"
+    # Access review change types
+    rotate_service_account = "rotate_service_account"
+    offboard_user = "offboard_user"
 
 
 class RiskLevel(str, enum.Enum):

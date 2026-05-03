@@ -103,3 +103,18 @@ def test_enrich_entry_flags_inactive():
     evidence = enrich_entry({}, identity_asset, None, {"include_last_login": True, "include_days_inactive": True, "include_asset_sensitivity": False})
     assert evidence["flagged_inactive"] is True
     assert evidence["days_inactive"] > 90
+
+
+from app.services.review_approver import connector_type_to_change_type
+
+
+def test_connector_change_type_okta():
+    assert connector_type_to_change_type("okta") == "rotate_service_account"
+
+
+def test_connector_change_type_github():
+    assert connector_type_to_change_type("github") == "offboard_user"
+
+
+def test_connector_change_type_fallback():
+    assert connector_type_to_change_type("unknown_connector") == "remote_command"
