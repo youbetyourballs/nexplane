@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import apiClient from "../lib/apiClient";
+import { apiClient } from "../api/client";
 
 interface ScheduledReboot {
   id: string;

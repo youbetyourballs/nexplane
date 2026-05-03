@@ -1,4 +1,4 @@
-import apiClient from "./client"; // existing axios instance
+import { apiClient } from "./client";
 
 export interface IRPlaybookTemplate {
   id: string;
