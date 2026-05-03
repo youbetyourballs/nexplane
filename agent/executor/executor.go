@@ -14,6 +14,7 @@ import (
 	"nexplane-agent/commands/winharden"
 	"nexplane-agent/commands/crossplatform"
 	"nexplane-agent/commands/linuxupgrade"
+	"nexplane-agent/commands/fleet"
 )
 
 // Result is the outcome of a command execution.
@@ -72,6 +73,11 @@ var commands = map[string]CommandFunc{
 	"audit_software_inventory": crossplatform.AuditSoftwareInventoryExecute,
 	// Linux upgrade (Spec 5e)
 	"upgrade_linux_instance":   linuxupgrade.UpgradeLinuxInstanceExecute,
+	// Fleet operations
+	"restart_service":  fleet.RestartServiceExecute,
+	"push_config_file": fleet.PushConfigFileExecute,
+	"distribute_file":  fleet.DistributeFileExecute,
+	"health_check":     fleet.HealthCheckExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
