@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional
 from pydantic import BaseModel, field_validator
 from app.models.asset import AssetType, Environment, Criticality
 
@@ -19,6 +19,8 @@ class AssetRead(BaseModel):
 
     id: uuid.UUID
     organization_id: uuid.UUID
+    connector_id: Optional[uuid.UUID] = None
+    connector_name: Optional[str] = None
     name: str
     asset_type: AssetType
     environment: Environment
@@ -32,7 +34,7 @@ class AssetUpdate(BaseModel):
     name: str | None = None
     criticality: Criticality | None = None
     asset_metadata: dict | None = None
-    tags: list[str] | None = None  # None = no change; [] = clear all tags
+    tags: list[str] | None = None
 
 
 class BulkTagOperation(BaseModel):

@@ -2,6 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models.asset import Asset, Environment, AssetType, Criticality
@@ -20,10 +21,11 @@ async def list_assets(
     asset_type: str | None = Query(None, description="Filter by asset type"),
     criticality: str | None = Query(None, description="Filter by criticality"),
     tag: str | None = Query(None, description="Filter by tag (asset must have this tag)"),
+    connector_id: uuid.UUID | None = Query(None, description="Filter by connector that discovered this asset"),
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Asset).where(Asset.organization_id == user.organization_id)
+    stmt = select(Asset).options(selectinload(Asset.connector)).where(Asset.organization_id == user.organization_id)
 
     if q:
         stmt = stmt.where(Asset.name.ilike(f"%{q}%"))
@@ -42,6 +44,8 @@ async def list_assets(
             stmt = stmt.where(Asset.criticality == Criticality(criticality))
         except ValueError:
             pass
+    if connector_id:
+        stmt = stmt.where(Asset.connector_id == connector_id)
 
     result = await db.execute(stmt.order_by(Asset.name))
     assets = result.scalars().all()
@@ -50,7 +54,13 @@ async def list_assets(
     if tag:
         assets = [a for a in assets if tag in (a.tags or [])]
 
-    return assets
+    return [
+        AssetRead(
+            **{k: v for k, v in asset.__dict__.items() if not k.startswith("_")},
+            connector_name=asset.connector.name if asset.connector else None,
+        )
+        for asset in assets
+    ]
 
 
 @router.get("/tags", response_model=list[str])
@@ -127,10 +137,19 @@ async def get_asset(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    asset = await db.get(Asset, asset_id)
-    if not asset or asset.organization_id != user.organization_id:
+    result = await db.execute(
+        select(Asset).options(selectinload(Asset.connector)).where(
+            Asset.id == asset_id,
+            Asset.organization_id == user.organization_id,
+        )
+    )
+    asset = result.scalar_one_or_none()
+    if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
-    return asset
+    return AssetRead(
+        **{k: v for k, v in asset.__dict__.items() if not k.startswith("_")},
+        connector_name=asset.connector.name if asset.connector else None,
+    )
 
 
 @router.patch("/{asset_id}", response_model=AssetRead)
