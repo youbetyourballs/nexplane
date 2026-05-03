@@ -78,9 +78,27 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
 def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[Asset], catalog) -> dict:
     generic_action = step_def["generic_action"]
     asset_types = [a.asset_type.value for a in assets]
+
+    # Determine if all assets share a single connector
+    connector_ids = {a.connector_id for a in assets if a.connector_id is not None}
+    locked_connector_type = None
+    locked_connector_id = None
+    if len(connector_ids) == 1:
+        asset_with_connector = next(a for a in assets if a.connector_id is not None)
+        if asset_with_connector.connector is not None:
+            locked_connector_type = asset_with_connector.connector.connector_type.value
+            locked_connector_id = str(asset_with_connector.connector_id)
+
     options = catalog.get_options_for_action(generic_action, asset_types=asset_types)
     if not options:
         options = catalog.get_options_for_action(generic_action)
+
+    # Filter to locked connector type when determined
+    if locked_connector_type and options:
+        locked_options = [o for o in options if o.connector_type == locked_connector_type]
+        if locked_options:
+            options = locked_options
+
     if not options:
         return {
             "step_number": step_number,
@@ -94,9 +112,11 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
             "parameters": _resolve_parameters(generic_action, desired, assets),
             "rollback_action": None,
             "rollback_connector_type": None,
+            "connector_id": locked_connector_id,
             "estimated_duration_seconds": 30,
             "blast_radius_hint": None,
         }
+
     best = options[0]
     action_def = best.action_def
     rollback_action = action_def.get("rollback_action")
@@ -115,6 +135,7 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
         "parameters": _resolve_parameters(generic_action, desired, assets),
         "rollback_action": rollback_action,
         "rollback_connector_type": best.connector_type if rollback_action else None,
+        "connector_id": locked_connector_id,
         "estimated_duration_seconds": action_def.get("estimated_duration_seconds", 30),
         "blast_radius_hint": action_def.get("blast_radius_hint"),
     }

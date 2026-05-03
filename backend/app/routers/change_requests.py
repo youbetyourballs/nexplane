@@ -125,7 +125,9 @@ async def generate_change_plan(
         raise HTTPException(status_code=400, detail=f"Cannot plan a change request in status '{cr.status.value}'")
 
     asset_ids = [uuid.UUID(aid) for aid in (cr.target_asset_ids or [])]
-    assets_result = await db.execute(select(Asset).where(Asset.id.in_(asset_ids)))
+    assets_result = await db.execute(
+        select(Asset).options(selectinload(Asset.connector)).where(Asset.id.in_(asset_ids))
+    )
     assets = list(assets_result.scalars().all())
 
     safety_result = score_change_request(cr, assets)
