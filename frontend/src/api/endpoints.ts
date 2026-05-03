@@ -96,6 +96,8 @@ export const changeRequestsApi = {
     apiClient.post<ExecutionRun>(`/change-requests/${id}/rollback`).then((r) => r.data),
   getAuditEvents: (id: string) =>
     apiClient.get<AuditEvent[]>(`/change-requests/${id}/audit-events`).then((r) => r.data),
+  getProgress: (id: string) =>
+    apiClient.get(`/change-requests/${id}/progress`).then((r) => r.data),
 };
 
 // Audit

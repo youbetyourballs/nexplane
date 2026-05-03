@@ -32,6 +32,96 @@ function JsonViewer({ data }: { data: unknown }) {
   );
 }
 
+function BatchProgress({ stepMetadata }: { stepMetadata: any }) {
+  if (!stepMetadata?.batches?.length) return null;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 border-b border-slate-200">
+          <tr>
+            <th className="text-left px-3 py-2 font-medium text-slate-600">Batch</th>
+            <th className="text-left px-3 py-2 font-medium text-slate-600">Hosts</th>
+            <th className="text-left px-3 py-2 font-medium text-slate-600">Status</th>
+            <th className="text-left px-3 py-2 font-medium text-slate-600">Failures</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {stepMetadata.batches.map((batch: any) => {
+            const failures = Object.values(batch.results || {}).filter((r: any) => r.error || !r.running).length;
+            return (
+              <tr key={batch.batch_index} className={batch.status === "aborted" ? "bg-red-50" : ""}>
+                <td className="px-3 py-2 text-slate-700">#{batch.batch_index + 1}</td>
+                <td className="px-3 py-2 text-slate-600">{batch.asset_ids?.length ?? 0}</td>
+                <td className="px-3 py-2">
+                  <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                    batch.status === "completed" ? "bg-green-100 text-green-700" :
+                    batch.status === "aborted" ? "bg-red-100 text-red-700" :
+                    batch.status === "running" ? "bg-blue-100 text-blue-700" :
+                    "bg-slate-100 text-slate-600"
+                  }`}>
+                    {batch.status}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-slate-600">{failures}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {stepMetadata.aborted && (
+        <p className="text-sm text-red-600 mt-2 px-3">
+          Rollout aborted: {stepMetadata.failure_count} of {stepMetadata.total_dispatched} hosts failed.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FleetHealthCheckResult({ stepMetadata }: { stepMetadata: any }) {
+  if (!stepMetadata?.per_host) return null;
+  const entries = Object.entries(stepMetadata.per_host) as [string, any][];
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 border-b border-slate-200">
+          <tr>
+            <th className="text-left px-3 py-2 font-medium text-slate-600">Host ID</th>
+            <th className="text-left px-3 py-2 font-medium text-slate-600">Disk OK</th>
+            <th className="text-left px-3 py-2 font-medium text-slate-600">Load OK</th>
+            <th className="text-left px-3 py-2 font-medium text-slate-600">No Reboot</th>
+            <th className="text-left px-3 py-2 font-medium text-slate-600">Services</th>
+            <th className="text-left px-3 py-2 font-medium text-slate-600">Pass</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {entries.map(([assetId, r]) => (
+            <tr key={assetId} className={!r.pass ? "bg-red-50" : ""}>
+              <td className="px-3 py-2 font-mono text-xs text-slate-700">{assetId}</td>
+              <td className="px-3 py-2">{r.disk_free_ok ? "✓" : "✗"}</td>
+              <td className="px-3 py-2">{r.load_ok ? "✓" : "✗"}</td>
+              <td className="px-3 py-2">{r.no_pending_reboot ? "✓" : "✗"}</td>
+              <td className="px-3 py-2">
+                {r.services && Object.keys(r.services).length > 0
+                  ? Object.entries(r.services).map(([svc, ok]: [string, any]) => (
+                      <span key={svc} className={`inline-block mr-1 px-1.5 py-0.5 rounded text-xs ${ok ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                        {svc}
+                      </span>
+                    ))
+                  : <span className="text-slate-400 text-xs">—</span>}
+              </td>
+              <td className="px-3 py-2">
+                <span className={`font-medium ${r.pass ? "text-green-600" : "text-red-600"}`}>
+                  {r.pass ? "Pass" : "Fail"}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function ChangeRequestDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -51,6 +141,16 @@ export function ChangeRequestDetail() {
     queryKey: ["change-request-audit", id],
     queryFn: () => changeRequestsApi.getAuditEvents(id!),
     refetchInterval: 5000,
+  });
+
+  const isFleetType = cr && ["rolling_restart", "canary_config_push", "distribute_file", "fleet_health_check"].includes(cr.change_type);
+  const isFleetActive = cr && ["batch_running", "preflight_running", "queued_for_maintenance"].includes(cr.status);
+
+  const { data: progress } = useQuery({
+    queryKey: ["change-request-progress", id],
+    queryFn: () => changeRequestsApi.getProgress(id!),
+    enabled: !!isFleetType,
+    refetchInterval: isFleetActive ? 5000 : false,
   });
 
   const invalidate = () => {
@@ -163,6 +263,12 @@ export function ChangeRequestDetail() {
       {actionError && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
           {actionError}
+        </div>
+      )}
+
+      {cr.status === "queued_for_maintenance" && (
+        <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg px-5 py-4 text-sm text-yellow-800">
+          <strong>Queued for Maintenance Window</strong> — This change is approved but no maintenance window is currently open. It will execute automatically when a scheduled window opens.
         </div>
       )}
 
@@ -288,6 +394,17 @@ export function ChangeRequestDetail() {
               </div>
             </Section>
           </>
+        )}
+
+        {isFleetType && progress?.step_metadata && (
+          <Section
+            title={cr.change_type === "fleet_health_check" ? "Health Check Results" : "Batch Execution Progress"}
+            icon={Layers}
+          >
+            {cr.change_type === "fleet_health_check"
+              ? <FleetHealthCheckResult stepMetadata={progress.step_metadata} />
+              : <BatchProgress stepMetadata={progress.step_metadata} />}
+          </Section>
         )}
 
         {cr.approvals && cr.approvals.length > 0 && (

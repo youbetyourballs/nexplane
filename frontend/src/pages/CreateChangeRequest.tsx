@@ -88,6 +88,46 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
       confirm_terminate: true,
     }, null, 2),
   },
+  rolling_restart: {
+    label: "Rolling Service Restart",
+    description: "Restart a service across a fleet of hosts in safe batches with configurable abort threshold.",
+    outcomeTemplate: JSON.stringify({
+      service_name: "nginx",
+      asset_group: { asset_ids: [] },
+      batch_size_pct: 10,
+      abort_threshold_pct: 25,
+    }, null, 2),
+  },
+  canary_config_push: {
+    label: "Canary Config Push",
+    description: "Push a config file to one canary host first, verify, then roll out to the full group.",
+    outcomeTemplate: JSON.stringify({
+      file_path: "/etc/nginx/nginx.conf",
+      file_content: "",
+      canary_asset_id: 0,
+      verification_command: "nginx -t",
+      asset_group: { asset_ids: [] },
+    }, null, 2),
+  },
+  distribute_file: {
+    label: "Distribute File",
+    description: "Push a file to all hosts in an asset group simultaneously.",
+    outcomeTemplate: JSON.stringify({
+      file_path: "/etc/ssl/certs/ca.crt",
+      file_content: "",
+      permissions: "0644",
+      post_command: "update-ca-certificates",
+      asset_group: { asset_ids: [] },
+    }, null, 2),
+  },
+  fleet_health_check: {
+    label: "Fleet Health Check",
+    description: "Run a preflight health check across all hosts: disk, load, pending reboots, service status.",
+    outcomeTemplate: JSON.stringify({
+      asset_group: { asset_ids: [] },
+      required_services: [],
+    }, null, 2),
+  },
 };
 
 export function CreateChangeRequest() {
