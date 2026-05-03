@@ -3,16 +3,24 @@ import re
 from app.services.secrets_service import SecretsService
 
 
-def _resolve_api_key(settings, secrets_svc: SecretsService) -> str:
-    """Resolve AI API key from ai_providers_encrypted or legacy anthropic_api_key_encrypted."""
+_PROVIDER_DEFAULTS = {
+    "anthropic": "claude-sonnet-4-6",
+    "openai": "gpt-4o",
+}
+
+
+def _resolve_provider_config(settings, secrets_svc: SecretsService) -> tuple[str, str, str]:
+    """Returns (provider, api_key, model)."""
     if settings.ai_providers_encrypted:
         data = secrets_svc.decrypt_json(settings.ai_providers_encrypted)
-        default = data.get("default", "anthropic")
+        provider = data.get("default", "anthropic")
         providers = data.get("providers", {})
-        if default in providers and providers[default].get("api_key"):
-            return providers[default]["api_key"]
+        if provider in providers and providers[provider].get("api_key"):
+            api_key = providers[provider]["api_key"]
+            model = providers[provider].get("model") or _PROVIDER_DEFAULTS.get(provider, "gpt-4o")
+            return provider, api_key, model
     if settings.anthropic_api_key_encrypted:
-        return secrets_svc.decrypt(settings.anthropic_api_key_encrypted)
+        return "anthropic", secrets_svc.decrypt(settings.anthropic_api_key_encrypted), _PROVIDER_DEFAULTS["anthropic"]
     raise ValueError("No AI provider configured")
 
 
