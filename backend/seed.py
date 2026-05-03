@@ -429,9 +429,23 @@ async def seed_expansion():
         print("Expansion seed (new connectors + example projects) created successfully.")
 
 
+async def seed_runbooks():
+    from app.models.runbook import Runbook
+    from app.seed.runbook_templates import load_seed_templates
+    async with AsyncSessionLocal() as db:
+        existing = await db.execute(select(Runbook).limit(1))
+        if existing.scalar_one_or_none():
+            print("Runbook templates already seeded - skipping.")
+            return
+        await load_seed_templates(db, ORG_ID, USER_IDS["admin"])
+        await db.commit()
+        print("Runbook seed templates created.")
+
+
 async def main():
     await seed()
     await seed_expansion()
+    await seed_runbooks()
 
 if __name__ == "__main__":
     asyncio.run(main())
