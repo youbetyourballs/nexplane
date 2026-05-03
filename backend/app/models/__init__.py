@@ -9,6 +9,7 @@ from app.models.execution_run import ExecutionRun
 from app.models.audit_event import AuditEvent
 from app.models.connector_credential import ConnectorCredential
 from app.models.scheduled_ingest import ScheduledIngest
+from app.models.runbook import Runbook, RunbookStep, RunbookExecution, RunbookStepResult  # noqa: F401
 
 __all__ = [
     "Organization",

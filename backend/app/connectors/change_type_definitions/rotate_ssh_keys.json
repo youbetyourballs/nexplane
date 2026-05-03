@@ -1,0 +1,72 @@
+{
+  "name": "rotate_ssh_keys",
+  "display_name": "Rotate SSH Keys (Fleet)",
+  "description": "Removes an old SSH public key by fingerprint and adds a new public key in authorized_keys for all assets in the target group. Runs in parallel per host with per-host rollback.",
+  "category": "credential_rotation",
+  "agent_required": true,
+  "fan_out_by": "asset_group",
+  "parameters": {
+    "asset_group": {
+      "type": "string",
+      "description": "Asset group tag — all assets in the group are targeted",
+      "required": true
+    },
+    "username": {
+      "type": "string",
+      "description": "OS username whose authorized_keys file is modified",
+      "required": true
+    },
+    "old_key_fingerprint": {
+      "type": "string",
+      "description": "SHA256 fingerprint (without 'SHA256:' prefix) of the key to remove",
+      "required": true
+    },
+    "new_public_key": {
+      "type": "string",
+      "description": "Full public key string to add (e.g. 'ssh-ed25519 AAAA... user@host')",
+      "required": true
+    }
+  },
+  "change_plan_template": [
+    {
+      "id": "step_backup_authorized_keys",
+      "type": "agent_command",
+      "command": "rotate_ssh_keys",
+      "params": {"action": "backup"},
+      "produces": ["authorized_keys_backup_path"],
+      "consumes": [],
+      "rollback_command": null,
+      "rollback_params": {}
+    },
+    {
+      "id": "step_remove_old_key",
+      "type": "agent_command",
+      "command": "rotate_ssh_keys",
+      "params": {"action": "remove_old"},
+      "produces": [],
+      "consumes": [],
+      "rollback_command": "rotate_ssh_keys",
+      "rollback_params": {"action": "restore"}
+    },
+    {
+      "id": "step_add_new_key",
+      "type": "agent_command",
+      "command": "rotate_ssh_keys",
+      "params": {"action": "add_new"},
+      "produces": [],
+      "consumes": [],
+      "rollback_command": "rotate_ssh_keys",
+      "rollback_params": {"action": "restore"}
+    },
+    {
+      "id": "step_verify_ssh_access",
+      "type": "verify_health",
+      "command": "verify_ssh_access",
+      "params": {},
+      "produces": [],
+      "consumes": [],
+      "rollback_command": null,
+      "rollback_params": {}
+    }
+  ]
+}

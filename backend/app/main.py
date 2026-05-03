@@ -13,6 +13,7 @@ from app.routers import agent as agent_router
 from app.routers import compliance as compliance_router
 from app.routers import current_user
 from app.routers.audit import list_cr_audit_events
+from app.routers.runbooks import router as runbooks_router, execution_router
 from app.services import scheduler_service
 
 
@@ -57,6 +58,8 @@ app.include_router(projects.router)
 app.include_router(settings_router.router)
 app.include_router(agent_router.router)
 app.include_router(compliance_router.router)
+app.include_router(runbooks_router)
+app.include_router(execution_router)
 
 
 @app.get("/change-requests/{cr_id}/audit-events", tags=["Audit"])
