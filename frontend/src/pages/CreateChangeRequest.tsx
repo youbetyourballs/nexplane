@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { changeRequestsApi, assetsApi } from "../api/endpoints";
 import { PageHeader } from "../components/PageHeader";
+import { OffboardUserForm } from "../components/change-requests/OffboardUserForm";
+import { OnboardUserForm } from "../components/change-requests/OnboardUserForm";
 import type { ChangeType } from "../types/api";
 
 const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string; outcomeTemplate: string }> = {
@@ -88,6 +90,27 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
       confirm_terminate: true,
     }, null, 2),
   },
+  offboard_user: {
+    label: "Offboard User",
+    description: "Disable a user across all connected identity systems (AD, Okta, Entra ID, Google, GitHub, Slack).",
+    outcomeTemplate: JSON.stringify({
+      target_email: "user@corp.com",
+      reason: "termination",
+      isolate_endpoints: false,
+      notify_manager: true,
+      manager_email: "",
+    }, null, 2),
+  },
+  onboard_user: {
+    label: "Onboard User",
+    description: "Provision a new user across all connected identity systems.",
+    outcomeTemplate: JSON.stringify({
+      target_email: "new.employee@corp.com",
+      display_name: "New Employee",
+      department: "Engineering",
+      manager_email: "manager@corp.com",
+    }, null, 2),
+  },
 };
 
 export function CreateChangeRequest() {
@@ -99,6 +122,7 @@ export function CreateChangeRequest() {
   const [changeType, setChangeType] = useState<ChangeType | "">("");
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [outcomeJson, setOutcomeJson] = useState("");
+  const [identityPayload, setIdentityPayload] = useState<Record<string, any>>({});
   const [jsonError, setJsonError] = useState("");
   const [submitError, setSubmitError] = useState("");
 
@@ -115,12 +139,13 @@ export function CreateChangeRequest() {
       } catch {
         throw new Error("Invalid JSON in Desired Outcome");
       }
+      const finalOutcome = isIdentityType ? identityPayload : outcome;
       return changeRequestsApi.create({
         title,
         description,
         change_type: changeType as ChangeType,
         target_asset_ids: selectedAssets,
-        desired_outcome: outcome,
+        desired_outcome: finalOutcome,
       });
     },
     onSuccess: (cr) => {
@@ -130,10 +155,13 @@ export function CreateChangeRequest() {
     onError: (e: any) => setSubmitError(e.message),
   });
 
+  const isIdentityType = changeType === "offboard_user" || changeType === "onboard_user";
+
   function handleTypeChange(type: ChangeType) {
     setChangeType(type);
     setOutcomeJson(CHANGE_TYPE_META[type].outcomeTemplate);
     setJsonError("");
+    setIdentityPayload({});
   }
 
   function handleJsonChange(value: string) {
@@ -152,7 +180,7 @@ export function CreateChangeRequest() {
     );
   };
 
-  const canSubmit = title && changeType && selectedAssets.length > 0 && outcomeJson && !jsonError;
+  const canSubmit = title && changeType && selectedAssets.length > 0 && (isIdentityType || (outcomeJson && !jsonError));
 
   return (
     <div className="p-8 max-w-3xl">
@@ -223,6 +251,21 @@ export function CreateChangeRequest() {
           </div>
         </div>
 
+        {changeType === "offboard_user" && (
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Offboarding Details</label>
+            <OffboardUserForm value={identityPayload} onChange={setIdentityPayload} />
+          </div>
+        )}
+
+        {changeType === "onboard_user" && (
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Onboarding Details</label>
+            <OnboardUserForm value={identityPayload} onChange={setIdentityPayload} />
+          </div>
+        )}
+
+        {!isIdentityType && (
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1.5">
             Desired Outcome{" "}
@@ -239,6 +282,7 @@ export function CreateChangeRequest() {
           />
           {jsonError && <div className="text-xs text-red-600 mt-1">{jsonError}</div>}
         </div>
+        )}
 
         {submitError && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
