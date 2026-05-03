@@ -274,10 +274,7 @@ async def get_active_freeze(
         .where(ChangeFreezeWindow.start_at <= now, ChangeFreezeWindow.end_at >= now)
         .limit(1)
     )
-    freeze = result.scalar_one_or_none()
-    if freeze is None:
-        raise HTTPException(status_code=404, detail="No active freeze window")
-    return freeze
+    return result.scalar_one_or_none()
 
 
 @router.get("/freeze-windows", response_model=list[ChangeFreezeWindowRead])
