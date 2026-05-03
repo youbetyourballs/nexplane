@@ -106,6 +106,12 @@ export function AssetDetail() {
           <div>
             <h1 className="text-xl font-semibold text-slate-900">{asset.name}</h1>
             <div className="text-sm text-slate-400">{asset.asset_type.replace(/_/g, " ")} · {asset.environment}</div>
+            {asset.connector_name && (
+              <div className="flex items-center gap-2 text-sm text-slate-500 mt-1">
+                <span className="text-slate-400">Source connector:</span>
+                <span className="font-medium text-slate-700">{asset.connector_name}</span>
+              </div>
+            )}
           </div>
         </div>
         <div className="flex gap-2">

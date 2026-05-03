@@ -33,6 +33,8 @@ export type Criticality = "low" | "medium" | "high" | "critical";
 export interface Asset {
   id: string;
   organization_id: string;
+  connector_id?: string;
+  connector_name?: string;
   name: string;
   asset_type: AssetType;
   environment: Environment;
@@ -64,6 +66,7 @@ export interface AssetListParams {
   asset_type?: string;
   criticality?: string;
   tag?: string;
+  connector_id?: string;
 }
 
 export type BulkTagOperation = "add" | "remove" | "set";

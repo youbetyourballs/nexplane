@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Plus, Search, Tag, X, ChevronRight } from "lucide-react";
-import { assetsApi } from "../api/endpoints";
+import { assetsApi, connectorsApi } from "../api/endpoints";
 import { RiskBadge } from "../components/RiskBadge";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
@@ -25,6 +25,7 @@ function parseSearch(input: string): { q: string; filters: Record<string, string
     type: "asset_type",
     criticality: "criticality",
     tag: "tag",
+    connector_id: "connector_id",
   };
   const filters: Record<string, string> = {};
   let remaining = input;
@@ -46,6 +47,7 @@ function buildSearchString(q: string, filters: Record<string, string>): string {
     asset_type: "type",
     criticality: "criticality",
     tag: "tag",
+    connector_id: "connector_id",
   };
   const tokens = Object.entries(filters)
     .filter(([, v]) => v)
@@ -105,6 +107,12 @@ export function Assets() {
   const { data: allTags } = useQuery({
     queryKey: ["asset-tags"],
     queryFn: () => assetsApi.tags(),
+  });
+
+  const { data: connectors } = useQuery({
+    queryKey: ["connectors"],
+    queryFn: connectorsApi.list,
+    staleTime: 60000,
   });
 
   const createMutation = useMutation({
@@ -231,6 +239,16 @@ export function Assets() {
         >
           <option value="">All Criticalities</option>
           {["low", "medium", "high", "critical"].map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select
+          value={filters.connector_id ?? ""}
+          onChange={(e) => setFilter("connector_id", e.target.value)}
+          className="text-sm border border-slate-200 rounded-md px-2 py-1.5 text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-brand-500"
+        >
+          <option value="">All connectors</option>
+          {(connectors ?? []).map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
         </select>
         <div className="relative">
           <Tag className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -417,7 +435,10 @@ function AssetRow({ asset, selected, onToggle, onClick }: AssetRowProps) {
       <span className="text-lg">{ASSET_TYPE_ICONS[asset.asset_type]}</span>
       <button onClick={onClick} className="flex-1 text-left">
         <div className="text-sm font-medium text-slate-900">{asset.name}</div>
-        <div className="text-xs text-slate-400">{asset.asset_type.replace(/_/g, " ")} · {asset.environment}</div>
+        <div className="text-xs text-slate-400">
+          {asset.asset_type.replace(/_/g, " ")} · {asset.environment}
+          {asset.connector_name && <span className="ml-1">· {asset.connector_name}</span>}
+        </div>
       </button>
       <div className="flex flex-wrap gap-1">
         {(asset.tags ?? []).slice(0, 3).map((t) => (
