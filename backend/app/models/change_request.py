@@ -91,6 +91,13 @@ class ChangeRequestStatus(str, enum.Enum):
     failed = "failed"
     rolled_back = "rolled_back"
     rejected = "rejected"
+    # Fleet operations
+    queued_for_maintenance = "queued_for_maintenance"
+    preflight_running = "preflight_running"
+    preflight_failed = "preflight_failed"
+    batch_running = "batch_running"
+    batch_aborted = "batch_aborted"
+    completed_with_errors = "completed_with_errors"
 
 
 class ChangeRequest(Base):
