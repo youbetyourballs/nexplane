@@ -83,7 +83,9 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   google_workspace: "🌐",
 };
 
-const ALL_TYPES = Object.keys(CONNECTOR_LABELS) as ConnectorType[];
+const ALL_TYPES = (Object.keys(CONNECTOR_LABELS) as ConnectorType[]).filter(
+  (t) => t !== "nexplane_agent"
+);
 
 interface Props {
   token: string;

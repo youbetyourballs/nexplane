@@ -438,7 +438,9 @@ make build
 
 ### Running the Agent
 
-First, generate an agent secret in **Settings → Agent Configuration** (admin only). Then:
+The only setup required is generating an agent secret in **Settings → Agent Configuration** (admin only). No connector configuration is needed — the agent authenticates directly with the secret and registers itself as an asset in the inventory automatically.
+
+Then:
 
 **Ephemeral (via SSH, run once):**
 ```bash
