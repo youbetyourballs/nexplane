@@ -4,8 +4,28 @@ from sqlalchemy import DateTime, func, ForeignKey, Enum as SAEnum, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 import enum
+from typing import Any, Literal, Optional
+
+from pydantic import BaseModel
 
 from app.database import Base
+
+
+class StepOutput(BaseModel):
+    slot: str           # e.g. "new_password"
+    sealed: bool = True # True if value should be passed through SecretsService
+    value: Optional[str] = None  # populated at runtime, never persisted
+
+
+class ChangePlanStep(BaseModel):
+    id: str
+    type: Literal["agent_command", "connector_action", "verify_health"]
+    command: str
+    params: dict[str, Any] = {}
+    produces: list[str] = []
+    consumes: list[str] = []
+    rollback_command: Optional[str] = None
+    rollback_params: dict[str, Any] = {}
 
 
 class PlanGeneratedBy(str, enum.Enum):

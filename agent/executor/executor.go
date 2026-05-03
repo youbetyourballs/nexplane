@@ -5,6 +5,7 @@ import (
 
 	"nexplane-agent/commands/changip"
 	"nexplane-agent/commands/configsyslog"
+	"nexplane-agent/commands/credrotation"
 	"nexplane-agent/commands/estimatesize"
 	"nexplane-agent/commands/ebpf"
 	"nexplane-agent/commands/linuxauth"
@@ -14,8 +15,6 @@ import (
 	"nexplane-agent/commands/winharden"
 	"nexplane-agent/commands/crossplatform"
 	"nexplane-agent/commands/linuxupgrade"
-	"nexplane-agent/commands/forensics"
-	"nexplane-agent/commands/isolation"
 )
 
 // Result is the outcome of a command execution.
@@ -74,9 +73,10 @@ var commands = map[string]CommandFunc{
 	"audit_software_inventory": crossplatform.AuditSoftwareInventoryExecute,
 	// Linux upgrade (Spec 5e)
 	"upgrade_linux_instance":   linuxupgrade.UpgradeLinuxInstanceExecute,
-	// Incident Response (Spec IR)
-	"isolate_host":       isolation.Execute,
-	"collect_forensics":  forensics.Execute,
+	// Credential rotation
+	"rotate_db_credentials": credrotation.DBRotateExecute,
+	"rotate_ssh_keys":       credrotation.SSHKeyExecute,
+	"update_agent_env_file": credrotation.APIKeyEnvExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -116,8 +116,10 @@ var rollbacks = map[string]CommandFunc{
 	"manage_tls_certificates": crossplatform.ManageTLSCertificatesRollback,
 	"configure_dns_resolver":  crossplatform.ConfigureDNSResolverRollback,
 	"upgrade_linux_instance":  linuxupgrade.UpgradeLinuxInstanceRollback,
-	// Incident Response (Spec IR)
-	"isolate_host":  isolation.Rollback,
+	// Credential rotation rollbacks
+	"rotate_db_credentials": credrotation.DBRotateRollback,
+	"rotate_ssh_keys":       credrotation.SSHKeyRollback,
+	"update_agent_env_file": credrotation.APIKeyEnvRollback,
 }
 
 // Dispatch routes a command to its implementation.
