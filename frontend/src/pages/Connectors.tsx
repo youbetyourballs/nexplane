@@ -96,13 +96,47 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   google_workspace: "🌐",
 };
 
-// Ingest action IDs per connector type (connectors that support discovery)
+// Primary ingest action per connector type — controls Run Discovery button and Schedule sync badge
 const INGEST_ACTIONS: Partial<Record<ConnectorType, string>> = {
-  active_directory: "discover_computers",
-  crowdstrike: "discover_endpoints",
-  tenable: "discover_assets",
-  azure: "discover_vms",
-  paloalto: "ingest_traffic_logs",
+  // Cloud & infrastructure
+  aws:               "discover_ec2_instances",
+  azure:             "discover_vms",
+  gcp:               "discover_compute_instances",
+  cloudflare:        "discover_waf_custom_rules",
+  paloalto:          "ingest_traffic_logs",
+  // Identity & access
+  active_directory:  "discover_computers",
+  okta:              "discover_users",
+  entra_id:          "discover_users",
+  hashicorp_vault:   "discover_secret_engines",
+  // Security tools / EDR
+  crowdstrike:       "discover_endpoints",
+  tenable:           "discover_assets",
+  sentinelone:       "discover_agents",
+  defender_endpoint: "discover_machines",
+  snyk:              "discover_projects",
+  qualys:            "discover_hosts",
+  wiz:               "discover_cloud_resources",
+  runzero:           "discover_assets",
+  zscaler:           "discover_users",
+  // Source & container
+  github:            "discover_repositories",
+  kubernetes:        "discover_nodes",
+  helm:              "discover_releases",
+  // IaC & config management
+  terraform:         "discover_workspaces",
+  ansible:           "discover_inventories",
+  cloudformation:    "discover_stacks",
+  pulumi:            "discover_stacks",
+  saltstack:         "discover_minions",
+  chef_inspec:       "discover_nodes",
+  // Workflow & observability
+  jira:              "discover_projects",
+  pagerduty:         "discover_services",
+  servicenow:        "discover_incidents",
+  splunk:            "discover_saved_searches",
+  datadog:           "discover_hosts",
+  google_workspace:  "discover_users",
 };
 
 const INTERVAL_LABELS: Record<number, string> = {
