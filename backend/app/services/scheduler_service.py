@@ -36,6 +36,16 @@ async def start():
         logger.warning(f"Could not load schedules on startup: {e}")
     logger.info(f"Loaded {loaded} scheduled ingest jobs")
 
+    # Weekly drift detection — every Sunday at 02:00 UTC
+    from apscheduler.triggers.cron import CronTrigger
+    scheduler.add_job(
+        _run_drift_detection_job,
+        trigger=CronTrigger(day_of_week="sun", hour=2, minute=0, timezone="UTC"),
+        id="drift_detection_weekly",
+        replace_existing=True,
+    )
+    logger.info("Registered weekly drift detection job (Sundays 02:00 UTC)")
+
 
 def stop():
     if scheduler.running:
@@ -100,3 +110,15 @@ async def _run_ingest_job(schedule_id: str):
         schedule.last_run_at = datetime.now(timezone.utc)
         schedule.next_run_at = datetime.now(timezone.utc) + timedelta(hours=schedule.interval_hours)
         await db.commit()
+
+
+async def _run_drift_detection_job():
+    """APScheduler entrypoint for weekly drift detection."""
+    if _db_factory is None:
+        return
+    async with _db_factory() as db:
+        try:
+            from app.compliance.drift import run_drift_detection
+            await run_drift_detection(db)
+        except Exception as e:
+            logger.error(f"Drift detection job failed: {e}")
