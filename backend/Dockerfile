@@ -2,14 +2,20 @@
 FROM golang:1.26-alpine AS agent-builder
 WORKDIR /agent
 COPY agent/ .
+COPY VERSION /VERSION
 RUN go mod download
-RUN GOOS=linux   GOARCH=amd64  go build -ldflags="-s -w" -o dist/nexplane-agent-linux-amd64     ./
-RUN GOOS=linux   GOARCH=arm64  go build -ldflags="-s -w" -o dist/nexplane-agent-linux-arm64     ./
-RUN GOOS=windows GOARCH=amd64  go build -ldflags="-s -w" -o dist/nexplane-agent-windows-amd64.exe ./
-RUN sha256sum dist/nexplane-agent-linux-amd64       | tee dist/nexplane-agent-linux-amd64.sha256
-RUN sha256sum dist/nexplane-agent-linux-arm64       | tee dist/nexplane-agent-linux-arm64.sha256
-RUN sha256sum dist/nexplane-agent-windows-amd64.exe | tee dist/nexplane-agent-windows-amd64.exe.sha256
-RUN printf "dev" > dist/version
+RUN export BUILD_VERSION=$(cat /VERSION) && \
+    GOOS=linux   GOARCH=amd64  go build -ldflags="-s -w -X main.Version=${BUILD_VERSION}" \
+        -o dist/nexplane-agent-linux-amd64-${BUILD_VERSION}     ./ && \
+    GOOS=linux   GOARCH=arm64  go build -ldflags="-s -w -X main.Version=${BUILD_VERSION}" \
+        -o dist/nexplane-agent-linux-arm64-${BUILD_VERSION}     ./ && \
+    GOOS=windows GOARCH=amd64  go build -ldflags="-s -w -X main.Version=${BUILD_VERSION}" \
+        -o dist/nexplane-agent-windows-amd64-${BUILD_VERSION}.exe ./
+RUN export BUILD_VERSION=$(cat /VERSION) && \
+    sha256sum dist/nexplane-agent-linux-amd64-${BUILD_VERSION}       | tee dist/nexplane-agent-linux-amd64-${BUILD_VERSION}.sha256 && \
+    sha256sum dist/nexplane-agent-linux-arm64-${BUILD_VERSION}       | tee dist/nexplane-agent-linux-arm64-${BUILD_VERSION}.sha256 && \
+    sha256sum dist/nexplane-agent-windows-amd64-${BUILD_VERSION}.exe | tee dist/nexplane-agent-windows-amd64-${BUILD_VERSION}.exe.sha256
+RUN cat /VERSION > dist/version
 
 # Stage 2 — Python backend
 FROM python:3.12-slim
