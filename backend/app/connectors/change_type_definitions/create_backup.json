@@ -1,0 +1,17 @@
+{
+  "change_type": "create_backup",
+  "display_name": "Create Backup",
+  "steps": [
+    {"generic_action": "preflight_check",   "purpose": "preflight_capture", "required": true},
+    {"generic_action": "create_backup",     "purpose": "execute",           "required": true},
+    {"generic_action": "verify_snapshot",   "purpose": "verify",            "required": false}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["api_check"],
+  "parameters": {
+    "backup_type":        {"type": "string", "enum": ["ebs_snapshot", "rds_snapshot", "agent_backup"], "required": true},
+    "target_resource_id": {"type": "string", "required": true},
+    "backup_name":        {"type": "string", "required": true},
+    "retention_days":     {"type": "integer", "default": 30}
+  }
+}
