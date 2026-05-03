@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
     AI_MODEL: str = "claude-sonnet-4-6"
+    WEBHOOK_SECRET: str = "changeme"
 
     @property
     def cors_origins_list(self) -> list[str]:
