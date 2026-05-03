@@ -47,6 +47,7 @@ services:
       - "3000:3000"
     environment:
       VITE_API_URL: http://localhost:8000
+      VITE_AGENT_DOWNLOAD_URL: ""
     depends_on:
       - backend
     volumes:

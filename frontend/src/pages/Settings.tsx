@@ -19,7 +19,7 @@ export function Settings() {
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [modelInput, setModelInput] = useState("");
-  const [agentPlatform, setAgentPlatform] = useState<"linux" | "windows">("linux");
+  const [agentPlatform, setAgentPlatform] = useState<"linux" | "linux-arm64" | "windows">("linux");
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
 
   const { data: settings, isLoading } = useQuery({
@@ -300,10 +300,23 @@ export function Settings() {
         {(settings?.agent_configured || generatedSecret) && (() => {
           const secret = generatedSecret ?? "<YOUR-SECRET>";
           const controlPlane = window.location.origin;
-          const linuxEphemeral = `./nexplane-agent-linux-amd64 \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode ephemeral`;
-          const linuxService = `sudo ./nexplane-agent-linux-amd64 \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode service \\\n  --poll-interval 30s`;
+          const downloadBase = (import.meta.env.VITE_AGENT_DOWNLOAD_URL as string) || controlPlane;
+
+          const binaryName = agentPlatform === "windows"
+            ? "nexplane-agent-windows-amd64.exe"
+            : agentPlatform === "linux-arm64"
+            ? "nexplane-agent-linux-arm64"
+            : "nexplane-agent-linux-amd64";
+
+          const agentBin = agentPlatform === "windows" ? "nexplane-agent.exe" : "nexplane-agent";
+
+          const linuxDownload = `curl -fsSL ${downloadBase}/downloads/${binaryName} -o ${agentBin} && chmod +x ${agentBin}`;
+          const linuxVerify = `curl -fsSL ${downloadBase}/downloads/${binaryName}.sha256 | sha256sum -c`;
+          const linuxEphemeral = `./${agentBin} \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode ephemeral`;
+          const linuxService = `sudo ./${agentBin} \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode service \\\n  --poll-interval 30s`;
           const linuxSystemd = `[Unit]\nDescription=Nexplane Agent\nAfter=network.target\n\n[Service]\nExecStart=/usr/local/bin/nexplane-agent \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode service \\\n  --poll-interval 30s\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target`;
-          const winEphemeral = `.\\nexplane-agent-windows-amd64.exe \`\n  --control-plane ${controlPlane} \`\n  --secret ${secret} \`\n  --mode ephemeral`;
+          const winDownload = `Invoke-WebRequest -Uri "${downloadBase}/downloads/${binaryName}" -OutFile ${agentBin}`;
+          const winEphemeral = `.\\${agentBin} \`\n  --control-plane ${controlPlane} \`\n  --secret ${secret} \`\n  --mode ephemeral`;
           const winService = `New-Service -Name "NexplaneAgent" \`\n  -BinaryPathName "C:\\nexplane\\nexplane-agent.exe --mode service --poll-interval 30s --control-plane ${controlPlane} --secret ${secret}" \`\n  -StartupType Automatic\nStart-Service NexplaneAgent`;
 
           const CmdBlock = ({ id, label, value }: { id: string; label: string; value: string }) => (
@@ -331,33 +344,38 @@ export function Settings() {
                 </p>
               )}
               <div className="flex gap-2 mb-3">
-                {(["linux", "windows"] as const).map((p) => (
+                {([
+                  { id: "linux",      label: "🐧 Linux (x86_64)" },
+                  { id: "linux-arm64", label: "🐧 Linux (ARM64)" },
+                  { id: "windows",    label: "🪟 Windows" },
+                ] as const).map((p) => (
                   <button
-                    key={p}
-                    onClick={() => setAgentPlatform(p)}
+                    key={p.id}
+                    onClick={() => setAgentPlatform(p.id)}
                     className={`px-3 py-1 text-xs rounded-md border transition-colors ${
-                      agentPlatform === p
+                      agentPlatform === p.id
                         ? "bg-slate-900 text-white border-slate-900"
                         : "border-slate-200 text-slate-600 hover:bg-slate-50"
                     }`}
                   >
-                    {p === "linux" ? "🐧 Linux" : "🪟 Windows"}
+                    {p.label}
                   </button>
                 ))}
               </div>
 
-              {agentPlatform === "linux" ? (
+              {agentPlatform !== "windows" ? (
                 <>
-                  <p className="text-xs text-slate-500 mb-1">Build the binary first: <code className="font-mono bg-slate-100 px-1 rounded">cd agent && make build</code></p>
-                  <CmdBlock id="linux-ephemeral" label="Run once (ephemeral)" value={linuxEphemeral} />
-                  <CmdBlock id="linux-service" label="Run as foreground service" value={linuxService} />
-                  <CmdBlock id="linux-systemd" label="systemd unit (save to /etc/systemd/system/nexplane-agent.service)" value={linuxSystemd} />
+                  <CmdBlock id="linux-download"  label="1. Download binary" value={linuxDownload} />
+                  <CmdBlock id="linux-verify"    label="2. Verify checksum" value={linuxVerify} />
+                  <CmdBlock id="linux-ephemeral" label="3. Run once (ephemeral)" value={linuxEphemeral} />
+                  <CmdBlock id="linux-service"   label="Run as foreground service" value={linuxService} />
+                  <CmdBlock id="linux-systemd"   label="systemd unit (save to /etc/systemd/system/nexplane-agent.service)" value={linuxSystemd} />
                 </>
               ) : (
                 <>
-                  <p className="text-xs text-slate-500 mb-1">Build the binary first: <code className="font-mono bg-slate-100 px-1 rounded">cd agent; make build</code></p>
-                  <CmdBlock id="win-ephemeral" label="Run once (ephemeral)" value={winEphemeral} />
-                  <CmdBlock id="win-service" label="Install as Windows Service (PowerShell, run as admin)" value={winService} />
+                  <CmdBlock id="win-download"  label="1. Download binary (PowerShell)" value={winDownload} />
+                  <CmdBlock id="win-ephemeral" label="2. Run once (ephemeral)" value={winEphemeral} />
+                  <CmdBlock id="win-service"   label="Install as Windows Service (run as admin)" value={winService} />
                 </>
               )}
             </div>
