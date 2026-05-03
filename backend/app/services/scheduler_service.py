@@ -19,6 +19,30 @@ def init_scheduler(db_factory):
 async def start():
     scheduler.start()
     logger.info("APScheduler started")
+
+    # Register vulnerability background jobs
+    scheduler.add_job(
+        _run_sla_enforcement,
+        trigger="interval",
+        minutes=15,
+        id="sla_enforcement",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _run_finding_asset_match,
+        trigger="interval",
+        minutes=5,
+        id="finding_asset_match",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _run_scanner_poll,
+        trigger="interval",
+        hours=6,
+        id="scanner_poll",
+        replace_existing=True,
+    )
+
     if _db_factory is None:
         return
     loaded = 0
@@ -100,3 +124,33 @@ async def _run_ingest_job(schedule_id: str):
         schedule.last_run_at = datetime.now(timezone.utc)
         schedule.next_run_at = datetime.now(timezone.utc) + timedelta(hours=schedule.interval_hours)
         await db.commit()
+
+
+async def _run_sla_enforcement():
+    if _db_factory is None:
+        return
+    async with _db_factory() as db:
+        from app.jobs.sla_enforcement import enforce_slas
+        await enforce_slas(db)
+
+
+async def _run_finding_asset_match():
+    if _db_factory is None:
+        return
+    async with _db_factory() as db:
+        from app.jobs.finding_asset_match import retry_asset_matching
+        await retry_asset_matching(db)
+
+
+async def _run_scanner_poll():
+    if _db_factory is None:
+        return
+    from app.models.organization import Organization
+    from sqlalchemy import select
+    async with _db_factory() as db:
+        from app.jobs.scanner_poll import poll_crowdstrike
+        result = await db.execute(select(Organization.id))
+        org_ids = [row[0] for row in result]
+    for org_id in org_ids:
+        async with _db_factory() as db:
+            await poll_crowdstrike(db, org_id)
