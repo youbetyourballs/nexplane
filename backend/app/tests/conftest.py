@@ -2,14 +2,16 @@ import asyncio
 import uuid
 import pytest
 import pytest_asyncio
+from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.database import Base
+from app.database import Base, get_db
+from app.main import app
 from app.models.organization import Organization
 from app.models.user import User, UserRole
 from app.models.asset import Asset, AssetType, Environment, Criticality
 from app.models.change_request import ChangeRequest, ChangeType, RiskLevel, ChangeRequestStatus
-from app.services.auth_service import hash_password
+from app.services.auth_service import hash_password, create_access_token
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -89,6 +91,41 @@ async def dev_low_asset(db, org):
     db.add(a)
     await db.flush()
     return a
+
+
+@pytest_asyncio.fixture
+async def auth_client(db):
+    """AsyncClient authenticated as a fresh admin user, with DB override."""
+    org = Organization(id=uuid.uuid4(), name=f"Auth Test Org {uuid.uuid4().hex[:6]}")
+    db.add(org)
+    await db.flush()
+
+    user = User(
+        id=uuid.uuid4(),
+        organization_id=org.id,
+        email=f"auth-admin-{uuid.uuid4().hex[:8]}@test.example",
+        name="Auth Admin",
+        role=UserRole.admin,
+        hashed_password=hash_password("testpass"),
+    )
+    db.add(user)
+    await db.flush()
+
+    token = create_access_token(str(user.id))
+
+    async def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {token}"},
+        ) as client:
+            yield client
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 def make_cr(org_id, requester_id, change_type=ChangeType.dns_update, target_ids=None, desired_outcome=None):

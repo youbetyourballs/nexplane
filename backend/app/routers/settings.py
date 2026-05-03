@@ -93,7 +93,10 @@ async def get_ai_providers(
         }
 
     providers = {
-        name: AIProviderInfo(configured=bool(info.get("api_key")))
+        name: AIProviderInfo(
+            configured=bool(info.get("api_key")),
+            model=info.get("model"),
+        )
         for name, info in providers_data.get("providers", {}).items()
     }
     for p in SUPPORTED_PROVIDERS:
@@ -137,7 +140,10 @@ async def set_ai_provider(
     svc = _get_secrets()
     settings = await _get_or_create_org_settings(user.organization_id, db)
     providers_data = svc.decrypt_json(settings.ai_providers_encrypted) if settings.ai_providers_encrypted else {}
-    providers_data.setdefault("providers", {})[provider] = {"api_key": body.api_key}
+    entry = {"api_key": body.api_key}
+    if body.model:
+        entry["model"] = body.model
+    providers_data.setdefault("providers", {})[provider] = entry
     if not providers_data.get("default"):
         providers_data["default"] = provider
     settings.ai_providers_encrypted = svc.encrypt_json(providers_data)
