@@ -1245,7 +1245,7 @@
                         "safety_notes":  [
                                              "Always take a cloud snapshot before running",
                                              "dd-based rollback requires booting from rescue media",
-                                             "dist upgrade is potentially destructive â€" test on non-production first"
+                                             "dist upgrade is potentially destructive - test on non-production first"
                                          ]
                     },
                     {
