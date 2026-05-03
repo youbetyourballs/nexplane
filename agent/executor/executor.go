@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"nexplane-agent/commands/changip"
+	"nexplane-agent/commands/compliance"
 	"nexplane-agent/commands/configsyslog"
 	"nexplane-agent/commands/estimatesize"
 	"nexplane-agent/commands/ebpf"
@@ -72,6 +73,9 @@ var commands = map[string]CommandFunc{
 	"audit_software_inventory": crossplatform.AuditSoftwareInventoryExecute,
 	// Linux upgrade (Spec 5e)
 	"upgrade_linux_instance":   linuxupgrade.UpgradeLinuxInstanceExecute,
+	// Compliance (Spec: compliance-governance)
+	"audit_cis_compliance": compliance.AuditCISComplianceExecute,
+	"collect_evidence":     compliance.CollectEvidenceExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
