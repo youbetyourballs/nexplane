@@ -1,0 +1,19 @@
+{
+  "change_type": "configure_db_audit",
+  "display_name": "Configure Database Audit Logging",
+  "description": "Enable or reconfigure database audit logging. Pre-change settings are captured as encrypted step output for rollback.",
+  "rollback_supported": true,
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "steps": [
+    {"action": "configure_db_audit", "purpose": "execute", "required": true}
+  ],
+  "parameters": {
+    "db_type":      {"type": "string",  "required": true,  "enum": ["postgres", "mysql", "mssql"]},
+    "db_host":      {"type": "string",  "required": true},
+    "db_port":      {"type": "integer", "required": false},
+    "connector_id": {"type": "string",  "required": true},
+    "audit_level":  {"type": "string",  "required": true,  "enum": ["ddl", "dml", "all"]},
+    "log_path":     {"type": "string",  "required": false},
+    "enabled":      {"type": "boolean", "required": true}
+  }
+}

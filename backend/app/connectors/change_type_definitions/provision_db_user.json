@@ -1,0 +1,21 @@
+{
+  "change_type": "provision_db_user",
+  "display_name": "Provision Database User",
+  "description": "Create a database login/user with an initial grant set. If password is omitted, a secure random password is generated and returned as encrypted step output.",
+  "rollback_supported": true,
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "steps": [
+    {"action": "provision_db_user", "purpose": "execute", "required": true},
+    {"action": "verify_connection",  "purpose": "verify",  "required": false}
+  ],
+  "parameters": {
+    "db_type":      {"type": "string", "required": true,  "enum": ["postgres", "mysql", "mssql"]},
+    "db_host":      {"type": "string", "required": true},
+    "db_port":      {"type": "integer","required": false},
+    "db_name":      {"type": "string", "required": true},
+    "username":     {"type": "string", "required": true},
+    "password":     {"type": "string", "required": false, "sensitive": true},
+    "grants":       {"type": "array",  "required": false, "items": {"type": "string"}},
+    "connector_id": {"type": "string", "required": true}
+  }
+}

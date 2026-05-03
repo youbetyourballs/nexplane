@@ -1,0 +1,20 @@
+{
+  "change_type": "db_permission_change",
+  "display_name": "Database Permission Change",
+  "description": "Add or remove specific grants from an existing database user without modifying the user itself. Grant strings use the format 'schema.table: PRIV1,PRIV2'.",
+  "rollback_supported": true,
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "steps": [
+    {"action": "db_permission_change", "purpose": "execute", "required": true}
+  ],
+  "parameters": {
+    "db_type":          {"type": "string", "required": true, "enum": ["postgres", "mysql", "mssql"]},
+    "db_host":          {"type": "string", "required": true},
+    "db_port":          {"type": "integer","required": false},
+    "db_name":          {"type": "string", "required": true},
+    "target_user":      {"type": "string", "required": true},
+    "grants_to_add":    {"type": "array",  "required": false, "items": {"type": "string"}},
+    "grants_to_revoke": {"type": "array",  "required": false, "items": {"type": "string"}},
+    "connector_id":     {"type": "string", "required": true}
+  }
+}

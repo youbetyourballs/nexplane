@@ -1,0 +1,18 @@
+{
+  "change_type": "db_connection_config",
+  "display_name": "Database Connection Limit Configuration",
+  "description": "Update the maximum connection limit for a database server. Pre-change value is captured for rollback. MySQL applies immediately; PostgreSQL and MSSQL require a service restart.",
+  "rollback_supported": true,
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "steps": [
+    {"action": "db_connection_config", "purpose": "execute", "required": true}
+  ],
+  "parameters": {
+    "db_type":         {"type": "string",  "required": true, "enum": ["postgres", "mysql", "mssql"]},
+    "db_host":         {"type": "string",  "required": true},
+    "db_port":         {"type": "integer", "required": false},
+    "connector_id":    {"type": "string",  "required": true},
+    "max_connections": {"type": "integer", "required": true},
+    "reload_only":     {"type": "boolean", "required": false}
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "change_type": "deprovision_db_user",
+  "display_name": "Deprovision Database User",
+  "description": "Revoke all privileges and drop a database user. Pre-drop grants are captured as encrypted step output for audit and rollback replay.",
+  "rollback_supported": true,
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "steps": [
+    {"action": "deprovision_db_user", "purpose": "execute", "required": true}
+  ],
+  "parameters": {
+    "db_type":      {"type": "string", "required": true, "enum": ["postgres", "mysql", "mssql"]},
+    "db_host":      {"type": "string", "required": true},
+    "db_port":      {"type": "integer","required": false},
+    "db_name":      {"type": "string", "required": true},
+    "username":     {"type": "string", "required": true},
+    "connector_id": {"type": "string", "required": true}
+  }
+}

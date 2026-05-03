@@ -13,6 +13,7 @@ import (
 	"nexplane-agent/commands/virtualize"
 	"nexplane-agent/commands/winharden"
 	"nexplane-agent/commands/crossplatform"
+	"nexplane-agent/commands/dbadmin"
 	"nexplane-agent/commands/linuxupgrade"
 )
 
@@ -72,6 +73,12 @@ var commands = map[string]CommandFunc{
 	"audit_software_inventory": crossplatform.AuditSoftwareInventoryExecute,
 	// Linux upgrade (Spec 5e)
 	"upgrade_linux_instance":   linuxupgrade.UpgradeLinuxInstanceExecute,
+	// DB administration (Spec DB-Admin)
+	"provision_db_user":    dbadmin.ExecuteCommand,
+	"deprovision_db_user":  dbadmin.ExecuteCommand,
+	"db_permission_change": dbadmin.ExecuteCommand,
+	"configure_db_audit":   dbadmin.ExecuteCommand,
+	"db_connection_config": dbadmin.ExecuteCommand,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -111,6 +118,12 @@ var rollbacks = map[string]CommandFunc{
 	"manage_tls_certificates": crossplatform.ManageTLSCertificatesRollback,
 	"configure_dns_resolver":  crossplatform.ConfigureDNSResolverRollback,
 	"upgrade_linux_instance":  linuxupgrade.UpgradeLinuxInstanceRollback,
+	// DB administration rollbacks
+	"provision_db_user":    dbadmin.RollbackCommand,
+	"deprovision_db_user":  dbadmin.RollbackCommand,
+	"db_permission_change": dbadmin.RollbackCommand,
+	"configure_db_audit":   dbadmin.RollbackCommand,
+	"db_connection_config": dbadmin.RollbackCommand,
 }
 
 // Dispatch routes a command to its implementation.
