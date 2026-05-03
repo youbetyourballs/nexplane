@@ -1,0 +1,34 @@
+{
+  "change_type": "enforce_cis_benchmark",
+  "display_name": "Enforce CIS Benchmark",
+  "description": "Audit each target host against the CIS Benchmark and remediate failing controls. Before/after scores are recorded in the change result.",
+  "category": "compliance",
+  "risk_guidance": "Medium risk. Remediation commands (sysctl, sshd, PAM, auditd, SELinux) modify running system configuration. Validate in staging before production.",
+  "parameters": {
+    "level": {
+      "type": "integer",
+      "enum": [1, 2],
+      "description": "CIS Benchmark level. Level 1 covers filesystem, sysctl, and SSH. Level 2 adds PAM, auditd, and MAC (SELinux/AppArmor).",
+      "required": true
+    },
+    "os_family": {
+      "type": "string",
+      "enum": ["rhel", "debian", "ubuntu"],
+      "description": "OS family of target hosts.",
+      "required": true
+    },
+    "asset_ids": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" },
+      "description": "UUIDs of target assets.",
+      "required": true
+    },
+    "dry_run": {
+      "type": "boolean",
+      "description": "If true, audit only — do not apply remediation.",
+      "default": false
+    }
+  },
+  "agent_commands": ["audit_cis_compliance"],
+  "remediation_commands": ["apply_sysctl_hardening", "harden_ssh", "configure_selinux", "configure_apparmor", "deploy_auditd_rules", "configure_pam"]
+}
