@@ -17,6 +17,9 @@ import { RunbookEditor } from "../pages/RunbookEditor";
 import { RunbookExecution } from "../pages/RunbookExecution";
 import { AccessReviews } from "../pages/AccessReviews";
 import { Compliance } from "../pages/Compliance";
+import BackupRecovery from "../pages/BackupRecovery";
+import { MaintenanceWindows } from "../pages/MaintenanceWindows";
+import ScheduledOperations from "../pages/ScheduledOperations";
 import { useAuth } from "../hooks/useAuth";
 
 export function AppRoutes() {
@@ -47,6 +50,9 @@ export function AppRoutes() {
         <Route path="/executions/:id" element={<RunbookExecution />} />
         <Route path="/access-reviews" element={<AccessReviews />} />
         <Route path="/compliance" element={<Compliance />} />
+        <Route path="/backup-recovery" element={<BackupRecovery />} />
+        <Route path="/maintenance-windows" element={<MaintenanceWindows />} />
+        <Route path="/scheduled-operations" element={<ScheduledOperations />} />
       </Route>
     </Routes>
   );

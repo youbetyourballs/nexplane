@@ -12,7 +12,9 @@ import {
   BookOpen,
   Bug,
   ClipboardList,
-  Siren,
+  HardDrive,
+  Clock,
+  CalendarClock,
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 
@@ -27,6 +29,9 @@ const navItems = [
   { to: "/remediation", label: "Vuln Remediation", icon: Bug },
   { to: "/compliance", label: "Compliance", icon: ClipboardList },
   { to: "/access-reviews", label: "Access Reviews", icon: ShieldCheck },
+  { to: "/backup-recovery", label: "Backup & Recovery", icon: HardDrive },
+  { to: "/maintenance-windows", label: "Maintenance Windows", icon: Clock },
+  { to: "/scheduled-operations", label: "Scheduled Ops", icon: CalendarClock },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
