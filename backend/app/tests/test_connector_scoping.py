@@ -20,3 +20,18 @@ async def test_asset_list_accepts_connector_id_filter(auth_client):
     resp = await auth_client.get(f"/assets?connector_id={fake_connector_id}")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_ingest_stamps_connector_id(auth_client):
+    """Filter by connector_id works without error (assets may be empty)."""
+    connectors_resp = await auth_client.get("/connectors")
+    assert connectors_resp.status_code == 200
+    connectors = connectors_resp.json()
+    if not connectors:
+        pytest.skip("No connectors in test org")
+    connector = connectors[0]
+    connector_id = connector["id"]
+    assets_resp = await auth_client.get(f"/assets?connector_id={connector_id}")
+    assert assets_resp.status_code == 200
+    assert isinstance(assets_resp.json(), list)

@@ -72,17 +72,32 @@ async def execute_action(
         raise ConnectorError(str(exc), {"connector_type": connector_type, "action_id": action_id}) from exc
     result = await executor.execute(parameters, asset_ids, connector)
     if "_auto_asset" in result and connector is not None and db is not None:
-        await _upsert_auto_asset(result.pop("_auto_asset"), connector.organization_id, db)
+        connector_id = getattr(connector, 'id', None)
+        await _upsert_auto_asset(result.pop("_auto_asset"), connector.organization_id, db, connector_id=connector_id)
     return result
 
 
-async def _upsert_auto_asset(payload: dict, organization_id, db) -> None:
+async def _upsert_auto_asset(payload: dict, organization_id, db, connector_id=None) -> None:
     from sqlalchemy import select
     from app.models.asset import Asset, AssetType, Environment, Criticality
     name = payload.get("name", "unnamed")
-    result = await db.execute(
-        select(Asset).where(Asset.organization_id == organization_id, Asset.name == name)
-    )
+
+    if connector_id:
+        result = await db.execute(
+            select(Asset).where(
+                Asset.organization_id == organization_id,
+                Asset.connector_id == connector_id,
+                Asset.name == name,
+            )
+        )
+    else:
+        result = await db.execute(
+            select(Asset).where(
+                Asset.organization_id == organization_id,
+                Asset.connector_id.is_(None),
+                Asset.name == name,
+            )
+        )
     existing = result.scalar_one_or_none()
     if existing:
         existing.asset_metadata = {**existing.asset_metadata, **payload.get("asset_metadata", {})}
@@ -91,6 +106,7 @@ async def _upsert_auto_asset(payload: dict, organization_id, db) -> None:
     else:
         asset = Asset(
             organization_id=organization_id,
+            connector_id=connector_id,
             name=name,
             asset_type=AssetType(payload.get("asset_type", "server")),
             environment=Environment(payload.get("environment", "prod")),

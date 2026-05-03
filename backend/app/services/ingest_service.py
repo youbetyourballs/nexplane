@@ -30,26 +30,38 @@ class IngestService:
         executor = self._catalog.get_executor(connector.connector_type, action_id)
         payloads: list[dict] = await executor.execute({}, [], connector)
 
+        connector_id = getattr(connector, 'id', None)
         created = 0
         updated = 0
         upserted_assets = []
 
         for payload in payloads:
             name = payload["name"]
-            result = await db.execute(
-                select(Asset).where(
-                    Asset.organization_id == organization_id,
-                    Asset.name == name,
+
+            # Dedup: scope by connector when available
+            if connector_id:
+                result = await db.execute(
+                    select(Asset).where(
+                        Asset.organization_id == organization_id,
+                        Asset.connector_id == connector_id,
+                        Asset.name == name,
+                    )
                 )
-            )
+            else:
+                result = await db.execute(
+                    select(Asset).where(
+                        Asset.organization_id == organization_id,
+                        Asset.connector_id.is_(None),
+                        Asset.name == name,
+                    )
+                )
             existing = result.scalar_one_or_none()
 
             if existing:
                 if "asset_metadata" in payload:
                     existing.asset_metadata = {**existing.asset_metadata, **payload["asset_metadata"]}
                 if "tags" in payload:
-                    merged = list(set(existing.tags or []) | set(payload["tags"]))
-                    existing.tags = merged
+                    existing.tags = list(set(existing.tags or []) | set(payload["tags"]))
                 if "criticality" in payload:
                     existing.criticality = Criticality(payload["criticality"])
                 if "environment" in payload:
@@ -63,6 +75,7 @@ class IngestService:
                     raise ValueError(f"Payload for asset '{name}' is missing required field 'asset_type'")
                 asset = Asset(
                     organization_id=organization_id,
+                    connector_id=connector_id,
                     name=name,
                     asset_type=AssetType(asset_type_raw),
                     environment=Environment(payload.get("environment", "prod")),
