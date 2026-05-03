@@ -32,6 +32,17 @@ export function Settings() {
     queryFn: () => apiClient.get("/settings/ai-providers").then((r) => r.data),
   });
 
+  const { data: agentVersion } = useQuery<string | null>({
+    queryKey: ["agent-version"],
+    queryFn: () =>
+      apiClient
+        .get<string>("/downloads/version", { responseType: "text" })
+        .then((r) => (typeof r.data === "string" ? r.data.trim() : null))
+        .catch(() => null),
+    staleTime: 300_000, // 5 min
+    enabled: !!(settings?.agent_configured || generatedSecret),
+  });
+
   const updateKey = useMutation({
     mutationFn: () => settingsApi.updateAIKey(apiKey),
     onSuccess: () => {
@@ -302,11 +313,12 @@ export function Settings() {
           const controlPlane = window.location.origin;
           const downloadBase = (import.meta.env.VITE_AGENT_DOWNLOAD_URL as string) || controlPlane;
 
+          const version = agentVersion ?? "<VERSION>";
           const binaryName = agentPlatform === "windows"
-            ? "nexplane-agent-windows-amd64.exe"
+            ? `nexplane-agent-windows-amd64-${version}.exe`
             : agentPlatform === "linux-arm64"
-            ? "nexplane-agent-linux-arm64"
-            : "nexplane-agent-linux-amd64";
+            ? `nexplane-agent-linux-arm64-${version}`
+            : `nexplane-agent-linux-amd64-${version}`;
 
           const agentBin = agentPlatform === "windows" ? "nexplane-agent.exe" : "nexplane-agent";
 
