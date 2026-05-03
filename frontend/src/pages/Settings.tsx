@@ -19,6 +19,8 @@ export function Settings() {
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [modelInput, setModelInput] = useState("");
+  const [agentPlatform, setAgentPlatform] = useState<"linux" | "windows">("linux");
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ["settings"],
@@ -77,6 +79,12 @@ export function Settings() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
+  }
+
+  function copyCmd(key: string, text: string) {
+    navigator.clipboard.writeText(text);
+    setCopiedCmd(key);
+    setTimeout(() => setCopiedCmd(null), 2000);
   }
 
   if (isLoading) return <PageLoading />;
@@ -288,6 +296,73 @@ export function Settings() {
             Agent is not configured. Ask an administrator to generate an agent secret.
           </p>
         )}
+
+        {(settings?.agent_configured || generatedSecret) && (() => {
+          const secret = generatedSecret ?? "<YOUR-SECRET>";
+          const controlPlane = window.location.origin;
+          const linuxEphemeral = `./nexplane-agent-linux-amd64 \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode ephemeral`;
+          const linuxService = `sudo ./nexplane-agent-linux-amd64 \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode service \\\n  --poll-interval 30s`;
+          const linuxSystemd = `[Unit]\nDescription=Nexplane Agent\nAfter=network.target\n\n[Service]\nExecStart=/usr/local/bin/nexplane-agent \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode service \\\n  --poll-interval 30s\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target`;
+          const winEphemeral = `.\\nexplane-agent-windows-amd64.exe \`\n  --control-plane ${controlPlane} \`\n  --secret ${secret} \`\n  --mode ephemeral`;
+          const winService = `New-Service -Name "NexplaneAgent" \`\n  -BinaryPathName "C:\\nexplane\\nexplane-agent.exe --mode service --poll-interval 30s --control-plane ${controlPlane} --secret ${secret}" \`\n  -StartupType Automatic\nStart-Service NexplaneAgent`;
+
+          const CmdBlock = ({ id, label, value }: { id: string; label: string; value: string }) => (
+            <div className="mt-2">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-slate-500">{label}</span>
+                <button
+                  onClick={() => copyCmd(id, value)}
+                  className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-700"
+                >
+                  {copiedCmd === id ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                  {copiedCmd === id ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <pre className="bg-slate-950 text-slate-100 text-xs rounded p-3 overflow-x-auto whitespace-pre">{value}</pre>
+            </div>
+          );
+
+          return (
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <h3 className="text-xs font-semibold text-slate-700 mb-3">Deploy Agent</h3>
+              {!generatedSecret && (
+                <p className="text-xs text-slate-400 mb-3">
+                  Replace <code className="font-mono bg-slate-100 px-1 rounded">&lt;YOUR-SECRET&gt;</code> with the secret from when you generated it. Rotate to get a new one.
+                </p>
+              )}
+              <div className="flex gap-2 mb-3">
+                {(["linux", "windows"] as const).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setAgentPlatform(p)}
+                    className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                      agentPlatform === p
+                        ? "bg-slate-900 text-white border-slate-900"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {p === "linux" ? "🐧 Linux" : "🪟 Windows"}
+                  </button>
+                ))}
+              </div>
+
+              {agentPlatform === "linux" ? (
+                <>
+                  <p className="text-xs text-slate-500 mb-1">Build the binary first: <code className="font-mono bg-slate-100 px-1 rounded">cd agent && make build</code></p>
+                  <CmdBlock id="linux-ephemeral" label="Run once (ephemeral)" value={linuxEphemeral} />
+                  <CmdBlock id="linux-service" label="Run as foreground service" value={linuxService} />
+                  <CmdBlock id="linux-systemd" label="systemd unit (save to /etc/systemd/system/nexplane-agent.service)" value={linuxSystemd} />
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-slate-500 mb-1">Build the binary first: <code className="font-mono bg-slate-100 px-1 rounded">cd agent; make build</code></p>
+                  <CmdBlock id="win-ephemeral" label="Run once (ephemeral)" value={winEphemeral} />
+                  <CmdBlock id="win-service" label="Install as Windows Service (PowerShell, run as admin)" value={winService} />
+                </>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
