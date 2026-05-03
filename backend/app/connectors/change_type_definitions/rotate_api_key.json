@@ -1,0 +1,85 @@
+{
+  "name": "rotate_api_key",
+  "display_name": "Rotate API Key",
+  "description": "Creates a new API key via the provider (Okta, GitHub, AWS IAM), propagates it to all configured targets (K8s secrets, agent env files, SSM, Vault), verifies propagation, then revokes the old key.",
+  "category": "credential_rotation",
+  "agent_required": false,
+  "parameters": {
+    "service": {
+      "type": "string",
+      "enum": ["okta", "github", "aws_iam"],
+      "description": "Identity provider or cloud service managing the API key",
+      "required": true
+    },
+    "key_identifier": {
+      "type": "string",
+      "description": "Key name (Okta), PAT name (GitHub), or IAM username (AWS)",
+      "required": true
+    },
+    "iam_username": {
+      "type": "string",
+      "description": "(aws_iam only) IAM username to create/delete access keys for"
+    },
+    "propagation_targets": {
+      "type": "array",
+      "description": "List of PropagationTarget objects describing where to push the new key",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {"type": "string", "enum": ["k8s_secret", "agent_env_file", "ssm_parameter", "vault_secret"]},
+          "namespace": {"type": "string"},
+          "secret_name": {"type": "string"},
+          "secret_key": {"type": "string"},
+          "asset_id": {"type": "string"},
+          "file_path": {"type": "string"},
+          "env_var_name": {"type": "string"},
+          "ssm_path": {"type": "string"},
+          "vault_path": {"type": "string"},
+          "vault_key": {"type": "string"}
+        }
+      }
+    }
+  },
+  "change_plan_template": [
+    {
+      "id": "step_create_new_api_key",
+      "type": "connector_action",
+      "command": "create_api_key",
+      "params": {},
+      "produces": ["new_api_key", "old_key_id"],
+      "consumes": [],
+      "rollback_command": null,
+      "rollback_params": {}
+    },
+    {
+      "id": "step_propagate_targets",
+      "type": "connector_action",
+      "command": "propagate_api_key",
+      "params": {},
+      "produces": [],
+      "consumes": ["new_api_key"],
+      "rollback_command": "restore_api_key_targets",
+      "rollback_params": {}
+    },
+    {
+      "id": "step_verify_propagation",
+      "type": "verify_health",
+      "command": "verify_propagation",
+      "params": {},
+      "produces": [],
+      "consumes": [],
+      "rollback_command": null,
+      "rollback_params": {}
+    },
+    {
+      "id": "step_revoke_old_api_key",
+      "type": "connector_action",
+      "command": "revoke_api_key",
+      "params": {},
+      "produces": [],
+      "consumes": ["old_key_id"],
+      "rollback_command": null,
+      "rollback_params": {}
+    }
+  ]
+}
