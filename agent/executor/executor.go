@@ -15,6 +15,7 @@ import (
 	"nexplane-agent/commands/crossplatform"
 	"nexplane-agent/commands/linuxupgrade"
 	"nexplane-agent/commands/fleet"
+	"nexplane-agent/commands/dbadmin"
 )
 
 // Result is the outcome of a command execution.
@@ -78,6 +79,12 @@ var commands = map[string]CommandFunc{
 	"push_config_file": fleet.PushConfigFileExecute,
 	"distribute_file":  fleet.DistributeFileExecute,
 	"health_check":     fleet.HealthCheckExecute,
+	// Database administration
+	"provision_db_user":    dbadmin.ExecuteCommand,
+	"deprovision_db_user":  dbadmin.ExecuteCommand,
+	"db_permission_change": dbadmin.ExecuteCommand,
+	"configure_db_audit":   dbadmin.ExecuteCommand,
+	"db_connection_config": dbadmin.ExecuteCommand,
 }
 
 var rollbacks = map[string]CommandFunc{
