@@ -1,0 +1,23 @@
+{
+  "change_type": "terraform_apply",
+  "display_name": "Terraform Apply",
+  "steps": [
+    {
+      "generic_action": "terraform_plan",
+      "purpose": "plan",
+      "required": true,
+      "description": "Run terraform init and plan; capture output for blast radius review"
+    },
+    {
+      "generic_action": "terraform_apply",
+      "purpose": "execute",
+      "required": true,
+      "description": "Apply the saved plan artifact — only runs after human approval"
+    }
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "auto_approve": false,
+  "rollback_command": "terraform_apply",
+  "dry_run_stops_after_step": 1
+}
