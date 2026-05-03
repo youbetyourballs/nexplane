@@ -244,7 +244,10 @@ export type ChangeType =
   | "ec2_reboot"
   | "ec2_stop_start"
   | "ec2_launch"
-  | "ec2_terminate";
+  | "ec2_terminate"
+  | "terraform_apply"
+  | "ansible_playbook"
+  | "helm_upgrade";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 

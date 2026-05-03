@@ -22,8 +22,9 @@ class ChangeType(str, enum.Enum):
     ec2_stop_start = "ec2_stop_start"
     ec2_launch = "ec2_launch"
     ec2_terminate = "ec2_terminate"
-    enforce_cis_benchmark = "enforce_cis_benchmark"
-    collect_evidence = "collect_evidence"
+    terraform_apply   = "terraform_apply"
+    ansible_playbook  = "ansible_playbook"
+    helm_upgrade      = "helm_upgrade"
 
 
 class RiskLevel(str, enum.Enum):

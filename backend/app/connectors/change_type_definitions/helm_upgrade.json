@@ -1,0 +1,23 @@
+{
+  "change_type": "helm_upgrade",
+  "display_name": "Helm Upgrade",
+  "steps": [
+    {
+      "generic_action": "helm_diff",
+      "purpose": "plan",
+      "required": true,
+      "description": "Run helm diff upgrade; capture output for blast radius review (requires helm-diff plugin)"
+    },
+    {
+      "generic_action": "helm_upgrade",
+      "purpose": "execute",
+      "required": true,
+      "description": "Run helm upgrade --install — only runs after human approval"
+    }
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "auto_approve": false,
+  "rollback_command": "helm_upgrade",
+  "dry_run_stops_after_step": 1
+}

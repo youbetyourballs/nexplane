@@ -3,8 +3,48 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight, ShieldAlert, Layers, RotateCcw, CheckCircle2,
-  AlertTriangle, Play, FileText, Clock,
+  AlertTriangle, Play, FileText, Clock, Terminal, ChevronDown,
 } from "lucide-react";
+
+const IAC_CHANGE_TYPES = new Set(["terraform_apply", "ansible_playbook", "helm_upgrade"]);
+
+function PlanOutputPanel({ title, output }: { title: string; output: string }) {
+  const [expanded, setExpanded] = useState(true);
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+      <button
+        className="flex items-center gap-2 w-full px-5 py-3.5 border-b border-slate-100 bg-slate-50 text-left"
+        onClick={() => setExpanded((e) => !e)}
+        aria-expanded={expanded}
+      >
+        <Terminal className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-700 flex-1">{title}</h3>
+        <ChevronDown
+          className={`w-4 h-4 text-slate-400 transition-transform ${expanded ? "" : "-rotate-90"}`}
+        />
+      </button>
+      {expanded && (
+        <div className="p-5">
+          <pre className="text-xs font-mono bg-slate-950 text-slate-100 rounded p-4 overflow-auto max-h-96 whitespace-pre-wrap">
+            {output.split("\n").map((line, i) => {
+              const cls = line.startsWith("+")
+                ? "text-green-400"
+                : line.startsWith("-")
+                ? "text-red-400"
+                : "text-slate-100";
+              return (
+                <span key={i} className={cls}>
+                  {line}
+                  {"\n"}
+                </span>
+              );
+            })}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
 import { changeRequestsApi } from "../api/endpoints";
 import { StatusBadge } from "../components/StatusBadge";
 import { RiskBadge } from "../components/RiskBadge";
@@ -193,6 +233,15 @@ export function ChangeRequestDetail() {
       )}
 
       <div className="space-y-4">
+        {/* IaC Plan Output Panel */}
+        {IAC_CHANGE_TYPES.has(cr.change_type) &&
+          cr.change_plan?.blast_radius?.impact_description && (
+            <PlanOutputPanel
+              title={cr.change_plan.blast_radius.panel_title ?? "Plan Output"}
+              output={cr.change_plan.blast_radius.impact_description}
+            />
+          )}
+
         {cr.change_plan && (
           <>
             <Section title="Blast Radius" icon={ShieldAlert}>

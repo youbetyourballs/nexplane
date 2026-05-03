@@ -1,0 +1,23 @@
+{
+  "change_type": "ansible_playbook",
+  "display_name": "Ansible Playbook",
+  "steps": [
+    {
+      "generic_action": "ansible_check",
+      "purpose": "plan",
+      "required": true,
+      "description": "Run playbook in --check --diff mode; capture output for blast radius review"
+    },
+    {
+      "generic_action": "ansible_run",
+      "purpose": "execute",
+      "required": true,
+      "description": "Execute the playbook — only runs after human approval"
+    }
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "auto_approve": false,
+  "rollback_command": "ansible_run",
+  "dry_run_stops_after_step": 1
+}
