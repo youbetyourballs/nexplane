@@ -49,6 +49,7 @@ export function AppRoutes() {
         <Route path="/runbooks/:id" element={<RunbookEditor />} />
         <Route path="/executions/:id" element={<RunbookExecution />} />
         <Route path="/access-reviews" element={<AccessReviews />} />
+        <Route path="/access-reviews/:id" element={<AccessReviews />} />
         <Route path="/compliance" element={<Compliance />} />
         <Route path="/backup-recovery" element={<BackupRecovery />} />
         <Route path="/maintenance-windows" element={<MaintenanceWindows />} />
