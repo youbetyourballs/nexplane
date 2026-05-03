@@ -1,5 +1,5 @@
-﻿"""
-Seed script â€” idempotent (skips if org already exists).
+﻿﻿"""
+Seed script â€" idempotent (skips if org already exists).
 Run: python seed.py
 """
 import asyncio
@@ -76,7 +76,7 @@ async def seed():
     async with AsyncSessionLocal() as db:
         existing = await db.get(Organization, ORG_ID)
         if existing:
-            print("Seed data already exists â€” skipping.")
+            print("Seed data already exists â€" skipping.")
             return
 
         org = Organization(id=ORG_ID, name="Acme Security Corp")
@@ -129,7 +129,7 @@ async def seed():
         ]
         db.add_all(connectors)
 
-        # CR 1: DNS update â€” awaiting approval
+        # CR 1: DNS update â€" awaiting approval
         cr1 = ChangeRequest(
             id=CR_IDS["dns_awaiting"],
             organization_id=ORG_ID,
@@ -183,7 +183,7 @@ async def seed():
         )
         db.add(plan1)
 
-        # CR 2: Snapshot â€” completed
+        # CR 2: Snapshot â€" completed
         cr2 = ChangeRequest(
             id=CR_IDS["snapshot_completed"],
             organization_id=ORG_ID,
@@ -228,7 +228,7 @@ async def seed():
         )
         db.add(approval2)
 
-        # CR 3: Remote command â€” rejected
+        # CR 3: Remote command â€" rejected
         cr3 = ChangeRequest(
             id=CR_IDS["remote_rejected"],
             organization_id=ORG_ID,
@@ -251,7 +251,7 @@ async def seed():
         )
         db.add(approval3)
 
-        # CR 4: Microsegmentation â€” planned
+        # CR 4: Microsegmentation â€" planned
         cr4 = ChangeRequest(
             id=CR_IDS["microseg_planned"],
             organization_id=ORG_ID,
@@ -291,7 +291,7 @@ async def seed():
                     {"id": str(ASSET_IDS["paloalto_fw"]), "name": "Palo Alto Prod Firewall", "env": "prod", "criticality": "critical"},
                 ],
                 "affected_environments": ["prod"],
-                "estimated_impact": "Simulation mode only â€” no live traffic impact",
+                "estimated_impact": "Simulation mode only â€" no live traffic impact",
                 "affected_services": [],
                 "recovery_time_estimate": "None (staged)",
                 "rollback_available": True,
@@ -346,10 +346,10 @@ async def seed():
 
 async def seed_expansion():
     async with AsyncSessionLocal() as db:
-        existing = await db.get(Connector, NEW_CONNECTOR_IDS[“crowdstrike”])
-        existing_project = await db.get(Project, PROJECT_IDS[“isolate_investigate”])
+        existing = await db.get(Connector, NEW_CONNECTOR_IDS["crowdstrike"])
+        existing_project = await db.get(Project, PROJECT_IDS["isolate_investigate"])
         if existing or existing_project:
-            print(“Expansion seed already exists â€” skipping.”)
+            print("Expansion seed already exists â€" skipping.")
             return
 
         new_connectors = [
