@@ -1,0 +1,36 @@
+{
+  "change_type": "collect_evidence",
+  "display_name": "Collect Audit Evidence",
+  "description": "Gather config files, command outputs, and change logs from target hosts and package them as a structured evidence bundle for compliance audits (SOC2, PCI-DSS, ISO 27001).",
+  "category": "compliance",
+  "risk_guidance": "Read-only. No configuration changes are made to target hosts.",
+  "parameters": {
+    "framework": {
+      "type": "string",
+      "enum": ["soc2", "pci", "iso27001"],
+      "description": "Compliance framework for which evidence is being collected.",
+      "required": true
+    },
+    "control_id": {
+      "type": "string",
+      "description": "Control identifier within the framework (e.g. CC6.1 for SOC2).",
+      "required": true
+    },
+    "asset_ids": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" },
+      "description": "UUIDs of target assets.",
+      "required": true
+    },
+    "evidence_types": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["config_files", "command_outputs", "change_logs"]
+      },
+      "description": "Types of evidence to collect.",
+      "default": ["config_files", "command_outputs", "change_logs"]
+    }
+  },
+  "agent_commands": ["collect_evidence"]
+}

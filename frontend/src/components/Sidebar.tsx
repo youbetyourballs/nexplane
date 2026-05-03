@@ -8,7 +8,7 @@ import {
   Server,
   FolderOpen,
   Settings as SettingsIcon,
-  BookOpen,
+  ShieldCheck,
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 
@@ -16,10 +16,10 @@ const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/projects", label: "Projects", icon: FolderOpen },
   { to: "/change-requests", label: "Change Requests", icon: FileStack },
-  { to: "/runbooks", label: "Runbooks", icon: BookOpen },
   { to: "/approvals", label: "Approvals Queue", icon: CheckSquare },
   { to: "/assets", label: "Asset Inventory", icon: Server },
   { to: "/connectors", label: "Connectors", icon: Plug },
+  { to: "/compliance", label: "Compliance", icon: ShieldCheck },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
@@ -71,3 +71,4 @@ export function Sidebar() {
     </aside>
   );
 }
+
