@@ -22,6 +22,8 @@ class ChangeType(str, enum.Enum):
     ec2_stop_start = "ec2_stop_start"
     ec2_launch = "ec2_launch"
     ec2_terminate = "ec2_terminate"
+    offboard_user = "offboard_user"
+    onboard_user = "onboard_user"
 
 
 class RiskLevel(str, enum.Enum):
@@ -65,6 +67,8 @@ class ChangeRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    runbook_execution_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="change_requests")
     requester: Mapped["User"] = relationship("User", back_populates="change_requests")
