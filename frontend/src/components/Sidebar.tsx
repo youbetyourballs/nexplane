@@ -10,6 +10,9 @@ import {
   Settings as SettingsIcon,
   ShieldCheck,
   BookOpen,
+  Bug,
+  ClipboardList,
+  Siren,
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 
@@ -21,6 +24,8 @@ const navItems = [
   { to: "/approvals", label: "Approvals Queue", icon: CheckSquare },
   { to: "/assets", label: "Asset Inventory", icon: Server },
   { to: "/connectors", label: "Connectors", icon: Plug },
+  { to: "/remediation", label: "Vuln Remediation", icon: Bug },
+  { to: "/compliance", label: "Compliance", icon: ClipboardList },
   { to: "/access-reviews", label: "Access Reviews", icon: ShieldCheck },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
