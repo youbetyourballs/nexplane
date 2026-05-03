@@ -138,8 +138,8 @@ export function MaintenanceWindows() {
     <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
       <PageHeader
         title="Maintenance Windows"
-        description="Schedule time windows when approved change requests are allowed to execute."
-        action={
+        subtitle="Schedule time windows when approved change requests are allowed to execute."
+        actions={
           <button
             onClick={() => { setShowForm(true); setEditingId(null); setForm(EMPTY_FORM); }}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
