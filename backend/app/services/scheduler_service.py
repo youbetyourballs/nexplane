@@ -45,6 +45,7 @@ async def start():
         replace_existing=True,
     )
     logger.info("Registered weekly drift detection job (Sundays 02:00 UTC)")
+    _register_runbook_executor()
 
 
 def stop():
@@ -122,3 +123,17 @@ async def _run_drift_detection_job():
             await run_drift_detection(db)
         except Exception as e:
             logger.error(f"Drift detection job failed: {e}")
+
+
+def _register_runbook_executor():
+    """Register the runbook executor tick job. Called from start()."""
+    from app.services.runbook_executor import tick_all_executions
+    scheduler.add_job(
+        tick_all_executions,
+        args=[_db_factory],
+        trigger="interval",
+        seconds=30,
+        id="runbook_executor",
+        replace_existing=True,
+    )
+    logger.info("Registered runbook executor job (every 30s)")

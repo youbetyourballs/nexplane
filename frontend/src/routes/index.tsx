@@ -12,6 +12,9 @@ import { Projects } from "../pages/Projects";
 import { ProjectDetail } from "../pages/ProjectDetail";
 import { Settings } from "../pages/Settings";
 import { Compliance } from "../pages/Compliance";
+import { Runbooks } from "../pages/Runbooks";
+import { RunbookEditor } from "../pages/RunbookEditor";
+import { RunbookExecution } from "../pages/RunbookExecution";
 import { useAuth } from "../hooks/useAuth";
 
 export function AppRoutes() {
@@ -36,6 +39,10 @@ export function AppRoutes() {
         <Route path="/connectors" element={<Connectors />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/compliance" element={<Compliance />} />
+        <Route path="/runbooks" element={<Runbooks />} />
+        <Route path="/runbooks/new" element={<RunbookEditor />} />
+        <Route path="/runbooks/:id" element={<RunbookEditor />} />
+        <Route path="/executions/:id" element={<RunbookExecution />} />
       </Route>
     </Routes>
   );
