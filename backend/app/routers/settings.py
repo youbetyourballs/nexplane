@@ -48,8 +48,12 @@ async def get_settings(
     org_settings = result.scalar_one_or_none()
     if not org_settings:
         return OrgSettingsRead(ai_configured=False, agent_configured=False, updated_at=None)
+    ai_configured = (
+        org_settings.anthropic_api_key_encrypted is not None
+        or org_settings.ai_providers_encrypted is not None
+    )
     return OrgSettingsRead(
-        ai_configured=org_settings.anthropic_api_key_encrypted is not None,
+        ai_configured=ai_configured,
         agent_configured=org_settings.agent_secret_encrypted is not None,
         updated_at=org_settings.updated_at,
     )
