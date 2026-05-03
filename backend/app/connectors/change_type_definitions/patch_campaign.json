@@ -1,0 +1,22 @@
+{
+  "change_type": "patch_campaign",
+  "display_name": "Emergency Patch Campaign",
+  "description": "Fan out security patching across all hosts affected by a CVE or vulnerable package version. Patches are applied in rolling batches; the campaign aborts if the failure rate exceeds the configured threshold.",
+  "steps": [
+    {"generic_action": "identify_affected_assets", "purpose": "preflight_validate", "required": true},
+    {"generic_action": "apply_campaign_patches",   "purpose": "execute",            "required": true},
+    {"generic_action": "verify_campaign_results",  "purpose": "verify",             "required": true}
+  ],
+  "preflight_checks": ["asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["package_version_check"],
+  "parameters": {
+    "cve_id":               {"type": "string",  "required": false, "description": "e.g. CVE-2024-3094"},
+    "package_name":         {"type": "string",  "required": false, "description": "e.g. xz-utils"},
+    "affected_version_lt":  {"type": "string",  "required": false, "description": "patch all hosts running versions < this"},
+    "asset_filter":         {"type": "object",  "required": false},
+    "batch_size":           {"type": "integer", "default": 10,    "description": "hosts patched in parallel per wave"},
+    "abort_error_threshold":{"type": "number",  "default": 0.2,   "description": "abort campaign if failure rate exceeds this fraction"},
+    "dry_run":              {"type": "boolean", "default": false},
+    "defer_reboot":         {"type": "boolean", "default": false}
+  }
+}
