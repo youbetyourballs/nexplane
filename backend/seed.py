@@ -1,4 +1,4 @@
-﻿﻿"""
+"""
 Seed script â€" idempotent (skips if org already exists).
 Run: python seed.py
 """
