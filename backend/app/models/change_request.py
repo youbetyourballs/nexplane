@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Optional
 from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
@@ -22,10 +23,13 @@ class ChangeType(str, enum.Enum):
     ec2_stop_start = "ec2_stop_start"
     ec2_launch = "ec2_launch"
     ec2_terminate = "ec2_terminate"
-    rolling_restart    = "rolling_restart"
-    canary_config_push = "canary_config_push"
-    distribute_file    = "distribute_file"
-    fleet_health_check = "fleet_health_check"
+    # Vulnerability remediation change types
+    patch_packages = "patch_packages"
+    s3_block_public_access = "s3_block_public_access"
+    iam_enforce_mfa = "iam_enforce_mfa"
+    generic_remediation = "generic_remediation"
+    notify_only = "notify_only"
+    suppress = "suppress"
 
 
 class RiskLevel(str, enum.Enum):
@@ -47,12 +51,6 @@ class ChangeRequestStatus(str, enum.Enum):
     failed = "failed"
     rolled_back = "rolled_back"
     rejected = "rejected"
-    queued_for_maintenance = "queued_for_maintenance"
-    preflight_running      = "preflight_running"
-    preflight_failed       = "preflight_failed"
-    batch_running          = "batch_running"
-    batch_aborted          = "batch_aborted"
-    completed_with_errors  = "completed_with_errors"
 
 
 class ChangeRequest(Base):
@@ -75,7 +73,9 @@ class ChangeRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-    step_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Vulnerability remediation fields
+    finding_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="change_requests")
     requester: Mapped["User"] = relationship("User", back_populates="change_requests")

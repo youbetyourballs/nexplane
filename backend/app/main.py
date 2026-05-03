@@ -10,7 +10,7 @@ from app.database import get_db, AsyncSessionLocal
 from app.routers import auth, assets, connectors, change_requests, audit, projects
 from app.routers import settings as settings_router
 from app.routers import agent as agent_router
-from app.routers import maintenance_windows as maintenance_windows_router
+from app.routers import vulnerability as vulnerability_router
 from app.routers import current_user
 from app.routers.audit import list_cr_audit_events
 from app.services import scheduler_service
@@ -56,7 +56,7 @@ app.include_router(audit.router)
 app.include_router(projects.router)
 app.include_router(settings_router.router)
 app.include_router(agent_router.router)
-app.include_router(maintenance_windows_router.router)
+app.include_router(vulnerability_router.router)
 
 
 @app.get("/change-requests/{cr_id}/audit-events", tags=["Audit"])

@@ -11,7 +11,7 @@ import { Connectors } from "../pages/Connectors";
 import { Projects } from "../pages/Projects";
 import { ProjectDetail } from "../pages/ProjectDetail";
 import { Settings } from "../pages/Settings";
-import { MaintenanceWindows } from "../pages/MaintenanceWindows";
+import VulnerabilityRemediation from "../pages/VulnerabilityRemediation";
 import { useAuth } from "../hooks/useAuth";
 
 export function AppRoutes() {
@@ -35,7 +35,7 @@ export function AppRoutes() {
         <Route path="/assets/:id" element={<AssetDetail />} />
         <Route path="/connectors" element={<Connectors />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/settings/maintenance-windows" element={<MaintenanceWindows />} />
+        <Route path="/remediation" element={<VulnerabilityRemediation />} />
       </Route>
     </Routes>
   );
