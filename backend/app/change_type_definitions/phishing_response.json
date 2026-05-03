@@ -1,0 +1,65 @@
+{
+  "change_type": "phishing_response",
+  "display_name": "Phishing Response",
+  "description": "Block sender domain, force password reset, revoke sessions, and re-enroll MFA for affected users.",
+  "incident_response": true,
+  "parameters": {
+    "sender_domain":        { "type": "string", "required": true, "description": "Domain to block" },
+    "affected_user_emails": { "type": "array", "items": { "type": "string", "format": "email" }, "required": true },
+    "reason":               { "type": "string", "required": true }
+  },
+  "phases": [
+    {
+      "phase": 1,
+      "name": "block_sender_domain",
+      "parallel": true,
+      "steps": [
+        { "name": "defender_block_domain",    "connector": "microsoft_defender" },
+        { "name": "google_block_domain",      "connector": "google_workspace" }
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "force_password_reset",
+      "parallel": true,
+      "per_user": true,
+      "steps": [
+        { "name": "ad_force_password_reset",       "connector": "active_directory" },
+        { "name": "okta_expire_password",          "connector": "okta" },
+        { "name": "google_force_password_change",  "connector": "google_workspace" },
+        { "name": "entraid_force_password_change", "connector": "entra_id" }
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "revoke_sessions",
+      "parallel": true,
+      "per_user": true,
+      "steps": [
+        { "name": "ad_revoke_kerberos",   "connector": "active_directory" },
+        { "name": "okta_revoke_sessions", "connector": "okta" },
+        { "name": "google_revoke_tokens", "connector": "google_workspace" }
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "force_mfa_reenrollment",
+      "parallel": true,
+      "per_user": true,
+      "steps": [
+        { "name": "okta_reset_factors",    "connector": "okta" },
+        { "name": "entraid_reset_mfa",     "connector": "entra_id" },
+        { "name": "google_reset_2sv",      "connector": "google_workspace" }
+      ]
+    },
+    {
+      "phase": 5,
+      "name": "generate_report",
+      "parallel": false,
+      "steps": [
+        { "name": "aggregate_report", "type": "internal" }
+      ]
+    }
+  ],
+  "rollback": "partial — domain block entries removed; password resets and MFA re-enrollment not reversed by design"
+}

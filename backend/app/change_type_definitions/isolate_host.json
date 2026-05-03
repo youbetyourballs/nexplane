@@ -1,0 +1,18 @@
+{
+  "change_type": "isolate_host",
+  "display_name": "Host Isolation",
+  "description": "Isolate a compromised host via agent-side OS firewall rules. Captures pre-isolation state for rollback.",
+  "incident_response": true,
+  "parameters": {
+    "asset_id": { "type": "string", "format": "uuid", "required": true, "description": "UUID of the asset to isolate" },
+    "management_cidr": { "type": "string", "required": true, "default": "10.0.0.0/8", "description": "CIDR block allowed outbound (management/SSH)" },
+    "reason": { "type": "string", "required": true, "description": "Free-text justification for isolation" }
+  },
+  "steps": [
+    { "name": "preserve_evidence", "type": "change_request", "optional": true, "skip_if_recent_bundle": true },
+    { "name": "isolate", "type": "agent_command", "command": "isolate_host" }
+  ],
+  "rollback": [
+    { "name": "restore_network_access", "type": "agent_command", "command": "isolate_host", "rollback": true }
+  ]
+}
