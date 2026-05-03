@@ -30,4 +30,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ .
 COPY --from=agent-builder /agent/dist/ /opt/nexplane-downloads/
 
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
 EXPOSE 8000

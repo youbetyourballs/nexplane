@@ -1,0 +1,42 @@
+{
+  "connector_type": "slack",
+  "display_name": "Slack",
+  "credential_fields": [
+    {"name": "bot_token", "label": "Bot Token (xoxb-)", "type": "password", "required": true},
+    {"name": "admin_token", "label": "Admin User Token (xoxp-, Enterprise Grid only)", "type": "password", "required": false}
+  ],
+  "actions": [
+    {
+      "action_id": "deactivate_user",
+      "generic_action": "deactivate_user",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Deactivate User",
+      "description": "Deactivate a Slack user, preventing sign-in. Enterprise Grid only — requires xoxp- admin token with admin.users:write scope.",
+      "applicable_asset_types": ["identity", "cloud_account"],
+      "parameters": [
+        {"name": "user_id", "type": "string", "required": true, "description": "Slack user ID (e.g. U012AB3CD)"}
+      ],
+      "executor": "slack.deactivate_user",
+      "rollback_action": "reactivate_user",
+      "estimated_duration_seconds": 5,
+      "blast_radius_hint": "account_access_loss",
+      "safety_notes": ["Requires Enterprise Grid. User will be immediately unable to sign in."]
+    },
+    {
+      "action_id": "reactivate_user",
+      "generic_action": "reactivate_user",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Reactivate User",
+      "description": "Reactivate a previously deactivated Slack user.",
+      "applicable_asset_types": ["identity", "cloud_account"],
+      "parameters": [
+        {"name": "user_id", "type": "string", "required": true, "description": "Slack user ID to reactivate"}
+      ],
+      "executor": "slack.reactivate_user",
+      "rollback_action": "deactivate_user",
+      "estimated_duration_seconds": 5
+    }
+  ]
+}
