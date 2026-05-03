@@ -245,8 +245,10 @@ export type ChangeType =
   | "ec2_stop_start"
   | "ec2_launch"
   | "ec2_terminate"
-  | "offboard_user"
-  | "onboard_user";
+  | "rolling_restart"
+  | "canary_config_push"
+  | "distribute_file"
+  | "fleet_health_check";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
@@ -261,7 +263,13 @@ export type ChangeRequestStatus =
   | "completed"
   | "failed"
   | "rolled_back"
-  | "rejected";
+  | "rejected"
+  | "queued_for_maintenance"
+  | "preflight_running"
+  | "preflight_failed"
+  | "batch_running"
+  | "batch_aborted"
+  | "completed_with_errors";
 
 export interface ChangeRequest {
   id: string;

@@ -244,6 +244,33 @@ async def approve_change_request(
         cr.status = ChangeRequestStatus.approved
         cr.updated_at = datetime.now(timezone.utc)
 
+        # Check if a maintenance window is required and currently open
+        from app.models.maintenance_window import MaintenanceWindow
+        from app.routers.maintenance_windows import is_window_open_for_org
+
+        windows_result = await db.execute(
+            select(MaintenanceWindow).where(
+                MaintenanceWindow.organization_id == user.organization_id,
+                MaintenanceWindow.enabled == True,
+            )
+        )
+        windows = windows_result.scalars().all()
+
+        if windows:
+            # Only gate if there are maintenance windows configured
+            asset_ids = [uuid.UUID(aid) for aid in (cr.target_asset_ids or [])]
+            assets_result = await db.execute(
+                select(Asset).where(Asset.id.in_(asset_ids))
+            )
+            assets = list(assets_result.scalars().all())
+            asset_tags: set[str] = set()
+            for asset in assets:
+                if asset.tags:
+                    asset_tags.update(asset.tags if isinstance(asset.tags, list) else [])
+            now = datetime.now(timezone.utc)
+            if not is_window_open_for_org(windows, asset_tags, now):
+                cr.status = ChangeRequestStatus.queued_for_maintenance
+
     await record_event(db, user.organization_id, f"change_request.{body.decision.value}",
                        {"change_request_id": str(cr.id), "approver": user.email,
                         "comment": body.comment, "approval_satisfied": req_check["satisfied"]},
@@ -383,3 +410,14 @@ async def manual_rollback(
 
     result = await db.execute(select(ExecutionRun).where(ExecutionRun.id == rollback_run.id))
     return result.scalar_one()
+
+
+@router.get("/{cr_id}/progress")
+async def get_change_request_progress(
+    cr_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns step_metadata for fleet change types — used for live batch progress polling."""
+    cr = await _get_cr(db, cr_id, user.organization_id)
+    return {"step_metadata": cr.step_metadata or {}, "status": cr.status}

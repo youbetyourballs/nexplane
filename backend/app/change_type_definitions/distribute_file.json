@@ -1,0 +1,43 @@
+{
+  "change_type": "distribute_file",
+  "display_name": "Distribute File",
+  "description": "Push a file to all hosts in an asset group simultaneously. Optionally run a post-write command on each host.",
+  "risk_level_default": "medium",
+  "parameters": {
+    "file_path": {
+      "type": "string",
+      "required": true,
+      "label": "Remote File Path",
+      "description": "Absolute path on target hosts."
+    },
+    "file_content": {
+      "type": "file_upload",
+      "required": true,
+      "label": "File Content",
+      "description": "File to distribute, base64-encoded by the frontend."
+    },
+    "permissions": {
+      "type": "string",
+      "required": false,
+      "default": "0644",
+      "label": "File Permissions",
+      "description": "Octal permission string, e.g. 0644 or 0600."
+    },
+    "post_command": {
+      "type": "string",
+      "required": false,
+      "label": "Post-Write Command",
+      "description": "Optional shell command run on each host after the file is written, e.g. 'systemctl reload nginx'."
+    },
+    "asset_group": {
+      "type": "asset_group",
+      "required": true,
+      "label": "Target Asset Group",
+      "description": "Tag name or explicit asset ID list."
+    }
+  },
+  "rollback": {
+    "strategy": "none",
+    "description": "No automatic rollback. Operator must redistribute the prior version."
+  }
+}

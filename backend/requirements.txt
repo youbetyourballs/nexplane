@@ -30,6 +30,7 @@ pan-os-python>=1.12.0
 okta>=2.9.0
 paramiko>=3.5.0
 apscheduler>=3.10.0
+croniter>=2.0.0
 reactflow
 google-cloud-compute>=1.14.0
 google-cloud-storage>=2.10.0
