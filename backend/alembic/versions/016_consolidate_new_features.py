@@ -392,7 +392,7 @@ def upgrade() -> None:
     op.execute("ALTER TYPE change_request_status ADD VALUE IF NOT EXISTS 'batch_aborted'")
     op.execute("ALTER TYPE change_request_status ADD VALUE IF NOT EXISTS 'completed_with_errors'")
     # userrole new value (IR)
-    op.execute("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'ir_responder'")
+    op.execute("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ir_responder'")
 
 
 def downgrade() -> None:
