@@ -24,3 +24,4 @@ __all__ = [
     "ConnectorCredential",
     "ScheduledIngest",
 ]
+from app.models.review_campaign import ReviewCampaign, ReviewEntry  # noqa: F401
