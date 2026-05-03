@@ -1,0 +1,24 @@
+{
+  "change_type": "fleet_health_check",
+  "display_name": "Fleet Health Check",
+  "description": "Run a preflight health check across all hosts: disk space, CPU load, pending reboots, and optional service status.",
+  "risk_level_default": "low",
+  "parameters": {
+    "asset_group": {
+      "type": "asset_group",
+      "required": true,
+      "label": "Target Asset Group",
+      "description": "Tag name or asset ID list to health-check."
+    },
+    "required_services": {
+      "type": "string_list",
+      "required": false,
+      "label": "Required Services",
+      "description": "List of service names that must be running on each host for the host to pass."
+    }
+  },
+  "rollback": {
+    "strategy": "none",
+    "description": "Health check is read-only; no rollback needed."
+  }
+}

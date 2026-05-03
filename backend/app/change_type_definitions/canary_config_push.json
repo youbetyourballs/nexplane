@@ -1,0 +1,42 @@
+{
+  "change_type": "canary_config_push",
+  "display_name": "Canary Config Push",
+  "description": "Push a config file to one canary host first, verify with a shell command, then roll out to the full asset group.",
+  "risk_level_default": "high",
+  "parameters": {
+    "file_path": {
+      "type": "string",
+      "required": true,
+      "label": "Remote File Path",
+      "description": "Absolute path on the target hosts where the file will be written."
+    },
+    "file_content": {
+      "type": "file_upload",
+      "required": true,
+      "label": "File Content",
+      "description": "File to push, base64-encoded by the frontend before submission."
+    },
+    "canary_asset_id": {
+      "type": "asset_id",
+      "required": true,
+      "label": "Canary Asset",
+      "description": "Asset that receives the config first. Must be included in asset_group."
+    },
+    "verification_command": {
+      "type": "string",
+      "required": true,
+      "label": "Verification Command",
+      "description": "Shell command run on the canary after push. Must exit 0 for rollout to proceed."
+    },
+    "asset_group": {
+      "type": "asset_group",
+      "required": true,
+      "label": "Target Asset Group",
+      "description": "Full target set for the config push (canary included)."
+    }
+  },
+  "rollback": {
+    "strategy": "backup_restore",
+    "description": "The agent backs up the existing file before writing. Rollback re-pushes the backup content to the canary; remaining hosts retain their previous version."
+  }
+}

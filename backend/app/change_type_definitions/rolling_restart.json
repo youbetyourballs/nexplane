@@ -1,0 +1,38 @@
+{
+  "change_type": "rolling_restart",
+  "display_name": "Rolling Service Restart",
+  "description": "Restart a service across a fleet of hosts in safe batches with configurable abort threshold.",
+  "risk_level_default": "medium",
+  "parameters": {
+    "service_name": {
+      "type": "string",
+      "required": true,
+      "label": "Service Name",
+      "description": "The systemd service name (Linux) or Windows service name to restart."
+    },
+    "asset_group": {
+      "type": "asset_group",
+      "required": true,
+      "label": "Target Asset Group",
+      "description": "Tag name or explicit list of asset IDs to restart."
+    },
+    "batch_size_pct": {
+      "type": "integer",
+      "required": false,
+      "default": 10,
+      "label": "Batch Size (%)",
+      "description": "Percentage of the fleet to restart per wave. Min 1%."
+    },
+    "abort_threshold_pct": {
+      "type": "integer",
+      "required": false,
+      "default": 25,
+      "label": "Abort Threshold (%)",
+      "description": "Stop the rollout if this percentage of dispatched hosts fail."
+    }
+  },
+  "rollback": {
+    "strategy": "re_issue",
+    "description": "Rollback re-issues restart_service to failed hosts. Service restart is idempotent."
+  }
+}
