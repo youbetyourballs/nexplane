@@ -333,9 +333,9 @@ async def ai_chat(
             detail="AI not configured — add an AI provider API key in Settings",
         )
 
-    from app.services.ai_service import _resolve_api_key
+    from app.services.ai_service import _resolve_provider_config
     secrets = SecretsService(app_settings.SECRET_KEY)
-    api_key = _resolve_api_key(org_settings, secrets)
+    provider, api_key, model = _resolve_provider_config(org_settings, secrets)
 
     # Load asset context
     assets_result = await db.execute(
@@ -360,7 +360,9 @@ async def ai_chat(
     ai_service = AIService(secrets)
     try:
         result_dict = await ai_service.chat(
+            provider=provider,
             api_key=api_key,
+            model=model,
             conversation=conversation,
             project_goal=project.goal or project.name,
             asset_context=asset_context,

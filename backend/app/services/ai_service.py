@@ -53,7 +53,7 @@ Your job:
 [
   {{
     "title": "Short descriptive title for the change request",
-    "change_type": "dns_update|snapshot_asset|security_group_update|key_rotation|telemetry_agent_deploy|remote_command|microsegmentation_policy",
+    "change_type": "dns_update|snapshot_asset|security_group_update|key_rotation|telemetry_agent_deploy|remote_command|microsegmentation_policy|ec2_stop|ec2_start|ec2_reboot|ec2_stop_start|ec2_launch|ec2_terminate",
     "suggested_assets": ["asset name 1", "asset name 2"],
     "desired_outcome_sketch": {{}},
     "notes": "Optional sequencing or dependency notes"
@@ -97,28 +97,37 @@ class AIService:
 
     async def chat(
         self,
+        provider: str,
         api_key: str,
+        model: str,
         conversation: list[dict],
         project_goal: str,
         asset_context: list[dict],
     ) -> dict:
-        import anthropic
-        from app.config import settings
-
-        client = anthropic.AsyncAnthropic(api_key=api_key)
         system_prompt = self._build_system_prompt(project_goal, asset_context)
-
         messages = [{"role": m["role"], "content": m["content"]} for m in conversation]
 
-        response = await client.messages.create(
-            model=settings.AI_MODEL,
-            max_tokens=2048,
-            system=system_prompt,
-            messages=messages,
-        )
+        if provider == "openai":
+            import openai
+            client = openai.AsyncOpenAI(api_key=api_key)
+            oai_messages = [{"role": "system", "content": system_prompt}] + messages
+            response = await client.chat.completions.create(
+                model=model,
+                max_tokens=2048,
+                messages=oai_messages,
+            )
+            reply_text = response.choices[0].message.content
+        else:
+            import anthropic
+            client = anthropic.AsyncAnthropic(api_key=api_key)
+            response = await client.messages.create(
+                model=model,
+                max_tokens=2048,
+                system=system_prompt,
+                messages=messages,
+            )
+            reply_text = response.content[0].text
 
-        reply_text = response.content[0].text
         proposed_crs = self._parse_proposal(reply_text)
         clean_reply = self._strip_proposal_tags(reply_text)
-
         return {"reply": clean_reply, "proposed_crs": proposed_crs}
