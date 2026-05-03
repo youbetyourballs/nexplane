@@ -22,6 +22,8 @@ class ChangeType(str, enum.Enum):
     ec2_stop_start = "ec2_stop_start"
     ec2_launch = "ec2_launch"
     ec2_terminate = "ec2_terminate"
+    enforce_cis_benchmark = "enforce_cis_benchmark"
+    collect_evidence = "collect_evidence"
 
 
 class RiskLevel(str, enum.Enum):
