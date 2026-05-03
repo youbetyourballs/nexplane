@@ -43,7 +43,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_downloads_dir = pathlib.Path("/app/downloads")
+_downloads_dir = pathlib.Path("/opt/nexplane-downloads")
 if _downloads_dir.exists():
     app.mount("/downloads", StaticFiles(directory=str(_downloads_dir)), name="downloads")
 
