@@ -346,9 +346,10 @@ async def seed():
 
 async def seed_expansion():
     async with AsyncSessionLocal() as db:
-        existing = await db.get(Connector, NEW_CONNECTOR_IDS["crowdstrike"])
-        if existing:
-            print("Expansion seed already exists â€” skipping.")
+        existing = await db.get(Connector, NEW_CONNECTOR_IDS[“crowdstrike”])
+        existing_project = await db.get(Project, PROJECT_IDS[“isolate_investigate”])
+        if existing or existing_project:
+            print(“Expansion seed already exists â€” skipping.”)
             return
 
         new_connectors = [
