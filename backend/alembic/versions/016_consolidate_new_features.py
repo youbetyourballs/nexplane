@@ -225,7 +225,6 @@ def upgrade() -> None:
         sa.Column(
             "secret_id",
             UUID(as_uuid=True),
-            sa.ForeignKey("secrets.id", ondelete="CASCADE"),
             nullable=False,
             index=True,
         ),
