@@ -245,9 +245,8 @@ export type ChangeType =
   | "ec2_stop_start"
   | "ec2_launch"
   | "ec2_terminate"
-  | "terraform_apply"
-  | "ansible_playbook"
-  | "helm_upgrade";
+  | "offboard_user"
+  | "onboard_user";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 

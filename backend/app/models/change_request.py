@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Text, Boolean
+from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 import enum
@@ -22,11 +22,8 @@ class ChangeType(str, enum.Enum):
     ec2_stop_start = "ec2_stop_start"
     ec2_launch = "ec2_launch"
     ec2_terminate = "ec2_terminate"
-    # Incident Response change types
-    isolate_host = "isolate_host"
-    lockdown_account = "lockdown_account"
-    phishing_response = "phishing_response"
-    preserve_evidence = "preserve_evidence"
+    offboard_user = "offboard_user"
+    onboard_user = "onboard_user"
 
 
 class RiskLevel(str, enum.Enum):
@@ -77,12 +74,3 @@ class ChangeRequest(Base):
     approvals: Mapped[list["Approval"]] = relationship("Approval", back_populates="change_request")
     execution_runs: Mapped[list["ExecutionRun"]] = relationship("ExecutionRun", back_populates="change_request")
     audit_events: Mapped[list["AuditEvent"]] = relationship("AuditEvent", back_populates="change_request")
-
-    # Incident Response fields
-    incident_response: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    ir_playbook_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    ir_template_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("ir_playbook_templates.id"), nullable=True
-    )
-    step_results: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    output: Mapped[dict | None] = mapped_column(JSON, nullable=True)

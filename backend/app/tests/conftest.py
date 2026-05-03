@@ -11,6 +11,7 @@ from app.models.organization import Organization
 from app.models.user import User, UserRole
 from app.models.asset import Asset, AssetType, Environment, Criticality
 from app.models.change_request import ChangeRequest, ChangeType, RiskLevel, ChangeRequestStatus
+from app.models.access_review import AccessReview  # noqa: F401 — ensures table is created in test DB
 from app.services.auth_service import hash_password, create_access_token
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
