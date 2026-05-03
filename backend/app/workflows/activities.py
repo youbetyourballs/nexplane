@@ -114,25 +114,39 @@ async def activity_execute_change(
 
     step_results = []
 
-    for step in generated_steps:
-        connector_type = step.get("connector_type", "")
-        action_id = step.get("action_id", "")
-        parameters = step.get("parameters", {})
+    async with AsyncSessionLocal() as db:
+        for step in generated_steps:
+            connector_type = step.get("connector_type", "")
+            action_id = step.get("action_id", "")
+            parameters = step.get("parameters", {})
+            step_connector_id = step.get("connector_id")
 
-        try:
-            result = await execute_action(connector_type, action_id, parameters, asset_ids)
-        except Exception as exc:
-            logger.error("Step %s failed: %s", step.get("step_number"), exc)
-            raise
+            # Look up the specific connector instance if we have its ID
+            connector = None
+            if step_connector_id:
+                result = await db.execute(
+                    select(Connector).where(Connector.id == uuid.UUID(step_connector_id))
+                )
+                connector = result.scalar_one_or_none()
 
-        step_results.append({
-            "step_number": step["step_number"],
-            "generic_action": step.get("generic_action"),
-            "action_id": action_id,
-            "connector_type": connector_type,
-            "result": result,
-        })
-        logger.info("Step %s (%s) completed", step.get("step_number"), action_id)
+            try:
+                result = await execute_action(
+                    connector_type, action_id, parameters, asset_ids,
+                    connector=connector, db=db if connector else None,
+                )
+            except Exception as exc:
+                logger.error("Step %s failed: %s", step.get("step_number"), exc)
+                raise
+
+            step_results.append({
+                "step_number": step["step_number"],
+                "generic_action": step.get("generic_action"),
+                "action_id": action_id,
+                "connector_type": connector_type,
+                "connector_id": step_connector_id,
+                "result": result,
+            })
+            logger.info("Step %s (%s) completed", step.get("step_number"), action_id)
 
     logger.info("All steps completed for change request %s", change_request_id)
     return {"steps": step_results}
@@ -157,23 +171,35 @@ async def activity_execute_rollback(
 
     rollback_results = []
 
-    for step in reversed(generated_steps):
-        rollback_action = step.get("rollback_action")
-        rollback_connector = step.get("rollback_connector_type")
-        if not rollback_action or not rollback_connector:
-            continue
+    async with AsyncSessionLocal() as db:
+        for step in reversed(generated_steps):
+            rollback_action = step.get("rollback_action")
+            rollback_connector = step.get("rollback_connector_type")
+            if not rollback_action or not rollback_connector:
+                continue
 
-        try:
-            result = await execute_action(rollback_connector, rollback_action, {}, [], None)
-        except Exception as exc:
-            logger.error("Rollback step %s failed: %s", step.get("step_number"), exc)
-            result = {"rolled_back": False, "error": str(exc)}
+            step_connector_id = step.get("connector_id")
+            connector = None
+            if step_connector_id:
+                result = await db.execute(
+                    select(Connector).where(Connector.id == uuid.UUID(step_connector_id))
+                )
+                connector = result.scalar_one_or_none()
 
-        rollback_results.append({
-            "step_number": step["step_number"],
-            "rollback_action": rollback_action,
-            "result": result,
-        })
+            try:
+                result = await execute_action(
+                    rollback_connector, rollback_action, {}, [],
+                    connector=connector, db=db if connector else None,
+                )
+            except Exception as exc:
+                logger.error("Rollback step %s failed: %s", step.get("step_number"), exc)
+                result = {"rolled_back": False, "error": str(exc)}
+
+            rollback_results.append({
+                "step_number": step["step_number"],
+                "rollback_action": rollback_action,
+                "result": result,
+            })
 
     logger.info("Rollback complete for %s", change_request_id)
     return {"rollback_steps": rollback_results}
