@@ -23,13 +23,53 @@ class ChangeType(str, enum.Enum):
     ec2_stop_start = "ec2_stop_start"
     ec2_launch = "ec2_launch"
     ec2_terminate = "ec2_terminate"
-    # Vulnerability remediation change types
+    # Patch management
     patch_packages = "patch_packages"
+    patch_campaign = "patch_campaign"
+    # Vulnerability remediation
     s3_block_public_access = "s3_block_public_access"
     iam_enforce_mfa = "iam_enforce_mfa"
     generic_remediation = "generic_remediation"
     notify_only = "notify_only"
     suppress = "suppress"
+    # Identity lifecycle
+    offboard_user = "offboard_user"
+    onboard_user = "onboard_user"
+    # Credential rotation
+    rotate_db_credentials = "rotate_db_credentials"
+    rotate_ssh_keys = "rotate_ssh_keys"
+    rotate_api_key = "rotate_api_key"
+    rotate_service_account = "rotate_service_account"
+    # Incident response
+    isolate_host = "isolate_host"
+    lockdown_account = "lockdown_account"
+    phishing_response = "phishing_response"
+    preserve_evidence = "preserve_evidence"
+    # IaC orchestration
+    terraform_apply = "terraform_apply"
+    ansible_playbook = "ansible_playbook"
+    helm_upgrade = "helm_upgrade"
+    # Database administration
+    provision_db_user = "provision_db_user"
+    deprovision_db_user = "deprovision_db_user"
+    db_permission_change = "db_permission_change"
+    configure_db_audit = "configure_db_audit"
+    promote_db_replica = "promote_db_replica"
+    db_connection_config = "db_connection_config"
+    # Fleet operations
+    rolling_restart = "rolling_restart"
+    canary_config_push = "canary_config_push"
+    distribute_file = "distribute_file"
+    fleet_health_check = "fleet_health_check"
+    # Backup & recovery
+    create_backup = "create_backup"
+    verify_backup = "verify_backup"
+    restore_files = "restore_files"
+    dr_failover = "dr_failover"
+    scheduled_reboot = "scheduled_reboot"
+    # Compliance
+    enforce_cis_benchmark = "enforce_cis_benchmark"
+    collect_evidence = "collect_evidence"
 
 
 class RiskLevel(str, enum.Enum):
