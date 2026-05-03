@@ -118,3 +118,37 @@ def test_connector_change_type_github():
 
 def test_connector_change_type_fallback():
     assert connector_type_to_change_type("unknown_connector") == "remote_command"
+
+
+import pytest
+import httpx
+from httpx import AsyncClient, ASGITransport
+from app.main import app as fastapi_app
+
+
+@pytest.mark.anyio
+async def test_create_campaign_requires_auth():
+    async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as client:
+        resp = await client.post("/review-campaigns", json={
+            "title": "Test",
+            "campaign_type": "security_team",
+            "scope": {},
+            "reviewer_assignment_rule": {"type": "security_team"},
+            "evidence_options": {},
+        })
+    assert resp.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_list_campaigns_requires_auth():
+    async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as client:
+        resp = await client.get("/review-campaigns")
+    assert resp.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_cancel_nonexistent_requires_auth():
+    import uuid
+    async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as client:
+        resp = await client.post(f"/review-campaigns/{uuid.uuid4()}/cancel")
+    assert resp.status_code == 401
