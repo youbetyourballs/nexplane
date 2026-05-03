@@ -78,6 +78,9 @@ func FetchVersion(ctx context.Context, controlPlaneURL string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d fetching version from %s", resp.StatusCode, controlPlaneURL+"/downloads/version")
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
 	if err != nil {
 		return "", err
@@ -103,9 +106,12 @@ func DownloadFile(ctx context.Context, url, destPath string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = io.Copy(f, resp.Body)
-	return err
+	const maxBinarySize = 512 << 20 // 512 MB
+	if _, err = io.Copy(f, io.LimitReader(resp.Body, maxBinarySize)); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // VerifySHA256 fetches checksumURL (sha256sum format), computes the SHA256 of
@@ -120,6 +126,9 @@ func VerifySHA256(ctx context.Context, checksumURL, filePath string) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d fetching checksum from %s", resp.StatusCode, checksumURL)
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 256))
 	if err != nil {
 		return err
