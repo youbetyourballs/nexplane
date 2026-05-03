@@ -33,6 +33,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - /app/downloads
     command: >
       sh -c "alembic upgrade head &&
              python seed.py &&
