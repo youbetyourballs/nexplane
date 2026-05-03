@@ -360,6 +360,7 @@ export function CreateChangeRequest() {
   const [description, setDescription] = useState("");
   const [changeType, setChangeType] = useState<ChangeType | "">("");
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
+  const [assetSearch, setAssetSearch] = useState("");
   const [outcomeJson, setOutcomeJson] = useState("");
   const [jsonError, setJsonError] = useState("");
   const [submitError, setSubmitError] = useState("");
@@ -367,6 +368,22 @@ export function CreateChangeRequest() {
   const { data: assets } = useQuery({
     queryKey: ["assets"],
     queryFn: () => assetsApi.list(),
+  });
+
+  const filteredAssets = (assets ?? []).filter((asset) => {
+    if (!assetSearch.trim()) return true;
+    const lower = assetSearch.toLowerCase();
+    const tagMatch = lower.match(/tag:(\S+)/);
+    if (tagMatch) {
+      return (asset.tags ?? []).some((t: string) => t.toLowerCase().includes(tagMatch[1]));
+    }
+    return (
+      asset.name.toLowerCase().includes(lower) ||
+      asset.asset_type.toLowerCase().includes(lower) ||
+      asset.environment.toLowerCase().includes(lower) ||
+      asset.criticality.toLowerCase().includes(lower) ||
+      (asset.tags ?? []).some((t: string) => t.toLowerCase().includes(lower))
+    );
   });
 
   const mutation = useMutation({
@@ -472,8 +489,20 @@ export function CreateChangeRequest() {
 
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">Target Assets</label>
+          <input
+            type="text"
+            value={assetSearch}
+            onChange={(e) => setAssetSearch(e.target.value)}
+            placeholder="Filter by name, type, environment, criticality, or tag:pci-scope"
+            className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 mb-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
           <div className="space-y-1.5 max-h-48 overflow-y-auto border border-slate-200 rounded-md p-2">
-            {(assets ?? []).map((asset) => (
+            {filteredAssets.length === 0 && (
+              <p className="text-xs text-slate-400 text-center py-3">
+                {assetSearch.trim() ? `No assets match "${assetSearch}"` : "No assets found"}
+              </p>
+            )}
+            {filteredAssets.map((asset) => (
               <label key={asset.id} className="flex items-center gap-2.5 p-2 rounded hover:bg-slate-50 cursor-pointer">
                 <input
                   type="checkbox"
@@ -485,6 +514,9 @@ export function CreateChangeRequest() {
                   <div className="text-sm text-slate-900 truncate">{asset.name}</div>
                   <div className="text-xs text-slate-400">
                     {asset.asset_type.replace(/_/g, " ")} · {asset.environment} · {asset.criticality}
+                    {(asset.tags ?? []).length > 0 && (
+                      <span className="ml-1">· {(asset.tags as string[]).join(", ")}</span>
+                    )}
                   </div>
                 </div>
               </label>
