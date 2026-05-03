@@ -1,0 +1,21 @@
+{
+  "change_type": "dr_failover",
+  "display_name": "DR Failover — Runbook Execution",
+  "steps": [
+    {"generic_action": "promote_read_replica", "purpose": "execute",  "required": true},
+    {"generic_action": "update_dns",           "purpose": "execute",  "required": true},
+    {"generic_action": "verify_app_health",    "purpose": "verify",   "required": true},
+    {"generic_action": "measure_rto",          "purpose": "teardown", "required": false}
+  ],
+  "preflight_checks": ["connector_reachable", "dr_region_healthy", "dns_provider_reachable"],
+  "verification_methods": ["api_check", "http_health_check"],
+  "parameters": {
+    "runbook_id":         {"type": "string",  "required": true},
+    "dr_region":          {"type": "string",  "required": true},
+    "dns_provider":       {"type": "string",  "enum": ["route53", "cloudflare"], "required": true},
+    "dns_record_id":      {"type": "string",  "required": true},
+    "dr_endpoint":        {"type": "string",  "required": true},
+    "target_rto_minutes": {"type": "integer", "default": 15},
+    "hosted_zone_id":     {"type": "string",  "required": false}
+  }
+}

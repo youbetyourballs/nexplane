@@ -1,0 +1,16 @@
+{
+  "change_type": "restore_files",
+  "display_name": "Restore Files from Backup",
+  "steps": [
+    {"generic_action": "restore_files",    "purpose": "execute", "required": true},
+    {"generic_action": "verify_checksums", "purpose": "verify",  "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "snapshot_exists", "destination_path_writable"],
+  "verification_methods": ["checksum_verify"],
+  "parameters": {
+    "backup_snapshot_id": {"type": "string",  "required": true},
+    "restore_paths":      {"type": "array",   "items": {"type": "string"}, "required": true},
+    "destination_path":   {"type": "string",  "required": true},
+    "backup_tool":        {"type": "string",  "default": "restic"}
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "change_type": "scheduled_reboot",
+  "display_name": "Scheduled Reboot",
+  "steps": [
+    {"generic_action": "preflight_check",    "purpose": "preflight_capture", "required": true},
+    {"generic_action": "graceful_reboot",    "purpose": "execute",           "required": true},
+    {"generic_action": "verify_post_reboot", "purpose": "verify",            "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "no_concurrent_changes", "in_maintenance_window"],
+  "verification_methods": ["service_health_check"],
+  "parameters": {
+    "target_asset_ids":       {"type": "array",   "items": {"type": "string"}, "required": true},
+    "reboot_at":              {"type": "string",  "format": "date-time",       "required": true},
+    "verify_services":        {"type": "array",   "items": {"type": "string"}, "default": []},
+    "graceful_delay_seconds": {"type": "integer", "default": 60}
+  }
+}
