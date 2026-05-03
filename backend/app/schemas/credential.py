@@ -23,6 +23,7 @@ class CredentialWrite(BaseModel):
 
 class AIProviderInfo(BaseModel):
     configured: bool
+    model: str | None = None
 
 
 class AIProvidersRead(BaseModel):
@@ -32,6 +33,7 @@ class AIProvidersRead(BaseModel):
 
 class AIProviderWrite(BaseModel):
     api_key: str
+    model: str | None = None
 
 
 class AIDefaultWrite(BaseModel):
