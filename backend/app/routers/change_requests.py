@@ -320,6 +320,46 @@ async def reject_change_request(
     return result.scalar_one()
 
 
+CANCELABLE_STATUSES = {
+    ChangeRequestStatus.draft,
+    ChangeRequestStatus.planned,
+    ChangeRequestStatus.awaiting_approval,
+    ChangeRequestStatus.approved,
+    ChangeRequestStatus.queued_for_maintenance,
+}
+
+
+@router.post("/{cr_id}/cancel", response_model=ChangeRequestRead)
+async def cancel_change_request(
+    cr_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cr = await _get_cr(db, cr_id, user.organization_id)
+
+    if cr.status not in CANCELABLE_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot cancel a change request in status '{cr.status.value}'"
+        )
+
+    # Requesters can cancel their own; approvers and admins can cancel any
+    is_owner = cr.requester_id == user.id
+    is_privileged = user.role in (UserRole.approver, UserRole.admin)
+    if not (is_owner or is_privileged):
+        raise HTTPException(status_code=403, detail="Only the requester, approvers, or admins can cancel a change request")
+
+    cr.status = ChangeRequestStatus.rejected
+    cr.updated_at = datetime.now(timezone.utc)
+
+    await record_event(db, user.organization_id, "change_request.cancelled",
+                       {"change_request_id": str(cr.id), "cancelled_by": user.email},
+                       actor_id=user.id, change_request_id=cr.id)
+    await db.commit()
+    await db.refresh(cr)
+    return cr
+
+
 @router.post("/{cr_id}/execute", response_model=ExecutionRunRead, dependencies=[Depends(require_no_active_freeze)])
 async def execute_change_request(
     cr_id: uuid.UUID,

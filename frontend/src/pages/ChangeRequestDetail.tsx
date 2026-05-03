@@ -226,6 +226,12 @@ export function ChangeRequestDetail() {
     onError: (e: any) => setActionError(e.response?.data?.detail || e.message),
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: () => changeRequestsApi.cancel(id!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["change-request", id] }),
+    onError: (e: any) => setActionError(e.response?.data?.detail ?? "Failed to cancel change request"),
+  });
+
   const rollbackMutation = useMutation({
     mutationFn: () => changeRequestsApi.rollback(id!),
     onSuccess: invalidate,
@@ -295,6 +301,20 @@ export function ChangeRequestDetail() {
             >
               <RotateCcw className="w-3.5 h-3.5" />
               Manual Rollback
+            </button>
+          )}
+          {["draft", "planned", "awaiting_approval", "approved", "queued_for_maintenance"].includes(cr.status) && (
+            <button
+              onClick={() => {
+                if (window.confirm("Cancel this change request? This cannot be undone.")) {
+                  setActionError("");
+                  cancelMutation.mutate();
+                }
+              }}
+              disabled={cancelMutation.isPending}
+              className="px-3 py-2 border border-slate-300 text-slate-600 text-sm rounded-md hover:bg-red-50 hover:border-red-300 hover:text-red-700 disabled:opacity-50 transition-colors"
+            >
+              {cancelMutation.isPending ? "Cancelling..." : "Cancel Request"}
             </button>
           )}
         </div>
