@@ -33,3 +33,73 @@ def test_entry_decision_valid():
 def test_entry_decision_invalid():
     with pytest.raises(Exception):
         EntryDecisionSubmit(decision="maybe")
+
+
+from unittest.mock import MagicMock
+from app.services.review_collector import extract_entries_from_asset, enrich_entry, resolve_reviewer
+
+
+def test_extract_entries_okta_asset():
+    connector = MagicMock()
+    connector.connector_type.value = "okta"
+    asset = MagicMock()
+    asset.name = "jane.doe@acme.com"
+    asset.connector = connector
+    asset.connector_id = uuid.uuid4()
+    asset.asset_metadata = {
+        "email": "jane.doe@acme.com",
+        "display_name": "Jane Doe",
+        "status": "ACTIVE",
+        "groups": ["Engineering", "All Users"],
+        "app_assignments": [{"app_name": "GitHub Enterprise", "role": "member"}],
+        "is_admin": False,
+    }
+    entries = extract_entries_from_asset(asset)
+    assert len(entries) == 3  # 2 groups + 1 app
+    resource_names = [e["resource_name"] for e in entries]
+    assert "Engineering" in resource_names
+    assert "GitHub Enterprise" in resource_names
+
+
+def test_extract_entries_active_directory():
+    connector = MagicMock()
+    connector.connector_type.value = "active_directory"
+    asset = MagicMock()
+    asset.name = "john.smith@acme.com"
+    asset.connector = connector
+    asset.connector_id = uuid.uuid4()
+    asset.asset_metadata = {
+        "email": "john.smith@acme.com",
+        "groups": ["Domain Admins", "IT Staff"],
+        "status": "enabled",
+    }
+    entries = extract_entries_from_asset(asset)
+    assert len(entries) == 2
+    privileged = [e for e in entries if e["is_privileged"]]
+    assert len(privileged) == 1  # Domain Admins is privileged
+
+
+def test_resolve_reviewer_security_team():
+    rule = {"type": "security_team", "fallback_reviewer_id": "abc123"}
+    result = resolve_reviewer({}, rule, manager_email=None, owner_email=None)
+    assert result == ("abc123", False)
+
+
+def test_resolve_reviewer_manager_found():
+    rule = {"type": "manager_centric", "fallback_reviewer_id": "fallback"}
+    result = resolve_reviewer({}, rule, manager_email="manager@acme.com", owner_email=None)
+    assert result == ("manager@acme.com", False)
+
+
+def test_resolve_reviewer_fallback_when_no_manager():
+    rule = {"type": "manager_centric", "fallback_reviewer_id": "fallback-uuid"}
+    result = resolve_reviewer({}, rule, manager_email=None, owner_email=None)
+    assert result == ("fallback-uuid", True)
+
+
+def test_enrich_entry_flags_inactive():
+    identity_asset = MagicMock()
+    identity_asset.asset_metadata = {"last_login_at": "2025-01-01T00:00:00Z"}
+    evidence = enrich_entry({}, identity_asset, None, {"include_last_login": True, "include_days_inactive": True, "include_asset_sensitivity": False})
+    assert evidence["flagged_inactive"] is True
+    assert evidence["days_inactive"] > 90
