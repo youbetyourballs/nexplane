@@ -7,7 +7,6 @@ import (
 	"nexplane-agent/commands/configsyslog"
 	"nexplane-agent/commands/estimatesize"
 	"nexplane-agent/commands/ebpf"
-	"nexplane-agent/commands/iac"
 	"nexplane-agent/commands/linuxauth"
 	"nexplane-agent/commands/ossecurity"
 	"nexplane-agent/commands/uploadimage"
@@ -15,6 +14,8 @@ import (
 	"nexplane-agent/commands/winharden"
 	"nexplane-agent/commands/crossplatform"
 	"nexplane-agent/commands/linuxupgrade"
+	"nexplane-agent/commands/forensics"
+	"nexplane-agent/commands/isolation"
 )
 
 // Result is the outcome of a command execution.
@@ -73,13 +74,9 @@ var commands = map[string]CommandFunc{
 	"audit_software_inventory": crossplatform.AuditSoftwareInventoryExecute,
 	// Linux upgrade (Spec 5e)
 	"upgrade_linux_instance":   linuxupgrade.UpgradeLinuxInstanceExecute,
-	// IaC (Spec iac-orchestration)
-	"terraform_plan":  iac.TerraformPlanExecute,
-	"terraform_apply": iac.TerraformApplyExecute,
-	"ansible_check":   iac.AnsibleCheckExecute,
-	"ansible_run":     iac.AnsibleRunExecute,
-	"helm_diff":       iac.HelmDiffExecute,
-	"helm_upgrade":    iac.HelmUpgradeExecute,
+	// Incident Response (Spec IR)
+	"isolate_host":       isolation.Execute,
+	"collect_forensics":  forensics.Execute,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -119,10 +116,8 @@ var rollbacks = map[string]CommandFunc{
 	"manage_tls_certificates": crossplatform.ManageTLSCertificatesRollback,
 	"configure_dns_resolver":  crossplatform.ConfigureDNSResolverRollback,
 	"upgrade_linux_instance":  linuxupgrade.UpgradeLinuxInstanceRollback,
-	// IaC rollbacks
-	"terraform_apply": iac.TerraformRollbackExecute,
-	"ansible_run":     iac.AnsibleRollbackExecute,
-	"helm_upgrade":    iac.HelmRollbackExecute,
+	// Incident Response (Spec IR)
+	"isolate_host":  isolation.Rollback,
 }
 
 // Dispatch routes a command to its implementation.

@@ -1,0 +1,17 @@
+{
+  "change_type": "preserve_evidence",
+  "display_name": "Evidence Preservation",
+  "description": "Collect forensic artifacts from a host agent and upload them to object storage as a tar.gz bundle.",
+  "incident_response": true,
+  "parameters": {
+    "asset_id":            { "type": "string", "format": "uuid", "required": true },
+    "include_memory_dump": { "type": "boolean", "default": false },
+    "upload_destination":  { "type": "string", "required": true, "default": "s3://nexplane-forensics/bundles/" }
+  },
+  "steps": [
+    { "name": "generate_upload_url", "type": "internal" },
+    { "name": "collect_forensics",   "type": "agent_command", "command": "collect_forensics" },
+    { "name": "store_manifest",      "type": "internal" }
+  ],
+  "rollback": "no-op — evidence collection is non-destructive"
+}
