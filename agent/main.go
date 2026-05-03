@@ -14,9 +14,12 @@ import (
 	"nexplane-agent/fingerprint"
 	"nexplane-agent/poller"
 	"nexplane-agent/registration"
+	"nexplane-agent/updater"
 )
 
-const agentVersion = "0.1.0"
+// Version is injected at build time via -ldflags "-X main.Version=<version>".
+// Falls back to "dev" for local builds.
+var Version = "dev"
 
 func main() {
 	cfg, err := config.Load(os.Args[1:])
@@ -25,7 +28,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Printf("Nexplane Agent %s starting (mode=%s)", agentVersion, cfg.Mode)
+	log.Printf("Nexplane Agent %s starting (mode=%s)", Version, cfg.Mode)
+
+	// Check for updates before doing anything else. If an update is applied,
+	// syscall.Exec replaces this process and we never reach the next line.
+	if _, err := updater.CheckAndUpdate(context.Background(), cfg.ControlPlane, Version); err != nil {
+		log.Printf("[updater] skipping update: %v", err)
+	}
 
 	machineID, err := fingerprint.GetMachineID()
 	if err != nil {
@@ -40,7 +49,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	info, err := registration.Register(ctx, c, machineID, hostname, osType, agentVersion)
+	info, err := registration.Register(ctx, c, machineID, hostname, osType, Version)
 	if err != nil {
 		log.Fatalf("Registration failed: %v", err)
 	}
