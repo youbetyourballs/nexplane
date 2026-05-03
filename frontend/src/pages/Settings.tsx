@@ -18,6 +18,7 @@ export function Settings() {
   const [copied, setCopied] = useState(false);
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [modelInput, setModelInput] = useState("");
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ["settings"],
@@ -50,11 +51,15 @@ export function Settings() {
 
   const setProviderMutation = useMutation({
     mutationFn: ({ provider, key }: { provider: string; key: string }) =>
-      apiClient.put(`/settings/ai-providers/${provider}`, { api_key: key }),
+      apiClient.put(`/settings/ai-providers/${provider}`, {
+        api_key: key,
+        ...(modelInput.trim() && { model: modelInput.trim() }),
+      }),
     onSuccess: () => {
       refetchAIProviders();
       setEditingProvider(null);
       setApiKeyInput("");
+      setModelInput("");
     },
   });
 
@@ -111,27 +116,39 @@ export function Settings() {
                     <span className={`text-xs ${info?.configured ? "text-green-600" : "text-gray-400"}`}>
                       {info?.configured ? "● Configured" : "○ Not configured"}
                     </span>
+                    {info?.model && (
+                      <span className="text-xs text-gray-400">· {info.model}</span>
+                    )}
                   </div>
                   {isEditing && (
-                    <div className="flex gap-2 mt-2">
+                    <div className="mt-2 space-y-1.5">
                       <input
                         type="password"
                         value={apiKeyInput}
                         onChange={(e) => setApiKeyInput(e.target.value)}
                         placeholder={provider === "anthropic" ? "sk-ant-..." : "sk-..."}
-                        className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-indigo-500"
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-indigo-500"
                         autoFocus
                       />
-                      <button
-                        onClick={() => setProviderMutation.mutate({ provider, key: apiKeyInput })}
-                        disabled={setProviderMutation.isPending || !apiKeyInput}
-                        className="text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 disabled:opacity-50"
-                      >
-                        Save
-                      </button>
-                      <button onClick={() => setEditingProvider(null)} className="text-xs text-gray-500">
-                        Cancel
-                      </button>
+                      <input
+                        type="text"
+                        value={modelInput}
+                        onChange={(e) => setModelInput(e.target.value)}
+                        placeholder={`Model (default: ${provider === "anthropic" ? "claude-sonnet-4-6" : "gpt-4o"})`}
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setProviderMutation.mutate({ provider, key: apiKeyInput })}
+                          disabled={setProviderMutation.isPending || !apiKeyInput}
+                          className="text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          Save
+                        </button>
+                        <button onClick={() => { setEditingProvider(null); setModelInput(""); }} className="text-xs text-gray-500">
+                          Cancel
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

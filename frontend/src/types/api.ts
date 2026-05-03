@@ -401,6 +401,7 @@ export interface CredentialStatus {
 
 export interface AIProviderInfo {
   configured: boolean;
+  model?: string;
 }
 
 export interface AIProviders {
