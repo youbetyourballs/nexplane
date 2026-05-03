@@ -12,7 +12,7 @@
       "generic_action": "ansible_run",
       "purpose": "execute",
       "required": true,
-      "description": "Execute the playbook — only runs after human approval"
+      "description": "Execute the playbook - only runs after human approval"
     }
   ],
   "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],

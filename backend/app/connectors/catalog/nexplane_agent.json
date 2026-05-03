@@ -259,7 +259,7 @@
                         "action_type":  "change",
                         "executor":  "nexplane_agent.configure_pam",
                         "safety_notes":  [
-                                             "Misconfigured PAM can lock out all users including root — test in non-production first",
+                                             "Misconfigured PAM can lock out all users including root - test in non-production first",
                                              "lockout_duration_seconds applies to all accounts; ensure break-glass access exists"
                                          ],
                         "generic_action":  "configure_pam",
@@ -1239,127 +1239,127 @@
                                                "required":  false
                                            }
                                        ],
-                        “executor”:  “nexplane_agent.upgrade_linux_instance”,
-                        “rollback_action”:  “upgrade_linux_instance”,
-                        “estimated_duration_seconds”:  300,
-                        “safety_notes”:  [
-                                             “Always take a cloud snapshot before running”,
-                                             “dd-based rollback requires booting from rescue media”,
-                                             “dist upgrade is potentially destructive â€” test on non-production first”
+                        "executor":  "nexplane_agent.upgrade_linux_instance",
+                        "rollback_action":  "upgrade_linux_instance",
+                        "estimated_duration_seconds":  300,
+                        "safety_notes":  [
+                                             "Always take a cloud snapshot before running",
+                                             "dd-based rollback requires booting from rescue media",
+                                             "dist upgrade is potentially destructive â€" test on non-production first"
                                          ]
                     },
                     {
-                        “action_id”: “apply_linux_patches”,
-                        “generic_action”: “apply_linux_patches”,
-                        “action_type”: “change”,
-                        “execution_tier”: 3,
-                        “display_name”: “Apply Linux Patches”,
-                        “description”: “Apply security patches on a Linux host using apt, dnf, or yum. Supports security-only mode, specific package, or CVE-targeted patching. Captures before/after versions and detects reboot requirement.”,
-                        “applicable_asset_types”: [“server”],
-                        “parameters”: [
-                            {“name”: “mode”,         “type”: “string”,  “required”: true},
-                            {“name”: “package_name”, “type”: “string”,  “required”: false},
-                            {“name”: “cve_id”,       “type”: “string”,  “required”: false},
-                            {“name”: “dry_run”,      “type”: “boolean”, “required”: false, “default”: false},
-                            {“name”: “defer_reboot”, “type”: “boolean”, “required”: false, “default”: false}
+                        "action_id": "apply_linux_patches",
+                        "generic_action": "apply_linux_patches",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Apply Linux Patches",
+                        "description": "Apply security patches on a Linux host using apt, dnf, or yum. Supports security-only mode, specific package, or CVE-targeted patching. Captures before/after versions and detects reboot requirement.",
+                        "applicable_asset_types": ["server"],
+                        "parameters": [
+                            {"name": "mode",         "type": "string",  "required": true},
+                            {"name": "package_name", "type": "string",  "required": false},
+                            {"name": "cve_id",       "type": "string",  "required": false},
+                            {"name": "dry_run",      "type": "boolean", "required": false, "default": false},
+                            {"name": "defer_reboot", "type": "boolean", "required": false, "default": false}
                         ],
-                        “executor”: “nexplane_agent.apply_linux_patches”,
-                        “rollback_action”: “apply_linux_patches”,
-                        “estimated_duration_seconds”: 120,
-                        “safety_notes”: [
-                            “Use dry_run=true first to preview changes”,
-                            “Reboot may be required after applying kernel or glibc patches”
+                        "executor": "nexplane_agent.apply_linux_patches",
+                        "rollback_action": "apply_linux_patches",
+                        "estimated_duration_seconds": 120,
+                        "safety_notes": [
+                            "Use dry_run=true first to preview changes",
+                            "Reboot may be required after applying kernel or glibc patches"
                         ]
                     },
                     {
-                        “action_id”: “audit_linux_patch_status”,
-                        “generic_action”: “audit_linux_patch_status”,
-                        “action_type”: “ingest”,
-                        “execution_tier”: 3,
-                        “display_name”: “Audit Linux Patch Status”,
-                        “description”: “Read-only: returns installed packages, available security updates, days since last security patch, and reboot-required status.”,
-                        “applicable_asset_types”: [“server”],
-                        “parameters”: [],
-                        “executor”: “nexplane_agent.audit_linux_patch_status”,
-                        “estimated_duration_seconds”: 30
+                        "action_id": "audit_linux_patch_status",
+                        "generic_action": "audit_linux_patch_status",
+                        "action_type": "ingest",
+                        "execution_tier": 3,
+                        "display_name": "Audit Linux Patch Status",
+                        "description": "Read-only: returns installed packages, available security updates, days since last security patch, and reboot-required status.",
+                        "applicable_asset_types": ["server"],
+                        "parameters": [],
+                        "executor": "nexplane_agent.audit_linux_patch_status",
+                        "estimated_duration_seconds": 30
                     },
                     {
-                        “action_id”: “apply_windows_patches”,
-                        “generic_action”: “apply_windows_patches”,
-                        “action_type”: “change”,
-                        “execution_tier”: 3,
-                        “display_name”: “Apply Windows Patches”,
-                        “description”: “Install Windows Updates using the Windows Update Agent COM API. Supports security-only mode or a specific KB article. Schedules reboot via Task Scheduler if required.”,
-                        “applicable_asset_types”: [“server”, “workstation”],
-                        “parameters”: [
-                            {“name”: “mode”,          “type”: “string”,  “required”: true},
-                            {“name”: “kb_id”,         “type”: “string”,  “required”: false},
-                            {“name”: “dry_run”,       “type”: “boolean”, “required”: false, “default”: false},
-                            {“name”: “defer_reboot”,  “type”: “boolean”, “required”: false, “default”: false},
-                            {“name”: “reboot_window”, “type”: “string”,  “required”: false}
+                        "action_id": "apply_windows_patches",
+                        "generic_action": "apply_windows_patches",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Apply Windows Patches",
+                        "description": "Install Windows Updates using the Windows Update Agent COM API. Supports security-only mode or a specific KB article. Schedules reboot via Task Scheduler if required.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [
+                            {"name": "mode",          "type": "string",  "required": true},
+                            {"name": "kb_id",         "type": "string",  "required": false},
+                            {"name": "dry_run",       "type": "boolean", "required": false, "default": false},
+                            {"name": "defer_reboot",  "type": "boolean", "required": false, "default": false},
+                            {"name": "reboot_window", "type": "string",  "required": false}
                         ],
-                        “executor”: “nexplane_agent.apply_windows_patches”,
-                        “rollback_action”: “apply_windows_patches”,
-                        “estimated_duration_seconds”: 300,
-                        “safety_notes”: [
-                            “Use dry_run=true first to preview pending updates”,
-                            “Reboot is often required; use defer_reboot=true to prevent automatic scheduling”,
-                            “Rollback uninstalls the KB — not all KBs support uninstallation”
+                        "executor": "nexplane_agent.apply_windows_patches",
+                        "rollback_action": "apply_windows_patches",
+                        "estimated_duration_seconds": 300,
+                        "safety_notes": [
+                            "Use dry_run=true first to preview pending updates",
+                            "Reboot is often required; use defer_reboot=true to prevent automatic scheduling",
+                            "Rollback uninstalls the KB - not all KBs support uninstallation"
                         ]
                     },
                     {
-                        “action_id”: “audit_windows_patch_status”,
-                        “generic_action”: “audit_windows_patch_status”,
-                        “action_type”: “ingest”,
-                        “execution_tier”: 3,
-                        “display_name”: “Audit Windows Patch Status”,
-                        “description”: “Read-only: returns installed KBs, pending security updates with severity and CVE IDs, last update check time, and reboot-pending status.”,
-                        “applicable_asset_types”: [“server”, “workstation”],
-                        “parameters”: [],
-                        “executor”: “nexplane_agent.audit_windows_patch_status”,
-                        “estimated_duration_seconds”: 30
+                        "action_id": "audit_windows_patch_status",
+                        "generic_action": "audit_windows_patch_status",
+                        "action_type": "ingest",
+                        "execution_tier": 3,
+                        "display_name": "Audit Windows Patch Status",
+                        "description": "Read-only: returns installed KBs, pending security updates with severity and CVE IDs, last update check time, and reboot-pending status.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "executor": "nexplane_agent.audit_windows_patch_status",
+                        "estimated_duration_seconds": 30
                     },
                     {
-                        “action_id”: “check_patch_compliance”,
-                        “generic_action”: “check_patch_compliance”,
-                        “action_type”: “ingest”,
-                        “execution_tier”: 3,
-                        “display_name”: “Check Patch Compliance”,
-                        “description”: “Evaluates all assets against a patch age threshold. Flags hosts whose last_security_patch_at metadata is older than max_patch_age_days. Optionally creates patch_packages change requests for non-compliant hosts.”,
-                        “applicable_asset_types”: [“server”, “workstation”],
-                        “parameters”: [
-                            {“name”: “max_patch_age_days”,    “type”: “integer”, “required”: false, “default”: 30},
-                            {“name”: “asset_filter”,          “type”: “object”,  “required”: false},
-                            {“name”: “os_family”,             “type”: “string”,  “required”: false},
-                            {“name”: “create_change_request”, “type”: “boolean”, “required”: false, “default”: false}
+                        "action_id": "check_patch_compliance",
+                        "generic_action": "check_patch_compliance",
+                        "action_type": "ingest",
+                        "execution_tier": 3,
+                        "display_name": "Check Patch Compliance",
+                        "description": "Evaluates all assets against a patch age threshold. Flags hosts whose last_security_patch_at metadata is older than max_patch_age_days. Optionally creates patch_packages change requests for non-compliant hosts.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [
+                            {"name": "max_patch_age_days",    "type": "integer", "required": false, "default": 30},
+                            {"name": "asset_filter",          "type": "object",  "required": false},
+                            {"name": "os_family",             "type": "string",  "required": false},
+                            {"name": "create_change_request", "type": "boolean", "required": false, "default": false}
                         ],
-                        “executor”: “nexplane_agent.check_patch_compliance”,
-                        “estimated_duration_seconds”: 10
+                        "executor": "nexplane_agent.check_patch_compliance",
+                        "estimated_duration_seconds": 10
                     },
                     {
-                        “action_id”: “run_patch_campaign”,
-                        “generic_action”: “run_patch_campaign”,
-                        “action_type”: “change”,
-                        “execution_tier”: 3,
-                        “display_name”: “Run Patch Campaign”,
-                        “description”: “Fan out patching across all hosts affected by a CVE or vulnerable package version. Patches in rolling batches and aborts if the failure rate exceeds the configured threshold.”,
-                        “applicable_asset_types”: [“server”, “workstation”],
-                        “parameters”: [
-                            {“name”: “cve_id”,               “type”: “string”,  “required”: false},
-                            {“name”: “package_name”,         “type”: “string”,  “required”: false},
-                            {“name”: “affected_version_lt”,  “type”: “string”,  “required”: false},
-                            {“name”: “asset_filter”,         “type”: “object”,  “required”: false},
-                            {“name”: “batch_size”,           “type”: “integer”, “required”: false, “default”: 10},
-                            {“name”: “abort_error_threshold”,”type”: “number”,  “required”: false, “default”: 0.2},
-                            {“name”: “dry_run”,              “type”: “boolean”, “required”: false, “default”: false},
-                            {“name”: “defer_reboot”,         “type”: “boolean”, “required”: false, “default”: false}
+                        "action_id": "run_patch_campaign",
+                        "generic_action": "run_patch_campaign",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Run Patch Campaign",
+                        "description": "Fan out patching across all hosts affected by a CVE or vulnerable package version. Patches in rolling batches and aborts if the failure rate exceeds the configured threshold.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [
+                            {"name": "cve_id",               "type": "string",  "required": false},
+                            {"name": "package_name",         "type": "string",  "required": false},
+                            {"name": "affected_version_lt",  "type": "string",  "required": false},
+                            {"name": "asset_filter",         "type": "object",  "required": false},
+                            {"name": "batch_size",           "type": "integer", "required": false, "default": 10},
+                            {"name": "abort_error_threshold","type": "number",  "required": false, "default": 0.2},
+                            {"name": "dry_run",              "type": "boolean", "required": false, "default": false},
+                            {"name": "defer_reboot",         "type": "boolean", "required": false, "default": false}
                         ],
-                        “executor”: “nexplane_agent.run_patch_campaign”,
-                        “estimated_duration_seconds”: 3600,
-                        “safety_notes”: [
-                            “Use dry_run=true to preview affected hosts before executing”,
-                            “Set abort_error_threshold conservatively (0.1-0.2) for production fleets”,
-                            “Ensure agents are reachable and not mid-reboot before starting a campaign”
+                        "executor": "nexplane_agent.run_patch_campaign",
+                        "estimated_duration_seconds": 3600,
+                        "safety_notes": [
+                            "Use dry_run=true to preview affected hosts before executing",
+                            "Set abort_error_threshold conservatively (0.1-0.2) for production fleets",
+                            "Ensure agents are reachable and not mid-reboot before starting a campaign"
                         ]
                     }
                 ]

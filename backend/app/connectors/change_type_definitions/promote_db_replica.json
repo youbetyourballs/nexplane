@@ -1,7 +1,7 @@
 {
   "change_type": "promote_db_replica",
   "display_name": "Promote RDS Read Replica",
-  "description": "Promote an RDS read replica to a standalone writable instance. Optionally updates a Route 53 CNAME. This action is irreversible — the replica cannot be re-attached to its source DB after promotion.",
+  "description": "Promote an RDS read replica to a standalone writable instance. Optionally updates a Route 53 CNAME. This action is irreversible - the replica cannot be re-attached to its source DB after promotion.",
   "rollback_supported": false,
   "requires_approval": true,
   "blast_radius_warning": "Promoting a read replica permanently disconnects it from its source DB and makes it writable as a standalone instance. This cannot be undone via rollback.",

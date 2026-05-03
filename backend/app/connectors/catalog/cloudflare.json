@@ -104,7 +104,7 @@
       "rollback_action": "disable_under_attack_mode",
       "estimated_duration_seconds": 5,
       "blast_radius_hint": "site_availability_impact",
-      "safety_notes": ["All visitors will see a challenge page — may impact legitimate traffic"]
+      "safety_notes": ["All visitors will see a challenge page - may impact legitimate traffic"]
     },
     {
       "action_id": "disable_under_attack_mode",

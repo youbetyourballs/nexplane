@@ -12,7 +12,7 @@
       "action_type": "change",
       "execution_tier": 2,
       "display_name": "Deactivate User",
-      "description": "Deactivate a Slack user, preventing sign-in. Enterprise Grid only — requires xoxp- admin token with admin.users:write scope.",
+      "description": "Deactivate a Slack user, preventing sign-in. Enterprise Grid only - requires xoxp- admin token with admin.users:write scope.",
       "applicable_asset_types": ["identity", "cloud_account"],
       "parameters": [
         {"name": "user_id", "type": "string", "required": true, "description": "Slack user ID (e.g. U012AB3CD)"}

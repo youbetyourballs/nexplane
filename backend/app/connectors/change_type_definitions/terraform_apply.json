@@ -12,7 +12,7 @@
       "generic_action": "terraform_apply",
       "purpose": "execute",
       "required": true,
-      "description": "Apply the saved plan artifact — only runs after human approval"
+      "description": "Apply the saved plan artifact - only runs after human approval"
     }
   ],
   "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],

@@ -8,7 +8,7 @@
   "parameters": {
     "asset_group": {
       "type": "string",
-      "description": "Asset group tag — all assets in the group are targeted",
+      "description": "Asset group tag - all assets in the group are targeted",
       "required": true
     },
     "username": {

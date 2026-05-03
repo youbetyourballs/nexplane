@@ -25,7 +25,7 @@
     },
     "dry_run": {
       "type": "boolean",
-      "description": "If true, audit only — do not apply remediation.",
+      "description": "If true, audit only - do not apply remediation.",
       "default": false
     }
   },

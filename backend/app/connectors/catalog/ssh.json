@@ -191,7 +191,7 @@
                         "estimated_duration_seconds":  30,
                         "blast_radius_hint":  "host_service_interruption",
                         "safety_notes":  [
-                                             "Only approved templates may be executed â€” no freeform commands permitted"
+                                             "Only approved templates may be executed â€" no freeform commands permitted"
                                          ]
                     },
                     {
@@ -288,7 +288,7 @@
                         "estimated_duration_seconds":  60,
                         "blast_radius_hint":  "host_service_interruption",
                         "safety_notes":  [
-                                             "Service will restart during containerization â€” schedule a maintenance window"
+                                             "Service will restart during containerization â€" schedule a maintenance window"
                                          ]
                     },
                     {

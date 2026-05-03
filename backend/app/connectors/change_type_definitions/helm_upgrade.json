@@ -12,7 +12,7 @@
       "generic_action": "helm_upgrade",
       "purpose": "execute",
       "required": true,
-      "description": "Run helm upgrade --install — only runs after human approval"
+      "description": "Run helm upgrade --install - only runs after human approval"
     }
   ],
   "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],

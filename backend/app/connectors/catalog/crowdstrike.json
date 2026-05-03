@@ -115,7 +115,7 @@
       "parameters": [{"name": "process_name", "type": "string", "required": true}],
       "executor": "crowdstrike.contain_process",
       "estimated_duration_seconds": 5,
-      "safety_notes": ["Verify process name is correct — killing the wrong process may destabilize the host"]
+      "safety_notes": ["Verify process name is correct - killing the wrong process may destabilize the host"]
     }
   ]
 }

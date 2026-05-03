@@ -1,6 +1,6 @@
 {
   "change_type": "dr_failover",
-  "display_name": "DR Failover — Runbook Execution",
+  "display_name": "DR Failover - Runbook Execution",
   "steps": [
     {"generic_action": "promote_read_replica", "purpose": "execute",  "required": true},
     {"generic_action": "update_dns",           "purpose": "execute",  "required": true},

@@ -70,7 +70,7 @@
       "action_type": "change",
       "execution_tier": 1,
       "display_name": "Stage Policy (Simulation Mode)",
-      "description": "Stages the new policy in simulation mode — no traffic is affected",
+      "description": "Stages the new policy in simulation mode - no traffic is affected",
       "applicable_asset_types": ["firewall"],
       "parameters": [
         {"name": "policy_rules", "type": "array", "required": true},
@@ -80,7 +80,7 @@
       "rollback_action": "remove_staged_policy",
       "estimated_duration_seconds": 15,
       "blast_radius_hint": "simulation_only",
-      "safety_notes": ["Simulation mode only — live enforcement requires a separate approval workflow"]
+      "safety_notes": ["Simulation mode only - live enforcement requires a separate approval workflow"]
     },
     {
       "action_id": "remove_staged_policy",
