@@ -22,6 +22,8 @@ class ChangeType(str, enum.Enum):
     ec2_stop_start = "ec2_stop_start"
     ec2_launch = "ec2_launch"
     ec2_terminate = "ec2_terminate"
+    offboard_user = "offboard_user"
+    onboard_user = "onboard_user"
 
 
 class RiskLevel(str, enum.Enum):

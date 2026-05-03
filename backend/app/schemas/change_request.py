@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 from pydantic import BaseModel
 from app.models.change_request import ChangeType, RiskLevel, ChangeRequestStatus
 from app.schemas.auth import UserRead
@@ -45,6 +46,27 @@ class ChangeRequestRead(BaseModel):
     change_plan: "ChangePlanRead | None" = None
     approvals: "list[ApprovalRead]" = []
     execution_runs: "list[ExecutionRunRead]" = []
+
+
+class OffboardUserPayload(BaseModel):
+    target_email: str
+    reason: Literal["resignation", "termination", "contract_end"]
+    isolate_endpoints: bool = False
+    notify_manager: bool = True
+    manager_email: str | None = None
+
+
+class OnboardUserPayload(BaseModel):
+    target_email: str
+    display_name: str
+    department: str
+    manager_email: str
+    ad_ou: str | None = None
+    ad_groups: list[str] = []
+    okta_groups: list[str] = []
+    google_org_unit: str | None = None
+    github_teams: list[str] = []
+    slack_channels: list[str] = []
 
 
 # Deferred imports to avoid circular refs
