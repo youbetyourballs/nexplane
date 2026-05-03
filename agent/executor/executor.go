@@ -3,6 +3,8 @@ package executor
 import (
 	"fmt"
 
+	"nexplane-agent/commands/backup"
+	"nexplane-agent/commands/reboot"
 	"nexplane-agent/commands/changip"
 	"nexplane-agent/commands/configsyslog"
 	"nexplane-agent/commands/estimatesize"
@@ -72,6 +74,11 @@ var commands = map[string]CommandFunc{
 	"audit_software_inventory": crossplatform.AuditSoftwareInventoryExecute,
 	// Linux upgrade (Spec 5e)
 	"upgrade_linux_instance":   linuxupgrade.UpgradeLinuxInstanceExecute,
+	// Backup & Recovery
+	"create_backup":      backup.Execute,
+	"restore_files":      backup.RestoreExecute,
+	"graceful_reboot":    reboot.Execute,
+	"verify_post_reboot": reboot.VerifyPostRebootExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -111,6 +118,10 @@ var rollbacks = map[string]CommandFunc{
 	"manage_tls_certificates": crossplatform.ManageTLSCertificatesRollback,
 	"configure_dns_resolver":  crossplatform.ConfigureDNSResolverRollback,
 	"upgrade_linux_instance":  linuxupgrade.UpgradeLinuxInstanceRollback,
+	// Backup & Recovery
+	"create_backup":   backup.Rollback,
+	"restore_files":   backup.RestoreRollback,
+	"graceful_reboot": reboot.Rollback,
 }
 
 // Dispatch routes a command to its implementation.
