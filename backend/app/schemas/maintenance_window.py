@@ -1,3 +1,4 @@
+import uuid
 from typing import Optional
 from pydantic import BaseModel, field_validator
 
@@ -27,7 +28,7 @@ class MaintenanceWindowCreate(BaseModel):
 
 class MaintenanceWindowRead(MaintenanceWindowCreate):
     id: int
-    organization_id: str
+    organization_id: uuid.UUID
 
     model_config = {"from_attributes": True}
 
