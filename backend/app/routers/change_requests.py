@@ -22,6 +22,7 @@ from app.services.planning_engine import generate_plan
 from app.services.safety_engine import score_change_request, check_approval_requirements
 from app.workflows import runner as workflow_runner
 from app.workflows.execute_change_workflow import execute_change_workflow
+from app.compliance.freeze import require_no_active_freeze
 
 router = APIRouter(prefix="/change-requests", tags=["Change Requests"])
 
@@ -202,7 +203,7 @@ async def submit_for_approval(
     return result.scalar_one()
 
 
-@router.post("/{cr_id}/approve", response_model=ApprovalRead)
+@router.post("/{cr_id}/approve", response_model=ApprovalRead, dependencies=[Depends(require_no_active_freeze)])
 async def approve_change_request(
     cr_id: uuid.UUID,
     body: ApprovalCreate,
@@ -292,7 +293,7 @@ async def reject_change_request(
     return result.scalar_one()
 
 
-@router.post("/{cr_id}/execute", response_model=ExecutionRunRead)
+@router.post("/{cr_id}/execute", response_model=ExecutionRunRead, dependencies=[Depends(require_no_active_freeze)])
 async def execute_change_request(
     cr_id: uuid.UUID,
     user: User = Depends(current_user),
