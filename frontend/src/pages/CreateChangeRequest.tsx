@@ -88,6 +88,43 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
       confirm_terminate: true,
     }, null, 2),
   },
+  terraform_apply: {
+    label: "Terraform Apply",
+    description: "Run terraform plan (for review) then apply after approval",
+    outcomeTemplate: JSON.stringify({
+      working_directory: "/opt/terraform/prod",
+      workspace: "default",
+      var_file: "",
+      target: [],
+      dry_run: false,
+    }, null, 2),
+  },
+  ansible_playbook: {
+    label: "Ansible Playbook",
+    description: "Run ansible-playbook --check (for review) then execute after approval",
+    outcomeTemplate: JSON.stringify({
+      playbook_path: "/etc/ansible/site.yml",
+      inventory: "/etc/ansible/hosts",
+      extra_vars: {},
+      limit: "",
+      rollback_playbook_path: "",
+      dry_run: false,
+    }, null, 2),
+  },
+  helm_upgrade: {
+    label: "Helm Upgrade",
+    description: "Run helm diff (for review) then upgrade after approval",
+    outcomeTemplate: JSON.stringify({
+      release_name: "myapp",
+      chart: "stable/myapp",
+      chart_version: "",
+      namespace: "default",
+      values: "",
+      atomic: true,
+      timeout: "5m",
+      dry_run: false,
+    }, null, 2),
+  },
 };
 
 export function CreateChangeRequest() {
