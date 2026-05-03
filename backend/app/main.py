@@ -1,7 +1,9 @@
 import uuid
+import pathlib
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import get_db, AsyncSessionLocal
@@ -40,6 +42,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_downloads_dir = pathlib.Path("/app/downloads")
+if _downloads_dir.exists():
+    app.mount("/downloads", StaticFiles(directory=str(_downloads_dir)), name="downloads")
 
 app.include_router(auth.router)
 app.include_router(assets.router)
