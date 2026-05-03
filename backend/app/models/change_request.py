@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID
 import enum
 
 from app.database import Base
@@ -75,7 +75,7 @@ class ChangeRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-    step_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    step_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="change_requests")
     requester: Mapped["User"] = relationship("User", back_populates="change_requests")

@@ -1,6 +1,6 @@
 import uuid
-from sqlalchemy import Column, Integer, String, Boolean
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Column, Integer, String, Boolean, JSON
+from sqlalchemy.dialects.postgresql import UUID
 
 from app.database import Base
 
@@ -15,5 +15,5 @@ class MaintenanceWindow(Base):
     cron_schedule   = Column(String(100), nullable=False)
     duration_minutes = Column(Integer, nullable=False, default=60)
     # null = applies to all assets; otherwise list of tag name strings
-    applies_to_tags = Column(JSONB, nullable=True)
+    applies_to_tags = Column(JSON, nullable=True)
     enabled         = Column(Boolean, nullable=False, default=True)
