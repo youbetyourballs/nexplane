@@ -12,6 +12,11 @@ import { Projects } from "../pages/Projects";
 import { ProjectDetail } from "../pages/ProjectDetail";
 import { Settings } from "../pages/Settings";
 import VulnerabilityRemediation from "../pages/VulnerabilityRemediation";
+import { Runbooks } from "../pages/Runbooks";
+import { RunbookEditor } from "../pages/RunbookEditor";
+import { RunbookExecution } from "../pages/RunbookExecution";
+import { AccessReviews } from "../pages/AccessReviews";
+import { Compliance } from "../pages/Compliance";
 import { useAuth } from "../hooks/useAuth";
 
 export function AppRoutes() {
@@ -36,6 +41,12 @@ export function AppRoutes() {
         <Route path="/connectors" element={<Connectors />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/remediation" element={<VulnerabilityRemediation />} />
+        <Route path="/runbooks" element={<Runbooks />} />
+        <Route path="/runbooks/new" element={<RunbookEditor />} />
+        <Route path="/runbooks/:id" element={<RunbookEditor />} />
+        <Route path="/executions/:id" element={<RunbookExecution />} />
+        <Route path="/access-reviews" element={<AccessReviews />} />
+        <Route path="/compliance" element={<Compliance />} />
       </Route>
     </Routes>
   );
