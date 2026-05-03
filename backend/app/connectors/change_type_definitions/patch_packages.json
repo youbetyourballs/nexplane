@@ -1,0 +1,21 @@
+{
+  "change_type": "patch_packages",
+  "display_name": "Patch Packages",
+  "description": "Apply security patches to a Linux or Windows host. Use mode=security_only for all available security updates, mode=package to update a specific package, mode=cve to patch the package that fixes a given CVE, or mode=kb to install a specific Windows KB article.",
+  "steps": [
+    {"generic_action": "audit_patch_status",   "purpose": "preflight_validate", "required": true},
+    {"generic_action": "apply_patches",        "purpose": "execute",            "required": true},
+    {"generic_action": "verify_patch_status",  "purpose": "verify",             "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["package_version_check", "output_check"],
+  "parameters": {
+    "os_family":    {"type": "string",  "enum": ["linux", "windows"],                       "required": true},
+    "mode":         {"type": "string",  "enum": ["security_only", "package", "kb", "cve"],  "required": true},
+    "package_name": {"type": "string",  "required": false},
+    "cve_id":       {"type": "string",  "required": false},
+    "kb_id":        {"type": "string",  "required": false},
+    "dry_run":      {"type": "boolean", "default": false},
+    "defer_reboot": {"type": "boolean", "default": false}
+  }
+}

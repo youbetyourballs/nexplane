@@ -5,15 +5,17 @@ import (
 
 	"nexplane-agent/commands/changip"
 	"nexplane-agent/commands/configsyslog"
-	"nexplane-agent/commands/estimatesize"
+	"nexplane-agent/commands/crossplatform"
 	"nexplane-agent/commands/ebpf"
+	"nexplane-agent/commands/estimatesize"
 	"nexplane-agent/commands/linuxauth"
+	"nexplane-agent/commands/linuxpatch"
+	"nexplane-agent/commands/linuxupgrade"
 	"nexplane-agent/commands/ossecurity"
 	"nexplane-agent/commands/uploadimage"
 	"nexplane-agent/commands/virtualize"
 	"nexplane-agent/commands/winharden"
-	"nexplane-agent/commands/crossplatform"
-	"nexplane-agent/commands/linuxupgrade"
+	"nexplane-agent/commands/winpatch"
 )
 
 // Result is the outcome of a command execution.
@@ -72,6 +74,12 @@ var commands = map[string]CommandFunc{
 	"audit_software_inventory": crossplatform.AuditSoftwareInventoryExecute,
 	// Linux upgrade (Spec 5e)
 	"upgrade_linux_instance":   linuxupgrade.UpgradeLinuxInstanceExecute,
+	// Linux patching
+	"apply_linux_patches":      linuxpatch.ApplyLinuxPatchesExecute,
+	"audit_linux_patch_status": linuxpatch.AuditLinuxPatchStatusExecute,
+	// Windows patching
+	"apply_windows_patches":      winpatch.ApplyWindowsPatchesExecute,
+	"audit_windows_patch_status": winpatch.AuditWindowsPatchStatusExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -111,6 +119,10 @@ var rollbacks = map[string]CommandFunc{
 	"manage_tls_certificates": crossplatform.ManageTLSCertificatesRollback,
 	"configure_dns_resolver":  crossplatform.ConfigureDNSResolverRollback,
 	"upgrade_linux_instance":  linuxupgrade.UpgradeLinuxInstanceRollback,
+	// Linux patching
+	"apply_linux_patches": linuxpatch.ApplyLinuxPatchesRollback,
+	// Windows patching
+	"apply_windows_patches": winpatch.ApplyWindowsPatchesRollback,
 }
 
 // Dispatch routes a command to its implementation.
