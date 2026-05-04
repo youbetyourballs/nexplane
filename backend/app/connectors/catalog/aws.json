@@ -9,6 +9,36 @@
   ],
   "actions": [
     {
+      "action_id": "create_key_pair",
+      "generic_action": "create_key_pair",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Create EC2 Key Pair",
+      "description": "Create a named EC2 key pair and store fingerprint as an asset.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "key_name", "type": "string", "required": true}
+      ],
+      "executor": "aws.create_key_pair",
+      "rollback_action": "delete_key_pair",
+      "rollback_connector_type": "aws",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "delete_key_pair",
+      "generic_action": "delete_key_pair",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Delete EC2 Key Pair",
+      "description": "Delete a named EC2 key pair.",
+      "applicable_asset_types": ["cloud_account", "key_pair"],
+      "parameters": [
+        {"name": "key_name", "type": "string", "required": true}
+      ],
+      "executor": "aws.delete_key_pair",
+      "estimated_duration_seconds": 5
+    },
+    {
       "action_id": "create_ebs_snapshot",
       "generic_action": "create_ebs_snapshot",
       "action_type": "change",

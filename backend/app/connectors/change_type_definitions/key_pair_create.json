@@ -1,0 +1,9 @@
+{
+  "change_type": "key_pair_create",
+  "display_name": "Create EC2 Key Pair",
+  "steps": [
+    {"generic_action": "create_key_pair", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
