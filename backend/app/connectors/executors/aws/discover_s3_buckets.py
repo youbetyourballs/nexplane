@@ -6,8 +6,28 @@ def _mock_response():
     return {
         "action": "discover_s3_buckets",
         "assets": [
-            {"id": "arn:aws:s3:::my-public-bucket", "name": "my-public-bucket", "asset_type": "cloud_account", "metadata": {"public_access_blocked": False, "region": "us-east-1"}},
-            {"id": "arn:aws:s3:::my-private-bucket", "name": "my-private-bucket", "asset_type": "cloud_account", "metadata": {"public_access_blocked": True, "region": "us-west-2"}},
+            {
+                "id": "arn:aws:s3:::my-public-bucket",
+                "name": "my-public-bucket",
+                "asset_type": "storage_bucket",
+                "asset_metadata": {
+                    "bucket_name": "my-public-bucket",
+                    "public_access_blocked": False,
+                    "region": "us-east-1",
+                    "provider": "aws",
+                },
+            },
+            {
+                "id": "arn:aws:s3:::my-private-bucket",
+                "name": "my-private-bucket",
+                "asset_type": "storage_bucket",
+                "asset_metadata": {
+                    "bucket_name": "my-private-bucket",
+                    "public_access_blocked": True,
+                    "region": "us-west-2",
+                    "provider": "aws",
+                },
+            },
         ],
         "discovered_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -25,7 +45,10 @@ async def _real_execute(creds: dict) -> dict:
             name = bucket['Name']
             try:
                 pab = s3.get_public_access_block(Bucket=name)['PublicAccessBlockConfiguration']
-                blocked = all([pab.get('BlockPublicAcls'), pab.get('IgnorePublicAcls'), pab.get('BlockPublicPolicy'), pab.get('RestrictPublicBuckets')])
+                blocked = all([
+                    pab.get('BlockPublicAcls'), pab.get('IgnorePublicAcls'),
+                    pab.get('BlockPublicPolicy'), pab.get('RestrictPublicBuckets'),
+                ])
             except Exception:
                 blocked = False
             try:
@@ -35,8 +58,13 @@ async def _real_execute(creds: dict) -> dict:
             assets.append({
                 "id": f"arn:aws:s3:::{name}",
                 "name": name,
-                "asset_type": "cloud_account",
-                "metadata": {"public_access_blocked": blocked, "region": loc},
+                "asset_type": "storage_bucket",
+                "asset_metadata": {
+                    "bucket_name": name,
+                    "public_access_blocked": blocked,
+                    "region": loc,
+                    "provider": "aws",
+                },
             })
         return assets
 

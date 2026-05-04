@@ -6,7 +6,19 @@ def _mock_response():
     return {
         "action": "discover_elbs",
         "assets": [
-            {"id": "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/prod-alb/abc", "name": "prod-alb", "asset_type": "server", "metadata": {"type": "application", "scheme": "internet-facing", "state": "active"}},
+            {
+                "id": "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/prod-alb/abc",
+                "name": "prod-alb",
+                "asset_type": "load_balancer",
+                "asset_metadata": {
+                    "lb_arn": "arn:aws:elasticloadbalancing:us-east-1:123:loadbalancer/app/prod-alb/abc",
+                    "lb_type": "application",
+                    "scheme": "internet-facing",
+                    "state": "active",
+                    "dns_name": "prod-alb-123.us-east-1.elb.amazonaws.com",
+                    "provider": "aws",
+                },
+            },
         ],
         "discovered_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -25,12 +37,14 @@ async def _real_execute(creds: dict) -> dict:
                 assets.append({
                     "id": lb['LoadBalancerArn'],
                     "name": lb['LoadBalancerName'],
-                    "asset_type": "server",
-                    "metadata": {
-                        "type": lb.get('Type'),
+                    "asset_type": "load_balancer",
+                    "asset_metadata": {
+                        "lb_arn": lb['LoadBalancerArn'],
+                        "lb_type": lb.get('Type'),
                         "scheme": lb.get('Scheme'),
                         "state": lb.get('State', {}).get('Code'),
                         "dns_name": lb.get('DNSName'),
+                        "provider": "aws",
                     },
                 })
         return assets

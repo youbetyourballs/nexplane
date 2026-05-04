@@ -6,7 +6,20 @@ def _mock_response():
     return {
         "action": "discover_rds_instances",
         "assets": [
-            {"id": "arn:aws:rds:us-east-1:123:db:prod-db", "name": "prod-db", "asset_type": "server", "metadata": {"engine": "postgres", "engine_version": "15.3", "publicly_accessible": False}},
+            {
+                "id": "arn:aws:rds:us-east-1:123:db:prod-db",
+                "name": "prod-db",
+                "asset_type": "database",
+                "asset_metadata": {
+                    "db_identifier": "prod-db",
+                    "engine": "postgres",
+                    "engine_version": "15.3",
+                    "endpoint": "prod-db.abc123.us-east-1.rds.amazonaws.com",
+                    "port": 5432,
+                    "publicly_accessible": False,
+                    "status": "available",
+                },
+            },
         ],
         "discovered_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -22,15 +35,20 @@ async def _real_execute(creds: dict) -> dict:
         assets = []
         for page in paginator.paginate():
             for db in page['DBInstances']:
+                endpoint = db.get('Endpoint', {})
                 assets.append({
                     "id": db['DBInstanceArn'],
                     "name": db['DBInstanceIdentifier'],
-                    "asset_type": "server",
-                    "metadata": {
+                    "asset_type": "database",
+                    "asset_metadata": {
+                        "db_identifier": db['DBInstanceIdentifier'],
                         "engine": db.get('Engine'),
                         "engine_version": db.get('EngineVersion'),
+                        "endpoint": endpoint.get('Address'),
+                        "port": endpoint.get('Port'),
                         "publicly_accessible": db.get('PubliclyAccessible', False),
                         "status": db.get('DBInstanceStatus'),
+                        "multi_az": db.get('MultiAZ', False),
                     },
                 })
         return assets
