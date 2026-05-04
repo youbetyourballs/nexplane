@@ -263,6 +263,14 @@ const ASSET_ACTIONS: Record<AssetType, { changeType: string; label: string; titl
       description: (a) => `Rolling restart of services on cluster ${a.name}.`,
     },
   ],
+  key_pair: [
+    {
+      changeType: "rotate_ssh_keys",
+      label: "Rotate Key",
+      title: (a) => `Rotate key pair ${a.name}`,
+      description: (a) => `Delete and recreate key pair ${a.asset_metadata?.key_name ?? a.name}.`,
+    },
+  ],
 };
 
 export function AssetDetail() {

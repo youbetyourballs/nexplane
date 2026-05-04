@@ -82,7 +82,27 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
       mode: "quick",
       name: "my-new-instance",
       os: "amazon_linux",
+      iam_instance_profile: "NexplaneEC2TestProfile",
+      key_name: "",
       rollback_strategy: "terminate_instance",
+    }, null, 2),
+  },
+  key_pair_create: {
+    label: "Create Key Pair",
+    description: "Create an EC2 key pair and store it in the asset inventory.",
+    outcomeTemplate: JSON.stringify({
+      key_name: "nexplane-test-key",
+      rollback_strategy: "delete_key_pair",
+    }, null, 2),
+  },
+  ssm_command: {
+    label: "Run SSM Command",
+    description: "Execute a shell command on an EC2 instance via AWS Systems Manager.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "i-0123456789abcdef0",
+      document_name: "AWS-RunShellScript",
+      command: "whoami && hostname",
+      rollback_strategy: "rollback_unavailable",
     }, null, 2),
   },
   ec2_terminate: {
@@ -318,7 +338,7 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   },
   {
     label: "EC2",
-    types: ["ec2_launch", "ec2_start", "ec2_stop", "ec2_reboot", "ec2_stop_start", "ec2_terminate"],
+    types: ["ec2_launch", "ec2_start", "ec2_stop", "ec2_reboot", "ec2_stop_start", "ec2_terminate", "ssm_command", "key_pair_create"],
   },
   {
     label: "Patching",
@@ -366,6 +386,8 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
 // null means "no restriction — show all assets".
 const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = {
   // Needs an AWS cloud account to launch into
+  key_pair_create: "cloud_account",
+  ssm_command: "server",
   ec2_launch: "cloud_account",
   // Operate on existing EC2 servers
   ec2_stop: "server",
@@ -431,6 +453,7 @@ const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   load_balancer: "load balancer",
   endpoint: "endpoint",
   container_cluster: "container cluster",
+  key_pair: "key pair",
 };
 
 export function CreateChangeRequest() {

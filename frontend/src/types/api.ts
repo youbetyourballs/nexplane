@@ -30,7 +30,8 @@ export type AssetType =
   | "storage_bucket"
   | "load_balancer"
   | "endpoint"
-  | "container_cluster";
+  | "container_cluster"
+  | "key_pair";
 
 export type Environment = "dev" | "staging" | "prod";
 export type Criticality = "low" | "medium" | "high" | "critical";
@@ -253,7 +254,9 @@ export type ChangeType =
   | "rolling_restart"
   | "canary_config_push"
   | "distribute_file"
-  | "fleet_health_check";
+  | "fleet_health_check"
+  | "key_pair_create"
+  | "ssm_command";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
