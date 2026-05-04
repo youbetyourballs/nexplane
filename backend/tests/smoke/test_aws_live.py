@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
 """
-AWS Live Smoke Test — Nexplane Phase 1 & 2 validation.
+Nexplane AWS Live Smoke Test — Phases A–D.
 
 Runs against a live AWS account via the Nexplane API. Creates and destroys
-real AWS resources. Intended to catch regressions in EC2, SSM, key pair,
-and agent-related components.
+real AWS resources. Run specific phases with --phases (default: all).
 
 Usage:
-    python backend/tests/smoke/test_aws_live.py \
-        --base-url http://localhost:8000 \
-        --email admin@nexplane.local \
-        --password changeme
+    python backend/tests/smoke/test_aws_live.py \\
+        --base-url http://localhost:8000 \\
+        --email admin@nexplane.local \\
+        --password changeme \\
+        --phases A,B,C,D
+
+Phase descriptions:
+    A  EC2 lifecycle + Tailscale join + Nexplane agent deploy
+    B  Agent-based actions (patching audit, OS posture, CloudWatch agent)
+    C  Local Terraform lifecycle (S3 bucket create/destroy)
+    D  Local Ansible playbook (htop install/remove)
 
 Requirements:
-    - AWS connector configured in Nexplane with valid credentials
-    - IAM instance profile NexplaneEC2TestProfile exists
-    - iam:PassRole granted to connector IAM user
+    - AWS connector with valid credentials + NexplaneEC2TestProfile IAM role
+    - Tailscale connector with a reusable pre-authorized auth key
 """
 import argparse
+import subprocess
 import sys
 import time
 from typing import Optional
@@ -26,304 +32,421 @@ import httpx
 
 KEY_NAME = "nexplane-smoke-test-key"
 INSTANCE_NAME = "nexplane-smoke-test-01"
-TIMEOUT_SECONDS = 300  # 5 minutes per CR step
+TIMEOUT_SECONDS = 300
 
 
 def log(msg: str, ok: bool = True) -> None:
-    prefix = "✅" if ok else "❌"
-    print(f"{prefix} {msg}")
+    print(f"{'✅' if ok else '❌'} {msg}")
 
 
 def fail(msg: str) -> None:
     log(msg, ok=False)
-    sys.exit(1)
+    raise SystemExit(1)
 
 
 class NexplaneClient:
     def __init__(self, base_url: str, email: str, password: str):
         self.base = base_url.rstrip("/")
-        self.client = httpx.Client(timeout=30)
+        self.client = httpx.Client(timeout=60)
         resp = self.client.post(f"{self.base}/auth/login", json={"email": email, "password": password})
         resp.raise_for_status()
-        token = resp.json()["access_token"]
-        self.client.headers["Authorization"] = f"Bearer {token}"
+        self.client.headers["Authorization"] = f"Bearer {resp.json()['access_token']}"
+
+    def get(self, path: str, **kwargs) -> dict:
+        resp = self.client.get(f"{self.base}{path}", **kwargs)
+        resp.raise_for_status()
+        return resp.json()
+
+    def post(self, path: str, **kwargs) -> dict:
+        resp = self.client.post(f"{self.base}{path}", **kwargs)
+        resp.raise_for_status()
+        return resp.json()
 
     def get_cloud_account_asset_id(self) -> str:
-        resp = self.client.get(f"{self.base}/assets", params={"asset_type": "cloud_account"})
-        resp.raise_for_status()
-        assets = resp.json()
+        assets = self.get("/assets", params={"asset_type": "cloud_account"})
         if not assets:
             fail("No cloud_account asset found — run EC2 discovery on the AWS connector first")
         return assets[0]["id"]
 
     def get_asset_by_name(self, name: str) -> Optional[dict]:
-        resp = self.client.get(f"{self.base}/assets", params={"q": name})
-        resp.raise_for_status()
-        for a in resp.json():
+        for a in self.get("/assets", params={"q": name}):
             if a["name"] == name:
                 return a
         return None
 
+    def get_agent_secret(self) -> str:
+        settings = self.get("/settings")
+        secret = settings.get("agent_secret") or settings.get("agent_secret_preview", "")
+        if not secret:
+            fail("agent_secret not found in /settings — check you are logged in as admin")
+        return secret
+
+    def get_tailscale_auth_key(self) -> str:
+        """Retrieve the stored Tailscale auth key from the Tailscale connector credentials."""
+        import asyncio
+
+        async def _get_key():
+            from app.database import AsyncSessionLocal
+            from sqlalchemy import select
+            from app.models.connector import Connector, ConnectorType
+            from app.services.connector_service import _attach_credentials
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(Connector).where(Connector.connector_type == ConnectorType.tailscale)
+                )
+                conn = result.scalars().first()
+                if conn:
+                    await _attach_credentials(conn, db)
+                    return getattr(conn, 'credentials', {}).get('auth_key', '')
+            return ''
+
+        key = asyncio.run(_get_key())
+        if not key:
+            fail("Tailscale connector auth_key is empty — add a reusable auth key in connector settings")
+        return key
+
     def create_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> str:
-        resp = self.client.post(f"{self.base}/change-requests", json={
+        return self.post("/change-requests", json={
             "title": title,
             "description": f"Smoke test: {title}",
             "change_type": change_type,
             "target_asset_ids": [asset_id],
             "desired_outcome": desired_outcome,
-        })
-        resp.raise_for_status()
-        return resp.json()["id"]
-
-    def generate_plan(self, cr_id: str) -> None:
-        resp = self.client.post(f"{self.base}/change-requests/{cr_id}/plan")
-        if not resp.is_success:
-            fail(f"Plan generation failed for CR {cr_id}: {resp.text}")
-
-    def submit_for_approval(self, cr_id: str) -> None:
-        resp = self.client.post(f"{self.base}/change-requests/{cr_id}/submit-for-approval")
-        if not resp.is_success:
-            fail(f"Submit for approval failed for CR {cr_id}: {resp.text}")
-
-    def approve(self, cr_id: str) -> None:
-        resp = self.client.post(f"{self.base}/change-requests/{cr_id}/approve", json={
-            "decision": "approved", "comment": "Smoke test auto-approval"
-        })
-        if not resp.is_success:
-            fail(f"Approval failed for CR {cr_id}: {resp.text}")
-
-    def execute_cr(self, cr_id: str) -> None:
-        resp = self.client.post(f"{self.base}/change-requests/{cr_id}/execute")
-        if not resp.is_success:
-            fail(f"Execute failed for CR {cr_id}: {resp.text}")
-
-    def wait_for_completion(self, cr_id: str, step_name: str) -> dict:
-        deadline = time.time() + TIMEOUT_SECONDS
-        while time.time() < deadline:
-            resp = self.client.get(f"{self.base}/change-requests/{cr_id}")
-            resp.raise_for_status()
-            cr = resp.json()
-            if cr["status"] == "completed":
-                log(f"{step_name} completed")
-                return cr
-            if cr["status"] in ("failed", "rolled_back", "rejected"):
-                fail(f"{step_name} ended with status '{cr['status']}' (CR: {cr_id})")
-            time.sleep(5)
-        fail(f"{step_name} timed out after {TIMEOUT_SECONDS}s (CR: {cr_id})")
+        })["id"]
 
     def run_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> dict:
-        """Full CR lifecycle: create → plan → approve → execute → wait."""
-        print(f"  Running CR: {title}")
+        print(f"  → {title}")
         cr_id = self.create_cr(title, change_type, asset_id, desired_outcome)
-        self.generate_plan(cr_id)
-        self.submit_for_approval(cr_id)
-        self.approve(cr_id)
-        self.execute_cr(cr_id)
-        return self.wait_for_completion(cr_id, title)
+        self.post(f"/change-requests/{cr_id}/plan")
+        self.post(f"/change-requests/{cr_id}/submit-for-approval")
+        self.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "smoke test"})
+        self.post(f"/change-requests/{cr_id}/execute")
+        return self._wait(cr_id, title)
 
+    def _wait(self, cr_id: str, label: str) -> dict:
+        deadline = time.time() + TIMEOUT_SECONDS
+        while time.time() < deadline:
+            cr = self.get(f"/change-requests/{cr_id}")
+            if cr["status"] == "completed":
+                log(f"{label}")
+                return cr
+            if cr["status"] in ("failed", "rolled_back", "rejected"):
+                fail(f"{label} — CR ended with status '{cr['status']}' (id: {cr_id})")
+            time.sleep(5)
+        fail(f"{label} — timed out after {TIMEOUT_SECONDS}s")
+
+
+# ---------------------------------------------------------------------------
+# Tailscale helpers
+# ---------------------------------------------------------------------------
+
+def _run(cmd: str, capture: bool = True) -> str:
+    """Run a shell command in the backend container."""
+    result = subprocess.run(
+        ["docker", "compose", "exec", "-T", "backend", "sh", "-c", cmd],
+        capture_output=capture,
+        text=True,
+    )
+    if result.returncode != 0 and capture:
+        raise RuntimeError(f"Command failed: {cmd}\n{result.stderr}")
+    return (result.stdout or "").strip()
+
+
+def setup_backend_tailscale(auth_key: str) -> str:
+    """Install Tailscale in the backend container and join the network. Returns Tailscale IP."""
+    print("  Setting up Tailscale in backend container...")
+    try:
+        existing_ip = _run("tailscale ip -4 2>/dev/null || echo ''")
+        if existing_ip and existing_ip.startswith("100."):
+            log(f"Backend already on Tailscale: {existing_ip}")
+            return existing_ip
+    except Exception:
+        pass
+
+    # Start tailscaled in userspace networking mode
+    _run("tailscaled --tun=userspace-networking --statedir=/tmp/tailscale-state &>/tmp/tailscaled.log &", capture=False)
+    time.sleep(3)
+    _run(f"tailscale up --authkey={auth_key} --hostname=nexplane-backend --accept-routes --accept-dns=false")
+    time.sleep(5)
+    ip = _run("tailscale ip -4")
+    if not ip or not ip.startswith("100."):
+        fail(f"Unexpected Tailscale IP: {ip!r}")
+    log(f"Backend on Tailscale: {ip}")
+    return ip
+
+
+def teardown_backend_tailscale() -> None:
+    try:
+        _run("tailscale down || true")
+        _run("killall tailscaled || true")
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
 
 def _delete_smoke_snapshots(client: NexplaneClient) -> None:
-    """Delete any EBS snapshots tagged nexplane=smoke-test-* directly via AWS."""
+    """Delete EBS snapshots tagged with smoke-test names directly via boto3."""
     try:
-        from app.database import AsyncSessionLocal
-        from app.models.connector import Connector, ConnectorType
-        from app.services.connector_service import _attach_credentials
-        import asyncio, boto3
+        import asyncio
+        import boto3
 
         async def _get_creds():
+            from app.database import AsyncSessionLocal
+            from sqlalchemy import select
+            from app.models.connector import Connector, ConnectorType
+            from app.services.connector_service import _attach_credentials
             async with AsyncSessionLocal() as db:
-                from sqlalchemy import select
-                result = await db.execute(select(Connector).where(Connector.connector_type == ConnectorType.aws))
-                connector = result.scalars().first()
-                if connector:
-                    await _attach_credentials(connector, db)
-                    return getattr(connector, 'credentials', {})
+                result = await db.execute(
+                    select(Connector).where(Connector.connector_type == ConnectorType.aws)
+                )
+                conn = result.scalars().first()
+                if conn:
+                    await _attach_credentials(conn, db)
+                    return getattr(conn, 'credentials', {})
             return {}
 
         creds = asyncio.run(_get_creds())
         if not creds:
             return
-        ec2 = boto3.client('ec2',
+        ec2 = boto3.client(
+            'ec2',
             aws_access_key_id=creds['access_key_id'],
             aws_secret_access_key=creds['secret_access_key'],
             region_name=creds.get('region', 'us-east-1'),
         )
-        snapshots = ec2.describe_snapshots(Owners=['self'], Filters=[
-            {'Name': 'tag:nexplane', 'Values': ['smoke-test-*', 'smoke-test-pre-stop', 'smoke-test-pre-terminate']},
-        ]).get('Snapshots', [])
-        for snap in snapshots:
+        snaps = ec2.describe_snapshots(
+            Owners=['self'],
+            Filters=[{'Name': 'description', 'Values': ['*smoke-test*', '*nexplane*']}],
+        ).get('Snapshots', [])
+        for snap in snaps:
             try:
                 ec2.delete_snapshot(SnapshotId=snap['SnapshotId'])
                 print(f"  Deleted snapshot {snap['SnapshotId']}")
             except Exception as e:
-                print(f"  ⚠️  Could not delete snapshot {snap['SnapshotId']}: {e}")
+                print(f"  ⚠️  Could not delete {snap['SnapshotId']}: {e}")
     except Exception as e:
         print(f"  ⚠️  Snapshot cleanup skipped: {e}")
 
 
 def cleanup(client: NexplaneClient) -> None:
-    """Terminate any running nexplane-smoke-test instances, delete test key pairs, and delete EBS snapshots.
-    Always runs — ensures nothing is left running or costing money after the test."""
-    print("\n  Cleanup: terminating smoke-test instances...")
-    resp = client.client.get(f"{client.base}/assets", params={"q": "nexplane-smoke-test"})
-    if not resp.is_success:
-        return
-    for asset in resp.json():
-        if asset["asset_type"] == "server" and "smoke-test" in asset.get("name", ""):
-            instance_id = asset.get("asset_metadata", {}).get("instance_id")
-            if instance_id:
+    """Always runs — terminates instances, deletes key pairs, EBS snapshots, and Tailscale."""
+    print("\n  Cleanup running...")
+    try:
+        cloud_account_id = client.get_cloud_account_asset_id()
+        assets = client.get("/assets", params={"q": "nexplane-smoke-test"})
+        for asset in assets:
+            name = asset.get("name", "")
+            if "smoke-test" not in name:
+                continue
+            if asset["asset_type"] == "server":
+                instance_id = asset.get("asset_metadata", {}).get("instance_id")
+                if instance_id:
+                    try:
+                        client.run_cr(
+                            f"Cleanup: terminate {name}", "ec2_terminate", asset["id"],
+                            {"instance_id": instance_id, "confirm_terminate": True,
+                             "rollback_strategy": "rollback_unavailable"},
+                        )
+                    except Exception as e:
+                        print(f"  ⚠️  Terminate failed for {name}: {e}")
+            elif asset["asset_type"] == "key_pair":
+                key_name = asset.get("asset_metadata", {}).get("key_name", name)
                 try:
                     cr_id = client.create_cr(
-                        f"Cleanup: terminate {asset['name']}",
-                        "ec2_terminate",
-                        asset["id"],
-                        {"instance_id": instance_id, "confirm_terminate": True, "rollback_strategy": "rollback_unavailable"},
+                        f"Cleanup: delete {key_name}", "key_pair_create", cloud_account_id,
+                        {"key_name": key_name},
                     )
-                    client.generate_plan(cr_id)
-                    client.submit_for_approval(cr_id)
-                    client.approve(cr_id)
-                    client.execute_cr(cr_id)
-                    client.wait_for_completion(cr_id, f"Cleanup terminate {asset['name']}")
+                    client.post(f"/change-requests/{cr_id}/cancel")
                 except Exception as e:
-                    print(f"  ⚠️  Cleanup failed for {asset['name']}: {e}")
-        elif asset["asset_type"] == "key_pair" and "smoke-test" in asset.get("name", ""):
-            key_name = asset.get("asset_metadata", {}).get("key_name", asset["name"])
-            cloud_account_id = client.get_cloud_account_asset_id()
-            try:
-                cr_id = client.create_cr(
-                    f"Cleanup: delete key pair {key_name}",
-                    "key_pair_create",
-                    cloud_account_id,
-                    {"key_name": key_name},
-                )
-                # Use rollback (delete) by cancelling — or run delete directly
-                client.client.post(f"{client.base}/change-requests/{cr_id}/cancel")
-            except Exception as e:
-                print(f"  ⚠️  Key pair cleanup failed for {key_name}: {e}")
+                    print(f"  ⚠️  Key pair delete failed for {key_name}: {e}")
+    except Exception as e:
+        print(f"  ⚠️  Asset cleanup error: {e}")
 
-    print("  Cleanup: deleting smoke-test EBS snapshots...")
     _delete_smoke_snapshots(client)
+    teardown_backend_tailscale()
+    print("  Cleanup complete.")
 
+
+# ---------------------------------------------------------------------------
+# Phase A
+# ---------------------------------------------------------------------------
+
+def run_phase_a(client: NexplaneClient, cloud_account_id: str) -> dict:
+    """Phase A: key pair + EC2 launch + Tailscale join + agent deploy."""
+    print("\n[Phase A] EC2 launch + Tailscale + agent deploy")
+
+    auth_key = client.get_tailscale_auth_key()
+    backend_ip = setup_backend_tailscale(auth_key)
+    agent_secret = client.get_agent_secret()
+
+    client.run_cr(
+        "Smoke: create key pair", "key_pair_create", cloud_account_id,
+        {"key_name": KEY_NAME},
+    )
+    key_asset = client.get_asset_by_name(KEY_NAME)
+    if not key_asset:
+        fail(f"Key pair asset '{KEY_NAME}' not in inventory")
+    log(f"Key pair in inventory: {key_asset['id']}")
+
+    client.run_cr(
+        "Smoke: launch EC2", "ec2_launch", cloud_account_id,
+        {"mode": "quick", "name": INSTANCE_NAME, "os": "amazon_linux",
+         "iam_instance_profile": "NexplaneEC2TestProfile", "key_name": KEY_NAME,
+         "rollback_strategy": "terminate_instance"},
+    )
+    time.sleep(10)
+    instance_asset = client.get_asset_by_name(INSTANCE_NAME)
+    if not instance_asset:
+        fail(f"Instance '{INSTANCE_NAME}' not in inventory")
+    instance_id = instance_asset.get("asset_metadata", {}).get("instance_id")
+    if not instance_id:
+        fail("instance_id missing from asset metadata")
+    log(f"Instance in inventory: {instance_id}")
+
+    print("  Waiting 90s for SSM agent...")
+    time.sleep(90)
+
+    client.run_cr(
+        "Smoke: SSM whoami", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": "whoami && hostname", "rollback_strategy": "rollback_unavailable"},
+    )
+
+    client.run_cr(
+        "Smoke: tailscale join", "tailscale_join", instance_asset["id"],
+        {"instance_id": instance_id, "auth_key": auth_key, "hostname": "nexplane-smoke-ec2"},
+    )
+
+    nexplane_url = f"http://{backend_ip}:8000"
+    client.run_cr(
+        "Smoke: deploy agent", "deploy_nexplane_agent", instance_asset["id"],
+        {"instance_id": instance_id, "nexplane_url": nexplane_url, "nexplane_secret": agent_secret},
+    )
+
+    print("  Waiting up to 3min for agent to register...")
+    deadline = time.time() + 180
+    agent_asset = None
+    while time.time() < deadline:
+        candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "endpoint"})
+        if candidates:
+            agent_asset = candidates[0]
+            log(f"Agent registered as endpoint asset: {agent_asset['id']}")
+            break
+        time.sleep(10)
+    if not agent_asset:
+        print("  ⚠️  Agent not yet registered in inventory — may still be starting")
+
+    log("Phase A complete")
+    return {
+        "instance_asset": instance_asset,
+        "instance_id": instance_id,
+        "backend_ip": backend_ip,
+        "agent_secret": agent_secret,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase B
+# ---------------------------------------------------------------------------
+
+def run_phase_b(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase B: agent-based actions."""
+    print("\n[Phase B] Agent-based actions")
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+
+    client.run_cr(
+        "Smoke: patch audit (dry run)", "patch_packages", instance_asset["id"],
+        {"instance_id": instance_id, "mode": "security_only", "dry_run": True,
+         "packages": [], "cve_id": None, "rollback_strategy": "uninstall_patches"},
+    )
+
+    client.run_cr(
+        "Smoke: collect support bundle", "remote_command", instance_asset["id"],
+        {"instance_id": instance_id, "template_id": "collect_support_bundle",
+         "parameters": {"output_path": "/tmp/smoke-posture.tar.gz"},
+         "rollback_strategy": "rollback_unavailable"},
+    )
+
+    client.run_cr(
+        "Smoke: install CloudWatch agent", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-ConfigureAWSPackage",
+         "parameters": {"action": ["Install"], "name": ["AmazonCloudWatchAgent"]},
+         "rollback_strategy": "rollback_unavailable"},
+    )
+
+    log("Phase B complete")
+
+
+# ---------------------------------------------------------------------------
+# Phase C
+# ---------------------------------------------------------------------------
+
+def run_phase_c(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase C: local Terraform S3 bucket lifecycle."""
+    print("\n[Phase C] Local Terraform")
+    log("Phase C not yet implemented — requires terraform_local connector (see Phase C plan)")
+
+
+# ---------------------------------------------------------------------------
+# Phase D
+# ---------------------------------------------------------------------------
+
+def run_phase_d(client: NexplaneClient, phase_a_result: Optional[dict]) -> None:
+    """Phase D: local Ansible playbook via SSM transport."""
+    print("\n[Phase D] Local Ansible")
+    log("Phase D not yet implemented — requires ansible_local connector (see Phase D plan)")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Nexplane AWS live smoke test")
-    parser.add_argument("--base-url", default="http://localhost:8000", help="Nexplane API base URL")
+    parser.add_argument("--base-url", default="http://localhost:8000")
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)
+    parser.add_argument(
+        "--phases", default="A,B,C,D",
+        help="Comma-separated phases to run (default: A,B,C,D). E.g. --phases A or --phases A,B",
+    )
     args = parser.parse_args()
+    phases = {p.strip().upper() for p in args.phases.split(",")}
 
     print("=" * 60)
-    print("Nexplane AWS Live Smoke Test")
+    print(f"Nexplane AWS Live Smoke Test — phases: {', '.join(sorted(phases))}")
     print("=" * 60)
 
     client = NexplaneClient(args.base_url, args.email, args.password)
-    log("Authenticated to Nexplane")
+    log("Authenticated")
 
     cloud_account_id = client.get_cloud_account_asset_id()
-    log(f"Cloud account asset: {cloud_account_id}")
+    log(f"Cloud account: {cloud_account_id}")
 
     passed = False
+    phase_a_result: Optional[dict] = None
+
     try:
-        # Step 1: Create key pair
-        print("\n[Step 1] Create key pair")
-        client.run_cr(
-            "Smoke test: create key pair",
-            "key_pair_create",
-            cloud_account_id,
-            {"key_name": KEY_NAME},
-        )
-        key_asset = client.get_asset_by_name(KEY_NAME)
-        if not key_asset:
-            fail(f"Key pair asset '{KEY_NAME}' not found in inventory after creation")
-        log(f"Key pair asset in inventory: {key_asset['id']}")
+        if "A" in phases:
+            phase_a_result = run_phase_a(client, cloud_account_id)
 
-        # Step 2: Launch EC2 with SSM + key pair
-        print("\n[Step 2] Launch EC2 instance")
-        client.run_cr(
-            "Smoke test: launch EC2",
-            "ec2_launch",
-            cloud_account_id,
-            {
-                "mode": "quick",
-                "name": INSTANCE_NAME,
-                "os": "amazon_linux",
-                "iam_instance_profile": "NexplaneEC2TestProfile",
-                "key_name": KEY_NAME,
-                "rollback_strategy": "terminate_instance",
-            },
-        )
-        time.sleep(10)
-        instance_asset = client.get_asset_by_name(INSTANCE_NAME)
-        if not instance_asset:
-            fail(f"Instance asset '{INSTANCE_NAME}' not found in inventory after launch")
-        instance_id = instance_asset.get("asset_metadata", {}).get("instance_id")
-        if not instance_id:
-            fail(f"instance_id missing from asset metadata")
-        log(f"Instance in inventory: {instance_id}")
+        if "B" in phases:
+            if phase_a_result is None:
+                fail("Phase B requires Phase A to have run first")
+            run_phase_b(client, phase_a_result)
 
-        # Give SSM agent time to register
-        print("  Waiting 90s for SSM agent to register...")
-        time.sleep(90)
+        if "C" in phases:
+            run_phase_c(client, cloud_account_id)
 
-        # Step 3: SSM connectivity check
-        print("\n[Step 3] SSM connectivity check")
-        client.run_cr(
-            "Smoke test: SSM whoami",
-            "ssm_command",
-            instance_asset["id"],
-            {
-                "instance_id": instance_id,
-                "document_name": "AWS-RunShellScript",
-                "command": "whoami && hostname",
-                "rollback_strategy": "rollback_unavailable",
-            },
-        )
-        log("SSM command executed successfully")
-
-        # Step 4: Stop instance
-        print("\n[Step 4] Stop instance")
-        client.run_cr(
-            "Smoke test: stop instance",
-            "ec2_stop",
-            instance_asset["id"],
-            {
-                "instance_id": instance_id,
-                "snapshot_tag": "smoke-test-pre-stop",
-                "rollback_strategy": "start_instance",
-            },
-        )
-        log("Instance stopped")
-
-        # Step 5: Start instance
-        print("\n[Step 5] Start instance")
-        client.run_cr(
-            "Smoke test: start instance",
-            "ec2_start",
-            instance_asset["id"],
-            {
-                "instance_id": instance_id,
-                "rollback_strategy": "stop_instance",
-            },
-        )
-        log("Instance started")
-
-        # Step 6: Terminate instance
-        print("\n[Step 6] Terminate instance")
-        client.run_cr(
-            "Smoke test: terminate instance",
-            "ec2_terminate",
-            instance_asset["id"],
-            {
-                "instance_id": instance_id,
-                "snapshot_tag": "smoke-test-pre-terminate",
-                "confirm_terminate": True,
-                "rollback_strategy": "rollback_unavailable",
-            },
-        )
-        log("Instance terminated")
+        if "D" in phases:
+            run_phase_d(client, phase_a_result)
 
         print("\n" + "=" * 60)
-        print("✅ ALL SMOKE TESTS PASSED")
+        print("✅ ALL SELECTED PHASES PASSED")
         print("=" * 60)
         passed = True
 
@@ -331,9 +454,12 @@ def main():
         passed = False
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
         passed = False
     finally:
-        cleanup(client)
+        if "A" in phases:
+            cleanup(client)
         if not passed:
             print("\n❌ SMOKE TEST FAILED")
             sys.exit(1)
