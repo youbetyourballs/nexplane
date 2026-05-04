@@ -262,19 +262,37 @@ async def activity_execute_rollback(
     return {"rollback_steps": rollback_results}
 
 
-# Change types that should trigger a discovery re-sync after completion
-_DISCOVERY_CHANGE_TYPES = {
-    "ec2_launch", "ec2_terminate", "ec2_stop", "ec2_start", "ec2_stop_start",
-}
-
-_CONNECTOR_DISCOVERY_ACTION = {
-    "aws": "discover_ec2_instances",
+# Change types that trigger asset re-sync after completion.
+# Maps change_type → list of (connector_type, discovery_action_id) pairs.
+# When multiple connectors are possible (e.g. identity via Okta or AD),
+# we iterate and run whichever connector is present in the org.
+_CHANGE_TYPE_DISCOVERY: dict[str, list[tuple[str, str]]] = {
+    # AWS EC2
+    "ec2_launch":      [("aws", "discover_ec2_instances")],
+    "ec2_terminate":   [("aws", "discover_ec2_instances")],
+    "ec2_stop":        [("aws", "discover_ec2_instances")],
+    "ec2_start":       [("aws", "discover_ec2_instances")],
+    "ec2_stop_start":  [("aws", "discover_ec2_instances")],
+    # AWS other
+    "s3_block_public_access": [("aws", "discover_s3_buckets")],
+    "promote_db_replica":     [("aws", "discover_rds_instances")],
+    # Identity (try okta then active_directory — whichever connector is attached)
+    "offboard_user":    [("okta", "discover_users"), ("active_directory", "discover_identities")],
+    "onboard_user":     [("okta", "discover_users"), ("active_directory", "discover_identities")],
+    "lockdown_account": [("okta", "discover_users"), ("active_directory", "discover_identities")],
+    # DNS
+    "dns_update":  [("cloudflare", "discover_dns_records")],
+    "dr_failover": [("cloudflare", "discover_dns_records")],
+    # Endpoint
+    "isolate_host": [("crowdstrike", "discover_endpoints")],
 }
 
 
 async def activity_post_completion_discovery(change_request_id: str) -> None:
-    """After certain change types complete, re-run discovery on the relevant connector
-    so new or modified assets appear in inventory without manual intervention."""
+    """Re-run discovery after stateful changes so inventory reflects reality."""
+    from app.services.ingest_service import IngestService
+    from app.connectors.catalog_service import get_catalog_service
+
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(ChangeRequest)
@@ -282,47 +300,76 @@ async def activity_post_completion_discovery(change_request_id: str) -> None:
             .options(selectinload(ChangeRequest.change_plan))
         )
         cr = result.scalar_one_or_none()
-        if not cr or cr.change_type.value not in _DISCOVERY_CHANGE_TYPES:
+        if not cr:
             return
 
-        # Find the connector used in the plan steps
+        candidates = _CHANGE_TYPE_DISCOVERY.get(cr.change_type.value)
+        if not candidates:
+            return
+
+        # Collect connector IDs referenced in plan steps
         plan = cr.change_plan
-        connector_id = None
+        step_connector_ids: list[str] = []
         if plan:
             for step in plan.generated_steps:
-                if step.get("connector_id"):
-                    connector_id = step["connector_id"]
+                if step.get("connector_id") and step["connector_id"] not in step_connector_ids:
+                    step_connector_ids.append(step["connector_id"])
+
+        catalog = get_catalog_service()
+        service = IngestService(catalog)
+
+        for connector_type, action_id in candidates:
+            # Find a matching connector: prefer one used in the plan steps
+            connector = None
+            for cid in step_connector_ids:
+                conn_result = await db.execute(
+                    select(Connector).where(
+                        Connector.id == uuid.UUID(cid),
+                        Connector.connector_type == connector_type,
+                    )
+                )
+                connector = conn_result.scalar_one_or_none()
+                if connector:
                     break
 
-        if not connector_id:
-            # Fall back: find any AWS connector in the org
-            conn_result = await db.execute(
-                select(Connector).where(
-                    Connector.organization_id == cr.organization_id,
-                    Connector.connector_type == ConnectorType.aws,
+            # Fall back: any connector of that type in the org
+            if not connector:
+                conn_result = await db.execute(
+                    select(Connector).where(
+                        Connector.organization_id == cr.organization_id,
+                        Connector.connector_type == connector_type,
+                    )
                 )
-            )
-            connector = conn_result.scalars().first()
-        else:
-            conn_result = await db.execute(
-                select(Connector).where(Connector.id == uuid.UUID(connector_id))
-            )
-            connector = conn_result.scalar_one_or_none()
+                connector = conn_result.scalars().first()
 
-        if not connector:
-            logger.info("No connector found for post-completion discovery on %s", change_request_id)
-            return
+            if not connector:
+                logger.info(
+                    "No %s connector found for post-completion discovery on %s",
+                    connector_type, change_request_id,
+                )
+                continue
 
-        action_id = _CONNECTOR_DISCOVERY_ACTION.get(connector.connector_type.value)
-        if not action_id:
-            return
+            # Verify the action is an ingest action before running
+            try:
+                action_def = catalog.get_action_def(connector_type, action_id)
+                if action_def.get("action_type") != "ingest":
+                    continue
+            except KeyError:
+                logger.warning(
+                    "Discovery action %s not found in %s catalog",
+                    action_id, connector_type,
+                )
+                continue
 
-        try:
-            from app.services.ingest_service import IngestService
-            from app.connectors.catalog_service import get_catalog_service
-            service = IngestService(get_catalog_service())
-            await service.run(action_id, connector, cr.organization_id, db)
-            await db.commit()
-            logger.info("Post-completion discovery ran for %s (%s)", change_request_id, action_id)
-        except Exception as exc:
-            logger.warning("Post-completion discovery failed for %s: %s", change_request_id, exc)
+            try:
+                await service.run(action_id, connector, cr.organization_id, db)
+                await db.commit()
+                logger.info(
+                    "Post-completion discovery %s/%s ran for CR %s",
+                    connector_type, action_id, change_request_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Post-completion discovery %s/%s failed for CR %s: %s",
+                    connector_type, action_id, change_request_id, exc,
+                )
