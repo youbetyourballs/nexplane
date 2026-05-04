@@ -51,7 +51,7 @@ app.add_middleware(
 
 _downloads_dir = pathlib.Path("/opt/nexplane-downloads")
 if _downloads_dir.exists():
-    app.mount("/downloads", StaticFiles(directory=str(_downloads_dir)), name="downloads")
+    app.mount("/downloads", StaticFiles(directory=str(_downloads_dir), html=False), name="downloads")
 
 app.include_router(auth.router)
 app.include_router(assets.router)

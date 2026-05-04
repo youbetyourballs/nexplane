@@ -10,7 +10,11 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not playbook_content:
         return {"action": "ansible_run_local", "stdout": "mock: no playbook content", "mock": True}
 
-    result = await run_playbook(instance_id, playbook_content, connector, check_mode=False, extra_vars=extra_vars)
+    inventory_content = parameters.get('inventory_content', None)
+    result = await run_playbook(
+        instance_id, playbook_content, connector,
+        check_mode=False, extra_vars=extra_vars, inventory_content=inventory_content,
+    )
     return {
         "action": "ansible_run_local",
         "instance_id": instance_id,

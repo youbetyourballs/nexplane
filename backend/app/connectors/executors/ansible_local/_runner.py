@@ -35,11 +35,12 @@ async def run_playbook(
     connector,
     check_mode: bool = False,
     extra_vars: dict | None = None,
+    inventory_content: str | None = None,
 ) -> dict:
     creds = getattr(connector, 'credentials', {}) or {}
     region = creds.get('region', 'us-east-1') if creds else 'us-east-1'
 
-    if not creds:
+    if not creds and instance_id != 'localhost':
         return {
             "stdout": "mock ansible run — no credentials",
             "rc": 0,
@@ -49,20 +50,36 @@ async def run_playbook(
     env = await _get_aws_env(connector)
     loop = asyncio.get_event_loop()
 
+    # Build inventory: use provided content, or SSM for real instances, or ad-hoc localhost
+    if inventory_content is not None:
+        inv = inventory_content
+    elif instance_id == 'localhost':
+        inv = "localhost,"  # ad-hoc inventory string — trailing comma required
+    else:
+        inv = _build_ssm_inventory(instance_id, region)
+
     def _run():
         work_dir = tempfile.mkdtemp(prefix="nexplane-ansible-")
         try:
-            inventory_path = os.path.join(work_dir, "inventory.ini")
             playbook_path = os.path.join(work_dir, "playbook.yml")
-            Path(inventory_path).write_text(_build_ssm_inventory(instance_id, region))
             Path(playbook_path).write_text(playbook_content)
 
-            cmd = [
-                "ansible-playbook",
-                "-i", inventory_path,
-                playbook_path,
-                "--timeout", "60",
-            ]
+            if inv == "localhost,":
+                # Ad-hoc inventory string passed directly on command line
+                inventory_arg = "localhost,"
+                inventory_path = None
+            elif inv is not None:
+                inventory_path = os.path.join(work_dir, "inventory.ini")
+                Path(inventory_path).write_text(inv)
+                inventory_arg = inventory_path
+            else:
+                inventory_path = None
+                inventory_arg = None
+
+            cmd = ["ansible-playbook"]
+            if inventory_arg:
+                cmd += ["-i", inventory_arg]
+            cmd += [playbook_path, "--timeout", "60"]
             if check_mode:
                 cmd.append("--check")
             if extra_vars:
@@ -82,5 +99,10 @@ async def run_playbook(
 
     result = await loop.run_in_executor(None, _run)
     if result["rc"] != 0:
-        raise RuntimeError("ansible-playbook failed (rc=" + str(result["rc"]) + "):\n" + result["stderr"])
+        out_snippet = result.get("stdout", "")[-2000:]
+        err_snippet = result.get("stderr", "")[-1000:]
+        raise RuntimeError(
+            f"ansible-playbook failed (rc={result['rc']}):\n"
+            f"STDOUT: {out_snippet}\nSTDERR: {err_snippet}"
+        )
     return result

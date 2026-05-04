@@ -18,8 +18,8 @@ async def _real_execute(creds: dict, parameters: dict) -> dict:
             Parameters=doc_params or {},
         )
         command_id = resp['Command']['CommandId']
-        # Poll for completion (max 60s)
-        for _ in range(12):
+        # Poll for completion (max 5 min)
+        for _ in range(60):
             time.sleep(5)
             result = ssm.get_command_invocation(CommandId=command_id, InstanceId=instance_id)
             if result['Status'] not in ('Pending', 'InProgress', 'Delayed'):
