@@ -82,6 +82,18 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
             "document_name": desired.get("document_name", "AWS-RunShellScript"),
             "parameters": {"commands": [desired.get("command", "echo hello")]},
         },
+        "tailscale_join":         {
+            "instance_id": desired.get("instance_id", ""),
+            "auth_key": desired.get("auth_key", ""),
+            "hostname": desired.get("hostname", ""),
+        },
+        "tailscale_remove":       {"instance_id": desired.get("instance_id", "")},
+        "deploy_nexplane_agent":  {
+            "instance_id": desired.get("instance_id", ""),
+            "nexplane_url": desired.get("nexplane_url", ""),
+            "nexplane_secret": desired.get("nexplane_secret", ""),
+        },
+        "remove_nexplane_agent":  {"instance_id": desired.get("instance_id", "")},
         "terminate_instance":     {"instance_id": desired.get("instance_id", ""), "confirm_terminate": desired.get("confirm_terminate", False)},
     }
     return resolvers.get(generic_action, {})

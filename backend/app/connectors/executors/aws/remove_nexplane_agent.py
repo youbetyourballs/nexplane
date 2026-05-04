@@ -1,0 +1,48 @@
+import asyncio
+from datetime import datetime, timezone
+
+
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    creds = getattr(connector, 'credentials', {})
+    instance_id = parameters.get('instance_id', '')
+
+    if not creds:
+        return {"action": "remove_nexplane_agent", "instance_id": instance_id, "removed": True, "mock": True}
+
+    from ._client import get_boto3_client
+    ssm = get_boto3_client(creds, 'ssm')
+    loop = asyncio.get_event_loop()
+
+    script = [
+        "systemctl disable --now nexplane-agent || true",
+        "rm -f /etc/systemd/system/nexplane-agent.service",
+        "rm -f /usr/local/bin/nexplane-agent",
+        "systemctl daemon-reload",
+    ]
+
+    def _call():
+        import time
+        resp = ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": script},
+        )
+        command_id = resp['Command']['CommandId']
+        for _ in range(12):
+            time.sleep(5)
+            result = ssm.get_command_invocation(CommandId=command_id, InstanceId=instance_id)
+            if result['Status'] not in ('Pending', 'InProgress', 'Delayed'):
+                return result
+        return {"Status": "TimedOut"}
+
+    result = await loop.run_in_executor(None, _call)
+    return {
+        "action": "remove_nexplane_agent",
+        "instance_id": instance_id,
+        "removed": result.get('Status') == 'Success',
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    return {"rolled_back": False, "reason": "remove_nexplane_agent has no further rollback"}

@@ -1,0 +1,9 @@
+{
+  "change_type": "tailscale_remove",
+  "display_name": "Remove from Tailscale Network",
+  "steps": [
+    {"generic_action": "tailscale_remove", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}

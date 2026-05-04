@@ -25,6 +25,9 @@ class ChangeType(str, enum.Enum):
     ec2_terminate = "ec2_terminate"
     key_pair_create = "key_pair_create"
     ssm_command = "ssm_command"
+    tailscale_join = "tailscale_join"
+    tailscale_remove = "tailscale_remove"
+    deploy_nexplane_agent = "deploy_nexplane_agent"
     # Patch management
     patch_packages = "patch_packages"
     patch_campaign = "patch_campaign"

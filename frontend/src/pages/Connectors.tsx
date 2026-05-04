@@ -51,6 +51,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   datadog: "Datadog",
   zscaler: "Zscaler",
   google_workspace: "Google Workspace",
+  tailscale: "Tailscale",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -94,6 +95,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   datadog: "🐕",
   zscaler: "🛡️",
   google_workspace: "🌐",
+  tailscale: "🔒",
 };
 
 // Primary ingest action per connector type — controls Run Discovery button and Schedule sync badge

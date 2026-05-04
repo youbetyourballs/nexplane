@@ -202,7 +202,8 @@ export type ConnectorType =
   | "splunk"
   | "datadog"
   | "zscaler"
-  | "google_workspace";
+  | "google_workspace"
+  | "tailscale";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 
@@ -256,7 +257,10 @@ export type ChangeType =
   | "distribute_file"
   | "fleet_health_check"
   | "key_pair_create"
-  | "ssm_command";
+  | "ssm_command"
+  | "tailscale_join"
+  | "tailscale_remove"
+  | "deploy_nexplane_agent";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 

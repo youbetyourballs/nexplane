@@ -1,0 +1,28 @@
+{
+  "connector_type": "tailscale",
+  "display_name": "Tailscale",
+  "credential_fields": [
+    {"name": "oauth_client_id", "label": "OAuth Client ID", "type": "string", "required": true},
+    {"name": "oauth_client_secret", "label": "OAuth Client Secret", "type": "password", "required": true},
+    {"name": "tailnet", "label": "Tailnet (e.g. example.com or your@email.com)", "type": "string", "required": false}
+  ],
+  "actions": [
+    {
+      "action_id": "generate_auth_key",
+      "generic_action": "generate_auth_key",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Generate Auth Key",
+      "description": "Generates an ephemeral Tailscale auth key for device enrollment.",
+      "applicable_asset_types": [],
+      "parameters": [
+        {"name": "expiry_seconds", "type": "integer", "required": false, "default": 3600},
+        {"name": "reusable", "type": "boolean", "required": false, "default": false},
+        {"name": "ephemeral", "type": "boolean", "required": false, "default": true},
+        {"name": "tags", "type": "array", "required": false, "default": []}
+      ],
+      "executor": "tailscale.generate_auth_key",
+      "estimated_duration_seconds": 5
+    }
+  ]
+}

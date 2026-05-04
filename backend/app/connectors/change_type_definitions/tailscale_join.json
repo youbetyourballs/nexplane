@@ -1,0 +1,9 @@
+{
+  "change_type": "tailscale_join",
+  "display_name": "Join Tailscale Network",
+  "steps": [
+    {"generic_action": "tailscale_join", "purpose": "execute", "required": true, "param_overrides": {}}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}

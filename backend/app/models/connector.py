@@ -49,6 +49,7 @@ class ConnectorType(str, enum.Enum):
     datadog = "datadog"
     zscaler = "zscaler"
     google_workspace = "google_workspace"
+    tailscale = "tailscale"
 
 
 class ConnectorStatus(str, enum.Enum):

@@ -39,6 +39,70 @@
       "estimated_duration_seconds": 5
     },
     {
+      "action_id": "tailscale_join",
+      "generic_action": "tailscale_join",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Join Tailscale Network",
+      "description": "Installs Tailscale on an EC2 instance via SSM and enrolls it in the Tailscale network.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true},
+        {"name": "auth_key", "type": "string", "required": true},
+        {"name": "hostname", "type": "string", "required": false}
+      ],
+      "executor": "aws.tailscale_join",
+      "rollback_action": "tailscale_remove",
+      "rollback_connector_type": "aws",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "tailscale_remove",
+      "generic_action": "tailscale_remove",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Remove from Tailscale Network",
+      "description": "Removes Tailscale from an EC2 instance and deregisters it from the network.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true}
+      ],
+      "executor": "aws.tailscale_remove",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "deploy_nexplane_agent",
+      "generic_action": "deploy_nexplane_agent",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Deploy Nexplane Agent",
+      "description": "Downloads and installs the Nexplane agent on an EC2 instance via SSM.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true},
+        {"name": "nexplane_url", "type": "string", "required": true},
+        {"name": "nexplane_secret", "type": "string", "required": true}
+      ],
+      "executor": "aws.deploy_nexplane_agent",
+      "rollback_action": "remove_nexplane_agent",
+      "rollback_connector_type": "aws",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "remove_nexplane_agent",
+      "generic_action": "remove_nexplane_agent",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Remove Nexplane Agent",
+      "description": "Stops and removes the Nexplane agent from an EC2 instance via SSM.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true}
+      ],
+      "executor": "aws.remove_nexplane_agent",
+      "estimated_duration_seconds": 30
+    },
+    {
       "action_id": "create_ebs_snapshot",
       "generic_action": "create_ebs_snapshot",
       "action_type": "change",

@@ -303,6 +303,35 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
     description: "Gather config files and command outputs for audit evidence (SOC2, PCI, ISO27001).",
     outcomeTemplate: JSON.stringify({ framework: "soc2", control_id: "CC6.1", asset_ids: [], rollback_strategy: "rollback_unavailable" }, null, 2),
   },
+  // Tailscale / Nexplane Agent
+  tailscale_join: {
+    label: "Join Tailscale Network",
+    description: "Install Tailscale on an EC2 instance and enroll it in your Tailscale network.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "i-0123456789abcdef0",
+      auth_key: "",
+      hostname: "nexplane-host",
+      rollback_strategy: "tailscale_remove",
+    }, null, 2),
+  },
+  tailscale_remove: {
+    label: "Remove from Tailscale",
+    description: "Remove Tailscale from an EC2 instance and deregister it.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "i-0123456789abcdef0",
+      rollback_strategy: "rollback_unavailable",
+    }, null, 2),
+  },
+  deploy_nexplane_agent: {
+    label: "Deploy Nexplane Agent",
+    description: "Download and install the Nexplane agent on an EC2 instance via SSM.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "i-0123456789abcdef0",
+      nexplane_url: "http://100.x.x.x:8000",
+      nexplane_secret: "",
+      rollback_strategy: "remove_nexplane_agent",
+    }, null, 2),
+  },
   // Misc
   s3_block_public_access: {
     label: "S3 Block Public Access",
@@ -338,7 +367,7 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   },
   {
     label: "EC2",
-    types: ["ec2_launch", "ec2_start", "ec2_stop", "ec2_reboot", "ec2_stop_start", "ec2_terminate", "ssm_command", "key_pair_create"],
+    types: ["ec2_launch", "ec2_start", "ec2_stop", "ec2_reboot", "ec2_stop_start", "ec2_terminate", "ssm_command", "key_pair_create", "tailscale_join", "tailscale_remove", "deploy_nexplane_agent"],
   },
   {
     label: "Patching",
@@ -389,6 +418,9 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   key_pair_create: "cloud_account",
   ssm_command: "server",
   ec2_launch: "cloud_account",
+  tailscale_join: "server",
+  tailscale_remove: "server",
+  deploy_nexplane_agent: "server",
   // Operate on existing EC2 servers
   ec2_stop: "server",
   ec2_start: "server",
