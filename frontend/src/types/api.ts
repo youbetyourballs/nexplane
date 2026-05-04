@@ -204,7 +204,8 @@ export type ConnectorType =
   | "zscaler"
   | "google_workspace"
   | "tailscale"
-  | "terraform_local";
+  | "terraform_local"
+  | "ansible_local";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 
@@ -262,7 +263,8 @@ export type ChangeType =
   | "tailscale_join"
   | "tailscale_remove"
   | "deploy_nexplane_agent"
-  | "terraform_local_apply";
+  | "terraform_local_apply"
+  | "ansible_local_playbook";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 

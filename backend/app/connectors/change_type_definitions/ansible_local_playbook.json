@@ -1,0 +1,10 @@
+{
+  "change_type": "ansible_local_playbook",
+  "display_name": "Ansible Playbook (Local CLI)",
+  "steps": [
+    {"generic_action": "ansible_check_local", "purpose": "preflight_validate", "required": true},
+    {"generic_action": "ansible_run_local",   "purpose": "execute",            "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}

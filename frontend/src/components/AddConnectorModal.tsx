@@ -43,6 +43,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   google_workspace: "Google Workspace",
   tailscale: "Tailscale",
   terraform_local: "Terraform (Local CLI)",
+  ansible_local: "Ansible (Local CLI)",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -85,6 +86,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   google_workspace: "🌐",
   tailscale: "🔒",
   terraform_local: "🏗️",
+  ansible_local: "⚙️",
 };
 
 const ALL_TYPES = (Object.keys(CONNECTOR_LABELS) as ConnectorType[]).filter(

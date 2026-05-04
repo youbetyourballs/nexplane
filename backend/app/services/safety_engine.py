@@ -143,6 +143,7 @@ def score_change_request(change_request: ChangeRequest, assets: list[Asset]) -> 
         ChangeType.key_pair_create,
         ChangeType.tailscale_join, ChangeType.tailscale_remove, ChangeType.deploy_nexplane_agent,
         ChangeType.terraform_local_apply,
+        ChangeType.ansible_local_playbook,
     }
     desired = change_request.desired_outcome or {}
     rollback_strategy = desired.get("rollback_strategy")

@@ -106,6 +106,16 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
             "working_dir": desired.get("working_dir", ""),
             "cleanup_dir": desired.get("cleanup_dir", True),
         },
+        "ansible_check_local":    {
+            "instance_id": desired.get("instance_id", ""),
+            "playbook_content": desired.get("playbook_content", ""),
+            "extra_vars": desired.get("extra_vars", {}),
+        },
+        "ansible_run_local":      {
+            "instance_id": desired.get("instance_id", ""),
+            "playbook_content": desired.get("playbook_content", ""),
+            "extra_vars": desired.get("extra_vars", {}),
+        },
         "terminate_instance":     {"instance_id": desired.get("instance_id", ""), "confirm_terminate": desired.get("confirm_terminate", False)},
     }
     return resolvers.get(generic_action, {})

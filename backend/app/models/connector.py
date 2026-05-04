@@ -51,6 +51,7 @@ class ConnectorType(str, enum.Enum):
     google_workspace = "google_workspace"
     tailscale = "tailscale"
     terraform_local = "terraform_local"
+    ansible_local = "ansible_local"
 
 
 class ConnectorStatus(str, enum.Enum):

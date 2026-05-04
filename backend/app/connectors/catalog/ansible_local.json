@@ -1,0 +1,39 @@
+{
+  "connector_type": "ansible_local",
+  "display_name": "Ansible (Local CLI)",
+  "credential_fields": [],
+  "actions": [
+    {
+      "action_id": "ansible_check_local",
+      "generic_action": "ansible_check_local",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Ansible Check (Local)",
+      "description": "Runs ansible-playbook --check using the local Ansible binary with SSM transport.",
+      "applicable_asset_types": ["server", "endpoint"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true},
+        {"name": "playbook_content", "type": "string", "required": true},
+        {"name": "extra_vars", "type": "object", "required": false}
+      ],
+      "executor": "ansible_local.ansible_check_local",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "ansible_run_local",
+      "generic_action": "ansible_run_local",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Ansible Run (Local)",
+      "description": "Runs ansible-playbook using the local Ansible binary with AWS SSM as the connection transport.",
+      "applicable_asset_types": ["server", "endpoint"],
+      "parameters": [
+        {"name": "instance_id", "type": "string", "required": true},
+        {"name": "playbook_content", "type": "string", "required": true},
+        {"name": "extra_vars", "type": "object", "required": false}
+      ],
+      "executor": "ansible_local.ansible_run_local",
+      "estimated_duration_seconds": 120
+    }
+  ]
+}

@@ -431,7 +431,76 @@ def run_phase_c(client: NexplaneClient, cloud_account_id: str) -> None:
 def run_phase_d(client: NexplaneClient, phase_a_result: Optional[dict]) -> None:
     """Phase D: local Ansible playbook via SSM transport."""
     print("\n[Phase D] Local Ansible")
-    log("Phase D not yet implemented — requires ansible_local connector (see Phase D plan)")
+
+    if phase_a_result is None:
+        fail("Phase D requires Phase A to have run first (needs a running EC2 instance)")
+
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+
+    INSTALL_PLAYBOOK = (
+        "---\n"
+        "- name: Smoke test — install htop\n"
+        "  hosts: all\n"
+        "  gather_facts: yes\n"
+        "  become: yes\n"
+        "  tasks:\n"
+        "    - name: Install htop\n"
+        "      ansible.builtin.package:\n"
+        "        name: htop\n"
+        "        state: present\n"
+        "\n"
+        "    - name: Verify htop installed\n"
+        "      ansible.builtin.command: htop --version\n"
+        "      register: htop_out\n"
+        "      changed_when: false\n"
+        "\n"
+        "    - name: Report\n"
+        "      ansible.builtin.debug:\n"
+        '        msg: "htop installed: {{ htop_out.stdout }}"\n'
+    )
+
+    REMOVE_PLAYBOOK = (
+        "---\n"
+        "- name: Smoke test — remove htop\n"
+        "  hosts: all\n"
+        "  gather_facts: yes\n"
+        "  become: yes\n"
+        "  tasks:\n"
+        "    - name: Remove htop\n"
+        "      ansible.builtin.package:\n"
+        "        name: htop\n"
+        "        state: absent\n"
+    )
+
+    client.run_cr(
+        "Smoke: ansible check (htop install)", "ansible_local_playbook", instance_asset["id"],
+        {"instance_id": instance_id, "playbook_content": INSTALL_PLAYBOOK,
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("Ansible check mode passed")
+
+    client.run_cr(
+        "Smoke: ansible run (install htop)", "ansible_local_playbook", instance_asset["id"],
+        {"instance_id": instance_id, "playbook_content": INSTALL_PLAYBOOK,
+         "rollback_strategy": "rollback_unavailable"},
+    )
+
+    client.run_cr(
+        "Smoke: verify htop via SSM", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": "htop --version", "rollback_strategy": "rollback_unavailable"},
+    )
+    log("htop verified via SSM")
+
+    client.run_cr(
+        "Smoke: ansible run (remove htop)", "ansible_local_playbook", instance_asset["id"],
+        {"instance_id": instance_id, "playbook_content": REMOVE_PLAYBOOK,
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("htop removed")
+
+    log("Phase D complete")
 
 
 # ---------------------------------------------------------------------------

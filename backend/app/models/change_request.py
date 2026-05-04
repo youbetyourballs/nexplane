@@ -29,6 +29,7 @@ class ChangeType(str, enum.Enum):
     tailscale_remove = "tailscale_remove"
     deploy_nexplane_agent = "deploy_nexplane_agent"
     terraform_local_apply = "terraform_local_apply"
+    ansible_local_playbook = "ansible_local_playbook"
     # Patch management
     patch_packages = "patch_packages"
     patch_campaign = "patch_campaign"

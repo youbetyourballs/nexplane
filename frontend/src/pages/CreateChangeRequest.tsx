@@ -228,6 +228,16 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
       rollback_strategy: "terraform_destroy_local",
     }, null, 2),
   },
+  ansible_local_playbook: {
+    label: "Ansible Playbook (Local CLI)",
+    description: "Run an Ansible playbook via the local Ansible binary using SSM as the connection transport — no SSH or AWX needed.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "i-0123456789abcdef0",
+      playbook_content: "---\n- name: Example\n  hosts: all\n  gather_facts: yes\n  tasks:\n    - name: Print hostname\n      ansible.builtin.debug:\n        msg: \"{{ ansible_hostname }}\"\n",
+      extra_vars: {},
+      rollback_strategy: "rollback_unavailable",
+    }, null, 2),
+  },
   terraform_apply: {
     label: "Terraform Apply",
     description: "Run terraform plan → review in Nexplane → terraform apply on approval.",
@@ -399,7 +409,7 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   },
   {
     label: "IaC",
-    types: ["terraform_local_apply", "terraform_apply", "ansible_playbook", "helm_upgrade"],
+    types: ["terraform_local_apply", "ansible_local_playbook", "terraform_apply", "ansible_playbook", "helm_upgrade"],
   },
   {
     label: "Database",
@@ -469,6 +479,7 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   phishing_response: "identity",
   // AWS account-level actions
   terraform_local_apply: "cloud_account",
+  ansible_local_playbook: "server",
   s3_block_public_access: "cloud_account",
   iam_enforce_mfa: "cloud_account",
   // Database actions

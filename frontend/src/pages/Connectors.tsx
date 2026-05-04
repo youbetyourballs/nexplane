@@ -53,6 +53,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   google_workspace: "Google Workspace",
   tailscale: "Tailscale",
   terraform_local: "Terraform (Local CLI)",
+  ansible_local: "Ansible (Local CLI)",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -98,6 +99,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   google_workspace: "🌐",
   tailscale: "🔒",
   terraform_local: "🏗️",
+  ansible_local: "⚙️",
 };
 
 // Primary ingest action per connector type — controls Run Discovery button and Schedule sync badge
