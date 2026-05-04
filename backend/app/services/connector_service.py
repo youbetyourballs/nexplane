@@ -98,7 +98,7 @@ async def _upsert_auto_asset(payload: dict, organization_id, db, connector_id=No
                 Asset.name == name,
             )
         )
-    existing = result.scalar_one_or_none()
+    existing = result.scalars().first()
     if existing:
         existing.asset_metadata = {**existing.asset_metadata, **payload.get("asset_metadata", {})}
         existing.tags = list(set(existing.tags or []) | set(payload.get("tags", [])))

@@ -24,13 +24,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc && rm -rf /var/lib/apt/lists/*
 
-# Install Tailscale for agent connectivity in smoke tests
+# Install curl, unzip, iproute2, iptables (needed for Tailscale + Terraform)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl gnupg lsb-release iproute2 iptables unzip \
-    && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.nokey | gpg --dearmor -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian bookworm main" > /etc/apt/sources.list.d/tailscale.list \
-    && apt-get update && apt-get install -y --no-install-recommends tailscale \
+    curl unzip iproute2 iptables \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Tailscale via official install script (handles OS detection automatically)
+RUN curl -fsSL https://tailscale.com/install.sh | sh
 
 # Install Terraform CLI for local IaC smoke tests
 RUN curl -fsSL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip -o /tmp/tf.zip \

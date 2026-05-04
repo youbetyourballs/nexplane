@@ -3,7 +3,7 @@ import asyncio
 
 _QUICK_AMI_FILTERS = {
     "amazon_linux": [
-        {"Name": "name", "Values": ["al2023-ami-*-x86_64"]},
+        {"Name": "name", "Values": ["al2023-ami-2023*-x86_64"]},
         {"Name": "owner-alias", "Values": ["amazon"]},
         {"Name": "state", "Values": ["available"]},
     ],

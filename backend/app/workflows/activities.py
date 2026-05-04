@@ -151,6 +151,9 @@ async def activity_execute_change(
                 logger.error("Step %s failed: %s", step.get("step_number"), exc)
                 raise
 
+            # Commit any flushed _auto_asset upserts from execute_action
+            await db.commit()
+
             step_results.append({
                 "step_number": step["step_number"],
                 "generic_action": step.get("generic_action"),

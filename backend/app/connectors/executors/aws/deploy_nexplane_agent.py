@@ -34,8 +34,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "WantedBy=multi-user.target"
     )
 
+    version_url = f"{nexplane_url}/downloads/version"
     script = [
-        f"curl -fsSL {nexplane_url}/downloads/nexplane-agent-linux-amd64 -o /usr/local/bin/nexplane-agent",
+        f"VERSION=$(curl -fsSL {version_url})",
+        f"curl -fsSL {nexplane_url}/downloads/nexplane-agent-linux-amd64-${{VERSION}} -o /usr/local/bin/nexplane-agent",
         "chmod +x /usr/local/bin/nexplane-agent",
         f"printf '{systemd_unit}' > /etc/systemd/system/nexplane-agent.service",
         "systemctl daemon-reload",

@@ -69,41 +69,28 @@ class NexplaneClient:
         return assets[0]["id"]
 
     def get_asset_by_name(self, name: str) -> Optional[dict]:
-        for a in self.get("/assets", params={"q": name}):
-            if a["name"] == name:
-                return a
-        return None
+        matches = [a for a in self.get("/assets", params={"q": name}) if a["name"] == name]
+        if not matches:
+            return None
+        # Prefer most recently updated (handles stale duplicate assets from prior runs)
+        return sorted(matches, key=lambda a: a.get("updated_at", ""), reverse=True)[0]
 
     def get_agent_secret(self) -> str:
         settings = self.get("/settings")
-        secret = settings.get("agent_secret") or settings.get("agent_secret_preview", "")
-        if not secret:
-            fail("agent_secret not found in /settings — check you are logged in as admin")
-        return secret
+        if not settings.get("agent_configured"):
+            # Auto-generate agent secret
+            data = self.post("/settings/agent-secret")
+            return data["agent_secret_plaintext"]
+        # Already configured — re-generate to get plaintext (idempotent for smoke tests)
+        data = self.post("/settings/agent-secret")
+        return data["agent_secret_plaintext"]
 
-    def get_tailscale_auth_key(self) -> str:
-        """Retrieve the stored Tailscale auth key from the Tailscale connector credentials."""
-        import asyncio
-
-        async def _get_key():
-            from app.database import AsyncSessionLocal
-            from sqlalchemy import select
-            from app.models.connector import Connector, ConnectorType
-            from app.services.connector_service import _attach_credentials
-            async with AsyncSessionLocal() as db:
-                result = await db.execute(
-                    select(Connector).where(Connector.connector_type == ConnectorType.tailscale)
-                )
-                conn = result.scalars().first()
-                if conn:
-                    await _attach_credentials(conn, db)
-                    return getattr(conn, 'credentials', {}).get('auth_key', '')
-            return ''
-
-        key = asyncio.run(_get_key())
-        if not key:
-            fail("Tailscale connector auth_key is empty — add a reusable auth key in connector settings")
-        return key
+    def get_tailscale_auth_key(self, provided_key: str = "") -> str:
+        """Return a Tailscale auth key. Uses --tailscale-auth-key if provided, else fails."""
+        if provided_key:
+            return provided_key
+        fail("Tailscale auth key required — pass --tailscale-auth-key <key>")
+        return ""  # unreachable
 
     def create_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> str:
         return self.post("/change-requests", json={
@@ -140,10 +127,20 @@ class NexplaneClient:
 # Tailscale helpers
 # ---------------------------------------------------------------------------
 
+import os as _os
+_IN_CONTAINER = _os.path.exists("/.dockerenv") or _os.path.exists("/app/app")
+if _IN_CONTAINER and "/app" not in sys.path:
+    sys.path.insert(0, "/app")
+
+
 def _run(cmd: str, capture: bool = True) -> str:
-    """Run a shell command in the backend container."""
+    """Run a shell command — directly if inside the container, via docker compose exec otherwise."""
+    if _IN_CONTAINER:
+        full_cmd = ["sh", "-c", cmd]
+    else:
+        full_cmd = ["docker", "compose", "exec", "-T", "backend", "sh", "-c", cmd]
     result = subprocess.run(
-        ["docker", "compose", "exec", "-T", "backend", "sh", "-c", cmd],
+        full_cmd,
         capture_output=capture,
         text=True,
     )
@@ -231,39 +228,83 @@ def _delete_smoke_snapshots(client: NexplaneClient) -> None:
         print(f"  ⚠️  Snapshot cleanup skipped: {e}")
 
 
+def _get_aws_boto3_client(service: str):
+    """Get a boto3 client using the AWS connector credentials via the app DB."""
+    import boto3
+    from app.database import AsyncSessionLocal
+    from app.models.connector import Connector, ConnectorType
+    from app.services.connector_service import _attach_credentials
+    import asyncio, sqlalchemy as sa
+
+    async def _get():
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                sa.select(Connector).where(Connector.connector_type == ConnectorType.aws)
+            )
+            conn = result.scalars().first()
+            if not conn:
+                return None
+            await _attach_credentials(conn, db)
+            return getattr(conn, 'credentials', {})
+
+    creds = asyncio.run(_get())
+    if not creds:
+        return None
+    return boto3.client(
+        service,
+        aws_access_key_id=creds['access_key_id'],
+        aws_secret_access_key=creds['secret_access_key'],
+        region_name=creds.get('region', 'us-east-1'),
+    )
+
+
 def cleanup(client: NexplaneClient) -> None:
     """Always runs — terminates instances, deletes key pairs, EBS snapshots, and Tailscale."""
     print("\n  Cleanup running...")
+
+    # Use boto3 directly for reliable cleanup (CR-based cleanup can fail if CR system is broken)
     try:
-        cloud_account_id = client.get_cloud_account_asset_id()
+        ec2 = _get_aws_boto3_client('ec2')
+        if ec2:
+            # Terminate smoke test instances
+            reservations = ec2.describe_instances(
+                Filters=[{'Name': 'tag:Name', 'Values': ['nexplane-smoke-test*']},
+                         {'Name': 'instance-state-name', 'Values': ['pending', 'running', 'stopping', 'stopped']}]
+            ).get('Reservations', [])
+            for res in reservations:
+                for inst in res.get('Instances', []):
+                    iid = inst['InstanceId']
+                    try:
+                        ec2.terminate_instances(InstanceIds=[iid])
+                        print(f"  Terminated {iid}")
+                    except Exception as e:
+                        print(f"  ⚠️  Terminate {iid}: {e}")
+
+            # Delete smoke test key pairs
+            kps = ec2.describe_key_pairs(
+                Filters=[{'Name': 'key-name', 'Values': ['nexplane-smoke-test*']}]
+            ).get('KeyPairs', [])
+            for kp in kps:
+                try:
+                    ec2.delete_key_pair(KeyName=kp['KeyName'])
+                    print(f"  Deleted key pair {kp['KeyName']}")
+                except Exception as e:
+                    print(f"  ⚠️  Key pair delete {kp['KeyName']}: {e}")
+    except Exception as e:
+        print(f"  ⚠️  AWS boto3 cleanup error: {e}")
+
+    # Delete smoke test assets from Nexplane inventory
+    try:
         assets = client.get("/assets", params={"q": "nexplane-smoke-test"})
         for asset in assets:
-            name = asset.get("name", "")
-            if "smoke-test" not in name:
-                continue
-            if asset["asset_type"] == "server":
-                instance_id = asset.get("asset_metadata", {}).get("instance_id")
-                if instance_id:
-                    try:
-                        client.run_cr(
-                            f"Cleanup: terminate {name}", "ec2_terminate", asset["id"],
-                            {"instance_id": instance_id, "confirm_terminate": True,
-                             "rollback_strategy": "rollback_unavailable"},
-                        )
-                    except Exception as e:
-                        print(f"  ⚠️  Terminate failed for {name}: {e}")
-            elif asset["asset_type"] == "key_pair":
-                key_name = asset.get("asset_metadata", {}).get("key_name", name)
+            if "smoke-test" in asset.get("name", ""):
                 try:
-                    cr_id = client.create_cr(
-                        f"Cleanup: delete {key_name}", "key_pair_create", cloud_account_id,
-                        {"key_name": key_name},
-                    )
-                    client.post(f"/change-requests/{cr_id}/cancel")
+                    client.client.delete(f"{client.base}/assets/{asset['id']}")
+                    print(f"  Deleted inventory asset {asset['name']} ({asset['id']})")
                 except Exception as e:
-                    print(f"  ⚠️  Key pair delete failed for {key_name}: {e}")
+                    print(f"  ⚠️  Could not delete inventory asset {asset['name']}: {e}")
     except Exception as e:
-        print(f"  ⚠️  Asset cleanup error: {e}")
+        print(f"  ⚠️  Inventory cleanup error: {e}")
 
     _delete_smoke_snapshots(client)
     teardown_backend_tailscale()
@@ -274,11 +315,11 @@ def cleanup(client: NexplaneClient) -> None:
 # Phase A
 # ---------------------------------------------------------------------------
 
-def run_phase_a(client: NexplaneClient, cloud_account_id: str) -> dict:
+def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_key: str = "") -> dict:
     """Phase A: key pair + EC2 launch + Tailscale join + agent deploy."""
     print("\n[Phase A] EC2 launch + Tailscale + agent deploy")
 
-    auth_key = client.get_tailscale_auth_key()
+    auth_key = client.get_tailscale_auth_key(tailscale_auth_key)
     backend_ip = setup_backend_tailscale(auth_key)
     agent_secret = client.get_agent_secret()
 
@@ -306,8 +347,8 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str) -> dict:
         fail("instance_id missing from asset metadata")
     log(f"Instance in inventory: {instance_id}")
 
-    print("  Waiting 90s for SSM agent...")
-    time.sleep(90)
+    print("  Waiting 3 min for SSM agent to register...")
+    time.sleep(180)
 
     client.run_cr(
         "Smoke: SSM whoami", "ssm_command", instance_asset["id"],
@@ -315,15 +356,16 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str) -> dict:
          "command": "whoami && hostname", "rollback_strategy": "rollback_unavailable"},
     )
 
-    client.run_cr(
-        "Smoke: tailscale join", "tailscale_join", instance_asset["id"],
-        {"instance_id": instance_id, "auth_key": auth_key, "hostname": "nexplane-smoke-ec2"},
-    )
-
+    # Deploy agent via SSM BEFORE Tailscale join — Tailscale can disrupt SSM connectivity
     nexplane_url = f"http://{backend_ip}:8000"
     client.run_cr(
         "Smoke: deploy agent", "deploy_nexplane_agent", instance_asset["id"],
         {"instance_id": instance_id, "nexplane_url": nexplane_url, "nexplane_secret": agent_secret},
+    )
+
+    client.run_cr(
+        "Smoke: tailscale join", "tailscale_join", instance_asset["id"],
+        {"instance_id": instance_id, "auth_key": auth_key, "hostname": "nexplane-smoke-ec2"},
     )
 
     print("  Waiting up to 3min for agent to register...")
@@ -516,6 +558,7 @@ def main():
         "--phases", default="A,B,C,D",
         help="Comma-separated phases to run (default: A,B,C,D). E.g. --phases A or --phases A,B",
     )
+    parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
     args = parser.parse_args()
     phases = {p.strip().upper() for p in args.phases.split(",")}
 
@@ -526,6 +569,17 @@ def main():
     client = NexplaneClient(args.base_url, args.email, args.password)
     log("Authenticated")
 
+    # Pre-run inventory cleanup: remove stale smoke test assets from prior runs
+    try:
+        stale = [a for a in client.get("/assets", params={"q": "nexplane-smoke-test"})
+                 if "smoke-test" in a.get("name", "")]
+        for asset in stale:
+            client.client.delete(f"{client.base}/assets/{asset['id']}")
+        if stale:
+            print(f"  Pre-run: removed {len(stale)} stale inventory asset(s)")
+    except Exception:
+        pass
+
     cloud_account_id = client.get_cloud_account_asset_id()
     log(f"Cloud account: {cloud_account_id}")
 
@@ -534,7 +588,7 @@ def main():
 
     try:
         if "A" in phases:
-            phase_a_result = run_phase_a(client, cloud_account_id)
+            phase_a_result = run_phase_a(client, cloud_account_id, args.tailscale_auth_key)
 
         if "B" in phases:
             if phase_a_result is None:
