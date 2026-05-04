@@ -25,6 +25,7 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
         "restore_dns_record": {"record_name": desired.get("record_name", "")},
         "health_check": {},
         "create_snapshot": {"snapshot_tag": desired.get("snapshot_tag", "nexplane-managed")},
+        "create_ebs_snapshot": {"volume_id": "", "backup_name": desired.get("snapshot_tag", "nexplane-pre-stop")},
         "verify_snapshot": {},
         "export_security_group": {"group_id": desired.get("group_id", "")},
         "validate_security_rules": {"rules": desired.get("rules", [])},
@@ -65,7 +66,7 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
         },
         "launch_instance":        {
             "ami_id": desired.get("ami_id", ""),
-            "instance_type": desired.get("instance_type", "t2.micro"),
+            "instance_type": desired.get("instance_type", ""),
             "subnet_id": desired.get("subnet_id", ""),
             "security_group_ids": desired.get("security_group_ids", []),
             "name": desired.get("name", "nexplane-instance"),
@@ -109,7 +110,7 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
             "action_id": generic_action,
             "execution_tier": 99,
             "connector_options": [],
-            "parameters": _resolve_parameters(generic_action, desired, assets),
+            "parameters": {**_resolve_parameters(generic_action, desired, assets), **step_def.get("param_overrides", {})},
             "rollback_action": None,
             "rollback_connector_type": None,
             "connector_id": locked_connector_id,
@@ -132,7 +133,7 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
             {"connector_type": o.connector_type, "action_id": o.action_id, "execution_tier": o.execution_tier}
             for o in options
         ],
-        "parameters": _resolve_parameters(generic_action, desired, assets),
+        "parameters": {**_resolve_parameters(generic_action, desired, assets), **step_def.get("param_overrides", {})},
         "rollback_action": rollback_action,
         "rollback_connector_type": best.connector_type if rollback_action else None,
         "connector_id": locked_connector_id,

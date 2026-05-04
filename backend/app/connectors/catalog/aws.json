@@ -9,6 +9,22 @@
   ],
   "actions": [
     {
+      "action_id": "create_ebs_snapshot",
+      "generic_action": "create_ebs_snapshot",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Create EBS Snapshot",
+      "description": "Creates an EBS snapshot of an instance's root volume. volume_id is resolved automatically from capture_instance_state.",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "volume_id", "type": "string", "required": true, "description": "EBS volume ID (vol-...)"},
+        {"name": "backup_name", "type": "string", "required": false, "default": "nexplane-backup"}
+      ],
+      "executor": "aws.create_ebs_snapshot",
+      "rollback_action": "delete_snapshot",
+      "estimated_duration_seconds": 30
+    },
+    {
       "action_id": "health_check",
       "generic_action": "health_check",
       "action_type": "change",

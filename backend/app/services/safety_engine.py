@@ -126,9 +126,15 @@ def score_change_request(change_request: ChangeRequest, assets: list[Asset]) -> 
     if change_request.change_type == ChangeType.key_rotation:
         warnings.append("Ensure all consumers of the rotated key are updated before revoking the old key.")
 
+    # EC2 operational changes have well-known implicit rollbacks (stop→start, start→stop, etc.)
+    # so we don't require an explicit rollback_strategy field for them.
+    _IMPLICIT_ROLLBACK_TYPES = {
+        ChangeType.ec2_stop, ChangeType.ec2_start, ChangeType.ec2_reboot,
+        ChangeType.ec2_stop_start, ChangeType.ec2_launch,
+    }
     desired = change_request.desired_outcome or {}
     rollback_strategy = desired.get("rollback_strategy")
-    if not rollback_strategy:
+    if not rollback_strategy and change_request.change_type not in _IMPLICIT_ROLLBACK_TYPES:
         score += 30
         risk_factors.append(RiskFactor(
             name="no_rollback_strategy",

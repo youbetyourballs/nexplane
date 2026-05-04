@@ -170,11 +170,15 @@ export function ChangeRequestDetail() {
   const [approvalComment, setApprovalComment] = useState("");
   const [actionError, setActionError] = useState("");
 
+  const ACTIVE_STATUSES = new Set([
+    "executing", "verifying", "pending", "preflight_running",
+    "batch_running", "queued_for_maintenance",
+  ]);
   const { data: cr, isLoading } = useQuery({
     queryKey: ["change-request", id],
     queryFn: () => changeRequestsApi.get(id!),
-    refetchInterval: (data) =>
-      data?.status && ["executing", "verifying"].includes(data.status) ? 2000 : false,
+    refetchInterval: (query) =>
+      query.state.data?.status && ACTIVE_STATUSES.has(query.state.data.status) ? 2000 : false,
   });
 
   const { data: auditEvents } = useQuery({
@@ -222,7 +226,15 @@ export function ChangeRequestDetail() {
 
   const executeMutation = useMutation({
     mutationFn: () => changeRequestsApi.execute(id!),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      // Force rapid polling for 30s after execute so status updates appear immediately
+      const interval = setInterval(() => {
+        qc.invalidateQueries({ queryKey: ["change-request", id] });
+        qc.invalidateQueries({ queryKey: ["change-request-audit", id] });
+      }, 1500);
+      setTimeout(() => clearInterval(interval), 30000);
+    },
     onError: (e: any) => setActionError(e.response?.data?.detail || e.message),
   });
 

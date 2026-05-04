@@ -1,13 +1,163 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Edit, Save, X, Plus } from "lucide-react";
+import { ArrowLeft, Edit, Save, X, Plus, Zap } from "lucide-react";
 import { assetsApi } from "../api/endpoints";
 import { changeRequestsApi } from "../api/endpoints";
 import { RiskBadge } from "../components/RiskBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { PageLoading } from "../components/LoadingSpinner";
-import type { Criticality } from "../types/api";
+import type { Asset, AssetType, Criticality } from "../types/api";
+
+// Maps asset type → eligible change types with label + title/description templates
+const ASSET_ACTIONS: Record<AssetType, { changeType: string; label: string; title: (a: Asset) => string; description: (a: Asset) => string }[]> = {
+  server: [
+    {
+      changeType: "ec2_reboot",
+      label: "Reboot Instance",
+      title: (a) => `Reboot ${a.name}`,
+      description: (a) => `Reboot EC2 instance ${a.asset_metadata?.instance_id ?? a.name} to apply pending changes.`,
+    },
+    {
+      changeType: "ec2_stop",
+      label: "Stop Instance",
+      title: (a) => `Stop ${a.name}`,
+      description: (a) => `Gracefully stop EC2 instance ${a.asset_metadata?.instance_id ?? a.name}.`,
+    },
+    {
+      changeType: "ec2_start",
+      label: "Start Instance",
+      title: (a) => `Start ${a.name}`,
+      description: (a) => `Start stopped EC2 instance ${a.asset_metadata?.instance_id ?? a.name}.`,
+    },
+    {
+      changeType: "ec2_stop_start",
+      label: "Restart Instance",
+      title: (a) => `Restart ${a.name}`,
+      description: (a) => `Full power cycle of EC2 instance ${a.asset_metadata?.instance_id ?? a.name}.`,
+    },
+    {
+      changeType: "ec2_terminate",
+      label: "Terminate Instance",
+      title: (a) => `Terminate ${a.name}`,
+      description: (a) => `Permanently terminate EC2 instance ${a.asset_metadata?.instance_id ?? a.name}. Irreversible.`,
+    },
+    {
+      changeType: "snapshot_asset",
+      label: "Snapshot",
+      title: (a) => `Snapshot ${a.name}`,
+      description: (a) => `Create a point-in-time snapshot of ${a.name} (${a.asset_metadata?.instance_id ?? ""}).`,
+    },
+    {
+      changeType: "patch_packages",
+      label: "Patch Packages",
+      title: (a) => `Patch ${a.name}`,
+      description: (a) => `Apply security patches to ${a.name}.`,
+    },
+    {
+      changeType: "remote_command",
+      label: "Run Command",
+      title: (a) => `Run command on ${a.name}`,
+      description: (a) => `Execute an approved command template on ${a.name}.`,
+    },
+    {
+      changeType: "isolate_host",
+      label: "Isolate Host",
+      title: (a) => `Isolate ${a.name}`,
+      description: (a) => `Flush outbound firewall rules to isolate ${a.name} from the network.`,
+    },
+    {
+      changeType: "enforce_cis_benchmark",
+      label: "Enforce CIS Benchmark",
+      title: (a) => `CIS Benchmark on ${a.name}`,
+      description: (a) => `Audit and remediate CIS controls on ${a.name}.`,
+    },
+  ],
+  cloud_account: [
+    {
+      changeType: "ec2_launch",
+      label: "Launch EC2 Instance",
+      title: (a) => `Launch EC2 in ${a.name}`,
+      description: (a) => `Launch a new EC2 instance in AWS account ${a.asset_metadata?.account_id ?? a.name}.`,
+    },
+    {
+      changeType: "s3_block_public_access",
+      label: "Block S3 Public Access",
+      title: (a) => `Block S3 public access in ${a.name}`,
+      description: (a) => `Enable S3 Block Public Access settings for account ${a.asset_metadata?.account_id ?? a.name}.`,
+    },
+    {
+      changeType: "iam_enforce_mfa",
+      label: "Enforce IAM MFA",
+      title: (a) => `Enforce MFA in ${a.name}`,
+      description: (a) => `Enforce MFA requirement on IAM users in account ${a.asset_metadata?.account_id ?? a.name}.`,
+    },
+  ],
+  dns_zone: [
+    {
+      changeType: "dns_update",
+      label: "Update DNS Record",
+      title: (a) => `Update DNS record in ${a.name}`,
+      description: (a) => `Update a DNS record in zone ${a.name}.`,
+    },
+    {
+      changeType: "dr_failover",
+      label: "DR Failover",
+      title: (a) => `DR failover for ${a.name}`,
+      description: (a) => `Fail over to DR site via Route53 for zone ${a.name}.`,
+    },
+  ],
+  firewall: [
+    {
+      changeType: "security_group_update",
+      label: "Update Security Group",
+      title: (a) => `Update security group on ${a.name}`,
+      description: (a) => `Modify firewall rules on ${a.name}.`,
+    },
+    {
+      changeType: "microsegmentation_policy",
+      label: "Microsegmentation Policy",
+      title: (a) => `Microsegmentation policy for ${a.name}`,
+      description: (a) => `Stage a network microsegmentation policy on ${a.name}.`,
+    },
+  ],
+  identity: [
+    {
+      changeType: "offboard_user",
+      label: "Offboard User",
+      title: (a) => `Offboard ${a.name}`,
+      description: (a) => `Disable ${a.name} across all connected identity systems.`,
+    },
+    {
+      changeType: "lockdown_account",
+      label: "Lockdown Account",
+      title: (a) => `Lockdown ${a.name}`,
+      description: (a) => `Lock ${a.name} across all identity systems immediately.`,
+    },
+  ],
+  identity_provider: [
+    {
+      changeType: "rotate_service_account",
+      label: "Rotate Service Account",
+      title: (a) => `Rotate service account on ${a.name}`,
+      description: (a) => `Rotate a service account credential on ${a.name}.`,
+    },
+  ],
+  application: [
+    {
+      changeType: "helm_upgrade",
+      label: "Helm Upgrade",
+      title: (a) => `Upgrade ${a.name}`,
+      description: (a) => `Upgrade Helm release for ${a.name}.`,
+    },
+    {
+      changeType: "ansible_playbook",
+      label: "Ansible Playbook",
+      title: (a) => `Run Ansible on ${a.name}`,
+      description: (a) => `Run an Ansible playbook against ${a.name}.`,
+    },
+  ],
+};
 
 export function AssetDetail() {
   const { id } = useParams<{ id: string }>();
@@ -241,6 +391,33 @@ export function AssetDetail() {
               </div>
             )}
           </div>
+
+          {(ASSET_ACTIONS[asset.asset_type] ?? []).length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-lg p-5">
+              <h2 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-1.5">
+                <Zap className="w-4 h-4 text-brand-500" /> Quick Actions
+              </h2>
+              <div className="space-y-1.5">
+                {(ASSET_ACTIONS[asset.asset_type] ?? []).map((action) => (
+                  <button
+                    key={action.changeType}
+                    onClick={() => {
+                      const params = new URLSearchParams({
+                        changeType: action.changeType,
+                        assetId: asset.id,
+                        title: action.title(asset),
+                        description: action.description(asset),
+                      });
+                      navigate(`/change-requests/new?${params.toString()}`);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm rounded-md border border-slate-200 hover:border-brand-300 hover:bg-brand-50 text-slate-700 hover:text-brand-800 transition-colors"
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="bg-white border border-slate-200 rounded-lg p-5">
             <h2 className="text-sm font-semibold text-slate-900 mb-3">Change Requests</h2>

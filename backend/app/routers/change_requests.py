@@ -125,6 +125,13 @@ async def generate_change_plan(
     if cr.status not in (ChangeRequestStatus.draft, ChangeRequestStatus.planned):
         raise HTTPException(status_code=400, detail=f"Cannot plan a change request in status '{cr.status.value}'")
 
+    # Clear stale approvals so a re-planned CR can be approved fresh
+    await db.execute(
+        select(Approval).where(Approval.change_request_id == cr.id)
+    )
+    from sqlalchemy import delete as sa_delete
+    await db.execute(sa_delete(Approval).where(Approval.change_request_id == cr.id))
+
     asset_ids = [uuid.UUID(aid) for aid in (cr.target_asset_ids or [])]
     assets_result = await db.execute(
         select(Asset).options(selectinload(Asset.connector)).where(Asset.id.in_(asset_ids))
@@ -383,7 +390,8 @@ async def execute_change_request(
                 detail="Critical risk changes require manual execution authorization. Contact your security administrator."
             )
 
-    workflow_id = f"wf-cr-{cr.id}"
+    attempt = len(cr.execution_runs) + 1
+    workflow_id = f"wf-cr-{cr.id}-{attempt}"
     run = ExecutionRun(
         change_request_id=cr.id,
         workflow_id=workflow_id,
@@ -423,11 +431,21 @@ async def manual_rollback(
     if user.role not in (UserRole.admin, UserRole.approver):
         raise HTTPException(status_code=403, detail="Only admins and approvers can initiate manual rollback")
 
-    latest_run_result = await db.execute(
-        select(ExecutionRun).where(ExecutionRun.change_request_id == cr.id)
-        .order_by(ExecutionRun.started_at.desc()).limit(1)
+    # Use the completed run — it has the execution result with resolved values like instance_id.
+    # Fall back to the most recent run if no completed run exists.
+    completed_run_result = await db.execute(
+        select(ExecutionRun).where(
+            ExecutionRun.change_request_id == cr.id,
+            ExecutionRun.status == ExecutionStatus.completed,
+        ).order_by(ExecutionRun.started_at.desc()).limit(1)
     )
-    latest_run = latest_run_result.scalar_one_or_none()
+    latest_run = completed_run_result.scalar_one_or_none()
+    if not latest_run:
+        fallback = await db.execute(
+            select(ExecutionRun).where(ExecutionRun.change_request_id == cr.id)
+            .order_by(ExecutionRun.started_at.desc()).limit(1)
+        )
+        latest_run = fallback.scalar_one_or_none()
 
     if not latest_run:
         raise HTTPException(status_code=400, detail="No execution run found to roll back")
@@ -439,16 +457,55 @@ async def manual_rollback(
         status=ExecutionStatus.rolling_back,
     )
     db.add(rollback_run)
-    cr.status = ChangeRequestStatus.rolled_back
+    cr.status = ChangeRequestStatus.rolling_back if hasattr(ChangeRequestStatus, 'rolling_back') else ChangeRequestStatus.executing
     cr.updated_at = datetime.now(timezone.utc)
 
     await db.flush()
+    rollback_run_id = rollback_run.id
     await record_event(db, user.organization_id, "rollback.manual_initiated",
                        {"change_request_id": str(cr.id), "initiator": user.email},
                        actor_id=user.id, change_request_id=cr.id)
     await db.commit()
 
-    result = await db.execute(select(ExecutionRun).where(ExecutionRun.id == rollback_run.id))
+    # Run the rollback asynchronously so the endpoint returns immediately
+    import asyncio
+    from app.workflows.activities import activity_execute_rollback
+
+    plan = cr.change_plan
+    execution_result = latest_run.result or {}
+
+    async def _do_rollback():
+        from app.database import AsyncSessionLocal
+        try:
+            rollback_result = await activity_execute_rollback(
+                str(cr.id), plan.generated_steps if plan else [], execution_result
+            )
+            async with AsyncSessionLocal() as s:
+                run = await s.get(ExecutionRun, rollback_run_id)
+                cr2 = await s.get(ChangeRequest, cr.id)
+                if run:
+                    run.status = ExecutionStatus.rolled_back
+                    run.result = rollback_result
+                if cr2:
+                    cr2.status = ChangeRequestStatus.rolled_back
+                    cr2.updated_at = datetime.now(timezone.utc)
+                await s.commit()
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("Manual rollback failed: %s", exc)
+            async with AsyncSessionLocal() as s:
+                run = await s.get(ExecutionRun, rollback_run_id)
+                cr2 = await s.get(ChangeRequest, cr.id)
+                if run:
+                    run.status = ExecutionStatus.failed
+                    run.result = {"error": str(exc)}
+                if cr2:
+                    cr2.status = ChangeRequestStatus.failed
+                await s.commit()
+
+    asyncio.ensure_future(_do_rollback())
+
+    result = await db.execute(select(ExecutionRun).where(ExecutionRun.id == rollback_run_id))
     return result.scalar_one()
 
 

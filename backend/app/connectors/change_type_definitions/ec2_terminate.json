@@ -3,7 +3,7 @@
   "display_name": "Terminate EC2 Instance",
   "steps": [
     {"generic_action": "capture_instance_state", "purpose": "preflight_capture", "required": true},
-    {"generic_action": "create_snapshot",        "purpose": "preflight_capture", "required": true},
+    {"generic_action": "create_ebs_snapshot",    "purpose": "preflight_capture", "required": true},
     {"generic_action": "terminate_instance",     "purpose": "execute",           "required": true}
   ],
   "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],

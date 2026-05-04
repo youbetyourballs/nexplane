@@ -16,6 +16,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "instance_type": "t2.micro",
             "security_groups": ["sg-mock000000000000"],
             "subnet_id": "subnet-mock0000000000",
+            "volume_id": "vol-mock0000000000000",
             "captured_at": datetime.now(timezone.utc).isoformat(),
         }
     from ._client import get_ec2_client
@@ -26,6 +27,15 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not reservations:
         return {"action": "capture_instance_state", "error": f"Instance {instance_id} not found"}
     inst = reservations[0]['Instances'][0]
+    # Extract root EBS volume ID so downstream steps (create_ebs_snapshot) have it
+    root_device = inst.get('RootDeviceName', '')
+    root_volume_id = None
+    for mapping in inst.get('BlockDeviceMappings', []):
+        if mapping.get('DeviceName') == root_device:
+            root_volume_id = mapping.get('Ebs', {}).get('VolumeId')
+            break
+    if not root_volume_id and inst.get('BlockDeviceMappings'):
+        root_volume_id = inst['BlockDeviceMappings'][0].get('Ebs', {}).get('VolumeId')
     return {
         "action": "capture_instance_state",
         "instance_id": inst['InstanceId'],
@@ -36,6 +46,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "instance_type": inst.get('InstanceType'),
         "security_groups": [sg['GroupId'] for sg in inst.get('SecurityGroups', [])],
         "subnet_id": inst.get('SubnetId'),
+        "volume_id": root_volume_id,
         "captured_at": datetime.now(timezone.utc).isoformat(),
     }
 

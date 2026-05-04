@@ -17,6 +17,7 @@ from app.workflows.activities import (
     activity_execute_change,
     activity_run_verification,
     activity_execute_rollback,
+    activity_post_completion_discovery,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,6 +144,7 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
             actor_id=actor_id,
             change_request_id=cr_id,
         )
+        await activity_post_completion_discovery(cr_id)
     else:
         failed_verifications = [r for r in verification_result["results"] if not r["passed"]]
         await write_audit_event(

@@ -152,6 +152,21 @@ async def get_asset(
     )
 
 
+@router.delete("/{asset_id}", status_code=204)
+async def delete_asset(
+    asset_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    asset = await db.get(Asset, asset_id)
+    if not asset or asset.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    await record_event(db, user.organization_id, "asset.deleted",
+                       {"asset_id": str(asset.id), "name": asset.name}, actor_id=user.id)
+    await db.delete(asset)
+    await db.commit()
+
+
 @router.patch("/{asset_id}", response_model=AssetRead)
 async def update_asset(
     asset_id: uuid.UUID,

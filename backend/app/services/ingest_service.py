@@ -28,34 +28,55 @@ class IngestService:
             connector.credentials = {}
 
         executor = self._catalog.get_executor(connector.connector_type, action_id)
-        payloads: list[dict] = await executor.execute({}, [], connector)
+        raw = await executor.execute({}, [], connector)
+
+        # Executors may return either a list of asset payloads or a dict with an "assets" key
+        if isinstance(raw, dict):
+            payloads: list[dict] = raw.get("assets", [])
+            auto_asset_payload = raw.get("_auto_asset")
+        else:
+            payloads = raw
+            auto_asset_payload = None
 
         connector_id = getattr(connector, 'id', None)
         created = 0
         updated = 0
         upserted_assets = []
 
+        if auto_asset_payload:
+            from app.services.connector_service import _upsert_auto_asset
+            await _upsert_auto_asset(auto_asset_payload, organization_id, db, connector_id=connector_id)
+
         for payload in payloads:
             name = payload["name"]
+            external_id = payload.get("id") or (payload.get("asset_metadata") or {}).get("instance_id")
 
-            # Dedup: scope by connector when available
+            # Dedup by external id (e.g. instance_id) when available, fall back to name.
+            # This prevents same-named assets (e.g. two EC2s called "my-new-instance") from colliding.
+            base_where = [Asset.organization_id == organization_id]
             if connector_id:
-                result = await db.execute(
-                    select(Asset).where(
-                        Asset.organization_id == organization_id,
-                        Asset.connector_id == connector_id,
-                        Asset.name == name,
-                    )
-                )
+                base_where.append(Asset.connector_id == connector_id)
             else:
+                base_where.append(Asset.connector_id.is_(None))
+
+            existing = None
+            if external_id:
                 result = await db.execute(
                     select(Asset).where(
-                        Asset.organization_id == organization_id,
-                        Asset.connector_id.is_(None),
-                        Asset.name == name,
+                        *base_where,
+                        Asset.asset_metadata["instance_id"].as_string() == external_id,
                     )
                 )
-            existing = result.scalar_one_or_none()
+                existing = result.scalar_one_or_none()
+
+            if existing is None:
+                result = await db.execute(
+                    select(Asset).where(*base_where, Asset.name == name)
+                )
+                # Only treat a name match as the same asset if it has no external id yet
+                candidate = result.scalar_one_or_none()
+                if candidate and not (candidate.asset_metadata or {}).get("instance_id"):
+                    existing = candidate
 
             if existing:
                 if "asset_metadata" in payload:

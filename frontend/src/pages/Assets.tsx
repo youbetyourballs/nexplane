@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Plus, Search, Tag, X, ChevronRight } from "lucide-react";
+import { Plus, Search, Tag, X, ChevronRight, Trash2 } from "lucide-react";
 import { assetsApi, connectorsApi } from "../api/endpoints";
 import { RiskBadge } from "../components/RiskBadge";
 import { PageHeader } from "../components/PageHeader";
@@ -122,6 +122,14 @@ export function Assets() {
       qc.invalidateQueries({ queryKey: ["assets"] });
       setShowForm(false);
       setNewName("");
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => assetsApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["assets"] });
+      qc.invalidateQueries({ queryKey: ["asset-tags"] });
     },
   });
 
@@ -393,7 +401,8 @@ export function Assets() {
           <div className="space-y-2">
             {(assets ?? []).map((asset) => (
               <AssetRow key={asset.id} asset={asset} selected={selected.has(asset.id)}
-                onToggle={() => toggleSelected(asset.id)} onClick={() => navigate(`/assets/${asset.id}`)} />
+                onToggle={() => toggleSelected(asset.id)} onClick={() => navigate(`/assets/${asset.id}`)}
+                onDelete={() => { if (confirm(`Delete "${asset.name}"?`)) deleteMutation.mutate(asset.id); }} />
             ))}
             {assets?.length === 0 && (
               <div className="text-center py-12 text-slate-400 text-sm">No assets match your search.</div>
@@ -413,7 +422,8 @@ export function Assets() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {envAssets.map((asset) => (
                     <AssetCard key={asset.id} asset={asset} selected={selected.has(asset.id)}
-                      onToggle={() => toggleSelected(asset.id)} onClick={() => navigate(`/assets/${asset.id}`)} />
+                      onToggle={() => toggleSelected(asset.id)} onClick={() => navigate(`/assets/${asset.id}`)}
+                      onDelete={() => { if (confirm(`Delete "${asset.name}"?`)) deleteMutation.mutate(asset.id); }} />
                   ))}
                 </div>
               </div>
@@ -425,9 +435,9 @@ export function Assets() {
   );
 }
 
-interface AssetRowProps { asset: Asset; selected: boolean; onToggle: () => void; onClick: () => void; }
+interface AssetRowProps { asset: Asset; selected: boolean; onToggle: () => void; onClick: () => void; onDelete: () => void; }
 
-function AssetRow({ asset, selected, onToggle, onClick }: AssetRowProps) {
+function AssetRow({ asset, selected, onToggle, onClick, onDelete }: AssetRowProps) {
   return (
     <div className={`flex items-center gap-3 bg-white border rounded-lg px-4 py-3 hover:border-brand-300 transition-colors ${selected ? "border-brand-300 bg-brand-50" : "border-slate-200"}`}>
       <input type="checkbox" checked={selected} onChange={onToggle} onClick={(e) => e.stopPropagation()}
@@ -449,14 +459,18 @@ function AssetRow({ asset, selected, onToggle, onClick }: AssetRowProps) {
         )}
       </div>
       <RiskBadge level={asset.criticality} size="sm" />
+      <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        className="p-1 text-slate-300 hover:text-red-500 transition-colors shrink-0" title="Delete asset">
+        <Trash2 className="w-4 h-4" />
+      </button>
       <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
     </div>
   );
 }
 
-interface AssetCardProps { asset: Asset; selected: boolean; onToggle: () => void; onClick: () => void; }
+interface AssetCardProps { asset: Asset; selected: boolean; onToggle: () => void; onClick: () => void; onDelete: () => void; }
 
-function AssetCard({ asset, selected, onToggle, onClick }: AssetCardProps) {
+function AssetCard({ asset, selected, onToggle, onClick, onDelete }: AssetCardProps) {
   return (
     <div className={`bg-white border rounded-lg p-4 hover:border-brand-300 transition-colors cursor-pointer ${selected ? "border-brand-300 bg-brand-50" : "border-slate-200"}`}>
       <div className="flex items-start justify-between mb-2">
@@ -469,7 +483,13 @@ function AssetCard({ asset, selected, onToggle, onClick }: AssetCardProps) {
             <div className="text-xs text-slate-400">{asset.asset_type.replace(/_/g, " ")}</div>
           </button>
         </div>
-        <RiskBadge level={asset.criticality} size="sm" />
+        <div className="flex items-center gap-1">
+          <RiskBadge level={asset.criticality} size="sm" />
+          <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="p-1 text-slate-300 hover:text-red-500 transition-colors" title="Delete asset">
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
       {(asset.tags ?? []).length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">

@@ -31,6 +31,7 @@ export const assetsApi = {
     apiClient.get<string[]>("/assets/tags").then((r) => r.data),
   bulkTag: (data: BulkTagBody) =>
     apiClient.patch<{ updated: number }>("/assets/bulk-tag", data).then((r) => r.data),
+  delete: (id: string) => apiClient.delete(`/assets/${id}`),
 };
 
 // Projects

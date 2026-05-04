@@ -1,9 +1,10 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import { changeRequestsApi, assetsApi } from "../api/endpoints";
 import { PageHeader } from "../components/PageHeader";
-import type { ChangeType } from "../types/api";
+import type { AssetType, ChangeType } from "../types/api";
 
 const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string; outcomeTemplate: string }> = {
   dns_update: {
@@ -47,6 +48,7 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
     outcomeTemplate: JSON.stringify({
       instance_id: "i-0123456789abcdef0",
       snapshot_tag: "pre-stop-nexplane",
+      rollback_strategy: "start_instance",
     }, null, 2),
   },
   ec2_start: {
@@ -54,6 +56,7 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
     description: "Start a stopped EC2 instance.",
     outcomeTemplate: JSON.stringify({
       instance_id: "i-0123456789abcdef0",
+      rollback_strategy: "stop_instance",
     }, null, 2),
   },
   ec2_reboot: {
@@ -61,6 +64,7 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
     description: "Soft reboot — stays on the same host, keeps its public IP.",
     outcomeTemplate: JSON.stringify({
       instance_id: "i-0123456789abcdef0",
+      rollback_strategy: "rollback_unavailable",
     }, null, 2),
   },
   ec2_stop_start: {
@@ -68,6 +72,7 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
     description: "Full power cycle (stop then start). Instance may get a new public IP if not using an Elastic IP.",
     outcomeTemplate: JSON.stringify({
       instance_id: "i-0123456789abcdef0",
+      rollback_strategy: "stop_instance",
     }, null, 2),
   },
   ec2_launch: {
@@ -77,6 +82,7 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
       mode: "quick",
       name: "my-new-instance",
       os: "amazon_linux",
+      rollback_strategy: "terminate_instance",
     }, null, 2),
   },
   ec2_terminate: {
@@ -86,6 +92,7 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
       instance_id: "i-0123456789abcdef0",
       snapshot_tag: "pre-terminate-nexplane",
       confirm_terminate: true,
+      rollback_strategy: "rollback_unavailable",
     }, null, 2),
   },
   rolling_restart: {
@@ -96,6 +103,7 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
       asset_group: { asset_ids: [] },
       batch_size_pct: 10,
       abort_threshold_pct: 25,
+      rollback_strategy: "restore_previous_service_state",
     }, null, 2),
   },
   canary_config_push: {
@@ -107,6 +115,7 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
       canary_asset_id: 0,
       verification_command: "nginx -t",
       asset_group: { asset_ids: [] },
+      rollback_strategy: "restore_previous_config",
     }, null, 2),
   },
   distribute_file: {
@@ -118,186 +127,187 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
       permissions: "0644",
       post_command: "update-ca-certificates",
       asset_group: { asset_ids: [] },
+      rollback_strategy: "restore_previous_file",
     }, null, 2),
   },
   fleet_health_check: {
     label: "Fleet Health Check",
     description: "Run a preflight health check across all hosts: disk, load, pending reboots, service status.",
-    outcomeTemplate: JSON.stringify({ asset_group: { asset_ids: [] }, required_services: [] }, null, 2),
+    outcomeTemplate: JSON.stringify({ asset_group: { asset_ids: [] }, required_services: [], rollback_strategy: "rollback_unavailable" }, null, 2),
   },
   // Patching
   patch_packages: {
     label: "Patch Packages",
     description: "Apply security patches to specific packages or CVEs on target hosts.",
-    outcomeTemplate: JSON.stringify({ mode: "security_only", packages: [], cve_id: null, dry_run: false }, null, 2),
+    outcomeTemplate: JSON.stringify({ mode: "security_only", packages: [], cve_id: null, dry_run: false, rollback_strategy: "uninstall_patches" }, null, 2),
   },
   patch_campaign: {
     label: "Patch Campaign",
     description: "Rolling patch campaign across a fleet — batched with abort-on-error threshold.",
-    outcomeTemplate: JSON.stringify({ cve_id: "CVE-2024-XXXX", batch_size_pct: 10, abort_threshold_pct: 25, dry_run: false }, null, 2),
+    outcomeTemplate: JSON.stringify({ cve_id: "CVE-2024-XXXX", batch_size_pct: 10, abort_threshold_pct: 25, dry_run: false, rollback_strategy: "uninstall_patches" }, null, 2),
   },
   // Identity lifecycle
   offboard_user: {
     label: "Offboard User",
     description: "Disable a user across all connected identity systems (AD, Okta, Google, GitHub, Slack).",
-    outcomeTemplate: JSON.stringify({ user_email: "user@example.com", isolate_endpoints: false }, null, 2),
+    outcomeTemplate: JSON.stringify({ user_email: "user@example.com", isolate_endpoints: false, rollback_strategy: "re_enable_account" }, null, 2),
   },
   onboard_user: {
     label: "Onboard User",
     description: "Provision a new user across all connected identity systems.",
-    outcomeTemplate: JSON.stringify({ user_email: "newuser@example.com", display_name: "New User", groups: [], role: "member" }, null, 2),
+    outcomeTemplate: JSON.stringify({ user_email: "newuser@example.com", display_name: "New User", groups: [], role: "member", rollback_strategy: "deprovision_account" }, null, 2),
   },
   // Credential rotation
   rotate_db_credentials: {
     label: "Rotate DB Credentials",
     description: "Generate new DB password, update the DB user, update config files, restart service.",
-    outcomeTemplate: JSON.stringify({ db_type: "postgres", db_host: "localhost", db_port: 5432, username: "appuser", config_file_path: "/etc/app/.env", service_name: "app" }, null, 2),
+    outcomeTemplate: JSON.stringify({ db_type: "postgres", db_host: "localhost", db_port: 5432, username: "appuser", config_file_path: "/etc/app/.env", service_name: "app", rollback_strategy: "restore_previous_credentials" }, null, 2),
   },
   rotate_ssh_keys: {
     label: "Rotate SSH Keys",
     description: "Remove old key by fingerprint from authorized_keys, add new public key across fleet.",
-    outcomeTemplate: JSON.stringify({ old_key_fingerprint: "SHA256:...", new_public_key: "ssh-rsa AAAA...", username: "ubuntu" }, null, 2),
+    outcomeTemplate: JSON.stringify({ old_key_fingerprint: "SHA256:...", new_public_key: "ssh-rsa AAAA...", username: "ubuntu", rollback_strategy: "restore_previous_key" }, null, 2),
   },
   rotate_api_key: {
     label: "Rotate API Key",
     description: "Rotate an API key (AWS IAM, Okta, GitHub PAT) and propagate to consumers.",
-    outcomeTemplate: JSON.stringify({ key_type: "aws_iam", username: "svc-account", propagation_targets: [] }, null, 2),
+    outcomeTemplate: JSON.stringify({ key_type: "aws_iam", username: "svc-account", propagation_targets: [], rollback_strategy: "restore_previous_key" }, null, 2),
   },
   rotate_service_account: {
     label: "Rotate Service Account",
     description: "Rotate a service account password in AD or Okta and update dependent services.",
-    outcomeTemplate: JSON.stringify({ provider: "active_directory", account_name: "svc-app", service_names: [] }, null, 2),
+    outcomeTemplate: JSON.stringify({ provider: "active_directory", account_name: "svc-app", service_names: [], rollback_strategy: "restore_previous_credentials" }, null, 2),
   },
   // Incident response
   isolate_host: {
     label: "Isolate Host",
     description: "Flush outbound firewall rules to isolate a host — allows only management CIDR + control plane.",
-    outcomeTemplate: JSON.stringify({ management_cidr: "10.0.0.0/8" }, null, 2),
+    outcomeTemplate: JSON.stringify({ management_cidr: "10.0.0.0/8", rollback_strategy: "restore_firewall_rules" }, null, 2),
   },
   lockdown_account: {
     label: "Lockdown Account",
     description: "Lock a user account across all identity systems simultaneously (incident response).",
-    outcomeTemplate: JSON.stringify({ user_email: "suspect@example.com" }, null, 2),
+    outcomeTemplate: JSON.stringify({ user_email: "suspect@example.com", rollback_strategy: "re_enable_account" }, null, 2),
   },
   phishing_response: {
     label: "Phishing Response",
     description: "Block sender domain, force password reset, revoke sessions, require MFA re-enrollment.",
-    outcomeTemplate: JSON.stringify({ sender_domain: "malicious.example.com", affected_user_emails: [] }, null, 2),
+    outcomeTemplate: JSON.stringify({ sender_domain: "malicious.example.com", affected_user_emails: [], rollback_strategy: "rollback_unavailable" }, null, 2),
   },
   preserve_evidence: {
     label: "Preserve Evidence",
     description: "Collect forensic artifacts before remediation — logs, netstat, process state → S3.",
-    outcomeTemplate: JSON.stringify({ s3_upload_url: null }, null, 2),
+    outcomeTemplate: JSON.stringify({ s3_upload_url: null, rollback_strategy: "rollback_unavailable" }, null, 2),
   },
   // IaC
   terraform_apply: {
     label: "Terraform Apply",
     description: "Run terraform plan → review in Nexplane → terraform apply on approval.",
-    outcomeTemplate: JSON.stringify({ working_directory: "/infra/prod", workspace: "default", var_file: null, target: null }, null, 2),
+    outcomeTemplate: JSON.stringify({ working_directory: "/infra/prod", workspace: "default", var_file: null, target: null, rollback_strategy: "terraform_destroy" }, null, 2),
   },
   ansible_playbook: {
     label: "Ansible Playbook",
     description: "Run an Ansible playbook with --check mode as preflight, then apply on approval.",
-    outcomeTemplate: JSON.stringify({ playbook_path: "/playbooks/harden.yml", inventory: "hosts.ini", extra_vars: {}, limit: null }, null, 2),
+    outcomeTemplate: JSON.stringify({ playbook_path: "/playbooks/harden.yml", inventory: "hosts.ini", extra_vars: {}, limit: null, rollback_strategy: "run_rollback_playbook" }, null, 2),
   },
   helm_upgrade: {
     label: "Helm Upgrade",
     description: "Upgrade a Helm release with --atomic (auto-rollback on failure).",
-    outcomeTemplate: JSON.stringify({ release_name: "my-app", chart: "stable/my-app", chart_version: "1.2.0", namespace: "default", values: {} }, null, 2),
+    outcomeTemplate: JSON.stringify({ release_name: "my-app", chart: "stable/my-app", chart_version: "1.2.0", namespace: "default", values: {}, rollback_strategy: "helm_rollback" }, null, 2),
   },
   // Database administration
   provision_db_user: {
     label: "Provision DB User",
     description: "Create a DB user with specified grants on PostgreSQL, MySQL, or MSSQL.",
-    outcomeTemplate: JSON.stringify({ db_type: "postgres", db_host: "localhost", username: "readonly", grants: ["public.users:SELECT"] }, null, 2),
+    outcomeTemplate: JSON.stringify({ db_type: "postgres", db_host: "localhost", username: "readonly", grants: ["public.users:SELECT"], rollback_strategy: "drop_db_user" }, null, 2),
   },
   deprovision_db_user: {
     label: "Deprovision DB User",
     description: "Revoke all grants and drop a DB user.",
-    outcomeTemplate: JSON.stringify({ db_type: "postgres", db_host: "localhost", username: "ex-employee" }, null, 2),
+    outcomeTemplate: JSON.stringify({ db_type: "postgres", db_host: "localhost", username: "ex-employee", rollback_strategy: "rollback_unavailable" }, null, 2),
   },
   db_permission_change: {
     label: "DB Permission Change",
     description: "Grant or revoke specific permissions on a database user.",
-    outcomeTemplate: JSON.stringify({ db_type: "postgres", db_host: "localhost", target_user: "appuser", grants_to_add: [], grants_to_remove: [] }, null, 2),
+    outcomeTemplate: JSON.stringify({ db_type: "postgres", db_host: "localhost", target_user: "appuser", grants_to_add: [], grants_to_remove: [], rollback_strategy: "restore_previous_grants" }, null, 2),
   },
   configure_db_audit: {
     label: "Configure DB Audit",
     description: "Enable audit logging (pg_audit, general_log, SQL Audit) on a database.",
-    outcomeTemplate: JSON.stringify({ db_type: "postgres", audit_level: "ddl", log_path: "/var/log/pg_audit.log" }, null, 2),
+    outcomeTemplate: JSON.stringify({ db_type: "postgres", audit_level: "ddl", log_path: "/var/log/pg_audit.log", rollback_strategy: "disable_db_audit" }, null, 2),
   },
   promote_db_replica: {
     label: "Promote DB Replica",
     description: "Promote an RDS read replica to standalone primary (failover). Irreversible.",
-    outcomeTemplate: JSON.stringify({ replica_identifier: "my-db-replica", update_dns_record: true, dns_record: "db.internal.example.com" }, null, 2),
+    outcomeTemplate: JSON.stringify({ replica_identifier: "my-db-replica", update_dns_record: true, dns_record: "db.internal.example.com", rollback_strategy: "rollback_unavailable" }, null, 2),
   },
   db_connection_config: {
     label: "DB Connection Config",
     description: "Update max_connections or pg_hba.conf rules.",
-    outcomeTemplate: JSON.stringify({ db_type: "postgres", max_connections: 200, reload_only: true }, null, 2),
+    outcomeTemplate: JSON.stringify({ db_type: "postgres", max_connections: 200, reload_only: true, rollback_strategy: "restore_previous_config" }, null, 2),
   },
   // Backup & recovery
   create_backup: {
     label: "Create Backup",
     description: "Create an EBS/RDS snapshot or agent-side restic backup.",
-    outcomeTemplate: JSON.stringify({ backup_type: "ebs_snapshot", target_resource_id: "vol-abc123", backup_name: "pre-deploy", retention_days: 30 }, null, 2),
+    outcomeTemplate: JSON.stringify({ backup_type: "ebs_snapshot", target_resource_id: "vol-abc123", backup_name: "pre-deploy", retention_days: 30, rollback_strategy: "rollback_unavailable" }, null, 2),
   },
   verify_backup: {
     label: "Verify Backup",
     description: "Restore a backup to a temp environment, run health checks, then destroy.",
-    outcomeTemplate: JSON.stringify({ backup_id: "snap-abc123", verification_query: "SELECT 1", terminate_after_verify: true }, null, 2),
+    outcomeTemplate: JSON.stringify({ backup_id: "snap-abc123", verification_query: "SELECT 1", terminate_after_verify: true, rollback_strategy: "rollback_unavailable" }, null, 2),
   },
   restore_files: {
     label: "Restore Files",
     description: "Restore specific files or directories from a backup snapshot.",
-    outcomeTemplate: JSON.stringify({ backup_snapshot_id: "snap-abc123", restore_paths: ["/etc/app"], destination_path: "/etc/app", backup_tool: "restic" }, null, 2),
+    outcomeTemplate: JSON.stringify({ backup_snapshot_id: "snap-abc123", restore_paths: ["/etc/app"], destination_path: "/etc/app", backup_tool: "restic", rollback_strategy: "restore_previous_files" }, null, 2),
   },
   dr_failover: {
     label: "DR Failover",
     description: "Fail over to DR site — updates Route53 weighted routing and measures RTO.",
-    outcomeTemplate: JSON.stringify({ hosted_zone_id: "Z123ABC", record_name: "api.example.com", dr_target: "api-dr.example.com", target_weight: 100 }, null, 2),
+    outcomeTemplate: JSON.stringify({ hosted_zone_id: "Z123ABC", record_name: "api.example.com", dr_target: "api-dr.example.com", target_weight: 100, rollback_strategy: "restore_primary_dns" }, null, 2),
   },
   scheduled_reboot: {
     label: "Scheduled Reboot",
     description: "Schedule a graceful reboot with post-reboot service health verification.",
-    outcomeTemplate: JSON.stringify({ reboot_at: "2026-06-01T02:00:00Z", verify_services: ["nginx", "app"] }, null, 2),
+    outcomeTemplate: JSON.stringify({ reboot_at: "2026-06-01T02:00:00Z", verify_services: ["nginx", "app"], rollback_strategy: "rollback_unavailable" }, null, 2),
   },
   // Compliance
   enforce_cis_benchmark: {
     label: "Enforce CIS Benchmark",
     description: "Audit and remediate CIS controls (Level 1 or 2) on Linux hosts.",
-    outcomeTemplate: JSON.stringify({ level: 2, os_family: "debian", dry_run: false }, null, 2),
+    outcomeTemplate: JSON.stringify({ level: 2, os_family: "debian", dry_run: false, rollback_strategy: "restore_previous_config" }, null, 2),
   },
   collect_evidence: {
     label: "Collect Evidence",
     description: "Gather config files and command outputs for audit evidence (SOC2, PCI, ISO27001).",
-    outcomeTemplate: JSON.stringify({ framework: "soc2", control_id: "CC6.1", asset_ids: [] }, null, 2),
+    outcomeTemplate: JSON.stringify({ framework: "soc2", control_id: "CC6.1", asset_ids: [], rollback_strategy: "rollback_unavailable" }, null, 2),
   },
-  // Misc (keep existing entries that don't fit other categories)
+  // Misc
   s3_block_public_access: {
     label: "S3 Block Public Access",
     description: "Enable S3 Block Public Access settings on a bucket.",
-    outcomeTemplate: JSON.stringify({ bucket_name: "my-bucket" }, null, 2),
+    outcomeTemplate: JSON.stringify({ bucket_name: "my-bucket", rollback_strategy: "restore_s3_public_access" }, null, 2),
   },
   iam_enforce_mfa: {
     label: "IAM Enforce MFA",
     description: "Enforce MFA requirement on an IAM user or group.",
-    outcomeTemplate: JSON.stringify({ target: "user", username: "svc-account" }, null, 2),
+    outcomeTemplate: JSON.stringify({ target: "user", username: "svc-account", rollback_strategy: "remove_mfa_requirement" }, null, 2),
   },
   generic_remediation: {
     label: "Generic Remediation",
     description: "Generic remediation action for scanner findings.",
-    outcomeTemplate: JSON.stringify({ finding_id: null, action: "remediate" }, null, 2),
+    outcomeTemplate: JSON.stringify({ finding_id: null, action: "remediate", rollback_strategy: "rollback_unavailable" }, null, 2),
   },
   notify_only: {
     label: "Notify Only",
     description: "Create a record and notification without executing any change.",
-    outcomeTemplate: JSON.stringify({ message: "" }, null, 2),
+    outcomeTemplate: JSON.stringify({ message: "", rollback_strategy: "rollback_unavailable" }, null, 2),
   },
   suppress: {
     label: "Suppress Finding",
     description: "Suppress a scanner finding with a justification.",
-    outcomeTemplate: JSON.stringify({ finding_id: null, reason: "", expiry_days: 90 }, null, 2),
+    outcomeTemplate: JSON.stringify({ finding_id: null, reason: "", expiry_days: 90, rollback_strategy: "unsuppress_finding" }, null, 2),
   },
 };
 
@@ -352,15 +362,75 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   },
 ];
 
+// Maps change type → the asset type that should be pre-selected in the filter.
+// null means "no restriction — show all assets".
+const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = {
+  // Needs an AWS cloud account to launch into
+  ec2_launch: "cloud_account",
+  // Operate on existing EC2 servers
+  ec2_stop: "server",
+  ec2_start: "server",
+  ec2_reboot: "server",
+  ec2_stop_start: "server",
+  ec2_terminate: "server",
+  snapshot_asset: "server",
+  // Patching targets servers
+  patch_packages: "server",
+  patch_campaign: "server",
+  // Fleet ops target servers
+  rolling_restart: "server",
+  canary_config_push: "server",
+  distribute_file: "server",
+  fleet_health_check: "server",
+  telemetry_agent_deploy: "server",
+  remote_command: "server",
+  scheduled_reboot: "server",
+  // Incident response on servers
+  isolate_host: "server",
+  preserve_evidence: "server",
+  // Compliance on servers
+  enforce_cis_benchmark: "server",
+  // Backup targets servers or cloud accounts
+  create_backup: "server",
+  verify_backup: "server",
+  restore_files: "server",
+  // DNS changes target dns zones
+  dns_update: "dns_zone",
+  dr_failover: "dns_zone",
+  // Firewall changes
+  security_group_update: "firewall",
+  microsegmentation_policy: "firewall",
+  // Identity targets identity assets
+  offboard_user: "identity",
+  onboard_user: "identity",
+  lockdown_account: "identity",
+  phishing_response: "identity",
+  // AWS account-level actions
+  s3_block_public_access: "cloud_account",
+  iam_enforce_mfa: "cloud_account",
+};
+
+const ASSET_TYPE_LABELS: Record<AssetType, string> = {
+  server: "server",
+  cloud_account: "cloud account",
+  dns_zone: "DNS zone",
+  firewall: "firewall",
+  identity_provider: "identity provider",
+  application: "application",
+  identity: "identity",
+};
+
 export function CreateChangeRequest() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const [searchParams] = useSearchParams();
 
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [changeType, setChangeType] = useState<ChangeType | "">("");
-  const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
+  const [title, setTitle] = useState(() => searchParams.get("title") ?? "");
+  const [description, setDescription] = useState(() => searchParams.get("description") ?? "");
+  const [changeType, setChangeType] = useState<ChangeType | "">(() => (searchParams.get("changeType") as ChangeType) ?? "");
+  const [selectedAssets, setSelectedAssets] = useState<string[]>(() => searchParams.get("assetId") ? [searchParams.get("assetId")!] : []);
   const [assetSearch, setAssetSearch] = useState("");
+  const [autoTypeFilter, setAutoTypeFilter] = useState<AssetType | null>(null);
   const [outcomeJson, setOutcomeJson] = useState("");
   const [jsonError, setJsonError] = useState("");
   const [submitError, setSubmitError] = useState("");
@@ -370,7 +440,29 @@ export function CreateChangeRequest() {
     queryFn: () => assetsApi.list(),
   });
 
+  // Pre-fill outcome template and asset filter when arriving from an asset quick action.
+  // Runs once assets load so instance_id can be injected from the pre-selected asset.
+  useEffect(() => {
+    const preType = searchParams.get("changeType") as ChangeType | null;
+    if (!preType || !(preType in CHANGE_TYPE_META)) return;
+
+    let template = JSON.parse(CHANGE_TYPE_META[preType].outcomeTemplate);
+
+    const preAssetId = searchParams.get("assetId");
+    if (preAssetId && assets) {
+      const preAsset = assets.find((a) => a.id === preAssetId);
+      if (preAsset?.asset_metadata?.instance_id && "instance_id" in template) {
+        template = { ...template, instance_id: preAsset.asset_metadata.instance_id };
+      }
+    }
+
+    setOutcomeJson(JSON.stringify(template, null, 2));
+    const filter = CHANGE_TYPE_ASSET_FILTER[preType];
+    setAutoTypeFilter(filter !== undefined ? (filter ?? null) : null);
+  }, [assets]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const filteredAssets = (assets ?? []).filter((asset) => {
+    if (autoTypeFilter && asset.asset_type !== autoTypeFilter) return false;
     if (!assetSearch.trim()) return true;
     const lower = assetSearch.toLowerCase();
     const tagMatch = lower.match(/tag:(\S+)/);
@@ -413,6 +505,9 @@ export function CreateChangeRequest() {
     setChangeType(type);
     setOutcomeJson(CHANGE_TYPE_META[type].outcomeTemplate);
     setJsonError("");
+    const filter = CHANGE_TYPE_ASSET_FILTER[type];
+    setAutoTypeFilter(filter !== undefined ? (filter ?? null) : null);
+    setSelectedAssets([]);
   }
 
   function handleJsonChange(value: string) {
@@ -489,6 +584,14 @@ export function CreateChangeRequest() {
 
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">Target Assets</label>
+          {autoTypeFilter && (
+            <div className="flex items-center gap-2 mb-2 px-3 py-1.5 bg-brand-50 border border-brand-200 rounded-md text-xs text-brand-700">
+              <span>Showing <strong>{ASSET_TYPE_LABELS[autoTypeFilter]}</strong> assets — required for this change type</span>
+              <button onClick={() => setAutoTypeFilter(null)} className="ml-auto text-brand-400 hover:text-brand-700" title="Show all assets">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
           <input
             type="text"
             value={assetSearch}
