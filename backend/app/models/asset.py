@@ -22,6 +22,7 @@ class AssetType(str, enum.Enum):
     load_balancer = "load_balancer"
     endpoint = "endpoint"
     container_cluster = "container_cluster"
+    key_pair = "key_pair"
 
 
 class Environment(str, enum.Enum):

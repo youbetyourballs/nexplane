@@ -23,6 +23,8 @@ class ChangeType(str, enum.Enum):
     ec2_stop_start = "ec2_stop_start"
     ec2_launch = "ec2_launch"
     ec2_terminate = "ec2_terminate"
+    key_pair_create = "key_pair_create"
+    ssm_command = "ssm_command"
     # Patch management
     patch_packages = "patch_packages"
     patch_campaign = "patch_campaign"
