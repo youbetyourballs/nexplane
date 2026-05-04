@@ -1,84 +1,78 @@
-﻿import asyncio
+import asyncio
 from datetime import datetime, timezone
-
-_USERS = [
-    ("jsmith", "user", ["Domain Users", "VPN-Access"]),
-    ("aadmin", "admin", ["Domain Admins", "Enterprise Admins"]),
-    ("svc-backup", "service_account", ["Backup Operators"]),
-    ("svc-monitoring", "service_account", ["Monitoring"]),
-    ("bjones", "user", ["Domain Users"]),
-    ("cwhite", "user", ["Domain Users", "Finance-Read"]),
-]
 
 
 def _mock_response():
-    now = datetime.now(timezone.utc).isoformat()
-    results = []
-    for username, account_type, groups in _USERS:
-        tag = f"ad-{account_type.replace('_', '-')}"
-        results.append({
-            "name": username,
-            "asset_type": "identity",
-            "environment": "prod",
-            "criticality": "high" if account_type in ("admin", "service_account") else "medium",
-            "tags": [tag, "ad-user"],
-            "asset_metadata": {
-                "account_type": account_type,
-                "groups": groups,
-                "enabled": True,
-                "last_login": now,
-                "ad_source": "active_directory",
+    return {
+        "action": "discover_identities",
+        "assets": [
+            {
+                "id": "550e8400-e29b-41d4-a716-446655440001",
+                "name": "Alice Example",
+                "asset_type": "identity",
+                "asset_metadata": {
+                    "object_guid": "550e8400-e29b-41d4-a716-446655440001",
+                    "sam_account_name": "alice.example",
+                    "email": "alice@corp.local",
+                    "dn": "CN=Alice Example,OU=Users,DC=corp,DC=local",
+                    "enabled": True,
+                    "provider": "active_directory",
+                },
             },
-        })
-    return results
+        ],
+        "discovered_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
-async def _real_execute(creds: dict) -> list:
+async def _real_execute(creds: dict) -> dict:
     from ._client import get_connection
+    from ldap3 import SUBTREE, ALL_ATTRIBUTES
     base_dn = creds.get("base_dn", "DC=corp,DC=local")
 
-    def _sync():
+    def _search():
         conn = get_connection(creds)
         conn.search(
             base_dn,
             "(objectClass=user)",
-            attributes=["sAMAccountName", "memberOf", "userAccountControl", "lastLogon", "description"],
+            SUBTREE,
+            attributes=["cn", "sAMAccountName", "mail", "objectGUID", "userAccountControl"],
         )
         entries = list(conn.entries)
         conn.unbind()
         return entries
 
-    entries = await asyncio.get_event_loop().run_in_executor(None, _sync)
-    now = datetime.now(timezone.utc).isoformat()
-    results = []
+    entries = await asyncio.get_event_loop().run_in_executor(None, _search)
+    assets = []
     for entry in entries:
-        sam = str(entry.sAMAccountName) if hasattr(entry, "sAMAccountName") else "unknown"
-        uac = int(str(entry.userAccountControl)) if hasattr(entry, "userAccountControl") and str(entry.userAccountControl).isdigit() else 512
-        enabled = not bool(uac & 2)
-        member_of = [str(g) for g in entry.memberOf] if hasattr(entry, "memberOf") else []
-        is_admin = any("admin" in g.lower() for g in member_of)
-        account_type = "admin" if is_admin else "user"
-        tag = f"ad-{account_type}"
-        results.append({
-            "name": sam,
-            "asset_type": "identity",
-            "environment": "prod",
-            "criticality": "high" if is_admin else "medium",
-            "tags": [tag, "ad-user"],
-            "asset_metadata": {
-                "account_type": account_type,
-                "groups": member_of,
-                "enabled": enabled,
-                "last_login": now,
-                "ad_source": "active_directory",
-            },
-        })
-    return results if results else _mock_response()
+        try:
+            guid = str(entry.objectGUID.value) if entry.objectGUID else None
+            uac = int(entry.userAccountControl.value) if entry.userAccountControl else 512
+            enabled = not bool(uac & 0x2)
+            cn = str(entry.cn.value) if entry.cn else str(entry.entry_dn)
+            assets.append({
+                "id": guid or str(entry.entry_dn),
+                "name": cn,
+                "asset_type": "identity",
+                "asset_metadata": {
+                    "object_guid": guid,
+                    "sam_account_name": str(entry.sAMAccountName.value) if entry.sAMAccountName else None,
+                    "email": str(entry.mail.value) if entry.mail else None,
+                    "dn": str(entry.entry_dn),
+                    "enabled": enabled,
+                    "provider": "active_directory",
+                },
+            })
+        except Exception:
+            continue
+    return {"action": "discover_identities", "assets": assets, "discovered_at": datetime.now(timezone.utc).isoformat()}
 
 
-async def execute(parameters: dict, asset_ids: list, connector) -> list:
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})
     if not creds:
         return _mock_response()
     return await _real_execute(creds)
 
+
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    return {"rolled_back": False, "reason": "discover actions have no rollback"}
