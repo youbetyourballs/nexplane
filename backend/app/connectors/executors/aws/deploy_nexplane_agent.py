@@ -1,6 +1,14 @@
 import asyncio
+import os
 import time as _time
 from datetime import datetime, timezone
+
+# Public S3 bucket where agent binaries are published after each build.
+# Override with NEXPLANE_AGENT_DOWNLOAD_URL env var for self-hosted deployments.
+_DEFAULT_DOWNLOAD_URL = os.environ.get(
+    "NEXPLANE_AGENT_DOWNLOAD_URL",
+    "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com",
+)
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
@@ -8,9 +16,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     instance_id = parameters.get('instance_id', '')
     nexplane_url = parameters.get('nexplane_url', '')
     nexplane_secret = parameters.get('nexplane_secret', '')
-    # download_url allows using a different URL (e.g. public IP) for the binary download
-    # while the agent connects HOME via nexplane_url (e.g. Tailscale IP)
-    download_url = parameters.get('download_url', '') or nexplane_url
+    download_url = parameters.get('download_url', '') or _DEFAULT_DOWNLOAD_URL
 
     if not creds:
         return {
@@ -40,17 +46,16 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # Build a single shell script to avoid SSM variable scoping issues
     # Total must fit inside SSM executionTimeout (600s below).
+    # S3 download URL: version file has no /downloads/ prefix (flat bucket layout)
+    is_s3 = "amazonaws.com" in download_url
+    version_url = f"{download_url}/version" if is_s3 else f"{download_url}/downloads/version"
+    binary_url_tpl = "{base}/nexplane-agent-linux-amd64-{ver}" if is_s3 else "{base}/downloads/nexplane-agent-linux-amd64-{ver}"
+
     inline_script = f"""#!/bin/bash
 set -eux
-# Wait for download URL to be reachable (up to 30s)
-for i in $(seq 1 6); do
-  curl -fsSL --max-time 5 '{download_url}/downloads/version' > /dev/null 2>&1 && break
-  echo "Waiting for download URL connectivity ($i/6)..."
-  sleep 5
-done
-VERSION=$(curl -fsSL --max-time 10 '{download_url}/downloads/version' | tr -d '[:space:]')
+VERSION=$(curl -fsSL --max-time 15 --retry 3 --retry-delay 5 '{version_url}' | tr -d '[:space:]')
 echo "Version: $VERSION"
-curl -fsSL --max-time 180 "{download_url}/downloads/nexplane-agent-linux-amd64-$VERSION" -o /usr/local/bin/nexplane-agent
+curl -fsSL --max-time 180 --retry 3 --retry-delay 5 "{binary_url_tpl.format(base=download_url, ver='$VERSION')}" -o /usr/local/bin/nexplane-agent
 chmod +x /usr/local/bin/nexplane-agent
 cat > /etc/systemd/system/nexplane-agent.service << 'SYSTEMD_EOF'
 [Unit]

@@ -403,19 +403,12 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
         {"instance_id": instance_id, "auth_key": auth_key, "hostname": "nexplane-smoke-ec2"},
     )
 
-    # Deploy agent:
-    # - nexplane_url: Tailscale IP so agent heartbeats reach backend from within the tailnet
-    # - download_url: public IP so the binary download doesn't depend on Tailscale peer connectivity
+    # Agent downloads binary from the public S3 bucket (NEXPLANE_AGENT_DOWNLOAD_URL default).
+    # nexplane_url is the Tailscale IP so agent heartbeats reach the backend within the tailnet.
     nexplane_url = f"http://{backend_ip}:8000"
-    try:
-        public_ip = _run("curl -fsSL --max-time 5 https://checkip.amazonaws.com || curl -fsSL --max-time 5 https://ifconfig.me")
-        download_url = f"http://{public_ip.strip()}:8000"
-    except Exception:
-        download_url = nexplane_url  # fallback to Tailscale URL
     client.run_cr(
         "Smoke: deploy agent", "deploy_nexplane_agent", instance_asset["id"],
-        {"instance_id": instance_id, "nexplane_url": nexplane_url,
-         "nexplane_secret": agent_secret, "download_url": download_url},
+        {"instance_id": instance_id, "nexplane_url": nexplane_url, "nexplane_secret": agent_secret},
     )
 
     print("  Waiting up to 3min for agent to register...")

@@ -22,12 +22,13 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://nexplane:nexplane_dev@db:5432/nexplane
       SECRET_KEY: dev-secret-key-change-in-production-32chars
       ENVIRONMENT: development
       CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      NEXPLANE_AGENT_DOWNLOAD_URL: "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com"
     depends_on:
       db:
         condition: service_healthy
