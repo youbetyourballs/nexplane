@@ -63,6 +63,8 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
             "instance_type": desired.get("instance_type"),
             "subnet_id": desired.get("subnet_id"),
             "security_group_ids": desired.get("security_group_ids", []),
+            "iam_instance_profile": desired.get("iam_instance_profile", ""),
+            "key_name": desired.get("key_name", ""),
         },
         "launch_instance":        {
             "ami_id": desired.get("ami_id", ""),
@@ -70,6 +72,15 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
             "subnet_id": desired.get("subnet_id", ""),
             "security_group_ids": desired.get("security_group_ids", []),
             "name": desired.get("name", "nexplane-instance"),
+            "iam_instance_profile": desired.get("iam_instance_profile", ""),
+            "key_name": desired.get("key_name", ""),
+        },
+        "create_key_pair":        {"key_name": desired.get("key_name", "nexplane-key")},
+        "delete_key_pair":        {"key_name": desired.get("key_name", "")},
+        "run_ssm_command":        {
+            "instance_id": desired.get("instance_id", ""),
+            "document_name": desired.get("document_name", "AWS-RunShellScript"),
+            "parameters": {"commands": [desired.get("command", "echo hello")]},
         },
         "terminate_instance":     {"instance_id": desired.get("instance_id", ""), "confirm_terminate": desired.get("confirm_terminate", False)},
     }

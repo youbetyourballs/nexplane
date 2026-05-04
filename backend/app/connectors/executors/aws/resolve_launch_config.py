@@ -23,6 +23,8 @@ _MOCK_AMIS = {
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, 'credentials', {})
     mode = parameters.get('mode', 'quick')
+    iam_instance_profile = parameters.get('iam_instance_profile', '')
+    key_name = parameters.get('key_name', '')
 
     if mode == 'spec':
         required = ['ami_id', 'instance_type', 'subnet_id', 'security_group_ids', 'name']
@@ -37,6 +39,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "subnet_id": parameters['subnet_id'],
             "security_group_ids": parameters['security_group_ids'],
             "name": parameters['name'],
+            "iam_instance_profile": iam_instance_profile,
+            "key_name": key_name,
         }
 
     if mode == 'clone':
@@ -48,10 +52,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                 "action": "resolve_launch_config",
                 "mode": "clone",
                 "ami_id": "ami-0abcdef1234567890",
-                "instance_type": "t2.micro",
+                "instance_type": "t3.micro",
                 "subnet_id": "subnet-mock0000000000",
                 "security_group_ids": ["sg-mock000000000000"],
                 "name": parameters.get('name', f"clone-of-{source_id}"),
+                "iam_instance_profile": iam_instance_profile,
+                "key_name": key_name,
             }
         from ._client import get_ec2_client
         ec2 = get_ec2_client(creds)
@@ -68,6 +74,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "subnet_id": inst['SubnetId'],
             "security_group_ids": [sg['GroupId'] for sg in inst.get('SecurityGroups', [])],
             "name": parameters.get('name', f"clone-of-{source_id}"),
+            "iam_instance_profile": iam_instance_profile,
+            "key_name": key_name,
         }
 
     # quick mode
@@ -82,6 +90,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "subnet_id": "subnet-mock0000000000",
             "security_group_ids": ["sg-mock000000000000"],
             "name": name,
+            "iam_instance_profile": iam_instance_profile,
+            "key_name": key_name,
         }
     from ._client import get_ec2_client
     ec2 = get_ec2_client(creds)
@@ -104,6 +114,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "subnet_id": subnet_id,
         "security_group_ids": sg_ids,
         "name": name,
+        "iam_instance_profile": iam_instance_profile,
+        "key_name": key_name,
     }
 
 
