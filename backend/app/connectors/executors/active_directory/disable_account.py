@@ -2,6 +2,29 @@ import asyncio
 from datetime import datetime, timezone
 
 
+async def _verify_disabled(username: str, user_dn: str, creds: dict, retries: int = 3, delay: float = 2.0) -> bool:
+    from ._client import get_connection
+    from ldap3 import SUBTREE
+    base_dn = creds.get("base_dn", "DC=corp,DC=local")
+
+    def _check():
+        conn = get_connection(creds)
+        conn.search(base_dn, f"(distinguishedName={user_dn})", SUBTREE, attributes=["userAccountControl"])
+        entries = conn.entries
+        conn.unbind()
+        if not entries:
+            return False
+        uac = int(entries[0].userAccountControl.value)
+        return bool(uac & 0x2)
+
+    for _ in range(retries):
+        confirmed = await asyncio.get_event_loop().run_in_executor(None, _check)
+        if confirmed:
+            return True
+        await asyncio.sleep(delay)
+    return False
+
+
 async def _real_execute(parameters: dict, creds: dict) -> dict:
     from ._client import get_connection
     from ldap3 import MODIFY_REPLACE
@@ -16,13 +39,26 @@ async def _real_execute(parameters: dict, creds: dict) -> dict:
         return conn.result
 
     result = await asyncio.get_event_loop().run_in_executor(None, _sync)
-    return {"action": "disable_account", "username": username, "user_dn": user_dn, "disabled": True, "ldap_result": str(result), "disabled_at": datetime.now(timezone.utc).isoformat()}
+    confirmed = await _verify_disabled(username, user_dn, creds)
+    return {
+        "action": "disable_account",
+        "username": username,
+        "user_dn": user_dn,
+        "disabled": confirmed,
+        "ldap_result": str(result),
+        "disabled_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})
     if not creds:
-        return {"action": "disable_account", "username": parameters.get("username"), "disabled": True, "disabled_at": datetime.now(timezone.utc).isoformat()}
+        return {
+            "action": "disable_account",
+            "username": parameters.get("username"),
+            "disabled": True,
+            "disabled_at": datetime.now(timezone.utc).isoformat(),
+        }
     return await _real_execute(parameters, creds)
 
 
