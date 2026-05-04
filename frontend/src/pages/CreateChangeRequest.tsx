@@ -386,7 +386,7 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   remote_command: "server",
   scheduled_reboot: "server",
   // Incident response on servers
-  isolate_host: "server",
+  isolate_host: "endpoint",
   preserve_evidence: "server",
   // Compliance on servers
   enforce_cis_benchmark: "server",
@@ -408,6 +408,14 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   // AWS account-level actions
   s3_block_public_access: "cloud_account",
   iam_enforce_mfa: "cloud_account",
+  // Database actions
+  rotate_db_credentials: "database",
+  promote_db_replica: "database",
+  provision_db_user: "database",
+  configure_db_audit: "database",
+  deprovision_db_user: "database",
+  db_permission_change: "database",
+  db_connection_config: "database",
 };
 
 const ASSET_TYPE_LABELS: Record<AssetType, string> = {
@@ -418,6 +426,11 @@ const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   identity_provider: "identity provider",
   application: "application",
   identity: "identity",
+  database: "database",
+  storage_bucket: "storage bucket",
+  load_balancer: "load balancer",
+  endpoint: "endpoint",
+  container_cluster: "container cluster",
 };
 
 export function CreateChangeRequest() {

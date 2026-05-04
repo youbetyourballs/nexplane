@@ -17,6 +17,11 @@ class AssetType(str, enum.Enum):
     identity_provider = "identity_provider"
     application = "application"
     identity = "identity"
+    database = "database"
+    storage_bucket = "storage_bucket"
+    load_balancer = "load_balancer"
+    endpoint = "endpoint"
+    container_cluster = "container_cluster"
 
 
 class Environment(str, enum.Enum):

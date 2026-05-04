@@ -157,6 +157,112 @@ const ASSET_ACTIONS: Record<AssetType, { changeType: string; label: string; titl
       description: (a) => `Run an Ansible playbook against ${a.name}.`,
     },
   ],
+  database: [
+    {
+      changeType: "rotate_db_credentials",
+      label: "Rotate Credentials",
+      title: (a) => `Rotate credentials on ${a.name}`,
+      description: (a) => `Rotate database credentials for ${a.name} (${a.asset_metadata?.engine ?? "database"}).`,
+    },
+    {
+      changeType: "create_backup",
+      label: "Create Backup",
+      title: (a) => `Backup ${a.name}`,
+      description: (a) => `Create a backup snapshot of database ${a.name}.`,
+    },
+    {
+      changeType: "provision_db_user",
+      label: "Provision DB User",
+      title: (a) => `Provision user on ${a.name}`,
+      description: (a) => `Create a new database user on ${a.name}.`,
+    },
+    {
+      changeType: "configure_db_audit",
+      label: "Configure Audit Logging",
+      title: (a) => `Configure audit on ${a.name}`,
+      description: (a) => `Enable audit logging on database ${a.name}.`,
+    },
+    {
+      changeType: "promote_db_replica",
+      label: "Promote Replica",
+      title: (a) => `Promote ${a.name} to primary`,
+      description: (a) => `Promote ${a.name} read replica to standalone primary.`,
+    },
+  ],
+  storage_bucket: [
+    {
+      changeType: "s3_block_public_access",
+      label: "Block Public Access",
+      title: (a) => `Block public access on ${a.name}`,
+      description: (a) => `Enable S3 Block Public Access on bucket ${a.asset_metadata?.bucket_name ?? a.name}.`,
+    },
+    {
+      changeType: "create_backup",
+      label: "Create Backup",
+      title: (a) => `Backup ${a.name}`,
+      description: (a) => `Create a backup of bucket ${a.name}.`,
+    },
+  ],
+  load_balancer: [
+    {
+      changeType: "security_group_update",
+      label: "Update Security Group",
+      title: (a) => `Update security group on ${a.name}`,
+      description: (a) => `Modify security group rules for load balancer ${a.name}.`,
+    },
+    {
+      changeType: "snapshot_asset",
+      label: "Snapshot Config",
+      title: (a) => `Snapshot ${a.name} config`,
+      description: (a) => `Capture current configuration of load balancer ${a.name}.`,
+    },
+  ],
+  endpoint: [
+    {
+      changeType: "isolate_host",
+      label: "Isolate Host",
+      title: (a) => `Isolate ${a.name}`,
+      description: (a) => `Network-isolate endpoint ${a.name} (device_id: ${a.asset_metadata?.device_id ?? "unknown"}).`,
+    },
+    {
+      changeType: "patch_packages",
+      label: "Patch Packages",
+      title: (a) => `Patch ${a.name}`,
+      description: (a) => `Apply security patches to endpoint ${a.name}.`,
+    },
+    {
+      changeType: "telemetry_agent_deploy",
+      label: "Deploy Agent",
+      title: (a) => `Deploy agent to ${a.name}`,
+      description: (a) => `Deploy telemetry or security agent to endpoint ${a.name}.`,
+    },
+    {
+      changeType: "remote_command",
+      label: "Run Command",
+      title: (a) => `Run command on ${a.name}`,
+      description: (a) => `Execute an approved command on endpoint ${a.name}.`,
+    },
+    {
+      changeType: "enforce_cis_benchmark",
+      label: "Enforce CIS Benchmark",
+      title: (a) => `CIS benchmark on ${a.name}`,
+      description: (a) => `Audit and remediate CIS controls on endpoint ${a.name}.`,
+    },
+  ],
+  container_cluster: [
+    {
+      changeType: "helm_upgrade",
+      label: "Helm Upgrade",
+      title: (a) => `Helm upgrade on ${a.name}`,
+      description: (a) => `Upgrade a Helm release on cluster ${a.name}.`,
+    },
+    {
+      changeType: "rolling_restart",
+      label: "Rolling Restart",
+      title: (a) => `Rolling restart on ${a.name}`,
+      description: (a) => `Rolling restart of services on cluster ${a.name}.`,
+    },
+  ],
 };
 
 export function AssetDetail() {

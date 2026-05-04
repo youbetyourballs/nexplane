@@ -25,7 +25,12 @@ export type AssetType =
   | "firewall"
   | "identity_provider"
   | "application"
-  | "identity";
+  | "identity"
+  | "database"
+  | "storage_bucket"
+  | "load_balancer"
+  | "endpoint"
+  | "container_cluster";
 
 export type Environment = "dev" | "staging" | "prod";
 export type Criticality = "low" | "medium" | "high" | "critical";

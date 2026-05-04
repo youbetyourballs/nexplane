@@ -16,6 +16,11 @@ const ASSET_TYPE_ICONS: Record<AssetType, string> = {
   identity_provider: "🔑",
   application: "📦",
   identity: "👤",
+  database: "🗄",
+  storage_bucket: "🪣",
+  load_balancer: "⚖️",
+  endpoint: "💻",
+  container_cluster: "🐳",
 };
 
 // Parses "payments env:prod tag:pci-scope" into { q: "payments", filters: { env: "prod", tag: "pci-scope" } }
@@ -236,7 +241,7 @@ export function Assets() {
           className="text-sm border border-slate-200 rounded-md px-2 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
         >
           <option value="">All Types</option>
-          {["server", "cloud_account", "dns_zone", "firewall", "identity_provider", "application"].map((t) => (
+          {["server", "cloud_account", "dns_zone", "firewall", "identity_provider", "application", "identity", "database", "storage_bucket", "load_balancer", "endpoint", "container_cluster"].map((t) => (
             <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
           ))}
         </select>
@@ -287,7 +292,7 @@ export function Assets() {
               <label className="block text-xs text-slate-500 mb-1">Type</label>
               <select value={newType} onChange={(e) => setNewType(e.target.value as AssetType)}
                 className="w-full text-sm border border-slate-200 rounded px-3 py-1.5">
-                {["server","cloud_account","dns_zone","firewall","identity_provider","application"].map((t) => (
+                {["server","cloud_account","dns_zone","firewall","identity_provider","application","identity","database","storage_bucket","load_balancer","endpoint","container_cluster"].map((t) => (
                   <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
                 ))}
               </select>
