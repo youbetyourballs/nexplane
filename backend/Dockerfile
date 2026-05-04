@@ -24,6 +24,24 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc && rm -rf /var/lib/apt/lists/*
 
+# Install Tailscale for agent connectivity in smoke tests
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl gnupg lsb-release iproute2 iptables unzip \
+    && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.nokey | gpg --dearmor -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian bookworm main" > /etc/apt/sources.list.d/tailscale.list \
+    && apt-get update && apt-get install -y --no-install-recommends tailscale \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Terraform CLI for local IaC smoke tests
+RUN curl -fsSL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip -o /tmp/tf.zip \
+    && unzip /tmp/tf.zip -d /usr/local/bin/ \
+    && rm /tmp/tf.zip \
+    && chmod +x /usr/local/bin/terraform
+
+# Install Ansible + AWS collections for local Ansible smoke tests
+RUN pip install --no-cache-dir ansible boto3 botocore \
+    && ansible-galaxy collection install amazon.aws community.aws --timeout 120
+
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
