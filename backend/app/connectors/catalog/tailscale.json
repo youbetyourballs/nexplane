@@ -2,9 +2,10 @@
   "connector_type": "tailscale",
   "display_name": "Tailscale",
   "credential_fields": [
-    {"name": "oauth_client_id", "label": "OAuth Client ID", "type": "string", "required": true},
-    {"name": "oauth_client_secret", "label": "OAuth Client Secret", "type": "password", "required": true},
-    {"name": "tailnet", "label": "Tailnet (e.g. example.com or your@email.com)", "type": "string", "required": false}
+    {"name": "auth_key", "label": "Reusable Auth Key (recommended — generate at tailscale.com/admin/settings/keys)", "type": "password", "required": false},
+    {"name": "oauth_client_id", "label": "OAuth Client ID (alternative to auth key)", "type": "string", "required": false},
+    {"name": "oauth_client_secret", "label": "OAuth Client Secret", "type": "password", "required": false},
+    {"name": "tailnet", "label": "Tailnet (e.g. example.com)", "type": "string", "required": false}
   ],
   "actions": [
     {

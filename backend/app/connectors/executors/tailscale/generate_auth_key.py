@@ -16,8 +16,22 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "mock": True,
         }
 
+    # If a pre-generated reusable auth key is stored in credentials, use it directly.
+    # This is the simplest path — generate a reusable key in tailscale.com/admin/settings/keys
+    # and store it as auth_key in the connector credentials.
+    if creds.get('auth_key'):
+        return {
+            "action": "generate_auth_key",
+            "auth_key": creds['auth_key'],
+            "source": "stored",
+            "executed_at": datetime.now(timezone.utc).isoformat(),
+        }
+
     from ._client import ts_post
-    tailnet = creds.get('tailnet', '-')
+    tailnet = creds.get('tailnet') or '-'
+    # Tailscale OAuth-generated keys must have at least one tag defined in the ACL.
+    # Default to tag:nexplane — add "tag:nexplane": ["autogroup:admin"] to your ACL policy.
+    resolved_tags = [f"tag:{t}" for t in tags] if tags else ["tag:nexplane"]
     body = {
         "capabilities": {
             "devices": {
@@ -25,7 +39,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                     "reusable": reusable,
                     "ephemeral": ephemeral,
                     "preauthorized": True,
-                    "tags": [f"tag:{t}" for t in tags] if tags else [],
+                    "tags": resolved_tags,
                 }
             }
         },
