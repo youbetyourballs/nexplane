@@ -311,7 +311,12 @@ export function Settings() {
         {(settings?.agent_configured || generatedSecret) && (() => {
           const secret = generatedSecret ?? "<YOUR-SECRET>";
           const controlPlane = window.location.origin;
-          const downloadBase = (import.meta.env.VITE_AGENT_DOWNLOAD_URL as string) || controlPlane;
+          // S3 public bucket (flat layout, no /downloads/ prefix).
+          // Falls back to the control plane origin for self-hosted deployments
+          // that serve binaries from the backend's /downloads/ route.
+          const s3Base = import.meta.env.VITE_AGENT_DOWNLOAD_URL as string;
+          const isS3 = s3Base && s3Base.includes("amazonaws.com");
+          const downloadBase = s3Base || controlPlane;
 
           const version = agentVersion ?? "<VERSION>";
           const binaryName = agentPlatform === "windows"
@@ -322,12 +327,20 @@ export function Settings() {
 
           const agentBin = agentPlatform === "windows" ? "nexplane-agent.exe" : "nexplane-agent";
 
-          const linuxDownload = `curl -fsSL ${downloadBase}/downloads/${binaryName} -o ${agentBin} && chmod +x ${agentBin}`;
-          const linuxVerify = `curl -fsSL ${downloadBase}/downloads/${binaryName}.sha256 | awk '{print $1 "  ${agentBin}"}' | sha256sum -c`;
+          // S3 bucket is flat; self-hosted backend serves under /downloads/
+          const binaryUrl = isS3
+            ? `${downloadBase}/${binaryName}`
+            : `${downloadBase}/downloads/${binaryName}`;
+          const sha256Url = isS3
+            ? `${downloadBase}/${binaryName}.sha256`
+            : `${downloadBase}/downloads/${binaryName}.sha256`;
+
+          const linuxDownload = `curl -fsSL ${binaryUrl} -o ${agentBin} && chmod +x ${agentBin}`;
+          const linuxVerify = `curl -fsSL ${sha256Url} | awk '{print $1 "  ${agentBin}"}' | sha256sum -c`;
           const linuxEphemeral = `./${agentBin} \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode ephemeral`;
           const linuxService = `sudo ./${agentBin} \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode service \\\n  --poll-interval 30s`;
           const linuxSystemd = `[Unit]\nDescription=Nexplane Agent\nAfter=network.target\n\n[Service]\nExecStart=/usr/local/bin/nexplane-agent \\\n  --control-plane ${controlPlane} \\\n  --secret ${secret} \\\n  --mode service \\\n  --poll-interval 30s\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target`;
-          const winDownload = `Invoke-WebRequest -Uri "${downloadBase}/downloads/${binaryName}" -OutFile ${agentBin}`;
+          const winDownload = `Invoke-WebRequest -Uri "${binaryUrl}" -OutFile ${agentBin}`;
           const winEphemeral = `.\\${agentBin} \`\n  --control-plane ${controlPlane} \`\n  --secret ${secret} \`\n  --mode ephemeral`;
           const winService = `New-Service -Name "NexplaneAgent" \`\n  -BinaryPathName "C:\\nexplane\\nexplane-agent.exe --mode service --poll-interval 30s --control-plane ${controlPlane} --secret ${secret}" \`\n  -StartupType Automatic\nStart-Service NexplaneAgent`;
 
@@ -349,7 +362,20 @@ export function Settings() {
 
           return (
             <div className="mt-4 border-t border-slate-100 pt-4">
-              <h3 className="text-xs font-semibold text-slate-700 mb-3">Deploy Agent</h3>
+              <div className="flex items-center gap-2 mb-3">
+                <h3 className="text-xs font-semibold text-slate-700">Deploy Agent</h3>
+                {isS3 && (
+                  <a
+                    href={downloadBase}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-full hover:bg-amber-100 transition-colors"
+                  >
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M13.75 6.75a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5zM19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0zm-7-9a9 9 0 1 0 0 18A9 9 0 0 0 12 3zm0 16a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>
+                    Hosted on S3
+                  </a>
+                )}
+              </div>
               {!generatedSecret && (
                 <p className="text-xs text-slate-400 mb-3">
                   Replace <code className="font-mono bg-slate-100 px-1 rounded">&lt;YOUR-SECRET&gt;</code> with the secret from when you generated it. Rotate to get a new one.

@@ -37,7 +37,7 @@ Nexplane gives security teams a governed execution layer:
 │  Connectors · Settings · Runbooks · Compliance · Incident Response       │
 │  Vulnerability Remediation · Access Reviews · Maintenance Windows        │
 └───────────────────────────┬─────────────────────────────────────────────┘
-                            │ HTTP/REST
+                            │ HTTP/REST (localhost only — not public internet)
 ┌───────────────────────────▼─────────────────────────────────────────────┐
 │  FastAPI Backend  (Python 3.12)                                           │
 │                                                                          │
@@ -55,7 +55,7 @@ Nexplane gives security teams a governed execution layer:
 │  Connectors — change actions + ingest (38+ connectors)                   │
 │  aws · azure · gcp · cloudflare · okta · paloalto · ssh                 │
 │  active_directory · entra_id · crowdstrike · tenable · kubernetes        │
-│  google_workspace · github · slack · nexplane_agent · ...               │
+│  tailscale · terraform_local · ansible_local · ...                      │
 │                                                                          │
 │  Agent API  (/agent/register · /agent/jobs/next · /agent/result)        │
 │  IR API  (/ir/templates · /ir/execute · /ir/bundles)                     │
@@ -67,22 +67,31 @@ Nexplane gives security teams a governed execution layer:
 └───────────────────────────┬─────────────────────────────────────────────┘
                             │ SQLAlchemy async
 ┌───────────────────────────▼─────────────────────────────────────────────┐
-│  PostgreSQL 16  (16+ Alembic migrations, 30+ tables)                     │
+│  PostgreSQL 16  (22+ Alembic migrations, 30+ tables)                     │
 └──────────────────────────────────────────────────────────────────────────┘
 
                     ┌──────────────────────────────────────┐
                     │  Nexplane Agent (Go)                  │
                     │  linux/amd64 · arm64 · windows/amd64 │
                     │                                       │
-                    │  Self-updating — checks /downloads/   │
-                    │  version on startup, applies update   │
-                    │  atomically via os.Rename + exec()    │
+                    │  Self-updating — fetches version from │
+                    │  S3, downloads + SHA256-verifies new  │
+                    │  binary atomically via os.Rename +    │
+                    │  syscall.Exec                         │
                     │                                       │
                     │  Outbound poll only —                 │
                     │  no inbound SSH needed                │
                     └────────────┬──────────────────────────┘
                                  │ long-poll HTTP (outbound)
                                  └──► /agent/jobs/next
+
+                    ┌──────────────────────────────────────┐
+                    │  Agent Binary Distribution            │
+                    │  S3: nexplane-agent-downloads         │
+                    │  (us-east-1, public read)             │
+                    │  Published via scripts/upload-agent-  │
+                    │  to-s3.sh after each build            │
+                    └──────────────────────────────────────┘
 ```
 
 ---
@@ -94,16 +103,19 @@ Nexplane gives security teams a governed execution layer:
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS, TanStack Query v5, React Router v6 |
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 async, Pydantic v2 |
 | Database | PostgreSQL 16 |
-| Migrations | Alembic (16 migrations, 30+ tables) |
+| Migrations | Alembic (22+ migrations, 30+ tables) |
 | Workflow | Temporal-pattern abstraction (asyncio MVP, Temporal-ready) |
 | Auth | JWT + bcrypt |
 | AI | Anthropic Claude + OpenAI (multi-provider, default configurable) |
 | Secrets | `cryptography.fernet` (AES-256) with versioning for rotation; abstracted for HSM/Vault swap-out |
 | Agent | Go 1.26+, AWS SDK v2, `golang.org/x/sys`, lib/pq, go-sql-driver/mysql, go-mssqldb |
+| Agent Distribution | AWS S3 (public bucket, `nexplane-agent-downloads`, us-east-1) |
+| IaC Runtime | Terraform CLI 1.7.5, Ansible + community.aws, AWS session-manager-plugin |
+| VPN | Tailscale (kernel TUN mode in Docker for agent deploy + smoke testing) |
 | Connector SDKs | boto3, azure-sdk, google-cloud-*, msal, hvac, kubernetes, falconpy, pytenable, pan-os-python, httpx, paramiko, checkov, google-api-python-client, slack-sdk, PyGithub, google-auth-httplib2, croniter |
 | Scheduler | APScheduler 3.x (scanner poll, SLA enforcement, compliance scans, access reviews, maintenance windows, scheduled reboots) |
 | Graph | React Flow 11 + @dagrejs/dagre (project dependency visualization) |
-| Deployment | Docker Compose (multi-stage build: Go agent binaries + Python backend) |
+| Deployment | Docker Compose (multi-stage build: Go agent binaries → Python backend) |
 
 ---
 
@@ -117,7 +129,7 @@ cd nexplane
 docker compose up --build
 
 # Frontend:   http://localhost:3000
-# Backend:    http://localhost:8000
+# Backend:    http://localhost:8000  (localhost only — not exposed publicly)
 # API docs:   http://localhost:8000/docs
 ```
 
@@ -151,11 +163,14 @@ Full lifecycle: Draft → Planned → Awaiting Approval → Approved → Executi
 | Category | Types |
 |----------|-------|
 | Infrastructure | `dns_update`, `security_group_update`, `microsegmentation_policy`, `snapshot_asset` |
-| EC2 | `ec2_launch`, `ec2_start`, `ec2_stop`, `ec2_reboot`, `ec2_terminate` |
-| Agent (OS) | `patch_packages`, `patch_campaign`, `isolate_host`, `rolling_restart`, `canary_config_push`, `distribute_file`, `fleet_health_check` |
+| EC2 | `ec2_launch`, `ec2_start`, `ec2_stop`, `ec2_reboot`, `ec2_terminate`, `key_pair_create`, `key_pair_delete` |
+| SSM | `ssm_command` (run any approved SSM document against an EC2 instance) |
+| Network | `tailscale_join`, `tailscale_remove` |
+| Agent | `deploy_nexplane_agent`, `patch_packages`, `patch_campaign`, `isolate_host`, `rolling_restart`, `canary_config_push`, `distribute_file`, `fleet_health_check` |
 | Identity | `offboard_user`, `onboard_user`, `key_rotation`, `rotate_db_credentials`, `rotate_ssh_keys`, `rotate_api_key`, `rotate_service_account` |
 | Incident Response | `lockdown_account`, `phishing_response`, `preserve_evidence` |
-| IaC | `terraform_apply`, `ansible_playbook`, `helm_upgrade` |
+| IaC (local) | `terraform_local_apply`, `ansible_local_playbook` |
+| IaC (remote) | `terraform_apply`, `ansible_playbook`, `helm_upgrade` |
 | Database | `provision_db_user`, `deprovision_db_user`, `db_permission_change`, `configure_db_audit`, `promote_db_replica`, `db_connection_config` |
 | Backup / Recovery | `create_backup`, `verify_backup`, `restore_files`, `dr_failover`, `scheduled_reboot` |
 | Compliance | `enforce_cis_benchmark`, `collect_evidence` |
@@ -225,11 +240,22 @@ Closes the loop between scanner findings and automated fixes:
 
 Terraform, Ansible, and Helm as tracked, auditable Nexplane change types:
 
-- **Terraform** — two-phase: `terraform plan` output stored as blast radius → approval gate → `terraform apply`; rollback via `terraform apply` to previous state
-- **Ansible** — `--check` mode as preflight, full run with rollback playbook path
+- **Terraform (local)** — runs `terraform init/plan/apply` directly in the backend container with AWS credentials injected; creates S3 buckets and other AWS resources as tracked CRs with rollback via `terraform destroy`
+- **Ansible (local)** — `--check` mode as preflight, full run via SSM transport; `community.aws.aws_ssm` connection plugin with `session-manager-plugin`; supports `inventory_content` override for custom targets
+- **Terraform (remote)** — two-phase: plan output stored as blast radius → approval gate → apply; rollback via state restore
 - **Helm** — `helm upgrade --atomic` with automatic rollback on health check failure; `helm rollback` on demand
 
 The plan output (diff) renders in the change request detail view with green/red coloring.
+
+### Tailscale Integration
+
+The Tailscale connector enables secure mesh networking as a tracked change:
+
+- **`tailscale_join`** — install Tailscale on an EC2 instance via SSM and join the tailnet with a pre-authorized auth key; returns the instance's Tailscale IP
+- **`tailscale_remove`** — gracefully remove the node from the tailnet
+- **Auth key management** — store a reusable pre-authorized key in the connector credentials; no OAuth complexity
+
+The backend container itself joins the tailnet during smoke tests using kernel TUN mode (`/dev/net/tun`) so EC2 instances can reach the control plane via Tailscale after joining.
 
 ### Database Administration
 
@@ -263,54 +289,52 @@ Change actions (not just discovery) on previously read-only connectors:
 
 ### Connectors
 
-**Cloud & Infrastructure (10 connectors)**
+**Cloud & Infrastructure**
 
 | Connector | Key capabilities |
 |-----------|-----------------|
-| AWS | EC2 start/stop/terminate/launch; IAM key rotation; S3 access; security groups; EBS/RDS snapshots; DR failover; promote read replica |
+| AWS | EC2 lifecycle (launch/stop/start/terminate); key pairs; IAM key rotation; S3 access; security groups; EBS/RDS snapshots; DR failover; promote read replica; SSM commands |
 | Azure | VMs; NSGs; Entra users (disable/enable, revoke sessions, assign license); storage; Defender |
 | GCP | Compute; IAM; storage; firewall; SAs; SCC findings; stop/start/delete; block public buckets |
 | Cloudflare | WAF; firewall; access policies; block IP; SSL mode; DNS |
 | Palo Alto | Address objects/rules/zones; create/delete rules; block IP; commit |
+| Tailscale | Join/remove nodes; auth key management; mesh networking |
 | Active Directory | Discover/disable stale accounts; move OU; rotate service account passwords |
 | CrowdStrike | Isolate host; RTR commands; prevention policy; host containment |
 | Tenable | Launch/pause/resume scans; export; trigger remediation verification |
 | SSH | Execute approved command templates; check service status; tail logs |
-| Nexplane Agent | Full OS hardening + all new command packages (see below) |
+| Nexplane Agent | Full OS hardening + all command packages (see below) |
 
-**Identity & Access (4 connectors)**
-
-| Connector | Key capabilities |
-|-----------|-----------------|
-| Okta | Suspend/deactivate; reset MFA; revoke sessions; force enrollment; rotate API key; rotate service account |
-| Microsoft Entra ID | Disable/enable; reset MFA; block sign-in; remove from Teams; assign/remove license; revoke sessions |
-| HashiCorp Vault | Discover engines/policies/leases; rotate secrets; revoke leases; seal vault |
-| GitHub | Branch protection; suspend member; revoke PATs; archive repos; disable Actions |
-
-**SaaS (4 connectors with change actions)**
+**IaC & Configuration Management**
 
 | Connector | Key capabilities |
 |-----------|-----------------|
-| Google Workspace | Suspend/unsuspend; remove from groups; reset 2FA; revoke OAuth tokens; wipe mobile device |
-| Slack | Deactivate/reactivate user |
-| Kubernetes | Restart/scale deployments; network policies; RBAC; rotate secrets; Helm upgrade/rollback |
-| Helm | Discover releases/history; upgrade; rollback; uninstall |
+| terraform_local | Apply/destroy Terraform plans locally in the backend container; AWS credentials injected |
+| ansible_local | Run Ansible playbooks via SSM transport or local connection; check + apply lifecycle |
+| Terraform (remote) | Two-phase plan→apply via external Terraform CLI |
+| Ansible (remote) | Remote playbook execution |
+| Helm | Upgrade/rollback Kubernetes releases |
+| AWS CloudFormation, Pulumi, Azure Bicep, Checkov, SaltStack, Chef InSpec | Discovery and execution |
 
-**Security Tools / EDR (4 connectors)**
+**Identity & Access**
+
+Okta · Microsoft Entra ID · HashiCorp Vault · GitHub
+
+**SaaS**
+
+Google Workspace · Slack · Kubernetes · Helm
+
+**Security Tools / EDR**
 
 SentinelOne · Microsoft Defender for Endpoint · Snyk · Qualys
 
-**Cloud Security & Discovery (3 connectors)**
+**Cloud Security & Discovery**
 
 RunZero · Wiz · Zscaler
 
-**IaC & Configuration Management (9 connectors)**
+**Workflow & Observability**
 
-Terraform · Ansible · AWS CloudFormation · Pulumi · Azure Bicep · Checkov · SaltStack · Chef InSpec · Helm
-
-**Workflow & Observability (7 connectors)**
-
-Jira · PagerDuty · ServiceNow · Splunk · Datadog · Google Workspace · PagerDuty
+Jira · PagerDuty · ServiceNow · Splunk · Datadog
 
 ---
 
@@ -318,12 +342,23 @@ Jira · PagerDuty · ServiceNow · Splunk · Datadog · Google Workspace · Page
 
 A cross-platform Go binary that reverses the connection direction: the agent polls the control plane for jobs and executes signed commands. No inbound SSH required.
 
-**Self-updating:** On startup the agent fetches `/downloads/version`, downloads and SHA256-verifies the new binary if behind, atomically replaces itself via `os.Rename` + `syscall.Exec`. Windows agents log a manual-update message.
+**Distribution:** Binaries are published to a public S3 bucket after each build:
+```
+https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/
+  nexplane-agent-linux-amd64-{VERSION}
+  nexplane-agent-linux-arm64-{VERSION}
+  nexplane-agent-windows-amd64-{VERSION}.exe
+  + .sha256 sidecar for each
+  version  (plain text: current version)
+```
+
+**Self-updating:** On startup the agent fetches the `version` file from S3, downloads and SHA256-verifies the new binary if behind, atomically replaces itself via `os.Rename` + `syscall.Exec`. Windows agents log a manual-update message.
 
 **Security model:**
 - Bearer token authentication (shared HMAC secret, generated in Settings)
 - Each job payload signed with HMAC-SHA256; agent verifies before executing
 - Agent registers itself — the managed machine appears as an Asset automatically
+- Binaries downloaded from S3 directly by the managed machine — the Nexplane control plane is never a download proxy
 
 **Agent command packages:**
 
@@ -337,19 +372,14 @@ A cross-platform Go binary that reverses the connection direction: the agent pol
 | `credrotation` | `rotate_db_credentials` (generate, update DB user, update config, restart service), `rotate_ssh_keys` (fingerprint-based), `update_agent_env_file` | Linux + Windows |
 | `iac` | `terraform_plan`, `terraform_apply`, `terraform_rollback`, `ansible_check`, `ansible_run`, `helm_diff`, `helm_upgrade`, `helm_rollback` | Linux |
 | `fleet` | `restart_service`, `push_config_file` (with backup), `distribute_file`, `health_check` | Linux + Windows |
-| `backup` | `create_backup` (restic), `restore_files` (restic with path filter + SHA256 verify) | Linux + Windows |
-| `reboot` | `graceful_reboot`, `verify_post_reboot` (service health check) | Linux + Windows |
+| `backup` | `create_backup` (restic), `restore_files` (restic with path filter + SHA256 verify) | Both |
+| `reboot` | `graceful_reboot`, `verify_post_reboot` (service health check) | Both |
 | `dbadmin` | `provision_db_user`, `deprovision_db_user`, `grant_permissions`, `revoke_permissions`, `configure_db_audit`, `db_connection_config` | PostgreSQL, MySQL, MSSQL |
 | `ossecurity` | SELinux, AppArmor, seccomp, sysctl, iptables, kernel modules, mount hardening, auditd, FIM, eBPF | Linux |
 | `linuxauth` | PAM, SSH, CA certs, NTP, user/group audit, privesc audit | Linux |
 | `winharden` | LAPS, Credential Guard, PowerShell CLM, AppLocker, SMB, BitLocker, Windows Firewall, TLS, RDP, audit policy, registry | Windows |
-| `crossplatform` | TLS certificates, DNS resolver, software inventory, syslog forwarding | Linux + Windows |
+| `crossplatform` | TLS certificates, DNS resolver, software inventory, syslog forwarding | Both |
 | `linuxupgrade` | In-place or containerize-and-migrate OS upgrades | Linux |
-| `estimatesize` | Disk space preflight | Both |
-| `changip` | IP address change (IPv4/IPv6/DHCP) | Both |
-| `configsyslog` | Syslog forwarding (rsyslog/syslog-ng/NXLog/WEF) | Both |
-| `virtualize` | Disk imaging (dd/losetup/VHD/robocopy) | Both |
-| `uploadimage` | S3 multipart upload | Both |
 
 ---
 
@@ -399,135 +429,85 @@ nexplane/
 │       ├── reboot/                      # Graceful reboot + post-reboot verify
 │       ├── dbadmin/                     # PostgreSQL, MySQL, MSSQL user/permission management
 │       ├── ossecurity/                  # Linux MAC/kernel/integrity hardening
-│       ├── ebpf/                        # eBPF program management
 │       ├── linuxauth/                   # PAM, SSH, CA certs, NTP, user audit
 │       ├── winharden/                   # Windows security hardening suite
 │       ├── crossplatform/               # TLS, DNS, software inventory
-│       ├── linuxupgrade/                # Linux in-place and containerize-and-migrate
-│       ├── estimatesize/                # Disk space preflight
-│       ├── changip/                     # IP address change
-│       ├── configsyslog/                # Syslog forwarding
-│       ├── virtualize/                  # Disk imaging
-│       └── uploadimage/                 # S3 multipart upload
+│       └── linuxupgrade/                # Linux in-place and containerize-and-migrate
 │
 ├── backend/
-│   ├── Dockerfile                       # Multi-stage: agent binaries → Python backend
+│   ├── Dockerfile                       # Multi-stage: Go agent binaries → Python backend
+│   │                                    # Includes: Tailscale, Terraform 1.7.5, Ansible,
+│   │                                    # community.aws collection, session-manager-plugin
 │   ├── seed.py                          # Demo data (org, users, assets, connectors, CRs, projects)
-│   ├── alembic/versions/                # 16 migrations (001→016), 30+ tables
+│   ├── alembic/versions/                # 22+ migrations (001→022), 30+ tables
 │   └── app/
 │       ├── main.py                      # App factory + router registration
 │       ├── models/
-│       │   ├── change_request.py        # 30+ ChangeType values, fleet/IR status values
-│       │   ├── runbook.py               # Runbook, RunbookStep, RunbookExecution, RunbookStepResult
-│       │   ├── vulnerability.py         # VulnerabilityFinding, RemediationPolicy, RemediationSLA
-│       │   ├── compliance.py            # ComplianceBaseline, ChangeFreezeWindow
-│       │   ├── maintenance_window.py    # Fleet maintenance scheduling
-│       │   ├── access_review.py         # AccessReview + access_review_change_requests join table
-│       │   ├── access_review_schedule.py # Recurring access review scheduling
-│       │   └── ...                      # asset, connector, project, agent, org_settings, etc.
+│       │   ├── change_request.py        # 35+ ChangeType values, fleet/IR status values
+│       │   ├── connector.py             # ConnectorType including tailscale/terraform_local/ansible_local
+│       │   ├── asset.py                 # AssetType including key_pair, cloud_account, storage_bucket
+│       │   └── ...                      # runbook, vulnerability, compliance, maintenance_window, etc.
 │       ├── routers/
-│       │   ├── runbooks.py              # /runbooks + /executions (CRUD, trigger, resume checkpoint)
-│       │   ├── vulnerability.py         # /vulnerability (findings, policies, SLA, webhook ingest)
-│       │   ├── compliance.py            # /compliance (baselines, freeze windows, evidence ZIP)
-│       │   ├── incident_response.py     # /ir (templates, execute, bundles)
-│       │   ├── access_reviews.py        # /access-reviews (collect, decisions, approve, changes)
-│       │   ├── maintenance_windows.py   # /maintenance-windows CRUD + status
 │       │   └── ...                      # change_requests, assets, connectors, projects, agent, etc.
 │       ├── services/
-│       │   ├── runbook_service.py       # RunbookService: fork, trigger, version snapshot
-│       │   ├── runbook_executor.py      # RunbookExecutor: change/condition/checkpoint/parallel steps
-│       │   ├── runbook_cr_bridge.py     # Bridges executor to ChangeRequest model
-│       │   ├── iac_executor.py          # Two-phase IaC execution (plan → approval → apply)
-│       │   ├── fleet_executor.py        # Rolling restart, canary push, distribute file, health check
-│       │   ├── vuln_asset_matcher.py    # Finding → Nexplane asset matching by IP/hostname
-│       │   ├── vuln_remediation_engine.py # Finding → change request generation
-│       │   ├── identity_resolution.py   # Email → per-connector account lookup
-│       │   ├── change_execution.py      # Step output propagation (produces/consumes)
-│       │   ├── secrets_service.py       # Fernet AES-256 + versioning (rotate/rollback)
-│       │   ├── scheduler_service.py     # APScheduler: 6+ recurring jobs
-│       │   └── ...                      # ai_service, ingest_service, safety/planning engine
-│       ├── compliance/
-│       │   ├── freeze.py                # require_no_active_freeze FastAPI dependency
-│       │   └── drift.py                 # detect_drift, run_drift_detection weekly job
-│       ├── jobs/
-│       │   ├── sla_enforcement.py       # Mark overdue findings, auto-create CRs
-│       │   ├── finding_asset_match.py   # Retry unmatched findings against asset inventory
-│       │   └── scanner_poll.py          # Pull findings from Qualys/Tenable APIs
-│       ├── seed/
-│       │   └── runbook_templates.py     # 3 seed runbooks: Onboarding, IR, Patch Campaign
-│       ├── connectors/
-│       │   ├── catalog/                 # Per-connector JSON catalogs (38+ connectors)
-│       │   ├── change_type_definitions/ # 30+ change type JSON definitions
-│       │   └── executors/               # Real API implementations
-│       │       ├── nexplane_agent/      # Agent command dispatch + patch/compliance/fleet
-│       │       ├── aws/                 # EC2, IAM, S3, SGs, RDS, EBS, Route53, DR failover
-│       │       ├── google_workspace/    # suspend, remove_from_groups, reset_2fa, revoke_oauth, wipe_device
-│       │       ├── github/              # remove_member, revoke_pats, branch_protection, archive, actions
-│       │       ├── slack/               # deactivate_user, reactivate_user
-│       │       ├── entra_id/            # remove_from_teams, assign/remove_license, revoke_sessions
-│       │       ├── kubernetes/          # restart/scale deployment, RBAC, network policy, Helm
-│       │       ├── active_directory/    # rotate service account password (ldap3)
-│       │       ├── okta/                # rotate API key, rotate service account
-│       │       ├── offboard_user/       # 8-step kill switch across all identity connectors
-│       │       └── onboard_user/        # 6-step provisioning across all identity connectors
-│       └── tests/                       # 200+ passing tests
+│       │   └── ...                      # ai_service, ingest_service, safety/planning engine,
+│       │                                # connector_service (commit _auto_asset after each step)
+│       ├── workflows/
+│       │   └── activities.py            # DB session commit after each step; _auto_asset persistence
+│       └── connectors/
+│           ├── catalog/                 # Per-connector JSON catalogs (38+ connectors)
+│           ├── change_type_definitions/ # 35+ change type JSON definitions
+│           └── executors/
+│               ├── aws/                 # EC2, IAM, S3, SSM, EBS, Route53, key pairs,
+│               │                        # Tailscale join/remove, agent deploy (S3 download)
+│               ├── terraform_local/     # terraform_plan_local, terraform_apply_local, terraform_destroy_local
+│               ├── ansible_local/       # ansible_check_local, ansible_run_local (_runner.py with
+│               │                        # SSM + localhost inventory modes)
+│               ├── nexplane_agent/      # Agent command dispatch + patch/compliance/fleet
+│               └── ...                  # google_workspace, github, slack, entra_id, kubernetes, etc.
+│
+├── tests/
+│   └── smoke/
+│       └── test_aws_live.py             # Live AWS smoke test — Phases A–D
+│                                        # Phase A: key pair + EC2 + SSM + Tailscale + agent deploy
+│                                        # Phase B: patch audit + system info + CloudWatch (via SSM)
+│                                        # Phase C: Terraform local (S3 bucket lifecycle)
+│                                        # Phase D: Ansible local CR + htop install/remove via SSM
+│
+├── scripts/
+│   └── upload-agent-to-s3.sh           # Extract binaries from Docker image, upload to S3
 │
 ├── frontend/
 │   └── src/
 │       ├── pages/
-│       │   ├── Runbooks.tsx             # Runbook list + trigger
-│       │   ├── RunbookEditor.tsx        # Step builder (change/condition/checkpoint/parallel)
-│       │   ├── RunbookExecution.tsx     # Live progress + checkpoint resume UI
-│       │   ├── Compliance.tsx           # CIS scores, control breakdown, drift alerts, evidence
-│       │   ├── VulnerabilityRemediation.tsx # CVE blast-radius + FindingQueue + SLAWidget
-│       │   ├── BackupRecovery.tsx       # On-demand backup + restore request
-│       │   ├── ScheduledOperations.tsx  # Scheduled reboots, access review schedules
-│       │   ├── MaintenanceWindows.tsx   # Fleet maintenance window CRUD
-│       │   ├── AccessReviews.tsx        # Access review list + decision UI
-│       │   ├── Projects.tsx             # Project list
-│       │   ├── ProjectDetail.tsx        # AI panel + List/Graph tab
-│       │   ├── Settings.tsx             # AI providers + agent secret + remediation policies
-│       │   ├── Connectors.tsx           # Connector cards + credentials + schedule + discovery
-│       │   ├── Assets.tsx               # Asset inventory with tag search + connector filter
-│       │   └── ChangeRequestDetail.tsx  # Full CR detail + IR tab + batch progress + plan output panel
-│       ├── components/
-│       │   ├── FreezeAlert.tsx          # Amber banner during active change freeze
-│       │   ├── IRPlaybookLauncher.tsx   # IR playbook card grid + parameter modal
-│       │   ├── IRStepStatusBadge.tsx    # Colored status indicators for IR steps
-│       │   ├── FindingQueue.tsx         # Paginated vulnerability findings with SLA badges
-│       │   ├── SLAWidget.tsx            # Per-severity SLA status summary
-│       │   ├── RemediationPolicyEditor.tsx # Policy CRUD UI in Settings
-│       │   ├── AIPanel.tsx              # Conversational AI planning panel
-│       │   ├── CredentialModal.tsx      # Per-connector credential configuration
-│       │   ├── ScheduleModal.tsx        # Recurring ingest interval picker
-│       │   ├── Layout.tsx               # App shell with FreezeAlert polling
-│       │   ├── Sidebar.tsx              # Navigation (all sections including new ones)
-│       │   └── ProjectGraph/            # Dependency DAG (React Flow + Dagre)
-│       └── hooks/
-│           └── useRunbooks.ts           # TanStack Query hooks for runbook API
+│       │   ├── Settings.tsx             # AI providers + agent secret + S3 download links
+│       │   └── ...                      # all other pages
+│       └── ...
 │
 ├── docs/superpowers/
-│   ├── specs/                           # 13 design specs (agent self-update + 12 sysadmin workflows)
-│   └── plans/                           # 13 implementation plans
+│   ├── specs/                           # Design specs
+│   └── plans/                          # Implementation plans
 │
-└── docker-compose.yml
+└── docker-compose.yml                   # Backend bound to 127.0.0.1:8000 (not public internet)
 ```
 
 ---
 
 ## Building the Agent
 
-The agent is built inside Docker as part of `docker compose build`. Binaries are served at `/downloads/`:
+The agent is compiled inside the Docker multi-stage build. After building, publish the binaries to S3:
 
-```
-nexplane-agent-linux-amd64-0.1.0
-nexplane-agent-linux-arm64-0.1.0
-nexplane-agent-windows-amd64-0.1.0.exe
-+ .sha256 sidecar for each
-version   (plain text: 0.1.0)
+```bash
+# Build the Docker image (compiles Go agent for linux/amd64, linux/arm64, windows/amd64)
+docker compose build backend
+
+# Upload binaries to S3
+./scripts/upload-agent-to-s3.sh
 ```
 
-**To build locally:**
+The script extracts binaries from the built image and uploads them to `s3://nexplane-agent-downloads` with correct cache headers. The `version` file (60s cache) and immutable binaries (1-year cache) are uploaded separately.
+
+**To build agent locally:**
 
 ```bash
 cd agent
@@ -544,12 +524,13 @@ GOOS=linux GOARCH=amd64 go build -ldflags="-X main.Version=0.1.0" -o dist/nexpla
 
 ### Running the Agent
 
-Generate an agent secret in **Settings → Agent Configuration** (admin only), then use the one-liner from the Deploy Agent panel (pre-filled with your control plane URL, secret, and platform).
+Generate an agent secret in **Settings → Agent Configuration** (admin only). The Deploy Agent panel pre-fills platform-specific install commands with your control plane URL, secret, and current version — resolved live from S3.
 
-**Ephemeral (run once):**
+**One-liner (Linux x86_64):**
 ```bash
-curl -fsSL http://localhost:8000/downloads/nexplane-agent-linux-amd64-0.1.0 -o nexplane-agent && chmod +x nexplane-agent
-./nexplane-agent --control-plane http://localhost:8000 --secret <your-secret> --mode ephemeral
+VERSION=$(curl -fsSL https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/version)
+curl -fsSL "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/nexplane-agent-linux-amd64-${VERSION}" \
+  -o nexplane-agent && chmod +x nexplane-agent
 ```
 
 **Persistent service (systemd):**
@@ -589,12 +570,59 @@ Start-Service NexplaneAgent
 
 ---
 
+## Live AWS Smoke Test
+
+End-to-end integration test that creates and destroys real AWS resources against a live account. Verifies the full chain from Nexplane CR → AWS API → asset inventory.
+
+```bash
+docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
+  --base-url http://localhost:8000 \
+  --email admin@acme.example \
+  --password admin123 \
+  --phases A,B,C,D \
+  --tailscale-auth-key tskey-auth-<your-key>
+```
+
+**Prerequisites:**
+- AWS connector configured with credentials that have EC2, SSM, IAM, S3, and Tailscale permissions
+- `NexplaneEC2TestProfile` IAM instance profile with `AmazonSSMManagedInstanceCore` + `CloudWatchAgentServerPolicy`
+- Tailscale connector configured with a reusable pre-authorized auth key
+- Agent secret generated in Settings
+
+**Phases:**
+
+| Phase | What it tests | AWS resources created |
+|-------|--------------|----------------------|
+| **A** | Key pair create → EC2 launch → SSM command → Tailscale join → Agent deploy from S3 | EC2 instance, key pair |
+| **B** | SSM patch audit, system info collection, CloudWatch agent install | (uses Phase A instance) |
+| **C** | Terraform local: S3 bucket create + destroy | S3 bucket |
+| **D** | Ansible local playbook CR + htop install/remove via SSM | (uses Phase A instance) |
+
+All resources are created under the `nexplane-smoke-test-*` naming prefix and are terminated/deleted in cleanup, which runs even on failure.
+
+**What gets verified per phase:**
+- Phase A: key pair appears in asset inventory; instance appears in inventory with correct `instance_id`; SSM connectivity; Tailscale mesh join; agent binary downloads from S3 and service starts
+- Phase B: SSM `yum check-update --security` completes; `uname`/`df`/`free` command output collected; CloudWatch agent installed
+- Phase C: `terraform apply` creates the bucket; CR completes successfully; Terraform state managed in local working directory
+- Phase D: `ansible_local_playbook` CR goes through check + apply lifecycle; htop installed and removed via SSM
+
+**Run individual phases:**
+```bash
+# Phase A only (quickest — ~8 minutes)
+--phases A
+
+# Phase C only (Terraform, no EC2 needed)
+--phases C
+```
+
+---
+
 ## Settings
 
 | Setting | Who | Notes |
 |---------|-----|-------|
 | AI Providers (Anthropic, OpenAI) | Admin | API keys per provider; select default. Encrypted at rest. |
-| Agent secret | Admin | Shared HMAC secret. Shown once — store securely. Deploy panel pre-fills commands. |
+| Agent secret | Admin | Shared HMAC secret. Shown once — store securely. Deploy panel pre-fills commands with S3 download URL. |
 | Connector credentials | Operator+ | Per-connector API credentials. Encrypted, never returned in GET. |
 | Remediation policies | Admin | Per-severity: auto-generate CR, auto-approve, SLA days. |
 | Maintenance windows | Admin | Cron-scheduled windows when changes are allowed. |
@@ -638,13 +666,21 @@ npm run dev
 ### Running Tests
 
 ```bash
-# Backend (200+ tests)
+# Backend unit tests (200+ tests)
 cd backend
 pytest
 
-# Agent (22 packages)
+# Agent tests (22 packages)
 cd agent
 go test ./...
+
+# Live AWS smoke test (requires AWS credentials + real account)
+docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
+  --base-url http://localhost:8000 \
+  --email admin@acme.example \
+  --password admin123 \
+  --phases A,B,C,D \
+  --tailscale-auth-key tskey-auth-<key>
 ```
 
 > **Note:** When running via Docker Compose on Windows, Vite's file watcher may not pick up changes. Run:
@@ -662,10 +698,17 @@ go test ./...
 | `ENVIRONMENT` | `development` | Environment name |
 | `AI_MODEL` | `claude-sonnet-4-6` | Anthropic model for AI planning |
 | `WEBHOOK_SECRET` | (dev key) | HMAC key for vulnerability scanner webhook verification |
+| `NEXPLANE_AGENT_DOWNLOAD_URL` | `https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com` | S3 base URL for agent binary downloads; override for self-hosted distributions |
 
 ---
 
-## Safety Design
+## Security Design
+
+### Network Exposure
+
+The backend API binds to `127.0.0.1:8000` — it is not exposed to the public internet. The frontend (port 3000) is the only externally accessible service in the default Docker Compose configuration. Agent binary distribution is handled entirely by S3, not by the backend.
+
+### Safety Engine
 
 | Scenario | Behavior |
 |----------|----------|
@@ -702,5 +745,5 @@ Key endpoint groups:
 - `/maintenance-windows/*` — CRUD, status check
 - `/agent/*` — agent registration, job dispatch, result reporting
 - `/settings/*` — AI providers, agent secret, remediation policies
-- `/downloads/*` — versioned agent binaries + SHA256 checksums + version file (unauthenticated)
+- `/downloads/*` — versioned agent binaries + SHA256 checksums + version file (served from backend for development; production uses S3)
 - `/audit-events/*` — immutable audit trail
