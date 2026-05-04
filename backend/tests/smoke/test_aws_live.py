@@ -122,8 +122,48 @@ class NexplaneClient:
         return self.wait_for_completion(cr_id, title)
 
 
+def _delete_smoke_snapshots(client: NexplaneClient) -> None:
+    """Delete any EBS snapshots tagged nexplane=smoke-test-* directly via AWS."""
+    try:
+        from app.database import AsyncSessionLocal
+        from app.models.connector import Connector, ConnectorType
+        from app.services.connector_service import _attach_credentials
+        import asyncio, boto3
+
+        async def _get_creds():
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+                result = await db.execute(select(Connector).where(Connector.connector_type == ConnectorType.aws))
+                connector = result.scalars().first()
+                if connector:
+                    await _attach_credentials(connector, db)
+                    return getattr(connector, 'credentials', {})
+            return {}
+
+        creds = asyncio.run(_get_creds())
+        if not creds:
+            return
+        ec2 = boto3.client('ec2',
+            aws_access_key_id=creds['access_key_id'],
+            aws_secret_access_key=creds['secret_access_key'],
+            region_name=creds.get('region', 'us-east-1'),
+        )
+        snapshots = ec2.describe_snapshots(Owners=['self'], Filters=[
+            {'Name': 'tag:nexplane', 'Values': ['smoke-test-*', 'smoke-test-pre-stop', 'smoke-test-pre-terminate']},
+        ]).get('Snapshots', [])
+        for snap in snapshots:
+            try:
+                ec2.delete_snapshot(SnapshotId=snap['SnapshotId'])
+                print(f"  Deleted snapshot {snap['SnapshotId']}")
+            except Exception as e:
+                print(f"  ⚠️  Could not delete snapshot {snap['SnapshotId']}: {e}")
+    except Exception as e:
+        print(f"  ⚠️  Snapshot cleanup skipped: {e}")
+
+
 def cleanup(client: NexplaneClient) -> None:
-    """Terminate any running nexplane-smoke-test instances and delete test key pairs."""
+    """Terminate any running nexplane-smoke-test instances, delete test key pairs, and delete EBS snapshots.
+    Always runs — ensures nothing is left running or costing money after the test."""
     print("\n  Cleanup: terminating smoke-test instances...")
     resp = client.client.get(f"{client.base}/assets", params={"q": "nexplane-smoke-test"})
     if not resp.is_success:
@@ -146,6 +186,23 @@ def cleanup(client: NexplaneClient) -> None:
                     client.wait_for_completion(cr_id, f"Cleanup terminate {asset['name']}")
                 except Exception as e:
                     print(f"  ⚠️  Cleanup failed for {asset['name']}: {e}")
+        elif asset["asset_type"] == "key_pair" and "smoke-test" in asset.get("name", ""):
+            key_name = asset.get("asset_metadata", {}).get("key_name", asset["name"])
+            cloud_account_id = client.get_cloud_account_asset_id()
+            try:
+                cr_id = client.create_cr(
+                    f"Cleanup: delete key pair {key_name}",
+                    "key_pair_create",
+                    cloud_account_id,
+                    {"key_name": key_name},
+                )
+                # Use rollback (delete) by cancelling — or run delete directly
+                client.client.post(f"{client.base}/change-requests/{cr_id}/cancel")
+            except Exception as e:
+                print(f"  ⚠️  Key pair cleanup failed for {key_name}: {e}")
+
+    print("  Cleanup: deleting smoke-test EBS snapshots...")
+    _delete_smoke_snapshots(client)
 
 
 def main():
@@ -165,6 +222,7 @@ def main():
     cloud_account_id = client.get_cloud_account_asset_id()
     log(f"Cloud account asset: {cloud_account_id}")
 
+    passed = False
     try:
         # Step 1: Create key pair
         print("\n[Step 1] Create key pair")
@@ -267,17 +325,18 @@ def main():
         print("\n" + "=" * 60)
         print("✅ ALL SMOKE TESTS PASSED")
         print("=" * 60)
+        passed = True
 
     except SystemExit:
-        print("\n" + "=" * 60)
-        print("❌ SMOKE TEST FAILED — running cleanup")
-        print("=" * 60)
-        cleanup(client)
-        sys.exit(1)
+        passed = False
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}")
+        passed = False
+    finally:
         cleanup(client)
-        sys.exit(1)
+        if not passed:
+            print("\n❌ SMOKE TEST FAILED")
+            sys.exit(1)
 
 
 if __name__ == "__main__":
