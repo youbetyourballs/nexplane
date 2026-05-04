@@ -30,11 +30,10 @@ async def _real_execute(parameters: dict, creds: dict) -> dict:
     ttl = parameters.get("ttl", 300)
     proxied = parameters.get("proxied", False)
 
-    # Find existing record to get previous value and record_id
     params = f"?name={record_name}&type={record_type}" if record_name else ""
     data = await cf_get(f"/zones/{zone_id}/dns_records{params}", creds)
     records = data.get("result", [])
-    previous_value = records[0].get("content") if records else "unknown"
+    previous_value = records[0].get("content") if records else None
     record_id = records[0].get("id") if records else None
 
     body = {"type": record_type, "name": record_name, "content": new_value, "ttl": ttl, "proxied": proxied}
@@ -43,16 +42,22 @@ async def _real_execute(parameters: dict, creds: dict) -> dict:
     else:
         resp = await cf_post(f"/zones/{zone_id}/dns_records", body, creds)
 
-    result = resp.get("result", {})
+    result_rec = resp.get("result", {})
+    final_record_id = result_rec.get("id", record_id)
+
+    verify = await cf_get(f"/zones/{zone_id}/dns_records/{final_record_id}", creds)
+    verified_value = verify.get("result", {}).get("content")
+    if verified_value != new_value:
+        raise RuntimeError(f"DNS record write unconfirmed: expected {new_value!r}, got {verified_value!r}")
+
     return {
         "action": "update_dns_record",
         "record_name": record_name,
         "record_type": record_type,
-        "record_id": result.get("id", record_id),
+        "record_id": final_record_id,
         "previous_value": previous_value,
         "new_value": new_value,
         "ttl": ttl,
-        "propagation_id": _fake_id("prop-"),
         "completed_at": datetime.now(timezone.utc).isoformat(),
     }
 
