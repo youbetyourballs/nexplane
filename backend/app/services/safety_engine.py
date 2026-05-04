@@ -105,6 +105,15 @@ def score_change_request(change_request: ChangeRequest, assets: list[Asset]) -> 
                 score=25,
             ))
 
+    elif change_request.change_type == ChangeType.ssm_command:
+        # SSM uses AWS IAM trust — freeform commands are permitted but scored as medium risk
+        score += 20
+        risk_factors.append(RiskFactor(
+            name="ssm_command_execution",
+            description="SSM command execution via AWS Systems Manager (IAM-gated)",
+            score=20,
+        ))
+
     if change_request.change_type == ChangeType.microsegmentation_policy:
         score += 20
         risk_factors.append(RiskFactor(
@@ -130,7 +139,8 @@ def score_change_request(change_request: ChangeRequest, assets: list[Asset]) -> 
     # so we don't require an explicit rollback_strategy field for them.
     _IMPLICIT_ROLLBACK_TYPES = {
         ChangeType.ec2_stop, ChangeType.ec2_start, ChangeType.ec2_reboot,
-        ChangeType.ec2_stop_start, ChangeType.ec2_launch,
+        ChangeType.ec2_stop_start, ChangeType.ec2_launch, ChangeType.ssm_command,
+        ChangeType.key_pair_create,
     }
     desired = change_request.desired_outcome or {}
     rollback_strategy = desired.get("rollback_strategy")
