@@ -142,6 +142,7 @@ def score_change_request(change_request: ChangeRequest, assets: list[Asset]) -> 
         ChangeType.ec2_stop_start, ChangeType.ec2_launch, ChangeType.ssm_command,
         ChangeType.key_pair_create,
         ChangeType.tailscale_join, ChangeType.tailscale_remove, ChangeType.deploy_nexplane_agent,
+        ChangeType.terraform_local_apply,
     }
     desired = change_request.desired_outcome or {}
     rollback_strategy = desired.get("rollback_strategy")

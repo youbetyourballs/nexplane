@@ -1,0 +1,10 @@
+{
+  "change_type": "terraform_local_apply",
+  "display_name": "Terraform Apply (Local CLI)",
+  "steps": [
+    {"generic_action": "terraform_plan_local",  "purpose": "preflight_validate", "required": true},
+    {"generic_action": "terraform_apply_local", "purpose": "execute",            "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

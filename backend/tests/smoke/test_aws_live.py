@@ -388,7 +388,40 @@ def run_phase_b(client: NexplaneClient, phase_a_result: dict) -> None:
 def run_phase_c(client: NexplaneClient, cloud_account_id: str) -> None:
     """Phase C: local Terraform S3 bucket lifecycle."""
     print("\n[Phase C] Local Terraform")
-    log("Phase C not yet implemented — requires terraform_local connector (see Phase C plan)")
+    import random
+    bucket_suffix = random.randint(10000, 99999)
+    bucket_name = "nexplane-smoke-test-" + str(bucket_suffix)
+
+    tf_content = (
+        'terraform {\n'
+        '  required_providers {\n'
+        '    aws = {\n'
+        '      source  = "hashicorp/aws"\n'
+        '      version = "~> 5.0"\n'
+        '    }\n'
+        '  }\n'
+        '}\n\n'
+        'provider "aws" {}\n\n'
+        'resource "aws_s3_bucket" "smoke_test" {\n'
+        '  bucket        = "' + bucket_name + '"\n'
+        '  force_destroy = true\n'
+        '}\n'
+    )
+
+    client.run_cr(
+        "Smoke: terraform apply S3 bucket", "terraform_local_apply", cloud_account_id,
+        {"tf_content": tf_content, "rollback_strategy": "terraform_destroy_local"},
+    )
+    log("Terraform applied — bucket: " + bucket_name)
+
+    time.sleep(5)
+    s3_assets = client.get("/assets", params={"asset_type": "storage_bucket", "q": bucket_name})
+    if s3_assets:
+        log("Bucket appears in inventory: " + s3_assets[0]["id"])
+    else:
+        print("  ⚠️  Bucket not yet in inventory — may need manual discovery run")
+
+    log("Phase C complete")
 
 
 # ---------------------------------------------------------------------------

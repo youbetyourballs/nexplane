@@ -220,6 +220,14 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
     outcomeTemplate: JSON.stringify({ s3_upload_url: null, rollback_strategy: "rollback_unavailable" }, null, 2),
   },
   // IaC
+  terraform_local_apply: {
+    label: "Terraform Apply (Local CLI)",
+    description: "Run terraform plan + apply using the local Terraform binary inside the Nexplane backend container.",
+    outcomeTemplate: JSON.stringify({
+      tf_content: "# Paste your .tf content here\n",
+      rollback_strategy: "terraform_destroy_local",
+    }, null, 2),
+  },
   terraform_apply: {
     label: "Terraform Apply",
     description: "Run terraform plan → review in Nexplane → terraform apply on approval.",
@@ -391,7 +399,7 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   },
   {
     label: "IaC",
-    types: ["terraform_apply", "ansible_playbook", "helm_upgrade"],
+    types: ["terraform_local_apply", "terraform_apply", "ansible_playbook", "helm_upgrade"],
   },
   {
     label: "Database",
@@ -460,6 +468,7 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   lockdown_account: "identity",
   phishing_response: "identity",
   // AWS account-level actions
+  terraform_local_apply: "cloud_account",
   s3_block_public_access: "cloud_account",
   iam_enforce_mfa: "cloud_account",
   // Database actions

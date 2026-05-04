@@ -203,7 +203,8 @@ export type ConnectorType =
   | "datadog"
   | "zscaler"
   | "google_workspace"
-  | "tailscale";
+  | "tailscale"
+  | "terraform_local";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 
@@ -260,7 +261,8 @@ export type ChangeType =
   | "ssm_command"
   | "tailscale_join"
   | "tailscale_remove"
-  | "deploy_nexplane_agent";
+  | "deploy_nexplane_agent"
+  | "terraform_local_apply";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 

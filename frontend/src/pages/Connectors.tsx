@@ -52,6 +52,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   zscaler: "Zscaler",
   google_workspace: "Google Workspace",
   tailscale: "Tailscale",
+  terraform_local: "Terraform (Local CLI)",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -96,6 +97,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   zscaler: "🛡️",
   google_workspace: "🌐",
   tailscale: "🔒",
+  terraform_local: "🏗️",
 };
 
 // Primary ingest action per connector type — controls Run Discovery button and Schedule sync badge

@@ -28,6 +28,7 @@ class ChangeType(str, enum.Enum):
     tailscale_join = "tailscale_join"
     tailscale_remove = "tailscale_remove"
     deploy_nexplane_agent = "deploy_nexplane_agent"
+    terraform_local_apply = "terraform_local_apply"
     # Patch management
     patch_packages = "patch_packages"
     patch_campaign = "patch_campaign"

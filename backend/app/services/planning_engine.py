@@ -94,6 +94,18 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
             "nexplane_secret": desired.get("nexplane_secret", ""),
         },
         "remove_nexplane_agent":  {"instance_id": desired.get("instance_id", "")},
+        "terraform_plan_local":    {
+            "tf_content": desired.get("tf_content", ""),
+            "working_dir": desired.get("working_dir", ""),
+        },
+        "terraform_apply_local":   {
+            "working_dir": desired.get("working_dir", ""),
+            "plan_file": desired.get("plan_file", ""),
+        },
+        "terraform_destroy_local": {
+            "working_dir": desired.get("working_dir", ""),
+            "cleanup_dir": desired.get("cleanup_dir", True),
+        },
         "terminate_instance":     {"instance_id": desired.get("instance_id", ""), "confirm_terminate": desired.get("confirm_terminate", False)},
     }
     return resolvers.get(generic_action, {})

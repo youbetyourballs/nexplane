@@ -1,0 +1,54 @@
+{
+  "connector_type": "terraform_local",
+  "display_name": "Terraform (Local CLI)",
+  "credential_fields": [],
+  "actions": [
+    {
+      "action_id": "terraform_plan_local",
+      "generic_action": "terraform_plan_local",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Terraform Plan (Local)",
+      "description": "Runs terraform plan using the local Terraform CLI binary inside the Nexplane backend container.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "tf_content", "type": "string", "required": false},
+        {"name": "working_dir", "type": "string", "required": false}
+      ],
+      "executor": "terraform_local.terraform_plan_local",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "terraform_apply_local",
+      "generic_action": "terraform_apply_local",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Terraform Apply (Local)",
+      "description": "Runs terraform apply using the local Terraform CLI binary.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "working_dir", "type": "string", "required": false},
+        {"name": "plan_file", "type": "string", "required": false}
+      ],
+      "executor": "terraform_local.terraform_apply_local",
+      "rollback_action": "terraform_destroy_local",
+      "rollback_connector_type": "terraform_local",
+      "estimated_duration_seconds": 120
+    },
+    {
+      "action_id": "terraform_destroy_local",
+      "generic_action": "terraform_destroy_local",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Terraform Destroy (Local)",
+      "description": "Runs terraform destroy to remove all resources in a working directory.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "working_dir", "type": "string", "required": true},
+        {"name": "cleanup_dir", "type": "boolean", "required": false, "default": true}
+      ],
+      "executor": "terraform_local.terraform_destroy_local",
+      "estimated_duration_seconds": 120
+    }
+  ]
+}
