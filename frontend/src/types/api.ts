@@ -264,7 +264,20 @@ export type ChangeType =
   | "tailscale_remove"
   | "deploy_nexplane_agent"
   | "terraform_local_apply"
-  | "ansible_local_playbook";
+  | "ansible_local_playbook"
+  | "iam_user_create"
+  | "iam_user_delete"
+  | "s3_bucket_create"
+  | "s3_bucket_delete"
+  | "s3_lifecycle_configure"
+  | "route53_zone_create"
+  | "route53_record_upsert"
+  | "route53_record_delete"
+  | "rds_instance_create"
+  | "rds_instance_delete"
+  | "rds_snapshot_create"
+  | "cloudwatch_alarm_create"
+  | "cloudwatch_alarm_delete";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
