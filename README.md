@@ -168,6 +168,11 @@ Full lifecycle: Draft → Planned → Awaiting Approval → Approved → Executi
 | Network | `tailscale_join`, `tailscale_remove` |
 | Agent | `deploy_nexplane_agent`, `patch_packages`, `patch_campaign`, `isolate_host`, `rolling_restart`, `canary_config_push`, `distribute_file`, `fleet_health_check` |
 | Identity | `offboard_user`, `onboard_user`, `key_rotation`, `rotate_db_credentials`, `rotate_ssh_keys`, `rotate_api_key`, `rotate_service_account` |
+| IAM | `iam_user_create`, `iam_user_delete` |
+| S3 Storage | `s3_bucket_create`, `s3_bucket_delete`, `s3_lifecycle_configure` |
+| DNS (Route53) | `route53_zone_create`, `route53_record_upsert`, `route53_record_delete` |
+| RDS | `rds_instance_create`, `rds_instance_delete`, `rds_snapshot_create` |
+| Observability | `cloudwatch_alarm_create`, `cloudwatch_alarm_delete` |
 | Incident Response | `lockdown_account`, `phishing_response`, `preserve_evidence` |
 | IaC (local) | `terraform_local_apply`, `ansible_local_playbook` |
 | IaC (remote) | `terraform_apply`, `ansible_playbook`, `helm_upgrade` |
@@ -293,7 +298,7 @@ Change actions (not just discovery) on previously read-only connectors:
 
 | Connector | Key capabilities |
 |-----------|-----------------|
-| AWS | EC2 lifecycle (launch/stop/start/terminate); key pairs; IAM key rotation; S3 access; security groups; EBS/RDS snapshots; DR failover; promote read replica; SSM commands |
+| AWS | EC2 lifecycle (launch/stop/start/reboot/terminate); key pairs; IAM users (create/delete); S3 buckets (create/delete/lifecycle); Route53 zones + records (create/upsert/delete); RDS instances (create/delete/snapshot); CloudWatch alarms (create/delete); security groups; EBS snapshots; SSM commands; Tailscale join/remove; agent deploy |
 | Azure | VMs; NSGs; Entra users (disable/enable, revoke sessions, assign license); storage; Defender |
 | GCP | Compute; IAM; storage; firewall; SAs; SCC findings; stop/start/delete; block public buckets |
 | Cloudflare | WAF; firewall; access policies; block IP; SSL mode; DNS |
@@ -439,11 +444,11 @@ nexplane/
 │   │                                    # Includes: Tailscale, Terraform 1.7.5, Ansible,
 │   │                                    # community.aws collection, session-manager-plugin
 │   ├── seed.py                          # Demo data (org, users, assets, connectors, CRs, projects)
-│   ├── alembic/versions/                # 22+ migrations (001→022), 30+ tables
+│   ├── alembic/versions/                # 23+ migrations (001→023), 30+ tables
 │   └── app/
 │       ├── main.py                      # App factory + router registration
 │       ├── models/
-│       │   ├── change_request.py        # 35+ ChangeType values, fleet/IR status values
+│       │   ├── change_request.py        # 48+ ChangeType values, fleet/IR status values
 │       │   ├── connector.py             # ConnectorType including tailscale/terraform_local/ansible_local
 │       │   ├── asset.py                 # AssetType including key_pair, cloud_account, storage_bucket
 │       │   └── ...                      # runbook, vulnerability, compliance, maintenance_window, etc.
@@ -456,10 +461,11 @@ nexplane/
 │       │   └── activities.py            # DB session commit after each step; _auto_asset persistence
 │       └── connectors/
 │           ├── catalog/                 # Per-connector JSON catalogs (38+ connectors)
-│           ├── change_type_definitions/ # 35+ change type JSON definitions
+│           ├── change_type_definitions/ # 48+ change type JSON definitions
 │           └── executors/
-│               ├── aws/                 # EC2, IAM, S3, SSM, EBS, Route53, key pairs,
-│               │                        # Tailscale join/remove, agent deploy (S3 download)
+│               ├── aws/                 # EC2, IAM users, S3 buckets/lifecycle, Route53 zones/records,
+│               │                        # RDS instances/snapshots, CloudWatch alarms, EBS snapshots,
+│               │                        # security groups, key pairs, SSM, Tailscale, agent deploy
 │               ├── terraform_local/     # terraform_plan_local, terraform_apply_local, terraform_destroy_local
 │               ├── ansible_local/       # ansible_check_local, ansible_run_local (_runner.py with
 │               │                        # SSM + localhost inventory modes)
@@ -468,11 +474,18 @@ nexplane/
 │
 ├── tests/
 │   └── smoke/
-│       └── test_aws_live.py             # Live AWS smoke test — Phases A–D
-│                                        # Phase A: key pair + EC2 + SSM + Tailscale + agent deploy
-│                                        # Phase B: patch audit + system info + CloudWatch (via SSM)
-│                                        # Phase C: Terraform local (S3 bucket lifecycle)
-│                                        # Phase D: Ansible local CR + htop install/remove via SSM
+│       └── test_aws_live.py             # Live AWS smoke test — Phases A–K
+│                                        # A: key pair + EC2 + SSM + Tailscale + agent deploy
+│                                        # B: patch audit + system info + CloudWatch (SSM)
+│                                        # C: Terraform local (S3 bucket lifecycle)
+│                                        # D: Ansible local CR + htop via SSM
+│                                        # E: EC2 stop/start/reboot/snapshot (rollback stack)
+│                                        # F: security group rule add/remove (rollback stack)
+│                                        # G: IAM user lifecycle (rollback stack)
+│                                        # H: S3 advanced — lifecycle/policy/public-access (rollback stack)
+│                                        # I: Route53 zone + A record CRUD (rollback stack)
+│                                        # J: RDS instance + snapshot lifecycle (~30 min, rollback stack)
+│                                        # K: CloudWatch alarms + SSM metric push (rollback stack)
 │
 ├── scripts/
 │   └── upload-agent-to-s3.sh           # Extract binaries from Docker image, upload to S3
@@ -572,47 +585,68 @@ Start-Service NexplaneAgent
 
 ## Live AWS Smoke Test
 
-End-to-end integration test that creates and destroys real AWS resources against a live account. Verifies the full chain from Nexplane CR → AWS API → asset inventory.
+End-to-end integration test that creates and destroys real AWS resources against a live account. Verifies the full chain from Nexplane CR → AWS API → asset inventory. All phases use the **rollback stack pattern** — each CR is pushed to a LIFO stack; the `finally` block triggers Nexplane's own rollback system in reverse order, followed by boto3 safety-net cleanup.
 
 ```bash
+# Quick run (no RDS — ~15–25 minutes depending on phases)
 docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --base-url http://localhost:8000 \
   --email admin@acme.example \
   --password admin123 \
-  --phases A,B,C,D \
+  --phases A,B,C,D,E,F,G,H,I,K \
   --tailscale-auth-key tskey-auth-<your-key>
+
+# Full run including RDS (~35 min additional for Phase J)
+docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
+  --phases A,B,C,D,E,F,G,H,I,J,K \
+  --tailscale-auth-key tskey-auth-<your-key> \
+  --base-url http://localhost:8000 \
+  --email admin@acme.example \
+  --password admin123
 ```
 
 **Prerequisites:**
-- AWS connector configured with credentials that have EC2, SSM, IAM, S3, and Tailscale permissions
+- AWS connector configured with credentials covering EC2, SSM, IAM, S3, Route53, RDS, CloudWatch
 - `NexplaneEC2TestProfile` IAM instance profile with `AmazonSSMManagedInstanceCore` + `CloudWatchAgentServerPolicy`
 - Tailscale connector configured with a reusable pre-authorized auth key
 - Agent secret generated in Settings
 
 **Phases:**
 
-| Phase | What it tests | AWS resources created |
-|-------|--------------|----------------------|
-| **A** | Key pair create → EC2 launch → SSM command → Tailscale join → Agent deploy from S3 | EC2 instance, key pair |
-| **B** | SSM patch audit, system info collection, CloudWatch agent install | (uses Phase A instance) |
-| **C** | Terraform local: S3 bucket create + destroy | S3 bucket |
-| **D** | Ansible local playbook CR + htop install/remove via SSM | (uses Phase A instance) |
+| Phase | What it tests | AWS resources created | Requires |
+|-------|--------------|----------------------|---------|
+| **A** | Key pair create → EC2 launch → SSM → Tailscale join → Agent deploy from S3 | EC2 instance, key pair | — |
+| **B** | SSM patch audit, system info, CloudWatch agent install | — | Phase A |
+| **C** | Terraform local: S3 bucket create + destroy | S3 bucket | — |
+| **D** | Ansible local playbook CR + htop install/remove via SSM | — | Phase A |
+| **E** | EC2 stop/start/reboot + EBS snapshot; rollback stack cleanup | EBS snapshot (deleted) | Phase A |
+| **F** | Security group rule add/remove via CR; boto3 verification | Security group (deleted) | — |
+| **G** | IAM user create → attach policy → rotate key → disable/enable → detach → delete | IAM user (deleted) | — |
+| **H** | S3 bucket create → lifecycle → bucket policy → public access block → delete | S3 bucket (deleted) | — |
+| **I** | Route53 private zone + A record create/update/delete; boto3 verification | Hosted zone (deleted) | — |
+| **J** | RDS db.t3.micro create → snapshot → verify → delete (~25–35 min) | RDS instance + snapshot (deleted) | — |
+| **K** | CloudWatch alarms create → trigger via SSM custom metric → verify ALARM state → rollback | CloudWatch alarms (deleted) | Phase A |
 
-All resources are created under the `nexplane-smoke-test-*` naming prefix and are terminated/deleted in cleanup, which runs even on failure.
+All resources are created under `nexplane-smoke-*` / `nexplane-smoke-test-*` naming prefixes and cleaned up even on failure. The `cleanup()` function in Phase A handles EC2/key-pair teardown; each phase's `finally` block handles its own resources via the rollback stack + boto3 safety net.
 
-**What gets verified per phase:**
-- Phase A: key pair appears in asset inventory; instance appears in inventory with correct `instance_id`; SSM connectivity; Tailscale mesh join; agent binary downloads from S3 and service starts
-- Phase B: SSM `yum check-update --security` completes; `uname`/`df`/`free` command output collected; CloudWatch agent installed
-- Phase C: `terraform apply` creates the bucket; CR completes successfully; Terraform state managed in local working directory
-- Phase D: `ansible_local_playbook` CR goes through check + apply lifecycle; htop installed and removed via SSM
+**Rollback stack pattern:**
+Each phase maintains a `rollback_stack: list[tuple[str, str]]` of `(cr_id, label)`. On success, resources are deleted by triggering rollback of the creation CRs (exercising Nexplane's own rollback system). On failure, the `finally` block iterates `reversed(rollback_stack)` calling `client.rollback_cr()`, followed by direct boto3 cleanup as a safety net.
 
 **Run individual phases:**
 ```bash
-# Phase A only (quickest — ~8 minutes)
+# Phase A only (quickest — ~8 minutes for EC2 + agent)
 --phases A
 
-# Phase C only (Terraform, no EC2 needed)
+# Phase C only (Terraform, no EC2 needed — ~2 minutes)
 --phases C
+
+# Phases F, G, H standalone (no EC2 needed)
+--phases F
+--phases G
+--phases H
+
+# Phase J standalone (RDS — ~30 minutes, costs ~$0.02)
+--phases J
 ```
 
 ---
@@ -675,12 +709,14 @@ cd agent
 go test ./...
 
 # Live AWS smoke test (requires AWS credentials + real account)
+# Quick (no RDS):
 docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --base-url http://localhost:8000 \
   --email admin@acme.example \
   --password admin123 \
-  --phases A,B,C,D \
+  --phases A,B,C,D,E,F,G,H,I,K \
   --tailscale-auth-key tskey-auth-<key>
+# Full (includes RDS ~30 min): --phases A,B,C,D,E,F,G,H,I,J,K
 ```
 
 > **Note:** When running via Docker Compose on Windows, Vite's file watcher may not pick up changes. Run:
