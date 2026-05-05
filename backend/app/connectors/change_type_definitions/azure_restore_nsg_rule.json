@@ -1,0 +1,9 @@
+{
+  "change_type": "azure_restore_nsg_rule",
+  "display_name": "Restore Azure NSG Rule",
+  "steps": [
+    {"generic_action": "restore_nsg_rule", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
