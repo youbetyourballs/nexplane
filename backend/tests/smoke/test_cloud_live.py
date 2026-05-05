@@ -1872,19 +1872,11 @@ def run_phase_o(client: NexplaneClient, phase_n_result: dict,
         log(f"Disk snapshot created: {snapshot_name}")
 
         if azure_resource_group:
-            _get_azure_compute_client()  # prime cache
-        if _azure_creds_cache and azure_resource_group:
             try:
-                from azure.identity import ClientSecretCredential
-                from azure.mgmt.compute import ComputeManagementClient
-                cred = ClientSecretCredential(
-                    tenant_id=_azure_creds_cache['tenant_id'],
-                    client_id=_azure_creds_cache['client_id'],
-                    client_secret=_azure_creds_cache['client_secret'],
-                )
-                compute = ComputeManagementClient(cred, _azure_creds_cache['subscription_id'])
-                snap = compute.snapshots.get(resource_group, snapshot_name)
-                log(f"Snapshot verified: provisioning_state={snap.provisioning_state}, size={snap.disk_size_gb}GB")
+                compute_verify = _get_azure_compute_client()
+                if compute_verify:
+                    snap = compute_verify.snapshots.get(resource_group, snapshot_name)
+                    log(f"Snapshot verified: provisioning_state={snap.provisioning_state}, size={snap.disk_size_gb}GB")
             except Exception as e:
                 print(f"  ⚠️  Snapshot verify skipped: {e}")
 
@@ -1899,18 +1891,12 @@ def run_phase_o(client: NexplaneClient, phase_n_result: dict,
             print("  [Phase O cleanup — rollback stack]")
             for cr_id, label in reversed(rollback_stack):
                 client.rollback_cr(cr_id, label)
-        if snapshot_name and _azure_creds_cache and azure_resource_group:
+        if snapshot_name and azure_resource_group:
             try:
-                from azure.identity import ClientSecretCredential
-                from azure.mgmt.compute import ComputeManagementClient
-                cred = ClientSecretCredential(
-                    tenant_id=_azure_creds_cache['tenant_id'],
-                    client_id=_azure_creds_cache['client_id'],
-                    client_secret=_azure_creds_cache['client_secret'],
-                )
-                compute = ComputeManagementClient(cred, _azure_creds_cache['subscription_id'])
-                compute.snapshots.begin_delete(azure_resource_group, snapshot_name).result()
-                print(f"  Safety net: deleted snapshot {snapshot_name}")
+                compute_safety = _get_azure_compute_client()
+                if compute_safety:
+                    compute_safety.snapshots.begin_delete(azure_resource_group, snapshot_name).result()
+                    print(f"  Safety net: deleted snapshot {snapshot_name}")
             except Exception as e2:
                 print(f"  ⚠️  Safety net snapshot delete failed: {e2}")
 
