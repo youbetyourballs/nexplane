@@ -21,6 +21,7 @@ class AssetRead(BaseModel):
     organization_id: uuid.UUID
     connector_id: Optional[uuid.UUID] = None
     connector_name: Optional[str] = None
+    connector_type: Optional[str] = None
     name: str
     asset_type: AssetType
     environment: Environment
