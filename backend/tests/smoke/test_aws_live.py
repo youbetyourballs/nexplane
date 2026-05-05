@@ -1194,8 +1194,8 @@ def run_phase_p(client: NexplaneClient, cloud_account_id: str) -> None:
             log("IAM user enabled (boto3 verified)")
 
         # 7. Detach policy via CR rollback
-        attach_cr_id, _ = rollback_stack.pop()  # pop enable_iam_user
-        client.rollback_cr(attach_cr_id, "enable_iam_user rollback")
+        enable_cr_id, _ = rollback_stack.pop()  # pop enable_iam_user
+        client.rollback_cr(enable_cr_id, "enable_iam_user rollback")
         disable_cr_id, _ = rollback_stack.pop()  # pop disable_iam_user
         client.rollback_cr(disable_cr_id, "disable_iam_user rollback")
         rotate_cr_id, _ = rollback_stack.pop()  # pop rotate_iam_key
@@ -1438,7 +1438,7 @@ def run_phase_t(client: NexplaneClient, phase_a_result: dict) -> None:
     print("\n[Phase T] Agent Lifecycle + Resource Tagging")
 
     instance_id = phase_a_result.get("instance_id", "")
-    instance_asset_id = phase_a_result.get("instance_asset")
+    instance_asset_id = phase_a_result.get("instance_asset", {}).get("id", "")
     if not instance_id:
         fail("Phase T requires a running EC2 instance from Phase A")
 
@@ -1456,9 +1456,9 @@ def run_phase_t(client: NexplaneClient, phase_a_result: dict) -> None:
         instance_arn = f"arn:aws:ec2:{region}:{account_id}:instance/{instance_id}"
 
         # 1. Tag EC2 instance via CR
-        target_asset = instance_asset_id if instance_asset_id else client.get_cloud_account_asset_id()
+        target_asset_id = instance_asset_id if instance_asset_id else client.get_cloud_account_asset_id()
         cr = client.run_cr(
-            "Smoke-T: tag EC2 instance", "tag_resource", target_asset,
+            "Smoke-T: tag EC2 instance", "tag_resource", target_asset_id,
             {"resource_arn": instance_arn, "tags": {"nexplane-smoke-tag": "true", "phase": "T"}},
         )
         rollback_stack.append((cr["id"], "tag_resource"))
@@ -1472,7 +1472,7 @@ def run_phase_t(client: NexplaneClient, phase_a_result: dict) -> None:
 
         # 2. Remove Nexplane agent via CR
         cr = client.run_cr(
-            "Smoke-T: remove nexplane agent", "remove_nexplane_agent", target_asset,
+            "Smoke-T: remove nexplane agent", "remove_nexplane_agent", target_asset_id,
             {"instance_id": instance_id},
         )
         rollback_stack.append((cr["id"], "remove_nexplane_agent"))
@@ -1482,11 +1482,11 @@ def run_phase_t(client: NexplaneClient, phase_a_result: dict) -> None:
 
         # 3. Re-deploy agent via CR
         agent_secret = client.get_agent_secret()
-        backend_ip = phase_a_result.get("backend_tailscale_ip", "")
+        backend_ip = phase_a_result.get("backend_ip", "")
         control_plane_url = f"http://{backend_ip}:8000" if backend_ip else "http://localhost:8000"
 
         cr = client.run_cr(
-            "Smoke-T: redeploy nexplane agent", "deploy_nexplane_agent", target_asset,
+            "Smoke-T: redeploy nexplane agent", "deploy_nexplane_agent", target_asset_id,
             {
                 "instance_id": instance_id,
                 "agent_secret": agent_secret,
