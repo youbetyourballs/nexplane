@@ -464,6 +464,41 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
     description: "Snapshot the boot disk of a Compute Engine instance.",
     outcomeTemplate: JSON.stringify({ instance_name: "", zone: "us-central1-a", snapshot_name: "", rollback_strategy: "delete_disk_snapshot" }, null, 2),
   },
+  azure_vm_create: {
+    label: "Launch Azure VM",
+    description: "Create a new Azure VM with agent, SSH, or password connection.",
+    outcomeTemplate: JSON.stringify({ vm_name: "", resource_group: "", location: "eastus", vm_size: "Standard_B1s", connection_mode: "agent_extension", rollback_strategy: "terminate_vm" }, null, 2),
+  },
+  azure_vm_stop: {
+    label: "Stop Azure VM",
+    description: "Deallocate a running Azure VM to halt compute charges.",
+    outcomeTemplate: JSON.stringify({ vm_name: "", resource_group: "", rollback_strategy: "start_vm" }, null, 2),
+  },
+  azure_vm_start: {
+    label: "Start Azure VM",
+    description: "Start a deallocated Azure VM.",
+    outcomeTemplate: JSON.stringify({ vm_name: "", resource_group: "", rollback_strategy: "deallocate_vm" }, null, 2),
+  },
+  azure_vm_reboot: {
+    label: "Reboot Azure VM",
+    description: "Restart a running Azure VM.",
+    outcomeTemplate: JSON.stringify({ vm_name: "", resource_group: "", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  azure_vm_delete: {
+    label: "Delete Azure VM",
+    description: "Permanently delete an Azure VM and its network resources.",
+    outcomeTemplate: JSON.stringify({ vm_name: "", resource_group: "", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  azure_vm_snapshot: {
+    label: "Create Azure Disk Snapshot",
+    description: "Snapshot the OS disk of an Azure VM.",
+    outcomeTemplate: JSON.stringify({ vm_name: "", resource_group: "", snapshot_name: "", rollback_strategy: "delete_disk_snapshot" }, null, 2),
+  },
+  azure_run_command: {
+    label: "Run Command on Azure VM",
+    description: "Execute a shell command via Azure Run Command (no SSH required).",
+    outcomeTemplate: JSON.stringify({ vm_name: "", resource_group: "", command: "", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
   generic_remediation: {
     label: "Generic Remediation",
     description: "Generic remediation action for scanner findings.",
@@ -541,6 +576,11 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   {
     label: "GCE Instances",
     types: ["gce_instance_create", "gce_stop", "gce_start", "gce_instance_reboot", "gce_instance_delete", "gce_disk_snapshot"],
+  },
+  {
+    label: "Azure VMs",
+    types: ["azure_vm_create", "azure_vm_stop", "azure_vm_start", "azure_vm_reboot",
+            "azure_vm_delete", "azure_vm_snapshot", "azure_run_command"],
   },
   {
     label: "Backup & Recovery",
@@ -630,6 +670,14 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   gce_instance_reboot: "server",
   gce_instance_delete: "server",
   gce_disk_snapshot: "server",
+  // Azure change types
+  azure_vm_create: "cloud_account",
+  azure_vm_stop: "server",
+  azure_vm_start: "server",
+  azure_vm_reboot: "server",
+  azure_vm_delete: "server",
+  azure_vm_snapshot: "server",
+  azure_run_command: "server",
   // Database actions
   rotate_db_credentials: "database",
   promote_db_replica: "database",
@@ -695,6 +743,12 @@ export function CreateChangeRequest() {
       }
       if (preAsset?.asset_metadata?.zone && "zone" in template) {
         template = { ...template, zone: preAsset.asset_metadata.zone as string };
+      }
+      if (preAsset?.asset_metadata?.vm_name && "vm_name" in template) {
+        template = { ...template, vm_name: preAsset.asset_metadata.vm_name as string };
+      }
+      if (preAsset?.asset_metadata?.resource_group && "resource_group" in template) {
+        template = { ...template, resource_group: preAsset.asset_metadata.resource_group as string };
       }
     }
 
