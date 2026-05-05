@@ -22,6 +22,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         policies = iam.list_attached_user_policies(UserName=username)['AttachedPolicies']
         for p in policies:
             iam.detach_user_policy(UserName=username, PolicyArn=p['PolicyArn'])
+        # Delete inline policies (delete_user fails if any remain)
+        inline = iam.list_user_policies(UserName=username)['PolicyNames']
+        for name in inline:
+            iam.delete_user_policy(UserName=username, PolicyName=name)
         # Delete login profile if exists
         try:
             iam.delete_login_profile(UserName=username)
