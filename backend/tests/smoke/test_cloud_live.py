@@ -1554,7 +1554,10 @@ def run_phase_l(client: NexplaneClient, cloud_account_id: str,
             print("  ⚠️  Agent not yet registered — startup script may still be running")
 
         log("Phase L complete")
-        return {"instance_asset": instance_asset, "rollback_stack": rollback_stack}
+        result = {"instance_asset": instance_asset}
+        rollback_stack.clear()   # success — don't roll back in finally
+        instance_created = False  # success — don't safety-net delete
+        return result
 
     except Exception as e:
         print(f"\n❌ Phase L failed: {e}")
@@ -1648,6 +1651,7 @@ def run_phase_m(client: NexplaneClient, phase_l_result: dict, gcp_project: str) 
             except Exception as e:
                 print(f"  ⚠️  Snapshot verify skipped: {e}")
 
+        rollback_stack.clear()  # success — instance stays running, snapshot cleaned up separately
         log("Phase M complete")
 
     except Exception as e:
@@ -1659,6 +1663,8 @@ def run_phase_m(client: NexplaneClient, phase_l_result: dict, gcp_project: str) 
             for cr_id, label in reversed(rollback_stack):
                 client.rollback_cr(cr_id, label)
         # Safety net: delete snapshot
+        if snapshot_name and gcp_project:
+            _get_gcp_compute_client()  # prime credentials cache if not already loaded
         if snapshot_name and gcp_project and _gcp_creds_cache:
             try:
                 import json as _j
@@ -1695,7 +1701,7 @@ def main():
     phases = {p.strip().upper() for p in args.phases.split(",")}
 
     print("=" * 60)
-    print(f"Nexplane AWS Live Smoke Test — phases: {', '.join(sorted(phases))}")
+    print(f"Nexplane Multi-Cloud Live Smoke Test — phases: {', '.join(sorted(phases))}")
     print("=" * 60)
 
     client = NexplaneClient(args.base_url, args.email, args.password)
