@@ -51,6 +51,14 @@ class ChangeType(str, enum.Enum):
     gce_instance_reboot = "gce_instance_reboot"
     gce_instance_delete = "gce_instance_delete"
     gce_disk_snapshot = "gce_disk_snapshot"
+    # Azure VM lifecycle — Sub-project A
+    azure_vm_create = "azure_vm_create"
+    azure_vm_stop = "azure_vm_stop"
+    azure_vm_start = "azure_vm_start"
+    azure_vm_reboot = "azure_vm_reboot"
+    azure_vm_delete = "azure_vm_delete"
+    azure_vm_snapshot = "azure_vm_snapshot"
+    azure_run_command = "azure_run_command"
     # Patch management
     patch_packages = "patch_packages"
     patch_campaign = "patch_campaign"

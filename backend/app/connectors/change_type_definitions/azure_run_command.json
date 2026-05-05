@@ -1,0 +1,1 @@
+{"change_type":"azure_run_command","display_name":"Run Command on Azure VM","steps":[{"generic_action":"run_command","purpose":"execute","required":true}],"preflight_checks":["connector_reachable","asset_exists"],"verification_methods":["api_check"],"rollback_action":"rollback_unavailable","rollback_connector_type":"azure"}
