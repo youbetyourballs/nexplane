@@ -18,6 +18,16 @@ def test_health_check_mock():
     assert result["status"] == "RUNNING"
 
 
+def test_gce_change_types_in_enum():
+    from app.models.change_request import ChangeType
+    assert ChangeType.gce_instance_create == "gce_instance_create"
+    assert ChangeType.gce_stop == "gce_stop"
+    assert ChangeType.gce_start == "gce_start"
+    assert ChangeType.gce_instance_reboot == "gce_instance_reboot"
+    assert ChangeType.gce_instance_delete == "gce_instance_delete"
+    assert ChangeType.gce_disk_snapshot == "gce_disk_snapshot"
+
+
 def test_wait_instance_state_mock():
     import asyncio
     from app.connectors.executors.gcp.wait_instance_state import execute
