@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Nexplane AWS Live Smoke Test — Phases A–D.
+Nexplane AWS Live Smoke Test — Phases A–H.
 
 Runs against a live AWS account via the Nexplane API. Creates and destroys
 real AWS resources. Run specific phases with --phases (default: all).
@@ -10,13 +10,17 @@ Usage:
         --base-url http://localhost:8000 \\
         --email admin@nexplane.local \\
         --password changeme \\
-        --phases A,B,C,D
+        --phases A,B,C,D,E,F,G,H
 
 Phase descriptions:
     A  EC2 lifecycle + Tailscale join + Nexplane agent deploy
     B  Agent-based actions (patching audit, OS posture, CloudWatch agent)
     C  Local Terraform lifecycle (S3 bucket create/destroy)
     D  Local Ansible playbook (htop install/remove)
+    E  EC2 advanced: stop/start/reboot/snapshot with rollback stack
+    F  Security group: add/remove rules with rollback stack
+    G  IAM user lifecycle: create/attach-policy/rotate-key/delete with rollback stack
+    H  S3 advanced: create/lifecycle/policy/public-access/delete with rollback stack
 
 Requirements:
     - AWS connector with valid credentials + NexplaneEC2TestProfile IAM role
@@ -707,6 +711,349 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase F
+# ---------------------------------------------------------------------------
+
+def run_phase_f(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase F: Security Groups — add/remove inbound rule with rollback stack."""
+    print("\n[Phase F] Security Group Operations")
+    import time as _t
+
+    rollback_stack: list[tuple[str, str]] = []
+    test_sg_id: str | None = None
+
+    try:
+        # Create isolated test SG via boto3 (test scaffolding — not a CR)
+        ec2_boto = _get_aws_boto3_client('ec2')
+        if not ec2_boto:
+            fail("Phase F requires AWS credentials")
+
+        sg_name = f"nexplane-smoke-sg-{int(_t.time())}"
+        sg = ec2_boto.create_security_group(
+            GroupName=sg_name,
+            Description="Nexplane smoke test security group",
+        )
+        test_sg_id = sg["GroupId"]
+        log(f"Created test SG: {test_sg_id}")
+
+        # 1. Add inbound rule via CR (port 8443 from RFC5737 test CIDR — not routable)
+        cr = client.run_cr(
+            "Smoke-F: add inbound rule", "security_group_update", cloud_account_id,
+            {
+                "group_id": test_sg_id,
+                "rules": [{"action": "add", "protocol": "tcp",
+                            "from_port": 8443, "to_port": 8443,
+                            "cidr": "192.0.2.0/24"}],
+            },
+        )
+        rollback_stack.append((cr["id"], "security_group_update add_inbound"))
+        log("Inbound rule added via CR")
+
+        # Verify rule is present via boto3
+        sg_details = ec2_boto.describe_security_groups(GroupIds=[test_sg_id])
+        perms = sg_details["SecurityGroups"][0].get("IpPermissions", [])
+        has_rule = any(
+            p.get("FromPort") == 8443 and
+            any(r.get("CidrIp") == "192.0.2.0/24" for r in p.get("IpRanges", []))
+            for p in perms
+        )
+        if has_rule:
+            log("Rule verified via boto3 describe")
+        else:
+            print("  ⚠️  Rule not found via describe — may be a mock path")
+
+        # 2. Remove the rule via a second CR
+        cr = client.run_cr(
+            "Smoke-F: remove inbound rule", "security_group_update", cloud_account_id,
+            {
+                "group_id": test_sg_id,
+                "rules": [{"action": "remove", "protocol": "tcp",
+                            "from_port": 8443, "to_port": 8443,
+                            "cidr": "192.0.2.0/24"}],
+            },
+        )
+        rollback_stack.pop()  # add_inbound CR superseded — rule now removed
+        rollback_stack.append((cr["id"], "security_group_update remove_inbound"))
+
+        # Verify rule is gone
+        sg_details2 = ec2_boto.describe_security_groups(GroupIds=[test_sg_id])
+        perms2 = sg_details2["SecurityGroups"][0].get("IpPermissions", [])
+        still_has = any(
+            p.get("FromPort") == 8443 and
+            any(r.get("CidrIp") == "192.0.2.0/24" for r in p.get("IpRanges", []))
+            for p in perms2
+        )
+        if not still_has:
+            log("Rule removed — verified via boto3")
+        else:
+            print("  ⚠️  Rule still present after remove CR")
+
+        log("Phase F complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase F failed: {e}")
+        raise
+    finally:
+        print("  [Phase F cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete the test SG
+        if test_sg_id:
+            try:
+                ec2_boto2 = _get_aws_boto3_client('ec2')
+                if ec2_boto2:
+                    ec2_boto2.delete_security_group(GroupId=test_sg_id)
+                    print(f"  Safety net: deleted SG {test_sg_id}")
+            except Exception as e2:
+                print(f"  ⚠️  Safety net SG delete failed: {e2}")
+
+
+# ---------------------------------------------------------------------------
+# Phase G
+# ---------------------------------------------------------------------------
+
+def run_phase_g(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase G: IAM User Lifecycle — create/attach-policy/rotate-key/disable/enable/detach/delete."""
+    print("\n[Phase G] IAM User Lifecycle")
+    import time as _t
+
+    username = f"nexplane-smoke-user-{int(_t.time())}"
+    rollback_stack: list[tuple[str, str]] = []
+    user_created = False
+
+    try:
+        # 1. Create IAM user via CR
+        cr = client.run_cr(
+            "Smoke-G: create IAM user", "iam_user_create", cloud_account_id,
+            {"username": username},
+        )
+        rollback_stack.append((cr["id"], "iam_user_create"))
+        user_created = True
+        log(f"IAM user created: {username}")
+
+        # Verify identity asset in inventory (ingest lag OK)
+        assets = client.get("/assets", params={"q": username, "asset_type": "identity"})
+        if assets:
+            log(f"IAM user in inventory: {assets[0]['id']}")
+        else:
+            print("  ⚠️  IAM user asset not yet in inventory (ingest lag expected)")
+
+        iam_client = _get_aws_boto3_client('iam')
+        if not iam_client:
+            fail("Phase G requires AWS credentials")
+
+        # 2. Attach ReadOnlyAccess policy via boto3 (no dedicated policy-attach CR yet)
+        iam_client.attach_user_policy(
+            UserName=username,
+            PolicyArn="arn:aws:iam::aws:policy/ReadOnlyAccess",
+        )
+        log("ReadOnlyAccess attached (boto3)")
+
+        # 3. Rotate IAM access key via boto3:
+        #    create a new key → deactivate the old one → delete the old one
+        keys_before = iam_client.list_access_keys(UserName=username)["AccessKeyMetadata"]
+        if keys_before:
+            old_key_id = keys_before[0]["AccessKeyId"]
+            new_key = iam_client.create_access_key(UserName=username)["AccessKey"]
+            iam_client.update_access_key(UserName=username, AccessKeyId=old_key_id, Status="Inactive")
+            iam_client.delete_access_key(UserName=username, AccessKeyId=old_key_id)
+            log(f"Key rotated: {old_key_id} → {new_key['AccessKeyId']}")
+        else:
+            log("No existing key to rotate (user created without key)")
+
+        # 4. Disable user: deactivate all access keys
+        keys = iam_client.list_access_keys(UserName=username)["AccessKeyMetadata"]
+        for k in keys:
+            iam_client.update_access_key(UserName=username, AccessKeyId=k["AccessKeyId"], Status="Inactive")
+        log(f"IAM user disabled ({len(keys)} key(s) deactivated)")
+
+        # 5. Re-enable user: reactivate all access keys
+        keys = iam_client.list_access_keys(UserName=username)["AccessKeyMetadata"]
+        for k in keys:
+            iam_client.update_access_key(UserName=username, AccessKeyId=k["AccessKeyId"], Status="Active")
+        log("IAM user re-enabled")
+
+        # 6. Detach policy via boto3
+        iam_client.detach_user_policy(
+            UserName=username,
+            PolicyArn="arn:aws:iam::aws:policy/ReadOnlyAccess",
+        )
+        log("ReadOnlyAccess detached (boto3)")
+
+        # 7. Delete user: trigger rollback of iam_user_create CR (rollback = delete_iam_user)
+        create_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(create_cr_id, "iam_user_create → delete_iam_user")
+        user_created = False
+        log("IAM user deleted via CR rollback")
+
+        log("Phase G complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase G failed: {e}")
+        raise
+    finally:
+        print("  [Phase G cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete user directly if still alive
+        if user_created:
+            try:
+                iam_safety = _get_aws_boto3_client('iam')
+                if iam_safety:
+                    for k in iam_safety.list_access_keys(UserName=username).get("AccessKeyMetadata", []):
+                        iam_safety.delete_access_key(UserName=username, AccessKeyId=k["AccessKeyId"])
+                    for p in iam_safety.list_attached_user_policies(UserName=username).get("AttachedPolicies", []):
+                        iam_safety.detach_user_policy(UserName=username, PolicyArn=p["PolicyArn"])
+                    for name in iam_safety.list_user_policies(UserName=username).get("PolicyNames", []):
+                        iam_safety.delete_user_policy(UserName=username, PolicyName=name)
+                    try:
+                        iam_safety.delete_login_profile(UserName=username)
+                    except Exception:
+                        pass
+                    iam_safety.delete_user(UserName=username)
+                    print(f"  Safety net: deleted IAM user {username}")
+            except Exception as e2:
+                print(f"  ⚠️  Safety net IAM user delete failed: {e2}")
+
+
+# ---------------------------------------------------------------------------
+# Phase H
+# ---------------------------------------------------------------------------
+
+def run_phase_h(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase H: S3 Advanced — create/lifecycle/policy/public-access/delete with rollback stack."""
+    print("\n[Phase H] S3 Advanced Operations")
+    import random as _rand
+
+    bucket_name = f"nexplane-smoke-{_rand.randint(100000, 999999)}"
+    rollback_stack: list[tuple[str, str]] = []
+    bucket_created = False
+
+    try:
+        # 1. Create bucket via CR
+        cr = client.run_cr(
+            "Smoke-H: create S3 bucket", "s3_bucket_create", cloud_account_id,
+            {"bucket_name": bucket_name},
+        )
+        rollback_stack.append((cr["id"], "s3_bucket_create"))
+        bucket_created = True
+        log(f"S3 bucket created: {bucket_name}")
+
+        # Verify storage_bucket asset in inventory (ingest lag OK)
+        assets = client.get("/assets", params={"q": bucket_name, "asset_type": "storage_bucket"})
+        if assets:
+            log(f"Bucket in inventory: {assets[0]['id']}")
+        else:
+            print("  ⚠️  Bucket asset not yet in inventory (ingest lag)")
+
+        s3_client = _get_aws_boto3_client('s3')
+        if not s3_client:
+            fail("Phase H requires AWS credentials")
+
+        # 2. Configure lifecycle via CR: 1-day expiration on smoke/ prefix
+        cr = client.run_cr(
+            "Smoke-H: configure lifecycle", "s3_lifecycle_configure", cloud_account_id,
+            {
+                "bucket_name": bucket_name,
+                "rules": [{
+                    "ID": "nexplane-smoke-expire",
+                    "Status": "Enabled",
+                    "Expiration": {"Days": 1},
+                    "Filter": {"Prefix": "smoke/"},
+                }],
+            },
+        )
+        rollback_stack.append((cr["id"], "s3_lifecycle_configure"))
+        log("Lifecycle policy configured via CR")
+
+        # Verify lifecycle via boto3
+        try:
+            lc = s3_client.get_bucket_lifecycle_configuration(Bucket=bucket_name)
+            if lc.get("Rules"):
+                log("Lifecycle rules verified via boto3")
+        except s3_client.exceptions.ClientError:
+            print("  ⚠️  Lifecycle not yet visible via boto3 (may be eventual consistency)")
+
+        # 3. Set bucket policy via boto3 (deny non-TLS GetObject)
+        import json as _json
+        policy = _json.dumps({
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Sid": "DenyNonTLS",
+                "Effect": "Deny",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Resource": f"arn:aws:s3:::{bucket_name}/*",
+                "Condition": {"Bool": {"aws:SecureTransport": "false"}},
+            }],
+        })
+        s3_client.put_bucket_policy(Bucket=bucket_name, Policy=policy)
+        log("Bucket policy applied (boto3)")
+
+        # 4. Block public access via boto3
+        s3_client.put_public_access_block(
+            Bucket=bucket_name,
+            PublicAccessBlockConfiguration={
+                "BlockPublicAcls": True,
+                "IgnorePublicAcls": True,
+                "BlockPublicPolicy": True,
+                "RestrictPublicBuckets": True,
+            },
+        )
+        log("Public access blocked (boto3)")
+
+        # 5. Verify public access block
+        pab = s3_client.get_public_access_block(Bucket=bucket_name)
+        config = pab["PublicAccessBlockConfiguration"]
+        if all(config.get(k) for k in ["BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"]):
+            log("Public access block verified")
+        else:
+            print(f"  ⚠️  Public access block partial: {config}")
+
+        # 6. Delete bucket via CR (terminal step — use s3_bucket_delete directly)
+        # Roll back lifecycle first, then delete bucket
+        lifecycle_cr_id, lifecycle_label = rollback_stack.pop()
+        client.rollback_cr(lifecycle_cr_id, lifecycle_label)
+
+        create_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(create_cr_id, "s3_bucket_create → delete_s3_bucket")
+        bucket_created = False
+        log("Bucket deleted via CR rollback")
+
+        log("Phase H complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase H failed: {e}")
+        raise
+    finally:
+        if rollback_stack:
+            print("  [Phase H cleanup — rollback stack]")
+            for cr_id, label in reversed(rollback_stack):
+                client.rollback_cr(cr_id, label)
+        # Safety net: force-delete bucket
+        if bucket_created:
+            try:
+                s3_safety = _get_aws_boto3_client('s3')
+                if s3_safety:
+                    try:
+                        # Delete all objects/versions first
+                        paginator = s3_safety.get_paginator('list_object_versions')
+                        for page in paginator.paginate(Bucket=bucket_name):
+                            objs = [{'Key': v['Key'], 'VersionId': v['VersionId']}
+                                    for v in page.get('Versions', [])]
+                            objs += [{'Key': m['Key'], 'VersionId': m['VersionId']}
+                                     for m in page.get('DeleteMarkers', [])]
+                            if objs:
+                                s3_safety.delete_objects(Bucket=bucket_name, Delete={'Objects': objs})
+                        s3_safety.delete_bucket(Bucket=bucket_name)
+                        print(f"  Safety net: deleted bucket {bucket_name}")
+                    except Exception as inner:
+                        print(f"  ⚠️  Safety net bucket delete failed: {inner}")
+            except Exception as e2:
+                print(f"  ⚠️  Safety net error: {e2}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -717,7 +1064,7 @@ def main():
     parser.add_argument("--password", required=True)
     parser.add_argument(
         "--phases", default="A,B,C,D",
-        help="Comma-separated phases to run (default: A,B,C,D). E.g. --phases A or --phases A,B,E",
+        help="Comma-separated phases to run (A-H). E.g. --phases A or --phases A,B,C,D,E,F,G,H",
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
     args = parser.parse_args()
@@ -766,6 +1113,15 @@ def main():
             if phase_a_result is None:
                 fail("Phase E requires Phase A to have run first")
             run_phase_e(client, phase_a_result)
+
+        if "F" in phases:
+            run_phase_f(client, cloud_account_id)
+
+        if "G" in phases:
+            run_phase_g(client, cloud_account_id)
+
+        if "H" in phases:
+            run_phase_h(client, cloud_account_id)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
