@@ -150,6 +150,7 @@ async def get_asset(
     return AssetRead(
         **{k: v for k, v in asset.__dict__.items() if not k.startswith("_")},
         connector_name=asset.connector.name if asset.connector else None,
+        connector_type=asset.connector.connector_type.value if asset.connector else None,
     )
 
 
