@@ -115,6 +115,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             )
         ],
         network_interfaces=[compute_v1.NetworkInterface(
+            network="global/networks/default",
             access_configs=[compute_v1.AccessConfig(name="External NAT", type_="ONE_TO_ONE_NAT")]
         )],
         metadata=compute_v1.Metadata(items=metadata_items),
