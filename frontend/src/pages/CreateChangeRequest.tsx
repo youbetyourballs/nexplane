@@ -426,6 +426,44 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
     description: "Delete a CloudWatch alarm.",
     outcomeTemplate: JSON.stringify({ alarm_name: "", rollback_strategy: "rollback_unavailable" }, null, 2),
   },
+  gce_instance_create: {
+    label: "Launch GCE Instance",
+    description: "Create a new Compute Engine VM with agent, IAP, or SSH connection.",
+    outcomeTemplate: JSON.stringify({
+      name: "",
+      machine_type: "e2-micro",
+      zone: "us-central1-a",
+      image_family: "ubuntu-2204-lts",
+      image_project: "ubuntu-os-cloud",
+      connection_mode: "agent_startup",
+      rollback_strategy: "delete_instance",
+    }, null, 2),
+  },
+  gce_stop: {
+    label: "Stop GCE Instance",
+    description: "Gracefully stop a running Compute Engine instance.",
+    outcomeTemplate: JSON.stringify({ instance_name: "", zone: "us-central1-a", rollback_strategy: "start_instance" }, null, 2),
+  },
+  gce_start: {
+    label: "Start GCE Instance",
+    description: "Start a stopped Compute Engine instance.",
+    outcomeTemplate: JSON.stringify({ instance_name: "", zone: "us-central1-a", rollback_strategy: "stop_instance" }, null, 2),
+  },
+  gce_instance_reboot: {
+    label: "Reboot GCE Instance",
+    description: "Hard reset (reset) a Compute Engine instance.",
+    outcomeTemplate: JSON.stringify({ instance_name: "", zone: "us-central1-a", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  gce_instance_delete: {
+    label: "Delete GCE Instance",
+    description: "Permanently delete a Compute Engine instance.",
+    outcomeTemplate: JSON.stringify({ instance_name: "", zone: "us-central1-a", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  gce_disk_snapshot: {
+    label: "Create GCE Disk Snapshot",
+    description: "Snapshot the boot disk of a Compute Engine instance.",
+    outcomeTemplate: JSON.stringify({ instance_name: "", zone: "us-central1-a", snapshot_name: "", rollback_strategy: "delete_disk_snapshot" }, null, 2),
+  },
   generic_remediation: {
     label: "Generic Remediation",
     description: "Generic remediation action for scanner findings.",
@@ -499,6 +537,10 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   {
     label: "Observability",
     types: ["cloudwatch_alarm_create", "cloudwatch_alarm_delete"],
+  },
+  {
+    label: "GCE Instances",
+    types: ["gce_instance_create", "gce_stop", "gce_start", "gce_instance_reboot", "gce_instance_delete", "gce_disk_snapshot"],
   },
   {
     label: "Backup & Recovery",
@@ -581,6 +623,13 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   rds_snapshot_create: "database",
   cloudwatch_alarm_create: null,
   cloudwatch_alarm_delete: null,
+  // GCE change types
+  gce_instance_create: "cloud_account",
+  gce_stop: "server",
+  gce_start: "server",
+  gce_instance_reboot: "server",
+  gce_instance_delete: "server",
+  gce_disk_snapshot: "server",
   // Database actions
   rotate_db_credentials: "database",
   promote_db_replica: "database",
