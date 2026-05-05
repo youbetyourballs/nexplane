@@ -1,0 +1,11 @@
+{
+  "change_type": "route53_record_delete",
+  "display_name": "Delete DNS Record",
+  "steps": [
+    {"generic_action": "delete_route53_record", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "upsert_route53_record",
+  "rollback_connector_type": "aws"
+}

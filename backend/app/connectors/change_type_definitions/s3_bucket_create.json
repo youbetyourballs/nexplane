@@ -1,0 +1,11 @@
+{
+  "change_type": "s3_bucket_create",
+  "display_name": "Create S3 Bucket",
+  "steps": [
+    {"generic_action": "create_s3_bucket", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_s3_bucket",
+  "rollback_connector_type": "aws"
+}
