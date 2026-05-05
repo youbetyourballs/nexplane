@@ -28,6 +28,12 @@ def test_gce_change_types_in_enum():
     assert ChangeType.gce_disk_snapshot == "gce_disk_snapshot"
 
 
+def test_asset_read_has_connector_type_field():
+    from app.schemas.asset import AssetRead
+    fields = AssetRead.model_fields
+    assert "connector_type" in fields, "AssetRead must expose connector_type for UI filtering"
+
+
 def test_wait_instance_state_mock():
     import asyncio
     from app.connectors.executors.gcp.wait_instance_state import execute
