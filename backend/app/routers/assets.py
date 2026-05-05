@@ -93,7 +93,11 @@ async def create_asset(
                        {"asset_id": str(asset.id), "name": asset.name}, actor_id=user.id)
     await db.commit()
     await db.refresh(asset)
-    return asset
+    return AssetRead(
+        **{k: v for k, v in asset.__dict__.items() if not k.startswith("_")},
+        connector_name=None,
+        connector_type=None,
+    )
 
 
 @router.patch("/bulk-tag")
@@ -194,4 +198,8 @@ async def update_asset(
                        actor_id=user.id)
     await db.commit()
     await db.refresh(asset)
-    return asset
+    return AssetRead(
+        **{k: v for k, v in asset.__dict__.items() if not k.startswith("_")},
+        connector_name=None,
+        connector_type=None,
+    )
