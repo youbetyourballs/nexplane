@@ -23,7 +23,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     credentials = get_credentials(creds)
     project = get_project_id(creds)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     client = compute_v1.InstancesClient(credentials=credentials)
 
     instance = await loop.run_in_executor(
@@ -36,7 +36,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "machine_type": instance.machine_type.split("/")[-1],
         "status": instance.status,
         "labels": dict(instance.labels),
-        "network_tags": list(instance.tags.items),
+        "network_tags": list(instance.tags.items) if instance.tags else [],
         "captured_at": datetime.now(timezone.utc).isoformat(),
     }
 
