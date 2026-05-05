@@ -342,32 +342,35 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
     snapshot_id: str | None = None
 
     try:
-        # 1. Stop instance
-        cr = client.run_cr(
+        # 1. Stop instance (ec2_stop includes an EBS snapshot preflight + state wait — needs 900s)
+        cr = client._run_cr_with_timeout(
             "Smoke-E: stop instance", "ec2_stop", instance_asset["id"],
             {"instance_id": instance_id, "rollback_strategy": "start_instance"},
+            timeout=900,
         )
         rollback_stack.append((cr["id"], "ec2_stop"))
         log("Instance stopped")
 
-        # 2. Start instance
-        cr = client.run_cr(
+        # 2. Start instance (also waits for running state — needs 900s)
+        cr = client._run_cr_with_timeout(
             "Smoke-E: start instance", "ec2_start", instance_asset["id"],
             {"instance_id": instance_id, "rollback_strategy": "stop_instance"},
+            timeout=900,
         )
         rollback_stack.pop()  # ec2_stop is superseded — instance is running
         rollback_stack.append((cr["id"], "ec2_start"))
         log("Instance started")
 
-        # 3. Reboot
-        client.run_cr(
+        # 3. Reboot (reboot includes a state wait — needs 900s)
+        client._run_cr_with_timeout(
             "Smoke-E: reboot instance", "ec2_reboot", instance_asset["id"],
             {"instance_id": instance_id, "rollback_strategy": "rollback_unavailable"},
+            timeout=900,
         )
         log("Instance rebooted")
 
-        # Wait for SSM to reconnect post-reboot
-        time.sleep(30)
+        # Wait for SSM to reconnect post-reboot (60s to be safe)
+        time.sleep(60)
         client.run_cr(
             "Smoke-E: SSM verify post-reboot", "ssm_command", instance_asset["id"],
             {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
