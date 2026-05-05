@@ -24,7 +24,7 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
         "wait_dns_propagation": {"ttl": desired.get("ttl", 300)},
         "restore_dns_record": {"record_name": desired.get("record_name", "")},
         "health_check": {},
-        "create_snapshot": {"snapshot_tag": desired.get("snapshot_tag", "nexplane-managed")},
+        "create_snapshot": {"snapshot_tag": desired.get("snapshot_tag", "nexplane-managed"), "volume_id": desired.get("volume_id", ""), "instance_id": desired.get("instance_id", "")},
         "create_ebs_snapshot": {"volume_id": "", "backup_name": desired.get("snapshot_tag", "nexplane-pre-stop")},
         "verify_snapshot": {},
         "export_security_group": {"group_id": desired.get("group_id", "")},
