@@ -499,6 +499,7 @@ def run_phase_f(client: NexplaneClient, cloud_account_id: str) -> None:
                 "rules": [{"action": "add", "protocol": "tcp",
                             "from_port": 8443, "to_port": 8443,
                             "cidr": "192.0.2.0/24"}],
+                "rollback_strategy": "restore_security_group",
             },
         )
         rollback_stack.append((cr["id"], "security_group_update add_inbound"))
@@ -525,6 +526,7 @@ def run_phase_f(client: NexplaneClient, cloud_account_id: str) -> None:
                 "rules": [{"action": "remove", "protocol": "tcp",
                             "from_port": 8443, "to_port": 8443,
                             "cidr": "192.0.2.0/24"}],
+                "rollback_strategy": "restore_security_group",
             },
         )
         rollback_stack.pop()  # add_inbound CR superseded — rule now removed
