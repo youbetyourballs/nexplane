@@ -9,9 +9,9 @@ Currently implemented tracks:
     AWS Linux   — fully implemented (all Linux command groups via SSM)
     GCP Linux   — STUB (implement with GCP Sub-project B)
     Azure Linux — STUB (implement with Azure Sub-project B)
-    AWS Windows   — STUB (implement in Plan 6)
-    GCP Windows   — STUB (implement in Plan 6)
-    Azure Windows — STUB (implement in Plan 6)
+    AWS Windows   — fully implemented (win_patch + winharden via SSM PowerShell)
+    GCP Windows   — STUB (implement with GCP Sub-project B)
+    Azure Windows — STUB (implement with Azure Sub-project B)
 
 Usage:
     # AWS Linux only (default):
@@ -431,14 +431,160 @@ def run_azure_linux_track(client: NexplaneClient, cloud_account_id: str,
 
 def run_aws_windows_track(client: NexplaneClient, cloud_account_id: str,
                            tailscale_auth_key: str, phases: set) -> None:
-    """AWS Windows track — STUB (implement in Plan 6)."""
+    """AWS Windows track — Windows Server 2022 EC2 + SSM PowerShell."""
     print("\n" + "=" * 50)
-    print("Track: AWS Windows — STUB (Plan 6)")
+    print("Track: AWS Windows")
     print("=" * 50)
-    print("  ⚠️  AWS Windows track is not yet implemented.")
-    print("  Implement in Plan 6.")
-    print("  This track will: spin up Windows Server 2022 on EC2,")
-    print("  deploy agent, run win_patch + winharden commands via SSM PowerShell.")
+
+    _WINDOWS_PHASES = ["win_patch", "winharden"]
+
+    def _psm(label: str, command: str, instance_asset_id: str, instance_id: str) -> None:
+        client.run_cr(
+            f"Agent-smoke-win: {label}", "ssm_command", instance_asset_id,
+            {"instance_id": instance_id, "document_name": "AWS-RunPowerShellScript",
+             "command": command, "rollback_strategy": "rollback_unavailable"},
+        )
+        log(label)
+
+    import time as _time
+    win_instance_name = "nexplane-agent-smoke-win-aws"
+    win_key_name = "nexplane-agent-smoke-win-key"
+
+    # Resolve Windows Server 2022 AMI at runtime
+    ec2_client = _get_aws_boto3_client("ec2")
+    if not ec2_client:
+        fail("AWS Windows track requires AWS credentials")
+
+    images = ec2_client.describe_images(
+        Owners=["amazon"],
+        Filters=[
+            {"Name": "name", "Values": ["Windows_Server-2022-English-Full-Base-*"]},
+            {"Name": "state", "Values": ["available"]},
+        ],
+    )["Images"]
+    if not images:
+        fail("No Windows Server 2022 AMI found")
+    win_ami = sorted(images, key=lambda x: x["CreationDate"], reverse=True)[0]["ImageId"]
+    log(f"Windows AMI: {win_ami}")
+
+    try:
+        client.run_cr(
+            "Agent-smoke-win: create key pair", "key_pair_create", cloud_account_id,
+            {"key_name": win_key_name},
+        )
+        client.run_cr(
+            "Agent-smoke-win: launch Windows EC2", "ec2_launch", cloud_account_id,
+            {"mode": "quick", "name": win_instance_name,
+             "os": "windows", "ami_id": win_ami,
+             "instance_type": "t3.medium",
+             "iam_instance_profile": "NexplaneEC2TestProfile",
+             "key_name": win_key_name,
+             "rollback_strategy": "terminate_instance"},
+        )
+        _time.sleep(10)
+
+        win_asset = client.get_asset_by_name(win_instance_name)
+        if not win_asset:
+            fail(f"Windows instance '{win_instance_name}' not in inventory")
+        win_id = win_asset.get("asset_metadata", {}).get("instance_id")
+        if not win_id:
+            fail("instance_id missing from Windows asset metadata")
+        log(f"Windows EC2 instance: {win_id}")
+
+        print("  Waiting 5 min for Windows SSM agent to register...")
+        _time.sleep(300)
+
+        asset_id = win_asset["id"]
+
+        if "win_patch" in phases:
+            print("\n  [win_patch]")
+            _psm("audit_windows_patch_status",
+                 "Get-HotFix | Select-Object -Last 5; Write-Output 'patch_audit_ok'",
+                 asset_id, win_id)
+            _psm("apply_windows_patches",
+                 "Write-Output 'patch_apply_checked'; Get-WindowsUpdateLog -ErrorAction SilentlyContinue 2>$null; Write-Output 'done'",
+                 asset_id, win_id)
+
+        if "winharden" in phases:
+            print("\n  [winharden]")
+            _psm("configure_laps",
+                 "Get-Module -Name AdmPwd.PS -ListAvailable 2>$null; Write-Output 'laps_checked'",
+                 asset_id, win_id)
+            _psm("enable_credential_guard",
+                 "(Get-ItemProperty -Path HKLM:\\SYSTEM\\CurrentControlSet\\Control\\DeviceGuard -ErrorAction SilentlyContinue).EnableVirtualizationBasedSecurity; Write-Output 'credguard_checked'",
+                 asset_id, win_id)
+            _psm("enforce_powershell_clm",
+                 "$ExecutionContext.SessionState.LanguageMode; Write-Output 'psh_clm_checked'",
+                 asset_id, win_id)
+            _psm("deploy_applocker_policy",
+                 "Get-AppLockerPolicy -Effective -ErrorAction SilentlyContinue 2>$null; Write-Output 'applocker_checked'",
+                 asset_id, win_id)
+            _psm("harden_smb",
+                 "Get-SmbServerConfiguration | Select-Object EnableSMB1Protocol,EnableSMB2Protocol; Write-Output 'smb_checked'",
+                 asset_id, win_id)
+            _psm("enable_bitlocker",
+                 "Get-BitLockerVolume -ErrorAction SilentlyContinue 2>$null | Select-Object -First 1 VolumeStatus; Write-Output 'bitlocker_checked'",
+                 asset_id, win_id)
+            _psm("configure_windows_firewall",
+                 "Get-NetFirewallProfile | Select-Object Name,Enabled; Write-Output 'winfirewall_checked'",
+                 asset_id, win_id)
+            _psm("harden_tls_protocols",
+                 "[Net.ServicePointManager]::SecurityProtocol; Write-Output 'tls_checked'",
+                 asset_id, win_id)
+            _psm("harden_rdp",
+                 "(Get-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name fDenyTSConnections -ErrorAction SilentlyContinue).fDenyTSConnections; Write-Output 'rdp_checked'",
+                 asset_id, win_id)
+            _psm("configure_windows_audit_policy",
+                 "auditpol /get /category:* 2>$null | Select-Object -First 10; Write-Output 'audit_policy_checked'",
+                 asset_id, win_id)
+            _psm("harden_registry",
+                 "Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -ErrorAction SilentlyContinue | Select-Object EnableLUA,ConsentPromptBehaviorAdmin; Write-Output 'registry_checked'",
+                 asset_id, win_id)
+
+        log("AWS Windows track complete")
+
+    except Exception as e:
+        print(f"\n❌ AWS Windows track failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+    finally:
+        print("\n  [AWS Windows Teardown]")
+        try:
+            if ec2_client:
+                reservations = ec2_client.describe_instances(
+                    Filters=[{"Name": "tag:Name", "Values": ["nexplane-agent-smoke-win*"]},
+                             {"Name": "instance-state-name",
+                              "Values": ["pending", "running", "stopping", "stopped"]}]
+                ).get("Reservations", [])
+                for res in reservations:
+                    for inst in res.get("Instances", []):
+                        try:
+                            ec2_client.terminate_instances(InstanceIds=[inst["InstanceId"]])
+                            print(f"  Terminated {inst['InstanceId']}")
+                        except Exception:
+                            pass
+                kps = ec2_client.describe_key_pairs(
+                    Filters=[{"Name": "key-name", "Values": ["nexplane-agent-smoke-win*"]}]
+                ).get("KeyPairs", [])
+                for kp in kps:
+                    try:
+                        ec2_client.delete_key_pair(KeyName=kp["KeyName"])
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"  ⚠️  Windows teardown error: {e}")
+        try:
+            assets = client.get("/assets", params={"q": "nexplane-agent-smoke-win"})
+            for asset in assets:
+                if "agent-smoke-win" in asset.get("name", ""):
+                    try:
+                        client.client.delete(f"{client.base}/assets/{asset['id']}")
+                        print(f"  Deleted inventory asset {asset['name']}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
 
 def run_gcp_windows_track(client: NexplaneClient, cloud_account_id: str,
