@@ -45,11 +45,13 @@ Every AWS capability has GCP and Azure equivalents. As GCP/Azure Sub-projects B�
 | DNS | Phase I | **GCP Sub-E stub** | **Azure Sub-E stub** |
 | Managed database | Phase J (~35 min) | **GCP Sub-F stub** | **Azure Sub-F stub** |
 | Monitoring / Alarms | Phase K | **GCP Sub-G stub** | **Azure Sub-G stub** |
-| Agent hardening (Linux) | Phase B (partial) | `test_agent_live.py` | `test_agent_live.py` |
-| Agent hardening (Windows) | — | `test_agent_live.py` | `test_agent_live.py` |
-| Terraform local | Phase C | shared | shared |
-| Ansible local | Phase D | shared | shared |
+| Terraform local (provider-specific resources) | Phase C (AWS resources) | Phase Q (GCP resources) | Phase S (Azure resources) |
+| Ansible local (provider-specific inventory) | Phase D (AWS targets) | Phase R (GCP targets) | Phase T (Azure targets) |
+| Agent hardening — Linux (cloud-agnostic binary, tested on AWS) | Phase B (partial) + `test_agent_live.py` | `test_agent_live.py --cloud gcp` (optional) | `test_agent_live.py --cloud azure` (optional) |
+| Agent hardening — Windows (cloud-agnostic binary) | `test_agent_live.py` | `test_agent_live.py --cloud gcp` (optional) | `test_agent_live.py --cloud azure` (optional) |
 | Cross-cloud equivalence | — | Phase X1–X2 (future) | Phase X1–X2 (future) |
+
+**Note on generic actions:** Terraform local, Ansible local, and the Nexplane agent are cloud-agnostic — the same binary/tool works on AWS, GCP, and Azure instances. Testing them against each cloud verifies that cloud-specific resource creation (via the respective Terraform provider) and cloud-specific instance targeting (via each cloud's run-command mechanism) work correctly. The agent hardening commands themselves are provider-agnostic; the optional `--cloud` flag in `test_agent_live.py` lets operators run the same 47 command set against a GCP or Azure instance when needed, defaulting to AWS.
 
 ---
 
@@ -179,18 +181,35 @@ Steps:
 4. `disable_service_account` CR → verifies `disabled: true` via SDK
 5. Safety net: delete service account via SDK
 
-### Sub-project contract stubs (Q–V)
+### New Phase Q: Terraform Local against GCP
+
+Exercises `terraform_local_apply` using the GCP Terraform provider (`hashicorp/google`). Verifies that Terraform running inside the backend container can create and destroy GCP resources using the GCP connector's service account credentials.
+
+Steps:
+1. `terraform_local_apply` CR with a Terraform config that creates a GCS bucket using the `google` provider and the GCP connector credentials injected as environment variables (`GOOGLE_CREDENTIALS`, `GOOGLE_PROJECT`)
+2. Verify bucket exists via GCP SDK `storage.buckets.get()`
+3. Rollback: `terraform_local_apply` rollback (= `terraform_destroy_local`) → verify bucket deleted
+
+### New Phase R: Ansible Local against GCP
+
+Exercises `ansible_local_playbook` targeting a running GCE instance (reuses Phase L/M instance or spins up a dedicated one).
+
+Steps:
+1. `ansible_local_playbook` CR with `connection: local` playbook that verifies Python is present on the GCE instance via GCP Run Command
+2. Verify playbook executed successfully (CR completes, no task failures)
+
+### Sub-project contract stubs (S–V)
 
 Each stub is a function with a `pass` body and a contract comment:
 ```python
-def run_phase_q_stub(*args):
-    """GCP Sub-B (Networking): NSG/firewall advanced — implement when GCP Sub-project B ships."""
-    print("\n[Phase Q] GCP Networking — STUB (implement with GCP Sub-project B)")
+def run_phase_s_stub(*args):
+    """GCP Sub-B (Networking): Advanced firewall lifecycle — implement when GCP Sub-project B ships."""
+    print("\n[Phase S] GCP Networking — STUB (implement with GCP Sub-project B)")
 
-def run_phase_r_stub(*args):
+def run_phase_t_stub(*args):
     """GCP Sub-C (Storage): GCS bucket create/delete/lifecycle — implement when GCP Sub-project C ships."""
     ...
-# phases S (IAM/Sub-D), T (DNS/Sub-E), U (SQL/Sub-F), V (Monitor/Sub-G)
+# phases U (IAM/Sub-D), V (DNS/Sub-E), W (SQL/Sub-F), X (Monitor/Sub-G)
 ```
 
 Each stub prints a clear message and exits cleanly. When a Sub-project ships, it replaces the stub with a real phase using the rollback stack pattern.
@@ -235,14 +254,30 @@ Steps:
 1. `tag_resource` CR → apply `{"nexplane-smoke": "true"}` to VM
 2. Verify via Azure SDK `virtual_machines.get()` → check `vm.tags`
 
-### Sub-project contract stubs (S–X)
+### New Phase S: Terraform Local against Azure
 
-Same pattern as GCP stubs:
+Exercises `terraform_local_apply` using the Azure Terraform provider (`hashicorp/azurerm`). Verifies that Terraform running inside the backend container can create and destroy Azure resources using the Azure connector's service principal credentials.
+
+Steps:
+1. `terraform_local_apply` CR with a Terraform config that creates an Azure Resource Group or Storage Account using the `azurerm` provider, with Azure credentials injected as environment variables (`ARM_TENANT_ID`, `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_SUBSCRIPTION_ID`)
+2. Verify resource exists via Azure SDK
+3. Rollback: `terraform_destroy_local` → verify resource deleted
+
+### New Phase T: Ansible Local against Azure
+
+Exercises `ansible_local_playbook` targeting a running Azure VM (reuses Phase N/O instance).
+
+Steps:
+1. `ansible_local_playbook` CR with `connection: local` playbook that verifies Python is available on the Azure VM via Azure Run Command
+2. Verify playbook executed successfully
+
+### Sub-project contract stubs (U–Z)
+
 ```python
-def run_phase_s_stub(*args):
+def run_phase_u_stub(*args):
     """Azure Sub-B (Networking): Advanced NSG lifecycle — implement when Azure Sub-project B ships."""
-    ...
-# phases T (Storage/Sub-C), U (IAM/Sub-D), V (DNS/Sub-E), W (SQL/Sub-F), X (Monitor/Sub-G)
+    print("\n[Phase U] Azure Networking — STUB (implement with Azure Sub-project B)")
+# phases V (Storage/Sub-C), W (IAM/Sub-D), X (DNS/Sub-E), Y (SQL/Sub-F), Z (Monitor/Sub-G)
 ```
 
 ---
@@ -255,7 +290,8 @@ Entirely new file. Two independent test tracks: Linux and Windows.
 
 - `--tailscale-auth-key`: for agent → backend communication
 - `--windows-instance-profile`: IAM instance profile for Windows EC2 (default: `NexplaneEC2TestProfile`)
-- AWS connector with credentials
+- `--cloud`: which cloud to provision the test instance on (`aws` default, `gcp`, or `azure`). The agent binary and all 47 commands are identical regardless of cloud — this flag only changes how the instance is launched and how the run-command mechanism works (SSM for AWS, Azure Run Command for Azure, GCP Run Command for GCP). AWS is the default because it has the most mature SSM integration and is already used for Phases A–T.
+- AWS connector with credentials (always required for agent binary S3 download, even when `--cloud gcp` or `--cloud azure`)
 
 ### Linux track — Amazon Linux EC2 (e2 phases)
 
@@ -347,12 +383,24 @@ python backend/tests/smoke/test_gcp_live.py \
 python backend/tests/smoke/test_azure_live.py \
   --phases N,O,P,Q,R --azure-resource-group <rg>
 
-# Agent (Linux only)
+# Agent (Linux, default AWS)
 python backend/tests/smoke/test_agent_live.py \
   --phases linux_patch,ossecurity,linuxauth,crossplatform,compliance,forensics,fleet,backup,reboot,credrotation,iac \
   --tailscale-auth-key tskey-auth-<key>
 
-# Agent (Windows only)
+# Agent (Linux, run against GCP instance instead)
+python backend/tests/smoke/test_agent_live.py \
+  --phases linux_patch,ossecurity,linuxauth \
+  --cloud gcp --gcp-project <project-id> \
+  --tailscale-auth-key tskey-auth-<key>
+
+# Agent (Linux, run against Azure instance instead)
+python backend/tests/smoke/test_agent_live.py \
+  --phases linux_patch,ossecurity,linuxauth \
+  --cloud azure --azure-resource-group <rg> \
+  --tailscale-auth-key tskey-auth-<key>
+
+# Agent (Windows only, default AWS)
 python backend/tests/smoke/test_agent_live.py \
   --phases win_patch,winharden \
   --tailscale-auth-key tskey-auth-<key>
