@@ -1206,6 +1206,12 @@ def run_phase_j(client: NexplaneClient, cloud_account_id: str) -> None:
     db_id = f"nexplane-smoke-db-{ts}"
     snap_id = f"nexplane-smoke-snap-{ts}"
 
+    import secrets as _secrets
+    import string as _string
+    # Generate a random password meeting RDS requirements (letters + digits + special char)
+    _pw_chars = _string.ascii_letters + _string.digits
+    rds_password = "Nx!" + "".join(_secrets.choice(_pw_chars) for _ in range(16))
+
     rollback_stack: list[tuple[str, str]] = []
     created_db_ids: list[str] = []
     created_snap_ids: list[str] = []
@@ -1221,7 +1227,7 @@ def run_phase_j(client: NexplaneClient, cloud_account_id: str) -> None:
                 "engine_version": "8.0",
                 "db_instance_class": "db.t3.micro",
                 "master_username": "admin",
-                "master_password": "Nexplane!Smoke1",
+                "master_password": rds_password,
                 "allocated_storage": 20,
                 "skip_final_snapshot": True,
             },
@@ -1321,6 +1327,7 @@ def run_phase_k(client: NexplaneClient, phase_a_result: dict) -> None:
     alarm_cpu = f"nexplane-smoke-cpu-{ts}"
     alarm_custom = f"nexplane-smoke-custom-{ts}"
     custom_namespace = "Nexplane/SmokeTest"
+    aws_region = (_aws_creds_cache.get("region") or "us-east-1") if _aws_creds_cache else "us-east-1"
     rollback_stack: list[tuple[str, str]] = []
 
     try:
@@ -1372,7 +1379,7 @@ def run_phase_k(client: NexplaneClient, phase_a_result: dict) -> None:
                     f"--metric-name TestTrigger "
                     f"--value 1 "
                     f"--unit Count "
-                    f"--region us-east-1"
+                    f"--region {aws_region}"
                 ),
                 "rollback_strategy": "rollback_unavailable",
             },
