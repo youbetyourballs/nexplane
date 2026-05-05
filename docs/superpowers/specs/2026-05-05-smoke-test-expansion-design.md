@@ -47,11 +47,11 @@ Every AWS capability has GCP and Azure equivalents. As GCP/Azure Sub-projects B�
 | Monitoring / Alarms | Phase K | **GCP Sub-G stub** | **Azure Sub-G stub** |
 | Terraform local (provider-specific resources) | Phase C (AWS resources) | Phase Q (GCP resources) | Phase S (Azure resources) |
 | Ansible local (provider-specific inventory) | Phase D (AWS targets) | Phase R (GCP targets) | Phase T (Azure targets) |
-| Agent hardening — Linux (cloud-agnostic binary, tested on AWS) | Phase B (partial) + `test_agent_live.py` | `test_agent_live.py --cloud gcp` (optional) | `test_agent_live.py --cloud azure` (optional) |
-| Agent hardening — Windows (cloud-agnostic binary) | `test_agent_live.py` | `test_agent_live.py --cloud gcp` (optional) | `test_agent_live.py --cloud azure` (optional) |
+| Agent hardening — Linux | Phase B (partial) + `test_agent_live.py` (AWS track) | `test_agent_live.py` (GCP track) | `test_agent_live.py` (Azure track) |
+| Agent hardening — Windows | `test_agent_live.py` (AWS track) | `test_agent_live.py` (GCP track) | `test_agent_live.py` (Azure track) |
 | Cross-cloud equivalence | — | Phase X1–X2 (future) | Phase X1–X2 (future) |
 
-**Note on generic actions:** Terraform local, Ansible local, and the Nexplane agent are cloud-agnostic — the same binary/tool works on AWS, GCP, and Azure instances. Testing them against each cloud verifies that cloud-specific resource creation (via the respective Terraform provider) and cloud-specific instance targeting (via each cloud's run-command mechanism) work correctly. The agent hardening commands themselves are provider-agnostic; the optional `--cloud` flag in `test_agent_live.py` lets operators run the same 47 command set against a GCP or Azure instance when needed, defaulting to AWS.
+**Note on generic actions:** Terraform local, Ansible local, and the Nexplane agent are cloud-agnostic — the same binary/tool works on AWS, GCP, and Azure instances. Testing them against each cloud verifies that cloud-specific resource creation (via the respective Terraform provider) and cloud-specific instance targeting (via each cloud's run-command mechanism) work correctly. The agent binary is identical across providers — all 47 commands are tested on all six tracks (Linux×3 + Windows×3) as standard, not optional. The `--cloud` flag in `test_agent_live.py` selects which track(s) to run; the default is all three.
 
 ---
 
@@ -282,20 +282,34 @@ def run_phase_u_stub(*args):
 
 ---
 
-## `test_agent_live.py` — All 47 Agent Commands
+## `test_agent_live.py` — All 47 Agent Commands × All 3 Clouds
 
-Entirely new file. Two independent test tracks: Linux and Windows.
+Entirely new file. Six independent test tracks: Linux on AWS, Linux on GCP, Linux on Azure, Windows on AWS, Windows on GCP, Windows on Azure. All six run by default. The `--cloud` flag (`aws`, `gcp`, `azure`, or `all`) selects which cloud tracks run; `--os` flag (`linux`, `windows`, or `all`) selects which OS tracks run.
+
+The agent binary is identical across all clouds. What differs per track is:
+- How the instance is provisioned (EC2 / GCE / Azure VM)
+- How run-command works for verification (SSM `AWS-RunShellScript` / GCP Run Command / Azure `RunShellScript`)
+- How the agent startup script is delivered (Phase A SSM script / GCE Custom Script Extension / Azure Custom Script Extension)
 
 ### Prerequisites
 
 - `--tailscale-auth-key`: for agent → backend communication
-- `--windows-instance-profile`: IAM instance profile for Windows EC2 (default: `NexplaneEC2TestProfile`)
-- `--cloud`: which cloud to provision the test instance on (`aws` default, `gcp`, or `azure`). The agent binary and all 47 commands are identical regardless of cloud — this flag only changes how the instance is launched and how the run-command mechanism works (SSM for AWS, Azure Run Command for Azure, GCP Run Command for GCP). AWS is the default because it has the most mature SSM integration and is already used for Phases A–T.
-- AWS connector with credentials (always required for agent binary S3 download, even when `--cloud gcp` or `--cloud azure`)
+- `--instance-profile`: IAM instance profile (default: `NexplaneEC2TestProfile`, used for Linux and Windows AWS tracks)
+- `--gcp-project`: GCP project ID (required for GCP tracks)
+- `--azure-resource-group`: Azure resource group (required for Azure tracks)
+- AWS connector with credentials (always required — agent binary downloaded from S3 regardless of target cloud)
+- GCP connector with credentials (required for GCP tracks)
+- Azure connector with credentials (required for Azure tracks)
 
-### Linux track — Amazon Linux EC2 (e2 phases)
+### Linux tracks — Amazon Linux 2023, Ubuntu 22.04 (GCP), Ubuntu 22.04 (Azure)
 
-Spins up a dedicated Amazon Linux EC2 instance (separate from test_aws_live.py Phase A). Deploys agent. Runs all Linux agent commands grouped by package, each as a separate phase:
+Each track spins up a dedicated instance, deploys the Linux agent binary, and runs all Linux agent commands grouped by package. The same phase set runs on all three clouds; verification uses the cloud-native run-command mechanism for each:
+
+| Cloud | Instance type | Run-command mechanism |
+|-------|-------------|----------------------|
+| AWS | `t3.small`, Amazon Linux 2023 | SSM `AWS-RunShellScript` |
+| GCP | `e2-small`, Ubuntu 22.04 LTS | GCP `virtual_machines.begin_run_command()` |
+| Azure | `Standard_B1s`, Ubuntu 22.04 LTS | Azure `virtual_machines.begin_run_command()` with `RunShellScript` |
 
 | Phase | Package | Commands covered |
 |-------|---------|-----------------|
@@ -314,9 +328,17 @@ Spins up a dedicated Amazon Linux EC2 instance (separate from test_aws_live.py P
 
 Each phase uses SSM RunShellScript to verify the effect on the instance, not just that the CR succeeded.
 
-### Windows track — Windows Server 2022 EC2
+### Windows tracks — Windows Server 2022 on AWS, GCP, and Azure
 
-Spins up a dedicated Windows Server 2022 EC2 resolved at runtime using the filter `windows-server-2022-english-full-base-*` (same boto3 AMI lookup pattern as Phase A's `al2023-ami-2023*`), `t3.medium` (4 GB RAM required for Credential Guard and BitLocker), `us-east-1`. Deploys Windows agent binary from S3 via SSM `AWS-RunPowerShellScript` document (not `AWS-RunShellScript` — Windows instances use the PowerShell variant). Runs all Windows-specific commands:
+Three parallel Windows tracks, one per cloud. Each spins up a Windows Server 2022 instance, deploys the Windows agent binary from S3 via PowerShell, and runs all Windows-specific commands.
+
+| Cloud | Instance type | AMI / Image | Run-command mechanism |
+|-------|-------------|-------------|----------------------|
+| AWS | `t3.medium`, `us-east-1` | Resolved at runtime via filter `windows-server-2022-english-full-base-*` | SSM `AWS-RunPowerShellScript` |
+| GCP | `n2-standard-2`, `us-central1-a` | `windows-cloud/windows-2022` image family | GCP Run Command (`RunPowerShellScript`) |
+| Azure | `Standard_D2s_v3`, `eastus` | `MicrosoftWindowsServer:WindowsServer:2022-Datacenter:latest` | Azure `RunPowerShellScript` |
+
+`t3.medium` / `n2-standard-2` / `Standard_D2s_v3` are the minimum sizes with 4 GB RAM required for Credential Guard and BitLocker. Smaller instance types will cause those commands to fail.
 
 | Phase | Package | Commands covered |
 |-------|---------|-----------------|
@@ -383,27 +405,30 @@ python backend/tests/smoke/test_gcp_live.py \
 python backend/tests/smoke/test_azure_live.py \
   --phases N,O,P,Q,R --azure-resource-group <rg>
 
-# Agent (Linux, default AWS)
+# Agent — all six tracks (default: all clouds × all OS)
+python backend/tests/smoke/test_agent_live.py \
+  --phases linux_patch,ossecurity,linuxauth,crossplatform,compliance,forensics,fleet,backup,reboot,credrotation,iac,win_patch,winharden \
+  --gcp-project <project-id> \
+  --azure-resource-group <rg> \
+  --tailscale-auth-key tskey-auth-<key>
+
+# Agent — Linux only, all clouds
 python backend/tests/smoke/test_agent_live.py \
   --phases linux_patch,ossecurity,linuxauth,crossplatform,compliance,forensics,fleet,backup,reboot,credrotation,iac \
+  --os linux \
+  --gcp-project <project-id> --azure-resource-group <rg> \
   --tailscale-auth-key tskey-auth-<key>
 
-# Agent (Linux, run against GCP instance instead)
+# Agent — all phases, AWS only
 python backend/tests/smoke/test_agent_live.py \
-  --phases linux_patch,ossecurity,linuxauth \
-  --cloud gcp --gcp-project <project-id> \
+  --phases linux_patch,ossecurity,linuxauth,win_patch,winharden \
+  --cloud aws \
   --tailscale-auth-key tskey-auth-<key>
 
-# Agent (Linux, run against Azure instance instead)
+# Agent — specific phase on one cloud
 python backend/tests/smoke/test_agent_live.py \
-  --phases linux_patch,ossecurity,linuxauth \
-  --cloud azure --azure-resource-group <rg> \
-  --tailscale-auth-key tskey-auth-<key>
-
-# Agent (Windows only, default AWS)
-python backend/tests/smoke/test_agent_live.py \
-  --phases win_patch,winharden \
-  --tailscale-auth-key tskey-auth-<key>
+  --phases ossecurity --cloud gcp --os linux \
+  --gcp-project <project-id> --tailscale-auth-key tskey-auth-<key>
 
 # Cross-cloud (future, after Azure B-G)
 python backend/tests/smoke/test_cloud_live.py --phases X1,X2
