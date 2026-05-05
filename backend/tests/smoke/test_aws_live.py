@@ -123,11 +123,36 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
          "iam_instance_profile": "NexplaneEC2TestProfile", "key_name": KEY_NAME,
          "rollback_strategy": "terminate_instance"},
     )
-    time.sleep(10)
-    instance_asset = client.get_asset_by_name(INSTANCE_NAME)
+    # Wait up to 60s for the inventory asset to appear with a running instance_id.
+    # Terminated instances from previous runs may still be visible in AWS (and can be re-ingested),
+    # so we verify the instance_id is actually pending/running before proceeding.
+    ec2_verify = _get_aws_boto3_client('ec2')
+    instance_asset = None
+    instance_id = None
+    for _ in range(12):  # up to 60s
+        time.sleep(5)
+        candidate = client.get_asset_by_name(INSTANCE_NAME)
+        if not candidate:
+            continue
+        cid = candidate.get("asset_metadata", {}).get("instance_id", "")
+        if not cid:
+            continue
+        if ec2_verify:
+            try:
+                state = ec2_verify.describe_instances(InstanceIds=[cid])["Reservations"][0]["Instances"][0]["State"]["Name"]
+                if state in ("pending", "running"):
+                    instance_asset = candidate
+                    instance_id = cid
+                    break
+                # stale asset with terminated instance — keep polling
+            except Exception:
+                pass
+        else:
+            instance_asset = candidate
+            instance_id = cid
+            break
     if not instance_asset:
-        fail(f"Instance '{INSTANCE_NAME}' not in inventory")
-    instance_id = instance_asset.get("asset_metadata", {}).get("instance_id")
+        fail(f"Instance '{INSTANCE_NAME}' not in inventory with a running instance_id")
     if not instance_id:
         fail("instance_id missing from asset metadata")
     log(f"Instance in inventory: {instance_id}")
