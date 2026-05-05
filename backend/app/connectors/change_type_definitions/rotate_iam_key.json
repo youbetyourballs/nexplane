@@ -1,0 +1,9 @@
+{
+  "change_type": "rotate_iam_key",
+  "display_name": "Rotate IAM Access Key",
+  "steps": [
+    {"generic_action": "rotate_iam_key", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

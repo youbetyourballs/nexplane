@@ -1,0 +1,9 @@
+{
+  "change_type": "remove_nexplane_agent",
+  "display_name": "Remove Nexplane Agent",
+  "steps": [
+    {"generic_action": "remove_nexplane_agent", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

@@ -1,0 +1,11 @@
+{
+  "change_type": "disable_iam_user",
+  "display_name": "Disable IAM User",
+  "steps": [
+    {"generic_action": "disable_iam_user", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "enable_iam_user",
+  "rollback_connector_type": "aws"
+}
