@@ -44,6 +44,13 @@ class ChangeType(str, enum.Enum):
     rds_snapshot_create = "rds_snapshot_create"
     cloudwatch_alarm_create = "cloudwatch_alarm_create"
     cloudwatch_alarm_delete = "cloudwatch_alarm_delete"
+    # GCP instance lifecycle — Sub-project A
+    gce_instance_create = "gce_instance_create"
+    gce_stop = "gce_stop"
+    gce_start = "gce_start"
+    gce_instance_reboot = "gce_instance_reboot"
+    gce_instance_delete = "gce_instance_delete"
+    gce_disk_snapshot = "gce_disk_snapshot"
     # Patch management
     patch_packages = "patch_packages"
     patch_campaign = "patch_campaign"

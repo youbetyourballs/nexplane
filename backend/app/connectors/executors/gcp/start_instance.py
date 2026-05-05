@@ -18,4 +18,5 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": False, "reason": "start rollback would stop — use stop_instance explicitly"}
+    from app.connectors.executors.gcp.stop_instance import execute as stop
+    return await stop(parameters, [], connector)
