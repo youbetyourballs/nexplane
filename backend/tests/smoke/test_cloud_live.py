@@ -1575,6 +1575,108 @@ def run_phase_l(client: NexplaneClient, cloud_account_id: str,
 
 
 # ---------------------------------------------------------------------------
+# Phase M
+# ---------------------------------------------------------------------------
+
+def run_phase_m(client: NexplaneClient, phase_l_result: dict, gcp_project: str) -> None:
+    """Phase M: GCE advanced — stop/start/reboot/snapshot with rollback stack."""
+    print("\n[Phase M] GCE Advanced Operations")
+
+    instance_asset = phase_l_result["instance_asset"]
+    instance_name = instance_asset.get("asset_metadata", {}).get("instance_name", GCE_SMOKE_INSTANCE)
+    zone = instance_asset.get("asset_metadata", {}).get("zone", GCE_ZONE)
+
+    rollback_stack: list[tuple[str, str]] = []
+    snapshot_name: str | None = None
+
+    try:
+        # 1. Stop instance
+        cr = client.run_cr(
+            "Smoke-M: stop GCE instance", "gce_stop", instance_asset["id"],
+            {"instance_name": instance_name, "zone": zone},
+        )
+        rollback_stack.append((cr["id"], "gce_stop"))
+        log("GCE instance stopped")
+
+        # 2. Start instance
+        cr = client.run_cr(
+            "Smoke-M: start GCE instance", "gce_start", instance_asset["id"],
+            {"instance_name": instance_name, "zone": zone},
+        )
+        rollback_stack.pop()  # stop CR superseded
+        rollback_stack.append((cr["id"], "gce_start"))
+        log("GCE instance started")
+
+        # 3. Reboot
+        client.run_cr(
+            "Smoke-M: reboot GCE instance", "gce_instance_reboot", instance_asset["id"],
+            {"instance_name": instance_name, "zone": zone},
+        )
+        log("GCE instance rebooted")
+
+        # Wait for agent to reconnect post-reboot
+        time.sleep(30)
+        assets = client.get("/assets", params={"q": GCE_SMOKE_INSTANCE, "asset_type": "endpoint"})
+        if assets:
+            log("Agent still registered post-reboot")
+        else:
+            print("  ⚠️  Agent not visible post-reboot (may still be reconnecting)")
+
+        # 4. Create disk snapshot
+        snapshot_name = f"nexplane-smoke-snap-{int(time.time())}"
+        cr = client.run_cr(
+            "Smoke-M: create disk snapshot", "gce_disk_snapshot", instance_asset["id"],
+            {"instance_name": instance_name, "zone": zone, "snapshot_name": snapshot_name},
+        )
+        rollback_stack.append((cr["id"], "gce_disk_snapshot"))
+        log(f"Disk snapshot created: {snapshot_name}")
+
+        # 5. Verify snapshot via GCP SDK
+        if gcp_project and _gcp_creds_cache:
+            try:
+                import json as _j
+                from google.oauth2 import service_account as _sa
+                from google.cloud import compute_v1 as _cv1
+                key_json_raw = _gcp_creds_cache.get("service_account_key_json", "")
+                key_json = _j.loads(key_json_raw) if isinstance(key_json_raw, str) else key_json_raw
+                gcp_creds = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+                snap_client = _cv1.SnapshotsClient(credentials=gcp_creds)
+                snap = snap_client.get(project=gcp_project, snapshot=snapshot_name)
+                log(f"Snapshot verified: status={snap.status}, size={snap.disk_size_gb}GB")
+            except Exception as e:
+                print(f"  ⚠️  Snapshot verify skipped: {e}")
+
+        log("Phase M complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase M failed: {e}")
+        raise
+    finally:
+        if rollback_stack:
+            print("  [Phase M cleanup — rollback stack]")
+            for cr_id, label in reversed(rollback_stack):
+                client.rollback_cr(cr_id, label)
+        # Safety net: delete snapshot
+        if snapshot_name and gcp_project and _gcp_creds_cache:
+            try:
+                import json as _j
+                from google.oauth2 import service_account as _sa
+                from google.cloud import compute_v1 as _cv1
+                key_json_raw = _gcp_creds_cache.get("service_account_key_json", "")
+                key_json = _j.loads(key_json_raw) if isinstance(key_json_raw, str) else key_json_raw
+                gcp_creds = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+                snap_client = _cv1.SnapshotsClient(credentials=gcp_creds)
+                snap_client.delete(project=gcp_project, snapshot=snapshot_name)
+                print(f"  Safety net: deleted snapshot {snapshot_name}")
+            except Exception as e2:
+                print(f"  ⚠️  Safety net snapshot delete failed: {e2}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1660,6 +1762,11 @@ def main():
         if "L" in phases:
             agent_secret = client.get_agent_secret()
             gcp_phase_result = run_phase_l(client, cloud_account_id, args.gcp_project, agent_secret)
+
+        if "M" in phases:
+            if gcp_phase_result is None or gcp_phase_result.get("instance_asset") is None:
+                fail("Phase M requires Phase L to have run first")
+            run_phase_m(client, gcp_phase_result, args.gcp_project)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
