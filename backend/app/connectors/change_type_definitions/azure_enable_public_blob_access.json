@@ -1,0 +1,9 @@
+{
+  "change_type": "azure_enable_public_blob_access",
+  "display_name": "Enable Azure Public Blob Access",
+  "steps": [
+    {"generic_action": "enable_public_blob_access", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

@@ -1,0 +1,9 @@
+{
+  "change_type": "azure_rotate_storage_key",
+  "display_name": "Rotate Azure Storage Account Key",
+  "steps": [
+    {"generic_action": "rotate_storage_key", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
