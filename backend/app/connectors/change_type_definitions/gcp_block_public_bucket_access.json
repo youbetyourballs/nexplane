@@ -1,0 +1,9 @@
+{
+  "change_type": "gcp_block_public_bucket_access",
+  "display_name": "Block GCS Public Bucket Access",
+  "steps": [
+    {"generic_action": "block_public_bucket_access", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
