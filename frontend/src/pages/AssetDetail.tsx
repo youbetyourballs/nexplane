@@ -121,6 +121,48 @@ const ASSET_ACTIONS: Record<AssetType, QuickAction[]> = {
       description: (a) => `Permanently delete GCE instance ${a.asset_metadata?.instance_name ?? a.name}. Irreversible.`,
       connectorType: "gcp",
     },
+    {
+      changeType: "azure_vm_stop",
+      label: "Stop VM",
+      title: (a) => `Stop ${a.name}`,
+      description: (a) => `Deallocate Azure VM ${a.asset_metadata?.vm_name ?? a.name} in ${a.asset_metadata?.resource_group ?? ""}.`,
+      connectorType: "azure",
+    },
+    {
+      changeType: "azure_vm_start",
+      label: "Start VM",
+      title: (a) => `Start ${a.name}`,
+      description: (a) => `Start deallocated Azure VM ${a.asset_metadata?.vm_name ?? a.name}.`,
+      connectorType: "azure",
+    },
+    {
+      changeType: "azure_vm_reboot",
+      label: "Reboot VM",
+      title: (a) => `Reboot ${a.name}`,
+      description: (a) => `Restart Azure VM ${a.asset_metadata?.vm_name ?? a.name}.`,
+      connectorType: "azure",
+    },
+    {
+      changeType: "azure_vm_snapshot",
+      label: "Create Disk Snapshot",
+      title: (a) => `Snapshot ${a.name}`,
+      description: (a) => `Snapshot OS disk of Azure VM ${a.asset_metadata?.vm_name ?? a.name}.`,
+      connectorType: "azure",
+    },
+    {
+      changeType: "azure_vm_delete",
+      label: "Delete VM",
+      title: (a) => `Delete ${a.name}`,
+      description: (a) => `Permanently delete Azure VM ${a.asset_metadata?.vm_name ?? a.name}. Irreversible.`,
+      connectorType: "azure",
+    },
+    {
+      changeType: "azure_run_command",
+      label: "Run Command",
+      title: (a) => `Run command on ${a.name}`,
+      description: (a) => `Execute a shell command on Azure VM ${a.asset_metadata?.vm_name ?? a.name} via Azure Run Command.`,
+      connectorType: "azure",
+    },
   ],
   cloud_account: [
     {
@@ -154,6 +196,13 @@ const ASSET_ACTIONS: Record<AssetType, QuickAction[]> = {
       title: (a) => `Launch GCE instance in ${a.name}`,
       description: (a) => `Create a new Compute Engine instance in GCP project ${a.asset_metadata?.project_id ?? a.name}.`,
       connectorType: "gcp",
+    },
+    {
+      changeType: "azure_vm_create",
+      label: "Launch Azure VM",
+      title: (a) => `Launch Azure VM in ${a.name}`,
+      description: (a) => `Create a new Azure VM in subscription ${a.asset_metadata?.subscription_id ?? a.name}.`,
+      connectorType: "azure",
     },
   ],
   dns_zone: [

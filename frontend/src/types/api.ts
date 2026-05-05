@@ -284,7 +284,14 @@ export type ChangeType =
   | "gce_start"
   | "gce_instance_reboot"
   | "gce_instance_delete"
-  | "gce_disk_snapshot";
+  | "gce_disk_snapshot"
+  | "azure_vm_create"
+  | "azure_vm_stop"
+  | "azure_vm_start"
+  | "azure_vm_reboot"
+  | "azure_vm_delete"
+  | "azure_vm_snapshot"
+  | "azure_run_command";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
