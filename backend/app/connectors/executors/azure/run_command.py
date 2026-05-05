@@ -16,6 +16,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "command": command,
             "stdout": "mock_output_ok",
             "stderr": "",
+            "mock": True,
         }
 
     from ._client import get_compute_client

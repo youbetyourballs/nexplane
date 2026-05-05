@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     vm_name = parameters["vm_name"]
 
     if not creds:
-        return {"action": "reboot_vm", "resource_group": resource_group, "vm_name": vm_name}
+        return {"action": "reboot_vm", "resource_group": resource_group, "vm_name": vm_name, "mock": True}
 
     from ._client import get_compute_client
     client = get_compute_client(creds)
