@@ -583,6 +583,99 @@ Start-Service NexplaneAgent
 
 ---
 
+## Smoke Tests
+
+Nexplane has a live smoke test suite that verifies end-to-end functionality against real cloud infrastructure. All smoke test files are in `backend/tests/smoke/` and share infrastructure via `smoke_helpers.py`.
+
+### Test File Structure
+
+| File | Coverage |
+|------|----------|
+| `smoke_helpers.py` | Shared infrastructure (NexplaneClient, cloud SDK helpers, constants) |
+| `test_aws_live.py` | AWS phases A–T: EC2, IAM, S3, Route53, RDS, CloudWatch, Terraform, Ansible, agent |
+| `test_gcp_live.py` | GCP phases L–R: GCE, firewall, storage, service accounts, Terraform, Ansible + stubs |
+| `test_azure_live.py` | Azure phases N–T: VM, NSG, blob storage, tagging, Terraform, Ansible + stubs |
+| `test_agent_live.py` | All Linux agent command groups (12 packages) × AWS; stub tracks for GCP/Azure/Windows |
+| `test_cloud_live.py` | Cross-cloud consolidation phases X1–X2 (stub — blocked until Azure Sub-projects B–G complete) |
+
+### Running Smoke Tests
+
+All smoke test files are independently runnable from inside the backend container:
+
+```bash
+# AWS phases A-D (default, no slow RDS/EC2-stop phases)
+docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
+  --email admin@acme.example --password admin123 \
+  --phases A,B,C,D \
+  --tailscale-auth-key tskey-auth-<key>
+
+# AWS new phases P-T (IAM advanced, S3 policy, DNS failover, agent lifecycle)
+docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
+  --email admin@acme.example --password admin123 \
+  --phases P,Q,R,T
+
+# GCP phases L-M (GCE launch + advanced operations)
+docker exec nexplane-backend-1 python tests/smoke/test_gcp_live.py \
+  --email admin@acme.example --password admin123 \
+  --phases L,M --gcp-project <project-id>
+
+# GCP new phases N-R (firewall, storage, service accounts, Terraform, Ansible)
+docker exec nexplane-backend-1 python tests/smoke/test_gcp_live.py \
+  --email admin@acme.example --password admin123 \
+  --phases N,O,P,Q,R --gcp-project <project-id>
+
+# Azure phases N-O (VM launch + advanced operations)
+docker exec nexplane-backend-1 python tests/smoke/test_azure_live.py \
+  --email admin@acme.example --password admin123 \
+  --phases N,O --azure-resource-group nexplane-smoke-rg
+
+# Azure new phases P-T (NSG, blob storage, tagging, Terraform, Ansible)
+docker exec nexplane-backend-1 python tests/smoke/test_azure_live.py \
+  --email admin@acme.example --password admin123 \
+  --phases P,Q,R,S,T --azure-resource-group nexplane-smoke-rg
+
+# Agent — all Linux command groups on AWS
+docker exec nexplane-backend-1 python tests/smoke/test_agent_live.py \
+  --email admin@acme.example --password admin123 \
+  --cloud aws --os linux \
+  --tailscale-auth-key tskey-auth-<key>
+
+# Agent — specific phase on AWS only
+docker exec nexplane-backend-1 python tests/smoke/test_agent_live.py \
+  --email admin@acme.example --password admin123 \
+  --cloud aws --os linux --phases ossecurity,linuxauth \
+  --tailscale-auth-key tskey-auth-<key>
+```
+
+### Agent Command Coverage
+
+The `test_agent_live.py` file tests all Linux agent command packages against AWS (EC2 + SSM):
+
+| Package | Commands |
+|---------|----------|
+| `linux_patch` | `audit_linux_patch_status`, `apply_linux_patches` |
+| `ossecurity` | `configure_selinux`, `configure_seccomp`, `apply_sysctl_hardening`, `configure_host_firewall`, `blacklist_kernel_modules`, `harden_mount_options`, `deploy_auditd_rules`, `setup_file_integrity_monitoring`, `audit_os_security_posture`, `audit_ebpf_posture`, `configure_ebpf_security_policy`, `deploy_ebpf_policy` |
+| `linuxauth` | `harden_ssh`, `configure_pam`, `manage_ca_certificates`, `configure_ntp`, `audit_users_and_groups`, `audit_privesc_vulnerabilities` |
+| `crossplatform` | `harden_tls_protocols`, `configure_dns_resolver`, `audit_software_inventory`, `configure_syslog` |
+| `compliance` | `audit_cis_compliance`, `collect_evidence` |
+| `forensics` | forensics bundle collection |
+| `fleet` | `restart_service`, `push_config_file`, `health_check` |
+| `backup` | `create_backup`, `restore_files` |
+| `reboot` | `graceful_reboot` (check only), `verify_post_reboot` |
+| `credrotation` | `update_agent_env_file`, `rotate_ssh_keys` |
+| `iac` | `terraform_plan` (non-destructive) |
+| `linuxupgrade` | `estimate_image_size` (non-destructive) |
+
+Windows tracks (`win_patch`, `winharden`) are implemented for AWS and are stubs for GCP/Azure pending Sub-project B completion.
+
+### Sub-project Contract
+
+GCP and Azure sub-projects B–G each include a corresponding smoke test stub. A sub-project is **not complete** until its stub is replaced with a real phase that runs green against live credentials.
+
+Stub phases print a clear `STUB` message when invoked, making incomplete sub-projects visible in CI output.
+
+---
+
 ## Live AWS Smoke Test
 
 End-to-end integration test that creates and destroys real AWS resources against a live account. Verifies the full chain from Nexplane CR → AWS API → asset inventory. All phases use the **rollback stack pattern** — each CR is pushed to a LIFO stack; the `finally` block triggers Nexplane's own rollback system in reverse order, followed by boto3 safety-net cleanup.
