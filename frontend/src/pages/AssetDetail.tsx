@@ -10,43 +10,57 @@ import { PageLoading } from "../components/LoadingSpinner";
 import type { Asset, AssetType, Criticality } from "../types/api";
 
 // Maps asset type → eligible change types with label + title/description templates
-const ASSET_ACTIONS: Record<AssetType, { changeType: string; label: string; title: (a: Asset) => string; description: (a: Asset) => string }[]> = {
+interface QuickAction {
+  changeType: string;
+  label: string;
+  title: (a: Asset) => string;
+  description: (a: Asset) => string;
+  connectorType?: string;
+}
+
+const ASSET_ACTIONS: Record<AssetType, QuickAction[]> = {
   server: [
     {
       changeType: "ec2_reboot",
       label: "Reboot Instance",
       title: (a) => `Reboot ${a.name}`,
       description: (a) => `Reboot EC2 instance ${a.asset_metadata?.instance_id ?? a.name} to apply pending changes.`,
+      connectorType: "aws",
     },
     {
       changeType: "ec2_stop",
       label: "Stop Instance",
       title: (a) => `Stop ${a.name}`,
       description: (a) => `Gracefully stop EC2 instance ${a.asset_metadata?.instance_id ?? a.name}.`,
+      connectorType: "aws",
     },
     {
       changeType: "ec2_start",
       label: "Start Instance",
       title: (a) => `Start ${a.name}`,
       description: (a) => `Start stopped EC2 instance ${a.asset_metadata?.instance_id ?? a.name}.`,
+      connectorType: "aws",
     },
     {
       changeType: "ec2_stop_start",
       label: "Restart Instance",
       title: (a) => `Restart ${a.name}`,
       description: (a) => `Full power cycle of EC2 instance ${a.asset_metadata?.instance_id ?? a.name}.`,
+      connectorType: "aws",
     },
     {
       changeType: "ec2_terminate",
       label: "Terminate Instance",
       title: (a) => `Terminate ${a.name}`,
       description: (a) => `Permanently terminate EC2 instance ${a.asset_metadata?.instance_id ?? a.name}. Irreversible.`,
+      connectorType: "aws",
     },
     {
       changeType: "snapshot_asset",
       label: "Snapshot",
       title: (a) => `Snapshot ${a.name}`,
       description: (a) => `Create a point-in-time snapshot of ${a.name} (${a.asset_metadata?.instance_id ?? ""}).`,
+      connectorType: "aws",
     },
     {
       changeType: "patch_packages",
@@ -72,6 +86,41 @@ const ASSET_ACTIONS: Record<AssetType, { changeType: string; label: string; titl
       title: (a) => `CIS Benchmark on ${a.name}`,
       description: (a) => `Audit and remediate CIS controls on ${a.name}.`,
     },
+    {
+      changeType: "gce_stop",
+      label: "Stop Instance",
+      title: (a) => `Stop ${a.name}`,
+      description: (a) => `Stop GCE instance ${a.asset_metadata?.instance_name ?? a.name} in zone ${a.asset_metadata?.zone ?? ""}.`,
+      connectorType: "gcp",
+    },
+    {
+      changeType: "gce_start",
+      label: "Start Instance",
+      title: (a) => `Start ${a.name}`,
+      description: (a) => `Start stopped GCE instance ${a.asset_metadata?.instance_name ?? a.name}.`,
+      connectorType: "gcp",
+    },
+    {
+      changeType: "gce_instance_reboot",
+      label: "Reboot Instance",
+      title: (a) => `Reboot ${a.name}`,
+      description: (a) => `Hard reset GCE instance ${a.asset_metadata?.instance_name ?? a.name}.`,
+      connectorType: "gcp",
+    },
+    {
+      changeType: "gce_disk_snapshot",
+      label: "Create Disk Snapshot",
+      title: (a) => `Snapshot ${a.name}`,
+      description: (a) => `Snapshot boot disk of GCE instance ${a.asset_metadata?.instance_name ?? a.name}.`,
+      connectorType: "gcp",
+    },
+    {
+      changeType: "gce_instance_delete",
+      label: "Delete Instance",
+      title: (a) => `Delete ${a.name}`,
+      description: (a) => `Permanently delete GCE instance ${a.asset_metadata?.instance_name ?? a.name}. Irreversible.`,
+      connectorType: "gcp",
+    },
   ],
   cloud_account: [
     {
@@ -79,23 +128,33 @@ const ASSET_ACTIONS: Record<AssetType, { changeType: string; label: string; titl
       label: "Launch EC2 Instance",
       title: (a) => `Launch EC2 in ${a.name}`,
       description: (a) => `Launch a new EC2 instance in AWS account ${a.asset_metadata?.account_id ?? a.name}.`,
+      connectorType: "aws",
     },
     {
       changeType: "s3_block_public_access",
       label: "Block S3 Public Access",
       title: (a) => `Block S3 public access in ${a.name}`,
       description: (a) => `Enable S3 Block Public Access settings for account ${a.asset_metadata?.account_id ?? a.name}.`,
+      connectorType: "aws",
     },
     {
       changeType: "iam_enforce_mfa",
       label: "Enforce IAM MFA",
       title: (a) => `Enforce MFA in ${a.name}`,
       description: (a) => `Enforce MFA requirement on IAM users in account ${a.asset_metadata?.account_id ?? a.name}.`,
+      connectorType: "aws",
     },
-    { changeType: "iam_user_create", label: "Create IAM User", title: (a) => `Create IAM user in ${a.name}`, description: (a) => `Create a new IAM user in account ${a.name}.` },
-    { changeType: "s3_bucket_create", label: "Create S3 Bucket", title: (a) => `Create S3 bucket in ${a.name}`, description: (a) => `Create a new S3 bucket in account ${a.name}.` },
-    { changeType: "route53_zone_create", label: "Create Hosted Zone", title: (a) => `Create hosted zone in ${a.name}`, description: (a) => `Create a Route53 hosted zone in account ${a.name}.` },
-    { changeType: "rds_instance_create", label: "Create RDS Instance", title: (a) => `Create RDS instance in ${a.name}`, description: (a) => `Launch a new RDS database instance in account ${a.name}.` },
+    { changeType: "iam_user_create", label: "Create IAM User", title: (a) => `Create IAM user in ${a.name}`, description: (a) => `Create a new IAM user in account ${a.name}.`, connectorType: "aws" },
+    { changeType: "s3_bucket_create", label: "Create S3 Bucket", title: (a) => `Create S3 bucket in ${a.name}`, description: (a) => `Create a new S3 bucket in account ${a.name}.`, connectorType: "aws" },
+    { changeType: "route53_zone_create", label: "Create Hosted Zone", title: (a) => `Create hosted zone in ${a.name}`, description: (a) => `Create a Route53 hosted zone in account ${a.name}.`, connectorType: "aws" },
+    { changeType: "rds_instance_create", label: "Create RDS Instance", title: (a) => `Create RDS instance in ${a.name}`, description: (a) => `Launch a new RDS database instance in account ${a.name}.`, connectorType: "aws" },
+    {
+      changeType: "gce_instance_create",
+      label: "Launch GCE Instance",
+      title: (a) => `Launch GCE instance in ${a.name}`,
+      description: (a) => `Create a new Compute Engine instance in GCP project ${a.asset_metadata?.project_id ?? a.name}.`,
+      connectorType: "gcp",
+    },
   ],
   dns_zone: [
     {
@@ -513,13 +572,17 @@ export function AssetDetail() {
             )}
           </div>
 
-          {(ASSET_ACTIONS[asset.asset_type] ?? []).length > 0 && (
+          {(() => {
+            const actions = (ASSET_ACTIONS[asset.asset_type] ?? []).filter(
+              (action) => !action.connectorType || action.connectorType === asset.connector_type
+            );
+            return actions.length > 0 && (
             <div className="bg-white border border-slate-200 rounded-lg p-5">
               <h2 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-1.5">
                 <Zap className="w-4 h-4 text-brand-500" /> Quick Actions
               </h2>
               <div className="space-y-1.5">
-                {(ASSET_ACTIONS[asset.asset_type] ?? []).map((action) => (
+                {actions.map((action) => (
                   <button
                     key={action.changeType}
                     onClick={() => {
@@ -538,7 +601,8 @@ export function AssetDetail() {
                 ))}
               </div>
             </div>
-          )}
+          );
+          })()}
 
           <div className="bg-white border border-slate-200 rounded-lg p-5">
             <h2 className="text-sm font-semibold text-slate-900 mb-3">Change Requests</h2>

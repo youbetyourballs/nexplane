@@ -41,6 +41,7 @@ export interface Asset {
   organization_id: string;
   connector_id?: string;
   connector_name?: string;
+  connector_type?: string;
   name: string;
   asset_type: AssetType;
   environment: Environment;
@@ -277,7 +278,13 @@ export type ChangeType =
   | "rds_instance_delete"
   | "rds_snapshot_create"
   | "cloudwatch_alarm_create"
-  | "cloudwatch_alarm_delete";
+  | "cloudwatch_alarm_delete"
+  | "gce_instance_create"
+  | "gce_stop"
+  | "gce_start"
+  | "gce_instance_reboot"
+  | "gce_instance_delete"
+  | "gce_disk_snapshot";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
