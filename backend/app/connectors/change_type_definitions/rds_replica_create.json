@@ -1,0 +1,11 @@
+{
+  "change_type": "rds_replica_create",
+  "display_name": "Create RDS Read Replica",
+  "steps": [
+    {"generic_action": "create_rds_replica", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_rds_instance",
+  "rollback_connector_type": "aws"
+}

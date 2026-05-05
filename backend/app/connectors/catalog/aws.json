@@ -819,6 +819,42 @@
       "executor": "aws.discover_route53_zones",
       "rollback_action": null,
       "estimated_duration_seconds": 10
+    },
+    {
+      "display_name": "Create RDS Read Replica",
+      "description": "Create a read replica of an existing RDS instance and wait for it to become available.",
+      "parameters": [
+        {"required": true,  "type": "string", "name": "replica_db_instance_identifier"},
+        {"required": true,  "type": "string", "name": "source_db_instance_identifier"},
+        {"required": false, "type": "string", "name": "db_instance_class"}
+      ],
+      "execution_tier": 1,
+      "rollback_action": "delete_rds_instance",
+      "estimated_duration_seconds": 1800,
+      "applicable_asset_types": ["cloud_account", "database"],
+      "rollback_connector_type": "aws",
+      "action_type": "change",
+      "executor": "aws.create_rds_replica",
+      "generic_action": "create_rds_replica",
+      "action_id": "create_rds_replica"
+    },
+    {
+      "display_name": "DR DNS Failover (Route53)",
+      "description": "Update a Route53 DNS record to point to the DR endpoint during a failover event.",
+      "parameters": [
+        {"required": true, "type": "string", "name": "dns_record_id"},
+        {"required": true, "type": "string", "name": "dr_endpoint"},
+        {"required": true, "type": "string", "name": "hosted_zone_id"},
+        {"required": false, "type": "string", "name": "original_endpoint"}
+      ],
+      "execution_tier": 1,
+      "rollback_action": null,
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["cloud_account"],
+      "action_type": "change",
+      "executor": "aws.dr_dns_failover_route53",
+      "generic_action": "dr_dns_failover_route53",
+      "action_id": "dr_dns_failover_route53"
     }
   ]
 }
