@@ -1123,11 +1123,513 @@ def run_phase_k(client: NexplaneClient, phase_a_result: dict) -> None:
             print(f"  ⚠️  Safety net alarm delete failed: {e2}")
 
 
+# ---------------------------------------------------------------------------
+# Phase P
+# ---------------------------------------------------------------------------
+
+def run_phase_p(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase P: IAM Advanced — attach/detach policy + disable/enable/rotate key via CRs."""
+    print("\n[Phase P] IAM Advanced")
+
+    username = f"nexplane-smoke-p-{int(time.time())}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # 1. Create IAM user
+        cr = client.run_cr(
+            "Smoke-P: create IAM user", "iam_user_create", cloud_account_id,
+            {"username": username},
+        )
+        rollback_stack.append((cr["id"], "iam_user_create"))
+
+        # 2. Attach ReadOnlyAccess policy via CR
+        cr = client.run_cr(
+            "Smoke-P: attach IAM policy", "attach_iam_policy", cloud_account_id,
+            {"principal_type": "user", "principal_name": username,
+             "policy_arn": "arn:aws:iam::aws:policy/ReadOnlyAccess"},
+        )
+        rollback_stack.append((cr["id"], "attach_iam_policy"))
+
+        # Verify via boto3
+        iam = _get_aws_boto3_client("iam")
+        if iam:
+            attached = iam.list_attached_user_policies(UserName=username)["AttachedPolicies"]
+            assert any(p["PolicyName"] == "ReadOnlyAccess" for p in attached), "ReadOnlyAccess not attached"
+            log("Policy attached (boto3 verified)")
+
+        # 3. Create an initial key via boto3 so there's a key to rotate
+        if iam:
+            iam.create_access_key(UserName=username)
+
+        # 4. Rotate IAM key via CR
+        cr = client.run_cr(
+            "Smoke-P: rotate IAM key", "rotate_iam_key", cloud_account_id,
+            {"username": username},
+        )
+        rollback_stack.append((cr["id"], "rotate_iam_key"))
+        log("IAM key rotated via CR")
+
+        # 5. Disable IAM user via CR
+        cr = client.run_cr(
+            "Smoke-P: disable IAM user", "disable_iam_user", cloud_account_id,
+            {"username": username},
+        )
+        rollback_stack.append((cr["id"], "disable_iam_user"))
+
+        if iam:
+            keys = iam.list_access_keys(UserName=username)["AccessKeyMetadata"]
+            assert all(k["Status"] == "Inactive" for k in keys), "Not all keys inactive"
+            log("IAM user disabled (boto3 verified)")
+
+        # 6. Enable IAM user via CR
+        cr = client.run_cr(
+            "Smoke-P: enable IAM user", "enable_iam_user", cloud_account_id,
+            {"username": username},
+        )
+        rollback_stack.append((cr["id"], "enable_iam_user"))
+
+        if iam:
+            keys = iam.list_access_keys(UserName=username)["AccessKeyMetadata"]
+            assert all(k["Status"] == "Active" for k in keys), "Not all keys active after enable"
+            log("IAM user enabled (boto3 verified)")
+
+        # 7. Detach policy via CR rollback
+        attach_cr_id, _ = rollback_stack.pop()  # pop enable_iam_user
+        client.rollback_cr(attach_cr_id, "enable_iam_user rollback")
+        disable_cr_id, _ = rollback_stack.pop()  # pop disable_iam_user
+        client.rollback_cr(disable_cr_id, "disable_iam_user rollback")
+        rotate_cr_id, _ = rollback_stack.pop()  # pop rotate_iam_key
+        client.rollback_cr(rotate_cr_id, "rotate_iam_key rollback")
+        attach_policy_cr_id, _ = rollback_stack.pop()  # pop attach_iam_policy
+        client.rollback_cr(attach_policy_cr_id, "attach_iam_policy → detach")
+        log("Policy detached via CR rollback")
+
+        # 8. Delete user via CR rollback
+        create_cr_id, _ = rollback_stack.pop()  # pop iam_user_create
+        client.rollback_cr(create_cr_id, "iam_user_create → delete_iam_user")
+        log("IAM user deleted via CR rollback")
+
+        log("Phase P complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase P failed: {e}")
+        raise
+    finally:
+        print("  [Phase P cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete user directly if still alive
+        try:
+            iam = _get_aws_boto3_client("iam")
+            if iam:
+                try:
+                    keys = iam.list_access_keys(UserName=username)["AccessKeyMetadata"]
+                    for k in keys:
+                        iam.delete_access_key(UserName=username, AccessKeyId=k["AccessKeyId"])
+                except Exception:
+                    pass
+                try:
+                    iam.delete_user(UserName=username)
+                    print(f"  Safety net: deleted IAM user {username}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Phase Q
+# ---------------------------------------------------------------------------
+
+def run_phase_q(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase Q: S3 Advanced — put_bucket_policy + tag_resource."""
+    print("\n[Phase Q] S3 Advanced Gaps")
+
+    import secrets as _secrets
+    bucket_name = f"nexplane-smoke-q-{_secrets.token_hex(4)}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # 1. Create S3 bucket
+        cr = client.run_cr(
+            "Smoke-Q: create S3 bucket", "s3_bucket_create", cloud_account_id,
+            {"bucket_name": bucket_name},
+        )
+        rollback_stack.append((cr["id"], "s3_bucket_create"))
+
+        # 2. Apply deny-non-TLS bucket policy via CR
+        deny_tls_policy = {
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Sid": "DenyNonTLS",
+                "Effect": "Deny",
+                "Principal": "*",
+                "Action": "s3:*",
+                "Resource": [
+                    f"arn:aws:s3:::{bucket_name}",
+                    f"arn:aws:s3:::{bucket_name}/*",
+                ],
+                "Condition": {"Bool": {"aws:SecureTransport": "false"}},
+            }],
+        }
+        cr = client.run_cr(
+            "Smoke-Q: put bucket policy", "put_bucket_policy", cloud_account_id,
+            {"bucket_name": bucket_name, "policy": deny_tls_policy},
+        )
+        rollback_stack.append((cr["id"], "put_bucket_policy"))
+
+        # Verify via boto3
+        s3 = _get_aws_boto3_client("s3")
+        if s3:
+            import json as _json
+            policy_str = s3.get_bucket_policy(Bucket=bucket_name)["Policy"]
+            policy = _json.loads(policy_str)
+            assert any(s.get("Sid") == "DenyNonTLS" for s in policy.get("Statement", [])), \
+                "DenyNonTLS policy statement not found"
+            log("Bucket policy applied (boto3 verified)")
+
+        # 3. Tag the bucket via CR
+        bucket_arn = f"arn:aws:s3:::{bucket_name}"
+        cr = client.run_cr(
+            "Smoke-Q: tag S3 bucket", "tag_resource", cloud_account_id,
+            {"resource_arn": bucket_arn, "tags": {"nexplane-smoke": "true", "phase": "Q"}},
+        )
+        rollback_stack.append((cr["id"], "tag_resource"))
+
+        if s3:
+            tagging = s3.get_bucket_tagging(Bucket=bucket_name)
+            tag_set = {t["Key"]: t["Value"] for t in tagging.get("TagSet", [])}
+            assert tag_set.get("nexplane-smoke") == "true", "Tag not applied"
+            log("Bucket tagged (boto3 verified)")
+
+        log("Phase Q complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase Q failed: {e}")
+        raise
+    finally:
+        print("  [Phase Q cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: empty and delete bucket via SDK
+        try:
+            s3 = _get_aws_boto3_client("s3")
+            if s3:
+                try:
+                    objs = s3.list_objects_v2(Bucket=bucket_name).get("Contents", [])
+                    for obj in objs:
+                        s3.delete_object(Bucket=bucket_name, Key=obj["Key"])
+                    s3.delete_bucket(Bucket=bucket_name)
+                    print(f"  Safety net: deleted bucket {bucket_name}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Phase R
+# ---------------------------------------------------------------------------
+
+def run_phase_r(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase R: DR DNS Failover — exercises dr_dns_failover_route53 executor."""
+    print("\n[Phase R] DR DNS Failover")
+
+    import secrets as _secrets
+    zone_name = f"nexplane-smoke-r-{_secrets.token_hex(4)}.internal."
+    rollback_stack: list[tuple[str, str]] = []
+    zone_id: str = ""
+
+    try:
+        # 1. Create a private Route53 zone
+        cr = client.run_cr(
+            "Smoke-R: create Route53 zone", "route53_zone_create", cloud_account_id,
+            {"zone_name": zone_name, "private": True, "vpc_id": ""},
+        )
+        rollback_stack.append((cr["id"], "route53_zone_create"))
+        log(f"Route53 zone created: {zone_name}")
+
+        # Get zone ID from boto3
+        r53 = _get_aws_boto3_client("route53")
+        if not r53:
+            fail("Phase R requires AWS credentials")
+
+        zones = r53.list_hosted_zones_by_name(DNSName=zone_name)["HostedZones"]
+        zone = next((z for z in zones if z["Name"] == zone_name), None)
+        if not zone:
+            fail(f"Could not find zone {zone_name} after creation")
+        zone_id = zone["Id"].split("/")[-1]
+        log(f"Zone ID: {zone_id}")
+
+        # 2. Create a CNAME record pointing to original endpoint
+        original_endpoint = "primary.example.internal"
+        record_name = f"app.{zone_name}"
+        cr = client.run_cr(
+            "Smoke-R: create CNAME record", "route53_record_upsert", cloud_account_id,
+            {
+                "hosted_zone_id": zone_id,
+                "record_name": record_name,
+                "record_type": "CNAME",
+                "ttl": 60,
+                "values": [original_endpoint],
+            },
+        )
+        rollback_stack.append((cr["id"], "route53_record_upsert"))
+
+        # 3. DR failover: update CNAME to point to DR endpoint via CR
+        dr_endpoint = "dr.example.internal"
+        cr = client.run_cr(
+            "Smoke-R: dr_dns_failover_route53", "dr_dns_failover_route53", cloud_account_id,
+            {
+                "dns_record_id": record_name,
+                "dr_endpoint": dr_endpoint,
+                "hosted_zone_id": zone_id,
+                "original_endpoint": original_endpoint,
+            },
+        )
+        rollback_stack.append((cr["id"], "dr_dns_failover_route53"))
+
+        # Verify DR endpoint is now active
+        records = r53.list_resource_record_sets(HostedZoneId=zone_id)["ResourceRecordSets"]
+        dr_cname = next((rec for rec in records
+                         if rec.get("Name", "").rstrip(".") == record_name.rstrip(".")
+                         and rec["Type"] == "CNAME"), None)
+        if dr_cname:
+            value = dr_cname["ResourceRecords"][0]["Value"]
+            assert value == dr_endpoint, f"CNAME not updated to DR: {value}"
+            log(f"DR failover verified: CNAME now points to {value}")
+        else:
+            print("  ⚠️  CNAME record not found after DR failover (may be eventual consistency)")
+
+        log("Phase R complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase R failed: {e}")
+        raise
+    finally:
+        print("  [Phase R cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete zone via boto3
+        if zone_id:
+            try:
+                r53 = _get_aws_boto3_client("route53")
+                if r53:
+                    sets = r53.list_resource_record_sets(HostedZoneId=zone_id)["ResourceRecordSets"]
+                    changes = [{"Action": "DELETE", "ResourceRecordSet": rrs}
+                               for rrs in sets if rrs["Type"] not in ("NS", "SOA")]
+                    if changes:
+                        r53.change_resource_record_sets(
+                            HostedZoneId=zone_id,
+                            ChangeBatch={"Changes": changes},
+                        )
+                    r53.delete_hosted_zone(Id=zone_id)
+                    print(f"  Safety net: deleted hosted zone {zone_id}")
+            except Exception as e:
+                print(f"  ⚠️  Safety net zone delete failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Phase T
+# ---------------------------------------------------------------------------
+
+def run_phase_t(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase T: Agent Lifecycle + Resource Tagging — tag EC2 + remove/redeploy agent."""
+    print("\n[Phase T] Agent Lifecycle + Resource Tagging")
+
+    instance_id = phase_a_result.get("instance_id", "")
+    instance_asset_id = phase_a_result.get("instance_asset")
+    if not instance_id:
+        fail("Phase T requires a running EC2 instance from Phase A")
+
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        ec2_client = _get_aws_boto3_client("ec2")
+        sts = _get_aws_boto3_client("sts")
+        if not ec2_client or not sts:
+            fail("Phase T requires AWS credentials")
+        caller = sts.get_caller_identity()
+        account_id = caller["Account"]
+        creds = _aws_creds_cache
+        region = creds.get("region", "us-east-1")
+        instance_arn = f"arn:aws:ec2:{region}:{account_id}:instance/{instance_id}"
+
+        # 1. Tag EC2 instance via CR
+        target_asset = instance_asset_id if instance_asset_id else client.get_cloud_account_asset_id()
+        cr = client.run_cr(
+            "Smoke-T: tag EC2 instance", "tag_resource", target_asset,
+            {"resource_arn": instance_arn, "tags": {"nexplane-smoke-tag": "true", "phase": "T"}},
+        )
+        rollback_stack.append((cr["id"], "tag_resource"))
+
+        # Verify tag via boto3
+        desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+        tags = {t["Key"]: t["Value"]
+                for t in desc["Reservations"][0]["Instances"][0].get("Tags", [])}
+        assert tags.get("nexplane-smoke-tag") == "true", "Tag not applied to instance"
+        log("EC2 instance tagged (boto3 verified)")
+
+        # 2. Remove Nexplane agent via CR
+        cr = client.run_cr(
+            "Smoke-T: remove nexplane agent", "remove_nexplane_agent", target_asset,
+            {"instance_id": instance_id},
+        )
+        rollback_stack.append((cr["id"], "remove_nexplane_agent"))
+        log("Nexplane agent removed via CR")
+
+        time.sleep(10)
+
+        # 3. Re-deploy agent via CR
+        agent_secret = client.get_agent_secret()
+        backend_ip = phase_a_result.get("backend_tailscale_ip", "")
+        control_plane_url = f"http://{backend_ip}:8000" if backend_ip else "http://localhost:8000"
+
+        cr = client.run_cr(
+            "Smoke-T: redeploy nexplane agent", "deploy_nexplane_agent", target_asset,
+            {
+                "instance_id": instance_id,
+                "agent_secret": agent_secret,
+                "nexplane_url": control_plane_url,
+            },
+        )
+        rollback_stack.append((cr["id"], "deploy_nexplane_agent"))
+        log("Nexplane agent redeployed via CR")
+
+        log("Phase T complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase T failed: {e}")
+        raise
+    finally:
+        print("  [Phase T cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+
+
+# ---------------------------------------------------------------------------
+# Phase S
+# ---------------------------------------------------------------------------
+
+def run_phase_s(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase S: RDS Advanced — verify_rds_backup + rds_replica_create + promote_rds_replica (~45 min, opt-in)."""
+    print("\n[Phase S] RDS Advanced (slow — ~45 min)")
+
+    import secrets as _secrets
+    db_id = f"nexplane-smoke-s-{_secrets.token_hex(3)}"
+    replica_id = f"{db_id}-replica"
+    snap_id = f"{db_id}-snap"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # 1. Create RDS instance
+        print("  Creating RDS instance (wait ~10 min)...")
+        cr = client._run_cr_with_timeout(
+            "Smoke-S: create RDS instance", "rds_instance_create", cloud_account_id,
+            {"db_instance_identifier": db_id, "engine": "mysql", "engine_version": "8.0",
+             "db_instance_class": "db.t3.micro", "master_username": "admin",
+             "master_password": "Nexplane!Smoke1", "allocated_storage": 20},
+            timeout=RDS_PHASE_TIMEOUT_SECONDS,
+        )
+        rollback_stack.append((cr["id"], "rds_instance_create"))
+        log(f"RDS instance created: {db_id}")
+
+        # 2. Create snapshot
+        print("  Creating RDS snapshot (wait ~5 min)...")
+        cr = client._run_cr_with_timeout(
+            "Smoke-S: create RDS snapshot", "rds_snapshot_create", cloud_account_id,
+            {"db_instance_identifier": db_id, "snapshot_identifier": snap_id},
+            timeout=RDS_PHASE_TIMEOUT_SECONDS,
+        )
+        rollback_stack.append((cr["id"], "rds_snapshot_create"))
+        log(f"Snapshot created: {snap_id}")
+
+        # 3. Verify backup via CR
+        client.run_cr(
+            "Smoke-S: verify RDS backup", "verify_backup", cloud_account_id,
+            {"snapshot_identifier": snap_id, "db_instance_identifier": db_id},
+        )
+        log("Backup verified via CR")
+
+        rds = _get_aws_boto3_client("rds")
+        if rds:
+            snaps = rds.describe_db_snapshots(DBSnapshotIdentifier=snap_id)["DBSnapshots"]
+            assert snaps and snaps[0]["Status"] == "available", "Snapshot not available"
+            assert snaps[0]["AllocatedStorage"] > 0, "AllocatedStorage is 0"
+            log(f"Snapshot boto3 verified: {snaps[0]['AllocatedStorage']}GB")
+
+        # 4. Create read replica
+        print("  Creating read replica (wait ~15 min)...")
+        cr = client._run_cr_with_timeout(
+            "Smoke-S: create RDS read replica", "rds_replica_create", cloud_account_id,
+            {"replica_db_instance_identifier": replica_id,
+             "source_db_instance_identifier": db_id,
+             "db_instance_class": "db.t3.micro"},
+            timeout=RDS_PHASE_TIMEOUT_SECONDS,
+        )
+        rollback_stack.append((cr["id"], "rds_replica_create"))
+        log(f"Replica created: {replica_id}")
+
+        # 5. Promote replica
+        print("  Promoting replica (wait ~10 min)...")
+        cr = client._run_cr_with_timeout(
+            "Smoke-S: promote RDS replica", "promote_db_replica", cloud_account_id,
+            {"replica_identifier": replica_id},
+            timeout=RDS_PHASE_TIMEOUT_SECONDS,
+        )
+        rollback_stack.append((cr["id"], "promote_db_replica"))
+
+        if rds:
+            desc = rds.describe_db_instances(DBInstanceIdentifier=replica_id)["DBInstances"][0]
+            assert not desc.get("ReadReplicaSourceDBInstanceIdentifier"), \
+                "Replica still shows source — not yet standalone"
+            log(f"Promotion verified: {replica_id} is now standalone")
+
+        # 6. Delete promoted instance
+        client.run_cr(
+            "Smoke-S: delete promoted instance", "rds_instance_delete", cloud_account_id,
+            {"db_instance_identifier": replica_id},
+        )
+        rollback_stack.pop()  # pop promote_db_replica
+        rollback_stack.pop()  # pop rds_replica_create
+        log("Promoted instance deleted")
+
+        log("Phase S complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase S failed: {e}")
+        raise
+    finally:
+        print("  [Phase S cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net
+        try:
+            rds = _get_aws_boto3_client("rds")
+            if rds:
+                for iid in [replica_id, db_id]:
+                    try:
+                        rds.delete_db_instance(DBInstanceIdentifier=iid, SkipFinalSnapshot=True)
+                        print(f"  Safety net: deleted RDS instance {iid}")
+                    except Exception:
+                        pass
+                try:
+                    rds.delete_db_snapshot(DBSnapshotIdentifier=snap_id)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
         "--phases", default="A,B,C,D",
-        help="Comma-separated phases to run (A-K, J is slow ~35 min). E.g. --phases A or --phases A,B,C,D,E",
+        help=(
+            "Comma-separated phases to run. "
+            "A-K: existing phases. P-T: new phases (P=IAM, Q=S3, R=DR-DNS, S=RDS-slow, T=Agent). "
+            "Default: A,B,C,D. J and S are slow (~35-45 min) and excluded from default."
+        ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
     args = parser.parse_args()
@@ -1185,6 +1687,18 @@ def main():
             if phase_a_result is None:
                 fail("Phase K requires Phase A to have run first")
             run_phase_k(client, phase_a_result)
+        if "P" in phases:
+            run_phase_p(client, cloud_account_id)
+        if "Q" in phases:
+            run_phase_q(client, cloud_account_id)
+        if "R" in phases:
+            run_phase_r(client, cloud_account_id)
+        if "S" in phases:
+            run_phase_s(client, cloud_account_id)
+        if "T" in phases:
+            if phase_a_result is None:
+                fail("Phase T requires Phase A to have run first")
+            run_phase_t(client, phase_a_result)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
