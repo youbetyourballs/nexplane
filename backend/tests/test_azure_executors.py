@@ -143,3 +143,14 @@ def test_launch_vm_mock_ssh_mode():
     }, [], None))
     assert result["connection_mode"] == "ssh"
     assert result["mock"] is True
+
+
+def test_azure_vm_change_types_in_enum():
+    from app.models.change_request import ChangeType
+    assert ChangeType.azure_vm_create == "azure_vm_create"
+    assert ChangeType.azure_vm_stop == "azure_vm_stop"
+    assert ChangeType.azure_vm_start == "azure_vm_start"
+    assert ChangeType.azure_vm_reboot == "azure_vm_reboot"
+    assert ChangeType.azure_vm_delete == "azure_vm_delete"
+    assert ChangeType.azure_vm_snapshot == "azure_vm_snapshot"
+    assert ChangeType.azure_run_command == "azure_run_command"
