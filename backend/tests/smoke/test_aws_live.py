@@ -367,10 +367,11 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
     snapshot_id: str | None = None
 
     try:
-        # 1. Stop instance (ec2_stop includes an EBS snapshot preflight + state wait — needs 900s)
+        # 1. Stop instance (needs target_state="stopped" or wait_instance_state defaults to "running")
         cr = client._run_cr_with_timeout(
             "Smoke-E: stop instance", "ec2_stop", instance_asset["id"],
-            {"instance_id": instance_id, "rollback_strategy": "start_instance"},
+            {"instance_id": instance_id, "rollback_strategy": "start_instance",
+             "target_state": "stopped"},
             timeout=900,
         )
         rollback_stack.append((cr["id"], "ec2_stop"))
