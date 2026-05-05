@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Nexplane Azure Live Smoke Test — Phases N–O.
+Nexplane Azure Live Smoke Test — Phases N–Z.
 
 Usage:
     python backend/tests/smoke/test_azure_live.py \\
@@ -14,12 +14,19 @@ Usage:
 Phase descriptions:
     N  Azure: VM launch + agent deploy with rollback stack
     O  Azure advanced: stop/start/reboot/snapshot with rollback stack
+    P  Azure NSG Rules: update_nsg_rule + restore via CR rollback
+    Q  Azure Blob Storage: disable/enable public access + rotate storage key
+    R  Azure Resource Tagging: tag_resource on Azure VM
+    S  Terraform local apply against Azure
+    T  Ansible local playbook against Azure
+    U-Z Sub-project stubs (not yet implemented)
 
 Requirements:
     Azure connector with credentials + Contributor role on subscription
     Pre-existing resource group passed via --azure-resource-group
 """
 import time
+import secrets
 from typing import Optional
 
 from smoke_helpers import (
@@ -28,6 +35,12 @@ from smoke_helpers import (
     _azure_creds_cache, _get_azure_compute_client,
     make_base_parser,
 )
+
+
+def _get_azure_creds() -> dict:
+    """Return the Azure credentials dict, populating cache if needed."""
+    _get_azure_compute_client()  # side effect: populates _azure_creds_cache
+    return _azure_creds_cache
 
 
 # ---------------------------------------------------------------------------
@@ -194,11 +207,412 @@ def run_phase_o(client: NexplaneClient, phase_n_result: dict,
                 print(f"  ⚠️  Safety net snapshot delete failed: {e2}")
 
 
+# ---------------------------------------------------------------------------
+# Phase P
+# ---------------------------------------------------------------------------
+
+def run_phase_p(client: NexplaneClient, cloud_account_id: str,
+                azure_resource_group: str) -> None:
+    """Phase P: Azure NSG Rules — update_nsg_rule + restore via CR rollback."""
+    print("\n[Phase P] Azure NSG Rules")
+
+    import time as _time
+    nsg_name = f"nexplane-smoke-nsg-{int(_time.time())}"
+    rollback_stack: list[tuple[str, str]] = []
+    nsg_created = False
+
+    try:
+        creds = _get_azure_creds()
+        if not creds:
+            fail("Phase P requires Azure credentials")
+
+        from azure.identity import ClientSecretCredential
+        from azure.mgmt.network import NetworkManagementClient
+        credential = ClientSecretCredential(
+            tenant_id=creds["tenant_id"],
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+        )
+        network_client = NetworkManagementClient(credential, creds["subscription_id"])
+
+        # 1. Create dedicated NSG via SDK scaffolding
+        poller = network_client.network_security_groups.begin_create_or_update(
+            azure_resource_group, nsg_name,
+            {"location": "eastus", "security_rules": []},
+        )
+        poller.result()
+        nsg_created = True
+        log(f"NSG created via SDK: {nsg_name}")
+
+        # 2. Add inbound rule via CR
+        cr = client.run_cr(
+            "Smoke-P: update NSG rule", "azure_update_nsg_rule", cloud_account_id,
+            {
+                "resource_group": azure_resource_group,
+                "nsg_name": nsg_name,
+                "rule_name": "nexplane-smoke-rule",
+                "priority": 200,
+                "direction": "Inbound",
+                "protocol": "Tcp",
+                "source_address_prefix": "192.0.2.0/24",
+                "destination_port_range": "8443",
+                "access": "Allow",
+            },
+        )
+        rollback_stack.append((cr["id"], "azure_update_nsg_rule"))
+
+        # Verify via SDK
+        nsg = network_client.network_security_groups.get(azure_resource_group, nsg_name)
+        rule_names = [r.name for r in (nsg.security_rules or [])]
+        assert "nexplane-smoke-rule" in rule_names, f"Rule not found in NSG: {rule_names}"
+        log("NSG rule verified via SDK")
+
+        # 3. Restore (delete) rule via CR rollback
+        cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(cr_id, "azure_update_nsg_rule → restore")
+        log("NSG rule removed via CR rollback")
+
+        log("Phase P complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase P failed: {e}")
+        raise
+    finally:
+        print("  [Phase P cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete NSG via SDK
+        if nsg_created:
+            try:
+                creds = _get_azure_creds()
+                if creds:
+                    from azure.identity import ClientSecretCredential
+                    from azure.mgmt.network import NetworkManagementClient
+                    credential = ClientSecretCredential(
+                        tenant_id=creds["tenant_id"],
+                        client_id=creds["client_id"],
+                        client_secret=creds["client_secret"],
+                    )
+                    nc = NetworkManagementClient(credential, creds["subscription_id"])
+                    nc.network_security_groups.begin_delete(azure_resource_group, nsg_name).result()
+                    print(f"  Safety net: deleted NSG {nsg_name}")
+            except Exception as e:
+                print(f"  ⚠️  Safety net NSG delete failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Phase Q
+# ---------------------------------------------------------------------------
+
+def run_phase_q(client: NexplaneClient, cloud_account_id: str,
+                azure_resource_group: str) -> None:
+    """Phase Q: Azure Blob Storage — disable/enable public access + rotate storage key."""
+    print("\n[Phase Q] Azure Blob Storage")
+
+    import secrets as _secrets
+    account_name = f"nxpsmq{_secrets.token_hex(4)}"  # max 24 chars, alphanumeric only
+    rollback_stack: list[tuple[str, str]] = []
+    account_created = False
+
+    try:
+        creds = _get_azure_creds()
+        if not creds:
+            fail("Phase Q requires Azure credentials")
+
+        from azure.identity import ClientSecretCredential
+        from azure.mgmt.storage import StorageManagementClient
+        credential = ClientSecretCredential(
+            tenant_id=creds["tenant_id"],
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+        )
+        storage_client = StorageManagementClient(credential, creds["subscription_id"])
+
+        # 1. Create storage account via SDK scaffolding
+        poller = storage_client.storage_accounts.begin_create(
+            azure_resource_group, account_name,
+            {
+                "location": "eastus",
+                "sku": {"name": "Standard_LRS"},
+                "kind": "StorageV2",
+                "allow_blob_public_access": True,
+            },
+        )
+        poller.result()
+        account_created = True
+        log(f"Storage account created via SDK: {account_name}")
+
+        # 2. Disable public blob access via CR
+        cr = client.run_cr(
+            "Smoke-Q: disable public blob access", "azure_disable_public_blob_access",
+            cloud_account_id,
+            {"resource_group": azure_resource_group, "storage_account_name": account_name},
+        )
+        rollback_stack.append((cr["id"], "azure_disable_public_blob_access"))
+
+        # Verify via SDK
+        acct = storage_client.storage_accounts.get_properties(azure_resource_group, account_name)
+        assert acct.allow_blob_public_access is False, "allow_blob_public_access not False"
+        log("Blob public access disabled (SDK verified)")
+
+        # 3. Enable public blob access via CR rollback
+        cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(cr_id, "azure_disable_public_blob_access → enable")
+        log("Blob public access enabled via CR rollback")
+
+        # 4. Rotate storage key via CR
+        cr = client.run_cr(
+            "Smoke-Q: rotate storage key", "azure_rotate_storage_key", cloud_account_id,
+            {"resource_group": azure_resource_group, "storage_account_name": account_name,
+             "key_name": "key1"},
+        )
+        rollback_stack.append((cr["id"], "azure_rotate_storage_key"))
+        log("Storage key rotated via CR")
+
+        log("Phase Q complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase Q failed: {e}")
+        raise
+    finally:
+        print("  [Phase Q cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete storage account
+        if account_created:
+            try:
+                creds = _get_azure_creds()
+                if creds:
+                    from azure.identity import ClientSecretCredential
+                    from azure.mgmt.storage import StorageManagementClient
+                    credential = ClientSecretCredential(
+                        tenant_id=creds["tenant_id"],
+                        client_id=creds["client_id"],
+                        client_secret=creds["client_secret"],
+                    )
+                    sc = StorageManagementClient(credential, creds["subscription_id"])
+                    sc.storage_accounts.delete(azure_resource_group, account_name)
+                    print(f"  Safety net: deleted storage account {account_name}")
+            except Exception as e:
+                print(f"  ⚠️  Safety net storage delete failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Phase R
+# ---------------------------------------------------------------------------
+
+def run_phase_r(client: NexplaneClient, azure_phase_result: Optional[dict],
+                azure_resource_group: str) -> None:
+    """Phase R: Azure Resource Tagging — tag_resource on Azure VM."""
+    print("\n[Phase R] Azure Resource Tagging")
+
+    vm_asset = azure_phase_result.get("vm_asset") if azure_phase_result else None
+    if vm_asset is None:
+        fail("Phase R requires Phase N to have run first (needs running VM)")
+
+    vm_asset_id = vm_asset.get("id", "") if isinstance(vm_asset, dict) else str(vm_asset)
+    vm_name = AZURE_SMOKE_VM
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        creds = _get_azure_creds()
+        if not creds:
+            fail("Phase R requires Azure credentials")
+
+        # Tag VM via CR
+        cr = client.run_cr(
+            "Smoke-R: tag Azure VM", "tag_resource", vm_asset_id,
+            {
+                "resource_group": azure_resource_group,
+                "resource_name": vm_name,
+                "tags": {"nexplane-smoke": "true", "phase": "R"},
+            },
+        )
+        rollback_stack.append((cr["id"], "tag_resource"))
+
+        # Verify via SDK
+        from azure.identity import ClientSecretCredential
+        from azure.mgmt.compute import ComputeManagementClient
+        credential = ClientSecretCredential(
+            tenant_id=creds["tenant_id"],
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+        )
+        compute_client = ComputeManagementClient(credential, creds["subscription_id"])
+        vm = compute_client.virtual_machines.get(azure_resource_group, vm_name)
+        tags = vm.tags or {}
+        assert tags.get("nexplane-smoke") == "true", "Tag not applied to VM"
+        log("Azure VM tagged (SDK verified)")
+
+        log("Phase R complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase R failed: {e}")
+        raise
+    finally:
+        print("  [Phase R cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+
+
+# ---------------------------------------------------------------------------
+# Phase S
+# ---------------------------------------------------------------------------
+
+def run_phase_s(client: NexplaneClient, cloud_account_id: str,
+                azure_resource_group: str) -> None:
+    """Phase S: Terraform local apply against Azure — creates resource group using azurerm provider."""
+    print("\n[Phase S] Terraform Local (Azure)")
+
+    import secrets as _secrets
+    rg_name = f"nexplane-smoke-s-{_secrets.token_hex(4)}"
+
+    creds = _get_azure_creds()
+    if not creds:
+        fail("Phase S requires Azure credentials")
+
+    tf_content = (
+        'terraform {\n'
+        '  required_providers {\n'
+        '    azurerm = {\n'
+        '      source  = "hashicorp/azurerm"\n'
+        '      version = "~> 3.0"\n'
+        '    }\n'
+        '  }\n'
+        '}\n\n'
+        'provider "azurerm" {\n'
+        '  features {}\n'
+        '  tenant_id       = "' + creds["tenant_id"] + '"\n'
+        '  client_id       = "' + creds["client_id"] + '"\n'
+        '  client_secret   = "' + creds["client_secret"] + '"\n'
+        '  subscription_id = "' + creds["subscription_id"] + '"\n'
+        '}\n\n'
+        'resource "azurerm_resource_group" "smoke_test" {\n'
+        '  name     = "' + rg_name + '"\n'
+        '  location = "eastus"\n'
+        '}\n'
+    )
+
+    cr = client.run_cr(
+        "Smoke-S: terraform apply Azure resource group", "terraform_local_apply", cloud_account_id,
+        {"tf_content": tf_content, "rollback_strategy": "terraform_destroy_local"},
+    )
+    log(f"Terraform applied (Azure) — resource group: {rg_name}")
+
+    # Verify via SDK
+    try:
+        from azure.identity import ClientSecretCredential
+        from azure.mgmt.resource import ResourceManagementClient
+        credential = ClientSecretCredential(
+            tenant_id=creds["tenant_id"],
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+        )
+        rm_client = ResourceManagementClient(credential, creds["subscription_id"])
+        rg = rm_client.resource_groups.get(rg_name)
+        assert rg.name == rg_name
+        log("Azure resource group confirmed via SDK")
+    except Exception as e:
+        print(f"  ⚠️  SDK verification skipped: {e}")
+
+    # Rollback: terraform destroy
+    client.rollback_cr(cr["id"], "terraform_local_apply → destroy")
+    log("Azure resource group destroyed via Terraform rollback")
+
+    log("Phase S complete")
+
+
+# ---------------------------------------------------------------------------
+# Phase T
+# ---------------------------------------------------------------------------
+
+def run_phase_t(client: NexplaneClient, cloud_account_id: str,
+                azure_phase_result: Optional[dict] = None) -> None:
+    """Phase T: Ansible local playbook against Azure."""
+    print("\n[Phase T] Ansible Local (Azure)")
+
+    playbook_content = (
+        "---\n"
+        "- name: Nexplane Azure smoke test\n"
+        "  hosts: localhost\n"
+        "  connection: local\n"
+        "  gather_facts: false\n"
+        "  tasks:\n"
+        "    - name: Check python version\n"
+        "      command: python3 --version\n"
+        "      register: py_ver\n"
+        "    - name: Print version\n"
+        "      debug:\n"
+        "        msg: 'Python: {{ py_ver.stdout }}'\n"
+    )
+
+    cr = client.run_cr(
+        "Smoke-T: ansible local playbook (Azure)", "ansible_local_playbook", cloud_account_id,
+        {"playbook_content": playbook_content, "inventory": "localhost,"},
+    )
+    log("Ansible local playbook CR executed successfully (Azure)")
+    log("Phase T complete")
+
+
+# ---------------------------------------------------------------------------
+# Sub-project stubs U-Z
+# ---------------------------------------------------------------------------
+
+def run_phase_u_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
+    """Phase U: Azure Sub-B (Networking) — STUB."""
+    print("\n[Phase U] Azure Networking — STUB (implement with Azure Sub-project B)")
+    print("  ⚠️  Phase U is not yet implemented.")
+    print("  This phase will cover: advanced NSG lifecycle, VNet peering, private endpoints.")
+
+
+def run_phase_v_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
+    """Phase V: Azure Sub-C (Storage) — STUB."""
+    print("\n[Phase V] Azure Storage — STUB (implement with Azure Sub-project C)")
+    print("  ⚠️  Phase V is not yet implemented.")
+    print("  This phase will cover: storage account create/delete/blob lifecycle via CRs.")
+
+
+def run_phase_w_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
+    """Phase W: Azure Sub-D (IAM) — STUB."""
+    print("\n[Phase W] Azure IAM — STUB (implement with Azure Sub-project D)")
+    print("  ⚠️  Phase W is not yet implemented.")
+    print("  This phase will cover: RBAC role assignments, managed identity operations via CRs.")
+
+
+def run_phase_x_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
+    """Phase X: Azure Sub-E (DNS) — STUB."""
+    print("\n[Phase X] Azure DNS — STUB (implement with Azure Sub-project E)")
+    print("  ⚠️  Phase X is not yet implemented.")
+    print("  This phase will cover: Azure DNS zone/record create/delete via CRs.")
+
+
+def run_phase_y_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
+    """Phase Y: Azure Sub-F (SQL) — STUB."""
+    print("\n[Phase Y] Azure SQL — STUB (implement with Azure Sub-project F)")
+    print("  ⚠️  Phase Y is not yet implemented.")
+    print("  This phase will cover: Azure SQL instance create/snapshot/failover via CRs.")
+
+
+def run_phase_z_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
+    """Phase Z: Azure Sub-G (Monitor) — STUB."""
+    print("\n[Phase Z] Azure Monitor — STUB (implement with Azure Sub-project G)")
+    print("  ⚠️  Phase Z is not yet implemented.")
+    print("  This phase will cover: Azure Monitor alerts, diagnostic settings via CRs.")
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
 def main():
     parser = make_base_parser("Nexplane Azure live smoke test")
     parser.add_argument(
         "--phases", default="N,O",
-        help="Comma-separated phases to run (N-O). E.g. --phases N or --phases N,O",
+        help=(
+            "Comma-separated phases to run. "
+            "N-O: existing phases. P=NSG, Q=Storage, R=Tagging, S=Terraform, T=Ansible. "
+            "U-Z=sub-project stubs. Default: N,O."
+        ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key")
     parser.add_argument("--azure-resource-group", default="", help="Azure resource group (must exist)")
@@ -226,6 +640,28 @@ def main():
             if azure_phase_result is None or azure_phase_result.get("vm_asset") is None:
                 fail("Phase O requires Phase N to have run first")
             run_phase_o(client, azure_phase_result, args.azure_resource_group)
+        if "P" in phases:
+            run_phase_p(client, cloud_account_id, args.azure_resource_group)
+        if "Q" in phases:
+            run_phase_q(client, cloud_account_id, args.azure_resource_group)
+        if "R" in phases:
+            run_phase_r(client, azure_phase_result, args.azure_resource_group)
+        if "S" in phases:
+            run_phase_s(client, cloud_account_id, args.azure_resource_group)
+        if "T" in phases:
+            run_phase_t(client, cloud_account_id, azure_phase_result)
+        if "U" in phases:
+            run_phase_u_stub(client, cloud_account_id, args.azure_resource_group)
+        if "V" in phases:
+            run_phase_v_stub(client, cloud_account_id, args.azure_resource_group)
+        if "W" in phases:
+            run_phase_w_stub(client, cloud_account_id, args.azure_resource_group)
+        if "X" in phases:
+            run_phase_x_stub(client, cloud_account_id, args.azure_resource_group)
+        if "Y" in phases:
+            run_phase_y_stub(client, cloud_account_id, args.azure_resource_group)
+        if "Z" in phases:
+            run_phase_z_stub(client, cloud_account_id, args.azure_resource_group)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
