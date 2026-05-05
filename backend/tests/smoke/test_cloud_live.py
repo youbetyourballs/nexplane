@@ -1563,9 +1563,10 @@ def run_phase_l(client: NexplaneClient, cloud_account_id: str,
         print(f"\n❌ Phase L failed: {e}")
         raise
     finally:
-        print("  [Phase L cleanup — rollback stack]")
-        for cr_id, label in reversed(rollback_stack):
-            client.rollback_cr(cr_id, label)
+        if rollback_stack:
+            print("  [Phase L cleanup — rollback stack]")
+            for cr_id, label in reversed(rollback_stack):
+                client.rollback_cr(cr_id, label)
         # Safety net: delete instance via GCP SDK
         if instance_created:
             try:
