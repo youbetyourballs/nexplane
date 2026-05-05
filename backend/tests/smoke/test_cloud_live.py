@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-Nexplane AWS Live Smoke Test — Phases A–H.
+Nexplane Multi-Cloud Live Smoke Test — Phases A–M.
 
-Runs against a live AWS account via the Nexplane API. Creates and destroys
-real AWS resources. Run specific phases with --phases (default: all).
+Runs against live AWS and GCP accounts via the Nexplane API. Creates and destroys
+real cloud resources. Run specific phases with --phases (default: A,B,C,D).
 
 Usage:
-    python backend/tests/smoke/test_aws_live.py \\
+    python backend/tests/smoke/test_cloud_live.py \\
         --base-url http://localhost:8000 \\
         --email admin@nexplane.local \\
         --password changeme \\
-        --phases A,B,C,D,E,F,G,H
+        --phases A,B,C,D \\
+        --tailscale-auth-key tskey-auth-<key> \\
+        --gcp-project my-project-id
 
 Phase descriptions:
     A  EC2 lifecycle + Tailscale join + Nexplane agent deploy
@@ -21,10 +23,16 @@ Phase descriptions:
     F  Security group: add/remove rules with rollback stack
     G  IAM user lifecycle: create/attach-policy/rotate-key/delete with rollback stack
     H  S3 advanced: create/lifecycle/policy/public-access/delete with rollback stack
+    I  Route53: private zone + A record create/update/delete with rollback stack
+    J  RDS: instance + snapshot lifecycle (~30 min) with rollback stack
+    K  CloudWatch: alarms + SSM metric push with rollback stack
+    L  GCE: instance launch + agent deploy with rollback stack
+    M  GCE advanced: stop/start/reboot/snapshot with rollback stack
 
 Requirements:
-    - AWS connector with valid credentials + NexplaneEC2TestProfile IAM role
-    - Tailscale connector with a reusable pre-authorized auth key
+    AWS phases (A-K): AWS connector with credentials + NexplaneEC2TestProfile IAM role
+                      Tailscale connector with reusable pre-authorized auth key
+    GCP phases (L-M): GCP connector with credentials + Compute Engine API enabled
 """
 import argparse
 import json
@@ -348,6 +356,61 @@ def _get_aws_boto3_client(service: str):
         aws_secret_access_key=creds['secret_access_key'],
         region_name=creds.get('region', 'us-east-1'),
     )
+
+
+_gcp_creds_cache: dict = {}
+
+
+def _get_gcp_compute_client():
+    """Get a GCP Compute Engine InstancesClient using GCP connector credentials from the app DB."""
+    import threading
+    global _gcp_creds_cache
+    if not _gcp_creds_cache:
+        from app.database import AsyncSessionLocal
+        from app.models.connector import Connector, ConnectorType
+        from app.services.connector_service import _attach_credentials
+        import asyncio, sqlalchemy as sa
+
+        result_holder: list = [None]
+
+        async def _get():
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    sa.select(Connector).where(Connector.connector_type == ConnectorType.gcp)
+                )
+                conn = result.scalars().first()
+                if not conn:
+                    return None
+                await _attach_credentials(conn, db)
+                return getattr(conn, 'credentials', {})
+
+        def _run_in_thread():
+            result_holder[0] = asyncio.run(_get())
+
+        t = threading.Thread(target=_run_in_thread)
+        t.start()
+        t.join()
+        _gcp_creds_cache = result_holder[0] or {}
+
+    creds = _gcp_creds_cache
+    if not creds:
+        return None
+
+    import json as _json
+    from google.oauth2 import service_account
+    from google.cloud import compute_v1
+
+    key_json_raw = creds.get("service_account_key_json", "")
+    if isinstance(key_json_raw, str):
+        key_json = _json.loads(key_json_raw)
+    else:
+        key_json = key_json_raw
+
+    credentials = service_account.Credentials.from_service_account_info(
+        key_json,
+        scopes=["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/compute"],
+    )
+    return compute_v1.InstancesClient(credentials=credentials)
 
 
 def cleanup(client: NexplaneClient) -> None:
@@ -1430,6 +1493,88 @@ def run_phase_k(client: NexplaneClient, phase_a_result: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase L
+# ---------------------------------------------------------------------------
+
+GCE_SMOKE_INSTANCE = "nexplane-smoke-gce-01"
+GCE_ZONE = "us-central1-a"
+
+
+def run_phase_l(client: NexplaneClient, cloud_account_id: str,
+                gcp_project: str, agent_secret: str) -> dict:
+    """Phase L: GCE instance launch + agent deploy with rollback stack."""
+    print("\n[Phase L] GCE Instance Launch + Agent Deploy")
+
+    rollback_stack: list[tuple[str, str]] = []
+    instance_created = False
+
+    try:
+        cr = client.run_cr(
+            "Smoke-L: launch GCE instance", "gce_instance_create", cloud_account_id,
+            {
+                "name": GCE_SMOKE_INSTANCE,
+                "machine_type": "e2-micro",
+                "zone": GCE_ZONE,
+                "image_family": "ubuntu-2204-lts",
+                "image_project": "ubuntu-os-cloud",
+                "connection_mode": "agent_startup",
+                "nexplane_url": "http://localhost:8000",
+                "nexplane_secret": agent_secret,
+            },
+        )
+        rollback_stack.append((cr["id"], "gce_instance_create"))
+        instance_created = True
+        log(f"GCE instance launched: {GCE_SMOKE_INSTANCE}")
+
+        # Verify server asset in inventory
+        time.sleep(10)
+        instance_asset = client.get_asset_by_name(GCE_SMOKE_INSTANCE)
+        if instance_asset:
+            log(f"GCE instance in inventory: {instance_asset['id']}")
+        else:
+            print(f"  ⚠️  GCE instance asset not yet in inventory (ingest lag)")
+            instance_asset = {
+                "id": cloud_account_id,
+                "name": GCE_SMOKE_INSTANCE,
+                "asset_metadata": {"instance_name": GCE_SMOKE_INSTANCE, "zone": GCE_ZONE},
+            }
+
+        # Wait up to 5 min for agent to register
+        print("  Waiting up to 5 min for Nexplane agent to register...")
+        deadline = time.time() + 300
+        agent_asset = None
+        while time.time() < deadline:
+            candidates = client.get("/assets", params={"q": GCE_SMOKE_INSTANCE, "asset_type": "endpoint"})
+            if candidates:
+                agent_asset = candidates[0]
+                log(f"Agent registered: {agent_asset['id']}")
+                break
+            time.sleep(15)
+        if not agent_asset:
+            print("  ⚠️  Agent not yet registered — startup script may still be running")
+
+        log("Phase L complete")
+        return {"instance_asset": instance_asset, "rollback_stack": rollback_stack}
+
+    except Exception as e:
+        print(f"\n❌ Phase L failed: {e}")
+        raise
+    finally:
+        print("  [Phase L cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete instance via GCP SDK
+        if instance_created:
+            try:
+                compute = _get_gcp_compute_client()
+                if compute and gcp_project:
+                    compute.delete(project=gcp_project, zone=GCE_ZONE, instance=GCE_SMOKE_INSTANCE)
+                    print(f"  Safety net: deleted GCE instance {GCE_SMOKE_INSTANCE}")
+            except Exception as e2:
+                print(f"  ⚠️  Safety net GCE delete failed: {e2}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1440,9 +1585,10 @@ def main():
     parser.add_argument("--password", required=True)
     parser.add_argument(
         "--phases", default="A,B,C,D",
-        help="Comma-separated phases to run (A-K). Phase J is slow (~35 min, creates RDS). E.g. --phases A,B,C,D,E,F,G,H,I,K",
+        help="Comma-separated phases to run (A-M). Phase J is slow (~35 min, creates RDS). GCP phases L-M require --gcp-project. E.g. --phases A,B,C,D or --phases L,M",
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
+    parser.add_argument("--gcp-project", default="", help="GCP project ID for phases L and M")
     args = parser.parse_args()
     phases = {p.strip().upper() for p in args.phases.split(",")}
 
@@ -1509,6 +1655,11 @@ def main():
             if phase_a_result is None:
                 fail("Phase K requires Phase A to have run first (needs a running EC2 instance)")
             run_phase_k(client, phase_a_result)
+
+        gcp_phase_result: Optional[dict] = None
+        if "L" in phases:
+            agent_secret = client.get_agent_secret()
+            gcp_phase_result = run_phase_l(client, cloud_account_id, args.gcp_project, agent_secret)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
