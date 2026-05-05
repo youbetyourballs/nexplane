@@ -118,7 +118,13 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
         },
         "terminate_instance":     {"instance_id": desired.get("instance_id", ""), "confirm_terminate": desired.get("confirm_terminate", False)},
     }
-    return resolvers.get(generic_action, {})
+    # If no specific resolver, pass through all desired_outcome keys except meta-fields.
+    # This ensures executors added after this resolver was written still receive their parameters.
+    _DESIRED_META_KEYS = {"rollback_strategy", "rollback_connector_type"}
+    return resolvers.get(
+        generic_action,
+        {k: v for k, v in desired.items() if k not in _DESIRED_META_KEYS},
+    )
 
 
 def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[Asset], catalog) -> dict:
