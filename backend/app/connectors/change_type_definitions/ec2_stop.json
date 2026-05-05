@@ -3,7 +3,6 @@
   "display_name": "Stop EC2 Instance",
   "steps": [
     {"generic_action": "capture_instance_state", "purpose": "preflight_validate", "required": true},
-    {"generic_action": "create_ebs_snapshot",     "purpose": "preflight_validate", "required": false},
     {"generic_action": "stop_instance",           "purpose": "execute",            "required": true},
     {"generic_action": "wait_instance_state",     "purpose": "verify",             "required": true}
   ],
