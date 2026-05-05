@@ -1,0 +1,11 @@
+{
+  "change_type": "iam_user_create",
+  "display_name": "Create IAM User",
+  "steps": [
+    {"generic_action": "create_iam_user", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_iam_user",
+  "rollback_connector_type": "aws"
+}

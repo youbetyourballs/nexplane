@@ -1,0 +1,11 @@
+{
+  "change_type": "cloudwatch_alarm_delete",
+  "display_name": "Delete CloudWatch Alarm",
+  "steps": [
+    {"generic_action": "delete_cloudwatch_alarm", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "create_cloudwatch_alarm",
+  "rollback_connector_type": "aws"
+}

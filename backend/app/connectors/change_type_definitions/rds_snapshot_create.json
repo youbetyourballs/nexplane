@@ -1,0 +1,11 @@
+{
+  "change_type": "rds_snapshot_create",
+  "display_name": "Create RDS Snapshot",
+  "steps": [
+    {"generic_action": "create_rds_snapshot", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_rds_snapshot",
+  "rollback_connector_type": "aws"
+}

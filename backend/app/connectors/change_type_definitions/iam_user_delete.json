@@ -1,0 +1,10 @@
+{
+  "change_type": "iam_user_delete",
+  "display_name": "Delete IAM User",
+  "steps": [
+    {"generic_action": "delete_iam_user", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "rollback_action": null
+}
