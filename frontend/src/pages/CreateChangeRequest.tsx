@@ -688,7 +688,13 @@ export function CreateChangeRequest() {
     if (preAssetId && assets) {
       const preAsset = assets.find((a) => a.id === preAssetId);
       if (preAsset?.asset_metadata?.instance_id && "instance_id" in template) {
-        template = { ...template, instance_id: preAsset.asset_metadata.instance_id };
+        template = { ...template, instance_id: preAsset.asset_metadata.instance_id as string };
+      }
+      if (preAsset?.asset_metadata?.instance_name && "instance_name" in template) {
+        template = { ...template, instance_name: preAsset.asset_metadata.instance_name as string };
+      }
+      if (preAsset?.asset_metadata?.zone && "zone" in template) {
+        template = { ...template, zone: preAsset.asset_metadata.zone as string };
       }
     }
 
