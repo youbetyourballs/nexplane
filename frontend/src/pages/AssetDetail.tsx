@@ -92,6 +92,10 @@ const ASSET_ACTIONS: Record<AssetType, { changeType: string; label: string; titl
       title: (a) => `Enforce MFA in ${a.name}`,
       description: (a) => `Enforce MFA requirement on IAM users in account ${a.asset_metadata?.account_id ?? a.name}.`,
     },
+    { changeType: "iam_user_create", label: "Create IAM User", title: (a) => `Create IAM user in ${a.name}`, description: (a) => `Create a new IAM user in account ${a.name}.` },
+    { changeType: "s3_bucket_create", label: "Create S3 Bucket", title: (a) => `Create S3 bucket in ${a.name}`, description: (a) => `Create a new S3 bucket in account ${a.name}.` },
+    { changeType: "route53_zone_create", label: "Create Hosted Zone", title: (a) => `Create hosted zone in ${a.name}`, description: (a) => `Create a Route53 hosted zone in account ${a.name}.` },
+    { changeType: "rds_instance_create", label: "Create RDS Instance", title: (a) => `Create RDS instance in ${a.name}`, description: (a) => `Launch a new RDS database instance in account ${a.name}.` },
   ],
   dns_zone: [
     {
@@ -106,6 +110,8 @@ const ASSET_ACTIONS: Record<AssetType, { changeType: string; label: string; titl
       title: (a) => `DR failover for ${a.name}`,
       description: (a) => `Fail over to DR site via Route53 for zone ${a.name}.`,
     },
+    { changeType: "route53_record_upsert", label: "Add / Update Record", title: (a) => `Add record to ${a.name}`, description: (a) => `Create or update a DNS record in zone ${a.asset_metadata?.zone_name ?? a.name}.` },
+    { changeType: "route53_record_delete", label: "Delete Record", title: (a) => `Delete record from ${a.name}`, description: (a) => `Delete a DNS record from zone ${a.asset_metadata?.zone_name ?? a.name}.` },
   ],
   firewall: [
     {
@@ -134,6 +140,7 @@ const ASSET_ACTIONS: Record<AssetType, { changeType: string; label: string; titl
       title: (a) => `Lockdown ${a.name}`,
       description: (a) => `Lock ${a.name} across all identity systems immediately.`,
     },
+    { changeType: "iam_user_delete", label: "Delete IAM User", title: (a) => `Delete IAM user ${a.name}`, description: (a) => `Delete IAM user ${a.asset_metadata?.username ?? a.name} and all access keys.` },
   ],
   identity_provider: [
     {
@@ -188,6 +195,9 @@ const ASSET_ACTIONS: Record<AssetType, { changeType: string; label: string; titl
       title: (a) => `Promote ${a.name} to primary`,
       description: (a) => `Promote ${a.name} read replica to standalone primary.`,
     },
+    { changeType: "rds_snapshot_create", label: "Create RDS Snapshot", title: (a) => `Snapshot ${a.name}`, description: (a) => `Create a manual RDS snapshot of ${a.name}.` },
+    { changeType: "rds_instance_delete", label: "Delete Instance", title: (a) => `Delete RDS instance ${a.name}`, description: (a) => `Permanently delete RDS instance ${a.asset_metadata?.db_instance_identifier ?? a.name}.` },
+    { changeType: "cloudwatch_alarm_create", label: "Create CloudWatch Alarm", title: (a) => `Monitor ${a.name}`, description: (a) => `Create a CloudWatch alarm for database ${a.name}.` },
   ],
   storage_bucket: [
     {
@@ -196,12 +206,9 @@ const ASSET_ACTIONS: Record<AssetType, { changeType: string; label: string; titl
       title: (a) => `Block public access on ${a.name}`,
       description: (a) => `Enable S3 Block Public Access on bucket ${a.asset_metadata?.bucket_name ?? a.name}.`,
     },
-    {
-      changeType: "create_backup",
-      label: "Create Backup",
-      title: (a) => `Backup ${a.name}`,
-      description: (a) => `Create a backup of bucket ${a.name}.`,
-    },
+    { changeType: "s3_lifecycle_configure", label: "Configure Lifecycle", title: (a) => `Configure lifecycle on ${a.name}`, description: (a) => `Set object expiration rules on bucket ${a.asset_metadata?.bucket_name ?? a.name}.` },
+    { changeType: "s3_bucket_delete", label: "Delete Bucket", title: (a) => `Delete bucket ${a.name}`, description: (a) => `Empty and delete S3 bucket ${a.asset_metadata?.bucket_name ?? a.name}.` },
+    { changeType: "create_backup", label: "Create Backup", title: (a) => `Backup ${a.name}`, description: (a) => `Create a backup of bucket ${a.name}.` },
   ],
   load_balancer: [
     {

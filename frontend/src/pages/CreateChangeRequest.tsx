@@ -361,6 +361,71 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
     description: "Enforce MFA requirement on an IAM user or group.",
     outcomeTemplate: JSON.stringify({ target: "user", username: "svc-account", rollback_strategy: "remove_mfa_requirement" }, null, 2),
   },
+  iam_user_create: {
+    label: "Create IAM User",
+    description: "Create a new IAM user in an AWS account.",
+    outcomeTemplate: JSON.stringify({ username: "" }, null, 2),
+  },
+  iam_user_delete: {
+    label: "Delete IAM User",
+    description: "Delete an IAM user and all associated access keys.",
+    outcomeTemplate: JSON.stringify({ username: "" }, null, 2),
+  },
+  s3_bucket_create: {
+    label: "Create S3 Bucket",
+    description: "Create a new S3 bucket in an AWS account.",
+    outcomeTemplate: JSON.stringify({ bucket_name: "" }, null, 2),
+  },
+  s3_bucket_delete: {
+    label: "Delete S3 Bucket",
+    description: "Empty and delete an S3 bucket.",
+    outcomeTemplate: JSON.stringify({ bucket_name: "" }, null, 2),
+  },
+  s3_lifecycle_configure: {
+    label: "Configure S3 Lifecycle",
+    description: "Set object expiration and transition rules on an S3 bucket.",
+    outcomeTemplate: JSON.stringify({ bucket_name: "", rules: [] }, null, 2),
+  },
+  route53_zone_create: {
+    label: "Create Hosted Zone",
+    description: "Create a new Route53 hosted zone in an AWS account.",
+    outcomeTemplate: JSON.stringify({ zone_name: "", private: true }, null, 2),
+  },
+  route53_record_upsert: {
+    label: "Create / Update DNS Record",
+    description: "Create or update a DNS record in a Route53 hosted zone.",
+    outcomeTemplate: JSON.stringify({ zone_id: "", name: "", record_type: "A", values: [], ttl: 300 }, null, 2),
+  },
+  route53_record_delete: {
+    label: "Delete DNS Record",
+    description: "Delete a DNS record from a Route53 hosted zone.",
+    outcomeTemplate: JSON.stringify({ zone_id: "", name: "", record_type: "A", values: [], ttl: 300 }, null, 2),
+  },
+  rds_instance_create: {
+    label: "Create RDS Instance",
+    description: "Launch a new RDS database instance in an AWS account.",
+    outcomeTemplate: JSON.stringify({ db_instance_identifier: "", engine: "mysql", db_instance_class: "db.t3.micro", master_username: "admin", master_password: "", allocated_storage: 20 }, null, 2),
+  },
+  rds_instance_delete: {
+    label: "Delete RDS Instance",
+    description: "Permanently delete an RDS database instance.",
+    outcomeTemplate: JSON.stringify({ db_instance_identifier: "" }, null, 2),
+  },
+  rds_snapshot_create: {
+    label: "Create RDS Snapshot",
+    description: "Create a manual snapshot of an RDS database instance.",
+    outcomeTemplate: JSON.stringify({ db_instance_identifier: "", snapshot_identifier: "" }, null, 2),
+  },
+  cloudwatch_alarm_create: {
+    label: "Create CloudWatch Alarm",
+    description: "Create a CloudWatch alarm for a metric threshold.",
+    outcomeTemplate: JSON.stringify({ alarm_name: "", metric_name: "CPUUtilization", namespace: "AWS/EC2", threshold: 80, comparison_operator: "GreaterThanThreshold", evaluation_periods: 1, period: 60, dimensions: [] }, null, 2),
+  },
+  cloudwatch_alarm_delete: {
+    label: "Delete CloudWatch Alarm",
+    description: "Delete a CloudWatch alarm.",
+    outcomeTemplate: JSON.stringify({ alarm_name: "" }, null, 2),
+  },
   generic_remediation: {
     label: "Generic Remediation",
     description: "Generic remediation action for scanner findings.",
@@ -414,6 +479,26 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   {
     label: "Database",
     types: ["provision_db_user", "deprovision_db_user", "db_permission_change", "configure_db_audit", "promote_db_replica", "db_connection_config"],
+  },
+  {
+    label: "IAM",
+    types: ["iam_user_create", "iam_user_delete"],
+  },
+  {
+    label: "S3 Storage",
+    types: ["s3_bucket_create", "s3_bucket_delete", "s3_lifecycle_configure"],
+  },
+  {
+    label: "DNS (Route53)",
+    types: ["route53_zone_create", "route53_record_upsert", "route53_record_delete"],
+  },
+  {
+    label: "RDS",
+    types: ["rds_instance_create", "rds_instance_delete", "rds_snapshot_create"],
+  },
+  {
+    label: "Observability",
+    types: ["cloudwatch_alarm_create", "cloudwatch_alarm_delete"],
   },
   {
     label: "Backup & Recovery",
@@ -482,6 +567,20 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   ansible_local_playbook: "server",
   s3_block_public_access: "cloud_account",
   iam_enforce_mfa: "cloud_account",
+  // New AWS change types
+  iam_user_create: "cloud_account",
+  iam_user_delete: "identity",
+  s3_bucket_create: "cloud_account",
+  s3_bucket_delete: "storage_bucket",
+  s3_lifecycle_configure: "storage_bucket",
+  route53_zone_create: "cloud_account",
+  route53_record_upsert: "dns_zone",
+  route53_record_delete: "dns_zone",
+  rds_instance_create: "cloud_account",
+  rds_instance_delete: "database",
+  rds_snapshot_create: "database",
+  cloudwatch_alarm_create: null,
+  cloudwatch_alarm_delete: null,
   // Database actions
   rotate_db_credentials: "database",
   promote_db_replica: "database",
