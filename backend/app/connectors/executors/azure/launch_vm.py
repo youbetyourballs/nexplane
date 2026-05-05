@@ -144,7 +144,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             admin_password=admin_password,
         )
     else:
-        key_data = ssh_public_key if ssh_public_key else "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC placeholder"
+        if not ssh_public_key and connection_mode == "ssh":
+            raise ValueError("ssh_public_key is required when connection_mode is 'ssh'")
+        key_data = ssh_public_key if ssh_public_key else ""
         os_profile = OsProfile(
             computer_name=vm_name,
             admin_username=admin_username,
