@@ -27,8 +27,6 @@ Requirements:
     AWS connector with credentials + NexplaneEC2TestProfile IAM role
     Tailscale connector with reusable pre-authorized auth key
 """
-import secrets
-import string
 import time
 from typing import Optional
 
