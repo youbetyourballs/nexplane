@@ -122,6 +122,30 @@ class NexplaneClient:
             time.sleep(5)
         fail(f"{label} — timed out after {TIMEOUT_SECONDS}s")
 
+    def _wait_rollback(self, cr_id: str, label: str) -> None:
+        """Wait for a rollback CR to reach rolled_back or failed status."""
+        deadline = time.time() + TIMEOUT_SECONDS
+        while time.time() < deadline:
+            cr = self.get(f"/change-requests/{cr_id}")
+            if cr["status"] == "rolled_back":
+                log(f"  rolled back: {label}")
+                return
+            if cr["status"] in ("failed", "completed"):
+                print(f"  ⚠️  Rollback CR {cr_id} ended with status '{cr['status']}' ({label})")
+                return
+            time.sleep(5)
+        print(f"  ⚠️  Rollback timed out for {cr_id} ({label})")
+
+    def rollback_cr(self, cr_id: str, label: str) -> bool:
+        """Trigger rollback on a CR and wait. Returns True if rolled_back, False otherwise."""
+        try:
+            self.post(f"/change-requests/{cr_id}/rollback")
+            self._wait_rollback(cr_id, label)
+            return True
+        except Exception as e:
+            print(f"  ⚠️  Rollback request failed for {cr_id} ({label}): {e}")
+            return False
+
 
 # ---------------------------------------------------------------------------
 # Tailscale helpers
@@ -586,6 +610,103 @@ def run_phase_d(client: NexplaneClient, phase_a_result: Optional[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase E
+# ---------------------------------------------------------------------------
+
+def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase E: EC2 advanced — stop/start/reboot/snapshot with rollback stack cleanup."""
+    print("\n[Phase E] EC2 Advanced Operations")
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+
+    rollback_stack: list[tuple[str, str]] = []  # (cr_id, label)
+    snapshot_id: str | None = None
+
+    try:
+        # 1. Stop instance
+        cr = client.run_cr(
+            "Smoke-E: stop instance", "ec2_stop", instance_asset["id"],
+            {"instance_id": instance_id, "rollback_strategy": "start_instance"},
+        )
+        rollback_stack.append((cr["id"], "ec2_stop"))
+        log("Instance stopped")
+
+        # 2. Start instance
+        cr = client.run_cr(
+            "Smoke-E: start instance", "ec2_start", instance_asset["id"],
+            {"instance_id": instance_id, "rollback_strategy": "stop_instance"},
+        )
+        rollback_stack.pop()  # ec2_stop is superseded — instance is running
+        rollback_stack.append((cr["id"], "ec2_start"))
+        log("Instance started")
+
+        # 3. Reboot
+        client.run_cr(
+            "Smoke-E: reboot instance", "ec2_reboot", instance_asset["id"],
+            {"instance_id": instance_id, "rollback_strategy": "rollback_unavailable"},
+        )
+        log("Instance rebooted")
+
+        # Wait for SSM to reconnect post-reboot
+        time.sleep(30)
+        client.run_cr(
+            "Smoke-E: SSM verify post-reboot", "ssm_command", instance_asset["id"],
+            {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+             "command": "uptime && echo 'post_reboot_ok'",
+             "rollback_strategy": "rollback_unavailable"},
+        )
+        log("SSM verified post-reboot")
+
+        # 4. Create EBS snapshot
+        cr = client.run_cr(
+            "Smoke-E: create EBS snapshot", "snapshot_asset", instance_asset["id"],
+            {"instance_id": instance_id, "rollback_strategy": "delete_ebs_snapshot"},
+        )
+        rollback_stack.append((cr["id"], "snapshot_asset"))
+
+        # Find the snapshot ID from AWS
+        ec2_boto = _get_aws_boto3_client('ec2')
+        if ec2_boto:
+            snaps = ec2_boto.describe_snapshots(
+                Filters=[
+                    {"Name": "description", "Values": [f"*{instance_id}*"]},
+                    {"Name": "status", "Values": ["completed", "pending"]},
+                ]
+            ).get("Snapshots", [])
+            snaps.sort(key=lambda s: s["StartTime"], reverse=True)
+            if snaps:
+                snapshot_id = snaps[0]["SnapshotId"]
+        log(f"EBS snapshot created: {snapshot_id or 'unknown'}")
+
+        # 5. Verify via SSM
+        client.run_cr(
+            "Smoke-E: verify post-snapshot", "ssm_command", instance_asset["id"],
+            {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+             "command": "echo 'snapshot_verify_ok'",
+             "rollback_strategy": "rollback_unavailable"},
+        )
+        log("Post-snapshot SSM verified")
+        log("Phase E complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase E failed: {e}")
+        raise
+    finally:
+        print("  [Phase E cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete snapshot directly
+        if snapshot_id:
+            try:
+                ec2_boto2 = _get_aws_boto3_client('ec2')
+                if ec2_boto2:
+                    ec2_boto2.delete_snapshot(SnapshotId=snapshot_id)
+                    print(f"  Safety net: deleted snapshot {snapshot_id}")
+            except Exception as e2:
+                print(f"  ⚠️  Safety net snapshot delete failed: {e2}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -596,7 +717,7 @@ def main():
     parser.add_argument("--password", required=True)
     parser.add_argument(
         "--phases", default="A,B,C,D",
-        help="Comma-separated phases to run (default: A,B,C,D). E.g. --phases A or --phases A,B",
+        help="Comma-separated phases to run (default: A,B,C,D). E.g. --phases A or --phases A,B,E",
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
     args = parser.parse_args()
@@ -640,6 +761,11 @@ def main():
 
         if "D" in phases:
             run_phase_d(client, phase_a_result)
+
+        if "E" in phases:
+            if phase_a_result is None:
+                fail("Phase E requires Phase A to have run first")
+            run_phase_e(client, phase_a_result)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
