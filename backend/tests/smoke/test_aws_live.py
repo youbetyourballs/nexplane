@@ -38,6 +38,7 @@ import httpx
 KEY_NAME = "nexplane-smoke-test-key"
 INSTANCE_NAME = "nexplane-smoke-test-01"
 TIMEOUT_SECONDS = 600
+RDS_PHASE_TIMEOUT_SECONDS = 2700  # 45 minutes for Phase J
 
 
 def log(msg: str, ok: bool = True) -> None:
@@ -150,6 +151,26 @@ class NexplaneClient:
         except Exception as e:
             print(f"  ⚠️  Rollback request failed for {cr_id} ({label}): {e}")
             return False
+
+    def _run_cr_with_timeout(self, title: str, change_type: str, asset_id: str,
+                              desired_outcome: dict, timeout: int = TIMEOUT_SECONDS) -> dict:
+        """Like run_cr but with a custom timeout for slow operations like RDS creation."""
+        print(f"  → {title}")
+        cr_id = self.create_cr(title, change_type, asset_id, desired_outcome)
+        self.post(f"/change-requests/{cr_id}/plan")
+        self.post(f"/change-requests/{cr_id}/submit-for-approval")
+        self.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "smoke test"})
+        self.post(f"/change-requests/{cr_id}/execute")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            cr = self.get(f"/change-requests/{cr_id}")
+            if cr["status"] == "completed":
+                log(f"{title}")
+                return cr
+            if cr["status"] in ("failed", "rolled_back", "rejected"):
+                fail(f"{title} — CR ended with status '{cr['status']}' (id: {cr_id})")
+            time.sleep(10)
+        fail(f"{title} — timed out after {timeout}s")
 
 
 # ---------------------------------------------------------------------------
@@ -1047,6 +1068,361 @@ def run_phase_h(client: NexplaneClient, cloud_account_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase I
+# ---------------------------------------------------------------------------
+
+def run_phase_i(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase I: Route53 — private zone, A record create/update/delete with rollback stack."""
+    print("\n[Phase I] Route53 DNS Operations")
+
+    zone_name = f"smoke-{int(time.time())}.nexplane.internal"
+    rollback_stack: list[tuple[str, str]] = []
+    zone_id: str | None = None
+
+    try:
+        # 1. Create private hosted zone via CR
+        cr = client.run_cr(
+            "Smoke-I: create hosted zone", "route53_zone_create", cloud_account_id,
+            {"zone_name": zone_name, "private": True},
+        )
+        rollback_stack.append((cr["id"], "route53_zone_create"))
+
+        # Resolve zone_id: look up via boto3 (executor stores in _auto_asset but ingest lag may apply)
+        r53_boto = _get_aws_boto3_client('route53')
+        if r53_boto:
+            zones = r53_boto.list_hosted_zones_by_name(DNSName=zone_name).get("HostedZones", [])
+            for z in zones:
+                if z["Name"].rstrip(".") == zone_name.rstrip("."):
+                    zone_id = z["Id"].split("/")[-1]
+                    break
+        if not zone_id:
+            # Fall back to inventory
+            assets = client.get("/assets", params={"q": zone_name, "asset_type": "dns_zone"})
+            if assets:
+                zone_id = assets[0].get("asset_metadata", {}).get("zone_id")
+        if not zone_id:
+            fail(f"Could not determine zone_id for {zone_name}")
+        log(f"Hosted zone created: {zone_id} ({zone_name})")
+
+        # 2. Create A record
+        cr = client.run_cr(
+            "Smoke-I: create A record", "route53_record_upsert", cloud_account_id,
+            {
+                "zone_id": zone_id,
+                "name": f"web.{zone_name}",
+                "record_type": "A",
+                "values": ["10.0.0.1"],
+                "ttl": 60,
+            },
+        )
+        rollback_stack.append((cr["id"], "route53_record_upsert create"))
+        log("A record created: web → 10.0.0.1")
+
+        # 3. Update the A record (UPSERT semantics)
+        cr = client.run_cr(
+            "Smoke-I: update A record", "route53_record_upsert", cloud_account_id,
+            {
+                "zone_id": zone_id,
+                "name": f"web.{zone_name}",
+                "record_type": "A",
+                "values": ["10.0.0.2"],
+                "ttl": 60,
+            },
+        )
+        rollback_stack.append((cr["id"], "route53_record_upsert update"))
+        log("A record updated: web → 10.0.0.2")
+
+        # 4. Verify record via boto3
+        if r53_boto and zone_id:
+            rrsets = r53_boto.list_resource_record_sets(
+                HostedZoneId=zone_id,
+                StartRecordName=f"web.{zone_name}",
+                StartRecordType="A",
+                MaxItems="1",
+            ).get("ResourceRecordSets", [])
+            if rrsets and rrsets[0].get("Name", "").rstrip(".") == f"web.{zone_name}".rstrip("."):
+                values = [r["Value"] for r in rrsets[0].get("ResourceRecords", [])]
+                log(f"A record verified via boto3: {values}")
+            else:
+                print("  ⚠️  A record not yet visible via boto3 (may be eventual consistency)")
+
+        # 5. Delete A record via route53_record_delete CR
+        cr = client.run_cr(
+            "Smoke-I: delete A record", "route53_record_delete", cloud_account_id,
+            {
+                "zone_id": zone_id,
+                "name": f"web.{zone_name}",
+                "record_type": "A",
+                "values": ["10.0.0.2"],
+                "ttl": 60,
+            },
+        )
+        # A record is gone — remove the upsert CRs from rollback stack (nothing to undo)
+        rollback_stack = [(cid, lbl) for cid, lbl in rollback_stack
+                          if not lbl.startswith("route53_record_upsert")]
+        log("A record deleted via CR")
+
+        log("Phase I complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase I failed: {e}")
+        raise
+    finally:
+        print("  [Phase I cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete the entire hosted zone
+        if zone_id:
+            try:
+                r53_safety = _get_aws_boto3_client('route53')
+                if r53_safety:
+                    # Delete all non-SOA/NS records first
+                    changes = []
+                    paginator = r53_safety.get_paginator('list_resource_record_sets')
+                    for page in paginator.paginate(HostedZoneId=zone_id):
+                        for rrs in page['ResourceRecordSets']:
+                            if rrs['Type'] not in ('SOA', 'NS'):
+                                changes.append({'Action': 'DELETE', 'ResourceRecordSet': rrs})
+                    if changes:
+                        r53_safety.change_resource_record_sets(
+                            HostedZoneId=zone_id,
+                            ChangeBatch={'Changes': changes},
+                        )
+                    r53_safety.delete_hosted_zone(Id=zone_id)
+                    print(f"  Safety net: deleted hosted zone {zone_id}")
+            except Exception as e2:
+                print(f"  ⚠️  Safety net zone delete failed: {e2}")
+
+
+# ---------------------------------------------------------------------------
+# Phase J
+# ---------------------------------------------------------------------------
+
+def run_phase_j(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase J: RDS Full Lifecycle — create/snapshot/verify/delete (~25-35 min)."""
+    print("\n[Phase J] RDS Full Lifecycle (~25-35 min)")
+
+    ts = int(time.time())
+    db_id = f"nexplane-smoke-db-{ts}"
+    snap_id = f"nexplane-smoke-snap-{ts}"
+
+    rollback_stack: list[tuple[str, str]] = []
+    created_db_ids: list[str] = []
+    created_snap_ids: list[str] = []
+
+    try:
+        # 1. Create primary RDS instance
+        print(f"  Creating RDS instance {db_id} (db.t3.micro MySQL 8.0) — may take ~10 min")
+        cr = client._run_cr_with_timeout(
+            "Smoke-J: create RDS instance", "rds_instance_create", cloud_account_id,
+            {
+                "db_instance_identifier": db_id,
+                "engine": "mysql",
+                "engine_version": "8.0",
+                "db_instance_class": "db.t3.micro",
+                "master_username": "admin",
+                "master_password": "Nexplane!Smoke1",
+                "allocated_storage": 20,
+                "skip_final_snapshot": True,
+            },
+            timeout=RDS_PHASE_TIMEOUT_SECONDS,
+        )
+        rollback_stack.append((cr["id"], "rds_instance_create"))
+        created_db_ids.append(db_id)
+        log(f"RDS instance created: {db_id}")
+
+        # Verify database asset in inventory
+        assets = client.get("/assets", params={"q": db_id, "asset_type": "database"})
+        if assets:
+            log(f"RDS instance in inventory: {assets[0]['id']}")
+        else:
+            print("  ⚠️  RDS asset not yet in inventory (ingest lag)")
+
+        # 2. Create manual snapshot
+        print(f"  Creating RDS snapshot {snap_id} — may take ~5 min")
+        cr = client._run_cr_with_timeout(
+            "Smoke-J: create RDS snapshot", "rds_snapshot_create", cloud_account_id,
+            {
+                "db_instance_identifier": db_id,
+                "snapshot_identifier": snap_id,
+            },
+            timeout=RDS_PHASE_TIMEOUT_SECONDS,
+        )
+        rollback_stack.append((cr["id"], "rds_snapshot_create"))
+        created_snap_ids.append(snap_id)
+        log(f"Snapshot created: {snap_id}")
+
+        # 3. Verify snapshot via boto3
+        rds_boto = _get_aws_boto3_client('rds')
+        if rds_boto:
+            snaps = rds_boto.describe_db_snapshots(DBSnapshotIdentifier=snap_id).get("DBSnapshots", [])
+            if snaps and snaps[0].get("Status") == "available":
+                log(f"Snapshot verified: {snaps[0].get('AllocatedStorage', 0)}GB, status=available")
+            elif snaps:
+                print(f"  ⚠️  Snapshot status: {snaps[0].get('Status')} (may still be creating)")
+            else:
+                print("  ⚠️  Snapshot not found via boto3")
+
+        # 4. Delete snapshot via rollback of snapshot CR
+        snap_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(snap_cr_id, "rds_snapshot_create → delete_rds_snapshot")
+        created_snap_ids.remove(snap_id)
+        log("Snapshot deleted via CR rollback")
+
+        # 5. Delete instance via rollback of create CR
+        print(f"  Deleting RDS instance {db_id} — may take ~10 min")
+        create_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(create_cr_id, "rds_instance_create → delete_rds_instance")
+        created_db_ids.remove(db_id)
+        log("RDS instance deleted via CR rollback")
+
+        log("Phase J complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase J failed: {e}")
+        raise
+    finally:
+        if rollback_stack:
+            print("  [Phase J cleanup — rollback stack]")
+            for cr_id, label in reversed(rollback_stack):
+                client.rollback_cr(cr_id, label)
+        # Safety net: force-delete any remaining RDS resources
+        rds_safety = _get_aws_boto3_client('rds')
+        if rds_safety:
+            for db_identifier in list(created_db_ids):
+                try:
+                    rds_safety.delete_db_instance(
+                        DBInstanceIdentifier=db_identifier,
+                        SkipFinalSnapshot=True,
+                        DeleteAutomatedBackups=True,
+                    )
+                    print(f"  Safety net: deleting RDS instance {db_identifier} (async)")
+                except Exception as e2:
+                    print(f"  ⚠️  Safety net instance delete failed {db_identifier}: {e2}")
+            for snap_identifier in list(created_snap_ids):
+                try:
+                    rds_safety.delete_db_snapshot(DBSnapshotIdentifier=snap_identifier)
+                    print(f"  Safety net: deleted snapshot {snap_identifier}")
+                except Exception as e2:
+                    print(f"  ⚠️  Safety net snapshot delete failed {snap_identifier}: {e2}")
+
+
+# ---------------------------------------------------------------------------
+# Phase K
+# ---------------------------------------------------------------------------
+
+def run_phase_k(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase K: CloudWatch — create alarms, trigger via SSM custom metric, verify, rollback."""
+    print("\n[Phase K] CloudWatch Alarms")
+
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+    ts = int(time.time())
+    alarm_cpu = f"nexplane-smoke-cpu-{ts}"
+    alarm_custom = f"nexplane-smoke-custom-{ts}"
+    custom_namespace = "Nexplane/SmokeTest"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # 1. Create CPU utilization alarm (99% threshold — won't fire on idle instance)
+        cr = client.run_cr(
+            "Smoke-K: create CPU alarm", "cloudwatch_alarm_create", instance_asset["id"],
+            {
+                "alarm_name": alarm_cpu,
+                "metric_name": "CPUUtilization",
+                "namespace": "AWS/EC2",
+                "threshold": 99.0,
+                "comparison_operator": "GreaterThanThreshold",
+                "evaluation_periods": 1,
+                "period": 60,
+                "statistic": "Average",
+                "dimensions": [{"Name": "InstanceId", "Value": instance_id}],
+            },
+        )
+        rollback_stack.append((cr["id"], "cloudwatch_alarm_create CPU"))
+        log(f"CPU alarm created: {alarm_cpu}")
+
+        # 2. Create custom namespace alarm (fires when metric value > 0)
+        cr = client.run_cr(
+            "Smoke-K: create custom metric alarm", "cloudwatch_alarm_create", instance_asset["id"],
+            {
+                "alarm_name": alarm_custom,
+                "metric_name": "TestTrigger",
+                "namespace": custom_namespace,
+                "threshold": 0.0,
+                "comparison_operator": "GreaterThanThreshold",
+                "evaluation_periods": 1,
+                "period": 60,
+                "statistic": "Sum",
+                "dimensions": [],
+            },
+        )
+        rollback_stack.append((cr["id"], "cloudwatch_alarm_create custom"))
+        log(f"Custom metric alarm created: {alarm_custom}")
+
+        # 3. Push metric data via SSM to trigger the custom alarm
+        client.run_cr(
+            "Smoke-K: push metric data via SSM", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": (
+                    f"aws cloudwatch put-metric-data "
+                    f"--namespace '{custom_namespace}' "
+                    f"--metric-name TestTrigger "
+                    f"--value 1 "
+                    f"--unit Count "
+                    f"--region us-east-1"
+                ),
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        log("Metric data pushed via SSM")
+
+        # 4. Wait up to 90s for custom alarm to enter ALARM state
+        print("  Waiting up to 90s for alarm to enter ALARM state...")
+        cw_boto = _get_aws_boto3_client('cloudwatch')
+        alarm_triggered = False
+        if cw_boto:
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                resp = cw_boto.describe_alarms(AlarmNames=[alarm_custom])
+                alarms = resp.get("MetricAlarms", [])
+                if alarms and alarms[0]["StateValue"] == "ALARM":
+                    alarm_triggered = True
+                    log(f"Alarm {alarm_custom} is in ALARM state")
+                    break
+                time.sleep(10)
+            if not alarm_triggered:
+                print(f"  ⚠️  Alarm did not enter ALARM state within 90s (CloudWatch evaluation lag)")
+
+        # 5. Delete both alarms via rollback stack
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        rollback_stack.clear()
+        log("Both alarms deleted via CR rollback")
+
+        log("Phase K complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase K failed: {e}")
+        raise
+    finally:
+        if rollback_stack:
+            print("  [Phase K cleanup — rollback stack]")
+            for cr_id, label in reversed(rollback_stack):
+                client.rollback_cr(cr_id, label)
+        # Safety net: delete alarms directly
+        try:
+            cw_safety = _get_aws_boto3_client('cloudwatch')
+            if cw_safety:
+                cw_safety.delete_alarms(AlarmNames=[alarm_cpu, alarm_custom])
+                print(f"  Safety net: deleted alarms {alarm_cpu}, {alarm_custom}")
+        except Exception as e2:
+            print(f"  ⚠️  Safety net alarm delete failed: {e2}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1057,7 +1433,7 @@ def main():
     parser.add_argument("--password", required=True)
     parser.add_argument(
         "--phases", default="A,B,C,D",
-        help="Comma-separated phases to run (A-H). E.g. --phases A or --phases A,B,C,D,E,F,G,H",
+        help="Comma-separated phases to run (A-K). Phase J is slow (~35 min, creates RDS). E.g. --phases A,B,C,D,E,F,G,H,I,K",
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
     args = parser.parse_args()
@@ -1115,6 +1491,17 @@ def main():
 
         if "H" in phases:
             run_phase_h(client, cloud_account_id)
+
+        if "I" in phases:
+            run_phase_i(client, cloud_account_id)
+
+        if "J" in phases:
+            run_phase_j(client, cloud_account_id)
+
+        if "K" in phases:
+            if phase_a_result is None:
+                fail("Phase K requires Phase A to have run first (needs a running EC2 instance)")
+            run_phase_k(client, phase_a_result)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
