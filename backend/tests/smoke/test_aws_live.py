@@ -27,6 +27,7 @@ Requirements:
     - Tailscale connector with a reusable pre-authorized auth key
 """
 import argparse
+import json
 import subprocess
 import sys
 import time
@@ -717,7 +718,6 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
 def run_phase_f(client: NexplaneClient, cloud_account_id: str) -> None:
     """Phase F: Security Groups — add/remove inbound rule with rollback stack."""
     print("\n[Phase F] Security Group Operations")
-    import time as _t
 
     rollback_stack: list[tuple[str, str]] = []
     test_sg_id: str | None = None
@@ -728,7 +728,7 @@ def run_phase_f(client: NexplaneClient, cloud_account_id: str) -> None:
         if not ec2_boto:
             fail("Phase F requires AWS credentials")
 
-        sg_name = f"nexplane-smoke-sg-{int(_t.time())}"
+        sg_name = f"nexplane-smoke-sg-{int(time.time())}"
         sg = ec2_boto.create_security_group(
             GroupName=sg_name,
             Description="Nexplane smoke test security group",
@@ -815,9 +815,8 @@ def run_phase_f(client: NexplaneClient, cloud_account_id: str) -> None:
 def run_phase_g(client: NexplaneClient, cloud_account_id: str) -> None:
     """Phase G: IAM User Lifecycle — create/attach-policy/rotate-key/disable/enable/detach/delete."""
     print("\n[Phase G] IAM User Lifecycle")
-    import time as _t
 
-    username = f"nexplane-smoke-user-{int(_t.time())}"
+    username = f"nexplane-smoke-user-{int(time.time())}"
     rollback_stack: list[tuple[str, str]] = []
     user_created = False
 
@@ -850,16 +849,13 @@ def run_phase_g(client: NexplaneClient, cloud_account_id: str) -> None:
         log("ReadOnlyAccess attached (boto3)")
 
         # 3. Rotate IAM access key via boto3:
-        #    create a new key → deactivate the old one → delete the old one
-        keys_before = iam_client.list_access_keys(UserName=username)["AccessKeyMetadata"]
-        if keys_before:
-            old_key_id = keys_before[0]["AccessKeyId"]
-            new_key = iam_client.create_access_key(UserName=username)["AccessKey"]
-            iam_client.update_access_key(UserName=username, AccessKeyId=old_key_id, Status="Inactive")
-            iam_client.delete_access_key(UserName=username, AccessKeyId=old_key_id)
-            log(f"Key rotated: {old_key_id} → {new_key['AccessKeyId']}")
-        else:
-            log("No existing key to rotate (user created without key)")
+        #    create initial key → create new key → deactivate old → delete old
+        initial_key = iam_client.create_access_key(UserName=username)["AccessKey"]
+        old_key_id = initial_key["AccessKeyId"]
+        new_key = iam_client.create_access_key(UserName=username)["AccessKey"]
+        iam_client.update_access_key(UserName=username, AccessKeyId=old_key_id, Status="Inactive")
+        iam_client.delete_access_key(UserName=username, AccessKeyId=old_key_id)
+        log(f"Key rotated: {old_key_id} → {new_key['AccessKeyId']}")
 
         # 4. Disable user: deactivate all access keys
         keys = iam_client.list_access_keys(UserName=username)["AccessKeyMetadata"]
@@ -923,9 +919,7 @@ def run_phase_g(client: NexplaneClient, cloud_account_id: str) -> None:
 def run_phase_h(client: NexplaneClient, cloud_account_id: str) -> None:
     """Phase H: S3 Advanced — create/lifecycle/policy/public-access/delete with rollback stack."""
     print("\n[Phase H] S3 Advanced Operations")
-    import random as _rand
-
-    bucket_name = f"nexplane-smoke-{_rand.randint(100000, 999999)}"
+    bucket_name = f"nexplane-smoke-{int(time.time())}"
     rollback_stack: list[tuple[str, str]] = []
     bucket_created = False
 
@@ -971,12 +965,11 @@ def run_phase_h(client: NexplaneClient, cloud_account_id: str) -> None:
             lc = s3_client.get_bucket_lifecycle_configuration(Bucket=bucket_name)
             if lc.get("Rules"):
                 log("Lifecycle rules verified via boto3")
-        except s3_client.exceptions.ClientError:
+        except Exception:
             print("  ⚠️  Lifecycle not yet visible via boto3 (may be eventual consistency)")
 
         # 3. Set bucket policy via boto3 (deny non-TLS GetObject)
-        import json as _json
-        policy = _json.dumps({
+        policy = json.dumps({
             "Version": "2012-10-17",
             "Statement": [{
                 "Sid": "DenyNonTLS",
