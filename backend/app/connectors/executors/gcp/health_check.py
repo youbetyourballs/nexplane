@@ -14,7 +14,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     credentials = get_credentials(creds)
     project = get_project_id(creds)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     client = compute_v1.InstancesClient(credentials=credentials)
 
     instance = await loop.run_in_executor(

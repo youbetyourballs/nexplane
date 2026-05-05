@@ -24,7 +24,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     credentials = get_credentials(creds)
     project = get_project_id(creds)
     client = compute_v1.InstancesClient(credentials=credentials)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
