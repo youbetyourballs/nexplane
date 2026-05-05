@@ -1,0 +1,9 @@
+{
+  "change_type": "gcp_firewall_delete",
+  "display_name": "Delete GCP Firewall Rule",
+  "steps": [
+    {"generic_action": "delete_firewall_rule", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
