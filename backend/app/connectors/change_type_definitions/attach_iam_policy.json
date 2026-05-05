@@ -1,0 +1,11 @@
+{
+  "change_type": "attach_iam_policy",
+  "display_name": "Attach IAM Policy",
+  "steps": [
+    {"generic_action": "attach_iam_policy", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "detach_iam_policy",
+  "rollback_connector_type": "aws"
+}

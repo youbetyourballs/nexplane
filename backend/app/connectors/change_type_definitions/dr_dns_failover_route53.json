@@ -1,0 +1,9 @@
+{
+  "change_type": "dr_dns_failover_route53",
+  "display_name": "DR DNS Failover (Route53)",
+  "steps": [
+    {"generic_action": "dr_dns_failover_route53", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

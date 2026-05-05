@@ -1,0 +1,9 @@
+{
+  "change_type": "tag_resource",
+  "display_name": "Tag AWS Resource",
+  "steps": [
+    {"generic_action": "tag_resource", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

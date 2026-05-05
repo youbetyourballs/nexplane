@@ -1,0 +1,9 @@
+{
+  "change_type": "put_bucket_policy",
+  "display_name": "Set S3 Bucket Policy",
+  "steps": [
+    {"generic_action": "put_bucket_policy", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
