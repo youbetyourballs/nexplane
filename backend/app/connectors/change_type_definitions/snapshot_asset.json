@@ -1,11 +1,11 @@
 {
   "change_type": "snapshot_asset",
-  "display_name": "Asset Snapshot",
+  "display_name": "Create Asset Snapshot",
   "steps": [
-    {"generic_action": "health_check",    "purpose": "preflight_capture", "required": true},
-    {"generic_action": "create_snapshot", "purpose": "execute",           "required": true},
-    {"generic_action": "verify_snapshot", "purpose": "verify",            "required": true}
+    {"generic_action": "create_snapshot", "purpose": "execute", "required": true}
   ],
-  "preflight_checks": ["connector_reachable", "asset_exists", "no_concurrent_changes"],
-  "verification_methods": ["api_check"]
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_ebs_snapshot",
+  "rollback_connector_type": "aws"
 }
