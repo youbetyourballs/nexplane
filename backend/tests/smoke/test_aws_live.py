@@ -405,15 +405,27 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
         )
         log("SSM verified post-reboot")
 
-        # 4. Create EBS snapshot
+        # 4. Create EBS snapshot — resolve root volume_id via boto3 first
+        ec2_boto = _get_aws_boto3_client('ec2')
+        volume_id = ""
+        if ec2_boto:
+            try:
+                resp = ec2_boto.describe_instances(InstanceIds=[instance_id])
+                mappings = resp["Reservations"][0]["Instances"][0].get("BlockDeviceMappings", [])
+                root = next((m for m in mappings if m.get("DeviceName") in ("/dev/xvda", "/dev/sda1")), mappings[0] if mappings else None)
+                if root:
+                    volume_id = root["Ebs"]["VolumeId"]
+            except Exception as e:
+                print(f"  ⚠️  Could not resolve volume_id: {e}")
+
         cr = client.run_cr(
             "Smoke-E: create EBS snapshot", "snapshot_asset", instance_asset["id"],
-            {"instance_id": instance_id, "rollback_strategy": "delete_ebs_snapshot"},
+            {"instance_id": instance_id, "volume_id": volume_id,
+             "rollback_strategy": "delete_ebs_snapshot"},
         )
         rollback_stack.append((cr["id"], "snapshot_asset"))
 
         # Find the snapshot ID from AWS
-        ec2_boto = _get_aws_boto3_client('ec2')
         if ec2_boto:
             snaps = ec2_boto.describe_snapshots(
                 Filters=[
