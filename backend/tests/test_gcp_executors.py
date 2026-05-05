@@ -52,3 +52,37 @@ def test_delete_disk_snapshot_mock():
     result = asyncio.run(execute({"snapshot_name": "snap-001"}, [], None))
     assert result["action"] == "delete_disk_snapshot"
     assert result["snapshot_name"] == "snap-001"
+
+
+def test_launch_instance_mock_agent_startup():
+    import asyncio
+    from app.connectors.executors.gcp.launch_instance import execute
+    result = asyncio.run(execute({
+        "name": "nexplane-smoke-test-gcp-01",
+        "machine_type": "e2-micro",
+        "zone": "us-central1-a",
+        "image_family": "ubuntu-2204-lts",
+        "image_project": "ubuntu-os-cloud",
+        "connection_mode": "agent_startup",
+    }, [], None))
+    assert result["action"] == "launch_instance"
+    assert result["instance_name"] == "nexplane-smoke-test-gcp-01"
+    assert "_auto_asset" in result
+    assert result["_auto_asset"]["asset_type"] == "server"
+    assert result["mock"] is True
+
+
+def test_launch_instance_mock_ssh_mode():
+    import asyncio
+    from app.connectors.executors.gcp.launch_instance import execute
+    result = asyncio.run(execute({
+        "name": "nexplane-smoke-test-gcp-02",
+        "machine_type": "e2-micro",
+        "zone": "us-central1-a",
+        "image_family": "ubuntu-2204-lts",
+        "image_project": "ubuntu-os-cloud",
+        "connection_mode": "ssh",
+        "ssh_public_key": "ssh-rsa AAAAB3NzaC1yc...",
+    }, [], None))
+    assert result["connection_mode"] == "ssh"
+    assert result["mock"] is True
