@@ -1,0 +1,13 @@
+{
+  "change_type": "gce_start",
+  "display_name": "Start GCE Instance",
+  "steps": [
+    {"generic_action": "start_instance",       "purpose": "execute", "required": true},
+    {"generic_action": "wait_instance_state",  "purpose": "verify",  "required": true},
+    {"generic_action": "health_check",         "purpose": "verify",  "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "stop_instance",
+  "rollback_connector_type": "gcp"
+}

@@ -12,13 +12,129 @@
     {"action_id": "discover_firewall_rules", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Firewall Rules", "description": "VPC firewall rules: direction, source ranges, target tags, ports", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "gcp.discover_firewall_rules", "estimated_duration_seconds": 15},
     {"action_id": "discover_service_accounts", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Discover Service Accounts", "description": "Service accounts: key age, roles, disabled status", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "gcp.discover_service_accounts", "estimated_duration_seconds": 15},
     {"action_id": "ingest_scc_findings", "generic_action": "ingest_findings", "action_type": "ingest", "execution_tier": 1, "display_name": "Ingest SCC Findings", "description": "Security Command Center findings - enriches assets with threat/misconfiguration tags", "applicable_asset_types": ["cloud_account"], "parameters": [], "executor": "gcp.ingest_scc_findings", "estimated_duration_seconds": 30},
-    {"action_id": "stop_instance", "generic_action": "stop_instance", "action_type": "change", "execution_tier": 2, "display_name": "Stop Instance", "description": "Stop a GCE instance. Rollback: start.", "applicable_asset_types": ["server"], "parameters": [{"name": "instance_name", "type": "string", "required": true}, {"name": "zone", "type": "string", "required": true}], "executor": "gcp.stop_instance", "estimated_duration_seconds": 30},
-    {"action_id": "start_instance", "generic_action": "start_instance", "action_type": "change", "execution_tier": 2, "display_name": "Start Instance", "description": "Start a stopped GCE instance.", "applicable_asset_types": ["server"], "parameters": [{"name": "instance_name", "type": "string", "required": true}, {"name": "zone", "type": "string", "required": true}], "executor": "gcp.start_instance", "estimated_duration_seconds": 30},
+    {"action_id": "stop_instance", "generic_action": "stop_instance", "action_type": "change", "execution_tier": 2, "display_name": "Stop Instance", "description": "Stop a GCE instance. Rollback: start.", "applicable_asset_types": ["server"], "parameters": [{"name": "instance_name", "type": "string", "required": true}, {"name": "zone", "type": "string", "required": true}], "executor": "gcp.stop_instance", "rollback_action": "start_instance", "estimated_duration_seconds": 30},
+    {"action_id": "start_instance", "generic_action": "start_instance", "action_type": "change", "execution_tier": 2, "display_name": "Start Instance", "description": "Start a stopped GCE instance.", "applicable_asset_types": ["server"], "parameters": [{"name": "instance_name", "type": "string", "required": true}, {"name": "zone", "type": "string", "required": true}], "executor": "gcp.start_instance", "rollback_action": "stop_instance", "estimated_duration_seconds": 30},
     {"action_id": "delete_instance", "generic_action": "terminate_instance", "action_type": "change", "execution_tier": 3, "display_name": "Delete Instance", "description": "Terminate a GCE instance.", "applicable_asset_types": ["server"], "parameters": [{"name": "instance_name", "type": "string", "required": true}, {"name": "zone", "type": "string", "required": true}], "executor": "gcp.delete_instance", "estimated_duration_seconds": 60, "blast_radius_hint": "destructive"},
     {"action_id": "create_firewall_rule", "generic_action": "create_firewall_rule", "action_type": "change", "execution_tier": 2, "display_name": "Create Firewall Rule", "description": "Add VPC firewall rule (ALLOW or DENY). Rollback: delete.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "rule_name", "type": "string", "required": true}, {"name": "direction", "type": "string", "required": true, "description": "INGRESS or EGRESS"}, {"name": "action", "type": "string", "required": true, "description": "allow or deny"}, {"name": "source_ranges", "type": "array", "required": false}, {"name": "ports", "type": "array", "required": false}], "executor": "gcp.create_firewall_rule", "estimated_duration_seconds": 15},
     {"action_id": "delete_firewall_rule", "generic_action": "delete_firewall_rule", "action_type": "change", "execution_tier": 2, "display_name": "Delete Firewall Rule", "description": "Remove VPC firewall rule.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "rule_name", "type": "string", "required": true}], "executor": "gcp.delete_firewall_rule", "estimated_duration_seconds": 15},
     {"action_id": "block_public_bucket_access", "generic_action": "block_public_access", "action_type": "change", "execution_tier": 2, "display_name": "Block Public Bucket Access", "description": "Remove allUsers/allAuthenticatedUsers IAM bindings from GCS bucket.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "bucket_name", "type": "string", "required": true}], "executor": "gcp.block_public_bucket_access", "estimated_duration_seconds": 10},
     {"action_id": "disable_service_account", "generic_action": "disable_account", "action_type": "change", "execution_tier": 2, "display_name": "Disable Service Account", "description": "Disable a service account. Rollback: enable.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "service_account_email", "type": "string", "required": true}], "executor": "gcp.disable_service_account", "estimated_duration_seconds": 10},
-    {"action_id": "rotate_service_account_key", "generic_action": "rotate_credentials", "action_type": "change", "execution_tier": 2, "display_name": "Rotate Service Account Key", "description": "Create new service account key, return in result, delete old key.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "service_account_email", "type": "string", "required": true}, {"name": "old_key_id", "type": "string", "required": true}], "executor": "gcp.rotate_service_account_key", "estimated_duration_seconds": 15}
+    {"action_id": "rotate_service_account_key", "generic_action": "rotate_credentials", "action_type": "change", "execution_tier": 2, "display_name": "Rotate Service Account Key", "description": "Create new service account key, return in result, delete old key.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "service_account_email", "type": "string", "required": true}, {"name": "old_key_id", "type": "string", "required": true}], "executor": "gcp.rotate_service_account_key", "estimated_duration_seconds": 15},
+    {
+      "action_id": "launch_instance",
+      "generic_action": "launch_instance",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Launch GCE Instance",
+      "description": "Create a new Compute Engine instance with agent_startup, iap, or ssh connection mode.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "name", "type": "string", "required": true},
+        {"name": "machine_type", "type": "string", "required": false, "default": "e2-micro"},
+        {"name": "zone", "type": "string", "required": false, "default": "us-central1-a"},
+        {"name": "image_family", "type": "string", "required": false, "default": "ubuntu-2204-lts"},
+        {"name": "image_project", "type": "string", "required": false, "default": "ubuntu-os-cloud"},
+        {"name": "connection_mode", "type": "string", "required": false, "default": "agent_startup"},
+        {"name": "nexplane_url", "type": "string", "required": false},
+        {"name": "nexplane_secret", "type": "string", "required": false},
+        {"name": "ssh_public_key", "type": "string", "required": false}
+      ],
+      "executor": "gcp.launch_instance",
+      "rollback_action": "delete_instance",
+      "estimated_duration_seconds": 120,
+      "blast_radius_hint": "new_resource"
+    },
+    {
+      "action_id": "reboot_instance",
+      "generic_action": "reboot_instance",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Reboot GCE Instance",
+      "description": "Reset (hard reboot) a running GCE instance.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "instance_name", "type": "string", "required": true},
+        {"name": "zone", "type": "string", "required": true}
+      ],
+      "executor": "gcp.reboot_instance",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "create_disk_snapshot",
+      "generic_action": "create_disk_snapshot",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Create Disk Snapshot",
+      "description": "Snapshot the boot disk of a GCE instance.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "instance_name", "type": "string", "required": true},
+        {"name": "zone", "type": "string", "required": true},
+        {"name": "snapshot_name", "type": "string", "required": false}
+      ],
+      "executor": "gcp.create_disk_snapshot",
+      "rollback_action": "delete_disk_snapshot",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "delete_disk_snapshot",
+      "generic_action": "delete_disk_snapshot",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Delete Disk Snapshot",
+      "description": "Delete a GCE disk snapshot.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "snapshot_name", "type": "string", "required": true}
+      ],
+      "executor": "gcp.delete_disk_snapshot",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "capture_instance_state",
+      "generic_action": "capture_instance_state",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Capture Instance State",
+      "description": "Record current instance metadata as preflight baseline.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "instance_name", "type": "string", "required": true},
+        {"name": "zone", "type": "string", "required": true}
+      ],
+      "executor": "gcp.capture_instance_state",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "health_check",
+      "generic_action": "health_check",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Health Check",
+      "description": "Verify GCE instance is in RUNNING state.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "instance_name", "type": "string", "required": true},
+        {"name": "zone", "type": "string", "required": true}
+      ],
+      "executor": "gcp.health_check",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "wait_instance_state",
+      "generic_action": "wait_instance_state",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Wait for Instance State",
+      "description": "Poll until GCE instance reaches target state (RUNNING, TERMINATED).",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "instance_name", "type": "string", "required": true},
+        {"name": "zone", "type": "string", "required": true},
+        {"name": "target_state", "type": "string", "required": false, "default": "RUNNING"}
+      ],
+      "executor": "gcp.wait_instance_state",
+      "estimated_duration_seconds": 60
+    }
   ]
 }
