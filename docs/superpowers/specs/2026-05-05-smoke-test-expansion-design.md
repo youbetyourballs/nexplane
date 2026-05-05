@@ -113,7 +113,7 @@ Steps:
 
 Exercises `verify_rds_backup` and `promote_rds_replica` (~45 minutes total, flagged slow).
 
-**Note:** `promote_rds_replica` creates a real read replica (~15 min) then promotes it (~10 min). This phase is opt-in via `--phases S` and skipped from the default run.
+**Note:** `promote_rds_replica` requires a read replica. Rather than using boto3 scaffolding (which would violate the "eat our own dogfood" principle), this phase delivers a new `rds_replica_create` change type and executor as part of its implementation. This is a small addition — one executor (`create_rds_replica.py`) wrapping `create_db_instance_read_replica` — that makes the full promote lifecycle testable via Nexplane CRs. Phase S is opt-in via `--phases S` and excluded from the default run.
 
 Steps (verify_rds_backup):
 1. `rds_instance_create` CR (db.t3.micro MySQL) → push rollback stack
@@ -121,11 +121,13 @@ Steps (verify_rds_backup):
 3. `verify_rds_backup` CR → describe snapshot, verify `AllocatedStorage > 0`, status=available
 
 Steps (promote_rds_replica):
-4. Create read replica via boto3 `create_db_instance_read_replica` (scaffolding — no CR change type yet)
-5. Wait for replica to be `available` (~15 min)
-6. `promote_rds_replica` CR → promotes replica to standalone
-7. Verify via boto3: no `ReadReplicaSourceDBInstanceIdentifier`
-8. Delete promoted instance + original instance via rollback
+4. `rds_replica_create` CR → create read replica from the source instance → push rollback stack; wait ~15 min
+5. `promote_rds_replica` CR → promotes replica to standalone → push rollback stack
+6. Verify via boto3: replica has no `ReadReplicaSourceDBInstanceIdentifier`
+7. `rds_instance_delete` CR (promoted instance) → pop from rollback stack
+8. Delete snapshot and original instance via rollback
+
+**New deliverable:** `backend/app/connectors/executors/aws/create_rds_replica.py` + `rds_replica_create` change type JSON + catalog entry. Rollback = `delete_rds_instance`.
 
 ### New Phase T: Agent Lifecycle + Resource Tagging
 
@@ -148,11 +150,12 @@ Steps:
 
 Exercises `create_firewall_rule`, `delete_firewall_rule`.
 
+Accepts `--gcp-network` CLI flag (default: `global/networks/default`) specifying the VPC network the firewall rule is scoped to. If the default VPC has been deleted, the user must pass their network name.
+
 Steps:
-1. `gce_instance_create` CR → launch test VM (or reuse Phase L if available) — scaffolding for network tag
-2. `gcp_firewall_create` CR → create rule allowing TCP 8443 from RFC5737 test CIDR `192.0.2.0/24` → push rollback stack
-3. Verify rule exists via GCP SDK `firewalls.get()`
-4. `gcp_firewall_delete` CR (rollback of create) → verify rule deleted via SDK
+1. `gcp_firewall_create` CR → create rule on `--gcp-network` allowing TCP/8443 from RFC5737 test CIDR `192.0.2.0/24` → push rollback stack
+2. Verify rule exists via GCP SDK `compute.firewalls.get()`
+3. `gcp_firewall_delete` CR (rollback of create) → verify rule deleted via SDK
 
 ### New Phase O: GCP Storage
 
@@ -202,12 +205,14 @@ Each stub prints a clear message and exits cleanly. When a Sub-project ships, it
 
 Exercises `update_nsg_rule`, `restore_nsg_rule`.
 
+Creates a **new, dedicated NSG** (named `nexplane-smoke-nsg-{timestamp}`) inside `--azure-resource-group`. Does not reuse the Phase N/O VM's NSG — isolates the firewall test from the VM lifecycle test so failures don't interfere.
+
 Steps:
-1. Create test NSG via Azure SDK (scaffolding): `network.network_security_groups.begin_create_or_update()`
+1. Create test NSG via Azure SDK (scaffolding): `network.network_security_groups.begin_create_or_update(resource_group, "nexplane-smoke-nsg-{ts}", ...)`
 2. `update_nsg_rule` CR → add inbound rule TCP/8443 from `192.0.2.0/24` → push rollback stack
 3. Verify rule exists via Azure SDK `network_security_groups.get()`
 4. `restore_nsg_rule` CR (rollback of update) → verify rule removed
-5. Safety net: delete NSG via SDK
+5. Safety net: delete NSG via SDK (`network.network_security_groups.begin_delete(resource_group, nsg_name)`)
 
 ### New Phase Q: Blob Storage
 
@@ -267,15 +272,15 @@ Spins up a dedicated Amazon Linux EC2 instance (separate from test_aws_live.py P
 | `fleet` | `fleet` | `restart_service` (restart a benign service), `push_config_file`, `health_check` |
 | `backup` | `backup` | `create_backup` (restic to /tmp), `restore_files` |
 | `reboot` | `reboot` | `graceful_reboot`, `verify_post_reboot` |
-| `credrotation` | `credrotation` | `update_agent_env_file` |
-| `iac` | `iac` | `terraform_plan` (plan-only, no apply) |
-| `linuxupgrade` | `linuxupgrade` | `estimate_image_size` (non-destructive check only) |
+| `credrotation` | `credrotation` | `update_agent_env_file`, `rotate_ssh_keys` (adds new key to authorized_keys, removes old by fingerprint — verified via SSM). `rotate_db_credentials` deferred to `test_db_admin_live.py` (requires live DB). |
+| `iac` | `iac` | `terraform_plan` (plan-only, no apply). `terraform_apply`, `terraform_rollback`, `ansible_check`, `ansible_run`, `helm_diff`, `helm_upgrade`, `helm_rollback` require Terraform/Ansible/Helm installed on the EC2 instance. The Linux EC2 launch phase installs these via SSM RunShellScript (`yum install -y terraform ansible` + Helm install script) as part of test scaffolding before iac phases run. |
+| `linuxupgrade` | `linuxupgrade` | `estimate_image_size` (non-destructive check only). `upgrade_linux_instance`, `virtualize_for_migration`, `upload_image` are destructive multi-hour operations — deferred to a future dedicated upgrade test. |
 
-Each phase uses `azure_run_command`-equivalent SSM command to verify the effect, not just that the CR succeeded.
+Each phase uses SSM RunShellScript to verify the effect on the instance, not just that the CR succeeded.
 
 ### Windows track — Windows Server 2022 EC2
 
-Spins up a dedicated Windows Server 2022 EC2 (`ami-windows-2022` latest, `t3.medium`, needs 4GB RAM for some hardening). Deploys Windows agent binary from S3. Runs all Windows-specific commands:
+Spins up a dedicated Windows Server 2022 EC2 resolved at runtime using the filter `windows-server-2022-english-full-base-*` (same boto3 AMI lookup pattern as Phase A's `al2023-ami-2023*`), `t3.medium` (4 GB RAM required for Credential Guard and BitLocker), `us-east-1`. Deploys Windows agent binary from S3 via SSM `AWS-RunPowerShellScript` document (not `AWS-RunShellScript` — Windows instances use the PowerShell variant). Runs all Windows-specific commands:
 
 | Phase | Package | Commands covered |
 |-------|---------|-----------------|
@@ -290,7 +295,17 @@ Both tracks use the rollback stack pattern. Linux EC2 and Windows EC2 are each t
 
 ## `test_cloud_live.py` — Cross-Cloud Consolidation (Future)
 
-Refactored to import from `smoke_helpers`. Existing A–O phases removed (delegated to provider files). New cross-cloud phases added after Azure B–G complete:
+Refactored to import from `smoke_helpers`. Existing phases A–O are **no longer handled by this file** — they live in `test_aws_live.py`, `test_gcp_live.py`, and `test_azure_live.py` respectively. If a user runs `test_cloud_live.py --phases A`, the `main()` function prints a clear error:
+
+```
+Phase 'A' is no longer in test_cloud_live.py.
+  AWS phases A-T → python backend/tests/smoke/test_aws_live.py --phases A
+  GCP phases L-V → python backend/tests/smoke/test_gcp_live.py --phases L
+  Azure phases N-X → python backend/tests/smoke/test_azure_live.py --phases N
+  Agent phases → python backend/tests/smoke/test_agent_live.py --phases linux_patch
+```
+
+New cross-cloud phases added after Azure B–G complete:
 
 ### Phase X1: Cross-cloud instance lifecycle
 
@@ -326,7 +341,7 @@ python backend/tests/smoke/test_aws_live.py --phases J,S
 
 # GCP
 python backend/tests/smoke/test_gcp_live.py \
-  --phases L,M,N,O,P --gcp-project <project-id>
+  --phases L,M,N,O,P --gcp-project <project-id> [--gcp-network global/networks/default]
 
 # Azure
 python backend/tests/smoke/test_azure_live.py \
@@ -374,7 +389,7 @@ This is enforced by the stub function — CI will print `"STUB — implement wit
 
 ## Out of Scope
 
-- `dbadmin` agent commands (PostgreSQL/MySQL/MSSQL) — require live DB instances, deferred to a dedicated `test_db_admin_live.py`
-- `linuxupgrade` full OS upgrade (`upgrade_linux_instance`, `virtualize_for_migration`, `upload_image`) — destructive, requires multi-hour migration; deferred
-- Cross-cloud phases X1–X2 — blocked until Azure B–G complete
-- Azure Sub-project B–G smoke test implementations — each sub-project delivers its own
+- **`dbadmin` agent commands** (`provision_db_user`, `deprovision_db_user`, `grant_permissions`, `revoke_permissions`, `configure_db_audit`, `db_connection_config`) and **`credrotation.rotate_db_credentials`** — all require a live PostgreSQL, MySQL, or MSSQL instance running on the EC2 target. Deferred to a future `test_db_admin_live.py` which will spin up an RDS instance, deploy agent to an EC2 in the same VPC, and run all DB commands against it. This is tracked as a future task.
+- **`linuxupgrade` full OS upgrade** (`upgrade_linux_instance`, `virtualize_for_migration`, `upload_image`) — destructive and multi-hour; deferred to a future dedicated upgrade test.
+- **Cross-cloud phases X1–X2** — blocked until Azure B–G complete.
+- **Azure Sub-project B–G smoke test implementations** — each sub-project delivers its own real phase to replace the stub.
