@@ -1,0 +1,12 @@
+{
+  "change_type": "gce_instance_delete",
+  "display_name": "Delete GCE Instance",
+  "steps": [
+    {"generic_action": "capture_instance_state", "purpose": "preflight_validate", "required": true},
+    {"generic_action": "delete_instance",        "purpose": "execute",            "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "rollback_unavailable",
+  "rollback_connector_type": "gcp"
+}
