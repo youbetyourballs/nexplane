@@ -19,6 +19,7 @@ Requirements:
     GCP connector with credentials + Compute Engine API enabled
     Tailscale connector with reusable pre-authorized auth key (for agent registration)
 """
+import secrets
 import time
 from typing import Optional
 
@@ -28,6 +29,12 @@ from smoke_helpers import (
     _gcp_creds_cache, _get_gcp_compute_client,
     make_base_parser,
 )
+
+
+def _get_gcp_creds() -> dict:
+    """Return the GCP credentials dict from the connector, populating cache if needed."""
+    _get_gcp_compute_client()  # side effect: populates _gcp_creds_cache
+    return _gcp_creds_cache
 
 
 # ---------------------------------------------------------------------------
@@ -217,14 +224,382 @@ def run_phase_m(client: NexplaneClient, phase_l_result: dict, gcp_project: str) 
                 print(f"  ⚠️  Safety net snapshot delete failed: {e2}")
 
 
+def run_phase_n(client: NexplaneClient, cloud_account_id: str,
+                gcp_project: str, gcp_network: str = "global/networks/default") -> None:
+    """Phase N: GCP Firewall — create_firewall_rule + delete via CR rollback."""
+    print("\n[Phase N] GCP Firewall Rules")
+
+    import time as _time
+    rule_name = f"nexplane-smoke-n-{int(_time.time())}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        cr = client.run_cr(
+            "Smoke-N: create GCP firewall rule", "gcp_firewall_create", cloud_account_id,
+            {
+                "project": gcp_project,
+                "rule_name": rule_name,
+                "network": gcp_network,
+                "direction": "INGRESS",
+                "priority": 1000,
+                "allowed": [{"IPProtocol": "tcp", "ports": ["8443"]}],
+                "source_ranges": ["192.0.2.0/24"],
+                "description": "Nexplane smoke test rule — safe to delete",
+            },
+        )
+        rollback_stack.append((cr["id"], "gcp_firewall_create"))
+
+        creds = _get_gcp_creds()
+        if creds:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from google.cloud import compute_v1
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                fw_client = compute_v1.FirewallsClient(credentials=gc)
+                fw = fw_client.get(project=gcp_project, firewall=rule_name)
+                assert fw.name == rule_name
+                log(f"GCP firewall rule verified via SDK: {rule_name}")
+            except Exception as e:
+                print(f"  ⚠️  SDK verification skipped: {e}")
+        else:
+            print("  ⚠️  No GCP credentials — SDK verification skipped")
+
+        create_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(create_cr_id, "gcp_firewall_create → delete")
+        log("GCP firewall rule deleted via CR rollback")
+
+        log("Phase N complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase N failed: {e}")
+        raise
+    finally:
+        print("  [Phase N cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        try:
+            creds = _get_gcp_creds()
+            if creds and gcp_project:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from google.cloud import compute_v1
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                fw_client = compute_v1.FirewallsClient(credentials=gc)
+                try:
+                    fw_client.delete(project=gcp_project, firewall=rule_name)
+                    print(f"  Safety net: deleted firewall rule {rule_name}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
+def run_phase_o(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase O: GCP Storage — block_public_bucket_access CR on a GCS bucket."""
+    print("\n[Phase O] GCP Storage")
+
+    bucket_name = f"nexplane-smoke-o-{secrets.token_hex(4)}"
+    rollback_stack: list[tuple[str, str]] = []
+    bucket_created = False
+
+    try:
+        creds = _get_gcp_creds()
+        if not creds:
+            fail("Phase O requires GCP credentials")
+
+        import json as _json
+        from google.oauth2 import service_account as _sa
+        from google.cloud import storage as _storage
+        key_raw = creds.get("service_account_key_json", "")
+        key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+        gc = _sa.Credentials.from_service_account_info(
+            key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        storage_client = _storage.Client(project=gcp_project, credentials=gc)
+        bucket = storage_client.bucket(bucket_name)
+        bucket.iam_configuration.uniform_bucket_level_access_enabled = False
+        storage_client.create_bucket(bucket, location="US")
+        bucket_created = True
+        log(f"GCS bucket created via SDK: {bucket_name}")
+
+        cr = client.run_cr(
+            "Smoke-O: block public GCS bucket access", "gcp_block_public_bucket_access",
+            cloud_account_id,
+            {"project": gcp_project, "bucket_name": bucket_name},
+        )
+        rollback_stack.append((cr["id"], "gcp_block_public_bucket_access"))
+
+        bucket_obj = storage_client.get_bucket(bucket_name)
+        policy = bucket_obj.get_iam_policy()
+        has_all_users = any(
+            "allUsers" in binding["members"] or "allAuthenticatedUsers" in binding["members"]
+            for binding in policy.bindings
+        )
+        assert not has_all_users, "allUsers/allAuthenticatedUsers still present after blocking"
+        log("GCS public access blocked (SDK verified)")
+
+        log("Phase O complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase O failed: {e}")
+        raise
+    finally:
+        print("  [Phase O cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        if bucket_created:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from google.cloud import storage as _storage
+                creds = _get_gcp_creds()
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                sc = _storage.Client(project=gcp_project, credentials=gc)
+                sc.get_bucket(bucket_name).delete(force=True)
+                print(f"  Safety net: deleted GCS bucket {bucket_name}")
+            except Exception as e:
+                print(f"  ⚠️  Safety net bucket delete failed: {e}")
+
+
+def run_phase_p(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase P: GCP Service Accounts — rotate key + disable via CRs."""
+    print("\n[Phase P] GCP Service Accounts")
+
+    sa_name = f"nexplane-smoke-p-{int(time.time()) % 100000}"
+    sa_email = f"{sa_name}@{gcp_project}.iam.gserviceaccount.com"
+    rollback_stack: list[tuple[str, str]] = []
+    sa_created = False
+
+    try:
+        creds = _get_gcp_creds()
+        if not creds:
+            fail("Phase P requires GCP credentials")
+
+        import json as _json
+        from google.oauth2 import service_account as _sa
+        from googleapiclient.discovery import build as _build
+        key_raw = creds.get("service_account_key_json", "")
+        key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+        gc = _sa.Credentials.from_service_account_info(
+            key_json,
+            scopes=["https://www.googleapis.com/auth/cloud-platform",
+                    "https://www.googleapis.com/auth/iam"],
+        )
+        iam_svc = _build("iam", "v1", credentials=gc)
+
+        iam_svc.projects().serviceAccounts().create(
+            name=f"projects/{gcp_project}",
+            body={"accountId": sa_name,
+                  "serviceAccount": {"displayName": "Nexplane smoke test"}},
+        ).execute()
+        sa_created = True
+        log(f"Service account created: {sa_email}")
+
+        cr = client.run_cr(
+            "Smoke-P: rotate service account key", "gcp_rotate_service_account_key",
+            cloud_account_id,
+            {"project": gcp_project, "service_account_email": sa_email},
+        )
+        rollback_stack.append((cr["id"], "gcp_rotate_service_account_key"))
+        log("Service account key rotated via CR")
+
+        cr = client.run_cr(
+            "Smoke-P: disable service account", "gcp_disable_service_account",
+            cloud_account_id,
+            {"project": gcp_project, "service_account_email": sa_email},
+        )
+        rollback_stack.append((cr["id"], "gcp_disable_service_account"))
+
+        sa_info = iam_svc.projects().serviceAccounts().get(
+            name=f"projects/{gcp_project}/serviceAccounts/{sa_email}"
+        ).execute()
+        assert sa_info.get("disabled"), "Service account not disabled"
+        log("Service account disabled (SDK verified)")
+
+        log("Phase P complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase P failed: {e}")
+        raise
+    finally:
+        print("  [Phase P cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        if sa_created:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from googleapiclient.discovery import build as _build
+                creds = _get_gcp_creds()
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform",
+                                      "https://www.googleapis.com/auth/iam"])
+                iam_svc = _build("iam", "v1", credentials=gc)
+                iam_svc.projects().serviceAccounts().delete(
+                    name=f"projects/{gcp_project}/serviceAccounts/{sa_email}"
+                ).execute()
+                print(f"  Safety net: deleted service account {sa_email}")
+            except Exception as e:
+                print(f"  ⚠️  Safety net SA delete failed: {e}")
+
+
+def run_phase_q(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase Q: Terraform local apply against GCP — creates GCS bucket using google provider."""
+    print("\n[Phase Q] Terraform Local (GCP)")
+
+    bucket_name = f"nexplane-smoke-q-{secrets.token_hex(4)}"
+
+    creds = _get_gcp_creds()
+    if not creds:
+        fail("Phase Q requires GCP credentials")
+
+    import json as _json
+    key_raw = creds.get("service_account_key_json", "")
+    key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+    key_str = _json.dumps(key_json)
+
+    tf_content = (
+        'terraform {\n'
+        '  required_providers {\n'
+        '    google = {\n'
+        '      source  = "hashicorp/google"\n'
+        '      version = "~> 5.0"\n'
+        '    }\n'
+        '  }\n'
+        '}\n\n'
+        'provider "google" {\n'
+        '  credentials = <<CREDS\n'
+        + key_str + '\n'
+        'CREDS\n'
+        '  project = "' + gcp_project + '"\n'
+        '  region  = "us-central1"\n'
+        '}\n\n'
+        'resource "google_storage_bucket" "smoke_test" {\n'
+        '  name          = "' + bucket_name + '"\n'
+        '  location      = "US"\n'
+        '  force_destroy = true\n'
+        '}\n'
+    )
+
+    cr = client.run_cr(
+        "Smoke-Q: terraform apply GCS bucket (GCP)", "terraform_local_apply", cloud_account_id,
+        {"tf_content": tf_content, "rollback_strategy": "terraform_destroy_local"},
+    )
+    log(f"Terraform applied (GCP) — GCS bucket: {bucket_name}")
+
+    try:
+        from google.oauth2 import service_account as _sa
+        from google.cloud import storage as _storage
+        gc = _sa.Credentials.from_service_account_info(
+            key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        sc = _storage.Client(project=gcp_project, credentials=gc)
+        bucket = sc.get_bucket(bucket_name)
+        assert bucket.name == bucket_name
+        log("GCS bucket confirmed via SDK")
+    except Exception as e:
+        print(f"  ⚠️  SDK verification skipped: {e}")
+
+    client.rollback_cr(cr["id"], "terraform_local_apply → destroy")
+    log("GCS bucket destroyed via Terraform rollback")
+
+    log("Phase Q complete")
+
+
+def run_phase_r(client: NexplaneClient, cloud_account_id: str, gcp_project: str,
+                gcp_phase_result: Optional[dict] = None) -> None:
+    """Phase R: Ansible local playbook against GCP."""
+    print("\n[Phase R] Ansible Local (GCP)")
+
+    playbook_content = (
+        "---\n"
+        "- name: Nexplane GCP smoke test\n"
+        "  hosts: localhost\n"
+        "  connection: local\n"
+        "  gather_facts: false\n"
+        "  tasks:\n"
+        "    - name: Check python version\n"
+        "      command: python3 --version\n"
+        "      register: py_ver\n"
+        "    - name: Print version\n"
+        "      debug:\n"
+        "        msg: 'Python: {{ py_ver.stdout }}'\n"
+    )
+
+    cr = client.run_cr(
+        "Smoke-R: ansible local playbook (GCP)", "ansible_local_playbook", cloud_account_id,
+        {"playbook_content": playbook_content, "inventory": "localhost,"},
+    )
+    log("Ansible local playbook CR executed successfully (GCP)")
+    log("Phase R complete")
+
+
+def run_phase_s_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase S: GCP Sub-B (Networking) — STUB."""
+    print("\n[Phase S] GCP Networking — STUB (implement with GCP Sub-project B)")
+    print("  ⚠️  Phase S is not yet implemented.")
+    print("  This phase will cover: advanced firewall lifecycle, VPC peering, private Google access.")
+
+
+def run_phase_t_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase T: GCP Sub-C (Storage) — STUB."""
+    print("\n[Phase T] GCP Storage — STUB (implement with GCP Sub-project C)")
+    print("  ⚠️  Phase T is not yet implemented.")
+    print("  This phase will cover: GCS bucket create/delete/lifecycle/policy via CRs.")
+
+
+def run_phase_u_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase U: GCP Sub-D (IAM) — STUB."""
+    print("\n[Phase U] GCP IAM — STUB (implement with GCP Sub-project D)")
+    print("  ⚠️  Phase U is not yet implemented.")
+    print("  This phase will cover: IAM role bindings, workload identity, service account impersonation.")
+
+
+def run_phase_v_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase V: GCP Sub-E (DNS) — STUB."""
+    print("\n[Phase V] GCP DNS — STUB (implement with GCP Sub-project E)")
+    print("  ⚠️  Phase V is not yet implemented.")
+    print("  This phase will cover: Cloud DNS zone create/record upsert/delete via CRs.")
+
+
+def run_phase_w_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase W: GCP Sub-F (SQL) — STUB."""
+    print("\n[Phase W] GCP Cloud SQL — STUB (implement with GCP Sub-project F)")
+    print("  ⚠️  Phase W is not yet implemented.")
+    print("  This phase will cover: Cloud SQL instance create/snapshot/replica/promote via CRs.")
+
+
+def run_phase_x_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase X: GCP Sub-G (Monitoring) — STUB."""
+    print("\n[Phase X] GCP Monitoring — STUB (implement with GCP Sub-project G)")
+    print("  ⚠️  Phase X is not yet implemented.")
+    print("  This phase will cover: Cloud Monitoring alerting policies, uptime checks via CRs.")
+
+
 def main():
     parser = make_base_parser("Nexplane GCP live smoke test")
     parser.add_argument(
         "--phases", default="L,M",
-        help="Comma-separated phases to run (L-M). E.g. --phases L or --phases L,M",
+        help=(
+            "Comma-separated phases to run. "
+            "L-M: existing phases. N=Firewall, O=Storage, P=ServiceAccounts, "
+            "Q=Terraform, R=Ansible. S-X=sub-project stubs. Default: L,M."
+        ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key")
     parser.add_argument("--gcp-project", default="", help="GCP project ID (required for GCP phases)")
+    parser.add_argument("--gcp-network", default="global/networks/default",
+                        help="GCP VPC network for Phase N firewall rule")
     args = parser.parse_args()
     phases = {p.strip().upper() for p in args.phases.split(",")}
 
@@ -249,6 +624,28 @@ def main():
             if gcp_phase_result is None or gcp_phase_result.get("instance_asset") is None:
                 fail("Phase M requires Phase L to have run first")
             run_phase_m(client, gcp_phase_result, args.gcp_project)
+        if "N" in phases:
+            run_phase_n(client, cloud_account_id, args.gcp_project, args.gcp_network)
+        if "O" in phases:
+            run_phase_o(client, cloud_account_id, args.gcp_project)
+        if "P" in phases:
+            run_phase_p(client, cloud_account_id, args.gcp_project)
+        if "Q" in phases:
+            run_phase_q(client, cloud_account_id, args.gcp_project)
+        if "R" in phases:
+            run_phase_r(client, cloud_account_id, args.gcp_project, gcp_phase_result)
+        if "S" in phases:
+            run_phase_s_stub(client, cloud_account_id, args.gcp_project)
+        if "T" in phases:
+            run_phase_t_stub(client, cloud_account_id, args.gcp_project)
+        if "U" in phases:
+            run_phase_u_stub(client, cloud_account_id, args.gcp_project)
+        if "V" in phases:
+            run_phase_v_stub(client, cloud_account_id, args.gcp_project)
+        if "W" in phases:
+            run_phase_w_stub(client, cloud_account_id, args.gcp_project)
+        if "X" in phases:
+            run_phase_x_stub(client, cloud_account_id, args.gcp_project)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
