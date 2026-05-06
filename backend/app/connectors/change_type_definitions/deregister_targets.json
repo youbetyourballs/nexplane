@@ -1,0 +1,9 @@
+{
+  "change_type": "deregister_targets",
+  "display_name": "Deregister Targets from Target Group",
+  "steps": [
+    {"generic_action": "deregister_targets", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

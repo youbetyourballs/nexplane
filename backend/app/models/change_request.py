@@ -154,6 +154,10 @@ class ChangeType(str, enum.Enum):
     target_group_create = "target_group_create"
     listener_create = "listener_create"
     listener_modify = "listener_modify"
+    target_group_delete = "target_group_delete"
+    listener_delete = "listener_delete"
+    register_targets = "register_targets"
+    deregister_targets = "deregister_targets"
 
 
 class RiskLevel(str, enum.Enum):
