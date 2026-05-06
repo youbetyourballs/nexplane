@@ -36,7 +36,7 @@ from smoke_helpers import (
     NexplaneClient, log, fail,
     _azure_creds_cache, _get_azure_compute_client,
     _get_azure_storage_client, _get_azure_msi_client, _get_azure_authorization_client,
-    _get_azure_network_client,
+    _get_azure_network_client, _get_azure_dns_client,
     make_base_parser,
 )
 
@@ -780,11 +780,77 @@ def run_phase_w(client: NexplaneClient, cloud_account_id: str, azure_resource_gr
                 pass
 
 
-def run_phase_x_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
-    """Phase X: Azure Sub-E (DNS) — STUB."""
-    print("\n[Phase X] Azure DNS — STUB (implement with Azure Sub-project E)")
-    print("  ⚠️  Phase X is not yet implemented.")
-    print("  This phase will cover: Azure DNS zone/record create/delete via CRs.")
+def run_phase_x(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
+    """Phase X: Azure DNS — create zone + A record, verify, explicit record delete, rollback zone."""
+    print("\n[Phase X] Azure DNS Lifecycle")
+
+    if not azure_resource_group:
+        fail("Phase X requires --azure-resource-group")
+
+    import secrets as _secrets
+    zone_name = f"nexplane-smoke-{_secrets.token_hex(4)}.example.com"
+    record_name = "smoke"
+    rollback_stack: list[tuple[str, str]] = []
+    dns = _get_azure_dns_client()
+
+    try:
+        # 1. Create DNS zone
+        cr = client.run_cr(
+            "[Phase X] create DNS zone", "azure_dns_zone_create", cloud_account_id,
+            {"zone_name": zone_name, "resource_group": azure_resource_group},
+        )
+        rollback_stack.append((cr["id"], "azure_dns_zone_create"))
+
+        if dns:
+            zone = dns.zones.get(azure_resource_group, zone_name)
+            assert zone.name == zone_name, f"Zone name mismatch: {zone.name}"
+            log(f"DNS zone verified: {zone_name}")
+        else:
+            log(f"DNS zone created (SDK verification skipped — no credentials)")
+
+        # 2. Create A record
+        cr = client.run_cr(
+            "[Phase X] create A record", "azure_dns_record_create", cloud_account_id,
+            {"zone_name": zone_name, "record_name": record_name,
+             "ip_address": "10.0.0.1", "resource_group": azure_resource_group},
+        )
+        rollback_stack.append((cr["id"], "azure_dns_record_create"))
+
+        if dns:
+            rs = dns.record_sets.get(azure_resource_group, zone_name, record_name, "A")
+            assert rs.a_records[0].ipv4_address == "10.0.0.1", \
+                f"IP mismatch: {rs.a_records[0].ipv4_address}"
+            log(f"A record verified: {record_name}.{zone_name} -> 10.0.0.1")
+
+        # 3. Explicit record delete
+        client.run_cr(
+            "[Phase X] delete A record", "azure_dns_record_delete", cloud_account_id,
+            {"zone_name": zone_name, "record_name": record_name,
+             "resource_group": azure_resource_group},
+        )
+        rollback_stack.pop()  # record already deleted
+
+        if dns:
+            records = list(dns.record_sets.list_by_dns_zone(azure_resource_group, zone_name))
+            assert not any(r.name == record_name for r in records), \
+                f"Record {record_name} still exists after delete"
+            log("A record deleted and verified gone")
+
+        log("Phase X complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase X failed: {e}")
+        raise
+    finally:
+        print("  [Phase X cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        if dns:
+            try:
+                dns.zones.begin_delete(azure_resource_group, zone_name).result()
+                print(f"  Safety net: deleted DNS zone {zone_name}")
+            except Exception:
+                pass
 
 
 def run_phase_y_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
@@ -858,7 +924,7 @@ def main():
         if "W" in phases:
             run_phase_w(client, cloud_account_id, args.azure_resource_group)
         if "X" in phases:
-            run_phase_x_stub(client, cloud_account_id, args.azure_resource_group)
+            run_phase_x(client, cloud_account_id, args.azure_resource_group)
         if "Y" in phases:
             run_phase_y_stub(client, cloud_account_id, args.azure_resource_group)
         if "Z" in phases:
