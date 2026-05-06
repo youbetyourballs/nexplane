@@ -1,0 +1,9 @@
+{
+  "change_type": "listener_delete",
+  "display_name": "Delete ALB Listener",
+  "steps": [
+    {"generic_action": "delete_listener", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

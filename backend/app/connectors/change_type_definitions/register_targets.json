@@ -1,0 +1,11 @@
+{
+  "change_type": "register_targets",
+  "display_name": "Register Targets with Target Group",
+  "steps": [
+    {"generic_action": "register_targets", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "deregister_targets",
+  "rollback_connector_type": "aws"
+}
