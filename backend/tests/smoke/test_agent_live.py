@@ -243,7 +243,6 @@ def _teardown_aws_linux_instance(client: NexplaneClient) -> None:
     except Exception as e:
         print(f"  ⚠️  Inventory cleanup error: {e}")
 
-    teardown_backend_tailscale()
     print("  Teardown complete.")
 
 
@@ -499,51 +498,6 @@ _LINUX_PHASE_MAP_AWS_CR = {
     "iac":           run_iac_aws_cr,
     "linuxupgrade":  run_linuxupgrade_aws_cr,
 }
-
-
-def run_aws_linux_track(client: NexplaneClient, cloud_account_id: str,
-                         tailscale_auth_key: str, phases: set) -> None:
-    """Run all selected Linux agent command phases on AWS.
-
-    Uses Nexplane agent CRs when the endpoint asset is registered (full stack test).
-    Falls back to SSM shell commands if agent didn't register in time.
-    """
-    print("\n" + "=" * 50)
-    print("Track: AWS Linux")
-    print("=" * 50)
-
-    try:
-        setup_result = _setup_aws_linux_instance(client, cloud_account_id, tailscale_auth_key)
-        instance_asset = setup_result["instance_asset"]
-        instance_id = setup_result["instance_id"]
-        asset_id = instance_asset["id"]
-        endpoint_asset_id = setup_result.get("endpoint_asset_id")
-
-        if endpoint_asset_id:
-            log(f"Agent endpoint registered: {endpoint_asset_id} — using CR dispatch")
-            phase_map = _LINUX_PHASE_MAP_AWS_CR
-            runner_args = (client, endpoint_asset_id)
-        else:
-            print("  ⚠️  Agent endpoint not registered — falling back to SSM dispatch")
-            phase_map = _LINUX_PHASE_MAP_AWS_SSM
-            runner_args = (client, asset_id, instance_id)
-
-        for phase in _LINUX_PHASES:
-            if phase not in phases:
-                continue
-            runner = phase_map.get(phase)
-            if runner:
-                runner(*runner_args)
-
-        log("AWS Linux track complete")
-
-    except Exception as e:
-        print(f"\n❌ AWS Linux track failed: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
-    finally:
-        _teardown_aws_linux_instance(client)
 
 
 # ---------------------------------------------------------------------------
