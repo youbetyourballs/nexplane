@@ -20,6 +20,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         }
 
     from ._client import get_authorization_client
+    from azure.mgmt.authorization.models import RoleAssignmentCreateParameters
     auth = get_authorization_client(creds)
     loop = asyncio.get_running_loop()
 
@@ -37,7 +38,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         None,
         lambda: auth.role_assignments.create(
             scope, assignment_id,
-            {"role_definition_id": role_definition_id, "principal_id": principal_id},
+            RoleAssignmentCreateParameters(
+                role_definition_id=role_definition_id,
+                principal_id=principal_id,
+            ),
         ),
     )
     return {
