@@ -23,7 +23,7 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
         "update_dns_record": {"record_name": desired.get("record_name", ""), "record_type": desired.get("record_type", "A"), "new_value": desired.get("new_value", ""), "ttl": desired.get("ttl", 300)},
         "wait_dns_propagation": {"ttl": desired.get("ttl", 300)},
         "restore_dns_record": {"record_name": desired.get("record_name", "")},
-        "health_check": {},
+        "health_check": {"instance_name": desired.get("instance_name", ""), "zone": desired.get("zone", ""), "instance_id": desired.get("instance_id", "")},
         "create_snapshot": {"snapshot_tag": desired.get("snapshot_tag", "nexplane-managed"), "volume_id": desired.get("volume_id", ""), "instance_id": desired.get("instance_id", "")},
         "create_ebs_snapshot": {"volume_id": "", "backup_name": desired.get("snapshot_tag", "nexplane-pre-stop")},
         "verify_snapshot": {},
@@ -49,11 +49,12 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
         "stage_policy": {"policy_rules": desired.get("policy_rules", []), "critical_flows": desired.get("critical_flows", [])},
         "remove_staged_policy": {},
         "validate_staged": {"critical_flows": desired.get("critical_flows", [])},
-        "capture_instance_state": {"instance_id": desired.get("instance_id", "")},
-        "stop_instance":          {"instance_id": desired.get("instance_id", "")},
-        "start_instance":         {"instance_id": desired.get("instance_id", "")},
-        "reboot_instance":        {"instance_id": desired.get("instance_id", "")},
-        "wait_instance_state":    {"instance_id": desired.get("instance_id", ""), "target_state": desired.get("target_state", "running")},
+        "capture_instance_state": {"instance_id": desired.get("instance_id", ""), "instance_name": desired.get("instance_name", ""), "zone": desired.get("zone", "")},
+        "stop_instance":          {"instance_id": desired.get("instance_id", ""), "instance_name": desired.get("instance_name", ""), "zone": desired.get("zone", "")},
+        "start_instance":         {"instance_id": desired.get("instance_id", ""), "instance_name": desired.get("instance_name", ""), "zone": desired.get("zone", "")},
+        "reboot_instance":        {"instance_id": desired.get("instance_id", ""), "instance_name": desired.get("instance_name", ""), "zone": desired.get("zone", "")},
+        "terminate_instance":     {"instance_id": desired.get("instance_id", ""), "instance_name": desired.get("instance_name", ""), "zone": desired.get("zone", ""), "confirm_terminate": desired.get("confirm_terminate", False)},
+        "wait_instance_state":    {"instance_id": desired.get("instance_id", ""), "instance_name": desired.get("instance_name", ""), "zone": desired.get("zone", ""), "target_state": desired.get("target_state", "running")},
         "resolve_launch_config":  {
             "mode": desired.get("mode", "quick"),
             "name": desired.get("name", "nexplane-instance"),
@@ -116,7 +117,6 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
             "playbook_content": desired.get("playbook_content", ""),
             "extra_vars": desired.get("extra_vars", {}),
         },
-        "terminate_instance":     {"instance_id": desired.get("instance_id", ""), "confirm_terminate": desired.get("confirm_terminate", False)},
     }
     # If no specific resolver, pass through all desired_outcome keys except meta-fields.
     # This ensures executors added after this resolver was written still receive their parameters.

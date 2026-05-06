@@ -4,7 +4,7 @@
   "steps": [
     {"generic_action": "capture_instance_state", "purpose": "preflight_validate", "required": true},
     {"generic_action": "stop_instance",          "purpose": "execute",            "required": true},
-    {"generic_action": "wait_instance_state",    "purpose": "verify",             "required": true}
+    {"generic_action": "wait_instance_state",    "purpose": "verify",             "required": true, "param_overrides": {"target_state": "TERMINATED"}}
   ],
   "preflight_checks": ["connector_reachable", "asset_exists"],
   "verification_methods": ["api_check"],

@@ -174,7 +174,7 @@ def score_change_request(change_request: ChangeRequest, assets: list[Asset]) -> 
         "azure_update_nsg_rule", "azure_restore_nsg_rule",
         "azure_disable_public_blob_access", "azure_enable_public_blob_access",
         "azure_rotate_storage_key",
-        "gce_instance_create", "gce_instance_delete", "gce_stop", "gce_start",
+        "gce_instance_create", "gce_instance_delete", "gce_stop", "gce_start", "gce_instance_reboot",
         "gce_disk_snapshot", "azure_vm_create", "azure_vm_delete", "azure_vm_stop",
         "azure_vm_start", "azure_vm_reboot", "azure_vm_snapshot",
         ChangeType.agent_linux_patch, ChangeType.agent_ossecurity,
