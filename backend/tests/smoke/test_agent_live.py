@@ -63,6 +63,18 @@ def _ssm(client: NexplaneClient, instance_asset_id: str, instance_id: str,
     log(label)
 
 
+def _agent_cr(client: NexplaneClient, endpoint_asset_id: str, phase: str,
+              change_type: str, params: dict = None) -> None:
+    """Dispatch an agent command group via Nexplane CR targeting the endpoint asset."""
+    client.run_cr(
+        f"[Phase {phase}] {change_type.replace('agent_', '').replace('_', ' ')}",
+        change_type,
+        endpoint_asset_id,
+        params or {"dry_run": True},
+    )
+    log(f"{phase}: {change_type}")
+
+
 def _setup_aws_linux_instance(client: NexplaneClient, cloud_account_id: str,
                                tailscale_auth_key: str) -> dict:
     """Spin up an Amazon Linux 2023 EC2 instance with agent deployed. Returns phase_a-style dict."""
@@ -136,6 +148,7 @@ def _setup_aws_linux_instance(client: NexplaneClient, cloud_account_id: str,
         "instance_id": instance_id,
         "backend_ip": backend_ip,
         "agent_secret": agent_secret,
+        "endpoint_asset_id": agent_asset["id"] if agent_asset else None,
     }
 
 
@@ -336,6 +349,70 @@ def run_linuxupgrade_aws(client: NexplaneClient, instance_asset_id: str, instanc
 
 
 # ---------------------------------------------------------------------------
+# AWS Linux agent CR phase runners (used when endpoint asset is available)
+# ---------------------------------------------------------------------------
+
+def run_linux_patch_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [linux_patch via CR]")
+    _agent_cr(client, endpoint_asset_id, "linux_patch-aws-linux", "agent_linux_patch")
+
+
+def run_ossecurity_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [ossecurity via CR]")
+    _agent_cr(client, endpoint_asset_id, "ossecurity-aws-linux", "agent_ossecurity")
+
+
+def run_linuxauth_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [linuxauth via CR]")
+    _agent_cr(client, endpoint_asset_id, "linuxauth-aws-linux", "agent_linuxauth")
+
+
+def run_crossplatform_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [crossplatform via CR]")
+    _agent_cr(client, endpoint_asset_id, "crossplatform-aws-linux", "agent_crossplatform")
+
+
+def run_compliance_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [compliance via CR]")
+    _agent_cr(client, endpoint_asset_id, "compliance-aws-linux", "agent_compliance")
+
+
+def run_forensics_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [forensics via CR]")
+    _agent_cr(client, endpoint_asset_id, "forensics-aws-linux", "agent_forensics")
+
+
+def run_fleet_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [fleet via CR]")
+    _agent_cr(client, endpoint_asset_id, "fleet-aws-linux", "agent_fleet")
+
+
+def run_backup_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [backup via CR]")
+    _agent_cr(client, endpoint_asset_id, "backup-aws-linux", "agent_backup")
+
+
+def run_reboot_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [reboot via CR]")
+    _agent_cr(client, endpoint_asset_id, "reboot-aws-linux", "agent_reboot")
+
+
+def run_credrotation_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [credrotation via CR]")
+    _agent_cr(client, endpoint_asset_id, "credrotation-aws-linux", "agent_credrotation")
+
+
+def run_iac_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [iac via CR]")
+    _agent_cr(client, endpoint_asset_id, "iac-aws-linux", "agent_iac")
+
+
+def run_linuxupgrade_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+    print("\n  [linuxupgrade via CR]")
+    _agent_cr(client, endpoint_asset_id, "linuxupgrade-aws-linux", "agent_linuxupgrade")
+
+
+# ---------------------------------------------------------------------------
 # AWS Linux track — main runner
 # ---------------------------------------------------------------------------
 
@@ -345,7 +422,7 @@ _LINUX_PHASES = [
     "credrotation", "iac", "linuxupgrade",
 ]
 
-_LINUX_PHASE_MAP_AWS = {
+_LINUX_PHASE_MAP_AWS_SSM = {
     "linux_patch":   run_linux_patch_aws,
     "ossecurity":    run_ossecurity_aws,
     "linuxauth":     run_linuxauth_aws,
@@ -360,10 +437,29 @@ _LINUX_PHASE_MAP_AWS = {
     "linuxupgrade":  run_linuxupgrade_aws,
 }
 
+_LINUX_PHASE_MAP_AWS_CR = {
+    "linux_patch":   run_linux_patch_aws_cr,
+    "ossecurity":    run_ossecurity_aws_cr,
+    "linuxauth":     run_linuxauth_aws_cr,
+    "crossplatform": run_crossplatform_aws_cr,
+    "compliance":    run_compliance_aws_cr,
+    "forensics":     run_forensics_aws_cr,
+    "fleet":         run_fleet_aws_cr,
+    "backup":        run_backup_aws_cr,
+    "reboot":        run_reboot_aws_cr,
+    "credrotation":  run_credrotation_aws_cr,
+    "iac":           run_iac_aws_cr,
+    "linuxupgrade":  run_linuxupgrade_aws_cr,
+}
+
 
 def run_aws_linux_track(client: NexplaneClient, cloud_account_id: str,
                          tailscale_auth_key: str, phases: set) -> None:
-    """Run all selected Linux agent command phases on AWS (EC2 + SSM)."""
+    """Run all selected Linux agent command phases on AWS.
+
+    Uses Nexplane agent CRs when the endpoint asset is registered (full stack test).
+    Falls back to SSM shell commands if agent didn't register in time.
+    """
     print("\n" + "=" * 50)
     print("Track: AWS Linux")
     print("=" * 50)
@@ -373,13 +469,23 @@ def run_aws_linux_track(client: NexplaneClient, cloud_account_id: str,
         instance_asset = setup_result["instance_asset"]
         instance_id = setup_result["instance_id"]
         asset_id = instance_asset["id"]
+        endpoint_asset_id = setup_result.get("endpoint_asset_id")
+
+        if endpoint_asset_id:
+            log(f"Agent endpoint registered: {endpoint_asset_id} — using CR dispatch")
+            phase_map = _LINUX_PHASE_MAP_AWS_CR
+            runner_args = (client, endpoint_asset_id)
+        else:
+            print("  ⚠️  Agent endpoint not registered — falling back to SSM dispatch")
+            phase_map = _LINUX_PHASE_MAP_AWS_SSM
+            runner_args = (client, asset_id, instance_id)
 
         for phase in _LINUX_PHASES:
             if phase not in phases:
                 continue
-            runner = _LINUX_PHASE_MAP_AWS.get(phase)
+            runner = phase_map.get(phase)
             if runner:
-                runner(client, asset_id, instance_id)
+                runner(*runner_args)
 
         log("AWS Linux track complete")
 
@@ -540,6 +646,37 @@ def run_aws_windows_track(client: NexplaneClient, cloud_account_id: str,
             _psm("harden_registry",
                  "Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -ErrorAction SilentlyContinue | Select-Object EnableLUA,ConsentPromptBehaviorAdmin; Write-Output 'registry_checked'",
                  asset_id, win_id)
+
+        # If Windows endpoint asset registered, also dispatch CRs for full stack verification
+        win_endpoint_id = None
+        print("  Waiting up to 3min for Windows agent to register...")
+        import time as _time
+        deadline_ep = _time.time() + 180
+        while _time.time() < deadline_ep:
+            candidates = client.get("/assets", params={
+                "q": "nexplane-agent-smoke-win", "asset_type": "endpoint"})
+            if candidates:
+                win_endpoint_id = candidates[0]["id"]
+                log(f"Windows agent registered: {win_endpoint_id}")
+                break
+            _time.sleep(15)
+        if not win_endpoint_id:
+            print("  ⚠️  Windows agent not registered — SSM-only verification complete")
+        else:
+            if "win_patch" in phases:
+                print("\n  [win_patch via CR]")
+                client.run_cr(
+                    "[Phase win_patch-aws-win] Windows patch management",
+                    "agent_win_patch", win_endpoint_id, {"dry_run": True},
+                )
+                log("win_patch CR dispatched via endpoint asset")
+            if "winharden" in phases:
+                print("\n  [winharden via CR]")
+                client.run_cr(
+                    "[Phase winharden-aws-win] Windows hardening",
+                    "agent_winharden", win_endpoint_id, {"dry_run": True},
+                )
+                log("winharden CR dispatched via endpoint asset")
 
         log("AWS Windows track complete")
 
