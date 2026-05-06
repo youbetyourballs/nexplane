@@ -1413,30 +1413,18 @@ def run_phase_r(client: NexplaneClient, cloud_account_id: str) -> None:
         zone_id = zone["Id"].split("/")[-1]
         log(f"Zone ID: {zone_id}")
 
-        # 2. Create a CNAME record pointing to original endpoint
-        original_endpoint = "primary.example.internal"
-        record_name = f"app.{zone_name}"
-        cr = client.run_cr(
-            "Smoke-R: create CNAME record", "route53_record_upsert", cloud_account_id,
-            {
-                "zone_id": zone_id,
-                "name": record_name,
-                "record_type": "CNAME",
-                "ttl": 60,
-                "values": [original_endpoint],
-            },
-        )
-        rollback_stack.append((cr["id"], "route53_record_upsert"))
-
-        # 3. DR failover: update CNAME to point to DR endpoint via CR
+        # 2. DR failover: use dr_dns_failover_route53 to create a weighted CNAME in one step.
+        #    The executor creates a weighted-routing CNAME (SetIdentifier: "dr-primary", Weight: 100).
+        #    We don't pre-create a simple CNAME because Route53 won't mix simple + weighted records
+        #    on the same name. The executor creates from scratch → verify it exists → cleanup.
         dr_endpoint = "dr.example.internal"
+        record_name = f"app.{zone_name}"
         cr = client.run_cr(
             "Smoke-R: dr_dns_failover_route53", "dr_dns_failover_route53", cloud_account_id,
             {
                 "dns_record_id": record_name,
                 "dr_endpoint": dr_endpoint,
                 "hosted_zone_id": zone_id,
-                "original_endpoint": original_endpoint,
             },
         )
         rollback_stack.append((cr["id"], "dr_dns_failover_route53"))
