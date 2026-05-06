@@ -106,6 +106,29 @@ class ChangeType(str, enum.Enum):
     # Compliance
     enforce_cis_benchmark = "enforce_cis_benchmark"
     collect_evidence = "collect_evidence"
+    # AWS Plans 2-4 — IAM, S3, Route53, agent, DR failover, RDS replica, GCP/Azure ops
+    attach_iam_policy = "attach_iam_policy"
+    detach_iam_policy = "detach_iam_policy"
+    disable_iam_user = "disable_iam_user"
+    enable_iam_user = "enable_iam_user"
+    rotate_iam_key = "rotate_iam_key"
+    put_bucket_policy = "put_bucket_policy"
+    tag_resource = "tag_resource"
+    remove_nexplane_agent = "remove_nexplane_agent"
+    dr_dns_failover_route53 = "dr_dns_failover_route53"
+    rds_replica_create = "rds_replica_create"
+    # GCP Plans 3 — firewall, storage, service accounts
+    gcp_firewall_create = "gcp_firewall_create"
+    gcp_firewall_delete = "gcp_firewall_delete"
+    gcp_block_public_bucket_access = "gcp_block_public_bucket_access"
+    gcp_disable_service_account = "gcp_disable_service_account"
+    gcp_rotate_service_account_key = "gcp_rotate_service_account_key"
+    # Azure Plans 4 — NSG, blob storage, storage key
+    azure_update_nsg_rule = "azure_update_nsg_rule"
+    azure_restore_nsg_rule = "azure_restore_nsg_rule"
+    azure_disable_public_blob_access = "azure_disable_public_blob_access"
+    azure_enable_public_blob_access = "azure_enable_public_blob_access"
+    azure_rotate_storage_key = "azure_rotate_storage_key"
 
 
 class RiskLevel(str, enum.Enum):
