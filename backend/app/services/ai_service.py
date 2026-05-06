@@ -72,7 +72,12 @@ class AIService:
         if asset_context:
             lines = []
             for a in asset_context:
-                line = f"- {a['name']} ({a['asset_type']}, {a['environment']})"
+                line = f"- {a['name']} ({a['asset_type']}, {a['environment']}"
+                if a.get("criticality"):
+                    line += f", criticality: {a['criticality']}"
+                if a.get("connector_type"):
+                    line += f", connector: {a['connector_type']}"
+                line += ")"
                 if a.get("tags"):
                     line += f" [tags: {', '.join(a['tags'])}]"
                 lines.append(line)

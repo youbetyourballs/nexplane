@@ -338,8 +338,11 @@ async def ai_chat(
     provider, api_key, model = _resolve_provider_config(org_settings, secrets)
 
     # Load asset context
+    from sqlalchemy.orm import selectinload as _selectinload
     assets_result = await db.execute(
-        select(Asset).where(Asset.organization_id == user.organization_id)
+        select(Asset)
+        .options(_selectinload(Asset.connector))
+        .where(Asset.organization_id == user.organization_id)
     )
     assets = assets_result.scalars().all()
     asset_context = [
@@ -347,6 +350,8 @@ async def ai_chat(
             "name": a.name,
             "asset_type": a.asset_type.value,
             "environment": a.environment.value,
+            "criticality": a.criticality.value if a.criticality else None,
+            "connector_type": a.connector.connector_type.value if a.connector else None,
             "tags": a.tags or [],
         }
         for a in assets
