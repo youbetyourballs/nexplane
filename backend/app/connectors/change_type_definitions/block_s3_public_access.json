@@ -1,0 +1,11 @@
+{
+  "change_type": "block_s3_public_access",
+  "display_name": "Block S3 Bucket Public Access",
+  "steps": [
+    {"generic_action": "block_s3_public_access", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "restore_s3_public_access",
+  "rollback_connector_type": "aws"
+}
