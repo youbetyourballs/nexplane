@@ -1903,8 +1903,8 @@ def run_phase_w(client: NexplaneClient, cloud_account_id: str, phase_a_result: d
             "[Phase W] deregister targets", "deregister_targets", cloud_account_id,
             {"tg_arn": tg_arn, "targets": targets},
         )
-        # Pop register_targets from rollback stack (already deregistered)
-        rollback_stack.pop()
+        # Pop register_targets from rollback stack (already deregistered via explicit CR)
+        rollback_stack.pop(2)
 
         health_after = elbv2.describe_target_health(TargetGroupArn=tg_arn)
         remaining = [t["Target"]["Id"] for t in health_after["TargetHealthDescriptions"]]
@@ -1952,7 +1952,7 @@ def main():
         help=(
             "Comma-separated phases to run. "
             "A-K: existing phases. P-T: new phases (P=IAM, Q=S3, R=DR-DNS, S=RDS-slow, T=Agent). "
-            "Default: A,B,C,D. J and S are slow (~35-45 min). U=instance-state+S3-access, V=tailscale-remove."
+            "Default: A,B,C,D. J and S are slow (~35-45 min). U=instance-state+S3-access, V=tailscale-remove, W=ALB-lifecycle."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
