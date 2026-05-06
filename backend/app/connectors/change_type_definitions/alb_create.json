@@ -1,0 +1,11 @@
+{
+  "change_type": "alb_create",
+  "display_name": "Create Application Load Balancer",
+  "steps": [
+    {"generic_action": "create_alb", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_alb",
+  "rollback_connector_type": "aws"
+}

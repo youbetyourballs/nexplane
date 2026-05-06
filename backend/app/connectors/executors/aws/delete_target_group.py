@@ -1,0 +1,20 @@
+import asyncio
+from datetime import datetime, timezone
+
+
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    creds = getattr(connector, "credentials", {})
+    tg_arn = parameters.get("tg_arn", "")
+
+    if not creds:
+        return {"action": "delete_target_group", "tg_arn": tg_arn, "mock": True}
+
+    from ._client import get_boto3_client
+    elbv2 = get_boto3_client(creds, "elbv2")
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: elbv2.delete_target_group(TargetGroupArn=tg_arn))
+    return {"action": "delete_target_group", "tg_arn": tg_arn, "executed_at": datetime.now(timezone.utc).isoformat()}
+
+
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    return {"rolled_back": False, "reason": "target group deletion cannot be reversed automatically"}
