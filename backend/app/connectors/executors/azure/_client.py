@@ -33,3 +33,8 @@ def get_authorization_client(creds: dict):
 def get_dns_client(creds: dict):
     from azure.mgmt.dns import DnsManagementClient
     return DnsManagementClient(get_credential(creds), creds['subscription_id'])
+
+
+def get_sql_client(creds: dict):
+    from azure.mgmt.sql import SqlManagementClient
+    return SqlManagementClient(get_credential(creds), creds['subscription_id'])
