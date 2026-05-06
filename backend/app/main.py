@@ -16,6 +16,7 @@ from app.routers import runbooks as runbooks_router
 from app.routers import review_campaigns as review_campaigns_router
 from app.routers import maintenance_windows as maintenance_windows_router
 from app.routers import ir as ir_router
+from app.routers import smoke_tests as smoke_tests_router
 from app.routers import current_user
 from app.routers.audit import list_cr_audit_events
 from app.services import scheduler_service
@@ -68,6 +69,7 @@ app.include_router(runbooks_router.execution_router)
 app.include_router(review_campaigns_router.router)
 app.include_router(maintenance_windows_router.router)
 app.include_router(ir_router.router)
+app.include_router(smoke_tests_router.router)
 
 
 @app.get("/change-requests/{cr_id}/audit-events", tags=["Audit"])
