@@ -22,6 +22,7 @@ Phase descriptions:
     I  Route53: private zone + A record create/update/delete with rollback stack
     J  RDS: instance + snapshot lifecycle (~30 min) with rollback stack
     K  CloudWatch: alarms + SSM metric push with rollback stack
+    W  ALB lifecycle: create ALB + target group + listener, register EC2 target, verify health, deregister, rollback
 
 Requirements:
     AWS connector with credentials + NexplaneEC2TestProfile IAM role
@@ -1779,6 +1780,171 @@ def run_phase_v(client: NexplaneClient, phase_a_result: dict) -> None:
             client.rollback_cr(cr_id, label)
 
 
+def run_phase_w(client: NexplaneClient, cloud_account_id: str, phase_a_result: dict) -> None:
+    """Phase W: ALB lifecycle — create ALB + target group + listener, register targets, verify, deregister, rollback."""
+    print("\n[Phase W] ALB Lifecycle")
+
+    instance_id = phase_a_result["instance_id"]
+    rollback_stack: list[tuple[str, str]] = []
+
+    # Look up VPC/subnets/SG from the Phase A EC2 instance
+    ec2 = _get_aws_boto3_client("ec2")
+    elbv2 = _get_aws_boto3_client("elbv2")
+    if not ec2 or not elbv2:
+        fail("Phase W requires AWS boto3 client with ec2 and elbv2 access")
+
+    inst_resp = ec2.describe_instances(InstanceIds=[instance_id])
+    inst_data = inst_resp["Reservations"][0]["Instances"][0]
+    vpc_id = inst_data["VpcId"]
+    sg_ids = [sg["GroupId"] for sg in inst_data["SecurityGroups"]]
+
+    # ALB requires >=2 subnets in different AZs
+    subnets_resp = ec2.describe_subnets(
+        Filters=[
+            {"Name": "vpc-id", "Values": [vpc_id]},
+            {"Name": "state", "Values": ["available"]},
+        ]
+    )
+    subnet_ids: list[str] = []
+    seen_azs: set[str] = set()
+    for s in subnets_resp["Subnets"]:
+        az = s["AvailabilityZone"]
+        if az not in seen_azs:
+            subnet_ids.append(s["SubnetId"])
+            seen_azs.add(az)
+        if len(subnet_ids) == 2:
+            break
+    if len(subnet_ids) < 2:
+        fail(f"Phase W requires >=2 subnets in different AZs in VPC {vpc_id}, found {len(subnet_ids)}")
+
+    alb_name = "nexplane-smoke-alb"
+    tg_name = "nexplane-smoke-tg"
+
+    try:
+        # 1. Create ALB
+        cr = client.run_cr(
+            "[Phase W] create ALB", "alb_create", cloud_account_id,
+            {
+                "name": alb_name,
+                "scheme": "internet-facing",
+                "lb_type": "application",
+                "subnets": subnet_ids,
+                "security_groups": sg_ids,
+            },
+        )
+        rollback_stack.append((cr["id"], "alb_create"))
+
+        lb_resp = elbv2.describe_load_balancers(Names=[alb_name])
+        lb_arn = lb_resp["LoadBalancers"][0]["LoadBalancerArn"]
+        log(f"ALB created: {lb_arn}")
+
+        # 2. Create target group
+        cr = client.run_cr(
+            "[Phase W] create target group", "target_group_create", cloud_account_id,
+            {
+                "name": tg_name,
+                "protocol": "HTTP",
+                "port": 80,
+                "vpc_id": vpc_id,
+                "target_type": "instance",
+            },
+        )
+        rollback_stack.append((cr["id"], "target_group_create"))
+
+        tg_resp = elbv2.describe_target_groups(Names=[tg_name])
+        tg_arn = tg_resp["TargetGroups"][0]["TargetGroupArn"]
+        log(f"Target group created: {tg_arn}")
+
+        # 3. Register Phase A instance as target
+        targets = [{"Id": instance_id, "Port": 80}]
+        cr = client.run_cr(
+            "[Phase W] register targets", "register_targets", cloud_account_id,
+            {"tg_arn": tg_arn, "targets": targets},
+        )
+        rollback_stack.append((cr["id"], "register_targets"))
+        log(f"Instance {instance_id} registered as target")
+
+        # 4. Create listener on port 80 forwarding to the target group
+        cr = client.run_cr(
+            "[Phase W] create listener", "listener_create", cloud_account_id,
+            {
+                "lb_arn": lb_arn,
+                "protocol": "HTTP",
+                "port": 80,
+                "default_target_group_arn": tg_arn,
+            },
+        )
+        rollback_stack.append((cr["id"], "listener_create"))
+
+        listeners_resp = elbv2.describe_listeners(LoadBalancerArn=lb_arn)
+        listener_arn = listeners_resp["Listeners"][0]["ListenerArn"]
+        log(f"Listener created: {listener_arn}")
+
+        # 5. Verify target is registered via boto3
+        health_resp = elbv2.describe_target_health(TargetGroupArn=tg_arn)
+        registered_ids = [t["Target"]["Id"] for t in health_resp["TargetHealthDescriptions"]]
+        assert instance_id in registered_ids, \
+            f"Instance {instance_id} not in registered targets: {registered_ids}"
+        log("Target registration verified (boto3 describe_target_health)")
+
+        # 6. Modify listener — change port to 8080
+        client.run_cr(
+            "[Phase W] modify listener port", "listener_modify", cloud_account_id,
+            {"listener_arn": listener_arn, "port": 8080, "protocol": "HTTP"},
+        )
+
+        updated_listeners = elbv2.describe_listeners(LoadBalancerArn=lb_arn)
+        updated_port = updated_listeners["Listeners"][0]["Port"]
+        assert updated_port == 8080, f"Listener port not updated: expected 8080, got {updated_port}"
+        log("Listener port modified to 8080 (boto3 verified)")
+
+        # 7. Deregister targets — exercise the deregister_targets CR
+        client.run_cr(
+            "[Phase W] deregister targets", "deregister_targets", cloud_account_id,
+            {"tg_arn": tg_arn, "targets": targets},
+        )
+        # Pop register_targets from rollback stack (already deregistered)
+        rollback_stack.pop()
+
+        health_after = elbv2.describe_target_health(TargetGroupArn=tg_arn)
+        remaining = [t["Target"]["Id"] for t in health_after["TargetHealthDescriptions"]]
+        assert instance_id not in remaining, \
+            f"Instance {instance_id} still registered after deregister: {remaining}"
+        log("Target deregistered and verified (boto3 describe_target_health)")
+
+        log("Phase W complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase W failed: {e}")
+        raise
+    finally:
+        print("  [Phase W cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete ALB and TG via boto3 if still present
+        try:
+            if elbv2:
+                try:
+                    lb_resp2 = elbv2.describe_load_balancers(Names=[alb_name])
+                    if lb_resp2.get("LoadBalancers"):
+                        remaining_lb_arn = lb_resp2["LoadBalancers"][0]["LoadBalancerArn"]
+                        for lst in elbv2.describe_listeners(LoadBalancerArn=remaining_lb_arn).get("Listeners", []):
+                            elbv2.delete_listener(ListenerArn=lst["ListenerArn"])
+                        elbv2.delete_load_balancer(LoadBalancerArn=remaining_lb_arn)
+                        print(f"  Safety net: deleted ALB {alb_name}")
+                except Exception:
+                    pass
+                try:
+                    tg_resp2 = elbv2.describe_target_groups(Names=[tg_name])
+                    if tg_resp2.get("TargetGroups"):
+                        elbv2.delete_target_group(TargetGroupArn=tg_resp2["TargetGroups"][0]["TargetGroupArn"])
+                        print(f"  Safety net: deleted target group {tg_name}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -1861,6 +2027,10 @@ def main():
             if phase_a_result is None:
                 fail("Phase V requires Phase A to have run first")
             run_phase_v(client, phase_a_result)
+        if "W" in phases:
+            if phase_a_result is None:
+                fail("Phase W requires Phase A to have run first")
+            run_phase_w(client, cloud_account_id, phase_a_result)
         if "T" in phases:
             if phase_a_result is None:
                 fail("Phase T requires Phase A to have run first")
