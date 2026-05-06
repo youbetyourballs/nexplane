@@ -106,6 +106,10 @@ class ChangeType(str, enum.Enum):
     # Compliance
     enforce_cis_benchmark = "enforce_cis_benchmark"
     collect_evidence = "collect_evidence"
+    # Coverage phases U and V
+    block_s3_public_access = "block_s3_public_access"
+    restore_s3_public_access = "restore_s3_public_access"
+    capture_instance_state = "capture_instance_state"
     # AWS Plans 2-4 — IAM, S3, Route53, agent, DR failover, RDS replica, GCP/Azure ops
     attach_iam_policy = "attach_iam_policy"
     detach_iam_policy = "detach_iam_policy"

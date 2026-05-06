@@ -162,6 +162,9 @@ def score_change_request(change_request: ChangeRequest, assets: list[Asset]) -> 
         ChangeType.rds_snapshot_create,
         ChangeType.promote_db_replica,
         ChangeType.verify_backup,
+        ChangeType.block_s3_public_access,
+        ChangeType.restore_s3_public_access,
+        ChangeType.capture_instance_state,
         # New change types added for Plans 2-4 (string-based, not in enum yet):
         "attach_iam_policy", "detach_iam_policy", "disable_iam_user", "enable_iam_user",
         "rotate_iam_key", "put_bucket_policy", "tag_resource", "remove_nexplane_agent",
