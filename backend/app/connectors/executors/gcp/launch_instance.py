@@ -2,6 +2,29 @@ import asyncio
 from datetime import datetime, timezone
 
 
+_WINDOWS_AGENT_PS1 = r"""# Install Tailscale for Windows
+$tsInstaller = "$env:TEMP\tailscale-setup.exe"
+Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup.exe" `
+  -OutFile $tsInstaller -UseBasicParsing
+Start-Process $tsInstaller -Args "/S" -Wait
+Start-Sleep -Seconds 10
+& "C:\Program Files\Tailscale\tailscale.exe" up `
+  --authkey="{tailscale_auth_key}" --hostname="{hostname}" --accept-routes
+
+# Download and install Nexplane agent
+$version = (Invoke-WebRequest `
+  "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/version" `
+  -UseBasicParsing).Content.Trim()
+$agentUrl = "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/nexplane-agent-windows-amd64-$version.exe"
+Invoke-WebRequest $agentUrl -OutFile "C:\nexplane-agent.exe" -UseBasicParsing
+
+New-Service -Name "NexplaneAgent" `
+  -BinaryPathName "C:\nexplane-agent.exe --control-plane {nexplane_url} --secret {nexplane_secret} --mode service" `
+  -StartupType Automatic -Description "Nexplane Agent" -ErrorAction SilentlyContinue
+Start-Service "NexplaneAgent"
+"""
+
+
 _AGENT_STARTUP_TEMPLATE = """#!/bin/bash
 set -e
 NEXPLANE_URL="{nexplane_url}"
@@ -43,7 +66,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     ssh_public_key = parameters.get("ssh_public_key", "")
     network_tags = parameters.get("network_tags", [])
     tailscale_auth_key = parameters.get("tailscale_auth_key", "")
+    os_type = parameters.get("os", "linux")
     labels = parameters.get("labels", {"managed-by": "nexplane"})
+
+    # Override image and machine type for Windows
+    if os_type == "windows":
+        image_family = parameters.get("image_family", "windows-server-2022-dc")
+        image_project = parameters.get("image_project", "windows-cloud")
+        machine_type = parameters.get("machine_type", "e2-medium")  # Windows needs >=4GB RAM
 
     auto_asset = {
         "name": name,
@@ -57,6 +87,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "connection_mode": connection_mode,
             "image_family": image_family,
             "provider": "gcp",
+            "os_type": os_type,
         },
         "tags": ["gce", "nexplane-managed"],
     }
@@ -89,20 +120,33 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # Build metadata items and network tags based on connection_mode
     if connection_mode == "agent_startup":
-        tailscale_section = ""
-        if tailscale_auth_key:
-            tailscale_section = f"""# Install and join Tailscale
+        if os_type == "windows":
+            # Windows uses windows-startup-script-ps1 metadata key
+            ps1_script = _WINDOWS_AGENT_PS1.format(
+                tailscale_auth_key=tailscale_auth_key,
+                hostname=name,
+                nexplane_url=nexplane_url,
+                nexplane_secret=nexplane_secret,
+            )
+            metadata_items = [
+                compute_v1.Items(key="windows-startup-script-ps1", value=ps1_script)
+            ]
+            tags_list = list(network_tags)
+        else:
+            tailscale_section = ""
+            if tailscale_auth_key:
+                tailscale_section = f"""# Install and join Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
 tailscale up --authkey="{tailscale_auth_key}" --hostname="{name}" --accept-routes
 """
-        startup_script = parameters.get(
-            "startup_script",
-            tailscale_section + _AGENT_STARTUP_TEMPLATE.format(
-                nexplane_url=nexplane_url, nexplane_secret=nexplane_secret
-            ),
-        )
-        metadata_items = [compute_v1.Items(key="startup-script", value=startup_script)]
-        tags_list = list(network_tags)
+            startup_script = parameters.get(
+                "startup_script",
+                tailscale_section + _AGENT_STARTUP_TEMPLATE.format(
+                    nexplane_url=nexplane_url, nexplane_secret=nexplane_secret
+                ),
+            )
+            metadata_items = [compute_v1.Items(key="startup-script", value=startup_script)]
+            tags_list = list(network_tags)
     elif connection_mode == "iap":
         startup_script = parameters.get("startup_script", "")
         metadata_items = [compute_v1.Items(key="startup-script", value=startup_script)] if startup_script else []
