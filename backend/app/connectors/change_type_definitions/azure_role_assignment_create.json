@@ -1,0 +1,9 @@
+{
+  "change_type": "azure_role_assignment_create",
+  "display_name": "Create Azure RBAC Role Assignment",
+  "steps": [{"generic_action": "assign_role", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "remove_role_assignment",
+  "rollback_connector_type": "azure"
+}
