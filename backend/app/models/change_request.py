@@ -137,6 +137,10 @@ class ChangeType(str, enum.Enum):
     azure_storage_account_delete = "azure_storage_account_delete"
     azure_blob_container_create = "azure_blob_container_create"
     azure_blob_container_delete = "azure_blob_container_delete"
+    azure_managed_identity_create = "azure_managed_identity_create"
+    azure_managed_identity_delete = "azure_managed_identity_delete"
+    azure_role_assignment_create = "azure_role_assignment_create"
+    azure_role_assignment_delete = "azure_role_assignment_delete"
     # Agent command group change types (Plans 4)
     agent_linux_patch = "agent_linux_patch"
     agent_ossecurity = "agent_ossecurity"
