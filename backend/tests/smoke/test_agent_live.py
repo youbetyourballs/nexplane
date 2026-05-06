@@ -1043,19 +1043,43 @@ def main():
     cloud_account_id = client.get_cloud_account_asset_id()
     log(f"Cloud account: {cloud_account_id}")
 
-    passed = False
+    backend_ip = setup_backend_tailscale(args.tailscale_auth_key) if args.tailscale_auth_key else ""
+    all_results = []
+
     try:
         if run_linux:
-            if run_aws:
-                run_aws_linux_track(client, cloud_account_id, args.tailscale_auth_key, phases)
-            if run_gcp:
-                run_gcp_linux_track(client, cloud_account_id, args.tailscale_auth_key,
-                                     args.gcp_project, phases)
-            if run_azure:
-                run_azure_linux_track(client, cloud_account_id, args.tailscale_auth_key,
-                                       args.azure_resource_group, phases)
+            print("\n" + "=" * 60)
+            print("Running Linux tracks in parallel")
+            print("=" * 60)
+            linux_futures: dict = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                if run_aws:
+                    linux_futures[executor.submit(
+                        run_aws_linux_worker,
+                        args.base_url, args.email, args.password,
+                        backend_ip, args.tailscale_auth_key,
+                    )] = "aws-linux"
+                if run_gcp:
+                    if not args.gcp_project:
+                        fail("--gcp-project required for GCP Linux track")
+                    linux_futures[executor.submit(
+                        run_gcp_linux_worker,
+                        args.base_url, args.email, args.password,
+                        backend_ip, args.tailscale_auth_key, args.gcp_project,
+                    )] = "gcp-linux"
+                if run_azure:
+                    if not args.azure_resource_group:
+                        fail("--azure-resource-group required for Azure Linux track")
+                    linux_futures[executor.submit(
+                        run_azure_linux_worker,
+                        args.base_url, args.email, args.password,
+                        backend_ip, args.tailscale_auth_key, args.azure_resource_group,
+                    )] = "azure-linux"
+                all_results.extend(_collect_results(linux_futures))
 
         if run_windows:
+            # Windows workers added in Task 12
+            print("\n  ⚠️  Windows parallel workers not yet implemented (Task 12)")
             if run_aws:
                 run_aws_windows_track(client, cloud_account_id, args.tailscale_auth_key, phases)
             if run_gcp:
@@ -1065,23 +1089,33 @@ def main():
                 run_azure_windows_track(client, cloud_account_id, args.tailscale_auth_key,
                                          args.azure_resource_group, phases)
 
-        print("\n" + "=" * 60)
-        print("✅ ALL SELECTED TRACKS PASSED")
-        print("=" * 60)
+    finally:
+        if args.tailscale_auth_key:
+            teardown_backend_tailscale()
+
+    # Print consolidated report
+    print("\n" + "=" * 60)
+    print("AGENT SMOKE TEST RESULTS")
+    print("=" * 60)
+    passed = True
+    for result in sorted(all_results, key=lambda r: r["track"]):
+        if result["passed"]:
+            print(f"  ✅ {result['track'].upper()}: PASSED")
+        else:
+            print(f"  ❌ {result['track'].upper()}: FAILED — {result['error']}")
+            passed = False
+
+    if not all_results:
+        # Windows-only or no results — assume passed (Windows still uses old sequential path)
         passed = True
 
-    except SystemExit:
-        passed = False
-    except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
-        import traceback
-        traceback.print_exc()
-        passed = False
-    finally:
-        if not passed:
-            print("\n❌ AGENT SMOKE TEST FAILED")
-            import sys as _sys
-            _sys.exit(1)
+    print("=" * 60)
+    if not passed:
+        print("\n❌ AGENT SMOKE TEST FAILED")
+        import sys as _sys
+        _sys.exit(1)
+    else:
+        print("✅ ALL TRACKS PASSED")
 
 
 if __name__ == "__main__":
