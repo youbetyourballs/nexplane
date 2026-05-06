@@ -610,7 +610,7 @@ def main():
     client = NexplaneClient(args.base_url, args.email, args.password)
     log("Authenticated")
 
-    cloud_account_id = client.get_cloud_account_asset_id()
+    cloud_account_id = client.get_connector_cloud_account_id("gcp")
     log(f"Cloud account: {cloud_account_id}")
 
     passed = False
