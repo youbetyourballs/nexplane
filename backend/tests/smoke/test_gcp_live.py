@@ -51,7 +51,7 @@ def run_phase_l(client: NexplaneClient, cloud_account_id: str,
 
     try:
         cr = client.run_cr(
-            "Smoke-L: launch GCE instance", "gce_instance_create", cloud_account_id,
+            "[Phase L] launch GCE instance", "gce_instance_create", cloud_account_id,
             {
                 "name": GCE_SMOKE_INSTANCE,
                 "machine_type": "e2-micro",
@@ -137,7 +137,7 @@ def run_phase_m(client: NexplaneClient, phase_l_result: dict, gcp_project: str) 
     try:
         # 1. Stop instance
         cr = client.run_cr(
-            "Smoke-M: stop GCE instance", "gce_stop", instance_asset["id"],
+            "[Phase M] stop GCE instance", "gce_stop", instance_asset["id"],
             {"instance_name": instance_name, "zone": zone},
         )
         rollback_stack.append((cr["id"], "gce_stop"))
@@ -145,7 +145,7 @@ def run_phase_m(client: NexplaneClient, phase_l_result: dict, gcp_project: str) 
 
         # 2. Start instance
         cr = client.run_cr(
-            "Smoke-M: start GCE instance", "gce_start", instance_asset["id"],
+            "[Phase M] start GCE instance", "gce_start", instance_asset["id"],
             {"instance_name": instance_name, "zone": zone},
         )
         rollback_stack.pop()  # stop CR superseded
@@ -154,7 +154,7 @@ def run_phase_m(client: NexplaneClient, phase_l_result: dict, gcp_project: str) 
 
         # 3. Reboot
         client.run_cr(
-            "Smoke-M: reboot GCE instance", "gce_instance_reboot", instance_asset["id"],
+            "[Phase M] reboot GCE instance", "gce_instance_reboot", instance_asset["id"],
             {"instance_name": instance_name, "zone": zone},
         )
         log("GCE instance rebooted")
@@ -170,7 +170,7 @@ def run_phase_m(client: NexplaneClient, phase_l_result: dict, gcp_project: str) 
         # 4. Create disk snapshot
         snapshot_name = f"nexplane-smoke-snap-{int(time.time())}"
         cr = client.run_cr(
-            "Smoke-M: create disk snapshot", "gce_disk_snapshot", instance_asset["id"],
+            "[Phase M] create GCE disk snapshot", "gce_disk_snapshot", instance_asset["id"],
             {"instance_name": instance_name, "zone": zone, "snapshot_name": snapshot_name},
         )
         rollback_stack.append((cr["id"], "gce_disk_snapshot"))
@@ -235,7 +235,7 @@ def run_phase_n(client: NexplaneClient, cloud_account_id: str,
 
     try:
         cr = client.run_cr(
-            "Smoke-N: create GCP firewall rule", "gcp_firewall_create", cloud_account_id,
+            "[Phase N] create GCP firewall rule", "gcp_firewall_create", cloud_account_id,
             {
                 "project": gcp_project,
                 "rule_name": rule_name,
@@ -329,7 +329,7 @@ def run_phase_o(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
         log(f"GCS bucket created via SDK: {bucket_name}")
 
         cr = client.run_cr(
-            "Smoke-O: block public GCS bucket access", "gcp_block_public_bucket_access",
+            "[Phase O] block public GCS bucket access", "gcp_block_public_bucket_access",
             cloud_account_id,
             {"project": gcp_project, "bucket_name": bucket_name},
         )
@@ -405,7 +405,7 @@ def run_phase_p(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
         log(f"Service account created: {sa_email}")
 
         cr = client.run_cr(
-            "Smoke-P: rotate service account key", "gcp_rotate_service_account_key",
+            "[Phase P] rotate GCP service account key", "gcp_rotate_service_account_key",
             cloud_account_id,
             {"project": gcp_project, "service_account_email": sa_email},
         )
@@ -413,7 +413,7 @@ def run_phase_p(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
         log("Service account key rotated via CR")
 
         cr = client.run_cr(
-            "Smoke-P: disable service account", "gcp_disable_service_account",
+            "[Phase P] disable GCP service account", "gcp_disable_service_account",
             cloud_account_id,
             {"project": gcp_project, "service_account_email": sa_email},
         )
@@ -493,7 +493,7 @@ def run_phase_q(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
     )
 
     cr = client.run_cr(
-        "Smoke-Q: terraform apply GCS bucket (GCP)", "terraform_local_apply", cloud_account_id,
+        "[Phase Q] terraform apply GCS bucket", "terraform_local_apply", cloud_account_id,
         {"tf_content": tf_content, "rollback_strategy": "terraform_destroy_local"},
     )
     log(f"Terraform applied (GCP) — GCS bucket: {bucket_name}")
@@ -537,7 +537,7 @@ def run_phase_r(client: NexplaneClient, cloud_account_id: str, gcp_project: str,
     )
 
     cr = client.run_cr(
-        "Smoke-R: ansible local playbook (GCP)", "ansible_local_playbook", cloud_account_id,
+        "[Phase R] ansible local playbook", "ansible_local_playbook", cloud_account_id,
         {"playbook_content": playbook_content, "inventory": "localhost,"},
     )
     log("Ansible local playbook CR executed successfully (GCP)")
