@@ -19,7 +19,8 @@ Phase descriptions:
     R  Azure Resource Tagging: tag_resource on Azure VM
     S  Terraform local apply against Azure
     T  Ansible local playbook against Azure
-    U-Z Sub-project stubs (not yet implemented)
+    V  Azure Storage account + blob container CRUD with rollback stack
+    U,W,X,Y,Z Sub-project stubs (not yet implemented)
 
 Requirements:
     Azure connector with credentials + Contributor role on subscription
@@ -32,7 +33,7 @@ from typing import Optional
 from smoke_helpers import (
     AZURE_SMOKE_VM, TIMEOUT_SECONDS,
     NexplaneClient, log, fail,
-    _azure_creds_cache, _get_azure_compute_client,
+    _azure_creds_cache, _get_azure_compute_client, _get_azure_storage_client,
     make_base_parser,
 )
 
@@ -565,11 +566,84 @@ def run_phase_u_stub(client: NexplaneClient, cloud_account_id: str, azure_resour
     print("  This phase will cover: advanced NSG lifecycle, VNet peering, private endpoints.")
 
 
-def run_phase_v_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
-    """Phase V: Azure Sub-C (Storage) — STUB."""
-    print("\n[Phase V] Azure Storage — STUB (implement with Azure Sub-project C)")
-    print("  ⚠️  Phase V is not yet implemented.")
-    print("  This phase will cover: storage account create/delete/blob lifecycle via CRs.")
+def run_phase_v(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
+    """Phase V: Azure storage account + blob container CRUD with rollback stack."""
+    print("\n[Phase V] Azure Storage Account + Blob Container CRUD")
+
+    if not azure_resource_group:
+        fail("Phase V requires --azure-resource-group")
+
+    import secrets as _secrets
+    account_name = f"nxpsmoke{_secrets.token_hex(4)}"  # <=24 chars, globally unique
+    container_name = "nexplane-smoke-container"
+    rollback_stack: list[tuple[str, str]] = []
+
+    storage = _get_azure_storage_client()
+
+    try:
+        # 1. Create storage account via CR
+        cr = client.run_cr(
+            "[Phase V] create storage account", "azure_storage_account_create", cloud_account_id,
+            {"storage_account_name": account_name, "resource_group": azure_resource_group,
+             "location": "eastus"},
+        )
+        rollback_stack.append((cr["id"], "azure_storage_account_create"))
+
+        # SDK verify: account exists with kind StorageV2
+        if storage:
+            acct = storage.storage_accounts.get_properties(azure_resource_group, account_name)
+            assert str(acct.kind).lower() in ("storagev2",), \
+                f"Unexpected account kind: {acct.kind}"
+            log(f"Storage account verified: {account_name} (kind={acct.kind})")
+        else:
+            log(f"Storage account created (SDK verification skipped — no credentials)")
+
+        # 2. Create blob container via CR
+        cr = client.run_cr(
+            "[Phase V] create blob container", "azure_blob_container_create", cloud_account_id,
+            {"storage_account_name": account_name, "container_name": container_name,
+             "resource_group": azure_resource_group},
+        )
+        rollback_stack.append((cr["id"], "azure_blob_container_create"))
+
+        # SDK verify: container exists
+        if storage:
+            container = storage.blob_containers.get(azure_resource_group, account_name, container_name)
+            assert container.name == container_name, \
+                f"Container name mismatch: {container.name}"
+            log(f"Blob container verified: {container_name}")
+
+        # 3. Explicit blob container delete via CR
+        client.run_cr(
+            "[Phase V] delete blob container", "azure_blob_container_delete", cloud_account_id,
+            {"storage_account_name": account_name, "container_name": container_name,
+             "resource_group": azure_resource_group},
+        )
+        rollback_stack.pop()  # container already deleted
+
+        # SDK verify: container gone
+        if storage:
+            containers = list(storage.blob_containers.list(azure_resource_group, account_name))
+            assert not any(c.name == container_name for c in containers), \
+                f"Container {container_name} still exists after delete"
+            log("Blob container deleted and verified gone")
+
+        log("Phase V complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase V failed: {e}")
+        raise
+    finally:
+        print("  [Phase V cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete storage account via SDK
+        if storage:
+            try:
+                storage.storage_accounts.delete(azure_resource_group, account_name)
+                print(f"  Safety net: deleted storage account {account_name}")
+            except Exception:
+                pass
 
 
 def run_phase_w_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
@@ -653,7 +727,7 @@ def main():
         if "U" in phases:
             run_phase_u_stub(client, cloud_account_id, args.azure_resource_group)
         if "V" in phases:
-            run_phase_v_stub(client, cloud_account_id, args.azure_resource_group)
+            run_phase_v(client, cloud_account_id, args.azure_resource_group)
         if "W" in phases:
             run_phase_w_stub(client, cloud_account_id, args.azure_resource_group)
         if "X" in phases:
