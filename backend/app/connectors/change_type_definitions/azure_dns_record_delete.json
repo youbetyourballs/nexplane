@@ -1,0 +1,7 @@
+{
+  "change_type": "azure_dns_record_delete",
+  "display_name": "Delete Azure DNS Record",
+  "steps": [{"generic_action": "delete_dns_record", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

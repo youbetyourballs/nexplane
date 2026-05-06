@@ -28,3 +28,8 @@ def get_msi_client(creds: dict):
 def get_authorization_client(creds: dict):
     from azure.mgmt.authorization import AuthorizationManagementClient
     return AuthorizationManagementClient(get_credential(creds), creds['subscription_id'])
+
+
+def get_dns_client(creds: dict):
+    from azure.mgmt.dns import DnsManagementClient
+    return DnsManagementClient(get_credential(creds), creds['subscription_id'])
