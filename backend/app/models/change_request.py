@@ -147,6 +147,10 @@ class ChangeType(str, enum.Enum):
     azure_dns_zone_delete = "azure_dns_zone_delete"
     azure_dns_record_create = "azure_dns_record_create"
     azure_dns_record_delete = "azure_dns_record_delete"
+    azure_sql_server_create = "azure_sql_server_create"
+    azure_sql_server_delete = "azure_sql_server_delete"
+    azure_sql_database_create = "azure_sql_database_create"
+    azure_sql_database_delete = "azure_sql_database_delete"
     # Agent command group change types (Plans 4)
     agent_linux_patch = "agent_linux_patch"
     agent_ossecurity = "agent_ossecurity"
