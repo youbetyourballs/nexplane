@@ -42,6 +42,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     nexplane_secret = parameters.get("nexplane_secret", "")
     ssh_public_key = parameters.get("ssh_public_key", "")
     network_tags = parameters.get("network_tags", [])
+    tailscale_auth_key = parameters.get("tailscale_auth_key", "")
     labels = parameters.get("labels", {"managed-by": "nexplane"})
 
     auto_asset = {
@@ -88,9 +89,17 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # Build metadata items and network tags based on connection_mode
     if connection_mode == "agent_startup":
+        tailscale_section = ""
+        if tailscale_auth_key:
+            tailscale_section = f"""# Install and join Tailscale
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up --authkey="{tailscale_auth_key}" --hostname="{name}" --accept-routes
+"""
         startup_script = parameters.get(
             "startup_script",
-            _AGENT_STARTUP_TEMPLATE.format(nexplane_url=nexplane_url, nexplane_secret=nexplane_secret),
+            tailscale_section + _AGENT_STARTUP_TEMPLATE.format(
+                nexplane_url=nexplane_url, nexplane_secret=nexplane_secret
+            ),
         )
         metadata_items = [compute_v1.Items(key="startup-script", value=startup_script)]
         tags_list = list(network_tags)
