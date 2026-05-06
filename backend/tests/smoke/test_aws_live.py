@@ -1206,14 +1206,17 @@ def run_phase_p(client: NexplaneClient, cloud_account_id: str) -> None:
             assert any(p["PolicyName"] == "ReadOnlyAccess" for p in attached), "ReadOnlyAccess not attached"
             log("Policy attached (boto3 verified)")
 
-        # 3. Create an initial key via boto3 so there's a key to rotate
+        # 3. Get the existing key ID (created by iam_user_create executor) to rotate from it
+        existing_key_id = ""
         if iam:
-            iam.create_access_key(UserName=username)
+            existing_keys = iam.list_access_keys(UserName=username)["AccessKeyMetadata"]
+            if existing_keys:
+                existing_key_id = existing_keys[0]["AccessKeyId"]
 
-        # 4. Rotate IAM key via CR
+        # 4. Rotate IAM key via CR — passes old key ID so executor deactivates it after creating new one
         cr = client.run_cr(
             "Smoke-P: rotate IAM key", "rotate_iam_key", cloud_account_id,
-            {"username": username},
+            {"username": username, "old_access_key_id": existing_key_id},
         )
         rollback_stack.append((cr["id"], "rotate_iam_key"))
         log("IAM key rotated via CR")
