@@ -1419,8 +1419,8 @@ def run_phase_r(client: NexplaneClient, cloud_account_id: str) -> None:
         cr = client.run_cr(
             "Smoke-R: create CNAME record", "route53_record_upsert", cloud_account_id,
             {
-                "hosted_zone_id": zone_id,
-                "record_name": record_name,
+                "zone_id": zone_id,
+                "name": record_name,
                 "record_type": "CNAME",
                 "ttl": 60,
                 "values": [original_endpoint],
