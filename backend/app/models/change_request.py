@@ -133,6 +133,21 @@ class ChangeType(str, enum.Enum):
     azure_disable_public_blob_access = "azure_disable_public_blob_access"
     azure_enable_public_blob_access = "azure_enable_public_blob_access"
     azure_rotate_storage_key = "azure_rotate_storage_key"
+    # Agent command group change types (Plans 4)
+    agent_linux_patch = "agent_linux_patch"
+    agent_ossecurity = "agent_ossecurity"
+    agent_linuxauth = "agent_linuxauth"
+    agent_crossplatform = "agent_crossplatform"
+    agent_compliance = "agent_compliance"
+    agent_forensics = "agent_forensics"
+    agent_fleet = "agent_fleet"
+    agent_backup = "agent_backup"
+    agent_reboot = "agent_reboot"
+    agent_credrotation = "agent_credrotation"
+    agent_iac = "agent_iac"
+    agent_linuxupgrade = "agent_linuxupgrade"
+    agent_win_patch = "agent_win_patch"
+    agent_winharden = "agent_winharden"
 
 
 class RiskLevel(str, enum.Enum):

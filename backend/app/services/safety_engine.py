@@ -177,6 +177,13 @@ def score_change_request(change_request: ChangeRequest, assets: list[Asset]) -> 
         "gce_instance_create", "gce_instance_delete", "gce_stop", "gce_start",
         "gce_disk_snapshot", "azure_vm_create", "azure_vm_delete", "azure_vm_stop",
         "azure_vm_start", "azure_vm_reboot", "azure_vm_snapshot",
+        ChangeType.agent_linux_patch, ChangeType.agent_ossecurity,
+        ChangeType.agent_linuxauth, ChangeType.agent_crossplatform,
+        ChangeType.agent_compliance, ChangeType.agent_forensics,
+        ChangeType.agent_fleet, ChangeType.agent_backup,
+        ChangeType.agent_reboot, ChangeType.agent_credrotation,
+        ChangeType.agent_iac, ChangeType.agent_linuxupgrade,
+        ChangeType.agent_win_patch, ChangeType.agent_winharden,
     }
     desired = change_request.desired_outcome or {}
     rollback_strategy = desired.get("rollback_strategy")
