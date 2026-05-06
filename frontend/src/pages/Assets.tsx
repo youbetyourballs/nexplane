@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Plus, Search, Tag, X, ChevronRight, Trash2 } from "lucide-react";
+import { Plus, Search, Tag, X, ChevronRight, Trash2, LayoutGrid, List, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import { assetsApi, connectorsApi } from "../api/endpoints";
 import { RiskBadge } from "../components/RiskBadge";
 import { PageHeader } from "../components/PageHeader";
@@ -66,6 +66,11 @@ export function Assets() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showForm, setShowForm] = useState(false);
+  const [viewMode, setViewMode] = useState<"card" | "list">(() =>
+    (localStorage.getItem("asset-view-mode") as "card" | "list") ?? "card"
+  );
+  const [sortKey, setSortKey] = useState<string>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<AssetType>("server");
   const [newEnv, setNewEnv] = useState<Environment>("dev");
@@ -79,6 +84,10 @@ export function Assets() {
 
   // Local input state — decoupled from URL so keystrokes don't re-mount the DOM
   const [inputValue, setInputValue] = useState(() => searchParams.get("search") ?? "");
+
+  useEffect(() => {
+    localStorage.setItem("asset-view-mode", viewMode);
+  }, [viewMode]);
 
   // Sync URL → input when URL changes externally (browser back/forward)
   useEffect(() => {
@@ -187,6 +196,26 @@ export function Assets() {
   const selectedAssets = (assets ?? []).filter((a) => selected.has(a.id));
   const selectedTagUnion = Array.from(new Set(selectedAssets.flatMap((a) => a.tags ?? [])));
 
+  const sortedAssets = [...(assets ?? [])].sort((a, b) => {
+    const av = (a as any)[sortKey] ?? "";
+    const bv = (b as any)[sortKey] ?? "";
+    return sortDir === "asc"
+      ? String(av).localeCompare(String(bv))
+      : String(bv).localeCompare(String(av));
+  });
+
+  function handleSort(key: string) {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  }
+
+  function SortIcon({ col }: { col: string }) {
+    if (sortKey !== col) return <ArrowUpDown size={12} className="text-slate-400" />;
+    return sortDir === "asc"
+      ? <ChevronUp size={12} className="text-blue-500" />
+      : <ChevronDown size={12} className="text-blue-500" />;
+  }
+
   if (isLoading) return <PageLoading />;
 
   const groupedByEnv = {
@@ -276,6 +305,22 @@ export function Assets() {
           <datalist id="tag-options">
             {(allTags ?? []).map((t) => <option key={t} value={t} />)}
           </datalist>
+        </div>
+        <div className="flex items-center gap-1 border border-slate-200 rounded-lg p-0.5">
+          <button
+            onClick={() => setViewMode("card")}
+            className={`p-1.5 rounded ${viewMode === "card" ? "bg-white shadow-sm text-blue-600" : "text-slate-400 hover:text-slate-600"}`}
+            title="Card view"
+          >
+            <LayoutGrid size={14} />
+          </button>
+          <button
+            onClick={() => setViewMode("list")}
+            className={`p-1.5 rounded ${viewMode === "list" ? "bg-white shadow-sm text-blue-600" : "text-slate-400 hover:text-slate-600"}`}
+            title="List view"
+          >
+            <List size={14} />
+          </button>
         </div>
       </div>
 
@@ -394,7 +439,66 @@ export function Assets() {
       )}
 
       {/* Asset list */}
-      {hasFilters ? (
+      {viewMode === "list" ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b border-slate-200">
+                {[
+                  { key: "name", label: "Name" },
+                  { key: "asset_type", label: "Type" },
+                  { key: "environment", label: "Environment" },
+                  { key: "criticality", label: "Criticality" },
+                  { key: "updated_at", label: "Last Updated" },
+                ].map(({ key, label }) => (
+                  <th
+                    key={key}
+                    className="py-2 pr-4 font-medium text-slate-500 text-xs uppercase tracking-wide cursor-pointer hover:text-slate-700 select-none"
+                    onClick={() => handleSort(key)}
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {label} <SortIcon col={key} />
+                    </span>
+                  </th>
+                ))}
+                <th className="py-2 font-medium text-slate-500 text-xs uppercase tracking-wide">Connector</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedAssets.map((asset) => (
+                <tr
+                  key={asset.id}
+                  className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
+                  onClick={() => navigate(`/assets/${asset.id}`)}
+                >
+                  <td className="py-2.5 pr-4 font-medium text-slate-900">
+                    <span className="mr-2">{ASSET_TYPE_ICONS[asset.asset_type as AssetType] ?? "📦"}</span>
+                    {asset.name}
+                  </td>
+                  <td className="py-2.5 pr-4 text-slate-500 capitalize">{asset.asset_type?.replace(/_/g, " ")}</td>
+                  <td className="py-2.5 pr-4">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      asset.environment === "prod" ? "bg-red-50 text-red-700" :
+                      asset.environment === "staging" ? "bg-yellow-50 text-yellow-700" :
+                      "bg-slate-100 text-slate-600"
+                    }`}>{asset.environment}</span>
+                  </td>
+                  <td className="py-2.5 pr-4">
+                    <RiskBadge level={asset.criticality} size="sm" />
+                  </td>
+                  <td className="py-2.5 pr-4 text-slate-400 text-xs">
+                    {(asset as any).updated_at ? new Date((asset as any).updated_at).toLocaleDateString() : "—"}
+                  </td>
+                  <td className="py-2.5 text-slate-400 text-xs">{(asset as any).connector_type ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {sortedAssets.length === 0 && (
+            <div className="text-center py-12 text-slate-400 text-sm">No assets match your filters</div>
+          )}
+        </div>
+      ) : hasFilters ? (
         <div>
           <div className="flex items-center gap-2 mb-2 px-1">
             <input type="checkbox"
