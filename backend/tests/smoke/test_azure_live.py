@@ -19,9 +19,12 @@ Phase descriptions:
     R  Azure Resource Tagging: tag_resource on Azure VM
     S  Terraform local apply against Azure
     T  Ansible local playbook against Azure
+    U  Azure VNet lifecycle: create VNet + subnet, verify, delete via rollback
     V  Azure Storage account + blob container CRUD with rollback stack
     W  Azure managed identity + RBAC role assignment lifecycle
-    U,X,Y,Z Sub-project stubs (not yet implemented)
+    X  Azure DNS: create zone + A record, verify, explicit record delete, rollback zone
+    Y  Azure SQL Database: create server + database, verify, delete, rollback server (~10 min)
+    Z  Azure Monitor: create metric alert on Phase N VM, verify, delete via rollback
 
 Requirements:
     Azure connector with credentials + Contributor role on subscription
@@ -37,6 +40,7 @@ from smoke_helpers import (
     _azure_creds_cache, _get_azure_compute_client,
     _get_azure_storage_client, _get_azure_msi_client, _get_azure_authorization_client,
     _get_azure_network_client, _get_azure_dns_client, _get_azure_sql_client,
+    _get_azure_monitor_client,
     make_base_parser,
 )
 
@@ -928,11 +932,64 @@ def run_phase_y(client: NexplaneClient, cloud_account_id: str, azure_resource_gr
                 pass
 
 
-def run_phase_z_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
-    """Phase Z: Azure Sub-G (Monitor) — STUB."""
-    print("\n[Phase Z] Azure Monitor — STUB (implement with Azure Sub-project G)")
-    print("  ⚠️  Phase Z is not yet implemented.")
-    print("  This phase will cover: Azure Monitor alerts, diagnostic settings via CRs.")
+def run_phase_z(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str,
+                azure_phase_result: Optional[dict] = None) -> None:
+    """Phase Z: Azure Monitor — create metric alert on Phase N VM, verify, delete via rollback."""
+    print("\n[Phase Z] Azure Monitor Metric Alert")
+
+    if not azure_phase_result or not azure_phase_result.get("vm_asset"):
+        print("  ⚠️  Phase Z requires Phase N VM — skipping (run with N,Z to enable)")
+        return
+
+    if not azure_resource_group:
+        fail("Phase Z requires --azure-resource-group")
+
+    import secrets as _secrets
+    alert_name = f"nexplane-smoke-alert-{_secrets.token_hex(4)}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    vm_asset = azure_phase_result["vm_asset"]
+    vm_name = vm_asset.get("asset_metadata", {}).get("vm_name", "")
+    creds = _get_azure_creds()
+    subscription_id = creds.get("subscription_id", "")
+    target_resource_id = (
+        f"/subscriptions/{subscription_id}/resourceGroups/{azure_resource_group}"
+        f"/providers/Microsoft.Compute/virtualMachines/{vm_name}"
+    )
+
+    monitor = _get_azure_monitor_client()
+
+    try:
+        cr = client.run_cr(
+            "[Phase Z] create metric alert", "azure_metric_alert_create", cloud_account_id,
+            {"alert_name": alert_name, "resource_group": azure_resource_group,
+             "target_resource_id": target_resource_id,
+             "metric_name": "Percentage CPU", "threshold": 90},
+        )
+        rollback_stack.append((cr["id"], "azure_metric_alert_create"))
+
+        if monitor:
+            alert = monitor.metric_alerts.get(azure_resource_group, alert_name)
+            assert alert.name == alert_name, f"Alert name mismatch: {alert.name}"
+            log(f"Metric alert verified: {alert_name}")
+        else:
+            log("Metric alert created (SDK verification skipped — no credentials)")
+
+        log("Phase Z complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase Z failed: {e}")
+        raise
+    finally:
+        print("  [Phase Z cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        if monitor:
+            try:
+                monitor.metric_alerts.delete(azure_resource_group, alert_name)
+                print(f"  Safety net: deleted metric alert {alert_name}")
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -946,7 +1003,7 @@ def main():
         help=(
             "Comma-separated phases to run. "
             "N-O: VM lifecycle. P=NSG, Q=Storage, R=Tagging, S=Terraform, T=Ansible. "
-            "V=Storage-CRUD, W=IAM-RBAC. U,X,Y,Z=stubs. Default: N,O."
+            "U=VNet, V=Storage-CRUD, W=IAM-RBAC, X=DNS, Y=SQL, Z=Monitor. Default: N,O."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key")
@@ -996,7 +1053,7 @@ def main():
         if "Y" in phases:
             run_phase_y(client, cloud_account_id, args.azure_resource_group)
         if "Z" in phases:
-            run_phase_z_stub(client, cloud_account_id, args.azure_resource_group)
+            run_phase_z(client, cloud_account_id, args.azure_resource_group, azure_phase_result)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
