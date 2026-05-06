@@ -97,7 +97,7 @@
       "execution_tier": 1,
       "display_name": "Capture Instance State",
       "description": "Record current instance metadata as preflight baseline.",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": ["server", "cloud_account"],
       "parameters": [
         {"name": "instance_name", "type": "string", "required": true},
         {"name": "zone", "type": "string", "required": true}
@@ -112,7 +112,7 @@
       "execution_tier": 1,
       "display_name": "Health Check",
       "description": "Verify GCE instance is in RUNNING state.",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": ["server", "cloud_account"],
       "parameters": [
         {"name": "instance_name", "type": "string", "required": true},
         {"name": "zone", "type": "string", "required": true}
@@ -127,7 +127,7 @@
       "execution_tier": 1,
       "display_name": "Wait for Instance State",
       "description": "Poll until GCE instance reaches target state (RUNNING, TERMINATED).",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": ["server", "cloud_account"],
       "parameters": [
         {"name": "instance_name", "type": "string", "required": true},
         {"name": "zone", "type": "string", "required": true},

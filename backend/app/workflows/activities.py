@@ -148,7 +148,8 @@ async def activity_execute_change(
                     connector=connector, db=db if connector else None,
                 )
             except Exception as exc:
-                logger.error("Step %s failed: %s", step.get("step_number"), exc)
+                import traceback
+                logger.error("Step %s failed: %s\n%s", step.get("step_number"), exc, traceback.format_exc())
                 raise
 
             # Commit any flushed _auto_asset upserts from execute_action
