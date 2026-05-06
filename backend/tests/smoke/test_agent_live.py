@@ -36,6 +36,7 @@ Requirements:
     AWS connector with credentials + NexplaneEC2TestProfile IAM role
     Tailscale connector with reusable pre-authorized auth key
 """
+import concurrent.futures
 import secrets
 import time
 from typing import Optional
@@ -73,6 +74,49 @@ def _agent_cr(client: NexplaneClient, endpoint_asset_id: str, phase: str,
         params or {"dry_run": True},
     )
     log(f"{phase}: {change_type}")
+
+
+def _poll_for_endpoint(client: NexplaneClient, hostname: str, timeout: int) -> dict:
+    """Poll for endpoint asset registration. Fails if agent does not register within timeout."""
+    print(f"  Waiting up to {timeout}s for agent '{hostname}' to register...")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        candidates = client.get("/assets", params={"q": hostname, "asset_type": "endpoint"})
+        if candidates:
+            log(f"Agent registered: {candidates[0]['id']}")
+            return candidates[0]
+        time.sleep(15)
+    fail(f"Agent '{hostname}' did not register within {timeout}s — aborting (no SSM fallback)")
+    return {}  # unreachable
+
+
+_LINUX_AGENT_CRS = [
+    "agent_linux_patch", "agent_ossecurity", "agent_linuxauth",
+    "agent_crossplatform", "agent_compliance", "agent_forensics",
+    "agent_fleet", "agent_backup", "agent_reboot", "agent_credrotation",
+    "agent_iac", "agent_linuxupgrade",
+]
+
+
+def _run_all_linux_agent_crs(client: NexplaneClient, endpoint_asset_id: str,
+                              label: str) -> None:
+    """Run all 12 Linux agent command groups via Nexplane CRs against the endpoint asset."""
+    for change_type in _LINUX_AGENT_CRS:
+        short = change_type.replace("agent_", "")
+        _agent_cr(client, endpoint_asset_id, f"{short}-{label}", change_type)
+
+
+def _collect_results(futures: dict) -> list:
+    """Collect results from a dict of {future: label}. Returns list of result dicts."""
+    results = []
+    for future in concurrent.futures.as_completed(futures):
+        label = futures[future]
+        try:
+            result = future.result()
+        except Exception as e:
+            result = {"track": label, "passed": False, "error": str(e)}
+        results.append(result)
+    return results
 
 
 def _setup_aws_linux_instance(client: NexplaneClient, cloud_account_id: str,
