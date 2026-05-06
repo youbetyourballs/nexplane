@@ -422,6 +422,22 @@ def _get_azure_authorization_client():
     )
     return AuthorizationManagementClient(credential, creds['subscription_id'])
 
+
+def _get_azure_network_client():
+    """Return an Azure NetworkManagementClient using cached credentials."""
+    _get_azure_compute_client()  # populates _azure_creds_cache
+    creds = _azure_creds_cache
+    if not creds:
+        return None
+    from azure.identity import ClientSecretCredential
+    from azure.mgmt.network import NetworkManagementClient
+    credential = ClientSecretCredential(
+        tenant_id=creds['tenant_id'],
+        client_id=creds['client_id'],
+        client_secret=creds['client_secret'],
+    )
+    return NetworkManagementClient(credential, creds['subscription_id'])
+
 # ---------------------------------------------------------------------------
 # AWS-specific cleanup (called by test_aws_live.py cleanup())
 # ---------------------------------------------------------------------------

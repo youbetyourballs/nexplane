@@ -36,6 +36,7 @@ from smoke_helpers import (
     NexplaneClient, log, fail,
     _azure_creds_cache, _get_azure_compute_client,
     _get_azure_storage_client, _get_azure_msi_client, _get_azure_authorization_client,
+    _get_azure_network_client,
     make_base_parser,
 )
 
@@ -561,11 +562,50 @@ def run_phase_t(client: NexplaneClient, cloud_account_id: str,
 # Sub-project stubs U-Z
 # ---------------------------------------------------------------------------
 
-def run_phase_u_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
-    """Phase U: Azure Sub-B (Networking) — STUB."""
-    print("\n[Phase U] Azure Networking — STUB (implement with Azure Sub-project B)")
-    print("  ⚠️  Phase U is not yet implemented.")
-    print("  This phase will cover: advanced NSG lifecycle, VNet peering, private endpoints.")
+def run_phase_u(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
+    """Phase U: Azure VNet lifecycle — create VNet + subnet, verify, delete via rollback."""
+    print("\n[Phase U] Azure VNet Lifecycle")
+
+    if not azure_resource_group:
+        fail("Phase U requires --azure-resource-group")
+
+    import secrets as _secrets
+    vnet_name = f"nexplane-smoke-vnet-{_secrets.token_hex(4)}"
+    rollback_stack: list[tuple[str, str]] = []
+    network = _get_azure_network_client()
+
+    try:
+        cr = client.run_cr(
+            "[Phase U] create VNet", "azure_vnet_create", cloud_account_id,
+            {"vnet_name": vnet_name, "resource_group": azure_resource_group,
+             "location": "eastus", "address_prefix": "10.100.0.0/16",
+             "subnet_prefix": "10.100.0.0/24"},
+        )
+        rollback_stack.append((cr["id"], "azure_vnet_create"))
+
+        if network:
+            vnet = network.virtual_networks.get(azure_resource_group, vnet_name)
+            assert vnet.name == vnet_name, f"VNet name mismatch: {vnet.name}"
+            assert len(vnet.subnets) > 0, "VNet has no subnets"
+            log(f"VNet verified: {vnet_name} ({vnet.address_space.address_prefixes[0]})")
+        else:
+            log(f"VNet created (SDK verification skipped — no credentials)")
+
+        log("Phase U complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase U failed: {e}")
+        raise
+    finally:
+        print("  [Phase U cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        if network:
+            try:
+                network.virtual_networks.begin_delete(azure_resource_group, vnet_name).result()
+                print(f"  Safety net: deleted VNet {vnet_name}")
+            except Exception:
+                pass
 
 
 def run_phase_v(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
@@ -812,7 +852,7 @@ def main():
         if "T" in phases:
             run_phase_t(client, cloud_account_id, azure_phase_result)
         if "U" in phases:
-            run_phase_u_stub(client, cloud_account_id, args.azure_resource_group)
+            run_phase_u(client, cloud_account_id, args.azure_resource_group)
         if "V" in phases:
             run_phase_v(client, cloud_account_id, args.azure_resource_group)
         if "W" in phases:
