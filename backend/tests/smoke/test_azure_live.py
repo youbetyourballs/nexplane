@@ -563,7 +563,7 @@ def run_phase_t(client: NexplaneClient, cloud_account_id: str,
 
 
 # ---------------------------------------------------------------------------
-# Sub-project stubs U-Z
+# Phases U-Z
 # ---------------------------------------------------------------------------
 
 def run_phase_u(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
