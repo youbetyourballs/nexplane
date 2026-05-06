@@ -543,6 +543,211 @@ def run_aws_linux_track(client: NexplaneClient, cloud_account_id: str,
 
 
 # ---------------------------------------------------------------------------
+# Parallel worker functions — CR-only, mandatory agent registration
+# ---------------------------------------------------------------------------
+
+def run_aws_linux_worker(base_url: str, email: str, password: str,
+                          backend_ip: str, tailscale_auth_key: str) -> dict:
+    """AWS Linux agent track worker — CR-only, runs in ThreadPoolExecutor."""
+    client = NexplaneClient(base_url, email, password)
+    result = {"track": "aws-linux", "passed": False, "error": None}
+    instance_name = "nexplane-agent-smoke-linux-aws"
+    nexplane_url = f"http://{backend_ip}:8000"
+    print(f"\n[aws-linux] Starting worker")
+
+    try:
+        cloud_account_id = client.get_connector_cloud_account_id("aws")
+        agent_secret = client.get_agent_secret()
+
+        client.run_cr(
+            "[aws-linux] create key pair", "key_pair_create", cloud_account_id,
+            {"key_name": "nexplane-agent-smoke-key"},
+        )
+        client.run_cr(
+            "[aws-linux] launch EC2", "ec2_launch", cloud_account_id,
+            {"mode": "quick", "name": instance_name, "os": "amazon_linux",
+             "iam_instance_profile": "NexplaneEC2TestProfile",
+             "key_name": "nexplane-agent-smoke-key",
+             "rollback_strategy": "terminate_instance"},
+        )
+        time.sleep(10)
+
+        instance_asset = client.get_asset_by_name(instance_name)
+        if not instance_asset:
+            fail("[aws-linux] EC2 instance not in inventory")
+        instance_id = instance_asset["asset_metadata"]["instance_id"]
+        log(f"[aws-linux] EC2: {instance_id}")
+
+        print("  [aws-linux] Waiting 3 min for SSM...")
+        time.sleep(180)
+
+        client.run_cr(
+            "[aws-linux] SSM whoami", "ssm_command", instance_asset["id"],
+            {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+             "command": "whoami", "rollback_strategy": "rollback_unavailable"},
+        )
+        client.run_cr(
+            "[aws-linux] tailscale join", "tailscale_join", instance_asset["id"],
+            {"instance_id": instance_id, "auth_key": tailscale_auth_key,
+             "hostname": "nexplane-agent-smoke-aws-linux"},
+        )
+        client.run_cr(
+            "[aws-linux] deploy agent", "deploy_nexplane_agent", instance_asset["id"],
+            {"instance_id": instance_id, "nexplane_url": nexplane_url,
+             "nexplane_secret": agent_secret},
+        )
+
+        # MANDATORY — fails if agent doesn't register (no SSM fallback)
+        endpoint_asset = _poll_for_endpoint(
+            client, "nexplane-agent-smoke-aws-linux", timeout=180)
+
+        _run_all_linux_agent_crs(client, endpoint_asset["id"], "aws-linux")
+        result["passed"] = True
+        log("[aws-linux] track complete")
+
+    except Exception as e:
+        result["error"] = str(e)
+        print(f"\n❌ [aws-linux] Failed: {e}")
+    finally:
+        _teardown_aws_linux_instance(client)
+
+    return result
+
+
+def _teardown_gcp_linux(client: NexplaneClient, instance_name: str, gcp_project: str) -> None:
+    """Delete GCE Linux instance and clean up inventory."""
+    print(f"\n  [gcp-linux teardown] {instance_name}")
+    try:
+        from smoke_helpers import _get_gcp_compute_client, GCE_ZONE
+        compute = _get_gcp_compute_client()
+        if compute and gcp_project:
+            compute.delete(project=gcp_project, zone=GCE_ZONE, instance=instance_name).result()
+            print(f"  Safety net: deleted GCE {instance_name}")
+    except Exception as e:
+        print(f"  ⚠️  GCP teardown error: {e}")
+    try:
+        assets = client.get("/assets", params={"q": instance_name})
+        for asset in assets:
+            if instance_name in asset.get("name", ""):
+                client.client.delete(f"{client.base}/assets/{asset['id']}")
+                print(f"  Deleted inventory asset {asset['name']}")
+    except Exception:
+        pass
+
+
+def run_gcp_linux_worker(base_url: str, email: str, password: str,
+                          backend_ip: str, tailscale_auth_key: str,
+                          gcp_project: str) -> dict:
+    """GCP Linux agent track worker — CR-only, runs in ThreadPoolExecutor."""
+    client = NexplaneClient(base_url, email, password)
+    result = {"track": "gcp-linux", "passed": False, "error": None}
+    instance_name = f"nexplane-agent-smoke-lx-gcp-{secrets.token_hex(3)}"
+    nexplane_url = f"http://{backend_ip}:8000"
+    print(f"\n[gcp-linux] Starting worker: {instance_name}")
+
+    try:
+        cloud_account_id = client.get_connector_cloud_account_id("gcp")
+        agent_secret = client.get_agent_secret()
+
+        # Launch GCE — startup script installs Tailscale then agent
+        client._run_cr_with_timeout(
+            "[gcp-linux] launch GCE instance", "gce_instance_create", cloud_account_id,
+            {"name": instance_name, "machine_type": "e2-micro", "zone": "us-central1-a",
+             "image_family": "ubuntu-2204-lts", "image_project": "ubuntu-os-cloud",
+             "connection_mode": "agent_startup", "nexplane_url": nexplane_url,
+             "nexplane_secret": agent_secret, "tailscale_auth_key": tailscale_auth_key},
+            timeout=300,
+        )
+        log(f"[gcp-linux] GCE instance launched: {instance_name}")
+
+        # 6 min — startup script runs during boot
+        endpoint_asset = _poll_for_endpoint(client, instance_name, timeout=360)
+
+        _run_all_linux_agent_crs(client, endpoint_asset["id"], "gcp-linux")
+        result["passed"] = True
+        log("[gcp-linux] track complete")
+
+    except Exception as e:
+        result["error"] = str(e)
+        print(f"\n❌ [gcp-linux] Failed: {e}")
+    finally:
+        _teardown_gcp_linux(client, instance_name, gcp_project)
+
+    return result
+
+
+def _teardown_azure_linux(client: NexplaneClient, vm_name: str,
+                           azure_resource_group: str) -> None:
+    """Delete Azure Linux VM and clean up inventory."""
+    print(f"\n  [azure-linux teardown] {vm_name}")
+    try:
+        from smoke_helpers import _get_azure_compute_client, _azure_creds_cache
+        _get_azure_compute_client()  # populate cache
+        creds = _azure_creds_cache
+        if creds:
+            from azure.identity import ClientSecretCredential
+            from azure.mgmt.compute import ComputeManagementClient
+            credential = ClientSecretCredential(
+                tenant_id=creds["tenant_id"], client_id=creds["client_id"],
+                client_secret=creds["client_secret"],
+            )
+            compute = ComputeManagementClient(credential, creds["subscription_id"])
+            compute.virtual_machines.begin_delete(azure_resource_group, vm_name).result()
+            print(f"  Safety net: deleted Azure VM {vm_name}")
+    except Exception as e:
+        print(f"  ⚠️  Azure teardown error: {e}")
+    try:
+        assets = client.get("/assets", params={"q": vm_name})
+        for asset in assets:
+            if vm_name in asset.get("name", ""):
+                client.client.delete(f"{client.base}/assets/{asset['id']}")
+                print(f"  Deleted inventory asset {asset['name']}")
+    except Exception:
+        pass
+
+
+def run_azure_linux_worker(base_url: str, email: str, password: str,
+                            backend_ip: str, tailscale_auth_key: str,
+                            azure_resource_group: str) -> dict:
+    """Azure Linux agent track worker — CR-only, runs in ThreadPoolExecutor."""
+    client = NexplaneClient(base_url, email, password)
+    result = {"track": "azure-linux", "passed": False, "error": None}
+    vm_name = f"nexplane-agent-smoke-lx-az-{secrets.token_hex(3)}"
+    nexplane_url = f"http://{backend_ip}:8000"
+    print(f"\n[azure-linux] Starting worker: {vm_name}")
+
+    try:
+        cloud_account_id = client.get_connector_cloud_account_id("azure")
+        agent_secret = client.get_agent_secret()
+
+        # Launch Azure VM — Custom Script Extension installs Tailscale then agent
+        client._run_cr_with_timeout(
+            "[azure-linux] launch Azure VM", "azure_vm_create", cloud_account_id,
+            {"vm_name": vm_name, "resource_group": azure_resource_group,
+             "location": "eastus", "vm_size": "Standard_B1s",
+             "connection_mode": "agent_extension", "nexplane_url": nexplane_url,
+             "nexplane_secret": agent_secret, "tailscale_auth_key": tailscale_auth_key},
+            timeout=600,
+        )
+        log(f"[azure-linux] Azure VM launched: {vm_name}")
+
+        # 8 min — Custom Script Extension can be slow
+        endpoint_asset = _poll_for_endpoint(client, vm_name, timeout=480)
+
+        _run_all_linux_agent_crs(client, endpoint_asset["id"], "azure-linux")
+        result["passed"] = True
+        log("[azure-linux] track complete")
+
+    except Exception as e:
+        result["error"] = str(e)
+        print(f"\n❌ [azure-linux] Failed: {e}")
+    finally:
+        _teardown_azure_linux(client, vm_name, azure_resource_group)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # GCP Linux track — STUB
 # ---------------------------------------------------------------------------
 
