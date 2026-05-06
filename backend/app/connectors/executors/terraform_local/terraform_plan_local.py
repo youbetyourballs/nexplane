@@ -43,7 +43,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
         init_result = subprocess.run(
             ["terraform", "init", "-no-color"],
-            cwd=work_dir, env=env, capture_output=True, text=True, timeout=120,
+            cwd=work_dir, env=env, capture_output=True, text=True, timeout=300,
         )
         if init_result.returncode != 0:
             raise RuntimeError(f"terraform init failed:\n{init_result.stderr}")
