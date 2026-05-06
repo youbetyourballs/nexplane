@@ -8,6 +8,7 @@ import { ApprovalsQueue } from "../pages/ApprovalsQueue";
 import { Assets } from "../pages/Assets";
 import { AssetDetail } from "../pages/AssetDetail";
 import { Connectors } from "../pages/Connectors";
+import { SmokeTests } from "../pages/SmokeTests";
 import { Projects } from "../pages/Projects";
 import { ProjectDetail } from "../pages/ProjectDetail";
 import { Settings } from "../pages/Settings";
@@ -55,6 +56,7 @@ export function AppRoutes() {
         <Route path="/backup-recovery" element={<BackupRecovery />} />
         <Route path="/maintenance-windows" element={<MaintenanceWindows />} />
         <Route path="/scheduled-operations" element={<ScheduledOperations />} />
+        <Route path="/smoke-tests" element={<SmokeTests />} />
       </Route>
     </Routes>
   );
