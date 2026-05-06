@@ -1,0 +1,15 @@
+{
+  "change_type": "agent_winharden",
+  "display_name": "Agent: Windows Hardening",
+  "steps": [
+    {"generic_action": "configure_windows_firewall",   "purpose": "execute", "required": false},
+    {"generic_action": "harden_smb",                   "purpose": "execute", "required": false},
+    {"generic_action": "harden_rdp",                   "purpose": "execute", "required": false},
+    {"generic_action": "configure_windows_audit_policy","purpose": "execute","required": false},
+    {"generic_action": "harden_registry",              "purpose": "execute", "required": false},
+    {"generic_action": "harden_tls_protocols",         "purpose": "execute", "required": false},
+    {"generic_action": "audit_scheduled_tasks",        "purpose": "verify",  "required": false}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}

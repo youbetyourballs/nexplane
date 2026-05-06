@@ -1,0 +1,10 @@
+{
+  "change_type": "agent_win_patch",
+  "display_name": "Agent: Windows Patch Management",
+  "steps": [
+    {"generic_action": "audit_windows_patch_status", "purpose": "preflight_validate", "required": true},
+    {"generic_action": "apply_windows_patches",      "purpose": "execute",            "required": false}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}

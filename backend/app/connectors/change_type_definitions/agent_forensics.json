@@ -1,0 +1,11 @@
+{
+  "change_type": "agent_forensics",
+  "display_name": "Agent: Forensics Bundle Collection",
+  "steps": [
+    {"generic_action": "audit_software_inventory",  "purpose": "execute", "required": true},
+    {"generic_action": "audit_os_security_posture", "purpose": "execute", "required": false},
+    {"generic_action": "audit_users_and_groups",    "purpose": "execute", "required": false}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}
