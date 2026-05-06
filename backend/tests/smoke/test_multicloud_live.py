@@ -180,11 +180,8 @@ def run_gcp_worker(base_url: str, email: str, password: str, gcp_project: str) -
                 instance_asset = candidate
                 break
         if not instance_asset:
-            instance_asset = {"id": cloud_account_id,
-                              "asset_metadata": {"instance_name": instance_name, "zone": GCE_ZONE}}
-            print(f"  ⚠️  [MC-GCP] Instance not yet in inventory (ingest lag) — using cloud account")
-        else:
-            log(f"[MC-GCP] Instance in inventory: {instance_asset['id']}")
+            raise AssertionError(f"GCE instance '{instance_name}' not in inventory after 60s")
+        log(f"[MC-GCP] Instance in inventory: {instance_asset['id']}")
 
         # 2. Stop
         cr = client._run_cr_with_timeout(
@@ -272,11 +269,8 @@ def run_azure_worker(base_url: str, email: str, password: str,
                 vm_asset = candidate
                 break
         if not vm_asset:
-            vm_asset = {"id": cloud_account_id,
-                        "asset_metadata": {"vm_name": vm_name, "resource_group": azure_resource_group}}
-            print(f"  ⚠️  [MC-AZ] VM not yet in inventory (ingest lag) — using cloud account")
-        else:
-            log(f"[MC-AZ] VM in inventory: {vm_asset['id']}")
+            raise AssertionError(f"Azure VM '{vm_name}' not in inventory after 60s")
+        log(f"[MC-AZ] VM in inventory: {vm_asset['id']}")
 
         # 2. Stop (deallocate)
         cr = client._run_cr_with_timeout(

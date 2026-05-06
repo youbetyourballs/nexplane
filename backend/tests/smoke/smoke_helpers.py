@@ -89,10 +89,7 @@ class NexplaneClient:
         for asset in assets:
             if asset.get("connector_id") == connector_id:
                 return asset["id"]
-        # Fall back to first cloud_account if none match
-        if assets:
-            return assets[0]["id"]
-        fail(f"No cloud_account asset found for {connector_type} connector")
+        fail(f"No cloud_account asset found for {connector_type} connector (connector_id={connector_id})")
         return ""  # unreachable
 
     def get_asset_by_name(self, name: str) -> Optional[dict]:
