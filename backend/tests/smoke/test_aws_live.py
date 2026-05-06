@@ -607,13 +607,18 @@ def run_phase_g(client: NexplaneClient, cloud_account_id: str) -> None:
         log("ReadOnlyAccess attached (boto3)")
 
         # 3. Rotate IAM access key via boto3:
-        #    create initial key → create new key → deactivate old → delete old
-        initial_key = iam_client.create_access_key(UserName=username)["AccessKey"]
-        old_key_id = initial_key["AccessKeyId"]
+        #    The create_iam_user executor already created 1 key. Rotate by:
+        #    finding the existing key → creating new key → deleting old.
+        #    (Don't create an "initial" key — executor already did that, avoids hitting the 2-key limit)
+        existing_keys = iam_client.list_access_keys(UserName=username)["AccessKeyMetadata"]
+        old_key_id = existing_keys[0]["AccessKeyId"] if existing_keys else None
         new_key = iam_client.create_access_key(UserName=username)["AccessKey"]
-        iam_client.update_access_key(UserName=username, AccessKeyId=old_key_id, Status="Inactive")
-        iam_client.delete_access_key(UserName=username, AccessKeyId=old_key_id)
-        log(f"Key rotated: {old_key_id} → {new_key['AccessKeyId']}")
+        if old_key_id:
+            iam_client.update_access_key(UserName=username, AccessKeyId=old_key_id, Status="Inactive")
+            iam_client.delete_access_key(UserName=username, AccessKeyId=old_key_id)
+            log(f"Key rotated: {old_key_id} → {new_key['AccessKeyId']}")
+        else:
+            log(f"Key created (no prior key to rotate): {new_key['AccessKeyId']}")
 
         # 4. Disable user: deactivate all access keys
         keys = iam_client.list_access_keys(UserName=username)["AccessKeyMetadata"]
