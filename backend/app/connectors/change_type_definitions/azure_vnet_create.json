@@ -1,0 +1,9 @@
+{
+  "change_type": "azure_vnet_create",
+  "display_name": "Create Azure Virtual Network",
+  "steps": [{"generic_action": "create_vnet", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_vnet",
+  "rollback_connector_type": "azure"
+}
