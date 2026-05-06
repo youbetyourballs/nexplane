@@ -36,7 +36,7 @@ from smoke_helpers import (
     NexplaneClient, log, fail,
     _azure_creds_cache, _get_azure_compute_client,
     _get_azure_storage_client, _get_azure_msi_client, _get_azure_authorization_client,
-    _get_azure_network_client, _get_azure_dns_client,
+    _get_azure_network_client, _get_azure_dns_client, _get_azure_sql_client,
     make_base_parser,
 )
 
@@ -853,11 +853,79 @@ def run_phase_x(client: NexplaneClient, cloud_account_id: str, azure_resource_gr
                 pass
 
 
-def run_phase_y_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
-    """Phase Y: Azure Sub-F (SQL) — STUB."""
-    print("\n[Phase Y] Azure SQL — STUB (implement with Azure Sub-project F)")
-    print("  ⚠️  Phase Y is not yet implemented.")
-    print("  This phase will cover: Azure SQL instance create/snapshot/failover via CRs.")
+def run_phase_y(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
+    """Phase Y: Azure SQL Database lifecycle — create server + database, verify, delete, rollback server. (~10 min)"""
+    print("\n[Phase Y] Azure SQL Database Lifecycle (~10 min)")
+
+    if not azure_resource_group:
+        fail("Phase Y requires --azure-resource-group")
+
+    import secrets as _secrets
+    server_name = f"nexplane-smoke-sql-{_secrets.token_hex(4)}"
+    db_name = "nexplane-smoke-db"
+    # Azure password complexity: uppercase + lowercase + digit + special, min 8 chars
+    admin_password = f"NxP!{_secrets.token_hex(8)}"
+    rollback_stack: list[tuple[str, str]] = []
+    sql = _get_azure_sql_client()
+
+    try:
+        # 1. Create SQL server (~5 min)
+        cr = client._run_cr_with_timeout(
+            "[Phase Y] create SQL server", "azure_sql_server_create", cloud_account_id,
+            {"server_name": server_name, "resource_group": azure_resource_group,
+             "location": "eastus", "admin_login": "nexplaneadmin",
+             "admin_password": admin_password},
+            timeout=600,
+        )
+        rollback_stack.append((cr["id"], "azure_sql_server_create"))
+
+        if sql:
+            server = sql.servers.get(azure_resource_group, server_name)
+            assert server.name == server_name, f"Server name mismatch: {server.name}"
+            log(f"SQL server verified: {server_name}")
+        else:
+            log("SQL server created (SDK verification skipped — no credentials)")
+
+        # 2. Create SQL database (~2 min)
+        cr = client._run_cr_with_timeout(
+            "[Phase Y] create SQL database", "azure_sql_database_create", cloud_account_id,
+            {"server_name": server_name, "database_name": db_name,
+             "resource_group": azure_resource_group, "location": "eastus",
+             "sku_name": "Basic"},
+            timeout=300,
+        )
+        rollback_stack.append((cr["id"], "azure_sql_database_create"))
+
+        if sql:
+            db = sql.databases.get(azure_resource_group, server_name, db_name)
+            assert db.name == db_name, f"Database name mismatch: {db.name}"
+            log(f"SQL database verified: {db_name}")
+
+        # 3. Explicit database delete
+        client._run_cr_with_timeout(
+            "[Phase Y] delete SQL database", "azure_sql_database_delete", cloud_account_id,
+            {"server_name": server_name, "database_name": db_name,
+             "resource_group": azure_resource_group},
+            timeout=120,
+        )
+        rollback_stack.pop()  # database already deleted
+        log("SQL database deleted")
+
+        log("Phase Y complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase Y failed: {e}")
+        raise
+    finally:
+        print("  [Phase Y cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        if sql:
+            try:
+                sql.servers.begin_delete(azure_resource_group, server_name).result()
+                print(f"  Safety net: deleted SQL server {server_name}")
+            except Exception:
+                pass
 
 
 def run_phase_z_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
@@ -926,7 +994,7 @@ def main():
         if "X" in phases:
             run_phase_x(client, cloud_account_id, args.azure_resource_group)
         if "Y" in phases:
-            run_phase_y_stub(client, cloud_account_id, args.azure_resource_group)
+            run_phase_y(client, cloud_account_id, args.azure_resource_group)
         if "Z" in phases:
             run_phase_z_stub(client, cloud_account_id, args.azure_resource_group)
 
