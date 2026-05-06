@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})
     instance_name = parameters["instance_name"]
     zone = parameters["zone"]
-    target_state = parameters.get("target_state", "RUNNING")
+    target_state = parameters.get("target_state", "RUNNING").upper()
     timeout = parameters.get("timeout_seconds", 300)
 
     if not creds:
