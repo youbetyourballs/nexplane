@@ -71,6 +71,30 @@ class NexplaneClient:
             fail("No cloud_account asset found — run EC2 discovery on the AWS connector first")
         return assets[0]["id"]
 
+    def get_connector_cloud_account_id(self, connector_type: str) -> str:
+        """Return the cloud_account asset ID for the given connector type (aws, gcp, azure)."""
+        try:
+            connectors = self.get("/connectors", params={"connector_type": connector_type})
+        except Exception:
+            connectors = self.get("/connectors")
+        if not connectors:
+            fail(f"No {connector_type} connector found")
+        # Find connector of the right type
+        matching = [c for c in connectors if c.get("connector_type") == connector_type]
+        if not matching:
+            fail(f"No {connector_type} connector found")
+        connector_id = matching[0]["id"]
+        # Find cloud_account asset linked to this connector
+        assets = self.get("/assets", params={"asset_type": "cloud_account"})
+        for asset in assets:
+            if asset.get("connector_id") == connector_id:
+                return asset["id"]
+        # Fall back to first cloud_account if none match
+        if assets:
+            return assets[0]["id"]
+        fail(f"No cloud_account asset found for {connector_type} connector")
+        return ""  # unreachable
+
     def get_asset_by_name(self, name: str) -> Optional[dict]:
         matches = [a for a in self.get("/assets", params={"q": name}) if a["name"] == name]
         if not matches:
