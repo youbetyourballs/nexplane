@@ -16,6 +16,7 @@ interface Finding {
   ingested_at: string;
   sla_due_at: string | null;
   sla_breached: boolean | null;
+  sla_escalated?: boolean | null;
 }
 
 interface FindingListResponse {
@@ -33,15 +34,50 @@ const SEVERITY_COLORS: Record<string, string> = {
   informational: "bg-gray-100 text-gray-800 border-gray-200",
 };
 
-function SLABadge({ dueAt, breached }: { dueAt: string | null; breached: boolean | null }) {
+function SLABadge({
+  dueAt,
+  breached,
+  escalated,
+}: {
+  dueAt: string | null;
+  breached: boolean | null;
+  escalated?: boolean | null;
+}) {
+  if (escalated) {
+    return (
+      <span className="inline-flex items-center gap-1 text-red-700 font-semibold text-xs bg-red-50 px-1.5 py-0.5 rounded">
+        🔴 ESCALATED
+      </span>
+    );
+  }
+  if (breached) {
+    return (
+      <span className="inline-flex items-center gap-1 text-orange-600 font-semibold text-xs bg-orange-50 px-1.5 py-0.5 rounded">
+        🟠 OVERDUE
+      </span>
+    );
+  }
   if (!dueAt) return null;
-  if (breached) return <span className="text-red-600 font-semibold text-xs">OVERDUE</span>;
-  const hoursLeft = Math.max(0, (new Date(dueAt).getTime() - Date.now()) / 3600000);
-  const label =
-    hoursLeft < 24
-      ? `${Math.round(hoursLeft)}h remaining`
-      : `${Math.round(hoursLeft / 24)}d remaining`;
-  return <span className="text-gray-600 text-xs">{label}</span>;
+  const due = new Date(dueAt);
+  const now = new Date();
+  const hoursLeft = (due.getTime() - now.getTime()) / 3600000;
+  if (hoursLeft < 0) {
+    return (
+      <span className="text-orange-600 font-semibold text-xs">OVERDUE</span>
+    );
+  }
+  if (hoursLeft < 24) {
+    return (
+      <span className="text-yellow-600 text-xs font-medium">
+        {Math.round(hoursLeft)}h left
+      </span>
+    );
+  }
+  return (
+    <span className="text-slate-400 text-xs">
+      {due.toLocaleDateString()}
+    </span>
+  );
 }
 
 export default function FindingQueue() {
@@ -134,7 +170,11 @@ export default function FindingQueue() {
                   </td>
                   <td className="p-3 text-xs text-gray-700">{f.asset_name ?? "Unmatched"}</td>
                   <td className="p-3">
-                    <SLABadge dueAt={f.sla_due_at} breached={f.sla_breached} />
+                    <SLABadge
+                      dueAt={f.sla_due_at}
+                      breached={f.sla_breached}
+                      escalated={f.sla_escalated}
+                    />
                   </td>
                   <td className="p-3 space-x-2">
                     {f.change_request_id ? (
