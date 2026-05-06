@@ -1,0 +1,11 @@
+{
+  "change_type": "agent_compliance",
+  "display_name": "Agent: Compliance Audit",
+  "steps": [
+    {"generic_action": "audit_linux_patch_status",  "purpose": "preflight_validate", "required": false},
+    {"generic_action": "audit_os_security_posture", "purpose": "preflight_validate", "required": false},
+    {"generic_action": "audit_users_and_groups",    "purpose": "preflight_validate", "required": false}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}

@@ -1,0 +1,12 @@
+{
+  "change_type": "agent_crossplatform",
+  "display_name": "Agent: Cross-Platform Hardening",
+  "steps": [
+    {"generic_action": "harden_tls_protocols",   "purpose": "execute", "required": false},
+    {"generic_action": "configure_dns_resolver",  "purpose": "execute", "required": false},
+    {"generic_action": "audit_software_inventory","purpose": "verify",  "required": true},
+    {"generic_action": "configure_syslog",        "purpose": "execute", "required": false}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}
