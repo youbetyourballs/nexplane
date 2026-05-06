@@ -1,0 +1,9 @@
+{
+  "change_type": "capture_instance_state",
+  "display_name": "Capture EC2 Instance State",
+  "steps": [
+    {"generic_action": "capture_instance_state", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}
