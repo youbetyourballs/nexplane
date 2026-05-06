@@ -1,0 +1,7 @@
+{
+  "change_type": "azure_storage_account_delete",
+  "display_name": "Delete Azure Storage Account",
+  "steps": [{"generic_action": "delete_storage_account", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
