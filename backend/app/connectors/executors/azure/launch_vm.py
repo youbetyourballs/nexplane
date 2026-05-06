@@ -43,6 +43,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     ssh_public_key = parameters.get("ssh_public_key", "")
     admin_password = parameters.get("admin_password", "")
     admin_username = parameters.get("admin_username", "azureuser")
+    tailscale_auth_key = parameters.get("tailscale_auth_key", "")
 
     auto_asset = {
         "name": vm_name,
@@ -200,6 +201,18 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             nexplane_url=nexplane_url,
             nexplane_secret=nexplane_secret,
         )
+        if tailscale_auth_key:
+            tailscale_prepend = f"""#!/bin/bash
+set -e
+# Install and join Tailscale first so agent can reach control plane
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up --authkey="{tailscale_auth_key}" --hostname="{vm_name}" --accept-routes
+"""
+            # Remove leading shebang from agent script to avoid duplicate
+            agent_body = startup_script.lstrip()
+            if agent_body.startswith("#!/bin/bash"):
+                agent_body = agent_body[len("#!/bin/bash"):].lstrip()
+            startup_script = tailscale_prepend + agent_body
         script_b64 = base64.b64encode(startup_script.encode()).decode()
         await loop.run_in_executor(
             None,
