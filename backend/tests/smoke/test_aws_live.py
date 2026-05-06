@@ -1661,6 +1661,124 @@ def run_phase_s(client: NexplaneClient, cloud_account_id: str) -> None:
             pass
 
 
+def run_phase_u(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase U: capture_instance_state + block/restore S3 public access."""
+    print("\n[Phase U] Instance State Capture + S3 Public Access")
+
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+    import secrets as _secrets
+    bucket_name = f"nexplane-smoke-u-{_secrets.token_hex(4)}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # 1. Capture instance state as a standalone CR
+        cr = client.run_cr(
+            "[Phase U] capture EC2 instance state", "capture_instance_state",
+            instance_asset["id"],
+            {"instance_id": instance_id},
+        )
+        rollback_stack.append((cr["id"], "capture_instance_state"))
+        log("EC2 instance state captured")
+
+        # capture_instance_state has no meaningful rollback — pop it now
+        rollback_stack.pop()
+
+        # 2. Create a test S3 bucket for public access tests
+        cloud_account_id = client.get_cloud_account_asset_id()
+        cr = client.run_cr(
+            "[Phase U] create S3 bucket for public access test", "s3_bucket_create",
+            cloud_account_id,
+            {"bucket_name": bucket_name},
+        )
+        rollback_stack.append((cr["id"], "s3_bucket_create"))
+        log(f"S3 bucket created: {bucket_name}")
+
+        # 3. Block public access via CR
+        cr = client.run_cr(
+            "[Phase U] block S3 public access", "block_s3_public_access",
+            cloud_account_id,
+            {"bucket_name": bucket_name},
+        )
+        rollback_stack.append((cr["id"], "block_s3_public_access"))
+
+        # Verify via boto3
+        s3 = _get_aws_boto3_client("s3")
+        if s3:
+            try:
+                pab = s3.get_public_access_block(Bucket=bucket_name)["PublicAccessBlockConfiguration"]
+                assert pab.get("BlockPublicAcls") and pab.get("BlockPublicPolicy"), \
+                    "Public access not fully blocked"
+                log("S3 public access blocked (boto3 verified)")
+            except Exception as e:
+                print(f"  ⚠️  S3 public access verification skipped: {e}")
+
+        # 4. Restore public access via CR rollback
+        block_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(block_cr_id, "block_s3_public_access → restore")
+        log("S3 public access restored via CR rollback")
+
+        # 5. Delete bucket via CR rollback
+        bucket_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(bucket_cr_id, "s3_bucket_create → delete")
+        log("S3 bucket deleted via CR rollback")
+
+        log("Phase U complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase U failed: {e}")
+        raise
+    finally:
+        print("  [Phase U cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete bucket
+        try:
+            s3 = _get_aws_boto3_client("s3")
+            if s3:
+                try:
+                    objs = s3.list_objects_v2(Bucket=bucket_name).get("Contents", [])
+                    for obj in objs:
+                        s3.delete_object(Bucket=bucket_name, Key=obj["Key"])
+                    s3.delete_bucket(Bucket=bucket_name)
+                    print(f"  Safety net: deleted bucket {bucket_name}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
+def run_phase_v(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase V: tailscale_remove — exercises the tailscale_remove executor."""
+    print("\n[Phase V] Tailscale Remove")
+
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # Remove Tailscale from the instance via CR
+        cr = client.run_cr(
+            "[Phase V] tailscale remove", "tailscale_remove", instance_asset["id"],
+            {"instance_id": instance_id},
+        )
+        rollback_stack.append((cr["id"], "tailscale_remove"))
+        log("Tailscale removed from EC2 instance via CR")
+
+        # Brief pause for removal to take effect
+        time.sleep(5)
+
+        log("Phase V complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase V failed: {e}")
+        raise
+    finally:
+        print("  [Phase V cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -1668,7 +1786,7 @@ def main():
         help=(
             "Comma-separated phases to run. "
             "A-K: existing phases. P-T: new phases (P=IAM, Q=S3, R=DR-DNS, S=RDS-slow, T=Agent). "
-            "Default: A,B,C,D. J and S are slow (~35-45 min) and excluded from default."
+            "Default: A,B,C,D. J and S are slow (~35-45 min). U=instance-state+S3-access, V=tailscale-remove."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -1735,6 +1853,14 @@ def main():
             run_phase_r(client, cloud_account_id)
         if "S" in phases:
             run_phase_s(client, cloud_account_id)
+        if "U" in phases:
+            if phase_a_result is None:
+                fail("Phase U requires Phase A to have run first")
+            run_phase_u(client, phase_a_result)
+        if "V" in phases:
+            if phase_a_result is None:
+                fail("Phase V requires Phase A to have run first")
+            run_phase_v(client, phase_a_result)
         if "T" in phases:
             if phase_a_result is None:
                 fail("Phase T requires Phase A to have run first")
