@@ -18,3 +18,13 @@ def get_compute_client(creds: dict):
 def get_storage_client(creds: dict):
     from azure.mgmt.storage import StorageManagementClient
     return StorageManagementClient(get_credential(creds), creds['subscription_id'])
+
+
+def get_msi_client(creds: dict):
+    from azure.mgmt.msi import ManagedServiceIdentityClient
+    return ManagedServiceIdentityClient(get_credential(creds), creds['subscription_id'])
+
+
+def get_authorization_client(creds: dict):
+    from azure.mgmt.authorization import AuthorizationManagementClient
+    return AuthorizationManagementClient(get_credential(creds), creds['subscription_id'])
