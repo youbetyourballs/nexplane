@@ -109,7 +109,7 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
     agent_secret = client.get_agent_secret()
 
     client.run_cr(
-        "Smoke: create key pair", "key_pair_create", cloud_account_id,
+        "[Phase A] create key pair", "key_pair_create", cloud_account_id,
         {"key_name": KEY_NAME},
     )
     key_asset = client.get_asset_by_name(KEY_NAME)
@@ -118,7 +118,7 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
     log(f"Key pair in inventory: {key_asset['id']}")
 
     client.run_cr(
-        "Smoke: launch EC2", "ec2_launch", cloud_account_id,
+        "[Phase A] launch EC2 instance", "ec2_launch", cloud_account_id,
         {"mode": "quick", "name": INSTANCE_NAME, "os": "amazon_linux",
          "iam_instance_profile": "NexplaneEC2TestProfile", "key_name": KEY_NAME,
          "rollback_strategy": "terminate_instance"},
@@ -161,13 +161,13 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
     time.sleep(180)
 
     client.run_cr(
-        "Smoke: SSM whoami", "ssm_command", instance_asset["id"],
+        "[Phase A] SSM whoami", "ssm_command", instance_asset["id"],
         {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
          "command": "whoami && hostname", "rollback_strategy": "rollback_unavailable"},
     )
 
     client.run_cr(
-        "Smoke: tailscale join", "tailscale_join", instance_asset["id"],
+        "[Phase A] tailscale join", "tailscale_join", instance_asset["id"],
         {"instance_id": instance_id, "auth_key": auth_key, "hostname": "nexplane-smoke-ec2"},
     )
 
@@ -175,7 +175,7 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
     # nexplane_url is the Tailscale IP so agent heartbeats reach the backend within the tailnet.
     nexplane_url = f"http://{backend_ip}:8000"
     client.run_cr(
-        "Smoke: deploy agent", "deploy_nexplane_agent", instance_asset["id"],
+        "[Phase A] deploy nexplane agent", "deploy_nexplane_agent", instance_asset["id"],
         {"instance_id": instance_id, "nexplane_url": nexplane_url, "nexplane_secret": agent_secret},
     )
 
@@ -213,7 +213,7 @@ def run_phase_b(client: NexplaneClient, phase_a_result: dict) -> None:
 
     # Check available security patches via SSM (patch audit equivalent)
     client.run_cr(
-        "Smoke: patch audit via SSM", "ssm_command", instance_asset["id"],
+        "[Phase B] patch audit via SSM", "ssm_command", instance_asset["id"],
         {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
          "command": "yum check-update --security 2>/dev/null | tail -5; echo 'patch_audit_ok'",
          "rollback_strategy": "rollback_unavailable"},
@@ -222,7 +222,7 @@ def run_phase_b(client: NexplaneClient, phase_a_result: dict) -> None:
 
     # Collect system info (support bundle equivalent)
     client.run_cr(
-        "Smoke: collect system info", "ssm_command", instance_asset["id"],
+        "[Phase B] collect system info", "ssm_command", instance_asset["id"],
         {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
          "command": "uname -a && cat /etc/os-release && df -h / && free -m",
          "rollback_strategy": "rollback_unavailable"},
@@ -231,7 +231,7 @@ def run_phase_b(client: NexplaneClient, phase_a_result: dict) -> None:
 
     # Install CloudWatch agent via shell script
     client.run_cr(
-        "Smoke: install CloudWatch agent", "ssm_command", instance_asset["id"],
+        "[Phase B] install CloudWatch agent", "ssm_command", instance_asset["id"],
         {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
          "command": "rpm -q amazon-cloudwatch-agent 2>/dev/null || yum install -y amazon-cloudwatch-agent; amazon-cloudwatch-agent --version 2>&1 || echo 'cwa_check_done'",
          "rollback_strategy": "rollback_unavailable"},
@@ -269,7 +269,7 @@ def run_phase_c(client: NexplaneClient, cloud_account_id: str) -> None:
     )
 
     client.run_cr(
-        "Smoke: terraform apply S3 bucket", "terraform_local_apply", cloud_account_id,
+        "[Phase C] terraform apply S3 bucket", "terraform_local_apply", cloud_account_id,
         {"tf_content": tf_content, "rollback_strategy": "terraform_destroy_local"},
     )
     log("Terraform applied — bucket: " + bucket_name)
@@ -327,7 +327,7 @@ def run_phase_d(client: NexplaneClient, phase_a_result: Optional[dict]) -> None:
     # The cloud_account_id is used as target since we're running locally
     cloud_account_id = client.get_cloud_account_asset_id()
     client.run_cr(
-        "Smoke: ansible local test", "ansible_local_playbook", instance_asset["id"],
+        "[Phase D] ansible local playbook", "ansible_local_playbook", instance_asset["id"],
         {"instance_id": "localhost", "playbook_content": LOCAL_TEST_PLAYBOOK,
          "rollback_strategy": "rollback_unavailable"},
     )
@@ -335,7 +335,7 @@ def run_phase_d(client: NexplaneClient, phase_a_result: Optional[dict]) -> None:
 
     # Install htop via SSM (same operation ansible would do via SSM connection)
     client.run_cr(
-        "Smoke: install htop via SSM", "ssm_command", instance_asset["id"],
+        "[Phase D] install htop via SSM", "ssm_command", instance_asset["id"],
         {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
          "command": "yum install -y htop && htop --version",
          "rollback_strategy": "rollback_unavailable"},
@@ -343,7 +343,7 @@ def run_phase_d(client: NexplaneClient, phase_a_result: Optional[dict]) -> None:
     log("htop installed via SSM")
 
     client.run_cr(
-        "Smoke: remove htop via SSM", "ssm_command", instance_asset["id"],
+        "[Phase D] remove htop via SSM", "ssm_command", instance_asset["id"],
         {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
          "command": "yum remove -y htop && echo 'htop_removed'",
          "rollback_strategy": "rollback_unavailable"},
@@ -369,7 +369,7 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
     try:
         # 1. Stop instance (needs target_state="stopped" or wait_instance_state defaults to "running")
         cr = client._run_cr_with_timeout(
-            "Smoke-E: stop instance", "ec2_stop", instance_asset["id"],
+            "[Phase E] stop EC2 instance", "ec2_stop", instance_asset["id"],
             {"instance_id": instance_id, "rollback_strategy": "start_instance",
              "target_state": "stopped"},
             timeout=900,
@@ -379,7 +379,7 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
 
         # 2. Start instance (also waits for running state — needs 900s)
         cr = client._run_cr_with_timeout(
-            "Smoke-E: start instance", "ec2_start", instance_asset["id"],
+            "[Phase E] start EC2 instance", "ec2_start", instance_asset["id"],
             {"instance_id": instance_id, "rollback_strategy": "stop_instance"},
             timeout=900,
         )
@@ -390,7 +390,7 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
 
         # 3. Reboot (reboot includes a state wait — needs 900s)
         client._run_cr_with_timeout(
-            "Smoke-E: reboot instance", "ec2_reboot", instance_asset["id"],
+            "[Phase E] reboot EC2 instance", "ec2_reboot", instance_asset["id"],
             {"instance_id": instance_id, "rollback_strategy": "rollback_unavailable"},
             timeout=900,
         )
@@ -399,7 +399,7 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
         # Wait for SSM to reconnect post-reboot (60s to be safe)
         time.sleep(60)
         client.run_cr(
-            "Smoke-E: SSM verify post-reboot", "ssm_command", instance_asset["id"],
+            "[Phase E] SSM verify post-reboot", "ssm_command", instance_asset["id"],
             {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
              "command": "uptime && echo 'post_reboot_ok'",
              "rollback_strategy": "rollback_unavailable"},
@@ -420,7 +420,7 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
                 print(f"  ⚠️  Could not resolve volume_id: {e}")
 
         cr = client.run_cr(
-            "Smoke-E: create EBS snapshot", "snapshot_asset", instance_asset["id"],
+            "[Phase E] create EBS snapshot", "snapshot_asset", instance_asset["id"],
             {"instance_id": instance_id, "volume_id": volume_id,
              "rollback_strategy": "delete_ebs_snapshot"},
         )
@@ -441,7 +441,7 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
 
         # 5. Verify via SSM
         client.run_cr(
-            "Smoke-E: verify post-snapshot", "ssm_command", instance_asset["id"],
+            "[Phase E] SSM verify post-snapshot", "ssm_command", instance_asset["id"],
             {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
              "command": "echo 'snapshot_verify_ok'",
              "rollback_strategy": "rollback_unavailable"},
@@ -494,7 +494,7 @@ def run_phase_f(client: NexplaneClient, cloud_account_id: str) -> None:
 
         # 1. Add inbound rule via CR (port 8443 from RFC5737 test CIDR — not routable)
         cr = client.run_cr(
-            "Smoke-F: add inbound rule", "security_group_update", cloud_account_id,
+            "[Phase F] add security group inbound rule", "security_group_update", cloud_account_id,
             {
                 "group_id": test_sg_id,
                 "rules": [{"action": "add", "protocol": "tcp",
@@ -521,7 +521,7 @@ def run_phase_f(client: NexplaneClient, cloud_account_id: str) -> None:
 
         # 2. Remove the rule via a second CR
         cr = client.run_cr(
-            "Smoke-F: remove inbound rule", "security_group_update", cloud_account_id,
+            "[Phase F] remove security group inbound rule", "security_group_update", cloud_account_id,
             {
                 "group_id": test_sg_id,
                 "rules": [{"action": "remove", "protocol": "tcp",
@@ -581,7 +581,7 @@ def run_phase_g(client: NexplaneClient, cloud_account_id: str) -> None:
     try:
         # 1. Create IAM user via CR
         cr = client.run_cr(
-            "Smoke-G: create IAM user", "iam_user_create", cloud_account_id,
+            "[Phase G] create IAM user", "iam_user_create", cloud_account_id,
             {"username": username},
         )
         rollback_stack.append((cr["id"], "iam_user_create"))
@@ -690,7 +690,7 @@ def run_phase_h(client: NexplaneClient, cloud_account_id: str) -> None:
     try:
         # 1. Create bucket via CR
         cr = client.run_cr(
-            "Smoke-H: create S3 bucket", "s3_bucket_create", cloud_account_id,
+            "[Phase H] create S3 bucket", "s3_bucket_create", cloud_account_id,
             {"bucket_name": bucket_name},
         )
         rollback_stack.append((cr["id"], "s3_bucket_create"))
@@ -710,7 +710,7 @@ def run_phase_h(client: NexplaneClient, cloud_account_id: str) -> None:
 
         # 2. Configure lifecycle via CR: 1-day expiration on smoke/ prefix
         cr = client.run_cr(
-            "Smoke-H: configure lifecycle", "s3_lifecycle_configure", cloud_account_id,
+            "[Phase H] configure S3 lifecycle", "s3_lifecycle_configure", cloud_account_id,
             {
                 "bucket_name": bucket_name,
                 "rules": [{
@@ -825,7 +825,7 @@ def run_phase_i(client: NexplaneClient, cloud_account_id: str) -> None:
     try:
         # 1. Create private hosted zone via CR
         cr = client.run_cr(
-            "Smoke-I: create hosted zone", "route53_zone_create", cloud_account_id,
+            "[Phase I] create Route53 hosted zone", "route53_zone_create", cloud_account_id,
             {"zone_name": zone_name, "private": True},
         )
         rollback_stack.append((cr["id"], "route53_zone_create"))
@@ -849,7 +849,7 @@ def run_phase_i(client: NexplaneClient, cloud_account_id: str) -> None:
 
         # 2. Create A record
         cr = client.run_cr(
-            "Smoke-I: create A record", "route53_record_upsert", cloud_account_id,
+            "[Phase I] create Route53 A record", "route53_record_upsert", cloud_account_id,
             {
                 "zone_id": zone_id,
                 "name": f"web.{zone_name}",
@@ -863,7 +863,7 @@ def run_phase_i(client: NexplaneClient, cloud_account_id: str) -> None:
 
         # 3. Update the A record (UPSERT semantics)
         cr = client.run_cr(
-            "Smoke-I: update A record", "route53_record_upsert", cloud_account_id,
+            "[Phase I] update Route53 A record", "route53_record_upsert", cloud_account_id,
             {
                 "zone_id": zone_id,
                 "name": f"web.{zone_name}",
@@ -891,7 +891,7 @@ def run_phase_i(client: NexplaneClient, cloud_account_id: str) -> None:
 
         # 5. Delete A record via route53_record_delete CR
         cr = client.run_cr(
-            "Smoke-I: delete A record", "route53_record_delete", cloud_account_id,
+            "[Phase I] delete Route53 A record", "route53_record_delete", cloud_account_id,
             {
                 "zone_id": zone_id,
                 "name": f"web.{zone_name}",
@@ -963,7 +963,7 @@ def run_phase_j(client: NexplaneClient, cloud_account_id: str) -> None:
         # 1. Create primary RDS instance
         print(f"  Creating RDS instance {db_id} (db.t3.micro MySQL 8.0) — may take ~10 min")
         cr = client._run_cr_with_timeout(
-            "Smoke-J: create RDS instance", "rds_instance_create", cloud_account_id,
+            "[Phase J] create RDS instance", "rds_instance_create", cloud_account_id,
             {
                 "db_instance_identifier": db_id,
                 "engine": "mysql",
@@ -990,7 +990,7 @@ def run_phase_j(client: NexplaneClient, cloud_account_id: str) -> None:
         # 2. Create manual snapshot
         print(f"  Creating RDS snapshot {snap_id} — may take ~5 min")
         cr = client._run_cr_with_timeout(
-            "Smoke-J: create RDS snapshot", "rds_snapshot_create", cloud_account_id,
+            "[Phase J] create RDS snapshot", "rds_snapshot_create", cloud_account_id,
             {
                 "db_instance_identifier": db_id,
                 "snapshot_identifier": snap_id,
@@ -1076,7 +1076,7 @@ def run_phase_k(client: NexplaneClient, phase_a_result: dict) -> None:
     try:
         # 1. Create CPU utilization alarm (99% threshold — won't fire on idle instance)
         cr = client.run_cr(
-            "Smoke-K: create CPU alarm", "cloudwatch_alarm_create", instance_asset["id"],
+            "[Phase K] create CloudWatch CPU alarm", "cloudwatch_alarm_create", instance_asset["id"],
             {
                 "alarm_name": alarm_cpu,
                 "metric_name": "CPUUtilization",
@@ -1094,7 +1094,7 @@ def run_phase_k(client: NexplaneClient, phase_a_result: dict) -> None:
 
         # 2. Create custom namespace alarm (fires when metric value > 0)
         cr = client.run_cr(
-            "Smoke-K: create custom metric alarm", "cloudwatch_alarm_create", instance_asset["id"],
+            "[Phase K] create CloudWatch custom metric alarm", "cloudwatch_alarm_create", instance_asset["id"],
             {
                 "alarm_name": alarm_custom,
                 "metric_name": "TestTrigger",
@@ -1112,7 +1112,7 @@ def run_phase_k(client: NexplaneClient, phase_a_result: dict) -> None:
 
         # 3. Push metric data via SSM to trigger the custom alarm
         client.run_cr(
-            "Smoke-K: push metric data via SSM", "ssm_command", instance_asset["id"],
+            "[Phase K] push metric data via SSM", "ssm_command", instance_asset["id"],
             {
                 "instance_id": instance_id,
                 "document_name": "AWS-RunShellScript",
@@ -1186,14 +1186,14 @@ def run_phase_p(client: NexplaneClient, cloud_account_id: str) -> None:
     try:
         # 1. Create IAM user
         cr = client.run_cr(
-            "Smoke-P: create IAM user", "iam_user_create", cloud_account_id,
+            "[Phase P] create IAM user", "iam_user_create", cloud_account_id,
             {"username": username},
         )
         rollback_stack.append((cr["id"], "iam_user_create"))
 
         # 2. Attach ReadOnlyAccess policy via CR
         cr = client.run_cr(
-            "Smoke-P: attach IAM policy", "attach_iam_policy", cloud_account_id,
+            "[Phase P] attach IAM policy", "attach_iam_policy", cloud_account_id,
             {"principal_type": "user", "principal_name": username,
              "policy_arn": "arn:aws:iam::aws:policy/ReadOnlyAccess"},
         )
@@ -1215,7 +1215,7 @@ def run_phase_p(client: NexplaneClient, cloud_account_id: str) -> None:
 
         # 4. Rotate IAM key via CR — passes old key ID so executor deactivates it after creating new one
         cr = client.run_cr(
-            "Smoke-P: rotate IAM key", "rotate_iam_key", cloud_account_id,
+            "[Phase P] rotate IAM access key", "rotate_iam_key", cloud_account_id,
             {"username": username, "old_access_key_id": existing_key_id},
         )
         rollback_stack.append((cr["id"], "rotate_iam_key"))
@@ -1223,7 +1223,7 @@ def run_phase_p(client: NexplaneClient, cloud_account_id: str) -> None:
 
         # 5. Disable IAM user via CR
         cr = client.run_cr(
-            "Smoke-P: disable IAM user", "disable_iam_user", cloud_account_id,
+            "[Phase P] disable IAM user", "disable_iam_user", cloud_account_id,
             {"username": username},
         )
         rollback_stack.append((cr["id"], "disable_iam_user"))
@@ -1235,7 +1235,7 @@ def run_phase_p(client: NexplaneClient, cloud_account_id: str) -> None:
 
         # 6. Enable IAM user via CR
         cr = client.run_cr(
-            "Smoke-P: enable IAM user", "enable_iam_user", cloud_account_id,
+            "[Phase P] enable IAM user", "enable_iam_user", cloud_account_id,
             {"username": username},
         )
         rollback_stack.append((cr["id"], "enable_iam_user"))
@@ -1304,7 +1304,7 @@ def run_phase_q(client: NexplaneClient, cloud_account_id: str) -> None:
     try:
         # 1. Create S3 bucket
         cr = client.run_cr(
-            "Smoke-Q: create S3 bucket", "s3_bucket_create", cloud_account_id,
+            "[Phase Q] create S3 bucket", "s3_bucket_create", cloud_account_id,
             {"bucket_name": bucket_name},
         )
         rollback_stack.append((cr["id"], "s3_bucket_create"))
@@ -1325,7 +1325,7 @@ def run_phase_q(client: NexplaneClient, cloud_account_id: str) -> None:
             }],
         }
         cr = client.run_cr(
-            "Smoke-Q: put bucket policy", "put_bucket_policy", cloud_account_id,
+            "[Phase Q] put S3 bucket policy", "put_bucket_policy", cloud_account_id,
             {"bucket_name": bucket_name, "policy": deny_tls_policy},
         )
         rollback_stack.append((cr["id"], "put_bucket_policy"))
@@ -1343,7 +1343,7 @@ def run_phase_q(client: NexplaneClient, cloud_account_id: str) -> None:
         # 3. Tag the bucket via CR
         bucket_arn = f"arn:aws:s3:::{bucket_name}"
         cr = client.run_cr(
-            "Smoke-Q: tag S3 bucket", "tag_resource", cloud_account_id,
+            "[Phase Q] tag S3 bucket", "tag_resource", cloud_account_id,
             {"resource_arn": bucket_arn, "tags": {"nexplane-smoke": "true", "phase": "Q"}},
         )
         rollback_stack.append((cr["id"], "tag_resource"))
@@ -1395,7 +1395,7 @@ def run_phase_r(client: NexplaneClient, cloud_account_id: str) -> None:
     try:
         # 1. Create a private Route53 zone
         cr = client.run_cr(
-            "Smoke-R: create Route53 zone", "route53_zone_create", cloud_account_id,
+            "[Phase R] create Route53 zone", "route53_zone_create", cloud_account_id,
             {"zone_name": zone_name, "private": True, "vpc_id": ""},
         )
         rollback_stack.append((cr["id"], "route53_zone_create"))
@@ -1420,7 +1420,7 @@ def run_phase_r(client: NexplaneClient, cloud_account_id: str) -> None:
         dr_endpoint = "dr.example.internal"
         record_name = f"app.{zone_name}"
         cr = client.run_cr(
-            "Smoke-R: dr_dns_failover_route53", "dr_dns_failover_route53", cloud_account_id,
+            "[Phase R] DR DNS failover Route53", "dr_dns_failover_route53", cloud_account_id,
             {
                 "dns_record_id": record_name,
                 "dr_endpoint": dr_endpoint,
@@ -1498,7 +1498,7 @@ def run_phase_t(client: NexplaneClient, phase_a_result: dict) -> None:
         # 1. Tag EC2 instance via CR
         target_asset_id = instance_asset_id if instance_asset_id else client.get_cloud_account_asset_id()
         cr = client.run_cr(
-            "Smoke-T: tag EC2 instance", "tag_resource", target_asset_id,
+            "[Phase T] tag EC2 instance", "tag_resource", target_asset_id,
             {"resource_arn": instance_arn, "tags": {"nexplane-smoke-tag": "true", "phase": "T"}},
         )
         rollback_stack.append((cr["id"], "tag_resource"))
@@ -1512,7 +1512,7 @@ def run_phase_t(client: NexplaneClient, phase_a_result: dict) -> None:
 
         # 2. Remove Nexplane agent via CR
         cr = client.run_cr(
-            "Smoke-T: remove nexplane agent", "remove_nexplane_agent", target_asset_id,
+            "[Phase T] remove nexplane agent", "remove_nexplane_agent", target_asset_id,
             {"instance_id": instance_id},
         )
         rollback_stack.append((cr["id"], "remove_nexplane_agent"))
@@ -1526,7 +1526,7 @@ def run_phase_t(client: NexplaneClient, phase_a_result: dict) -> None:
         control_plane_url = f"http://{backend_ip}:8000" if backend_ip else "http://localhost:8000"
 
         cr = client.run_cr(
-            "Smoke-T: redeploy nexplane agent", "deploy_nexplane_agent", target_asset_id,
+            "[Phase T] redeploy nexplane agent", "deploy_nexplane_agent", target_asset_id,
             {
                 "instance_id": instance_id,
                 "agent_secret": agent_secret,
@@ -1565,7 +1565,7 @@ def run_phase_s(client: NexplaneClient, cloud_account_id: str) -> None:
         # 1. Create RDS instance
         print("  Creating RDS instance (wait ~10 min)...")
         cr = client._run_cr_with_timeout(
-            "Smoke-S: create RDS instance", "rds_instance_create", cloud_account_id,
+            "[Phase S] create RDS instance", "rds_instance_create", cloud_account_id,
             {"db_instance_identifier": db_id, "engine": "mysql", "engine_version": "8.0",
              "db_instance_class": "db.t3.micro", "master_username": "admin",
              "master_password": "Nexplane!Smoke1", "allocated_storage": 20},
@@ -1577,7 +1577,7 @@ def run_phase_s(client: NexplaneClient, cloud_account_id: str) -> None:
         # 2. Create snapshot
         print("  Creating RDS snapshot (wait ~5 min)...")
         cr = client._run_cr_with_timeout(
-            "Smoke-S: create RDS snapshot", "rds_snapshot_create", cloud_account_id,
+            "[Phase S] create RDS snapshot", "rds_snapshot_create", cloud_account_id,
             {"db_instance_identifier": db_id, "snapshot_identifier": snap_id},
             timeout=RDS_PHASE_TIMEOUT_SECONDS,
         )
@@ -1586,7 +1586,7 @@ def run_phase_s(client: NexplaneClient, cloud_account_id: str) -> None:
 
         # 3. Verify backup via CR
         client.run_cr(
-            "Smoke-S: verify RDS backup", "verify_backup", cloud_account_id,
+            "[Phase S] verify RDS backup", "verify_backup", cloud_account_id,
             {"snapshot_identifier": snap_id, "db_instance_identifier": db_id},
         )
         log("Backup verified via CR")
@@ -1601,7 +1601,7 @@ def run_phase_s(client: NexplaneClient, cloud_account_id: str) -> None:
         # 4. Create read replica
         print("  Creating read replica (wait ~15 min)...")
         cr = client._run_cr_with_timeout(
-            "Smoke-S: create RDS read replica", "rds_replica_create", cloud_account_id,
+            "[Phase S] create RDS read replica", "rds_replica_create", cloud_account_id,
             {"replica_db_instance_identifier": replica_id,
              "source_db_instance_identifier": db_id,
              "db_instance_class": "db.t3.micro"},
@@ -1613,7 +1613,7 @@ def run_phase_s(client: NexplaneClient, cloud_account_id: str) -> None:
         # 5. Promote replica
         print("  Promoting replica (wait ~10 min)...")
         cr = client._run_cr_with_timeout(
-            "Smoke-S: promote RDS replica", "promote_db_replica", cloud_account_id,
+            "[Phase S] promote RDS replica", "promote_db_replica", cloud_account_id,
             {"replica_identifier": replica_id},
             timeout=RDS_PHASE_TIMEOUT_SECONDS,
         )
@@ -1627,7 +1627,7 @@ def run_phase_s(client: NexplaneClient, cloud_account_id: str) -> None:
 
         # 6. Delete promoted instance
         client.run_cr(
-            "Smoke-S: delete promoted instance", "rds_instance_delete", cloud_account_id,
+            "[Phase S] delete promoted RDS instance", "rds_instance_delete", cloud_account_id,
             {"db_instance_identifier": replica_id},
         )
         rollback_stack.pop()  # pop promote_db_replica
