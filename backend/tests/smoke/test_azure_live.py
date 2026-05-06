@@ -20,7 +20,8 @@ Phase descriptions:
     S  Terraform local apply against Azure
     T  Ansible local playbook against Azure
     V  Azure Storage account + blob container CRUD with rollback stack
-    U,W,X,Y,Z Sub-project stubs (not yet implemented)
+    W  Azure managed identity + RBAC role assignment lifecycle
+    U,X,Y,Z Sub-project stubs (not yet implemented)
 
 Requirements:
     Azure connector with credentials + Contributor role on subscription
@@ -33,7 +34,8 @@ from typing import Optional
 from smoke_helpers import (
     AZURE_SMOKE_VM, TIMEOUT_SECONDS,
     NexplaneClient, log, fail,
-    _azure_creds_cache, _get_azure_compute_client, _get_azure_storage_client,
+    _azure_creds_cache, _get_azure_compute_client,
+    _get_azure_storage_client, _get_azure_msi_client, _get_azure_authorization_client,
     make_base_parser,
 )
 
@@ -646,11 +648,96 @@ def run_phase_v(client: NexplaneClient, cloud_account_id: str, azure_resource_gr
                 pass
 
 
-def run_phase_w_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
-    """Phase W: Azure Sub-D (IAM) — STUB."""
-    print("\n[Phase W] Azure IAM — STUB (implement with Azure Sub-project D)")
-    print("  ⚠️  Phase W is not yet implemented.")
-    print("  This phase will cover: RBAC role assignments, managed identity operations via CRs.")
+def run_phase_w(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
+    """Phase W: Azure managed identity + RBAC role assignment lifecycle."""
+    print("\n[Phase W] Azure Managed Identity + RBAC Role Assignment")
+
+    if not azure_resource_group:
+        fail("Phase W requires --azure-resource-group")
+
+    creds = _get_azure_creds()
+    subscription_id = creds.get("subscription_id", "")
+    if not subscription_id:
+        fail("Phase W requires Azure credentials with subscription_id")
+
+    import secrets as _secrets
+    identity_name = f"nexplane-smoke-id-{_secrets.token_hex(4)}"
+    scope = f"/subscriptions/{subscription_id}/resourceGroups/{azure_resource_group}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    msi = _get_azure_msi_client()
+    auth = _get_azure_authorization_client()
+
+    try:
+        # 1. Create managed identity via CR
+        cr = client.run_cr(
+            "[Phase W] create managed identity", "azure_managed_identity_create", cloud_account_id,
+            {"identity_name": identity_name, "resource_group": azure_resource_group,
+             "location": "eastus"},
+        )
+        rollback_stack.append((cr["id"], "azure_managed_identity_create"))
+
+        # SDK verify: identity exists with a principal_id
+        principal_id = None
+        if msi:
+            identity = msi.user_assigned_identities.get(azure_resource_group, identity_name)
+            assert identity.principal_id, "Managed identity has no principal_id"
+            principal_id = str(identity.principal_id)
+            log(f"Managed identity verified: {identity_name} ({principal_id})")
+        else:
+            log("Managed identity created (SDK verification skipped — no credentials)")
+            principal_id = "mock-principal-id"
+
+        # 2. Assign Reader role at resource group scope via CR
+        cr = client.run_cr(
+            "[Phase W] assign Reader role", "azure_role_assignment_create", cloud_account_id,
+            {"principal_id": principal_id, "role_definition_name": "Reader", "scope": scope},
+        )
+        rollback_stack.append((cr["id"], "azure_role_assignment_create"))
+
+        # SDK verify: role assignment exists for this principal
+        assignment_id = None
+        if auth and principal_id != "mock-principal-id":
+            assignments = list(auth.role_assignments.list_for_scope(
+                scope, filter=f"principalId eq '{principal_id}'"
+            ))
+            assert len(assignments) > 0, \
+                f"No role assignments found for principal {principal_id} at scope {scope}"
+            assignment_id = assignments[0].name
+            log(f"Role assignment verified: {assignment_id}")
+
+        # 3. Explicit role assignment delete via CR
+        client.run_cr(
+            "[Phase W] delete role assignment", "azure_role_assignment_delete", cloud_account_id,
+            {"assignment_id": assignment_id or cr["id"], "scope": scope},
+        )
+        rollback_stack.pop()  # role assignment already deleted
+
+        # SDK verify: assignment gone
+        if auth and principal_id and principal_id != "mock-principal-id":
+            remaining = list(auth.role_assignments.list_for_scope(
+                scope, filter=f"principalId eq '{principal_id}'"
+            ))
+            assert len(remaining) == 0, \
+                f"Role assignment still present after delete: {remaining}"
+            log("Role assignment deleted and verified gone")
+
+        log("Phase W complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase W failed: {e}")
+        raise
+    finally:
+        print("  [Phase W cleanup — rollback stack]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete managed identity via SDK
+        if msi:
+            try:
+                msi.user_assigned_identities.delete(azure_resource_group, identity_name)
+                print(f"  Safety net: deleted managed identity {identity_name}")
+            except Exception:
+                pass
 
 
 def run_phase_x_stub(client: NexplaneClient, cloud_account_id: str, azure_resource_group: str) -> None:
@@ -684,8 +771,8 @@ def main():
         "--phases", default="N,O",
         help=(
             "Comma-separated phases to run. "
-            "N-O: existing phases. P=NSG, Q=Storage, R=Tagging, S=Terraform, T=Ansible. "
-            "U-Z=sub-project stubs. Default: N,O."
+            "N-O: VM lifecycle. P=NSG, Q=Storage, R=Tagging, S=Terraform, T=Ansible. "
+            "V=Storage-CRUD, W=IAM-RBAC. U,X,Y,Z=stubs. Default: N,O."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key")
@@ -729,7 +816,7 @@ def main():
         if "V" in phases:
             run_phase_v(client, cloud_account_id, args.azure_resource_group)
         if "W" in phases:
-            run_phase_w_stub(client, cloud_account_id, args.azure_resource_group)
+            run_phase_w(client, cloud_account_id, args.azure_resource_group)
         if "X" in phases:
             run_phase_x_stub(client, cloud_account_id, args.azure_resource_group)
         if "Y" in phases:
