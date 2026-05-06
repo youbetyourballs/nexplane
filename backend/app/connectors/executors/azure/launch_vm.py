@@ -60,7 +60,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     vm_name = parameters["vm_name"]
     resource_group = parameters["resource_group"]
     location = parameters.get("location", "eastus")
-    vm_size = parameters.get("vm_size", "Standard_B1s")
+    vm_size = parameters.get("vm_size", "Standard_A1_v2")
     connection_mode = parameters.get("connection_mode", "agent_extension")
     nexplane_url = parameters.get("nexplane_url", "")
     nexplane_secret = parameters.get("nexplane_secret", "")
@@ -100,11 +100,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     from ._client import get_compute_client, get_network_client
     from azure.mgmt.compute.models import (
-        VirtualMachine, HardwareProfile, StorageProfile, OsProfile,
+        VirtualMachine, HardwareProfile, StorageProfile, OSProfile,
         NetworkProfile, NetworkInterfaceReference, LinuxConfiguration,
         SshConfiguration, SshPublicKey, ImageReference, OSDisk,
         ManagedDiskParameters,
     )
+    OsProfile = OSProfile  # alias for backwards compat within this function
     from azure.mgmt.compute.models import DiskCreateOptionTypes
     from azure.mgmt.network.models import (
         VirtualNetwork, AddressSpace, Subnet, PublicIPAddress,
@@ -122,8 +123,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             resource_group, f"{vm_name}-pip",
             PublicIPAddress(
                 location=location,
-                sku=PublicIPAddressSku(name="Basic"),
-                public_ip_allocation_method="Dynamic",
+                sku=PublicIPAddressSku(name="Standard"),
+                public_ip_allocation_method="Static",
             ),
         ).result(),
     )
@@ -180,8 +181,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     else:
         image_reference_obj = ImageReference(
             publisher="Canonical",
-            offer="0001-com-ubuntu-server-jammy",
-            sku="22_04-lts",
+            offer="ubuntu-24_04-lts",
+            sku="server",
             version="latest",
         )
         # Build Linux OS profile based on connection_mode
@@ -191,10 +192,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                 admin_username=admin_username,
                 admin_password=admin_password,
             )
-        else:
-            if not ssh_public_key and connection_mode == "ssh":
-                raise ValueError("ssh_public_key is required when connection_mode is 'ssh'")
-            key_data = ssh_public_key if ssh_public_key else ""
+        elif ssh_public_key:
             os_profile = OsProfile(
                 computer_name=vm_name,
                 admin_username=admin_username,
@@ -204,11 +202,22 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                         public_keys=[
                             SshPublicKey(
                                 path=f"/home/{admin_username}/.ssh/authorized_keys",
-                                key_data=key_data,
+                                key_data=ssh_public_key,
                             )
                         ]
                     ),
                 ),
+            )
+        else:
+            if connection_mode == "ssh":
+                raise ValueError("ssh_public_key is required when connection_mode is 'ssh'")
+            # agent_extension mode — use password auth (password auto-generated if not provided)
+            import secrets as _secrets
+            effective_password = admin_password or f"Nx{_secrets.token_hex(8)}!1"
+            os_profile = OsProfile(
+                computer_name=vm_name,
+                admin_username=admin_username,
+                admin_password=effective_password,
             )
 
     # Create VM
@@ -238,7 +247,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # Deploy Custom Script Extension for agent_extension mode
     if connection_mode == "agent_extension":
-        from azure.mgmt.compute.models import VirtualMachineExtension
+        from azure.mgmt.compute.models import VirtualMachineExtension, VirtualMachineExtensionProperties
         if os_type == "windows":
             import base64 as _base64
             ps1_script = _WINDOWS_AGENT_PS1_AZURE.format(
@@ -248,20 +257,18 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                 nexplane_secret=nexplane_secret,
             )
             script_b64 = _base64.b64encode(ps1_script.encode("utf-8")).decode()
+            ext_props = VirtualMachineExtensionProperties(
+                publisher="Microsoft.Compute",
+                type="CustomScriptExtension",
+                type_handler_version="1.10",
+                auto_upgrade_minor_version=True,
+                settings={"commandToExecute": f"powershell -EncodedCommand {script_b64}"},
+            )
             await loop.run_in_executor(
                 None,
                 lambda: compute.virtual_machine_extensions.begin_create_or_update(
                     resource_group, vm_name, "NexplaneAgentInstall",
-                    VirtualMachineExtension(
-                        location=location,
-                        publisher="Microsoft.Compute",
-                        type_properties_type="CustomScriptExtension",
-                        type_handler_version="1.10",
-                        auto_upgrade_minor_version=True,
-                        settings={
-                            "commandToExecute": f"powershell -EncodedCommand {script_b64}"
-                        },
-                    ),
+                    VirtualMachineExtension(location=location, properties=ext_props),
                 ).result(),
             )
         else:
@@ -282,18 +289,18 @@ tailscale up --authkey="{tailscale_auth_key}" --hostname="{vm_name}" --accept-ro
                     agent_body = agent_body[len("#!/bin/bash"):].lstrip()
                 startup_script = tailscale_prepend + agent_body
             script_b64 = base64.b64encode(startup_script.encode()).decode()
+            ext_props = VirtualMachineExtensionProperties(
+                publisher="Microsoft.Azure.Extensions",
+                type="CustomScript",
+                type_handler_version="2.1",
+                auto_upgrade_minor_version=True,
+                settings={"script": script_b64},
+            )
             await loop.run_in_executor(
                 None,
                 lambda: compute.virtual_machine_extensions.begin_create_or_update(
                     resource_group, vm_name, "NexplaneAgentInstall",
-                    VirtualMachineExtension(
-                        location=location,
-                        publisher="Microsoft.Azure.Extensions",
-                        type_properties_type="CustomScript",
-                        type_handler_version="2.1",
-                        auto_upgrade_minor_version=True,
-                        settings={"script": script_b64},
-                    ),
+                    VirtualMachineExtension(location=location, properties=ext_props),
                 ).result(),
             )
 
