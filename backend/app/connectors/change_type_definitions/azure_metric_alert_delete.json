@@ -1,0 +1,7 @@
+{
+  "change_type": "azure_metric_alert_delete",
+  "display_name": "Delete Azure Metric Alert",
+  "steps": [{"generic_action": "delete_metric_alert", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

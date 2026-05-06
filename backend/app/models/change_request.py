@@ -151,6 +151,8 @@ class ChangeType(str, enum.Enum):
     azure_sql_server_delete = "azure_sql_server_delete"
     azure_sql_database_create = "azure_sql_database_create"
     azure_sql_database_delete = "azure_sql_database_delete"
+    azure_metric_alert_create = "azure_metric_alert_create"
+    azure_metric_alert_delete = "azure_metric_alert_delete"
     # Agent command group change types (Plans 4)
     agent_linux_patch = "agent_linux_patch"
     agent_ossecurity = "agent_ossecurity"
