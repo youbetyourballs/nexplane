@@ -13,7 +13,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     loop = asyncio.get_event_loop()
     client = iam_admin_v1.IAMClient(credentials=credentials)
     name = f"projects/{project}/serviceAccounts/{sa_email}"
-    await loop.run_in_executor(None, lambda: client.disable_service_account(name=name))
+    await loop.run_in_executor(None, lambda: client.disable_service_account(request={"name": name}))
     return {"action": "disable_service_account", "service_account_email": sa_email, "disabled": True}
 
 
@@ -30,5 +30,5 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     loop = _asyncio.get_event_loop()
     client = iam_admin_v1.IAMClient(credentials=credentials)
     name = f"projects/{project}/serviceAccounts/{sa_email}"
-    await loop.run_in_executor(None, lambda: client.enable_service_account(name=name))
+    await loop.run_in_executor(None, lambda: client.enable_service_account(request={"name": name}))
     return {"action": "enable_service_account", "service_account_email": sa_email, "disabled": False}

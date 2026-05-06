@@ -21,10 +21,25 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         direction=direction,
         source_ranges=source_ranges,
     )
+    network = parameters.get("network", "global/networks/default")
+    firewall.network = f"https://www.googleapis.com/compute/v1/projects/{project}/{network}"
+    priority = parameters.get("priority", 1000)
+    firewall.priority = priority
+    allowed_rules = parameters.get("allowed", [])
     if action.lower() == "allow":
-        firewall.allowed = [compute_v1.Allowed(ip_protocol="tcp", ports=ports)] if ports else [compute_v1.Allowed(ip_protocol="all")]
+        if allowed_rules:
+            firewall.allowed = [compute_v1.Allowed(I_p_protocol=r.get("IPProtocol", "tcp"), ports=r.get("ports", [])) for r in allowed_rules]
+        elif ports:
+            firewall.allowed = [compute_v1.Allowed(I_p_protocol="tcp", ports=ports)]
+        else:
+            firewall.allowed = [compute_v1.Allowed(I_p_protocol="all")]
     else:
-        firewall.denied = [compute_v1.Denied(ip_protocol="tcp", ports=ports)] if ports else [compute_v1.Denied(ip_protocol="all")]
+        if allowed_rules:
+            firewall.denied = [compute_v1.Denied(I_p_protocol=r.get("IPProtocol", "tcp"), ports=r.get("ports", [])) for r in allowed_rules]
+        elif ports:
+            firewall.denied = [compute_v1.Denied(I_p_protocol="tcp", ports=ports)]
+        else:
+            firewall.denied = [compute_v1.Denied(I_p_protocol="all")]
     op = await loop.run_in_executor(None, lambda: client.insert(project=project, firewall_resource=firewall))
     return {"action": "create_firewall_rule", "rule_name": rule_name, "operation": op.name}
 
