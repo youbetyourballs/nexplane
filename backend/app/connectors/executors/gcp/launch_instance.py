@@ -2,29 +2,6 @@ import asyncio
 from datetime import datetime, timezone
 
 
-_WINDOWS_AGENT_PS1 = r"""# Install Tailscale for Windows
-$tsInstaller = "$env:TEMP\tailscale-setup.exe"
-Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup.exe" `
-  -OutFile $tsInstaller -UseBasicParsing
-Start-Process $tsInstaller -Args "/S" -Wait
-Start-Sleep -Seconds 10
-& "C:\Program Files\Tailscale\tailscale.exe" up `
-  --authkey="{tailscale_auth_key}" --hostname="{hostname}" --accept-routes
-
-# Download and install Nexplane agent
-$version = (Invoke-WebRequest `
-  "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/version" `
-  -UseBasicParsing).Content.Trim()
-$agentUrl = "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/nexplane-agent-windows-amd64-$version.exe"
-Invoke-WebRequest $agentUrl -OutFile "C:\nexplane-agent.exe" -UseBasicParsing
-
-New-Service -Name "NexplaneAgent" `
-  -BinaryPathName "C:\nexplane-agent.exe --control-plane {nexplane_url} --secret {nexplane_secret} --mode service" `
-  -StartupType Automatic -Description "Nexplane Agent" -ErrorAction SilentlyContinue
-Start-Service "NexplaneAgent"
-"""
-
-
 _AGENT_STARTUP_TEMPLATE = """#!/bin/bash
 set -e
 NEXPLANE_URL="{nexplane_url}"
@@ -50,6 +27,29 @@ EOF
 systemctl daemon-reload
 systemctl enable nexplane-agent
 systemctl start nexplane-agent
+"""
+
+
+_WINDOWS_AGENT_PS1 = r"""# Install Tailscale for Windows
+$tsInstaller = "$env:TEMP\tailscale-setup.exe"
+Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup.exe" `
+  -OutFile $tsInstaller -UseBasicParsing
+Start-Process $tsInstaller -Args "/S" -Wait
+Start-Sleep -Seconds 10
+& "C:\Program Files\Tailscale\tailscale.exe" up `
+  --authkey="{tailscale_auth_key}" --hostname="{hostname}" --accept-routes
+
+# Download and install Nexplane agent
+$version = (Invoke-WebRequest `
+  "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/version" `
+  -UseBasicParsing).Content.Trim()
+$agentUrl = "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/nexplane-agent-windows-amd64-$version.exe"
+Invoke-WebRequest $agentUrl -OutFile "C:\nexplane-agent.exe" -UseBasicParsing
+
+New-Service -Name "NexplaneAgent" `
+  -BinaryPathName "C:\nexplane-agent.exe --control-plane {nexplane_url} --secret {nexplane_secret} --mode service" `
+  -StartupType Automatic -Description "Nexplane Agent" -ErrorAction SilentlyContinue
+Start-Service "NexplaneAgent"
 """
 
 
