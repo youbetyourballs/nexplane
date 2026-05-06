@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ShieldCheck, ShieldAlert, AlertTriangle, Download } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ShieldCheck, ShieldAlert, AlertTriangle, Download, Play, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { apiClient } from "../api/client";
 import { PageLoading } from "../components/LoadingSpinner";
@@ -47,44 +47,86 @@ function StatusIcon({ status }: { status: string }) {
   return <AlertTriangle size={16} className="text-slate-400 inline" />;
 }
 
-function ControlBreakdownTable({ controls }: { controls: ControlResult[] }) {
+function ScoreTrend({ history }: { history: { score: number; collected_at: string }[] }) {
+  if (!history || history.length < 2) return null;
+  const recent = history.slice(-5);
+  const max = Math.max(...recent.map(h => h.score));
   return (
-    <table className="w-full text-sm border-t border-slate-200 mt-2">
-      <thead>
-        <tr className="text-left text-xs text-slate-500 uppercase tracking-wide">
-          <th className="py-1 pr-3 font-medium">ID</th>
-          <th className="py-1 pr-3 font-medium">Section</th>
-          <th className="py-1 pr-3 font-medium">Title</th>
-          <th className="py-1 pr-3 font-medium">Status</th>
-          <th className="py-1 pr-3 font-medium">Expected</th>
-          <th className="py-1 font-medium">Actual</th>
-        </tr>
-      </thead>
-      <tbody>
-        {controls.map((c) => (
-          <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
-            <td className="py-1 pr-3 font-mono text-xs text-slate-600">{c.id}</td>
-            <td className="py-1 pr-3 text-xs text-slate-500 capitalize">{c.section}</td>
-            <td className="py-1 pr-3 text-slate-700">{c.title}</td>
-            <td className="py-1 pr-3"><StatusIcon status={c.status} /> {c.status}</td>
-            <td className="py-1 pr-3 font-mono text-xs text-slate-500 max-w-[200px] truncate">{c.expected}</td>
-            <td className="py-1 font-mono text-xs text-slate-500 max-w-[200px] truncate">{c.actual}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="flex items-end gap-0.5 h-5 ml-2" title="Score trend (last 5 audits)">
+      {recent.map((h, i) => (
+        <div
+          key={i}
+          className="w-1.5 rounded-sm bg-blue-400 opacity-70"
+          style={{ height: `${Math.round((h.score / (max || 1)) * 100)}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ControlBreakdownTable({ controls }: { controls: ControlResult[] }) {
+  const failing = controls.filter(c => c.status === "fail");
+  const passing = controls.filter(c => c.status === "pass");
+  return (
+    <div>
+      {failing.length > 0 && (
+        <div className="mb-2">
+          <p className="text-xs font-semibold text-red-600 mb-1">Failing controls ({failing.length})</p>
+          <table className="w-full text-sm border-t border-slate-200">
+            <thead>
+              <tr className="text-left text-xs text-slate-500 uppercase tracking-wide">
+                <th className="py-1 pr-3 font-medium">ID</th>
+                <th className="py-1 pr-3 font-medium">Section</th>
+                <th className="py-1 pr-3 font-medium">Title</th>
+                <th className="py-1 pr-3 font-medium">Expected</th>
+                <th className="py-1 font-medium">Actual</th>
+              </tr>
+            </thead>
+            <tbody>
+              {failing.map((c) => (
+                <tr key={c.id} className="border-t border-slate-100 bg-red-50/30">
+                  <td className="py-1 pr-3 font-mono text-xs text-slate-600">{c.id}</td>
+                  <td className="py-1 pr-3 text-xs text-slate-500 capitalize">{c.section}</td>
+                  <td className="py-1 pr-3 text-slate-700">{c.title}</td>
+                  <td className="py-1 pr-3 font-mono text-xs text-slate-500 max-w-[150px] truncate">{c.expected}</td>
+                  <td className="py-1 font-mono text-xs text-red-600 max-w-[150px] truncate">{c.actual}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {passing.length > 0 && (
+        <details className="mt-1">
+          <summary className="text-xs text-slate-400 cursor-pointer select-none">
+            {passing.length} passing controls
+          </summary>
+          <table className="w-full text-sm border-t border-slate-100 mt-1">
+            <tbody>
+              {passing.map((c) => (
+                <tr key={c.id} className="border-t border-slate-50">
+                  <td className="py-0.5 pr-3 font-mono text-xs text-slate-400">{c.id}</td>
+                  <td className="py-0.5 pr-3 text-xs text-slate-400 capitalize">{c.section}</td>
+                  <td className="py-0.5 text-xs text-slate-500">{c.title}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+    </div>
   );
 }
 
 export function Compliance() {
   const [expandedAsset, setExpandedAsset] = useState<string | null>(null);
+  const [auditingAssets, setAuditingAssets] = useState<Set<string>>(new Set());
+  const queryClient = useQueryClient();
 
-  const { data: assets, isLoading } = useQuery<AssetWithCIS[]>({
+  const { data: allAssets, isLoading } = useQuery<AssetWithCIS[]>({
     queryKey: ["assets-with-cis"],
-    queryFn: () =>
-      apiClient.get("/assets").then((r) =>
-        r.data.filter((a: AssetWithCIS) => a.cis_compliance?.latest)
-      ),
+    queryFn: () => apiClient.get("/assets").then((r) => r.data),
+    refetchInterval: auditingAssets.size > 0 ? 8000 : false,
   });
 
   const { data: driftAlerts } = useQuery({
@@ -92,94 +134,126 @@ export function Compliance() {
     queryFn: () => apiClient.get("/compliance/drift-alerts").then((r) => r.data),
   });
 
+  const runAuditMutation = useMutation({
+    mutationFn: async (asset: AssetWithCIS) => {
+      // Create an agent_compliance CR targeting this asset
+      const cr = await apiClient.post("/change-requests", {
+        title: `CIS Audit — ${asset.name}`,
+        description: `On-demand CIS compliance audit for ${asset.name}`,
+        change_type: "agent_compliance",
+        target_asset_ids: [asset.id],
+        desired_outcome: { dry_run: true },
+      });
+      const crId = cr.data.id;
+      // Plan → approve → execute
+      await apiClient.post(`/change-requests/${crId}/plan`);
+      await apiClient.post(`/change-requests/${crId}/submit-for-approval`);
+      await apiClient.post(`/change-requests/${crId}/approve`, {
+        decision: "approved",
+        comment: "On-demand audit",
+      });
+      await apiClient.post(`/change-requests/${crId}/execute`);
+      return crId;
+    },
+    onMutate: (asset) => {
+      setAuditingAssets(prev => new Set([...prev, asset.id]));
+    },
+    onSettled: (_data, _error, asset) => {
+      // Poll for results — remove from auditing set after 60s or when results appear
+      setTimeout(() => {
+        setAuditingAssets(prev => {
+          const next = new Set(prev);
+          next.delete(asset.id);
+          return next;
+        });
+        queryClient.invalidateQueries({ queryKey: ["assets-with-cis"] });
+      }, 60000);
+    },
+  });
+
   if (isLoading) return <PageLoading />;
 
-  const audited = assets ?? [];
+  const assets = allAssets ?? [];
+  const audited = assets.filter((a: AssetWithCIS) => a.cis_compliance?.latest);
+  const unaudited = assets.filter((a: AssetWithCIS) => !a.cis_compliance?.latest && a.id);
   const drifted = driftAlerts ?? [];
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-4xl mx-auto py-8 px-4 space-y-8">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Compliance</h1>
-          <p className="text-slate-500 mt-1 text-sm">CIS Benchmark scores and drift alerts across your fleet</p>
+          <p className="text-slate-500 text-sm mt-1">
+            CIS benchmark scores for audited hosts. Run audits per-asset below.
+          </p>
         </div>
         <Link
-          to="/change-requests/new?type=enforce_cis_benchmark"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
+          to="/change-requests/new?change_type=enforce_cis_benchmark"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
         >
           <ShieldCheck size={16} />
-          Run CIS Audit
+          New CIS Campaign
         </Link>
       </div>
 
       {drifted.length > 0 && (
-        <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-yellow-800 font-semibold mb-2">
-            <AlertTriangle size={18} />
-            {drifted.length} open drift {drifted.length === 1 ? "alert" : "alerts"}
-          </div>
-          <ul className="space-y-1">
-            {drifted.slice(0, 5).map((alert: any) => (
-              <li key={alert.change_request_id} className="text-sm text-yellow-700">
-                <Link
-                  to={`/change-requests/${alert.change_request_id}`}
-                  className="hover:underline font-medium"
-                >
-                  {alert.title}
-                </Link>
-                {" — "}
-                <span className="text-yellow-600">
-                  {formatDistanceToNow(new Date(alert.created_at), { addSuffix: true })}
-                </span>
-              </li>
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+          <p className="text-yellow-800 font-medium text-sm flex items-center gap-1">
+            <AlertTriangle size={16} /> {drifted.length} asset(s) drifted from baseline
+          </p>
+          <ul className="mt-2 text-yellow-700 text-sm list-disc list-inside">
+            {drifted.slice(0, 5).map((d: any) => (
+              <li key={d.asset_id}>{d.asset_name}: {d.drifted_controls?.length ?? 0} control(s)</li>
             ))}
           </ul>
-          {drifted.length > 5 && (
-            <p className="text-xs text-yellow-600 mt-1">
-              +{drifted.length - 5} more — <Link to="/change-requests?change_type=enforce_cis_benchmark&status=draft" className="underline">view all</Link>
-            </p>
-          )}
         </div>
       )}
 
-      {audited.length === 0 ? (
-        <div className="text-center text-slate-500 py-16">
-          <ShieldCheck size={40} className="mx-auto mb-3 text-slate-300" />
-          <p className="text-lg font-medium text-slate-600">No CIS audit data yet</p>
-          <p className="text-sm mt-1">Run a CIS Audit change request to see compliance scores here.</p>
-        </div>
-      ) : (
+      {/* Audited assets */}
+      {audited.length > 0 && (
         <div className="space-y-3">
+          <h2 className="text-base font-semibold text-slate-700">Audited Assets</h2>
           {audited.map((asset) => {
             const latest = asset.cis_compliance!.latest!;
-            const isExpanded = expandedAsset === asset.id;
+            const history = (asset.cis_compliance as any)?.history ?? [];
+            const isAuditing = auditingAssets.has(asset.id);
+            const failCount = latest.controls?.filter((c: ControlResult) => c.status === "fail").length ?? 0;
             return (
-              <div key={asset.id} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                <button
-                  className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-50 transition-colors"
-                  onClick={() => setExpandedAsset(isExpanded ? null : asset.id)}
+              <div key={asset.id} className="border border-slate-200 rounded-xl bg-white shadow-sm">
+                <div
+                  className="flex items-center justify-between px-5 py-4 cursor-pointer"
+                  onClick={() => setExpandedAsset(expandedAsset === asset.id ? null : asset.id)}
                 >
                   <div className="flex items-center gap-3">
                     <ScoreBadge score={latest.score} />
-                    <span className="font-medium text-slate-800">{asset.name || asset.id}</span>
-                    <span className="text-xs text-slate-400">
-                      Level {latest.level} · audited {formatDistanceToNow(new Date(latest.collected_at), { addSuffix: true })}
-                    </span>
+                    <ScoreTrend history={history} />
+                    <div>
+                      <p className="font-medium text-slate-900">{asset.name}</p>
+                      <p className="text-xs text-slate-400">
+                        Last audited {formatDistanceToNow(new Date(latest.collected_at), { addSuffix: true })}
+                        {failCount > 0 && <span className="text-red-500 ml-2">· {failCount} failing</span>}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <a
-                      href={`/compliance/evidence-collection?asset_id=${asset.id}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); runAuditMutation.mutate(asset); }}
+                      disabled={isAuditing}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-300 rounded-lg transition-colors disabled:opacity-50"
                     >
-                      <Download size={13} />
-                      Evidence
-                    </a>
-                    <span className="text-slate-400 text-sm">{isExpanded ? "▲" : "▼"}</span>
+                      {isAuditing ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                      {isAuditing ? "Auditing..." : "Re-audit"}
+                    </button>
+                    <Link
+                      to={`/compliance/evidence-collection?asset_id=${asset.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-blue-600"
+                    >
+                      <Download size={12} /> Evidence
+                    </Link>
                   </div>
-                </button>
-                {isExpanded && (
+                </div>
+                {expandedAsset === asset.id && latest.controls && (
                   <div className="px-5 pb-4">
                     <ControlBreakdownTable controls={latest.controls} />
                   </div>
@@ -187,6 +261,41 @@ export function Compliance() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Unaudited assets with Run Audit button */}
+      {unaudited.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-base font-semibold text-slate-700">Not Yet Audited</h2>
+          <div className="grid grid-cols-1 gap-2">
+            {unaudited.slice(0, 10).map((asset) => {
+              const isAuditing = auditingAssets.has(asset.id);
+              return (
+                <div key={asset.id} className="flex items-center justify-between px-4 py-3 border border-slate-100 rounded-lg bg-slate-50/50">
+                  <span className="text-sm text-slate-600">{asset.name}</span>
+                  <button
+                    onClick={() => runAuditMutation.mutate(asset)}
+                    disabled={isAuditing}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {isAuditing ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                    {isAuditing ? "Running..." : "Run Audit"}
+                  </button>
+                </div>
+              );
+            })}
+            {unaudited.length > 10 && (
+              <p className="text-xs text-slate-400 px-4">+{unaudited.length - 10} more assets</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {audited.length === 0 && unaudited.length === 0 && (
+        <div className="text-center py-16 text-slate-400">
+          <ShieldCheck size={32} className="mx-auto mb-3 opacity-30" />
+          <p className="text-sm">No assets found. Add connectors to discover assets.</p>
         </div>
       )}
     </div>
