@@ -1,0 +1,9 @@
+{
+  "change_type": "azure_storage_account_create",
+  "display_name": "Create Azure Storage Account",
+  "steps": [{"generic_action": "create_storage_account", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_storage_account",
+  "rollback_connector_type": "azure"
+}
