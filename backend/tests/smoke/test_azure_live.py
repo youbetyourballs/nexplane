@@ -60,7 +60,7 @@ def run_phase_n(client: NexplaneClient, cloud_account_id: str,
 
     try:
         cr = client.run_cr(
-            "Smoke-N: launch Azure VM", "azure_vm_create", cloud_account_id,
+            "[Phase N] launch Azure VM", "azure_vm_create", cloud_account_id,
             {
                 "vm_name": AZURE_SMOKE_VM,
                 "resource_group": azure_resource_group,
@@ -142,14 +142,14 @@ def run_phase_o(client: NexplaneClient, phase_n_result: dict,
 
     try:
         cr = client.run_cr(
-            "Smoke-O: stop Azure VM", "azure_vm_stop", vm_asset["id"],
+            "[Phase O] stop Azure VM", "azure_vm_stop", vm_asset["id"],
             {"vm_name": vm_name, "resource_group": resource_group},
         )
         rollback_stack.append((cr["id"], "azure_vm_stop"))
         log("Azure VM stopped (deallocated)")
 
         cr = client.run_cr(
-            "Smoke-O: start Azure VM", "azure_vm_start", vm_asset["id"],
+            "[Phase O] start Azure VM", "azure_vm_start", vm_asset["id"],
             {"vm_name": vm_name, "resource_group": resource_group},
         )
         rollback_stack.pop()
@@ -157,7 +157,7 @@ def run_phase_o(client: NexplaneClient, phase_n_result: dict,
         log("Azure VM started")
 
         client.run_cr(
-            "Smoke-O: reboot Azure VM", "azure_vm_reboot", vm_asset["id"],
+            "[Phase O] reboot Azure VM", "azure_vm_reboot", vm_asset["id"],
             {"vm_name": vm_name, "resource_group": resource_group},
         )
         log("Azure VM rebooted")
@@ -171,7 +171,7 @@ def run_phase_o(client: NexplaneClient, phase_n_result: dict,
 
         snapshot_name = f"nexplane-smoke-snap-{int(time.time())}"
         cr = client.run_cr(
-            "Smoke-O: create disk snapshot", "azure_vm_snapshot", vm_asset["id"],
+            "[Phase O] create Azure disk snapshot", "azure_vm_snapshot", vm_asset["id"],
             {"vm_name": vm_name, "resource_group": resource_group, "snapshot_name": snapshot_name},
         )
         rollback_stack.append((cr["id"], "azure_vm_snapshot"))
@@ -246,7 +246,7 @@ def run_phase_p(client: NexplaneClient, cloud_account_id: str,
 
         # 2. Add inbound rule via CR
         cr = client.run_cr(
-            "Smoke-P: update NSG rule", "azure_update_nsg_rule", cloud_account_id,
+            "[Phase P] update Azure NSG rule", "azure_update_nsg_rule", cloud_account_id,
             {
                 "resource_group": azure_resource_group,
                 "nsg_name": nsg_name,
@@ -344,7 +344,7 @@ def run_phase_q(client: NexplaneClient, cloud_account_id: str,
 
         # 2. Disable public blob access via CR
         cr = client.run_cr(
-            "Smoke-Q: disable public blob access", "azure_disable_public_blob_access",
+            "[Phase Q] disable Azure public blob access", "azure_disable_public_blob_access",
             cloud_account_id,
             {"resource_group": azure_resource_group, "storage_account_name": account_name},
         )
@@ -362,7 +362,7 @@ def run_phase_q(client: NexplaneClient, cloud_account_id: str,
 
         # 4. Rotate storage key via CR
         cr = client.run_cr(
-            "Smoke-Q: rotate storage key", "azure_rotate_storage_key", cloud_account_id,
+            "[Phase Q] rotate Azure storage key", "azure_rotate_storage_key", cloud_account_id,
             {"resource_group": azure_resource_group, "storage_account_name": account_name,
              "key_name": "key1"},
         )
@@ -421,7 +421,7 @@ def run_phase_r(client: NexplaneClient, azure_phase_result: Optional[dict],
 
         # Tag VM via CR
         cr = client.run_cr(
-            "Smoke-R: tag Azure VM", "tag_resource", vm_asset_id,
+            "[Phase R] tag Azure VM", "tag_resource", vm_asset_id,
             {
                 "resource_group": azure_resource_group,
                 "resource_name": vm_name,
@@ -494,7 +494,7 @@ def run_phase_s(client: NexplaneClient, cloud_account_id: str,
     )
 
     cr = client.run_cr(
-        "Smoke-S: terraform apply Azure resource group", "terraform_local_apply", cloud_account_id,
+        "[Phase S] terraform apply Azure resource group", "terraform_local_apply", cloud_account_id,
         {"tf_content": tf_content, "rollback_strategy": "terraform_destroy_local"},
     )
     log(f"Terraform applied (Azure) — resource group: {rg_name}")
@@ -547,7 +547,7 @@ def run_phase_t(client: NexplaneClient, cloud_account_id: str,
     )
 
     cr = client.run_cr(
-        "Smoke-T: ansible local playbook (Azure)", "ansible_local_playbook", cloud_account_id,
+        "[Phase T] ansible local playbook", "ansible_local_playbook", cloud_account_id,
         {"playbook_content": playbook_content, "inventory": "localhost,"},
     )
     log("Ansible local playbook CR executed successfully (Azure)")
