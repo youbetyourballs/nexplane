@@ -383,8 +383,9 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
             {"instance_id": instance_id, "rollback_strategy": "stop_instance"},
             timeout=900,
         )
-        rollback_stack.pop()  # ec2_stop is superseded — instance is running
-        rollback_stack.append((cr["id"], "ec2_start"))
+        rollback_stack.pop()  # ec2_stop superseded — instance is running again
+        # Don't push ec2_start — rolling it back would stop the instance, but we
+        # want it running for Phase K SSM commands. Main cleanup terminates anyway.
         log("Instance started")
 
         # 3. Reboot (reboot includes a state wait — needs 900s)
