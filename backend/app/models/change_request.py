@@ -148,6 +148,12 @@ class ChangeType(str, enum.Enum):
     agent_linuxupgrade = "agent_linuxupgrade"
     agent_win_patch = "agent_win_patch"
     agent_winharden = "agent_winharden"
+    # ALB lifecycle
+    alb_create = "alb_create"
+    alb_delete = "alb_delete"
+    target_group_create = "target_group_create"
+    listener_create = "listener_create"
+    listener_modify = "listener_modify"
 
 
 class RiskLevel(str, enum.Enum):

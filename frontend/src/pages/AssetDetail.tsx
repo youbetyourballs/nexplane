@@ -320,16 +320,46 @@ const ASSET_ACTIONS: Record<AssetType, QuickAction[]> = {
   ],
   load_balancer: [
     {
+      changeType: "alb_create",
+      label: "Create ALB",
+      title: (a) => `Create Application Load Balancer`,
+      description: () => `Create a new Application Load Balancer in your AWS account.`,
+    },
+    {
+      changeType: "target_group_create",
+      label: "Create Target Group",
+      title: (a) => `Create target group for ${a.name}`,
+      description: (a) => `Create a new target group to register instances behind ${a.name}.`,
+    },
+    {
+      changeType: "register_targets",
+      label: "Register Targets",
+      title: (a) => `Register targets in ${a.name}`,
+      description: (a) => `Register EC2 instances as targets in a target group for ${a.name}.`,
+    },
+    {
+      changeType: "listener_create",
+      label: "Add Listener",
+      title: (a) => `Add listener to ${a.name}`,
+      description: (a) => `Create a new listener (port + protocol) on ${a.name}.`,
+    },
+    {
+      changeType: "listener_modify",
+      label: "Modify Listener",
+      title: (a) => `Modify listener on ${a.name}`,
+      description: (a) => `Update port, protocol, or default action on an existing listener for ${a.name}.`,
+    },
+    {
+      changeType: "alb_delete",
+      label: "Delete ALB",
+      title: (a) => `Delete ${a.name}`,
+      description: (a) => `Permanently delete the ALB ${a.name}. This cannot be undone.`,
+    },
+    {
       changeType: "security_group_update",
       label: "Update Security Group",
       title: (a) => `Update security group on ${a.name}`,
       description: (a) => `Modify security group rules for load balancer ${a.name}.`,
-    },
-    {
-      changeType: "snapshot_asset",
-      label: "Snapshot Config",
-      title: (a) => `Snapshot ${a.name} config`,
-      description: (a) => `Capture current configuration of load balancer ${a.name}.`,
     },
   ],
   endpoint: [
