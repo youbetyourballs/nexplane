@@ -390,6 +390,38 @@ def _get_azure_storage_client():
     )
     return StorageManagementClient(credential, creds['subscription_id'])
 
+
+def _get_azure_msi_client():
+    """Return an Azure ManagedServiceIdentityClient using cached credentials."""
+    _get_azure_compute_client()  # populates _azure_creds_cache
+    creds = _azure_creds_cache
+    if not creds:
+        return None
+    from azure.identity import ClientSecretCredential
+    from azure.mgmt.msi import ManagedServiceIdentityClient
+    credential = ClientSecretCredential(
+        tenant_id=creds['tenant_id'],
+        client_id=creds['client_id'],
+        client_secret=creds['client_secret'],
+    )
+    return ManagedServiceIdentityClient(credential, creds['subscription_id'])
+
+
+def _get_azure_authorization_client():
+    """Return an Azure AuthorizationManagementClient using cached credentials."""
+    _get_azure_compute_client()  # populates _azure_creds_cache
+    creds = _azure_creds_cache
+    if not creds:
+        return None
+    from azure.identity import ClientSecretCredential
+    from azure.mgmt.authorization import AuthorizationManagementClient
+    credential = ClientSecretCredential(
+        tenant_id=creds['tenant_id'],
+        client_id=creds['client_id'],
+        client_secret=creds['client_secret'],
+    )
+    return AuthorizationManagementClient(credential, creds['subscription_id'])
+
 # ---------------------------------------------------------------------------
 # AWS-specific cleanup (called by test_aws_live.py cleanup())
 # ---------------------------------------------------------------------------
