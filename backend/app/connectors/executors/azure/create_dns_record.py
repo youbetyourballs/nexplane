@@ -1,0 +1,52 @@
+import asyncio
+from datetime import datetime, timezone
+
+
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    creds = getattr(connector, "credentials", {})
+    zone_name = parameters.get("zone_name", "")
+    record_name = parameters.get("record_name", "smoke")
+    ip_address = parameters.get("ip_address", "1.2.3.4")
+    ttl = parameters.get("ttl", 300)
+    rg = parameters.get("resource_group", creds.get("resource_group", "default"))
+
+    if not creds:
+        return {
+            "action": "create_dns_record",
+            "zone_name": zone_name,
+            "record_name": record_name,
+            "resource_group": rg,
+            "mock": True,
+        }
+
+    from ._client import get_dns_client
+    from azure.mgmt.dns.models import RecordSet, ARecord
+    dns = get_dns_client(creds)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        None,
+        lambda: dns.record_sets.create_or_update(
+            rg, zone_name, record_name, "A",
+            RecordSet(ttl=ttl, a_records=[ARecord(ipv4_address=ip_address)]),
+        ),
+    )
+    return {
+        "action": "create_dns_record",
+        "zone_name": zone_name,
+        "record_name": record_name,
+        "ip_address": ip_address,
+        "resource_group": rg,
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    from app.connectors.executors.azure.delete_dns_record import execute as delete
+    return await delete(
+        {
+            "zone_name": execution_result.get("zone_name", parameters.get("zone_name")),
+            "record_name": execution_result.get("record_name", parameters.get("record_name")),
+            "resource_group": execution_result.get("resource_group", parameters.get("resource_group")),
+        },
+        [], connector,
+    )

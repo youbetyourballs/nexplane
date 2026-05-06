@@ -1,0 +1,9 @@
+{
+  "change_type": "azure_dns_record_create",
+  "display_name": "Create Azure DNS Record",
+  "steps": [{"generic_action": "create_dns_record", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_dns_record",
+  "rollback_connector_type": "azure"
+}
