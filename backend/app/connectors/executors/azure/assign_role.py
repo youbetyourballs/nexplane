@@ -33,17 +33,33 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         raise ValueError(f"Role '{role_name}' not found at scope '{scope}'")
     role_definition_id = roles[0].id
 
+    import time as _time
     assignment_id = str(uuid.uuid4())
-    await loop.run_in_executor(
-        None,
-        lambda: auth.role_assignments.create(
-            scope, assignment_id,
-            RoleAssignmentCreateParameters(
-                role_definition_id=role_definition_id,
-                principal_id=principal_id,
-            ),
-        ),
-    )
+    principal_type = parameters.get("principal_type", "ServicePrincipal")
+    # Retry to handle AAD replication delay after principal creation
+    last_exc = None
+    for attempt in range(6):
+        try:
+            await loop.run_in_executor(
+                None,
+                lambda: auth.role_assignments.create(
+                    scope, assignment_id,
+                    RoleAssignmentCreateParameters(
+                        role_definition_id=role_definition_id,
+                        principal_id=principal_id,
+                        principal_type=principal_type,
+                    ),
+                ),
+            )
+            break
+        except Exception as exc:
+            if "PrincipalNotFound" in str(exc) and attempt < 5:
+                await asyncio.sleep(15)
+                last_exc = exc
+            else:
+                raise
+    else:
+        raise last_exc
     return {
         "action": "assign_role",
         "assignment_id": assignment_id,
