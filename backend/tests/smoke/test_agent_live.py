@@ -835,6 +835,24 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
             timeout=300,
         )
 
+        # Rename computer so agent registers with expected name (takes effect for new processes via registry)
+        client._run_cr_with_timeout(
+            "[aws-windows] rename computer", "ssm_command", asset_id,
+            {"instance_id": win_id, "document_name": "AWS-RunPowerShellScript",
+             "command": (
+                 f"$name = 'nexplane-agent-smoke-aws-windows'; "
+                 f"Rename-Computer -NewName $name -Force -ErrorAction SilentlyContinue; "
+                 f"Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\ComputerName\\ComputerName' "
+                 f"-Name 'ComputerName' -Value $name; "
+                 f"Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\ComputerName\\ActiveComputerName' "
+                 f"-Name 'ComputerName' -Value $name; "
+                 f"[System.Environment]::SetEnvironmentVariable('COMPUTERNAME', $name, 'Machine'); "
+                 f"echo 'Renamed to nexplane-agent-smoke-aws-windows'"
+             ),
+             "rollback_strategy": "rollback_unavailable"},
+            timeout=60,
+        )
+
         # Install Nexplane Windows agent as a service via SSM PowerShell
         client._run_cr_with_timeout(
             "[aws-windows] install agent", "ssm_command", asset_id,
@@ -846,6 +864,7 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
                  f"Invoke-WebRequest \"https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com"
                  f"/nexplane-agent-windows-amd64-$v.exe\" "
                  f"-OutFile 'C:\\nexplane-agent.exe' -UseBasicParsing; "
+                 f"[System.Environment]::SetEnvironmentVariable('COMPUTERNAME', 'nexplane-agent-smoke-aws-windows', 'Process'); "
                  f"New-Service -Name 'NexplaneAgent' "
                  f"-BinaryPathName 'C:\\nexplane-agent.exe --control-plane {nexplane_url} "
                  f"--secret {agent_secret} --mode service' "
@@ -986,7 +1005,7 @@ def run_azure_windows_worker(base_url: str, email: str, password: str,
         client._run_cr_with_timeout(
             "[azure-windows] launch Windows VM", "azure_vm_create", cloud_account_id,
             {"vm_name": vm_name, "resource_group": azure_resource_group,
-             "location": "eastus", "vm_size": "Standard_B2s",
+             "location": "eastus2", "vm_size": "Standard_D2as_v7",
              "os": "windows", "connection_mode": "agent_extension",
              "nexplane_url": nexplane_url, "nexplane_secret": agent_secret,
              "tailscale_auth_key": tailscale_auth_key,
