@@ -11,10 +11,10 @@ def _get_rds_client(creds: dict):
 async def _real_execute(creds: dict, parameters: dict) -> dict:
     rds = _get_rds_client(creds)
     loop = asyncio.get_event_loop()
-    db_instance_id = parameters["db_instance_id"]
+    db_instance_id = parameters.get("db_instance_id") or parameters.get("db_instance_identifier", "")
     name = parameters.get("backup_name", "nexplane-rds-backup")
     retention = int(parameters.get("retention_days", 30))
-    snapshot_id = f"nexplane-{db_instance_id}-{int(time.time())}"
+    snapshot_id = parameters.get("snapshot_identifier") or f"nexplane-{db_instance_id}-{int(time.time())}"
 
     def _call():
         return rds.create_db_snapshot(

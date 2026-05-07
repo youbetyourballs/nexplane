@@ -44,7 +44,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             MasterUserPassword=password,
             AllocatedStorage=storage,
             PubliclyAccessible=False,
-            SkipFinalSnapshot=skip_final,
+            BackupRetentionPeriod=0,
             Tags=[{"Key": "ManagedBy", "Value": "nexplane"}],
         )
         waiter = rds.get_waiter('db_instance_available')
