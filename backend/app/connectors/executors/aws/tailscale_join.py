@@ -24,6 +24,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "set -e",
         "curl -fsSL https://tailscale.com/install.sh | sh",
         f"tailscale up --authkey={auth_key} --hostname={hostname} --accept-routes --accept-dns=false",
+        # Set OS hostname so agent registers with this name
+        f"hostnamectl set-hostname {hostname} 2>/dev/null || hostname {hostname} 2>/dev/null || true",
         "tailscale ip -4",
     ]
 

@@ -35,8 +35,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "Description=Nexplane Agent\\n"
         "After=network.target\\n\\n"
         "[Service]\\n"
-        f"Environment=NEXPLANE_URL={nexplane_url}\\n"
-        f"Environment=NEXPLANE_SECRET={nexplane_secret}\\n"
+        f"Environment=NP_CONTROL_PLANE={nexplane_url}\\n"
+        f"Environment=NP_SECRET={nexplane_secret}\\n"
         "ExecStart=/usr/local/bin/nexplane-agent\\n"
         "Restart=always\\n"
         "RestartSec=10\\n\\n"
@@ -61,13 +61,12 @@ cat > /etc/systemd/system/nexplane-agent.service << 'SYSTEMD_EOF'
 [Unit]
 Description=Nexplane Agent
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
-Environment=NEXPLANE_URL={nexplane_url}
-Environment=NEXPLANE_SECRET={nexplane_secret}
-ExecStart=/usr/local/bin/nexplane-agent
+ExecStart=/usr/local/bin/nexplane-agent -control-plane {nexplane_url} -secret {nexplane_secret} -mode service
 Restart=always
-RestartSec=10
+RestartSec=15
 
 [Install]
 WantedBy=multi-user.target

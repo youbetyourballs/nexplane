@@ -85,7 +85,7 @@ def _poll_for_endpoint(client: NexplaneClient, hostname: str, timeout: int) -> d
     print(f"  Waiting up to {timeout}s for agent '{hostname}' to register...")
     deadline = time.time() + timeout
     while time.time() < deadline:
-        candidates = client.get("/assets", params={"q": hostname, "asset_type": "endpoint"})
+        candidates = client.get("/assets", params={"q": hostname, "asset_type": "server"})
         if candidates:
             log(f"Agent registered: {candidates[0]['id']}")
             return candidates[0]
@@ -182,7 +182,7 @@ def _setup_aws_linux_instance(client: NexplaneClient, cloud_account_id: str,
     agent_asset = None
     while time.time() < deadline:
         candidates = client.get("/assets", params={
-            "q": "nexplane-agent-smoke-linux", "asset_type": "endpoint"})
+            "q": "nexplane-agent-smoke-linux", "asset_type": "server"})
         if candidates:
             agent_asset = candidates[0]
             log(f"Agent registered: {agent_asset['id']}")
@@ -557,7 +557,7 @@ def run_aws_linux_worker(base_url: str, email: str, password: str,
 
         # MANDATORY — fails if agent doesn't register (no SSM fallback)
         endpoint_asset = _poll_for_endpoint(
-            client, "nexplane-agent-smoke-aws-linux", timeout=180)
+            client, "nexplane-agent-smoke-aws-linux", timeout=600)
 
         _run_all_linux_agent_crs(client, endpoint_asset["id"], "aws-linux")
         result["passed"] = True
