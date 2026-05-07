@@ -1288,11 +1288,28 @@
         "database", 
         "cloud_account"
       ], 
-      "action_type": "change", 
-      "executor": "aws.delete_rds_snapshot", 
-      "generic_action": "delete_rds_snapshot", 
+      "action_type": "change",
+      "executor": "aws.delete_rds_snapshot",
+      "generic_action": "delete_rds_snapshot",
       "action_id": "delete_rds_snapshot"
-    }, 
+    },
+    {
+      "display_name": "Create RDS Snapshot",
+      "description": "Create a manual snapshot of an RDS DB instance.",
+      "parameters": [
+        {"required": true, "type": "string", "name": "db_instance_id"},
+        {"required": false, "type": "string", "name": "backup_name"},
+        {"required": false, "type": "integer", "name": "retention_days"}
+      ],
+      "execution_tier": 2,
+      "rollback_action": "delete_rds_snapshot",
+      "estimated_duration_seconds": 300,
+      "applicable_asset_types": ["database", "cloud_account"],
+      "action_type": "change",
+      "executor": "aws.create_rds_snapshot",
+      "generic_action": "create_rds_snapshot",
+      "action_id": "create_rds_snapshot"
+    },
     {
       "display_name": "Create CloudWatch Alarm", 
       "description": "Create a metric alarm in CloudWatch.", 
