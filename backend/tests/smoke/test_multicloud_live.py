@@ -252,7 +252,7 @@ def run_azure_worker(base_url: str, email: str, password: str,
         cr = client._run_cr_with_timeout(
             "[MC-AZ] launch Azure VM", "azure_vm_create", cloud_account_id,
             {"vm_name": vm_name, "resource_group": azure_resource_group,
-             "location": "eastus", "vm_size": "Standard_B1s",
+             "location": "eastus2", "vm_size": "Standard_D2as_v7",
              "connection_mode": "password",
              "admin_username": "nexplaneadmin", "admin_password": admin_password},
             timeout=TIMEOUT_SECONDS,
@@ -295,7 +295,7 @@ def run_azure_worker(base_url: str, email: str, password: str,
         cr = client._run_cr_with_timeout(
             "[MC-AZ] snapshot Azure VM", "azure_vm_snapshot", vm_asset["id"],
             {"vm_name": vm_name, "resource_group": azure_resource_group,
-             "snapshot_name": snap_name, "location": "eastus"},
+             "snapshot_name": snap_name, "location": "eastus2"},
             timeout=TIMEOUT_SECONDS,
         )
         rollback_stack.append((cr["id"], "azure_vm_snapshot"))
