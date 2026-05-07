@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-async def _get_aws_env(connector) -> dict:
+async def _get_env(connector) -> dict:
     creds = getattr(connector, 'credentials', {}) or {}
     env = {**os.environ}
     if creds.get('access_key_id'):
@@ -15,7 +15,27 @@ async def _get_aws_env(connector) -> dict:
         env['AWS_DEFAULT_REGION'] = creds.get('region', 'us-east-1')
         if creds.get('session_token'):
             env['AWS_SESSION_TOKEN'] = creds['session_token']
+    if creds.get('client_id') and creds.get('tenant_id'):
+        env['ARM_CLIENT_ID'] = creds['client_id']
+        env['ARM_CLIENT_SECRET'] = creds.get('client_secret', '')
+        env['ARM_TENANT_ID'] = creds['tenant_id']
+        env['ARM_SUBSCRIPTION_ID'] = creds.get('subscription_id', '')
+    if creds.get('project_id') and creds.get('service_account_key_json'):
+        import json as _json
+        import tempfile as _tempfile
+        key_data = creds['service_account_key_json']
+        if isinstance(key_data, str):
+            key_data = _json.loads(key_data)
+        sa_file = _tempfile.NamedTemporaryFile(suffix='.json', delete=False, mode='w')
+        _json.dump(key_data, sa_file)
+        sa_file.close()
+        env['GOOGLE_APPLICATION_CREDENTIALS'] = sa_file.name
+        env['GOOGLE_PROJECT'] = creds['project_id']
     return env
+
+
+async def _get_aws_env(connector) -> dict:
+    return await _get_env(connector)
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
@@ -31,7 +51,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "mock": True,
         }
 
-    env = await _get_aws_env(connector)
+    env = await _get_env(connector)
     loop = asyncio.get_event_loop()
 
     def _run():
@@ -50,7 +70,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
         plan_result = subprocess.run(
             ["terraform", "plan", "-no-color", f"-out={plan_file}"],
-            cwd=work_dir, env=env, capture_output=True, text=True, timeout=180,
+            cwd=work_dir, env=env, capture_output=True, text=True, timeout=600,
         )
         if plan_result.returncode != 0:
             raise RuntimeError(f"terraform plan failed:\n{plan_result.stderr}")
