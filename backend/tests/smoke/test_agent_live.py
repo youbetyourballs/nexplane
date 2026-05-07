@@ -801,7 +801,7 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
         client._run_cr_with_timeout(
             "[aws-windows] launch Windows EC2", "ec2_launch", cloud_account_id,
             {"mode": "quick", "name": instance_name, "os": "windows",
-             "ami_id": win_ami, "instance_type": "t3.medium",
+             "ami_id": win_ami, "instance_type": "t3.micro",
              "iam_instance_profile": "NexplaneEC2TestProfile",
              "key_name": win_key_name, "rollback_strategy": "terminate_instance"},
             timeout=600,
