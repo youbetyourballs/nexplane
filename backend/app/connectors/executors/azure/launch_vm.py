@@ -171,7 +171,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         image_reference_obj = _ImageRef(
             publisher="MicrosoftWindowsServer",
             offer="WindowsServer",
-            sku="2022-datacenter-smalldisk",
+            sku="2022-datacenter-smalldisk-g2",
             version="latest",
         )
         os_profile = OsProfile(
