@@ -245,6 +245,29 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         ).result(),
     )
 
+    # Wait for VM to reach running state (start it if deallocated)
+    import time as _time
+    _vm_running = False
+    _started = False
+    _deadline = _time.monotonic() + 300
+    while _time.monotonic() < _deadline:
+        vm_view = await loop.run_in_executor(
+            None, lambda: compute.virtual_machines.get(resource_group, vm_name, expand="instanceView")
+        )
+        _iview = vm_view.instance_view
+        statuses = {s.code for s in (_iview.statuses if _iview and _iview.statuses else []) if s.code}
+        if "PowerState/running" in statuses:
+            _vm_running = True
+            break
+        if "PowerState/deallocated" in statuses and not _started:
+            await loop.run_in_executor(
+                None, lambda: compute.virtual_machines.begin_start(resource_group, vm_name).result()
+            )
+            _started = True
+        await asyncio.sleep(15)
+    if not _vm_running:
+        raise RuntimeError(f"VM {vm_name} did not reach running state within 5 minutes")
+
     # Deploy Custom Script Extension for agent_extension mode
     if connection_mode == "agent_extension":
         from azure.mgmt.compute.models import VirtualMachineExtension, VirtualMachineExtensionProperties
