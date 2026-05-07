@@ -879,7 +879,7 @@ def run_phase_y(client: NexplaneClient, cloud_account_id: str, azure_resource_gr
         cr = client._run_cr_with_timeout(
             "[Phase Y] create SQL server", "azure_sql_server_create", cloud_account_id,
             {"server_name": server_name, "resource_group": azure_resource_group,
-             "location": "eastus", "admin_login": "nexplaneadmin",
+             "location": "eastus2", "admin_login": "nexplaneadmin",
              "admin_password": admin_password},
             timeout=600,
         )
@@ -896,7 +896,7 @@ def run_phase_y(client: NexplaneClient, cloud_account_id: str, azure_resource_gr
         cr = client._run_cr_with_timeout(
             "[Phase Y] create SQL database", "azure_sql_database_create", cloud_account_id,
             {"server_name": server_name, "database_name": db_name,
-             "resource_group": azure_resource_group, "location": "eastus",
+             "resource_group": azure_resource_group, "location": "eastus2",
              "sku_name": "Basic"},
             timeout=300,
         )
