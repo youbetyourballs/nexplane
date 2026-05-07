@@ -682,7 +682,7 @@ def run_azure_linux_worker(base_url: str, email: str, password: str,
         client._run_cr_with_timeout(
             "[azure-linux] launch Azure VM", "azure_vm_create", cloud_account_id,
             {"vm_name": vm_name, "resource_group": azure_resource_group,
-             "location": "eastus", "vm_size": "Standard_B1s",
+             "location": "eastus2", "vm_size": "Standard_D2as_v7",
              "connection_mode": "agent_extension", "nexplane_url": nexplane_url,
              "nexplane_secret": agent_secret, "tailscale_auth_key": tailscale_auth_key},
             timeout=600,

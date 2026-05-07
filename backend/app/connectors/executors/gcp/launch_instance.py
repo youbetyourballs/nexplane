@@ -15,10 +15,12 @@ cat > /etc/systemd/system/nexplane-agent.service <<EOF
 [Unit]
 Description=Nexplane Agent
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=/usr/local/bin/nexplane-agent --control-plane $NEXPLANE_URL --secret $NEXPLANE_SECRET --mode service
-Restart=on-failure
+Restart=always
+RestartSec=15
 
 [Install]
 WantedBy=multi-user.target
