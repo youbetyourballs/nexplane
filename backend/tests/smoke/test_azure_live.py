@@ -47,8 +47,9 @@ from smoke_helpers import (
 
 def _get_azure_creds() -> dict:
     """Return the Azure credentials dict, populating cache if needed."""
-    _get_azure_compute_client()  # side effect: populates _azure_creds_cache
-    return _azure_creds_cache
+    import smoke_helpers as _sh
+    _get_azure_compute_client()  # side effect: populates smoke_helpers._azure_creds_cache
+    return _sh._azure_creds_cache
 
 
 # ---------------------------------------------------------------------------

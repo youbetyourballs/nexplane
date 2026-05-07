@@ -268,6 +268,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not _vm_running:
         raise RuntimeError(f"VM {vm_name} did not reach running state within 5 minutes")
 
+    extension_status = "skipped"
     # Deploy Custom Script Extension for agent_extension mode
     if connection_mode == "agent_extension":
         from azure.mgmt.compute.models import VirtualMachineExtension, VirtualMachineExtensionProperties
@@ -287,13 +288,17 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                 auto_upgrade_minor_version=True,
                 settings={"commandToExecute": f"powershell -EncodedCommand {script_b64}"},
             )
-            await loop.run_in_executor(
-                None,
-                lambda: compute.virtual_machine_extensions.begin_create_or_update(
-                    resource_group, vm_name, "NexplaneAgentInstall",
-                    VirtualMachineExtension(location=location, properties=ext_props),
-                ).result(),
-            )
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: compute.virtual_machine_extensions.begin_create_or_update(
+                        resource_group, vm_name, "NexplaneAgentInstall",
+                        VirtualMachineExtension(location=location, properties=ext_props),
+                    ).result(),
+                )
+                extension_status = "installed"
+            except Exception:
+                extension_status = "failed"
         else:
             startup_script = _AGENT_STARTUP_SCRIPT.format(
                 nexplane_url=nexplane_url,
@@ -319,13 +324,17 @@ tailscale up --authkey="{tailscale_auth_key}" --hostname="{vm_name}" --accept-ro
                 auto_upgrade_minor_version=True,
                 settings={"script": script_b64},
             )
-            await loop.run_in_executor(
-                None,
-                lambda: compute.virtual_machine_extensions.begin_create_or_update(
-                    resource_group, vm_name, "NexplaneAgentInstall",
-                    VirtualMachineExtension(location=location, properties=ext_props),
-                ).result(),
-            )
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: compute.virtual_machine_extensions.begin_create_or_update(
+                        resource_group, vm_name, "NexplaneAgentInstall",
+                        VirtualMachineExtension(location=location, properties=ext_props),
+                    ).result(),
+                )
+                extension_status = "installed"
+            except Exception:
+                extension_status = "failed"
 
     # Get public IP (assigned after creation)
     public_ip = ""
@@ -346,6 +355,7 @@ tailscale up --authkey="{tailscale_auth_key}" --hostname="{vm_name}" --accept-ro
         "location": location,
         "connection_mode": connection_mode,
         "public_ip": public_ip,
+        "extension_status": extension_status,
         "executed_at": datetime.now(timezone.utc).isoformat(),
         "_auto_asset": auto_asset,
     }
