@@ -69,7 +69,9 @@ class NexplaneClient:
         assets = self.get("/assets", params={"asset_type": "cloud_account"})
         if not assets:
             fail("No cloud_account asset found — run EC2 discovery on the AWS connector first")
-        return assets[0]["id"]
+        # Prefer connector-linked (live) assets over unlinked demo/seed assets
+        linked = [a for a in assets if a.get("connector_id")]
+        return (linked[0] if linked else assets[0])["id"]
 
     def get_connector_cloud_account_id(self, connector_type: str) -> str:
         """Return the cloud_account asset ID for the given connector type (aws, gcp, azure)."""

@@ -1906,10 +1906,23 @@ def run_phase_w(client: NexplaneClient, cloud_account_id: str, phase_a_result: d
         # Pop register_targets from rollback stack (already deregistered via explicit CR)
         rollback_stack.pop(2)
 
-        health_after = elbv2.describe_target_health(TargetGroupArn=tg_arn)
-        remaining = [t["Target"]["Id"] for t in health_after["TargetHealthDescriptions"]]
-        assert instance_id not in remaining, \
-            f"Instance {instance_id} still registered after deregister: {remaining}"
+        # AWS deregistration is async — targets enter "draining" state before removal.
+        # Poll until the target is gone or in "unused" state (up to 30s).
+        import time as _time
+        for _ in range(6):
+            health_after = elbv2.describe_target_health(TargetGroupArn=tg_arn)
+            remaining = [
+                t["Target"]["Id"] for t in health_after["TargetHealthDescriptions"]
+                if t.get("TargetHealth", {}).get("State") not in ("unused", "draining")
+            ]
+            if instance_id not in remaining:
+                break
+            _time.sleep(5)
+        else:
+            health_after = elbv2.describe_target_health(TargetGroupArn=tg_arn)
+            remaining = [t["Target"]["Id"] for t in health_after["TargetHealthDescriptions"]]
+            assert instance_id not in remaining, \
+                f"Instance {instance_id} still registered after deregister: {remaining}"
         log("Target deregistered and verified (boto3 describe_target_health)")
 
         log("Phase W complete")

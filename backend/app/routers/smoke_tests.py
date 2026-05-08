@@ -33,9 +33,9 @@ SUITES = [
         "id": "aws",
         "name": "AWS",
         "file": "test_aws_live.py",
-        "default_phases": "A,B,C,D,E,F,G,H,I,K,P,Q,R,T",
+        "default_phases": "A,B,C,D,E,F,G,H,I,K,P,Q,R,T,U,V,W",
         "slow_phases": "J,S",
-        "description": "EC2, IAM, S3, Route53, CloudWatch, RDS, agent lifecycle",
+        "description": "EC2, IAM, S3, Route53, CloudWatch, RDS, ALB, agent lifecycle",
     },
     {
         "id": "gcp",
@@ -49,9 +49,9 @@ SUITES = [
         "id": "azure",
         "name": "Azure",
         "file": "test_azure_live.py",
-        "default_phases": "N,O,P,Q,R,S,T",
+        "default_phases": "N,O,P,Q,R,S,T,U,V,W,X,Y,Z",
         "slow_phases": "",
-        "description": "Azure VM, NSG, blob storage, Terraform, Ansible",
+        "description": "Azure VM, NSG, blob storage, managed identity, RBAC, VNet, DNS, SQL, Monitor alerts, Terraform, Ansible",
     },
     {
         "id": "agent",
