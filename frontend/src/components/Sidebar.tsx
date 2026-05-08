@@ -27,13 +27,13 @@ const navItems = [
   { to: "/approvals", label: "Approvals Queue", icon: CheckSquare },
   { to: "/assets", label: "Asset Inventory", icon: Server },
   { to: "/connectors", label: "Connectors", icon: Plug },
-  { to: "/smoke-tests", label: "Smoke Tests", icon: FlaskConical },
   { to: "/remediation", label: "Vuln Remediation", icon: Bug },
   { to: "/compliance", label: "Compliance", icon: ClipboardList },
   { to: "/access-reviews", label: "Access Reviews", icon: ShieldCheck },
   { to: "/backup-recovery", label: "Backup & Recovery", icon: HardDrive },
   { to: "/maintenance-windows", label: "Maintenance Windows", icon: Clock },
   { to: "/scheduled-operations", label: "Scheduled Ops", icon: CalendarClock },
+  { to: "/smoke-tests", label: "Smoke Tests", icon: FlaskConical },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
