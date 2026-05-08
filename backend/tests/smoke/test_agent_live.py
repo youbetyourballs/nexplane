@@ -818,73 +818,47 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
         print("  [aws-windows] Waiting 5 min for Windows SSM agent...")
         time.sleep(300)
 
-        # Install Tailscale via SSM PowerShell
-        client._run_cr_with_timeout(
-            "[aws-windows] install Tailscale", "ssm_command", asset_id,
-            {"instance_id": win_id, "document_name": "AWS-RunPowerShellScript",
-             "command": (
-                 f"$ts = '$env:TEMP\\ts-setup.exe'; "
-                 f"Invoke-WebRequest 'https://pkgs.tailscale.com/stable/tailscale-setup.exe' "
-                 f"-OutFile $ts -UseBasicParsing; "
-                 f"Start-Process $ts -Args '/S' -Wait; Start-Sleep 10; "
-                 f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up "
-                 f"--authkey='{tailscale_auth_key}' "
-                 f"--hostname='nexplane-agent-smoke-aws-windows' --accept-routes"
-             ),
-             "rollback_strategy": "rollback_unavailable"},
-            timeout=300,
-        )
-
-        # Rename computer so agent registers with expected name (takes effect for new processes via registry)
-        client._run_cr_with_timeout(
-            "[aws-windows] rename computer", "ssm_command", asset_id,
-            {"instance_id": win_id, "document_name": "AWS-RunPowerShellScript",
-             "command": (
-                 f"$name = 'nexplane-agent-smoke-aws-windows'; "
-                 f"Rename-Computer -NewName $name -Force -ErrorAction SilentlyContinue; "
-                 f"Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\ComputerName\\ComputerName' "
-                 f"-Name 'ComputerName' -Value $name; "
-                 f"Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\ComputerName\\ActiveComputerName' "
-                 f"-Name 'ComputerName' -Value $name; "
-                 f"[System.Environment]::SetEnvironmentVariable('COMPUTERNAME', $name, 'Machine'); "
-                 f"echo 'Renamed to nexplane-agent-smoke-aws-windows'"
-             ),
-             "rollback_strategy": "rollback_unavailable"},
-            timeout=60,
-        )
-
-        # Step 1: Download agent binary
+        # Step 0: Download agent binary BEFORE Tailscale (test if Tailscale interferes)
         client._run_cr_with_timeout(
             "[aws-windows] download agent", "ssm_command", asset_id,
             {"instance_id": win_id, "document_name": "AWS-RunPowerShellScript",
              "command": (
-                 f"$wc = New-Object System.Net.WebClient; "
-                 f"$v = $wc.DownloadString('https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/version').Trim(); "
-                 f"$wc.DownloadFile(\"https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/nexplane-agent-windows-amd64-${{v}}.exe\", 'C:\\nexplane-agent.exe'); "
-                 f"Write-Host 'Downloaded nexplane-agent.exe'"
+                 f"$ProgressPreference = 'SilentlyContinue'; "
+                 f"Invoke-WebRequest -Uri 'https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/version' -OutFile 'C:\\np-ver.txt' -UseBasicParsing; "
+                 f"$v = (Get-Content 'C:\\np-ver.txt').Trim(); "
+                 f"Write-Host ('Downloading version: ' + $v); "
+                 f"$url = \"https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/nexplane-agent-windows-amd64-${{v}}.exe\"; "
+                 f"Invoke-WebRequest -Uri $url -OutFile 'C:\\nexplane-agent.exe' -UseBasicParsing; "
+                 f"Write-Host ('Downloaded: ' + (Get-Item 'C:\\nexplane-agent.exe').Length + ' bytes')"
              ),
              "rollback_strategy": "rollback_unavailable"},
             timeout=300,
         )
 
-        # Step 2: Register and start service (separate command to avoid pipeline overflow)
+        # Combined: Install Tailscale + agent service in ONE SSM command (avoids SSM state issues)
         client._run_cr_with_timeout(
-            "[aws-windows] install agent", "ssm_command", asset_id,
+            "[aws-windows] install Tailscale and agent", "ssm_command", asset_id,
             {"instance_id": win_id, "document_name": "AWS-RunPowerShellScript",
              "command": (
-                 f"$svcKey = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NexplaneAgent'; "
-                 f"New-Item -Path $svcKey -Force | Out-Null; "
-                 f"Set-ItemProperty -Path $svcKey -Name 'ImagePath' -Value '\"C:\\nexplane-agent.exe\" --control-plane {nexplane_url} --secret {agent_secret} --mode service'; "
-                 f"Set-ItemProperty -Path $svcKey -Name 'Type' -Value 16; "
-                 f"Set-ItemProperty -Path $svcKey -Name 'Start' -Value 2; "
-                 f"Set-ItemProperty -Path $svcKey -Name 'ErrorControl' -Value 1; "
-                 f"Set-ItemProperty -Path $svcKey -Name 'ObjectName' -Value 'LocalSystem'; "
-                 f"Set-ItemProperty -Path $svcKey -Name 'Environment' -Value ([string[]]@('NP_HOSTNAME=nexplane-agent-smoke-aws-windows')); "
-                 f"[System.ServiceProcess.ServiceController]::new('NexplaneAgent').Start(); "
-                 f"Write-Host 'Agent service started'"
+                 f"$ProgressPreference = 'SilentlyContinue'; "
+                 f"Invoke-WebRequest 'https://pkgs.tailscale.com/stable/tailscale-setup-1.96.3.exe' -OutFile 'C:\\ts-setup.exe' -UseBasicParsing; "
+                 f"Start-Process 'C:\\ts-setup.exe' -Args '/S' -Wait; "
+                 f"Start-Sleep 20; "
+                 f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey='{tailscale_auth_key}' --hostname='nexplane-agent-smoke-aws-windows' --accept-routes; "
+                 f"if ($LASTEXITCODE -ne 0) {{ Write-Host ('Tailscale up failed: ' + $LASTEXITCODE); exit 1 }}; "
+                 f"Write-Host 'Tailscale joined'; "
+                 f"Set-Content -Path C:\\np-agent.bat -Value '@echo off' -Encoding ASCII; "
+                 f"Add-Content -Path C:\\np-agent.bat -Value 'set NP_HOSTNAME=nexplane-agent-smoke-aws-windows' -Encoding ASCII; "
+                 f"Add-Content -Path C:\\np-agent.bat -Value 'C:\\nexplane-agent.exe --control-plane {nexplane_url} --secret {agent_secret} --mode service' -Encoding ASCII; "
+                 f"schtasks /create /tn NexplaneAgent /tr C:\\np-agent.bat /sc onstart /ru SYSTEM /rl HIGHEST /f; "
+                 f"schtasks /run /tn NexplaneAgent; "
+                 f"Start-Sleep 60; "
+                 f"$taskStatus = schtasks /query /tn NexplaneAgent /fo LIST 2>&1; "
+                 f"Write-Host ('Task status: ' + $taskStatus); "
+                 f"echo 'Agent task started'"
              ),
              "rollback_strategy": "rollback_unavailable"},
-            timeout=120,
+            timeout=600,
         )
 
         # MANDATORY — 10 min polling for Windows

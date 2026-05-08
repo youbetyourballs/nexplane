@@ -27,6 +27,12 @@ async def _real_execute(creds: dict, parameters: dict) -> dict:
         return {"command_id": command_id, "status": "timeout"}
 
     result = await loop.run_in_executor(None, _call)
+    if result.get("status") not in ("Success", "timeout"):
+        stdout = result.get("stdout", "")
+        stderr = result.get("stderr", "")
+        raise RuntimeError(
+            f"SSM command failed ({result.get('status')}): {stderr or stdout or 'no output'}"
+        )
     return {"action": "run_ssm_command", "instance_id": instance_id, "document_name": document_name, "executed_at": datetime.now(timezone.utc).isoformat(), **result}
 
 
