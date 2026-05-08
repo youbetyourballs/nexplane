@@ -28,7 +28,17 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                 "labels": dict(inst.labels),
                 "service_account": inst.service_accounts[0].email if inst.service_accounts else None,
             })
-    return {"action": "discover_compute_instances", "instances": instances, "count": len(instances)}
+    return {
+        "action": "discover_compute_instances",
+        "instances": instances,
+        "count": len(instances),
+        "_auto_asset": {
+            "name": f"GCP · {project} (Google Cloud Platform)",
+            "asset_type": "cloud_account",
+            "asset_metadata": {"project_id": project, "provider": "gcp"},
+            "tags": ["gcp", "cloud-account", "live"],
+        },
+    }
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
