@@ -448,6 +448,7 @@ export function Assets() {
                   <input type="checkbox"
                     checked={selected.size === (sortedAssets.length) && sortedAssets.length > 0}
                     onChange={toggleSelectAll}
+                    aria-label="Select all assets"
                     className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                   />
                 </th>
@@ -483,6 +484,7 @@ export function Assets() {
                       checked={selected.has(asset.id)}
                       onChange={() => toggleSelected(asset.id)}
                       onClick={(e) => e.stopPropagation()}
+                      aria-label={`Select asset "${asset.name}"`}
                       className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                     />
                   </td>
@@ -504,7 +506,7 @@ export function Assets() {
                   <td className="py-2.5 pr-4 text-slate-400 text-xs">
                     {asset.created_at ? new Date(asset.created_at).toLocaleDateString() : "—"}
                   </td>
-                  <td className="py-2.5 text-slate-400 text-xs">{(asset as any).connector_name ?? (asset as any).connector_type ?? "—"}</td>
+                  <td className="py-2.5 text-slate-400 text-xs">{asset.connector_name ?? asset.connector_type ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
