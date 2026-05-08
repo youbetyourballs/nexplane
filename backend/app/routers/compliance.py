@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.asset import Asset
+from app.compliance.cis_v8_map import compute_cis_summary
+from app.models.asset import Asset, AssetType
 from app.models.change_request import ChangeRequest, ChangeRequestStatus
 from app.models.compliance import ComplianceBaseline, ChangeFreezeWindow
 from app.routers import current_user
@@ -22,6 +23,7 @@ from app.schemas.compliance import (
     ComplianceBaselineUpdate,
     ChangeFreezeWindowCreate,
     ChangeFreezeWindowRead,
+    CisSummaryResponse,
     EvidenceCollectionRequest,
 )
 
@@ -321,3 +323,33 @@ async def delete_freeze_window(
         raise HTTPException(status_code=404, detail="Freeze window not found")
     await db.delete(freeze)
     await db.commit()
+
+
+# ---- CIS Controls v8 summary ----
+
+@router.get("/cis-summary", response_model=CisSummaryResponse)
+async def get_cis_summary(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the 18-control CIS Controls v8 compliance summary for the org."""
+    result = await db.execute(
+        select(Asset).where(
+            Asset.organization_id == user.organization_id,
+            Asset.asset_type == AssetType.server,
+        )
+    )
+    assets = result.scalars().all()
+
+    asset_dicts = [
+        {
+            "id": str(a.id),
+            "name": a.name,
+            "connector_id": str(a.connector_id) if a.connector_id else None,
+            "asset_metadata": a.asset_metadata or {},
+        }
+        for a in assets
+    ]
+
+    summary = compute_cis_summary(asset_dicts)
+    return CisSummaryResponse(**summary)
