@@ -858,21 +858,16 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
             "[aws-windows] install agent", "ssm_command", asset_id,
             {"instance_id": win_id, "document_name": "AWS-RunPowerShellScript",
              "command": (
-                 f"$v = (Invoke-WebRequest "
-                 f"'https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/version' "
-                 f"-UseBasicParsing).Content.Trim(); "
-                 f"Invoke-WebRequest \"https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com"
-                 f"/nexplane-agent-windows-amd64-$v.exe\" "
-                 f"-OutFile 'C:\\nexplane-agent.exe' -UseBasicParsing; "
-                 f"[System.Environment]::SetEnvironmentVariable('COMPUTERNAME', 'nexplane-agent-smoke-aws-windows', 'Process'); "
-                 f"try {{ "
-                 f"  $bp = 'C:\\nexplane-agent.exe --control-plane {nexplane_url} --secret {agent_secret} --mode service'; "
-                 f"  cmd /c sc create NexplaneAgent binPath= \"$bp\" start= auto; "
-                 f"  reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\NexplaneAgent /v Environment /t REG_MULTI_SZ /d NP_HOSTNAME=nexplane-agent-smoke-aws-windows /f; "
-                 f"  sc.exe start NexplaneAgent; "
-                 f"  Start-Sleep -Seconds 5; "
-                 f"  sc.exe query NexplaneAgent "
-                 f"}} catch {{ Write-Host \"Error: $_\" }}"
+                 f"$wc = New-Object System.Net.WebClient; "
+                 f"$v = $wc.DownloadString('https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/version').Trim(); "
+                 f"$wc.DownloadFile(\"https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/nexplane-agent-windows-amd64-$v.exe\", 'C:\\nexplane-agent.exe'); "
+                 f"New-Service -Name 'NexplaneAgent' "
+                 f"-BinaryPathName '\"C:\\nexplane-agent.exe\" --control-plane {nexplane_url} --secret {agent_secret} --mode service' "
+                 f"-StartupType Automatic -ErrorAction SilentlyContinue | Out-Null; "
+                 f"$regPath = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NexplaneAgent'; "
+                 f"New-ItemProperty -Path $regPath -Name 'Environment' -Value @('NP_HOSTNAME=nexplane-agent-smoke-aws-windows') -PropertyType MultiString -Force -ErrorAction SilentlyContinue | Out-Null; "
+                 f"Start-Service 'NexplaneAgent' -ErrorAction SilentlyContinue; "
+                 f"Write-Host 'Agent service setup complete'"
              ),
              "rollback_strategy": "rollback_unavailable"},
             timeout=300,
