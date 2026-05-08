@@ -25,8 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.asset import Asset
-from app.routers import current_user
-from app.models.user import User
+from app.routers import current_user, require_roles
+from app.models.user import User, UserRole
 
 router = APIRouter(prefix="/smoke-tests", tags=["Smoke Tests"])
 
@@ -295,7 +295,7 @@ async def cleanup_preview(
             {
                 "id": str(a.id),
                 "name": a.name,
-                "asset_type": a.asset_type.value if hasattr(a.asset_type, "value") else str(a.asset_type),
+                "asset_type": a.asset_type.value,
                 "created_at": a.created_at.isoformat() if a.created_at else None,
             }
             for a in assets
@@ -305,18 +305,18 @@ async def cleanup_preview(
 
 @router.delete("/cleanup-inventory")
 async def cleanup_inventory(
-    user: User = Depends(current_user),
+    user: User = Depends(require_roles(UserRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk-delete all org assets whose name contains 'nexplane-smoke'."""
+    from sqlalchemy import delete as sa_delete
     result = await db.execute(
-        select(Asset).where(
+        sa_delete(Asset)
+        .where(
             Asset.organization_id == user.organization_id,
             Asset.name.ilike("%nexplane-smoke%"),
         )
+        .execution_options(synchronize_session=False)
     )
-    assets = result.scalars().all()
-    for asset in assets:
-        await db.delete(asset)
     await db.commit()
-    return {"deleted": len(assets)}
+    return {"deleted": result.rowcount}
