@@ -39,9 +39,19 @@ async def _real_execute(creds: dict) -> list:
     return results
 
 
-async def execute(parameters: dict, asset_ids: list, connector) -> list:
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})
-    if not creds:
-        return []
-    return await _real_execute(creds)
+    assets = await _real_execute(creds) if creds else []
+    subscription_id = (creds or {}).get("subscription_id", "unknown")
+    short_id = subscription_id[:8] if subscription_id != "unknown" else "unknown"
+    return {
+        "action": "discover_vms",
+        "assets": assets,
+        "_auto_asset": {
+            "name": f"Azure · {short_id} (Microsoft Azure)",
+            "asset_type": "cloud_account",
+            "asset_metadata": {"subscription_id": subscription_id, "provider": "azure"},
+            "tags": ["azure", "cloud-account", "live"],
+        },
+    }
 

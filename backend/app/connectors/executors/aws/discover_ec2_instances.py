@@ -58,10 +58,10 @@ async def _real_execute(creds: dict) -> dict:
         "action": "discover_ec2_instances",
         "assets": assets,
         "_auto_asset": {
-            "name": f"AWS Account {account_id}",
+            "name": f"AWS · {account_id} (Amazon Web Services)",
             "asset_type": "cloud_account",
             "asset_metadata": {"account_id": account_id, "provider": "aws", "region": creds.get("region", "us-east-1")},
-            "tags": [],
+            "tags": ["aws", "cloud-account", "live"],
         },
         "discovered_at": datetime.now(timezone.utc).isoformat(),
     }
