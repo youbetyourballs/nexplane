@@ -5,7 +5,9 @@ def test_discover_vms_mock_returns_empty():
     import asyncio
     from app.connectors.executors.azure.discover_vms import execute
     result = asyncio.run(execute({}, [], None))
-    assert result == []
+    assert result["action"] == "discover_vms"
+    assert result["assets"] == []
+    assert result["_auto_asset"]["asset_type"] == "cloud_account"
 
 
 def test_deallocate_vm_mock():
