@@ -16,6 +16,7 @@ import {
   smokeTestsApi,
   type SmokeTestSuite,
   type RunConfig,
+  type CleanupAsset,
 } from "../api/smokeTestsApi";
 
 // ---------------------------------------------------------------------------
@@ -341,6 +342,105 @@ function SuiteCard({ suite, onRun, activeRunId }: SuiteCardProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Cleanup Modal
+// ---------------------------------------------------------------------------
+
+function CleanupModal({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient();
+
+  const { data: preview, isLoading: isLoadingPreview, isError: isPreviewError } = useQuery({
+    queryKey: ["smoke-cleanup-preview"],
+    queryFn: smokeTestsApi.getCleanupPreview,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: smokeTestsApi.executeCleanup,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["smoke-cleanup-preview"] });
+    },
+  });
+
+  const isEmpty = !isLoadingPreview && !isPreviewError && preview?.count === 0;
+  const isDone = deleteMutation.isSuccess;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-navy-light border border-navy-border rounded-xl w-full max-w-lg mx-4 p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-white font-semibold text-base">Clean Up Inventory</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+        </div>
+
+        {isLoadingPreview && (
+          <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Scanning inventory…
+          </div>
+        )}
+
+        {isPreviewError && (
+          <p className="text-red-400 text-sm">Failed to load preview — please try again.</p>
+        )}
+
+        {isEmpty && (
+          <p className="text-slate-400 text-sm py-2">
+            No smoke test assets found — inventory is clean.
+          </p>
+        )}
+
+        {isDone && (
+          <p className="text-green-400 text-sm py-2">
+            Deleted {deleteMutation.data?.deleted ?? 0} asset{deleteMutation.data?.deleted !== 1 ? "s" : ""}.
+          </p>
+        )}
+
+        {!isLoadingPreview && !isPreviewError && !isEmpty && !isDone && preview && (
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            <p className="text-slate-400 text-xs mb-2">
+              {preview.count} asset{preview.count !== 1 ? "s" : ""} will be removed from the inventory:
+            </p>
+            {preview.assets.map((a: CleanupAsset) => (
+              <div key={a.id} className="flex items-center justify-between px-3 py-1.5 bg-navy rounded-lg text-xs">
+                <span className="text-white font-mono">{a.name}</span>
+                <span className="text-slate-400">{a.asset_type}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {deleteMutation.isError && (
+          <p className="text-red-400 text-sm">Deletion failed — please try again.</p>
+        )}
+
+        <div className="flex justify-end gap-3 pt-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-slate-300 hover:text-white transition-colors"
+          >
+            {isDone ? "Close" : "Cancel"}
+          </button>
+          {!isEmpty && !isDone && (
+            <button
+              onClick={() => deleteMutation.mutate()}
+              disabled={isLoadingPreview || deleteMutation.isPending || !preview}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {deleteMutation.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : null}
+              Delete {preview?.count ?? "…"} asset{preview?.count !== 1 ? "s" : ""}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Page
 // ---------------------------------------------------------------------------
 
@@ -348,6 +448,7 @@ export function SmokeTests() {
   const queryClient = useQueryClient();
   const [modalSuite, setModalSuite] = useState<SmokeTestSuite | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [showCleanupModal, setShowCleanupModal] = useState(false);
 
   const { data: suites, isLoading } = useQuery({
     queryKey: ["smoke-tests-suites"],
@@ -389,10 +490,18 @@ export function SmokeTests() {
 
   return (
     <div className="max-w-5xl mx-auto py-8 px-6 space-y-6">
-      <PageHeader
-        title="Smoke Tests"
-        subtitle="Live end-to-end connector verification against real cloud infrastructure"
-      />
+      <div className="flex items-start justify-between">
+        <PageHeader
+          title="Smoke Tests"
+          subtitle="Live end-to-end connector verification against real cloud infrastructure"
+        />
+        <button
+          onClick={() => setShowCleanupModal(true)}
+          className="shrink-0 mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white text-xs font-medium rounded-lg transition-colors"
+        >
+          Clean Up Inventory
+        </button>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {(suites ?? []).map((suite) => (
@@ -416,6 +525,9 @@ export function SmokeTests() {
           onRun={handleRun}
           isRunning={runMutation.isPending}
         />
+      )}
+      {showCleanupModal && (
+        <CleanupModal onClose={() => setShowCleanupModal(false)} />
       )}
     </div>
   );
