@@ -444,12 +444,19 @@ export function Assets() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left border-b border-slate-200">
+                <th className="py-2 pr-4 w-8">
+                  <input type="checkbox"
+                    checked={selected.size === (sortedAssets.length) && sortedAssets.length > 0}
+                    onChange={toggleSelectAll}
+                    className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                  />
+                </th>
                 {[
                   { key: "name", label: "Name" },
                   { key: "asset_type", label: "Type" },
                   { key: "environment", label: "Environment" },
                   { key: "criticality", label: "Criticality" },
-                  { key: "updated_at", label: "Last Updated" },
+                  { key: "created_at", label: "Created" },
                 ].map(({ key, label }) => (
                   <th
                     key={key}
@@ -471,6 +478,14 @@ export function Assets() {
                   className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
                   onClick={() => navigate(`/assets/${asset.id}`)}
                 >
+                  <td className="py-2.5 pr-4 w-8">
+                    <input type="checkbox"
+                      checked={selected.has(asset.id)}
+                      onChange={() => toggleSelected(asset.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                  </td>
                   <td className="py-2.5 pr-4 font-medium text-slate-900">
                     <span className="mr-2">{ASSET_TYPE_ICONS[asset.asset_type as AssetType] ?? "📦"}</span>
                     {asset.name}
@@ -487,9 +502,9 @@ export function Assets() {
                     <RiskBadge level={asset.criticality} size="sm" />
                   </td>
                   <td className="py-2.5 pr-4 text-slate-400 text-xs">
-                    {(asset as any).updated_at ? new Date((asset as any).updated_at).toLocaleDateString() : "—"}
+                    {asset.created_at ? new Date(asset.created_at).toLocaleDateString() : "—"}
                   </td>
-                  <td className="py-2.5 text-slate-400 text-xs">{(asset as any).connector_type ?? "—"}</td>
+                  <td className="py-2.5 text-slate-400 text-xs">{(asset as any).connector_name ?? (asset as any).connector_type ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
