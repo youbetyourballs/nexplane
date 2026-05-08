@@ -371,7 +371,7 @@ function CleanupModal({ onClose }: { onClose: () => void }) {
       <div className="bg-navy-light border border-navy-border rounded-xl w-full max-w-lg mx-4 p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-white font-semibold text-base">Clean Up Inventory</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+          <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
         </div>
 
         {isLoadingPreview && (
@@ -431,7 +431,7 @@ function CleanupModal({ onClose }: { onClose: () => void }) {
               {deleteMutation.isPending ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : null}
-              Delete {preview?.count ?? "…"} asset{preview?.count !== 1 ? "s" : ""}
+              Delete {preview?.count ?? "…"} asset{(preview?.count ?? 2) !== 1 ? "s" : ""}
             </button>
           )}
         </div>
