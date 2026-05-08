@@ -860,7 +860,7 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
              "command": (
                  f"$wc = New-Object System.Net.WebClient; "
                  f"$v = $wc.DownloadString('https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/version').Trim(); "
-                 f"$wc.DownloadFile(\"https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/nexplane-agent-windows-amd64-$v.exe\", 'C:\\nexplane-agent.exe'); "
+                 f"$wc.DownloadFile(\"https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/nexplane-agent-windows-amd64-${{v}}.exe\", 'C:\\nexplane-agent.exe'); "
                  f"Write-Host 'Downloaded nexplane-agent.exe'"
              ),
              "rollback_strategy": "rollback_unavailable"},
