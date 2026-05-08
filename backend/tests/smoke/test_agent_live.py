@@ -541,11 +541,11 @@ def run_aws_linux_worker(base_url: str, email: str, password: str,
         agent_secret = client.get_agent_secret()
 
         client.run_cr(
-            "[aws-linux] create key pair", "key_pair_create", cloud_account_id,
+            "[Phase aws-linux] create key pair", "key_pair_create", cloud_account_id,
             {"key_name": "nexplane-agent-smoke-key"},
         )
         client.run_cr(
-            "[aws-linux] launch EC2", "ec2_launch", cloud_account_id,
+            "[Phase aws-linux] launch EC2", "ec2_launch", cloud_account_id,
             {"mode": "quick", "name": instance_name, "os": "amazon_linux",
              "iam_instance_profile": "NexplaneEC2TestProfile",
              "key_name": "nexplane-agent-smoke-key",
@@ -555,25 +555,25 @@ def run_aws_linux_worker(base_url: str, email: str, password: str,
 
         instance_asset = client.get_asset_by_name(instance_name)
         if not instance_asset:
-            fail("[aws-linux] EC2 instance not in inventory")
+            fail("[Phase aws-linux] EC2 instance not in inventory")
         instance_id = instance_asset["asset_metadata"]["instance_id"]
-        log(f"[aws-linux] EC2: {instance_id}")
+        log(f"[Phase aws-linux] EC2: {instance_id}")
 
         print("  [aws-linux] Waiting 3 min for SSM...")
         time.sleep(180)
 
         client.run_cr(
-            "[aws-linux] SSM whoami", "ssm_command", instance_asset["id"],
+            "[Phase aws-linux] SSM whoami", "ssm_command", instance_asset["id"],
             {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
              "command": "whoami", "rollback_strategy": "rollback_unavailable"},
         )
         client.run_cr(
-            "[aws-linux] tailscale join", "tailscale_join", instance_asset["id"],
+            "[Phase aws-linux] tailscale join", "tailscale_join", instance_asset["id"],
             {"instance_id": instance_id, "auth_key": tailscale_auth_key,
              "hostname": "nexplane-agent-smoke-aws-linux"},
         )
         client.run_cr(
-            "[aws-linux] deploy agent", "deploy_nexplane_agent", instance_asset["id"],
+            "[Phase aws-linux] deploy agent", "deploy_nexplane_agent", instance_asset["id"],
             {"instance_id": instance_id, "nexplane_url": nexplane_url,
              "nexplane_secret": agent_secret},
         )
@@ -584,7 +584,7 @@ def run_aws_linux_worker(base_url: str, email: str, password: str,
 
         _run_all_linux_agent_crs(client, endpoint_asset["id"], "aws-linux")
         result["passed"] = True
-        log("[aws-linux] track complete")
+        log("[Phase aws-linux] track complete")
 
     except Exception as e:
         result["error"] = str(e)
@@ -632,21 +632,21 @@ def run_gcp_linux_worker(base_url: str, email: str, password: str,
 
         # Launch GCE — startup script installs Tailscale then agent
         client._run_cr_with_timeout(
-            "[gcp-linux] launch GCE instance", "gce_instance_create", cloud_account_id,
+            "[Phase gcp-linux] launch GCE instance", "gce_instance_create", cloud_account_id,
             {"name": instance_name, "machine_type": "e2-micro", "zone": "us-central1-a",
              "image_family": "ubuntu-2204-lts", "image_project": "ubuntu-os-cloud",
              "connection_mode": "agent_startup", "nexplane_url": nexplane_url,
              "nexplane_secret": agent_secret, "tailscale_auth_key": tailscale_auth_key},
             timeout=300,
         )
-        log(f"[gcp-linux] GCE instance launched: {instance_name}")
+        log(f"[Phase gcp-linux] GCE instance launched: {instance_name}")
 
         # 6 min — startup script runs during boot
         endpoint_asset = _poll_for_endpoint(client, instance_name, timeout=360)
 
         _run_all_linux_agent_crs(client, endpoint_asset["id"], "gcp-linux")
         result["passed"] = True
-        log("[gcp-linux] track complete")
+        log("[Phase gcp-linux] track complete")
 
     except Exception as e:
         result["error"] = str(e)
@@ -703,21 +703,21 @@ def run_azure_linux_worker(base_url: str, email: str, password: str,
 
         # Launch Azure VM — Custom Script Extension installs Tailscale then agent
         client._run_cr_with_timeout(
-            "[azure-linux] launch Azure VM", "azure_vm_create", cloud_account_id,
+            "[Phase azure-linux] launch Azure VM", "azure_vm_create", cloud_account_id,
             {"vm_name": vm_name, "resource_group": azure_resource_group,
              "location": "eastus2", "vm_size": "Standard_D2as_v7",
              "connection_mode": "agent_extension", "nexplane_url": nexplane_url,
              "nexplane_secret": agent_secret, "tailscale_auth_key": tailscale_auth_key},
             timeout=600,
         )
-        log(f"[azure-linux] Azure VM launched: {vm_name}")
+        log(f"[Phase azure-linux] Azure VM launched: {vm_name}")
 
         # 8 min — Custom Script Extension can be slow
         endpoint_asset = _poll_for_endpoint(client, vm_name, timeout=480)
 
         _run_all_linux_agent_crs(client, endpoint_asset["id"], "azure-linux")
         result["passed"] = True
-        log("[azure-linux] track complete")
+        log("[Phase azure-linux] track complete")
 
     except Exception as e:
         result["error"] = str(e)
@@ -806,23 +806,23 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
 
         # Resolve latest Windows Server 2022 AMI
         if not ec2_client:
-            fail("[aws-windows] AWS credentials required")
+            fail("[Phase aws-windows] AWS credentials required")
         images = ec2_client.describe_images(
             Owners=["amazon"],
             Filters=[{"Name": "name", "Values": ["Windows_Server-2022-English-Full-Base-*"]},
                      {"Name": "state", "Values": ["available"]}],
         )["Images"]
         if not images:
-            fail("[aws-windows] No Windows Server 2022 AMI found")
+            fail("[Phase aws-windows] No Windows Server 2022 AMI found")
         win_ami = sorted(images, key=lambda x: x["CreationDate"], reverse=True)[0]["ImageId"]
-        log(f"[aws-windows] AMI: {win_ami}")
+        log(f"[Phase aws-windows] AMI: {win_ami}")
 
         client.run_cr(
-            "[aws-windows] create key pair", "key_pair_create", cloud_account_id,
+            "[Phase aws-windows] create key pair", "key_pair_create", cloud_account_id,
             {"key_name": win_key_name},
         )
         client._run_cr_with_timeout(
-            "[aws-windows] launch Windows EC2", "ec2_launch", cloud_account_id,
+            "[Phase aws-windows] launch Windows EC2", "ec2_launch", cloud_account_id,
             {"mode": "quick", "name": instance_name, "os": "windows",
              "ami_id": win_ami, "instance_type": "t3.micro",
              "iam_instance_profile": "NexplaneEC2TestProfile",
@@ -833,9 +833,9 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
 
         win_asset = client.get_asset_by_name(instance_name)
         if not win_asset:
-            fail("[aws-windows] Windows EC2 not in inventory")
+            fail("[Phase aws-windows] Windows EC2 not in inventory")
         win_id = win_asset["asset_metadata"]["instance_id"]
-        log(f"[aws-windows] EC2: {win_id}")
+        log(f"[Phase aws-windows] EC2: {win_id}")
         asset_id = win_asset["id"]
 
         print("  [aws-windows] Waiting 5 min for Windows SSM agent...")
@@ -843,7 +843,7 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
 
         # Step 0: Download agent binary BEFORE Tailscale (test if Tailscale interferes)
         client._run_cr_with_timeout(
-            "[aws-windows] download agent", "ssm_command", asset_id,
+            "[Phase aws-windows] download agent", "ssm_command", asset_id,
             {"instance_id": win_id, "document_name": "AWS-RunPowerShellScript",
              "command": (
                  f"$ProgressPreference = 'SilentlyContinue'; "
@@ -861,7 +861,7 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
         # Combined: Install Tailscale + agent service in ONE SSM command (avoids SSM state issues)
         ts_windows_url = _get_tailscale_windows_url()
         client._run_cr_with_timeout(
-            "[aws-windows] install Tailscale and agent", "ssm_command", asset_id,
+            "[Phase aws-windows] install Tailscale and agent", "ssm_command", asset_id,
             {"instance_id": win_id, "document_name": "AWS-RunPowerShellScript",
              "command": (
                  f"$ProgressPreference = 'SilentlyContinue'; "
@@ -886,7 +886,7 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
 
         _run_all_windows_agent_crs(client, endpoint_asset["id"], "aws-windows")
         result["passed"] = True
-        log("[aws-windows] track complete")
+        log("[Phase aws-windows] track complete")
 
     except Exception as e:
         result["error"] = str(e)
@@ -935,7 +935,7 @@ def run_gcp_windows_worker(base_url: str, email: str, password: str,
         agent_secret = client.get_agent_secret()
 
         client._run_cr_with_timeout(
-            "[gcp-windows] launch Windows GCE", "gce_instance_create", cloud_account_id,
+            "[Phase gcp-windows] launch Windows GCE", "gce_instance_create", cloud_account_id,
             {"name": instance_name, "machine_type": "e2-medium", "zone": "us-central1-a",
              "image_family": "windows-server-2022-dc", "image_project": "windows-cloud",
              "os": "windows", "connection_mode": "agent_startup",
@@ -943,14 +943,14 @@ def run_gcp_windows_worker(base_url: str, email: str, password: str,
              "tailscale_auth_key": tailscale_auth_key},
             timeout=600,
         )
-        log(f"[gcp-windows] GCE Windows instance launched: {instance_name}")
+        log(f"[Phase gcp-windows] GCE Windows instance launched: {instance_name}")
 
         # 10 min — Windows boot + startup script
         endpoint_asset = _poll_for_endpoint(client, instance_name, timeout=600)
 
         _run_all_windows_agent_crs(client, endpoint_asset["id"], "gcp-windows")
         result["passed"] = True
-        log("[gcp-windows] track complete")
+        log("[Phase gcp-windows] track complete")
 
     except Exception as e:
         result["error"] = str(e)
@@ -1008,7 +1008,7 @@ def run_azure_windows_worker(base_url: str, email: str, password: str,
         agent_secret = client.get_agent_secret()
 
         client._run_cr_with_timeout(
-            "[azure-windows] launch Windows VM", "azure_vm_create", cloud_account_id,
+            "[Phase azure-windows] launch Windows VM", "azure_vm_create", cloud_account_id,
             {"vm_name": vm_name, "resource_group": azure_resource_group,
              "location": "eastus2", "vm_size": "Standard_D2as_v7",
              "os": "windows", "connection_mode": "agent_extension",
@@ -1017,14 +1017,14 @@ def run_azure_windows_worker(base_url: str, email: str, password: str,
              "admin_username": "nexplaneadmin", "admin_password": admin_password},
             timeout=900,
         )
-        log(f"[azure-windows] Azure Windows VM launched: {vm_name}")
+        log(f"[Phase azure-windows] Azure Windows VM launched: {vm_name}")
 
         # 12 min — Windows + Custom Script Extension is slowest
         endpoint_asset = _poll_for_endpoint(client, vm_name, timeout=720)
 
         _run_all_windows_agent_crs(client, endpoint_asset["id"], "azure-windows")
         result["passed"] = True
-        log("[azure-windows] track complete")
+        log("[Phase azure-windows] track complete")
 
     except Exception as e:
         result["error"] = str(e)
