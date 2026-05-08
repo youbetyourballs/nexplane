@@ -95,8 +95,11 @@ function CheckRow({ check }: { check: CisCheckRow }) {
   return (
     <div>
       <div
-        className={`flex items-center gap-2 px-4 py-1.5 text-sm hover:bg-slate-50 ${hasFailing ? "cursor-pointer" : "cursor-default"}`}
+        role={hasFailing ? "button" : undefined}
+        tabIndex={hasFailing ? 0 : undefined}
+        className={`flex items-center gap-2 px-4 py-1.5 text-sm ${hasFailing ? "cursor-pointer hover:bg-slate-50" : "cursor-default"}`}
         onClick={() => hasFailing && setExpanded((e) => !e)}
+        onKeyDown={(e) => { if (hasFailing && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setExpanded((prev) => !prev); } }}
       >
         {hasFailing ? (
           expanded ? <ChevronDown size={12} className="text-slate-400 shrink-0" /> : <ChevronRight size={12} className="text-slate-400 shrink-0" />
@@ -125,8 +128,11 @@ function ControlRow({ ctrl }: { ctrl: CisControlRow }) {
     <div className={`border-b border-slate-100 ${!isTracked ? "opacity-50" : ""}`}>
       {/* Main row */}
       <div
+        role={isTracked ? "button" : undefined}
+        tabIndex={isTracked ? 0 : undefined}
         className={`flex items-center gap-3 px-4 py-3 ${isTracked ? "cursor-pointer hover:bg-slate-50" : ""}`}
         onClick={() => isTracked && setExpanded((e) => !e)}
+        onKeyDown={(e) => { if (isTracked && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setExpanded((prev) => !prev); } }}
       >
         {isTracked ? (
           expanded
@@ -141,7 +147,9 @@ function ControlRow({ ctrl }: { ctrl: CisControlRow }) {
           <ScoreBar score={ctrl.score} />
         </div>
         <div className="w-20 text-sm text-slate-500 text-center">
-          {hasData ? `${ctrl.assets_passing}/${ctrl.assets_total}` : "—"}
+          {ctrl.assets_passing != null && ctrl.assets_total != null
+            ? `${ctrl.assets_passing}/${ctrl.assets_total}`
+            : "—"}
         </div>
         <div className="w-28 text-right">
           <StatusBadge score={ctrl.score} method={ctrl.method} />
@@ -161,7 +169,7 @@ function ControlRow({ ctrl }: { ctrl: CisControlRow }) {
             <span className="w-10 text-center">Total</span>
           </div>
           {ctrl.checks.map((ch) => (
-            <CheckRow key={ch.id + ch.title} check={ch} />
+            <CheckRow key={`${ch.id}:${ch.title}`} check={ch} />
           ))}
         </div>
       )}
@@ -174,7 +182,7 @@ function ControlRow({ ctrl }: { ctrl: CisControlRow }) {
 export function Compliance() {
   const queryClient = useQueryClient();
 
-  const { data: summary, isLoading } = useQuery({
+  const { data: summary, isLoading, isError: isSummaryError } = useQuery({
     queryKey: ["cis-summary"],
     queryFn: complianceApi.getSummary,
     refetchInterval: 30_000,
@@ -186,38 +194,53 @@ export function Compliance() {
         .get("/assets", { params: { asset_type: "server" } })
         .then((r) => r.data);
 
-      await Promise.all(
-        assets.map(async (asset) => {
-          try {
-            const cr = await apiClient
-              .post("/change-requests", {
-                title: "CIS v8 Full Audit",
-                description: "Full CIS Controls v8 compliance audit",
-                change_type: "agent_compliance",
-                target_asset_ids: [asset.id],
-                desired_outcome: { dry_run: false },
-              })
-              .then((r) => r.data);
-            const crId = cr.id;
-            await apiClient.post(`/change-requests/${crId}/plan`);
-            await apiClient.post(`/change-requests/${crId}/submit-for-approval`);
-            await apiClient.post(`/change-requests/${crId}/approve`, {
-              decision: "approved",
-              comment: "Auto-approved via Run Full Audit",
-            });
-            await apiClient.post(`/change-requests/${crId}/execute`);
-          } catch {
-            // Skip assets where audit fails (e.g., no agent registered)
-          }
-        })
-      );
+      // Process in batches of 10 to avoid overwhelming the backend
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < assets.length; i += BATCH_SIZE) {
+        const batch = assets.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (asset) => {
+            try {
+              const cr = await apiClient
+                .post("/change-requests", {
+                  title: "CIS v8 Full Audit",
+                  description: "Full CIS Controls v8 compliance audit",
+                  change_type: "agent_compliance",
+                  target_asset_ids: [asset.id],
+                  desired_outcome: { dry_run: false },
+                })
+                .then((r) => r.data);
+              const crId = cr.id;
+              await apiClient.post(`/change-requests/${crId}/plan`);
+              await apiClient.post(`/change-requests/${crId}/submit-for-approval`);
+              await apiClient.post(`/change-requests/${crId}/approve`, {
+                decision: "approved",
+                comment: "Auto-approved via Run Full Audit",
+              });
+              await apiClient.post(`/change-requests/${crId}/execute`);
+            } catch {
+              // Skip assets where audit fails (e.g., no agent registered)
+            }
+          })
+        );
+      }
     },
     onSuccess: () => {
       setTimeout(() => queryClient.invalidateQueries({ queryKey: ["cis-summary"] }), 5000);
     },
+    onError: () => {
+      // Error is surfaced below the button
+    },
   });
 
   if (isLoading) return <PageLoading />;
+  if (isSummaryError) {
+    return (
+      <div className="max-w-5xl mx-auto py-8 px-6">
+        <p className="text-sm text-red-600">Failed to load compliance data — please refresh</p>
+      </div>
+    );
+  }
 
   const overallPct = summary?.overall_score != null
     ? Math.round(summary.overall_score * 100)
@@ -254,6 +277,9 @@ export function Compliance() {
           )}
           Run Full Audit
         </button>
+        {runAuditMutation.isError && (
+          <p className="text-xs text-red-600 mt-1">Audit failed — check backend logs</p>
+        )}
       </div>
 
       {/* Overall score bar */}
