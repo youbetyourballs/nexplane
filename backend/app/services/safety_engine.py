@@ -195,8 +195,9 @@ def score_change_request(change_request: ChangeRequest, assets: list[Asset]) -> 
         ChangeType.agent_iac, ChangeType.agent_linuxupgrade,
         ChangeType.agent_win_patch, ChangeType.agent_winharden,
         ChangeType.alb_create, ChangeType.alb_delete,
-        ChangeType.target_group_create, ChangeType.listener_create,
-        ChangeType.listener_modify,
+        ChangeType.target_group_create, ChangeType.target_group_delete,
+        ChangeType.listener_create, ChangeType.listener_modify, ChangeType.listener_delete,
+        ChangeType.register_targets, ChangeType.deregister_targets,
     }
     desired = change_request.desired_outcome or {}
     rollback_strategy = desired.get("rollback_strategy")

@@ -426,6 +426,51 @@ const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string;
     description: "Delete a CloudWatch alarm.",
     outcomeTemplate: JSON.stringify({ alarm_name: "", rollback_strategy: "rollback_unavailable" }, null, 2),
   },
+  alb_create: {
+    label: "Create Application Load Balancer",
+    description: "Create an ALB with specified subnets and security groups.",
+    outcomeTemplate: JSON.stringify({ name: "", subnets: [], security_group_ids: [], scheme: "internet-facing", rollback_strategy: "delete_alb" }, null, 2),
+  },
+  alb_delete: {
+    label: "Delete Application Load Balancer",
+    description: "Delete an ALB by ARN.",
+    outcomeTemplate: JSON.stringify({ lb_arn: "", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  target_group_create: {
+    label: "Create Target Group",
+    description: "Create an ALB target group for EC2 instances or IPs.",
+    outcomeTemplate: JSON.stringify({ name: "", protocol: "HTTP", port: 80, vpc_id: "", rollback_strategy: "delete_target_group" }, null, 2),
+  },
+  target_group_delete: {
+    label: "Delete Target Group",
+    description: "Delete a target group by ARN.",
+    outcomeTemplate: JSON.stringify({ tg_arn: "", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  register_targets: {
+    label: "Register Targets",
+    description: "Register EC2 instances or IPs with an ALB target group.",
+    outcomeTemplate: JSON.stringify({ tg_arn: "", targets: [{ id: "", port: 80 }], rollback_strategy: "deregister_targets" }, null, 2),
+  },
+  deregister_targets: {
+    label: "Deregister Targets",
+    description: "Remove EC2 instances or IPs from an ALB target group.",
+    outcomeTemplate: JSON.stringify({ tg_arn: "", targets: [{ id: "" }], rollback_strategy: "register_targets" }, null, 2),
+  },
+  listener_create: {
+    label: "Create ALB Listener",
+    description: "Add a listener to an ALB forwarding to a target group.",
+    outcomeTemplate: JSON.stringify({ lb_arn: "", protocol: "HTTP", port: 80, tg_arn: "", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  listener_modify: {
+    label: "Modify ALB Listener",
+    description: "Update a listener's port, protocol, or default action.",
+    outcomeTemplate: JSON.stringify({ listener_arn: "", port: 443, protocol: "HTTPS", tg_arn: "", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  listener_delete: {
+    label: "Delete ALB Listener",
+    description: "Remove a listener from an ALB.",
+    outcomeTemplate: JSON.stringify({ listener_arn: "", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
   gce_instance_create: {
     label: "Launch GCE Instance",
     description: "Create a new Compute Engine VM with agent, IAP, or SSH connection.",
@@ -574,6 +619,10 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
     types: ["cloudwatch_alarm_create", "cloudwatch_alarm_delete"],
   },
   {
+    label: "Load Balancers (ALB)",
+    types: ["alb_create", "alb_delete", "target_group_create", "target_group_delete", "register_targets", "deregister_targets", "listener_create", "listener_modify", "listener_delete"],
+  },
+  {
     label: "GCE Instances",
     types: ["gce_instance_create", "gce_stop", "gce_start", "gce_instance_reboot", "gce_instance_delete", "gce_disk_snapshot"],
   },
@@ -663,6 +712,16 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   rds_snapshot_create: "database",
   cloudwatch_alarm_create: null,
   cloudwatch_alarm_delete: null,
+  // ALB change types
+  alb_create: "cloud_account",
+  alb_delete: "load_balancer",
+  target_group_create: "cloud_account",
+  target_group_delete: "load_balancer",
+  register_targets: "load_balancer",
+  deregister_targets: "load_balancer",
+  listener_create: "load_balancer",
+  listener_modify: "load_balancer",
+  listener_delete: "load_balancer",
   // GCE change types
   gce_instance_create: "cloud_account",
   gce_stop: "server",
