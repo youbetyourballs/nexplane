@@ -44,6 +44,18 @@ export interface RunConfig {
   password?: string;
 }
 
+export interface CleanupAsset {
+  id: string;
+  name: string;
+  asset_type: string;
+  created_at: string | null;
+}
+
+export interface CleanupPreview {
+  assets: CleanupAsset[];
+  count: number;
+}
+
 export const smokeTestsApi = {
   getSuites: () =>
     apiClient.get<SmokeTestSuite[]>("/smoke-tests/suites").then((r) => r.data),
@@ -58,4 +70,10 @@ export const smokeTestsApi = {
 
   stopRun: (runId: string) =>
     apiClient.delete(`/smoke-tests/runs/${runId}`).then((r) => r.data),
+
+  getCleanupPreview: (): Promise<CleanupPreview> =>
+    apiClient.get<CleanupPreview>("/smoke-tests/cleanup-preview").then((r) => r.data),
+
+  executeCleanup: (): Promise<{ deleted: number }> =>
+    apiClient.delete<{ deleted: number }>("/smoke-tests/cleanup-inventory").then((r) => r.data),
 };
