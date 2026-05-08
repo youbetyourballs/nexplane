@@ -41,8 +41,10 @@ Requirements:
     Tailscale connector with reusable pre-authorized auth key
 """
 import concurrent.futures
+import re
 import secrets
 import time
+import urllib.request
 from typing import Optional
 
 from smoke_helpers import (
@@ -52,6 +54,27 @@ from smoke_helpers import (
     _get_aws_boto3_client,
     make_base_parser,
 )
+
+_TAILSCALE_WINDOWS_URL_CACHE: Optional[str] = None
+
+def _get_tailscale_windows_url() -> str:
+    """Fetch the latest Tailscale Windows installer URL from pkgs.tailscale.com/stable/."""
+    global _TAILSCALE_WINDOWS_URL_CACHE
+    if _TAILSCALE_WINDOWS_URL_CACHE:
+        return _TAILSCALE_WINDOWS_URL_CACHE
+    try:
+        with urllib.request.urlopen("https://pkgs.tailscale.com/stable/", timeout=15) as resp:
+            html = resp.read().decode()
+        # Find the first tailscale-setup-VERSION.exe (not -full- variant)
+        match = re.search(r'href="(tailscale-setup-[\d.]+\.exe)"', html)
+        if match:
+            _TAILSCALE_WINDOWS_URL_CACHE = f"https://pkgs.tailscale.com/stable/{match.group(1)}"
+            return _TAILSCALE_WINDOWS_URL_CACHE
+    except Exception:
+        pass
+    # Fallback to last known good version
+    return "https://pkgs.tailscale.com/stable/tailscale-setup-1.96.3.exe"
+
 
 # ---------------------------------------------------------------------------
 # AWS Linux track helpers
@@ -836,25 +859,21 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
         )
 
         # Combined: Install Tailscale + agent service in ONE SSM command (avoids SSM state issues)
+        ts_windows_url = _get_tailscale_windows_url()
         client._run_cr_with_timeout(
             "[aws-windows] install Tailscale and agent", "ssm_command", asset_id,
             {"instance_id": win_id, "document_name": "AWS-RunPowerShellScript",
              "command": (
                  f"$ProgressPreference = 'SilentlyContinue'; "
-                 f"Invoke-WebRequest 'https://pkgs.tailscale.com/stable/tailscale-setup-1.96.3.exe' -OutFile 'C:\\ts-setup.exe' -UseBasicParsing; "
+                 f"Invoke-WebRequest '{ts_windows_url}' -OutFile 'C:\\ts-setup.exe' -UseBasicParsing; "
                  f"Start-Process 'C:\\ts-setup.exe' -Args '/S' -Wait; "
                  f"Start-Sleep 20; "
                  f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey='{tailscale_auth_key}' --hostname='nexplane-agent-smoke-aws-windows' --accept-routes; "
                  f"if ($LASTEXITCODE -ne 0) {{ Write-Host ('Tailscale up failed: ' + $LASTEXITCODE); exit 1 }}; "
                  f"Write-Host 'Tailscale joined'; "
-                 f"Set-Content -Path C:\\np-agent.bat -Value '@echo off' -Encoding ASCII; "
-                 f"Add-Content -Path C:\\np-agent.bat -Value 'set NP_HOSTNAME=nexplane-agent-smoke-aws-windows' -Encoding ASCII; "
-                 f"Add-Content -Path C:\\np-agent.bat -Value 'C:\\nexplane-agent.exe --control-plane {nexplane_url} --secret {agent_secret} --mode service' -Encoding ASCII; "
-                 f"schtasks /create /tn NexplaneAgent /tr C:\\np-agent.bat /sc onstart /ru SYSTEM /rl HIGHEST /f; "
+                 f"schtasks /create /tn NexplaneAgent /tr '\"C:\\nexplane-agent.exe\" --control-plane {nexplane_url} --secret {agent_secret} --mode service --hostname nexplane-agent-smoke-aws-windows' /sc onstart /ru SYSTEM /rl HIGHEST /f; "
                  f"schtasks /run /tn NexplaneAgent; "
                  f"Start-Sleep 60; "
-                 f"$taskStatus = schtasks /query /tn NexplaneAgent /fo LIST 2>&1; "
-                 f"Write-Host ('Task status: ' + $taskStatus); "
                  f"echo 'Agent task started'"
              ),
              "rollback_strategy": "rollback_unavailable"},
