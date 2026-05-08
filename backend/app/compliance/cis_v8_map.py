@@ -24,7 +24,14 @@ CIS_V8_CONTROLS: list[dict] = [
 
 
 def _section_matches(section: str, prefixes: list[str]) -> bool:
-    return any(section.startswith(p) for p in prefixes)
+    for p in prefixes:
+        if p.endswith("."):
+            if section.startswith(p) or section == p.rstrip("."):
+                return True
+        else:
+            if section == p or section.startswith(p + "."):
+                return True
+    return False
 
 
 def compute_cis_summary(assets: list[dict[str, Any]]) -> dict[str, Any]:
@@ -37,6 +44,8 @@ def compute_cis_summary(assets: list[dict[str, Any]]) -> dict[str, Any]:
             .get("collected_at")
         )
         if ts:
+            # Assumes collected_at values are UTC ISO 8601 (e.g. "2026-05-08T12:00:00Z").
+            # Lexicographic comparison is valid only for this normalised format.
             if last_updated is None or ts > last_updated:
                 last_updated = ts
 
@@ -59,6 +68,8 @@ def compute_cis_summary(assets: list[dict[str, Any]]) -> dict[str, Any]:
 
         if method == "asset_coverage":
             total = len(assets)
+            # An asset is "tracked" for CIS Control 1 when it has an active connector link.
+            # Assets with connector_id=None are treated as unmanaged/untracked.
             passing_assets = [a for a in assets if a.get("connector_id")]
             failing_assets = [a for a in assets if not a.get("connector_id")]
             score = (len(passing_assets) / total) if total > 0 else None
@@ -107,13 +118,18 @@ def compute_cis_summary(assets: list[dict[str, Any]]) -> dict[str, Any]:
                 assets_passing_ctrl.append(asset)
 
             for r in relevant:
-                title = r.get("title", r.get("id", "unknown"))
-                if title not in check_map:
-                    check_map[title] = {"id": r.get("id", ""), "pass_assets": [], "fail_assets": []}
+                check_key = r.get("id") or r.get("title", "unknown")
+                if check_key not in check_map:
+                    check_map[check_key] = {
+                        "id": r.get("id", ""),
+                        "title": r.get("title", r.get("id", "unknown")),
+                        "pass_assets": [],
+                        "fail_assets": [],
+                    }
                 if r.get("status") == "pass":
-                    check_map[title]["pass_assets"].append(asset)
+                    check_map[check_key]["pass_assets"].append(asset)
                 else:
-                    check_map[title]["fail_assets"].append({
+                    check_map[check_key]["fail_assets"].append({
                         "id": asset["id"],
                         "name": asset["name"],
                         "detail": f"Expected: {r.get('expected', '')}  Got: {r.get('actual', '')}",
@@ -127,12 +143,12 @@ def compute_cis_summary(assets: list[dict[str, Any]]) -> dict[str, Any]:
         checks_out = [
             {
                 "id": data["id"],
-                "title": title,
+                "title": data["title"],
                 "pass_count": len(data["pass_assets"]),
                 "fail_count": len(data["fail_assets"]),
                 "failing_assets": data["fail_assets"],
             }
-            for title, data in check_map.items()
+            for data in check_map.values()
         ]
 
         controls_out.append({

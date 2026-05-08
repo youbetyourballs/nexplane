@@ -141,3 +141,25 @@ def test_compute_cis_summary_no_assets_returns_null_scores():
     for ctrl in summary["controls"]:
         if ctrl["method"] != "not_tracked":
             assert ctrl["score"] is None
+
+
+def test_compute_cis_summary_checks_keyed_by_id_not_title():
+    # Two checks with different IDs but potentially same title should not merge
+    cis_data = {
+        "cis_compliance": {
+            "latest": {
+                "collected_at": "2026-05-08T00:00:00Z",
+                "controls": [
+                    {"id": "1.1.1", "section": "1.1", "title": "Filesystem config",
+                     "status": "pass", "expected": "ok", "actual": "ok"},
+                    {"id": "1.1.2", "section": "1.1", "title": "Filesystem config",
+                     "status": "fail", "expected": "ok", "actual": "bad"},
+                ]
+            }
+        }
+    }
+    assets = [{"id": "a1", "name": "web-01", "connector_id": "c1", "asset_metadata": cis_data}]
+    summary = compute_cis_summary(assets)
+    ctrl4 = next(c for c in summary["controls"] if c["id"] == 4)
+    # Two distinct check IDs → two check rows, not one merged row
+    assert len(ctrl4["checks"]) == 2
