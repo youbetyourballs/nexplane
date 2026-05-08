@@ -78,3 +78,36 @@ class EvidenceCollectionRequest(BaseModel):
     control_id: str
     asset_ids: list[uuid.UUID]
     evidence_types: list[str] = ["config_files", "command_outputs", "change_logs"]
+
+
+# ---- CIS v8 Summary ----
+
+class CisFailingAsset(BaseModel):
+    id: str
+    name: str
+    detail: str
+
+
+class CisCheckRow(BaseModel):
+    id: str
+    title: str
+    pass_count: int
+    fail_count: int
+    failing_assets: list[CisFailingAsset]
+
+
+class CisControlRow(BaseModel):
+    id: int
+    name: str
+    method: str  # "asset_coverage" | "agent_audit" | "not_tracked"
+    score: Optional[float]
+    assets_passing: Optional[int]
+    assets_total: Optional[int]
+    checks: list[CisCheckRow]
+
+
+class CisSummaryResponse(BaseModel):
+    overall_score: Optional[float]
+    tracked_controls: int
+    last_updated: Optional[str]
+    controls: list[CisControlRow]
