@@ -163,3 +163,27 @@ def test_compute_cis_summary_checks_keyed_by_id_not_title():
     ctrl4 = next(c for c in summary["controls"] if c["id"] == 4)
     # Two distinct check IDs → two check rows, not one merged row
     assert len(ctrl4["checks"]) == 2
+
+
+def test_cis_summary_response_model_accepts_valid_data():
+    from app.schemas.compliance import CisSummaryResponse, CisControlRow, CisCheckRow, CisFailingAsset
+    asset = CisFailingAsset(id="uuid", name="web-01", detail="Expected: 0  Got: 1")
+    check = CisCheckRow(id="4.1", title="SSH check", pass_count=3, fail_count=1, failing_assets=[asset])
+    ctrl = CisControlRow(
+        id=4, name="Secure Config", method="agent_audit",
+        score=0.75, assets_passing=3, assets_total=4, checks=[check]
+    )
+    resp = CisSummaryResponse(
+        overall_score=0.75, tracked_controls=6,
+        last_updated="2026-05-08T12:00:00Z", controls=[ctrl]
+    )
+    assert resp.overall_score == 0.75
+
+
+def test_cis_summary_response_model_accepts_null_score():
+    from app.schemas.compliance import CisControlRow
+    ctrl = CisControlRow(
+        id=2, name="Software Inventory", method="not_tracked",
+        score=None, assets_passing=None, assets_total=None, checks=[]
+    )
+    assert ctrl.score is None
