@@ -54,7 +54,7 @@ def run_aws_worker(base_url: str, email: str, password: str) -> dict:
 
         # 1. Launch EC2 instance
         cr = client._run_cr_with_timeout(
-            "[MC-AWS] launch EC2 instance", "ec2_launch", cloud_account_id,
+            "[Phase MC-AWS] launch EC2 instance", "ec2_launch", cloud_account_id,
             {"mode": "quick", "name": instance_name, "os": "amazon_linux",
              "rollback_strategy": "terminate_instance"},
             timeout=TIMEOUT_SECONDS,
@@ -72,25 +72,25 @@ def run_aws_worker(base_url: str, email: str, password: str) -> dict:
         if not instance_asset:
             raise AssertionError(f"EC2 instance '{instance_name}' not in inventory after 60s")
         instance_id = instance_asset["asset_metadata"]["instance_id"]
-        log(f"[MC-AWS] Instance in inventory: {instance_id}")
+        log(f"[Phase MC-AWS] Instance in inventory: {instance_id}")
 
         # 2. Stop instance
         cr = client._run_cr_with_timeout(
-            "[MC-AWS] stop EC2 instance", "ec2_stop", instance_asset["id"],
+            "[Phase MC-AWS] stop EC2 instance", "ec2_stop", instance_asset["id"],
             {"instance_id": instance_id, "target_state": "stopped"},
             timeout=TIMEOUT_SECONDS,
         )
         rollback_stack.append((cr["id"], "ec2_stop"))
-        log("[MC-AWS] Instance stopped")
+        log("[Phase MC-AWS] Instance stopped")
 
         # 3. Start instance
         cr = client._run_cr_with_timeout(
-            "[MC-AWS] start EC2 instance", "ec2_start", instance_asset["id"],
+            "[Phase MC-AWS] start EC2 instance", "ec2_start", instance_asset["id"],
             {"instance_id": instance_id, "rollback_strategy": "stop_instance"},
             timeout=TIMEOUT_SECONDS,
         )
         rollback_stack.pop()  # ec2_stop superseded
-        log("[MC-AWS] Instance started")
+        log("[Phase MC-AWS] Instance started")
 
         # 4. Snapshot
         ec2_client = _get_aws_boto3_client("ec2")
@@ -106,18 +106,18 @@ def run_aws_worker(base_url: str, email: str, password: str) -> dict:
 
         if volume_id:
             cr = client._run_cr_with_timeout(
-                "[MC-AWS] snapshot instance", "snapshot_asset", instance_asset["id"],
+                "[Phase MC-AWS] snapshot instance", "snapshot_asset", instance_asset["id"],
                 {"instance_id": instance_id, "volume_id": volume_id,
                  "rollback_strategy": "delete_ebs_snapshot"},
                 timeout=TIMEOUT_SECONDS,
             )
             rollback_stack.append((cr["id"], "snapshot_asset"))
-            log("[MC-AWS] Snapshot created")
+            log("[Phase MC-AWS] Snapshot created")
         else:
-            log("[MC-AWS] Skipping snapshot (could not determine volume_id)")
+            log("[Phase MC-AWS] Skipping snapshot (could not determine volume_id)")
 
         # 5. Terminate — rollback handles it
-        log("[MC-AWS] Lifecycle complete; cleaning up via rollback stack")
+        log("[Phase MC-AWS] Lifecycle complete; cleaning up via rollback stack")
         result["passed"] = True
 
     except Exception as e:
@@ -161,7 +161,7 @@ def run_gcp_worker(base_url: str, email: str, password: str, gcp_project: str) -
 
         # 1. Launch GCE instance
         cr = client._run_cr_with_timeout(
-            "[MC-GCP] launch GCE instance", "gce_instance_create", cloud_account_id,
+            "[Phase MC-GCP] launch GCE instance", "gce_instance_create", cloud_account_id,
             {"name": instance_name, "machine_type": "e2-micro", "zone": GCE_ZONE,
              "image_family": "ubuntu-2204-lts", "image_project": "ubuntu-os-cloud",
              "connection_mode": "agent_startup",
@@ -169,7 +169,7 @@ def run_gcp_worker(base_url: str, email: str, password: str, gcp_project: str) -
             timeout=TIMEOUT_SECONDS,
         )
         rollback_stack.append((cr["id"], "gce_instance_create"))
-        log(f"[MC-GCP] Instance launched: {instance_name}")
+        log(f"[Phase MC-GCP] Instance launched: {instance_name}")
 
         # Wait for inventory
         instance_asset = None
@@ -181,37 +181,37 @@ def run_gcp_worker(base_url: str, email: str, password: str, gcp_project: str) -
                 break
         if not instance_asset:
             raise AssertionError(f"GCE instance '{instance_name}' not in inventory after 60s")
-        log(f"[MC-GCP] Instance in inventory: {instance_asset['id']}")
+        log(f"[Phase MC-GCP] Instance in inventory: {instance_asset['id']}")
 
         # 2. Stop
         cr = client._run_cr_with_timeout(
-            "[MC-GCP] stop GCE instance", "gce_stop", instance_asset["id"],
+            "[Phase MC-GCP] stop GCE instance", "gce_stop", instance_asset["id"],
             {"instance_name": instance_name, "zone": GCE_ZONE},
             timeout=TIMEOUT_SECONDS,
         )
         rollback_stack.append((cr["id"], "gce_stop"))
-        log("[MC-GCP] Instance stopped")
+        log("[Phase MC-GCP] Instance stopped")
 
         # 3. Start
         cr = client._run_cr_with_timeout(
-            "[MC-GCP] start GCE instance", "gce_start", instance_asset["id"],
+            "[Phase MC-GCP] start GCE instance", "gce_start", instance_asset["id"],
             {"instance_name": instance_name, "zone": GCE_ZONE},
             timeout=TIMEOUT_SECONDS,
         )
         rollback_stack.pop()  # gce_stop superseded
-        log("[MC-GCP] Instance started")
+        log("[Phase MC-GCP] Instance started")
 
         # 4. Snapshot
         snap_name = f"nexplane-mc-snap-{secrets.token_hex(3)}"
         cr = client._run_cr_with_timeout(
-            "[MC-GCP] snapshot GCE disk", "gce_disk_snapshot", instance_asset["id"],
+            "[Phase MC-GCP] snapshot GCE disk", "gce_disk_snapshot", instance_asset["id"],
             {"instance_name": instance_name, "zone": GCE_ZONE, "snapshot_name": snap_name},
             timeout=TIMEOUT_SECONDS,
         )
         rollback_stack.append((cr["id"], "gce_disk_snapshot"))
-        log(f"[MC-GCP] Snapshot created: {snap_name}")
+        log(f"[Phase MC-GCP] Snapshot created: {snap_name}")
 
-        log("[MC-GCP] Lifecycle complete; cleaning up via rollback stack")
+        log("[Phase MC-GCP] Lifecycle complete; cleaning up via rollback stack")
         result["passed"] = True
 
     except Exception as e:
@@ -250,7 +250,7 @@ def run_azure_worker(base_url: str, email: str, password: str,
 
         # 1. Launch Azure VM
         cr = client._run_cr_with_timeout(
-            "[MC-AZ] launch Azure VM", "azure_vm_create", cloud_account_id,
+            "[Phase MC-AZ] launch Azure VM", "azure_vm_create", cloud_account_id,
             {"vm_name": vm_name, "resource_group": azure_resource_group,
              "location": "eastus2", "vm_size": "Standard_D2as_v7",
              "connection_mode": "password",
@@ -258,7 +258,7 @@ def run_azure_worker(base_url: str, email: str, password: str,
             timeout=TIMEOUT_SECONDS,
         )
         rollback_stack.append((cr["id"], "azure_vm_create"))
-        log(f"[MC-AZ] VM launched: {vm_name}")
+        log(f"[Phase MC-AZ] VM launched: {vm_name}")
 
         # Wait for inventory
         vm_asset = None
@@ -270,38 +270,38 @@ def run_azure_worker(base_url: str, email: str, password: str,
                 break
         if not vm_asset:
             raise AssertionError(f"Azure VM '{vm_name}' not in inventory after 60s")
-        log(f"[MC-AZ] VM in inventory: {vm_asset['id']}")
+        log(f"[Phase MC-AZ] VM in inventory: {vm_asset['id']}")
 
         # 2. Stop (deallocate)
         cr = client._run_cr_with_timeout(
-            "[MC-AZ] stop Azure VM", "azure_vm_stop", vm_asset["id"],
+            "[Phase MC-AZ] stop Azure VM", "azure_vm_stop", vm_asset["id"],
             {"vm_name": vm_name, "resource_group": azure_resource_group},
             timeout=TIMEOUT_SECONDS,
         )
         rollback_stack.append((cr["id"], "azure_vm_stop"))
-        log("[MC-AZ] VM stopped")
+        log("[Phase MC-AZ] VM stopped")
 
         # 3. Start
         cr = client._run_cr_with_timeout(
-            "[MC-AZ] start Azure VM", "azure_vm_start", vm_asset["id"],
+            "[Phase MC-AZ] start Azure VM", "azure_vm_start", vm_asset["id"],
             {"vm_name": vm_name, "resource_group": azure_resource_group},
             timeout=TIMEOUT_SECONDS,
         )
         rollback_stack.pop()  # azure_vm_stop superseded
-        log("[MC-AZ] VM started")
+        log("[Phase MC-AZ] VM started")
 
         # 4. Snapshot
         snap_name = f"nexplane-mc-snap-{secrets.token_hex(3)}"
         cr = client._run_cr_with_timeout(
-            "[MC-AZ] snapshot Azure VM", "azure_vm_snapshot", vm_asset["id"],
+            "[Phase MC-AZ] snapshot Azure VM", "azure_vm_snapshot", vm_asset["id"],
             {"vm_name": vm_name, "resource_group": azure_resource_group,
              "snapshot_name": snap_name, "location": "eastus2"},
             timeout=TIMEOUT_SECONDS,
         )
         rollback_stack.append((cr["id"], "azure_vm_snapshot"))
-        log(f"[MC-AZ] Snapshot created: {snap_name}")
+        log(f"[Phase MC-AZ] Snapshot created: {snap_name}")
 
-        log("[MC-AZ] Lifecycle complete; cleaning up via rollback stack")
+        log("[Phase MC-AZ] Lifecycle complete; cleaning up via rollback stack")
         result["passed"] = True
 
     except Exception as e:
