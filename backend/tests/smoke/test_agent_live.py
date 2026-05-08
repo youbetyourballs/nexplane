@@ -865,10 +865,14 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
                  f"/nexplane-agent-windows-amd64-$v.exe\" "
                  f"-OutFile 'C:\\nexplane-agent.exe' -UseBasicParsing; "
                  f"[System.Environment]::SetEnvironmentVariable('COMPUTERNAME', 'nexplane-agent-smoke-aws-windows', 'Process'); "
-                 f"$env:NP_HOSTNAME = 'nexplane-agent-smoke-aws-windows'; "
-                 f"Start-Process -FilePath 'C:\\nexplane-agent.exe' "
-                 f"-ArgumentList '--control-plane {nexplane_url} --secret {agent_secret} --mode service'; "
-                 f"Write-Host 'Agent started with NP_HOSTNAME=nexplane-agent-smoke-aws-windows'"
+                 f"try {{ "
+                 f"  $bp = 'C:\\nexplane-agent.exe --control-plane {nexplane_url} --secret {agent_secret} --mode service'; "
+                 f"  cmd /c sc create NexplaneAgent binPath= \"$bp\" start= auto; "
+                 f"  reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\NexplaneAgent /v Environment /t REG_MULTI_SZ /d NP_HOSTNAME=nexplane-agent-smoke-aws-windows /f; "
+                 f"  sc.exe start NexplaneAgent; "
+                 f"  Start-Sleep -Seconds 5; "
+                 f"  sc.exe query NexplaneAgent "
+                 f"}} catch {{ Write-Host \"Error: $_\" }}"
              ),
              "rollback_strategy": "rollback_unavailable"},
             timeout=300,
