@@ -108,3 +108,41 @@ export const auditApi = {
   list: (params?: { limit?: number; offset?: number; event_type?: string }) =>
     apiClient.get<AuditEvent[]>("/audit-events", { params }).then((r) => r.data),
 };
+
+// ---- Compliance ----
+
+export interface CisFailingAsset {
+  id: string;
+  name: string;
+  detail: string;
+}
+
+export interface CisCheckRow {
+  id: string;
+  title: string;
+  pass_count: number;
+  fail_count: number;
+  failing_assets: CisFailingAsset[];
+}
+
+export interface CisControlRow {
+  id: number;
+  name: string;
+  method: "asset_coverage" | "agent_audit" | "not_tracked";
+  score: number | null;
+  assets_passing: number | null;
+  assets_total: number | null;
+  checks: CisCheckRow[];
+}
+
+export interface CisSummaryResponse {
+  overall_score: number | null;
+  tracked_controls: number;
+  last_updated: string | null;
+  controls: CisControlRow[];
+}
+
+export const complianceApi = {
+  getSummary: (): Promise<CisSummaryResponse> =>
+    apiClient.get<CisSummaryResponse>("/compliance/cis-summary").then((r) => r.data),
+};
