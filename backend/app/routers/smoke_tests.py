@@ -20,6 +20,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.models.asset import Asset
 from app.routers import current_user
 from app.models.user import User
 
@@ -269,3 +274,49 @@ async def stop_run(run_id: str, current_user: User = Depends(current_user)):
         return {"stopped": True, "pid": pid}
     except (ProcessLookupError, ValueError):
         raise HTTPException(status_code=404, detail="Process not found")
+
+
+@router.get("/cleanup-preview")
+async def cleanup_preview(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all org assets whose name contains 'nexplane-smoke' (no deletions)."""
+    result = await db.execute(
+        select(Asset).where(
+            Asset.organization_id == user.organization_id,
+            Asset.name.ilike("%nexplane-smoke%"),
+        )
+    )
+    assets = result.scalars().all()
+    return {
+        "count": len(assets),
+        "assets": [
+            {
+                "id": str(a.id),
+                "name": a.name,
+                "asset_type": a.asset_type.value if hasattr(a.asset_type, "value") else str(a.asset_type),
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in assets
+        ],
+    }
+
+
+@router.delete("/cleanup-inventory")
+async def cleanup_inventory(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-delete all org assets whose name contains 'nexplane-smoke'."""
+    result = await db.execute(
+        select(Asset).where(
+            Asset.organization_id == user.organization_id,
+            Asset.name.ilike("%nexplane-smoke%"),
+        )
+    )
+    assets = result.scalars().all()
+    for asset in assets:
+        await db.delete(asset)
+    await db.commit()
+    return {"deleted": len(assets)}
