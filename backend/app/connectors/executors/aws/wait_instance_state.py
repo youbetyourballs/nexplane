@@ -13,7 +13,13 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     loop = asyncio.get_event_loop()
     start = time.time()
     for attempt in range(20):
-        resp = await loop.run_in_executor(None, lambda: ec2.describe_instances(InstanceIds=[instance_id]))
+        try:
+            resp = await loop.run_in_executor(None, lambda: ec2.describe_instances(InstanceIds=[instance_id]))
+        except Exception as e:
+            if 'InvalidInstanceID' in str(e) and attempt < 5:
+                await asyncio.sleep(15)
+                continue
+            raise
         reservations = resp.get('Reservations', [])
         if reservations:
             state = reservations[0]['Instances'][0]['State']['Name']
