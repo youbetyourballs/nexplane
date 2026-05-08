@@ -187,3 +187,37 @@ def test_cis_summary_response_model_accepts_null_score():
         score=None, assets_passing=None, assets_total=None, checks=[]
     )
     assert ctrl.score is None
+
+
+def test_cis_summary_endpoint_returns_18_controls():
+    import asyncio
+    from unittest.mock import AsyncMock, patch, MagicMock
+    from app.routers.compliance import get_cis_summary
+
+    mock_user = MagicMock()
+    mock_user.organization_id = "org-1"
+
+    asset1 = MagicMock()
+    asset1.id = "a1"
+    asset1.name = "web-01"
+    asset1.connector_id = "conn-1"
+    asset1.asset_metadata = {}
+
+    asset2 = MagicMock()
+    asset2.id = "a2"
+    asset2.name = "db-01"
+    asset2.connector_id = None
+    asset2.asset_metadata = {}
+
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [asset1, asset2]
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+
+    result = asyncio.run(get_cis_summary(user=mock_user, db=mock_db))
+
+    assert len(result.controls) == 18
+    assert result.tracked_controls == 6
+    ctrl1 = next(c for c in result.controls if c.id == 1)
+    assert ctrl1.score == pytest.approx(0.5)
