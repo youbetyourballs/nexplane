@@ -853,24 +853,38 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
             timeout=60,
         )
 
-        # Install Nexplane Windows agent as a service via SSM PowerShell
+        # Step 1: Download agent binary
         client._run_cr_with_timeout(
-            "[aws-windows] install agent", "ssm_command", asset_id,
+            "[aws-windows] download agent", "ssm_command", asset_id,
             {"instance_id": win_id, "document_name": "AWS-RunPowerShellScript",
              "command": (
                  f"$wc = New-Object System.Net.WebClient; "
                  f"$v = $wc.DownloadString('https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/version').Trim(); "
                  f"$wc.DownloadFile(\"https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/nexplane-agent-windows-amd64-$v.exe\", 'C:\\nexplane-agent.exe'); "
-                 f"New-Service -Name 'NexplaneAgent' "
-                 f"-BinaryPathName '\"C:\\nexplane-agent.exe\" --control-plane {nexplane_url} --secret {agent_secret} --mode service' "
-                 f"-StartupType Automatic -ErrorAction SilentlyContinue | Out-Null; "
-                 f"$regPath = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NexplaneAgent'; "
-                 f"New-ItemProperty -Path $regPath -Name 'Environment' -Value @('NP_HOSTNAME=nexplane-agent-smoke-aws-windows') -PropertyType MultiString -Force -ErrorAction SilentlyContinue | Out-Null; "
-                 f"Start-Service 'NexplaneAgent' -ErrorAction SilentlyContinue; "
-                 f"Write-Host 'Agent service setup complete'"
+                 f"Write-Host 'Downloaded nexplane-agent.exe'"
              ),
              "rollback_strategy": "rollback_unavailable"},
             timeout=300,
+        )
+
+        # Step 2: Register and start service (separate command to avoid pipeline overflow)
+        client._run_cr_with_timeout(
+            "[aws-windows] install agent", "ssm_command", asset_id,
+            {"instance_id": win_id, "document_name": "AWS-RunPowerShellScript",
+             "command": (
+                 f"$svcKey = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NexplaneAgent'; "
+                 f"New-Item -Path $svcKey -Force | Out-Null; "
+                 f"Set-ItemProperty -Path $svcKey -Name 'ImagePath' -Value '\"C:\\nexplane-agent.exe\" --control-plane {nexplane_url} --secret {agent_secret} --mode service'; "
+                 f"Set-ItemProperty -Path $svcKey -Name 'Type' -Value 16; "
+                 f"Set-ItemProperty -Path $svcKey -Name 'Start' -Value 2; "
+                 f"Set-ItemProperty -Path $svcKey -Name 'ErrorControl' -Value 1; "
+                 f"Set-ItemProperty -Path $svcKey -Name 'ObjectName' -Value 'LocalSystem'; "
+                 f"Set-ItemProperty -Path $svcKey -Name 'Environment' -Value ([string[]]@('NP_HOSTNAME=nexplane-agent-smoke-aws-windows')); "
+                 f"[System.ServiceProcess.ServiceController]::new('NexplaneAgent').Start(); "
+                 f"Write-Host 'Agent service started'"
+             ),
+             "rollback_strategy": "rollback_unavailable"},
+            timeout=120,
         )
 
         # MANDATORY — 10 min polling for Windows
