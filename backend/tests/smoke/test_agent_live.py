@@ -865,12 +865,9 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
                  f"/nexplane-agent-windows-amd64-$v.exe\" "
                  f"-OutFile 'C:\\nexplane-agent.exe' -UseBasicParsing; "
                  f"[System.Environment]::SetEnvironmentVariable('COMPUTERNAME', 'nexplane-agent-smoke-aws-windows', 'Process'); "
-                 f"$psi = New-Object System.Diagnostics.ProcessStartInfo; "
-                 f"$psi.FileName = 'C:\\nexplane-agent.exe'; "
-                 f"$psi.Arguments = '--control-plane {nexplane_url} --secret {agent_secret} --mode service'; "
-                 f"$psi.UseShellExecute = $false; "
-                 f"$psi.EnvironmentVariables['NP_HOSTNAME'] = 'nexplane-agent-smoke-aws-windows'; "
-                 f"[System.Diagnostics.Process]::Start($psi) | Out-Null; "
+                 f"$env:NP_HOSTNAME = 'nexplane-agent-smoke-aws-windows'; "
+                 f"Start-Process -FilePath 'C:\\nexplane-agent.exe' "
+                 f"-ArgumentList '--control-plane {nexplane_url} --secret {agent_secret} --mode service'; "
                  f"Write-Host 'Agent started with NP_HOSTNAME=nexplane-agent-smoke-aws-windows'"
              ),
              "rollback_strategy": "rollback_unavailable"},
