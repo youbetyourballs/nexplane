@@ -345,6 +345,49 @@ Jira · PagerDuty · ServiceNow · Splunk · Datadog
 
 ---
 
+### Required Permissions
+
+Minimum permissions for each connector when using live credentials with the smoke test suite.
+
+**AWS**
+
+Create an IAM user with programmatic access and attach these managed policies:
+- `AmazonEC2FullAccess`
+- `AmazonSSMFullAccess`
+- `IAMFullAccess`
+- `AmazonRDSFullAccess`
+- `AmazonRoute53FullAccess`
+- `AmazonS3FullAccess`
+- `CloudWatchFullAccess`
+
+Also attach or create a policy granting `sts:GetCallerIdentity`.
+
+> **Note:** AWS Free Tier accounts cannot launch Windows EC2 instances (requires a paid account for Windows Server AMIs and `t3.micro` Windows capacity).
+
+**GCP**
+
+Grant the service account these IAM roles on the project:
+- `roles/compute.admin`
+- `roles/iam.serviceAccountAdmin`
+- `roles/iam.serviceAccountKeyAdmin`
+- `roles/storage.admin`
+- `roles/dns.admin`
+- `roles/iam.securityAdmin` (for IAM bindings)
+
+**Azure**
+
+The service principal needs two roles assigned at the subscription scope:
+- `Contributor` — required for all resource create/delete/modify operations
+- `User Access Administrator` — required for RBAC role assignment operations (Phase W)
+
+> `Contributor` alone is **not sufficient** — role assignment operations fail without `User Access Administrator`.
+
+**Tailscale**
+
+- Use a **reusable** auth key (not single-use). Single-use keys are consumed on the first node join and break subsequent smoke test runs.
+- The key must be **pre-authorized** (no manual approval step in the Tailscale admin console).
+- Pass the key via `--tailscale-auth-key tskey-auth-<key>` when running agent smoke tests.
+
 ### Nexplane Agent
 
 A cross-platform Go binary that reverses the connection direction: the agent polls the control plane for jobs and executes signed commands. No inbound SSH required.
