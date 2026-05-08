@@ -12,6 +12,7 @@ type Config struct {
 	ControlPlane string
 	Secret       string
 	Mode         string
+	Hostname     string
 	PollInterval time.Duration
 }
 
@@ -22,6 +23,7 @@ func Load(args []string) (*Config, error) {
 	controlPlane := fs.String("control-plane", "", "Base URL of the Nexplane control plane")
 	secret := fs.String("secret", "", "Shared HMAC secret for agent authentication")
 	mode := fs.String("mode", "", "Operation mode: ephemeral or service (default: service)")
+	hostname := fs.String("hostname", "", "Override hostname used for registration (default: OS hostname)")
 	pollInterval := fs.Duration("poll-interval", 0, "Poll interval in service mode (default: 30s)")
 
 	if err := fs.Parse(args); err != nil {
@@ -48,6 +50,12 @@ func Load(args []string) (*Config, error) {
 		cfg.Mode = v
 	} else {
 		cfg.Mode = "service"
+	}
+
+	if *hostname != "" {
+		cfg.Hostname = *hostname
+	} else if v := os.Getenv("NP_HOSTNAME"); v != "" {
+		cfg.Hostname = v
 	}
 
 	if *pollInterval != 0 {

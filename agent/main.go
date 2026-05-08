@@ -41,7 +41,7 @@ func main() {
 		log.Fatalf("Cannot determine machine ID: %v", err)
 	}
 
-	hostname := os.Getenv("NP_HOSTNAME")
+	hostname := cfg.Hostname
 	if hostname == "" {
 		hostname, _ = os.Hostname()
 	}
