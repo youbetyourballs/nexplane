@@ -414,6 +414,8 @@ async def get_prompt_preview(
 ):
     """Return the full assembled prompt string for this project (no AI call)."""
     project = await _get_project(db, project_id, user.organization_id)
+    if not (project.goal or project.name):
+        raise HTTPException(status_code=400, detail="Project has no goal or name")
 
     from sqlalchemy.orm import selectinload as _selectinload
     assets_result = await db.execute(
