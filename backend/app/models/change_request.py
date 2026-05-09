@@ -178,6 +178,11 @@ class ChangeType(str, enum.Enum):
     listener_delete = "listener_delete"
     register_targets = "register_targets"
     deregister_targets = "deregister_targets"
+    # Containerize legacy workloads
+    agent_appdiscovery = "agent_appdiscovery"
+    agent_containerize_build = "agent_containerize_build"
+    k8s_workload_deploy = "k8s_workload_deploy"
+    agent_containerize_retire = "agent_containerize_retire"
 
 
 class RiskLevel(str, enum.Enum):
