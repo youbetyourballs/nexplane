@@ -15,6 +15,7 @@ import (
 	"nexplane-agent/commands/crossplatform"
 	"nexplane-agent/commands/linuxupgrade"
 	"nexplane-agent/commands/fleet"
+	"nexplane-agent/commands/appdiscovery"
 	"nexplane-agent/commands/dbadmin"
 )
 
@@ -79,6 +80,8 @@ var commands = map[string]CommandFunc{
 	"push_config_file": fleet.PushConfigFileExecute,
 	"distribute_file":  fleet.DistributeFileExecute,
 	"health_check":     fleet.HealthCheckExecute,
+	// App discovery (containerize foundation)
+	"discover_applications": appdiscovery.DiscoverApplicationsExecute,
 	// Database administration
 	"provision_db_user":    dbadmin.ExecuteCommand,
 	"deprovision_db_user":  dbadmin.ExecuteCommand,
