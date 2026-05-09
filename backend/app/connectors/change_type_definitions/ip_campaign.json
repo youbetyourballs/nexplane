@@ -1,0 +1,29 @@
+{
+  "change_type": "ip_campaign",
+  "display_name": "IP Migration Campaign",
+  "steps": [{"generic_action": "ip_campaign", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "parameters": {
+    "migration_plan": {
+      "type": "array",
+      "required": true,
+      "items": {
+        "type": "object",
+        "properties": {
+          "asset_id":      {"type": "string"},
+          "interface":     {"type": "string"},
+          "new_ip_v4":     {"type": "string"},
+          "new_gateway_v4":{"type": "string"},
+          "method":        {"type": "string"}
+        }
+      }
+    },
+    "batch_size":              {"type": "integer", "required": false, "default": 5},
+    "batch_interval_seconds":  {"type": "integer", "required": false, "default": 60},
+    "abort_error_threshold":   {"type": "number",  "required": false, "default": 0.1},
+    "method":                  {"type": "string",  "required": false, "default": "auto"},
+    "commit_timer_seconds":    {"type": "integer", "required": false, "default": 30},
+    "dry_run":                 {"type": "boolean", "required": false, "default": false}
+  }
+}
