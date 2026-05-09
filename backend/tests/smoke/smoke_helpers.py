@@ -107,7 +107,42 @@ class NexplaneClient:
     def get_tailscale_auth_key(self, provided_key: str = "") -> str:
         if provided_key:
             return provided_key
-        fail("Tailscale auth key required — pass --tailscale-auth-key <key>")
+        # Smoke tests run inside the backend container with full DB access.
+        # Retrieve the auth_key directly from the encrypted ConnectorCredential
+        # the same way the executor service does via _attach_credentials().
+        try:
+            import asyncio as _asyncio
+            from app.database import AsyncSessionLocal as _Session
+            from app.models.connector import Connector as _Connector
+            from app.models.connector_credential import ConnectorCredential as _CC
+            from app.services.secrets_service import SecretsService as _Secrets
+            from app.config import settings as _cfg
+            from sqlalchemy import select as _select
+
+            async def _fetch() -> str:
+                async with _Session() as db:
+                    row = await db.execute(
+                        _select(_Connector).where(_Connector.connector_type == "tailscale")
+                    )
+                    conn = row.scalar_one_or_none()
+                    if not conn:
+                        return ""
+                    cred_row = await db.execute(
+                        _select(_CC).where(_CC.connector_id == conn.id)
+                    )
+                    cred = cred_row.scalar_one_or_none()
+                    if not cred:
+                        return ""
+                    svc = _Secrets(_cfg.SECRET_KEY)
+                    return svc.decrypt_json(cred.credentials_encrypted).get("auth_key", "")
+
+            key = _asyncio.run(_fetch())
+            if key:
+                log("Tailscale auth key retrieved from connector credentials")
+                return key
+        except Exception as exc:
+            log(f"Could not retrieve Tailscale key from connector: {exc}")
+        fail("Tailscale auth key not found — store credentials in the Tailscale connector or pass --tailscale-auth-key <key>")
         return ""
 
     def create_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> str:
