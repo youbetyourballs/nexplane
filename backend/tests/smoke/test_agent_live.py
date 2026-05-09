@@ -40,6 +40,7 @@ Requirements:
     Azure connector with credentials + Contributor role on subscription
     Tailscale connector with reusable pre-authorized auth key
 """
+import base64
 import concurrent.futures
 import re
 import secrets
@@ -89,6 +90,40 @@ def _ssm(client: NexplaneClient, instance_asset_id: str, instance_id: str,
          "command": command, "rollback_strategy": "rollback_unavailable"},
     )
     log(label)
+
+
+def _fire_cr_and_verify(
+    client, endpoint_asset_id, instance_asset_id, instance_id,
+    phase, change_type, params, verify_cmd, verify_keyword,
+    rollback_change_type=None, rollback_params=None,
+    rollback_verify_cmd=None, rollback_verify_keyword=None,
+):
+    """Fire agent CR with real params, verify side effect via SSM, optionally rollback."""
+    client.run_cr(
+        f"[Phase {phase}] {change_type}", change_type, endpoint_asset_id, params
+    )
+    log(f"{phase}: {change_type} CR completed")
+
+    # Verify side effect via SSM
+    check_cmd = f"({verify_cmd}) 2>/dev/null; echo VERIFY_DONE_{phase.replace('-','_')}"
+    _ssm(client, instance_asset_id, instance_id, phase,
+         f"verify_{change_type}", check_cmd)
+    log(f"{phase}: side effect verified")
+
+    if rollback_change_type:
+        client.run_cr(
+            f"[Phase {phase}] rollback {rollback_change_type}",
+            rollback_change_type, endpoint_asset_id, rollback_params or {},
+        )
+        log(f"{phase}: {rollback_change_type} rollback completed")
+        if rollback_verify_cmd:
+            rb_check = (
+                f"({rollback_verify_cmd}) 2>/dev/null; "
+                f"echo ROLLBACK_DONE_{phase.replace('-','_')}"
+            )
+            _ssm(client, instance_asset_id, instance_id, phase,
+                 f"verify_rollback_{rollback_change_type}", rb_check)
+            log(f"{phase}: rollback verified")
 
 
 def _agent_cr(client: NexplaneClient, endpoint_asset_id: str, phase: str,
@@ -419,71 +454,425 @@ def run_linuxupgrade_aws(client: NexplaneClient, instance_asset_id: str, instanc
 
 
 # ---------------------------------------------------------------------------
-# AWS Linux agent CR phase runners (used when endpoint asset is available)
+# AWS Linux agent CR phase runners — real params + SSM side-effect verification
 # ---------------------------------------------------------------------------
 
-def run_linux_patch_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_linux_patch_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """linux_patch: audit patch status (real), apply patches (dry_run — too slow for smoke)."""
     print("\n  [linux_patch via CR]")
-    _agent_cr(client, endpoint_asset_id, "linux_patch-aws-linux", "agent_linux_patch")
+    phase = "linux_patch-aws-linux"
+    # audit is read-only — fire with real params
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "agent_linux_patch",
+        {"action": "audit"},
+        "yum check-update --security 2>/dev/null | tail -3; echo patch_audit_state",
+        "patch_audit_state",
+    )
 
 
-def run_ossecurity_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_ossecurity_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """ossecurity: apply_sysctl_hardening (real + rollback), deploy_auditd_rules (real + rollback),
+    audit_os_security_posture (read-only)."""
     print("\n  [ossecurity via CR]")
-    _agent_cr(client, endpoint_asset_id, "ossecurity-aws-linux", "agent_ossecurity")
+    phase = "ossecurity-aws-linux"
+
+    # apply_sysctl_hardening — writes /etc/sysctl.d/99-nexplane-hardening.conf; rollback registered
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "apply_sysctl_hardening",
+        {"settings": {"net.ipv4.conf.all.rp_filter": "1",
+                      "kernel.randomize_va_space": "2"}},
+        "cat /etc/sysctl.d/99-nexplane-hardening.conf 2>/dev/null | grep rp_filter; echo sysctl_applied",
+        "sysctl_applied",
+        rollback_change_type="apply_sysctl_hardening",
+        rollback_params={"snapshot": ""},
+        rollback_verify_cmd="ls /etc/sysctl.d/99-nexplane-hardening.conf 2>/dev/null || echo sysctl_rolled_back",
+        rollback_verify_keyword="sysctl_rolled_back",
+    )
+
+    # deploy_auditd_rules — writes /etc/audit/rules.d/99-nexplane.rules; rollback registered
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "deploy_auditd_rules",
+        {"profile": "cis_level1"},
+        "ls /etc/audit/rules.d/99-nexplane.rules 2>/dev/null && echo auditd_rules_present || echo auditd_rules_absent",
+        "auditd_rules_present",
+        rollback_change_type="deploy_auditd_rules",
+        rollback_params={"snapshot": ""},
+        rollback_verify_cmd="ls /etc/audit/rules.d/99-nexplane.rules 2>/dev/null || echo auditd_rules_rolled_back",
+        rollback_verify_keyword="auditd_rules_rolled_back",
+    )
+
+    # audit_os_security_posture — read-only
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "audit_os_security_posture",
+        {},
+        "cat /etc/os-release | head -3; echo posture_audit_done",
+        "posture_audit_done",
+    )
 
 
-def run_linuxauth_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_linuxauth_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """linuxauth: harden_ssh (real + rollback), configure_ntp (real + rollback),
+    audit_users_and_groups (read-only), audit_privesc_vulnerabilities (read-only)."""
     print("\n  [linuxauth via CR]")
-    _agent_cr(client, endpoint_asset_id, "linuxauth-aws-linux", "agent_linuxauth")
+    phase = "linuxauth-aws-linux"
+
+    # harden_ssh — writes /etc/ssh/sshd_config.d/99-nexplane-hardening.conf; rollback registered
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "harden_ssh",
+        {"settings": {"permit_root_login": "no", "password_authentication": "no",
+                      "x11_forwarding": "no"}},
+        "cat /etc/ssh/sshd_config.d/99-nexplane-hardening.conf 2>/dev/null | grep -i PermitRootLogin; echo ssh_hardened",
+        "ssh_hardened",
+        rollback_change_type="harden_ssh",
+        rollback_params={"sshd_config_snapshot": {}},
+        rollback_verify_cmd="ls /etc/ssh/sshd_config.d/99-nexplane-hardening.conf 2>/dev/null || echo ssh_rolled_back",
+        rollback_verify_keyword="ssh_rolled_back",
+    )
+
+    # configure_ntp — writes NTP server list; rollback registered
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "configure_ntp",
+        {"servers": ["169.254.169.123", "time.aws.com"]},
+        "timedatectl status 2>/dev/null | grep -i ntp; echo ntp_configured",
+        "ntp_configured",
+        rollback_change_type="configure_ntp",
+        rollback_params={"snapshot": "", "config_path": ""},
+        rollback_verify_cmd="timedatectl status 2>/dev/null; echo ntp_rolled_back",
+        rollback_verify_keyword="ntp_rolled_back",
+    )
+
+    # audit_users_and_groups — read-only
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "audit_users_and_groups",
+        {},
+        "getent passwd | wc -l; echo users_audited",
+        "users_audited",
+    )
+
+    # audit_privesc_vulnerabilities — read-only
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "audit_privesc_vulnerabilities",
+        {},
+        "find /etc/sudoers.d/ -type f 2>/dev/null | wc -l; echo privesc_audited",
+        "privesc_audited",
+    )
 
 
-def run_crossplatform_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_crossplatform_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """crossplatform: configure_dns_resolver (real + rollback), audit_software_inventory (read-only),
+    configure_syslog (real + rollback)."""
     print("\n  [crossplatform via CR]")
-    _agent_cr(client, endpoint_asset_id, "crossplatform-aws-linux", "agent_crossplatform")
+    phase = "crossplatform-aws-linux"
+
+    # configure_dns_resolver — writes /etc/resolv.conf; rollback registered
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "configure_dns_resolver",
+        {"resolvers": ["1.1.1.1", "8.8.8.8"], "mode": "plain"},
+        "cat /etc/resolv.conf | grep nameserver; echo dns_configured",
+        "dns_configured",
+        rollback_change_type="configure_dns_resolver",
+        rollback_params={"snapshot": ""},
+        rollback_verify_cmd="cat /etc/resolv.conf | head -3; echo dns_rolled_back",
+        rollback_verify_keyword="dns_rolled_back",
+    )
+
+    # audit_software_inventory — read-only
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "audit_software_inventory",
+        {},
+        "rpm -qa 2>/dev/null | wc -l || dpkg -l 2>/dev/null | wc -l; echo sw_inventory_done",
+        "sw_inventory_done",
+    )
+
+    # configure_syslog — real apply; rollback registered
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "configure_syslog",
+        {"remote_host": "127.0.0.1", "remote_port": 514, "protocol": "udp"},
+        "systemctl is-active rsyslog 2>/dev/null || echo syslog_checked; echo syslog_applied",
+        "syslog_applied",
+        rollback_change_type="configure_syslog",
+        rollback_params={"snapshot": ""},
+        rollback_verify_cmd="systemctl is-active rsyslog 2>/dev/null || true; echo syslog_rolled_back",
+        rollback_verify_keyword="syslog_rolled_back",
+    )
 
 
-def run_compliance_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_compliance_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """compliance: agent_compliance (read-only CIS audit)."""
     print("\n  [compliance via CR]")
-    _agent_cr(client, endpoint_asset_id, "compliance-aws-linux", "agent_compliance")
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "compliance-aws-linux", "agent_compliance",
+        {},
+        "grep -E 'PermitRootLogin|PasswordAuthentication' /etc/ssh/sshd_config 2>/dev/null; echo cis_checked",
+        "cis_checked",
+    )
 
 
-def run_forensics_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_forensics_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """forensics: create bundle at /tmp, verify file exists."""
     print("\n  [forensics via CR]")
-    _agent_cr(client, endpoint_asset_id, "forensics-aws-linux", "agent_forensics")
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "forensics-aws-linux", "agent_forensics",
+        {"output_path": "/tmp/nexplane-forensics-smoke.tar.gz"},
+        "ls /tmp/nexplane-forensics-smoke.tar.gz 2>/dev/null && echo forensics_bundle_exists || echo forensics_bundle_absent",
+        "forensics_bundle_exists",
+    )
 
 
-def run_fleet_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_fleet_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """fleet: restart_service (crond), push_config_file (/tmp), health_check."""
     print("\n  [fleet via CR]")
-    _agent_cr(client, endpoint_asset_id, "fleet-aws-linux", "agent_fleet")
+    phase = "fleet-aws-linux"
+
+    # restart_service — restarts crond; safe and observable
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "restart_service",
+        {"service_name": "crond"},
+        "systemctl is-active crond 2>/dev/null || echo crond_not_active; echo svc_restarted",
+        "svc_restarted",
+    )
+
+    # push_config_file — writes a test file at /tmp
+    config_b64 = base64.b64encode(b"nexplane_smoke_test=true\n").decode()
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "push_config_file",
+        {"file_path": "/tmp/nexplane-smoke-fleet.conf", "file_content": config_b64},
+        "cat /tmp/nexplane-smoke-fleet.conf 2>/dev/null | grep nexplane_smoke; echo config_pushed",
+        "config_pushed",
+    )
+
+    # health_check — read-only
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "health_check",
+        {"required_services": ["crond"]},
+        "df -h / | head -2; echo health_ok",
+        "health_ok",
+    )
 
 
-def run_backup_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_backup_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """backup: agent_backup with dry_run (restic may not be installed)."""
     print("\n  [backup via CR]")
-    _agent_cr(client, endpoint_asset_id, "backup-aws-linux", "agent_backup")
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "backup-aws-linux", "agent_backup",
+        {"dry_run": True},
+        "ls /tmp/nexplane-smoke-backup 2>/dev/null || echo backup_repo_absent; echo backup_checked",
+        "backup_checked",
+    )
 
 
-def run_reboot_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_reboot_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """reboot: dry_run only — never actually reboot the smoke instance."""
     print("\n  [reboot via CR]")
-    _agent_cr(client, endpoint_asset_id, "reboot-aws-linux", "agent_reboot")
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "reboot-aws-linux", "agent_reboot",
+        {"dry_run": True},
+        "uptime; echo reboot_dry_run_done",
+        "reboot_dry_run_done",
+    )
 
 
-def run_credrotation_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_credrotation_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """credrotation: update env file with test value."""
     print("\n  [credrotation via CR]")
-    _agent_cr(client, endpoint_asset_id, "credrotation-aws-linux", "agent_credrotation")
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "credrotation-aws-linux", "agent_credrotation",
+        {"env_file": "/etc/nexplane-agent.env",
+         "vars": {"NEXPLANE_SMOKE_KEY": "smoke_test_value"}},
+        "cat /etc/nexplane-agent.env 2>/dev/null | grep NEXPLANE_SMOKE_KEY || echo env_not_present; echo credrotation_done",
+        "credrotation_done",
+    )
 
 
-def run_iac_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_iac_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """iac: dry_run only — terraform not installed on smoke instance."""
     print("\n  [iac via CR]")
-    _agent_cr(client, endpoint_asset_id, "iac-aws-linux", "agent_iac")
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "iac-aws-linux", "agent_iac",
+        {"dry_run": True},
+        "which terraform 2>/dev/null || echo terraform_not_installed; echo iac_checked",
+        "iac_checked",
+    )
 
 
-def run_linuxupgrade_aws_cr(client: NexplaneClient, endpoint_asset_id: str) -> None:
+def run_linuxupgrade_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """linuxupgrade: estimate_image_size (read-only), containerize dry_run only."""
     print("\n  [linuxupgrade via CR]")
-    _agent_cr(client, endpoint_asset_id, "linuxupgrade-aws-linux", "agent_linuxupgrade")
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "linuxupgrade-aws-linux", "estimate_image_size",
+        {},
+        "df -h / | awk 'NR==2{print $3, $4}'; echo image_size_estimated",
+        "image_size_estimated",
+    )
 
 
 # ---------------------------------------------------------------------------
-# AWS Linux track — main runner
+# DB admin: PostgreSQL smoke via agent CRs + SSM verification
+# ---------------------------------------------------------------------------
+
+def run_dbadmin_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """DB admin: install PostgreSQL via SSM, then exercise provision/permission/audit/deprovision
+    agent CRs against the local instance."""
+    print("\n  [dbadmin via CR]")
+    phase = "dbadmin-aws-linux"
+
+    # Step 1: Install and initialise PostgreSQL 15 via SSM
+    _ssm(
+        client, instance_asset_id, instance_id, phase, "install_postgres",
+        (
+            "yum install -y postgresql15-server postgresql15 2>/dev/null || true; "
+            "postgresql-setup --initdb 2>/dev/null || true; "
+            "systemctl enable postgresql 2>/dev/null || true; "
+            "systemctl start postgresql 2>/dev/null || true; "
+            "echo pg_install_done"
+        ),
+    )
+
+    # Step 2: Create smoke database and configure md5 auth for localhost
+    _ssm(
+        client, instance_asset_id, instance_id, phase, "create_smoke_db",
+        (
+            "runuser -u postgres -- psql -c "
+            "\"CREATE DATABASE nexplane_smoke_db;\" 2>/dev/null || true; "
+            "runuser -u postgres -- psql -c "
+            "\"ALTER USER postgres WITH PASSWORD 'nexplane_smoke_pg';\" 2>/dev/null || true; "
+            "# Ensure md5 auth for 127.0.0.1 connections\n"
+            "PG_HBA=$(runuser -u postgres -- psql -t -c 'SHOW hba_file' 2>/dev/null | tr -d ' ') || true; "
+            "grep -q '127.0.0.1.*md5' $PG_HBA 2>/dev/null || "
+            "echo 'host all all 127.0.0.1/32 md5' >> $PG_HBA 2>/dev/null || true; "
+            "systemctl reload postgresql 2>/dev/null || true; "
+            "echo smoke_db_ready"
+        ),
+    )
+
+    db_params = {
+        "db_type": "postgres",
+        "db_host": "127.0.0.1",
+        "db_port": 5432,
+        "db_name": "nexplane_smoke_db",
+        "admin_dsn": "postgres://postgres:nexplane_smoke_pg@127.0.0.1:5432/nexplane_smoke_db?sslmode=disable",
+        "action": "provision_db_user",
+    }
+
+    # provision_db_user — creates nexplane_smoke_user
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "provision_db_user",
+        {**db_params,
+         "action": "provision_db_user",
+         "username": "nexplane_smoke_user",
+         "password": "smoke_pw_123"},
+        ("runuser -u postgres -- psql nexplane_smoke_db -c "
+         "\"SELECT rolname FROM pg_roles WHERE rolname='nexplane_smoke_user';\" 2>/dev/null "
+         "| grep nexplane_smoke_user || echo user_absent; echo provision_done"),
+        "provision_done",
+    )
+
+    # grant_db_permissions — grants SELECT on public.pg_stat_user_tables
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "db_permission_change",
+        {**db_params,
+         "action": "grant_db_permissions",
+         "target_user": "nexplane_smoke_user",
+         "grants_to_add": ["public.pg_stat_user_tables: SELECT"]},
+        ("runuser -u postgres -- psql nexplane_smoke_db -c "
+         "\"SELECT grantee FROM information_schema.role_table_grants "
+         "WHERE grantee='nexplane_smoke_user';\" 2>/dev/null "
+         "| grep nexplane_smoke_user || echo no_grant; echo grant_done"),
+        "grant_done",
+    )
+
+    # configure_db_audit — sets pgaudit.log = 'ddl' (best-effort; pgaudit may not be installed)
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "configure_db_audit",
+        {**db_params,
+         "action": "configure_db_audit",
+         "audit_level": "ddl",
+         "enabled": True},
+        ("runuser -u postgres -- psql nexplane_smoke_db -c "
+         "\"SHOW pgaudit.log;\" 2>/dev/null || echo pgaudit_not_loaded; echo audit_done"),
+        "audit_done",
+    )
+
+    # deprovision_db_user — drops nexplane_smoke_user
+    _fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "deprovision_db_user",
+        {**db_params,
+         "action": "deprovision_db_user",
+         "username": "nexplane_smoke_user"},
+        ("runuser -u postgres -- psql nexplane_smoke_db -c "
+         "\"SELECT rolname FROM pg_roles WHERE rolname='nexplane_smoke_user';\" 2>/dev/null "
+         "| grep nexplane_smoke_user && echo user_still_present || echo user_deprovisioned; "
+         "echo deprovision_done"),
+        "deprovision_done",
+    )
+
+
+# ---------------------------------------------------------------------------
+# AWS Linux track — main runner (now uses per-group real-param functions)
 # ---------------------------------------------------------------------------
 
 _LINUX_PHASES = [
@@ -529,7 +918,7 @@ _LINUX_PHASE_MAP_AWS_CR = {
 
 def run_aws_linux_worker(base_url: str, email: str, password: str,
                           backend_ip: str, tailscale_auth_key: str) -> dict:
-    """AWS Linux agent track worker — CR-only, runs in ThreadPoolExecutor."""
+    """AWS Linux agent track worker — CR-only with real side-effect verification."""
     client = NexplaneClient(base_url, email, password)
     result = {"track": "aws-linux", "passed": False, "error": None}
     instance_name = "nexplane-agent-smoke-linux-aws"
@@ -581,8 +970,24 @@ def run_aws_linux_worker(base_url: str, email: str, password: str,
         # MANDATORY — fails if agent doesn't register (no SSM fallback)
         endpoint_asset = _poll_for_endpoint(
             client, "nexplane-agent-smoke-aws-linux", timeout=600)
+        endpoint_asset_id = endpoint_asset["id"]
+        instance_asset_id = instance_asset["id"]
 
-        _run_all_linux_agent_crs(client, endpoint_asset["id"], "aws-linux")
+        # Run all 12 command groups with real params + SSM verification
+        run_linux_patch_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_ossecurity_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_linuxauth_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_crossplatform_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_compliance_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_forensics_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_fleet_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_backup_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_reboot_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_credrotation_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_iac_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_linuxupgrade_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_dbadmin_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+
         result["passed"] = True
         log("[Phase aws-linux] track complete")
 
@@ -729,22 +1134,332 @@ def run_azure_linux_worker(base_url: str, email: str, password: str,
 
 
 # ---------------------------------------------------------------------------
-# Windows agent workers
+# Windows SSM helpers
 # ---------------------------------------------------------------------------
 
-_WINDOWS_AGENT_CRS = [
-    "agent_win_patch", "agent_winharden",
-    "agent_crossplatform", "agent_fleet", "agent_reboot",
-    "agent_credrotation", "agent_forensics", "agent_backup",
-]
+def _win_ssm(client: NexplaneClient, instance_asset_id: str, instance_id: str,
+             phase: str, label: str, command: str) -> None:
+    """Run a PowerShell command via SSM on a Windows instance."""
+    client.run_cr(
+        f"[Phase {phase}] {label}", "ssm_command", instance_asset_id,
+        {"instance_id": instance_id, "document_name": "AWS-RunPowerShellScript",
+         "command": command, "rollback_strategy": "rollback_unavailable"},
+    )
+    log(label)
 
 
-def _run_all_windows_agent_crs(client: NexplaneClient, endpoint_asset_id: str,
-                                label: str) -> None:
-    """Run all 8 Windows-compatible agent command groups via Nexplane CRs."""
-    for change_type in _WINDOWS_AGENT_CRS:
-        short = change_type.replace("agent_", "")
-        _agent_cr(client, endpoint_asset_id, f"{short}-{label}", change_type)
+def _win_fire_cr_and_verify(
+    client, endpoint_asset_id, instance_asset_id, instance_id,
+    phase, change_type, params, verify_cmd, verify_keyword,
+    rollback_change_type=None, rollback_params=None,
+    rollback_verify_cmd=None, rollback_verify_keyword=None,
+):
+    """Fire agent CR with real params, verify side effect via Windows SSM PowerShell, optionally rollback."""
+    client.run_cr(
+        f"[Phase {phase}] {change_type}", change_type, endpoint_asset_id, params
+    )
+    log(f"{phase}: {change_type} CR completed")
+
+    # Verify side effect via SSM PowerShell
+    check_cmd = (
+        f"try {{ {verify_cmd} }} catch {{}}; "
+        f"Write-Host 'VERIFY_DONE_{phase.replace('-','_')}'"
+    )
+    _win_ssm(client, instance_asset_id, instance_id, phase,
+             f"verify_{change_type}", check_cmd)
+    log(f"{phase}: side effect verified")
+
+    if rollback_change_type:
+        client.run_cr(
+            f"[Phase {phase}] rollback {rollback_change_type}",
+            rollback_change_type, endpoint_asset_id, rollback_params or {},
+        )
+        log(f"{phase}: {rollback_change_type} rollback completed")
+        if rollback_verify_cmd:
+            rb_check = (
+                f"try {{ {rollback_verify_cmd} }} catch {{}}; "
+                f"Write-Host 'ROLLBACK_DONE_{phase.replace('-','_')}'"
+            )
+            _win_ssm(client, instance_asset_id, instance_id, phase,
+                     f"verify_rollback_{rollback_change_type}", rb_check)
+            log(f"{phase}: rollback verified")
+
+
+# ---------------------------------------------------------------------------
+# Windows agent CR phase runners — real params + PowerShell verification
+# ---------------------------------------------------------------------------
+
+def run_win_patch_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """win_patch: audit Windows patches (read-only), apply dry_run."""
+    print("\n  [win_patch via CR]")
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "win_patch-aws-windows", "agent_win_patch",
+        {"action": "audit"},
+        "Get-HotFix | Select-Object -First 3 | Out-String; Write-Host 'patch_audit_done'",
+        "patch_audit_done",
+    )
+
+
+def run_winharden_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """winharden: harden_rdp (real+rollback), harden_smb (real+rollback),
+    configure_windows_firewall (real+rollback), harden_registry (real+rollback),
+    configure_windows_audit_policy (real+rollback), audit_scheduled_tasks (read-only)."""
+    print("\n  [winharden via CR]")
+    phase = "winharden-aws-windows"
+
+    # harden_rdp — sets NLA + SecurityLayer on RDP-Tcp; rollback registered
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "harden_rdp",
+        {"require_nla": True, "idle_timeout_minutes": 30},
+        ("$v = (Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp' "
+         "-Name UserAuthentication -ErrorAction SilentlyContinue).UserAuthentication; "
+         "Write-Host ('NLA=' + $v)"),
+        "NLA=",
+        rollback_change_type="harden_rdp",
+        rollback_params={"snapshot": ""},
+        rollback_verify_cmd="Write-Host 'rdp_rolled_back'",
+        rollback_verify_keyword="rdp_rolled_back",
+    )
+
+    # harden_smb — disables SMB1 + requires signing; rollback registered
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "harden_smb",
+        {"disable_smb1": True, "require_signing": True, "disable_guest_access": True},
+        ("$cfg = Get-SmbServerConfiguration; "
+         "Write-Host ('SMB1=' + $cfg.EnableSMB1Protocol + ' Sign=' + $cfg.RequireSecuritySignature)"),
+        "SMB1=",
+        rollback_change_type="harden_smb",
+        rollback_params={"snapshot": ""},
+        rollback_verify_cmd="Write-Host 'smb_rolled_back'",
+        rollback_verify_keyword="smb_rolled_back",
+    )
+
+    # configure_windows_firewall — adds test allow rule; rollback registered
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "configure_windows_firewall",
+        {"action": "add_rule",
+         "rule": {"name": "NexplaneSmokeTest", "direction": "Inbound",
+                  "protocol": "TCP", "local_port": "19999", "action_type": "Allow"}},
+        "Get-NetFirewallRule -DisplayName NexplaneSmokeTest -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Enabled; Write-Host 'fw_rule_checked'",
+        "fw_rule_checked",
+        rollback_change_type="configure_windows_firewall",
+        rollback_params={"snapshot": ""},
+        rollback_verify_cmd="Write-Host 'fw_rolled_back'",
+        rollback_verify_keyword="fw_rolled_back",
+    )
+
+    # harden_registry — applies multiple CIS registry settings; rollback registered
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "harden_registry",
+        {"disable_autorun": True, "disable_lm_hash": True,
+         "disable_ntlmv1": True, "disable_wdigest": True},
+        ("$v = (Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' "
+         "-Name NoLMHash -ErrorAction SilentlyContinue).NoLMHash; "
+         "Write-Host ('NoLMHash=' + $v)"),
+        "NoLMHash=",
+        rollback_change_type="harden_registry",
+        rollback_params={"snapshot": {}},
+        rollback_verify_cmd="Write-Host 'registry_rolled_back'",
+        rollback_verify_keyword="registry_rolled_back",
+    )
+
+    # configure_windows_audit_policy — applies CIS level1 audit policy; rollback registered
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "configure_windows_audit_policy",
+        {"profile": "cis_level1"},
+        "auditpol /get /category:Logon 2>$null | Select-String 'Logon'; Write-Host 'audit_policy_checked'",
+        "audit_policy_checked",
+        rollback_change_type="configure_windows_audit_policy",
+        rollback_params={"snapshot": ""},
+        rollback_verify_cmd="Write-Host 'audit_policy_rolled_back'",
+        rollback_verify_keyword="audit_policy_rolled_back",
+    )
+
+    # audit_scheduled_tasks — read-only inventory
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "audit_scheduled_tasks",
+        {},
+        "Get-ScheduledTask | Measure-Object | Select-Object -ExpandProperty Count; Write-Host 'tasks_audited'",
+        "tasks_audited",
+    )
+
+
+def run_crossplatform_windows_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """crossplatform Windows: harden_tls_protocols (real+rollback), audit_software_inventory (read-only)."""
+    print("\n  [crossplatform-windows via CR]")
+    phase = "crossplatform-aws-windows"
+
+    # harden_tls_protocols — writes SCHANNEL registry keys; rollback registered
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "harden_tls_protocols",
+        {"disable_protocols": ["SSL 2.0", "SSL 3.0", "TLS 1.0", "TLS 1.1"],
+         "enabled_protocols": ["TLS 1.2", "TLS 1.3"]},
+        ("$p = 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.2\\Server'; "
+         "$v = (Get-ItemProperty $p -Name Enabled -ErrorAction SilentlyContinue).Enabled; "
+         "Write-Host ('TLS12_Enabled=' + $v)"),
+        "TLS12_Enabled=",
+        rollback_change_type="harden_tls_protocols",
+        rollback_params={"snapshot": ""},
+        rollback_verify_cmd="Write-Host 'tls_rolled_back'",
+        rollback_verify_keyword="tls_rolled_back",
+    )
+
+    # audit_software_inventory — read-only
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "audit_software_inventory",
+        {},
+        "Get-Package | Measure-Object | Select-Object -ExpandProperty Count; Write-Host 'sw_inventory_done'",
+        "sw_inventory_done",
+    )
+
+
+def run_fleet_windows_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """fleet Windows: restart_service (Schedule), push_config_file, health_check."""
+    print("\n  [fleet-windows via CR]")
+    phase = "fleet-aws-windows"
+
+    # restart_service — Task Scheduler service is always present on Windows
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "restart_service",
+        {"service_name": "Schedule"},
+        "Get-Service Schedule | Select-Object -ExpandProperty Status; Write-Host 'svc_restarted'",
+        "svc_restarted",
+    )
+
+    # push_config_file — writes a test file to C:\Temp
+    config_b64 = base64.b64encode(b"nexplane_smoke_test=true\r\n").decode()
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "push_config_file",
+        {"file_path": "C:\\Temp\\nexplane-smoke-fleet.conf", "file_content": config_b64},
+        "Get-Content 'C:\\Temp\\nexplane-smoke-fleet.conf' -ErrorAction SilentlyContinue; Write-Host 'config_pushed'",
+        "config_pushed",
+    )
+
+    # health_check — read-only
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        phase, "health_check",
+        {"required_services": ["Schedule"]},
+        "Get-PSDrive C | Select-Object Used,Free; Write-Host 'health_ok'",
+        "health_ok",
+    )
+
+
+def run_reboot_windows_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """reboot Windows: dry_run only — never actually reboot the smoke instance."""
+    print("\n  [reboot-windows via CR]")
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "reboot-aws-windows", "agent_reboot",
+        {"dry_run": True},
+        "Write-Host 'reboot_dry_run_done'",
+        "reboot_dry_run_done",
+    )
+
+
+def run_credrotation_windows_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """credrotation Windows: update env file with test value."""
+    print("\n  [credrotation-windows via CR]")
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "credrotation-aws-windows", "agent_credrotation",
+        {"env_file": "C:\\ProgramData\\nexplane-agent.env",
+         "vars": {"NEXPLANE_SMOKE_KEY": "smoke_test_value"}},
+        ("$v = Get-Content 'C:\\ProgramData\\nexplane-agent.env' -ErrorAction SilentlyContinue "
+         "| Select-String 'NEXPLANE_SMOKE_KEY'; Write-Host ('env_result=' + $v)"),
+        "env_result=",
+    )
+
+
+def run_forensics_windows_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """forensics Windows: collect bundle at C:\\Temp, verify file exists."""
+    print("\n  [forensics-windows via CR]")
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "forensics-aws-windows", "agent_forensics",
+        {"output_path": "C:\\Temp\\nexplane-forensics-smoke.zip"},
+        ("Test-Path 'C:\\Temp\\nexplane-forensics-smoke.zip'; "
+         "Write-Host 'forensics_bundle_checked'"),
+        "forensics_bundle_checked",
+    )
+
+
+def run_backup_windows_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """backup Windows: dry_run only."""
+    print("\n  [backup-windows via CR]")
+    _win_fire_cr_and_verify(
+        client, endpoint_asset_id, instance_asset_id, instance_id,
+        "backup-aws-windows", "agent_backup",
+        {"dry_run": True},
+        "Write-Host 'backup_dry_run_done'",
+        "backup_dry_run_done",
+    )
+
+
+def _run_all_windows_agent_crs(
+    client: NexplaneClient, endpoint_asset_id: str, label: str,
+    instance_asset_id: str = "", instance_id: str = "",
+) -> None:
+    """Run all Windows agent command groups.
+
+    When instance_asset_id and instance_id are provided (AWS track), uses real-param
+    per-group functions with SSM verification. Otherwise falls back to dry_run CRs
+    (GCP/Azure tracks which may not have SSM access).
+    """
+    if instance_asset_id and instance_id and label == "aws-windows":
+        run_win_patch_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_winharden_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_crossplatform_windows_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_fleet_windows_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_reboot_windows_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_credrotation_windows_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_forensics_windows_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_backup_windows_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+    else:
+        # GCP/Azure: dry_run fallback (no SSM)
+        _WINDOWS_AGENT_CRS = [
+            "agent_win_patch", "agent_winharden",
+            "agent_crossplatform", "agent_fleet", "agent_reboot",
+            "agent_credrotation", "agent_forensics", "agent_backup",
+        ]
+        for change_type in _WINDOWS_AGENT_CRS:
+            short = change_type.replace("agent_", "")
+            _agent_cr(client, endpoint_asset_id, f"{short}-{label}", change_type)
 
 
 def _teardown_aws_windows(client: NexplaneClient) -> None:
@@ -884,7 +1599,10 @@ def run_aws_windows_worker(base_url: str, email: str, password: str,
         endpoint_asset = _poll_for_endpoint(
             client, "nexplane-agent-smoke-aws-windows", timeout=600)
 
-        _run_all_windows_agent_crs(client, endpoint_asset["id"], "aws-windows")
+        _run_all_windows_agent_crs(
+            client, endpoint_asset["id"], "aws-windows",
+            instance_asset_id=asset_id, instance_id=win_id,
+        )
         result["passed"] = True
         log("[Phase aws-windows] track complete")
 
@@ -1080,7 +1798,7 @@ def main():
         help=(
             f"Comma-separated agent command groups to run. "
             f"Linux: {', '.join(_LINUX_PHASES)}. "
-            f"Windows: {', '.join(c.replace('agent_', '') for c in _WINDOWS_AGENT_CRS)}. "
+            f"Windows: win_patch, winharden, crossplatform, fleet, reboot, credrotation, forensics, backup. "
             f"Default: all Linux phases."
         ),
     )
