@@ -1,10 +1,8 @@
 {
   "change_type": "agent_containerize_build",
-  "display_name": "Agent: Containerize and Build Image",
+  "display_name": "Agent: Containerize Application",
   "steps": [
-    {"generic_action": "generate_dockerfile",   "purpose": "preflight_validate", "required": true},
-    {"generic_action": "build_container_image", "purpose": "execute",            "required": true},
-    {"generic_action": "push_container_image",  "purpose": "execute",            "required": true}
+    {"generic_action": "agent_containerize_build", "purpose": "execute", "required": true}
   ],
   "preflight_checks": ["connector_reachable", "asset_exists"],
   "verification_methods": ["api_check"]
