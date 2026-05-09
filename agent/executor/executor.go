@@ -17,6 +17,7 @@ import (
 	"nexplane-agent/commands/fleet"
 	"nexplane-agent/commands/appdiscovery"
 	"nexplane-agent/commands/dbadmin"
+	"nexplane-agent/commands/containerizebuild"
 )
 
 // Result is the outcome of a command execution.
@@ -82,6 +83,8 @@ var commands = map[string]CommandFunc{
 	"health_check":     fleet.HealthCheckExecute,
 	// App discovery (containerize foundation)
 	"discover_applications": appdiscovery.DiscoverApplicationsExecute,
+	// Containerize build
+	"containerize_build": containerizebuild.ContainerizeBuildExecute,
 	// Database administration
 	"provision_db_user":    dbadmin.ExecuteCommand,
 	"deprovision_db_user":  dbadmin.ExecuteCommand,
