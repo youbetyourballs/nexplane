@@ -184,10 +184,10 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
     deadline = time.time() + 180
     agent_asset = None
     while time.time() < deadline:
-        candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "endpoint"})
+        candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
         if candidates:
             agent_asset = candidates[0]
-            log(f"Agent registered as endpoint asset: {agent_asset['id']}")
+            log(f"Agent registered as server asset: {agent_asset['id']}")
             break
         time.sleep(10)
     if not agent_asset:
@@ -2048,34 +2048,40 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
     log(f"[Phase X] nexplane-smoketest service running on port {_SMOKETEST_PORT}")
 
     try:
-        # Step 2: Wait for the Nexplane agent to register (it may still be starting)
+        # Step 2: Wait for the Nexplane agent to register as a server asset
+        # The agent registers under name=hostname ('nexplane-smoke-ec2') with asset_type=server.
         log("[Phase X] Waiting for Nexplane agent to register (up to 3 min)")
         import time as _time
         deadline = _time.time() + 180
-        agent_registered = False
+        agent_asset_id = None
         while _time.time() < deadline:
-            candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "endpoint"})
-            if candidates:
-                log(f"[Phase X] Agent registered: {candidates[0]['id']}")
-                agent_registered = True
+            candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
+            # Filter to the agent-registered asset (has 'nexplane-agent' tag or hostname metadata)
+            for c in candidates:
+                tags = c.get("tags") or []
+                if "nexplane-agent" in tags:
+                    agent_asset_id = c["id"]
+                    break
+            if agent_asset_id:
+                log(f"[Phase X] Agent registered: {agent_asset_id}")
                 break
             _time.sleep(10)
-        if not agent_registered:
+        if not agent_asset_id:
             fail("[Phase X] Nexplane agent did not register within 3 minutes — cannot run discovery")
 
-        # Step 3: Fire the agent_appdiscovery CR
-        log("[Phase X] Running agent_appdiscovery CR on instance asset")
+        # Step 3: Fire the agent_appdiscovery CR targeting the agent's registered asset
+        log("[Phase X] Running agent_appdiscovery CR on agent asset")
         client.run_cr(
             "[Phase X] discover applications",
             "agent_appdiscovery",
-            instance_asset_id,
+            agent_asset_id,
             {"dry_run": False},
         )
         log("[Phase X] appdiscovery CR completed")
 
-        # Step 4: Fetch the asset via per-asset endpoint and verify applications
+        # Step 4: Fetch the agent asset and verify applications were written to its metadata
         log("[Phase X] Verifying asset_metadata.applications was written")
-        instance_asset = client.get(f"/assets/{instance_asset_id}")
+        instance_asset = client.get(f"/assets/{agent_asset_id}")
         if not instance_asset:
             fail(f"[Phase X] Instance asset {instance_asset_id} not found after discovery")
 
