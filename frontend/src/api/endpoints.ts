@@ -3,7 +3,7 @@ import type {
   Token, User, Asset, AssetCreate, AssetUpdate, AssetListParams, BulkTagBody,
   Project, ProjectSummary, ProjectDetail, ProjectMember,
   ProjectCreate, ProjectUpdate, ProjectMemberCreate, ProjectMemberUpdate,
-  OrgSettings, AIChatResponse, AIChatRequest,
+  OrgSettings, AIChatResponse, AIChatRequest, PromptPreviewResponse,
   Connector, ConnectorCreate, ConnectorTestResult, IngestResponse,
   ChangeRequest, ChangeRequestSummary, ChangeRequestCreate,
   ChangePlan, Approval, ApprovalCreate, ExecutionRun, AuditEvent,
@@ -52,6 +52,12 @@ export const projectsApi = {
     apiClient.patch<ProjectMember>(`/projects/${id}/members/${pcrId}`, data).then((r) => r.data),
   aiChat: (id: string, data: AIChatRequest) =>
     apiClient.post<AIChatResponse>(`/projects/${id}/ai/chat`, data).then((r) => r.data),
+  getPromptPreview: (id: string, draftMessage?: string) =>
+    apiClient
+      .get<PromptPreviewResponse>(`/projects/${id}/ai/prompt-preview`, {
+        params: draftMessage ? { draft_message: draftMessage } : {},
+      })
+      .then((r) => r.data),
 };
 
 // Settings
