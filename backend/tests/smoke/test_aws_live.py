@@ -40,6 +40,17 @@ from smoke_helpers import (
 )
 
 
+def _ssm(client: NexplaneClient, instance_asset_id: str, instance_id: str,
+         phase: str, label: str, command: str) -> None:
+    """Run a shell command via SSM on a Linux EC2 instance and verify it succeeded."""
+    client.run_cr(
+        f"[Phase {phase}] {label}", "ssm_command", instance_asset_id,
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": command, "rollback_strategy": "rollback_unavailable"},
+    )
+    log(label)
+
+
 # ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
@@ -2403,33 +2414,35 @@ def run_phase_ip_a(client: NexplaneClient, phase_a_result: dict) -> None:
     6. Rollback via CR rollback
     7. SSM verify: original IP restored
     """
-    print("\n[Phase IP-A] Tailscale-first IP change")
+    print("\n[Phase IP-A] Tailscale-first IP change (dummy interface)")
 
     instance_asset = phase_a_result["instance_asset"]
     instance_id = phase_a_result["instance_id"]
     agent_asset = phase_a_result.get("agent_asset") or {}
     agent_asset_id = agent_asset.get("id") or instance_asset["id"]
     rollback_stack: list[tuple[str, str]] = []
+    DUMMY_IFACE = "dummy-npsmoke"
+    DUMMY_IP_1 = "192.168.200.10/24"
+    DUMMY_IP_2 = "192.168.200.11/24"
 
     try:
-        # Step 1: Detect interface and get current IP
-        iface, current_ip_cidr = _get_interface_and_ip(client, instance_asset, instance_id)
+        # Step 1: Create a dummy interface via NetworkManager so nmcli can manage it.
+        # Changing ens5 on AWS breaks connectivity (ENI-managed IP); dummy interface is safe.
+        _ssm(client, instance_asset["id"], instance_id, "IP-A",
+             "create dummy interface",
+             f"nmcli con add type dummy ifname {DUMMY_IFACE} con-name {DUMMY_IFACE} "
+             f"ipv4.method manual ipv4.addresses {DUMMY_IP_1} connection.autoconnect yes && "
+             f"nmcli con up {DUMMY_IFACE} && echo 'dummy up'")
+        log(f"Dummy interface {DUMMY_IFACE} created with {DUMMY_IP_1}")
 
-        # Step 2: Compute new IP (current + 1 in same subnet)
-        import ipaddress
-        net = ipaddress.IPv4Interface(current_ip_cidr)
-        new_host = int(net.ip) + 1
-        new_ip_cidr = f"{ipaddress.IPv4Address(new_host)}/{net.network.prefixlen}"
-        gateway = str(list(net.network.hosts())[0])
-        log(f"New IP will be: {new_ip_cidr}")
-
-        # Step 3: Fire change_ip with method=tailscale — must target agent server asset
+        # Step 2: Fire change_ip on the dummy interface using tailscale method.
+        # Tailscale maintains connectivity; dummy interface change is safe.
         cr = client.run_cr(
             "[Phase IP-A] change_ip tailscale method", "change_ip", agent_asset_id,
             {
-                "interface": iface,
-                "new_ip_v4": new_ip_cidr,
-                "new_gateway_v4": gateway,
+                "interface": DUMMY_IFACE,
+                "new_ip_v4": DUMMY_IP_2,
+                "new_gateway_v4": "",
                 "method": "tailscale",
                 "rollback_strategy": "nexplane_rollback",
             },
@@ -2437,20 +2450,20 @@ def run_phase_ip_a(client: NexplaneClient, phase_a_result: dict) -> None:
         rollback_stack.append((cr["id"], "change_ip"))
         log("change_ip CR completed — agent remained reachable via Tailscale")
 
-        # Step 4: SSM verify new IP is assigned
+        # Step 3: SSM verify new IP is assigned to dummy interface
         _ssm(client, instance_asset["id"], instance_id, "IP-A",
-             "verify new IP",
-             f"ip -4 addr show {iface} | grep '{new_ip_cidr.split('/')[0]}' && echo IP_VERIFIED || echo IP_NOT_YET")
-        log(f"New IP {new_ip_cidr} verified on {iface}")
+             "verify new IP on dummy",
+             f"ip -4 addr show {DUMMY_IFACE} | grep '{DUMMY_IP_2.split('/')[0]}' && echo IP_VERIFIED || echo IP_NOT_YET")
+        log(f"New IP {DUMMY_IP_2} verified on {DUMMY_IFACE}")
 
-        # Step 5: Rollback via Nexplane CR rollback
+        # Step 4: Rollback via Nexplane CR rollback
         ip_cr_id, _ = rollback_stack.pop()
         client.rollback_cr(ip_cr_id, "change_ip → restore original IP")
 
-        # Step 6: SSM verify original IP restored
+        # Step 5: SSM verify original IP restored
         _ssm(client, instance_asset["id"], instance_id, "IP-A",
-             "verify original IP",
-             f"ip -4 addr show {iface} | grep '{current_ip_cidr.split('/')[0]}' && echo RESTORED || echo NOT_RESTORED")
+             "verify original IP restored",
+             f"ip -4 addr show {DUMMY_IFACE} | grep '{DUMMY_IP_1.split('/')[0]}' && echo RESTORED || echo NOT_RESTORED")
 
         log("Phase IP-A complete")
 
@@ -2462,6 +2475,12 @@ def run_phase_ip_a(client: NexplaneClient, phase_a_result: dict) -> None:
             print("  [Phase IP-A cleanup — rollback stack]")
             for cr_id, label in reversed(rollback_stack):
                 client.rollback_cr(cr_id, label)
+        try:
+            _ssm(client, instance_asset["id"], instance_id, "IP-A",
+                 "teardown dummy interface",
+                 f"nmcli con del {DUMMY_IFACE} 2>/dev/null || true && echo 'dummy removed'")
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -2478,32 +2497,33 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
     5. SSM verify: new IP is applied
     6. Rollback and verify original IP restored
     """
-    print("\n[Phase IP-D] Dead man's switch — success path (commit timer)")
+    print("\n[Phase IP-D] Dead man's switch — success path (commit timer, dummy interface)")
 
     instance_asset = phase_a_result["instance_asset"]
     instance_id = phase_a_result["instance_id"]
     agent_asset = phase_a_result.get("agent_asset") or {}
     agent_asset_id = agent_asset.get("id") or instance_asset["id"]
     rollback_stack: list[tuple[str, str]] = []
+    DUMMY_IFACE = "dummy-npsmoked"
+    DUMMY_IP_1 = "192.168.201.10/24"
+    DUMMY_IP_2 = "192.168.201.11/24"
 
     try:
-        # Step 1: Detect interface and get current IP
-        iface, current_ip_cidr = _get_interface_and_ip(client, instance_asset, instance_id)
-
-        import ipaddress
-        net = ipaddress.IPv4Interface(current_ip_cidr)
-        new_host = int(net.ip) + 1
-        new_ip_cidr = f"{ipaddress.IPv4Address(new_host)}/{net.network.prefixlen}"
-        gateway = str(list(net.network.hosts())[0])
-        log(f"New IP will be: {new_ip_cidr}")
+        # Create dummy interface via NetworkManager so nmcli can manage it
+        _ssm(client, instance_asset["id"], instance_id, "IP-D",
+             "create dummy interface",
+             f"nmcli con add type dummy ifname {DUMMY_IFACE} con-name {DUMMY_IFACE} "
+             f"ipv4.method manual ipv4.addresses {DUMMY_IP_1} connection.autoconnect yes && "
+             f"nmcli con up {DUMMY_IFACE} && echo 'dummy up'")
+        log(f"Dummy interface {DUMMY_IFACE} created with {DUMMY_IP_1}")
 
         # Step 2: Fire change_ip with method=commit_timer, timer=60s
         cr = client.run_cr(
             "[Phase IP-D] change_ip commit_timer (should succeed)", "change_ip", agent_asset_id,
             {
-                "interface": iface,
-                "new_ip_v4": new_ip_cidr,
-                "new_gateway_v4": gateway,
+                "interface": DUMMY_IFACE,
+                "new_ip_v4": DUMMY_IP_2,
+                "new_gateway_v4": "",
                 "method": "commit_timer",
                 "commit_timer_seconds": 60,
                 "probe_interval_seconds": 5,
@@ -2512,7 +2532,7 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
         )
         rollback_stack.append((cr["id"], "change_ip commit_timer"))
 
-        # Step 3: CR must be completed (not rolled_back)
+        # Step 3: CR must be completed (probe succeeds because ens5 still connects to control plane)
         if cr.get("status") != "completed":
             fail(f"[Phase IP-D] Expected status=completed, got: {cr.get('status')}")
         log("CR completed — commit timer cancelled by successful probe")
@@ -2523,11 +2543,11 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
              "ls /var/lib/nexplane-agent/pending_rollback.json 2>/dev/null && echo TIMER_EXISTS || echo TIMER_GONE")
         log("Timer file check done (gone = timer cancelled cleanly)")
 
-        # Step 5: SSM verify new IP applied
+        # Step 5: SSM verify new IP applied on dummy interface
         _ssm(client, instance_asset["id"], instance_id, "IP-D",
              "verify new IP applied",
-             f"ip -4 addr show {iface} | grep '{new_ip_cidr.split('/')[0]}' && echo IP_VERIFIED || echo IP_PENDING")
-        log(f"New IP {new_ip_cidr} verified on {iface}")
+             f"ip -4 addr show {DUMMY_IFACE} | grep '{DUMMY_IP_2.split('/')[0]}' && echo IP_VERIFIED || echo IP_PENDING")
+        log(f"New IP {DUMMY_IP_2} verified on {DUMMY_IFACE}")
 
         # Step 6: Rollback and verify
         ip_cr_id, _ = rollback_stack.pop()
@@ -2535,7 +2555,7 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
 
         _ssm(client, instance_asset["id"], instance_id, "IP-D",
              "verify original IP restored",
-             f"ip -4 addr show {iface} | grep '{current_ip_cidr.split('/')[0]}' && echo RESTORED || echo PENDING")
+             f"ip -4 addr show {DUMMY_IFACE} | grep '{DUMMY_IP_1.split('/')[0]}' && echo RESTORED || echo PENDING")
 
         log("Phase IP-D complete")
 
@@ -2547,6 +2567,12 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
             print("  [Phase IP-D cleanup — rollback stack]")
             for cr_id, label in reversed(rollback_stack):
                 client.rollback_cr(cr_id, label)
+        try:
+            _ssm(client, instance_asset["id"], instance_id, "IP-D",
+                 "teardown dummy interface",
+                 f"nmcli con del {DUMMY_IFACE} 2>/dev/null || true && echo 'dummy removed'")
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -2567,42 +2593,44 @@ def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
     5. SSM verify: original IP is back on the interface
     6. SSM verify: pending_rollback.json is GONE (cleaned up after rollback)
     """
-    print("\n[Phase IP-D2] Dead man's switch rollback (invalid gateway)")
+    print("\n[Phase IP-D2] Dead man's switch rollback (unreachable probe URL, dummy interface)")
 
     instance_asset = phase_a_result["instance_asset"]
     instance_id = phase_a_result["instance_id"]
     agent_asset = phase_a_result.get("agent_asset") or {}
     agent_asset_id = agent_asset.get("id") or instance_asset["id"]
+    DUMMY_IFACE2 = "dummy-npsmokd2"
+    DUMMY_IP_D2A = "192.168.202.10/24"
+    DUMMY_IP_D2B = "192.168.202.11/24"
 
     # We do not add to rollback_stack — the auto-rollback is the test.
-    # If somehow the CR succeeds (shouldn't), we'll clean up in finally.
     ip_cr_id = ""
 
     try:
-        # Step 1: Detect interface and get current IP
-        iface, current_ip_cidr = _get_interface_and_ip(client, instance_asset, instance_id)
+        # Create dummy interface via NetworkManager so nmcli can manage it
+        _ssm(client, instance_asset["id"], instance_id, "IP-D2",
+             "create dummy interface",
+             f"nmcli con add type dummy ifname {DUMMY_IFACE2} con-name {DUMMY_IFACE2} "
+             f"ipv4.method manual ipv4.addresses {DUMMY_IP_D2A} connection.autoconnect yes && "
+             f"nmcli con up {DUMMY_IFACE2} && echo 'dummy up'")
+        log(f"Dummy interface {DUMMY_IFACE2} created with {DUMMY_IP_D2A}")
 
-        import ipaddress
-        net = ipaddress.IPv4Interface(current_ip_cidr)
-        new_host = int(net.ip) + 1
-        new_ip_cidr = f"{ipaddress.IPv4Address(new_host)}/{net.network.prefixlen}"
-        # Use TEST-NET gateway that is guaranteed unreachable
-        invalid_gateway = "240.0.0.1"
-        log(f"New IP: {new_ip_cidr}, invalid gateway: {invalid_gateway}")
-
-        # Step 2: Fire change_ip — timer=15s with unreachable gateway
-        print("  → [Phase IP-D2] change_ip commit_timer 15s with invalid gateway (expect auto-rollback)")
+        # Step 2: Fire change_ip — timer=15s with probe_url pointing to unreachable endpoint.
+        # The dummy interface change is safe; the dead man's switch fires because the
+        # probe URL (240.0.0.1) is an unreachable RFC TEST-NET address.
+        print("  → [Phase IP-D2] change_ip commit_timer 15s with unreachable probe URL (expect auto-rollback)")
         ip_cr_id = client.create_cr(
             "[Phase IP-D2] change_ip commit_timer rollback test",
             "change_ip",
             agent_asset_id,
             {
-                "interface": iface,
-                "new_ip_v4": new_ip_cidr,
-                "new_gateway_v4": invalid_gateway,
+                "interface": DUMMY_IFACE2,
+                "new_ip_v4": DUMMY_IP_D2B,
+                "new_gateway_v4": "",
                 "method": "commit_timer",
                 "commit_timer_seconds": 15,
                 "probe_interval_seconds": 5,
+                "probe_url": "http://240.0.0.1:8000",
                 "rollback_strategy": "nexplane_rollback",
             },
         )
@@ -2638,11 +2666,11 @@ def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
         # Brief wait for agent to restore connectivity
         time.sleep(10)
 
-        # Step 5: SSM verify original IP is back
+        # Step 5: SSM verify original IP is back on dummy interface
         _ssm(client, instance_asset["id"], instance_id, "IP-D2",
              "verify original IP restored",
-             f"ip -4 addr show {iface} | grep '{current_ip_cidr.split('/')[0]}' && echo RESTORED || echo PENDING")
-        log(f"Original IP {current_ip_cidr} restored after auto-rollback")
+             f"ip -4 addr show {DUMMY_IFACE2} | grep '{DUMMY_IP_D2A.split('/')[0]}' && echo RESTORED || echo PENDING")
+        log(f"Original IP {DUMMY_IP_D2A} restored after auto-rollback")
 
         # Step 6: SSM verify pending_rollback.json is gone
         _ssm(client, instance_asset["id"], instance_id, "IP-D2",
@@ -2665,6 +2693,12 @@ def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
                     client.rollback_cr(ip_cr_id, "change_ip unexpected completion")
             except Exception as e2:
                 print(f"  ⚠️  Safety net error: {e2}")
+        try:
+            _ssm(client, instance_asset["id"], instance_id, "IP-D2",
+                 "teardown dummy interface",
+                 f"nmcli con del {DUMMY_IFACE2} 2>/dev/null || true && echo 'dummy removed'")
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
