@@ -925,6 +925,9 @@ def run_aws_linux_worker(base_url: str, email: str, password: str,
     nexplane_url = f"http://{backend_ip}:8000"
     print(f"\n[aws-linux] Starting worker")
 
+    # Auto-retrieve Tailscale auth key from connector credentials if not provided
+    auth_key = tailscale_auth_key or client.get_tailscale_auth_key("")
+
     try:
         cloud_account_id = client.get_connector_cloud_account_id("aws")
         agent_secret = client.get_agent_secret()
@@ -958,7 +961,7 @@ def run_aws_linux_worker(base_url: str, email: str, password: str,
         )
         client.run_cr(
             "[Phase aws-linux] tailscale join", "tailscale_join", instance_asset["id"],
-            {"instance_id": instance_id, "auth_key": tailscale_auth_key,
+            {"instance_id": instance_id, "auth_key": auth_key,
              "hostname": "nexplane-agent-smoke-aws-linux"},
         )
         client.run_cr(
@@ -1837,7 +1840,9 @@ def main():
     cloud_account_id = client.get_cloud_account_asset_id()
     log(f"Cloud account: {cloud_account_id}")
 
-    backend_ip = setup_backend_tailscale(args.tailscale_auth_key) if args.tailscale_auth_key else ""
+    # Auto-retrieve Tailscale auth key from connector credentials if not provided via CLI
+    ts_key = args.tailscale_auth_key or client.get_tailscale_auth_key("")
+    backend_ip = setup_backend_tailscale(ts_key) if ts_key else ""
     all_results = []
 
     try:
@@ -1851,7 +1856,7 @@ def main():
                     linux_futures[executor.submit(
                         run_aws_linux_worker,
                         args.base_url, args.email, args.password,
-                        backend_ip, args.tailscale_auth_key,
+                        backend_ip, ts_key,
                     )] = "aws-linux"
                 if run_gcp:
                     if not args.gcp_project:
@@ -1859,7 +1864,7 @@ def main():
                     linux_futures[executor.submit(
                         run_gcp_linux_worker,
                         args.base_url, args.email, args.password,
-                        backend_ip, args.tailscale_auth_key, args.gcp_project,
+                        backend_ip, ts_key, args.gcp_project,
                     )] = "gcp-linux"
                 if run_azure:
                     if not args.azure_resource_group:
@@ -1867,7 +1872,7 @@ def main():
                     linux_futures[executor.submit(
                         run_azure_linux_worker,
                         args.base_url, args.email, args.password,
-                        backend_ip, args.tailscale_auth_key, args.azure_resource_group,
+                        backend_ip, ts_key, args.azure_resource_group,
                     )] = "azure-linux"
                 all_results.extend(_collect_results(linux_futures))
 
@@ -1881,7 +1886,7 @@ def main():
                     windows_futures[executor.submit(
                         run_aws_windows_worker,
                         args.base_url, args.email, args.password,
-                        backend_ip, args.tailscale_auth_key,
+                        backend_ip, ts_key,
                     )] = "aws-windows"
                 if run_gcp:
                     if not args.gcp_project:
@@ -1889,7 +1894,7 @@ def main():
                     windows_futures[executor.submit(
                         run_gcp_windows_worker,
                         args.base_url, args.email, args.password,
-                        backend_ip, args.tailscale_auth_key, args.gcp_project,
+                        backend_ip, ts_key, args.gcp_project,
                     )] = "gcp-windows"
                 if run_azure:
                     if not args.azure_resource_group:
@@ -1897,7 +1902,7 @@ def main():
                     windows_futures[executor.submit(
                         run_azure_windows_worker,
                         args.base_url, args.email, args.password,
-                        backend_ip, args.tailscale_auth_key, args.azure_resource_group,
+                        backend_ip, ts_key, args.azure_resource_group,
                     )] = "azure-windows"
                 all_results.extend(_collect_results(windows_futures))
 
