@@ -2642,7 +2642,9 @@ def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
                     json={"decision": "approved", "comment": "smoke test IP-D2"})
         client.post(f"/change-requests/{ip_cr_id}/execute")
 
-        # Step 3: Poll for rollback completion — expect within 60s (15s timer + 45s buffer)
+        # Step 3: Wait for CR to reach a terminal state (completed or failed/rolled_back).
+        # NOTE: The CR will complete immediately (agent reports result before timer fires).
+        # The dead man's switch fires AFTER the CR completes, rolling back the IP change.
         deadline = time.time() + 60
         final_cr = None
         while time.time() < deadline:
@@ -2654,25 +2656,22 @@ def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
             time.sleep(5)
 
         if not final_cr:
-            fail("[Phase IP-D2] Timed out waiting for auto-rollback after 60s")
+            fail("[Phase IP-D2] Timed out waiting for CR terminal state after 60s")
 
-        # Step 4: Verify status is rolled_back or failed (NOT completed)
         final_status = final_cr.get("status", "")
-        if final_status in ("rolled_back", "failed"):
-            log(f"CR ended with status={final_status} — auto-rollback confirmed")
-        elif final_status == "completed":
-            fail(f"[Phase IP-D2] CR unexpectedly completed with invalid gateway — dead man's switch did not fire")
-        else:
-            log(f"  ⚠️  Unexpected final status: {final_status} (non-fatal, continuing verification)")
+        log(f"CR ended with status={final_status}")
+        # CR may complete (agent reports back quickly) OR fail/rollback (timer fired first).
+        # Either is acceptable — what matters is that the IP is restored after 15+buffer seconds.
 
-        # Brief wait for agent to restore connectivity
-        time.sleep(10)
+        # Step 4: Wait for the dead man's switch timer to fire (15s + 10s buffer = 25s total wait)
+        log("Waiting 25s for dead man's switch to fire and restore original IP...")
+        time.sleep(25)
 
-        # Step 5: SSM verify original IP is back on dummy interface
+        # Step 5: SSM verify original IP is back on dummy interface (dead man's switch rolled back)
         _ssm(client, instance_asset["id"], instance_id, "IP-D2",
-             "verify original IP restored",
-             f"ip -4 addr show {DUMMY_IFACE2} | grep '{DUMMY_IP_D2A.split('/')[0]}' && echo RESTORED || echo PENDING")
-        log(f"Original IP {DUMMY_IP_D2A} restored after auto-rollback")
+             "verify original IP restored by dead man's switch",
+             f"ip -4 addr show {DUMMY_IFACE2} | grep '{DUMMY_IP_D2A.split('/')[0]}' && echo RESTORED || (echo NOT_RESTORED && exit 1)")
+        log(f"Original IP {DUMMY_IP_D2A} restored by dead man's switch")
 
         # Step 6: SSM verify pending_rollback.json is gone
         _ssm(client, instance_asset["id"], instance_id, "IP-D2",
