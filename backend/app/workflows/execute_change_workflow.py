@@ -18,6 +18,7 @@ from app.workflows.activities import (
     activity_run_verification,
     activity_execute_rollback,
     activity_post_completion_discovery,
+    activity_write_appdiscovery_metadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,12 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
         if execution_run_id:
             await update_execution_run_status(execution_run_id, "failed", {"error": str(exc)})
         return
+
+    # Post-execution: persist discovered applications to asset_metadata
+    if data.get("change_type") == "agent_appdiscovery":
+        await activity_write_appdiscovery_metadata(
+            cr_id, data["target_asset_ids"], execution_result
+        )
 
     await write_audit_event(
         organization_id=org_id,

@@ -61,3 +61,44 @@ def test_workload_deploy_executor_succeeds_with_target_cluster():
     result = asyncio.run(execute({"target_cluster": "eks-prod"}, [], None))
     assert result["action"] == "k8s_workload_deploy"
     assert result["pods_ready"] >= 1
+
+
+def test_write_discovered_apps_to_metadata_sets_applications():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from app.services.app_discovery_service import write_discovered_apps_to_metadata
+
+    mock_asset = MagicMock()
+    mock_asset.id = "asset-uuid-1"
+    mock_asset.asset_metadata = {}
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_asset
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.commit = AsyncMock()
+
+    applications = [
+        {"id": "app-1", "name": "nginx", "stateful": False, "containerization_status": "not_started"}
+    ]
+    execution_result = {"steps": [{"result": {"action": "discover_applications", "applications": applications}}]}
+
+    asyncio.run(write_discovered_apps_to_metadata(mock_db, ["asset-uuid-1"], execution_result))
+
+    assert mock_asset.asset_metadata["applications"] == applications
+    mock_db.commit.assert_called_once()
+
+
+def test_write_discovered_apps_noop_when_no_applications_in_result():
+    import asyncio
+    from unittest.mock import AsyncMock
+    from app.services.app_discovery_service import write_discovered_apps_to_metadata
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock()
+
+    execution_result = {"steps": [{"result": {"action": "something_else"}}]}
+    asyncio.run(write_discovered_apps_to_metadata(mock_db, ["asset-uuid-1"], execution_result))
+
+    mock_db.execute.assert_not_called()
