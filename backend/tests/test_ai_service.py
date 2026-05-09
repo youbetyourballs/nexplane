@@ -152,3 +152,34 @@ def test_parse_proposal_returns_none_for_non_list_json():
     svc = AIService(MagicMock())
     text = '<nexplane-proposal>{"not": "a list"}</nexplane-proposal>'
     assert svc._parse_proposal(text) is None
+
+
+def test_resolve_target_assets_to_ids():
+    from app.routers.projects import _resolve_asset_ids
+
+    name_to_id = {
+        "prod-web-01": "uuid-1111",
+        "prod-db-01": "uuid-2222",
+    }
+    proposed = [
+        {"title": "Harden SSH", "change_type": "agent_ossecurity",
+         "target_assets": ["prod-web-01", "prod-db-01"], "desired_outcome": {}, "seq": 1, "depends_on": []},
+        {"title": "Unknown asset CR", "change_type": "ec2_stop",
+         "target_assets": ["nonexistent-server"], "desired_outcome": {}, "seq": 2, "depends_on": [1]},
+    ]
+    resolved = _resolve_asset_ids(proposed, name_to_id)
+    assert resolved[0]["target_asset_ids"] == ["uuid-1111", "uuid-2222"]
+    assert resolved[1]["target_asset_ids"] == []
+
+
+def test_resolve_asset_ids_handles_empty_input():
+    from app.routers.projects import _resolve_asset_ids
+    result = _resolve_asset_ids([], {})
+    assert result == []
+
+
+def test_resolve_asset_ids_handles_no_target_assets_key():
+    from app.routers.projects import _resolve_asset_ids
+    proposed = [{"title": "No targets", "change_type": "ec2_stop", "seq": 1}]
+    result = _resolve_asset_ids(proposed, {"prod-web-01": "uuid-1"})
+    assert result[0]["target_asset_ids"] == []
