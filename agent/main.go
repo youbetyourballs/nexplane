@@ -10,7 +10,9 @@ import (
 	"syscall"
 
 	"nexplane-agent/client"
+	"nexplane-agent/commands/changip"
 	"nexplane-agent/config"
+	"nexplane-agent/executor"
 	"nexplane-agent/fingerprint"
 	"nexplane-agent/poller"
 	"nexplane-agent/registration"
@@ -57,6 +59,13 @@ func main() {
 		log.Fatalf("Registration failed: %v", err)
 	}
 	log.Printf("Registered: agent_id=%s asset_id=%s", info.AgentID, info.AssetID)
+
+	if err := changip.CheckPendingRollback(func(params map[string]any) {
+		result := executor.Dispatch("change_ip", params, true, params)
+		log.Printf("Startup dead man's switch rollback: %s", result.Status)
+	}); err != nil {
+		log.Printf("Warning: dead man's switch check failed: %v", err)
+	}
 
 	switch cfg.Mode {
 	case "ephemeral":

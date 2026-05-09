@@ -94,7 +94,7 @@ func TestCheckPendingRollback_Expired(t *testing.T) {
 	os.WriteFile(rollbackPath, data, 0644)
 
 	rollbackCalled := make(chan struct{}, 1)
-	err := checkPendingRollback(rollbackPath, func() {
+	err := checkPendingRollback(rollbackPath, func(params map[string]any) {
 		rollbackCalled <- struct{}{}
 	})
 	if err != nil {
@@ -125,7 +125,7 @@ func TestCheckPendingRollback_NotExpired(t *testing.T) {
 	os.WriteFile(rollbackPath, data, 0644)
 
 	rollbackCalled := make(chan struct{}, 1)
-	err := checkPendingRollback(rollbackPath, func() {
+	err := checkPendingRollback(rollbackPath, func(params map[string]any) {
 		rollbackCalled <- struct{}{}
 	})
 	if err != nil {

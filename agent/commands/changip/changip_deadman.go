@@ -121,15 +121,15 @@ func startDeadManSwitch(pr PendingRollback, rollbackPath string, rollbackFn func
 }
 
 // CheckPendingRollback checks for an existing pending_rollback.json on agent startup.
-// If the file exists and ExpiresAt is in the past, rollbackFn is called immediately.
-// If ExpiresAt is in the future, the commit-timer goroutine is resumed.
-// Returns nil if no file exists.
-func CheckPendingRollback(rollbackFn func()) error {
+// If the file exists and ExpiresAt is in the past, rollbackFn is called immediately
+// with the stored rollback params. If ExpiresAt is in the future, the commit-timer
+// goroutine is resumed. Returns nil if no file exists.
+func CheckPendingRollback(rollbackFn func(params map[string]any)) error {
 	return checkPendingRollback(PendingRollbackPath, rollbackFn)
 }
 
 // checkPendingRollback is the internal version with an injectable path for tests.
-func checkPendingRollback(rollbackPath string, rollbackFn func()) error {
+func checkPendingRollback(rollbackPath string, rollbackFn func(params map[string]any)) error {
 	data, err := os.ReadFile(rollbackPath)
 	if os.IsNotExist(err) {
 		return nil
@@ -143,14 +143,17 @@ func checkPendingRollback(rollbackPath string, rollbackFn func()) error {
 		return fmt.Errorf("parse pending rollback: %w", err)
 	}
 
+	// Wrap the params-aware callback into a no-arg closure for startDeadManSwitch.
+	wrappedFn := func() { rollbackFn(pr.RollbackParams) }
+
 	if time.Now().After(pr.ExpiresAt) {
 		// Already expired — roll back immediately.
-		rollbackFn()
+		wrappedFn()
 		os.Remove(rollbackPath)
 		return nil
 	}
 
 	// Not yet expired — resume the timer with the remaining window.
-	_, err = startDeadManSwitch(pr, rollbackPath, rollbackFn)
+	_, err = startDeadManSwitch(pr, rollbackPath, wrappedFn)
 	return err
 }
