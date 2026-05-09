@@ -1,0 +1,12 @@
+{
+  "change_type": "k8s_workload_deploy",
+  "display_name": "Kubernetes: Deploy Workload",
+  "steps": [
+    {"generic_action": "provision_persistent_volume", "purpose": "preflight_validate", "required": false},
+    {"generic_action": "migrate_data_to_volume",      "purpose": "execute",            "required": false},
+    {"generic_action": "apply_k8s_manifests",         "purpose": "execute",            "required": true},
+    {"generic_action": "wait_for_pods_ready",         "purpose": "verify",             "required": true}
+  ],
+  "preflight_checks": ["asset_exists"],
+  "verification_methods": ["api_check"]
+}

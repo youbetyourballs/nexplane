@@ -1,0 +1,12 @@
+{
+  "change_type": "agent_containerize_retire",
+  "display_name": "Agent: Retire Legacy Host",
+  "steps": [
+    {"generic_action": "verify_container_health", "purpose": "preflight_validate", "required": true},
+    {"generic_action": "snapshot_legacy_host",    "purpose": "execute",            "required": true},
+    {"generic_action": "stop_legacy_service",     "purpose": "execute",            "required": true},
+    {"generic_action": "mark_asset_retired",      "purpose": "execute",            "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}
