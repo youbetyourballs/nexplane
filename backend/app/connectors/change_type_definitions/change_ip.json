@@ -1,0 +1,23 @@
+{
+  "change_type": "change_ip",
+  "display_name": "Change IP Address",
+  "steps": [{"generic_action": "change_ip", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "parameters": {
+    "interface": {"type": "string", "required": true},
+    "mode": {"type": "string", "required": true, "enum": ["static", "dhcp"]},
+    "method": {"type": "string", "required": false, "default": "auto", "enum": ["auto", "tailscale", "secondary_swap", "commit_timer", "manual"]},
+    "ip_version": {"type": "string", "required": false, "default": "4"},
+    "new_ip_v4": {"type": "string", "required": false},
+    "new_ip_v6": {"type": "string", "required": false},
+    "new_gateway_v4": {"type": "string", "required": false},
+    "new_gateway_v6": {"type": "string", "required": false},
+    "dns_servers": {"type": "array", "required": false, "items": {"type": "string"}},
+    "dns_search_domains": {"type": "array", "required": false, "items": {"type": "string"}},
+    "commit_timer_seconds": {"type": "integer", "required": false, "default": 30},
+    "probe_interval_seconds": {"type": "integer", "required": false, "default": 5},
+    "add_secondary": {"type": "boolean", "required": false, "default": false},
+    "preflight_arp_probe": {"type": "boolean", "required": false, "default": true}
+  }
+}

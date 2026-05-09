@@ -74,11 +74,46 @@
                                                "required":  false,
                                                "type":  "array",
                                                "name":  "dns_servers"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "array",
+                                               "name":  "dns_search_domains"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "default":  "auto",
+                                               "name":  "method"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "integer",
+                                               "default":  30,
+                                               "name":  "commit_timer_seconds"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "integer",
+                                               "default":  5,
+                                               "name":  "probe_interval_seconds"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "boolean",
+                                               "default":  false,
+                                               "name":  "add_secondary"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "boolean",
+                                               "default":  true,
+                                               "name":  "preflight_arp_probe"
                                            }
                                        ],
                         "execution_tier":  3,
                         "rollback_action":  "change_ip",
-                        "estimated_duration_seconds":  10,
+                        "estimated_duration_seconds":  180,
                         "blast_radius_hint":  "network_connectivity_loss",
                         "applicable_asset_types":  [
                                                        "server"
@@ -1407,6 +1442,67 @@
                         ],
                         "executor": "nexplane_agent.containerize_retire",
                         "estimated_duration_seconds": 60
+                    },
+                    {
+                        "action_id": "migrate_ip",
+                        "generic_action": "migrate_ip",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Migrate IP Address",
+                        "description": "Multi-stage IP migration with method-aware dispatch (Tailscale, secondary swap, commit timer, or manual), DNS record discovery, and per-stage rollback.",
+                        "applicable_asset_types": ["server"],
+                        "parameters": [
+                            {"name": "interface",               "type": "string",  "required": true},
+                            {"name": "mode",                    "type": "string",  "required": true},
+                            {"name": "method",                  "type": "string",  "required": false, "default": "auto"},
+                            {"name": "new_ip_v4",               "type": "string",  "required": false},
+                            {"name": "new_gateway_v4",          "type": "string",  "required": false},
+                            {"name": "dns_servers",             "type": "array",   "required": false},
+                            {"name": "dns_search_domains",      "type": "array",   "required": false},
+                            {"name": "commit_timer_seconds",    "type": "integer", "required": false, "default": 30},
+                            {"name": "probe_interval_seconds",  "type": "integer", "required": false, "default": 5},
+                            {"name": "add_secondary",           "type": "boolean", "required": false, "default": false},
+                            {"name": "preflight_arp_probe",     "type": "boolean", "required": false, "default": true},
+                            {"name": "update_dns",              "type": "boolean", "required": false, "default": true},
+                            {"name": "update_dns_ttl",          "type": "boolean", "required": false, "default": true},
+                            {"name": "confirm_at_stage",        "type": "string",  "required": false},
+                            {"name": "rollback_on_stage_failure","type": "boolean","required": false, "default": true}
+                        ],
+                        "executor": "nexplane_agent.migrate_ip",
+                        "rollback_action": "migrate_ip",
+                        "estimated_duration_seconds": 300,
+                        "blast_radius_hint": "network_connectivity_loss",
+                        "safety_notes": [
+                            "Changing IP may temporarily disconnect the agent from the control plane",
+                            "Use method=tailscale if Tailscale is deployed to eliminate connectivity risk",
+                            "DNS records are discovered automatically but v1 DNS update is not yet automated"
+                        ]
+                    },
+                    {
+                        "action_id": "ip_campaign",
+                        "generic_action": "ip_campaign",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "IP Migration Campaign",
+                        "description": "Fleet-level IP migration. Applies change_ip across a set of assets in configurable batches. Aborts if the error rate exceeds the threshold.",
+                        "applicable_asset_types": ["server"],
+                        "parameters": [
+                            {"name": "migration_plan",          "type": "array",   "required": true},
+                            {"name": "batch_size",              "type": "integer", "required": false, "default": 5},
+                            {"name": "batch_interval_seconds",  "type": "integer", "required": false, "default": 60},
+                            {"name": "abort_error_threshold",   "type": "number",  "required": false, "default": 0.1},
+                            {"name": "method",                  "type": "string",  "required": false, "default": "auto"},
+                            {"name": "commit_timer_seconds",    "type": "integer", "required": false, "default": 30},
+                            {"name": "dry_run",                 "type": "boolean", "required": false, "default": false}
+                        ],
+                        "executor": "nexplane_agent.ip_campaign",
+                        "estimated_duration_seconds": 3600,
+                        "blast_radius_hint": "fleet_network_connectivity_loss",
+                        "safety_notes": [
+                            "Use dry_run=true to preview the migration plan before executing",
+                            "Set abort_error_threshold conservatively (0.05-0.1) for production fleets",
+                            "Completed batches are not automatically rolled back — operator initiates per-host recovery"
+                        ]
                     }
                 ]
 }
