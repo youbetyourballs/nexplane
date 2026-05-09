@@ -2048,7 +2048,22 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
     log(f"[Phase X] nexplane-smoketest service running on port {_SMOKETEST_PORT}")
 
     try:
-        # Step 2: Fire the agent_appdiscovery CR
+        # Step 2: Wait for the Nexplane agent to register (it may still be starting)
+        log("[Phase X] Waiting for Nexplane agent to register (up to 3 min)")
+        import time as _time
+        deadline = _time.time() + 180
+        agent_registered = False
+        while _time.time() < deadline:
+            candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "endpoint"})
+            if candidates:
+                log(f"[Phase X] Agent registered: {candidates[0]['id']}")
+                agent_registered = True
+                break
+            _time.sleep(10)
+        if not agent_registered:
+            fail("[Phase X] Nexplane agent did not register within 3 minutes — cannot run discovery")
+
+        # Step 3: Fire the agent_appdiscovery CR
         log("[Phase X] Running agent_appdiscovery CR on instance asset")
         client.run_cr(
             "[Phase X] discover applications",
@@ -2058,7 +2073,7 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
         )
         log("[Phase X] appdiscovery CR completed")
 
-        # Step 3: Fetch the asset via per-asset endpoint and verify applications
+        # Step 4: Fetch the asset via per-asset endpoint and verify applications
         log("[Phase X] Verifying asset_metadata.applications was written")
         instance_asset = client.get(f"/assets/{instance_asset_id}")
         if not instance_asset:
