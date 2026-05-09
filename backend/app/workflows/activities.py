@@ -377,3 +377,14 @@ async def activity_post_completion_discovery(change_request_id: str) -> None:
                     "Post-completion discovery %s/%s failed for CR %s: %s",
                     connector_type, action_id, change_request_id, exc,
                 )
+
+
+async def activity_write_appdiscovery_metadata(
+    change_request_id: str,
+    asset_ids: list[str],
+    execution_result: dict,
+) -> None:
+    """Write discovered applications to asset_metadata after agent_appdiscovery CR completes."""
+    from app.services.app_discovery_service import write_discovered_apps_to_metadata
+    async with AsyncSessionLocal() as db:
+        await write_discovered_apps_to_metadata(db, asset_ids, execution_result)
