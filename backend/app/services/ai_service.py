@@ -179,7 +179,7 @@ def _build_asset_context_text(assets: list[dict]) -> str:
 
     if other:
         lines.append(f"**Other ({len(other)})**")
-        compact = "  " + " • ".join(
+        compact = "  " + ", ".join(
             f"{a['name']} ({a.get('asset_type', '?')}, {a.get('environment', '?')})"
             for a in other
         )
