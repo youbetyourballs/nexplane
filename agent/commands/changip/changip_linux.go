@@ -3,12 +3,41 @@
 package changip
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 )
+
+// execCommand is a hook for tests to replace exec.Command.
+var execCommand = exec.Command
+
+// execCommandForRun is the hook used by runCmd (and configureDNS).
+var execCommandForRun = exec.Command
+
+// Snapshot holds everything needed to restore a network interface.
+type Snapshot struct {
+	Interface        string       `json:"interface"`
+	IPv4Addresses    []string     `json:"ip_v4_addresses"`
+	IPv6Addresses    []string     `json:"ip_v6_addresses"`
+	GatewayV4        string       `json:"gateway_v4"`
+	GatewayV6        string       `json:"gateway_v6"`
+	DNSServers       []string     `json:"dns_servers"`
+	DNSSearchDomains []string     `json:"dns_search_domains"`
+	Routes           []RouteEntry `json:"routes"`
+	MTU              int          `json:"mtu"`
+	NetworkManager   string       `json:"network_manager"`
+	ConnectionName   string       `json:"connection_name"`
+}
+
+// RouteEntry is one line from `ip route show dev {iface}`.
+type RouteEntry struct {
+	Dst string `json:"dst"`
+	Gw  string `json:"gw"`
+	Dev string `json:"dev"`
+}
 
 func executeOS(params map[string]any) (map[string]any, error) {
 	iface, _ := params["interface"].(string)
@@ -25,24 +54,159 @@ func executeOS(params map[string]any) (map[string]any, error) {
 		ipVersion = "4"
 	}
 
-	snapshot, err := captureSnapshot(iface)
+	// --- New parameters ---
+	method, _ := params["method"].(string)
+	if method == "" {
+		method = "auto"
+	}
+	commitTimerSecs := paramInt(params, "commit_timer_seconds", 30)
+	if commitTimerSecs < 10 {
+		commitTimerSecs = 10
+	}
+	if commitTimerSecs > 300 {
+		commitTimerSecs = 300
+	}
+	probeIntervalSecs := paramInt(params, "probe_interval_seconds", 5)
+	probeURL, _ := params["probe_url"].(string)
+
+	var dnsServers []string
+	if raw, ok := params["dns_servers"].([]any); ok {
+		for _, v := range raw {
+			if s, ok := v.(string); ok {
+				dnsServers = append(dnsServers, s)
+			}
+		}
+	}
+	var dnsSearchDomains []string
+	if raw, ok := params["dns_search_domains"].([]any); ok {
+		for _, v := range raw {
+			if s, ok := v.(string); ok {
+				dnsSearchDomains = append(dnsSearchDomains, s)
+			}
+		}
+	}
+
+	// --- Capture snapshot before any change ---
+	snap, err := captureSnapshot(iface)
 	if err != nil {
 		return nil, fmt.Errorf("capturing snapshot: %w", err)
 	}
+	snapBytes, _ := json.Marshal(snap)
+	var snapMap map[string]any
+	json.Unmarshal(snapBytes, &snapMap)
 
-	method := detectNetworkManager()
-	if err := applyIPChange(method, iface, mode, ipVersion, params); err != nil {
-		return nil, err
+	nm := detectNetworkManager()
+
+	// --- Auto method selection ---
+	if method == "auto" {
+		tsIP, tsActive := IsTailscaleActive()
+		if tsActive && probeURL != "" && IsControlPlaneReachableViaTailscale(probeURL, 5*time.Second) {
+			_ = tsIP
+			method = "tailscale"
+		} else {
+			// Fall through: secondary_swap requires routability check (not implemented here — default to commit_timer).
+			method = "commit_timer"
+		}
 	}
 
-	return map[string]any{
-		"action":     "change_ip",
-		"interface":  iface,
-		"mode":       mode,
-		"applied":    true,
-		"snapshot":   snapshot,
-		"applied_at": time.Now().UTC().Format(time.RFC3339),
-	}, nil
+	// --- Dispatch ---
+	result := map[string]any{
+		"action":      "change_ip",
+		"interface":   iface,
+		"mode":        mode,
+		"applied":     false,
+		"snapshot":    snapMap,
+		"applied_at":  time.Now().UTC().Format(time.RFC3339),
+		"method_used": method,
+	}
+
+	switch method {
+	case "tailscale":
+		tsIP, _ := IsTailscaleActive()
+		if err := applyIPChange(nm, iface, mode, ipVersion, params); err != nil {
+			return nil, err
+		}
+		if err := configureDNS(nm, iface, snap.ConnectionName, dnsServers, dnsSearchDomains); err != nil {
+			return nil, err
+		}
+		result["applied"] = true
+		result["tailscale_ip"] = tsIP
+
+	case "secondary_swap":
+		newCIDR, _ := params["new_ip_v4"].(string)
+		if newCIDR == "" {
+			return nil, fmt.Errorf("new_ip_v4 required for secondary_swap")
+		}
+		if err := AddSecondaryIP(iface, newCIDR); err != nil {
+			return nil, fmt.Errorf("add secondary IP: %w", err)
+		}
+		// Remove old primary IPs.
+		for _, old := range snap.IPv4Addresses {
+			_ = RemoveSecondaryIP(iface, old)
+		}
+		if err := configureDNS(nm, iface, snap.ConnectionName, dnsServers, dnsSearchDomains); err != nil {
+			return nil, err
+		}
+		result["applied"] = true
+		result["secondary_ip_added"] = newCIDR
+
+	case "commit_timer":
+		pr := PendingRollback{
+			JobID:             fmt.Sprintf("job-%d", time.Now().UnixNano()),
+			ExpiresAt:         time.Now().Add(time.Duration(commitTimerSecs) * time.Second),
+			RollbackParams:    snapMap,
+			ProbeURL:          probeURL,
+			ProbeIntervalSecs: probeIntervalSecs,
+			ProbeTimeoutSecs:  3,
+		}
+		path := activePendingRollbackPath()
+		_, err := startDeadManSwitch(pr, path, func() {
+			_, _ = rollbackOS(map[string]any{"snapshot": snapMap, "interface": iface})
+		})
+		if err != nil {
+			return nil, fmt.Errorf("start dead man's switch: %w", err)
+		}
+		if err := applyIPChange(nm, iface, mode, ipVersion, params); err != nil {
+			return nil, err
+		}
+		if err := configureDNS(nm, iface, snap.ConnectionName, dnsServers, dnsSearchDomains); err != nil {
+			return nil, err
+		}
+		result["applied"] = true
+		result["commit_timer_started"] = true
+
+	case "manual":
+		if err := applyIPChange(nm, iface, mode, ipVersion, params); err != nil {
+			return nil, err
+		}
+		result["applied"] = true
+		result["requires_confirmation"] = true
+
+	default:
+		// Backward-compatible: apply change directly.
+		if err := applyIPChange(nm, iface, mode, ipVersion, params); err != nil {
+			return nil, err
+		}
+		if err := configureDNS(nm, iface, snap.ConnectionName, dnsServers, dnsSearchDomains); err != nil {
+			return nil, err
+		}
+		result["applied"] = true
+	}
+
+	return result, nil
+}
+
+// paramInt reads an int parameter from params, returning def if missing or wrong type.
+func paramInt(params map[string]any, key string, def int) int {
+	switch v := params[key].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	case int64:
+		return int(v)
+	}
+	return def
 }
 
 func rollbackOS(params map[string]any) (map[string]any, error) {
@@ -59,16 +223,34 @@ func rollbackOS(params map[string]any) (map[string]any, error) {
 	}
 
 	method := detectNetworkManager()
+
+	// Build rollback params from new snapshot fields.
+	var ipv4 string
+	if addrs, ok := snapshot["ip_v4_addresses"].([]any); ok && len(addrs) > 0 {
+		ipv4, _ = addrs[0].(string)
+	}
+	var ipv6 string
+	if addrs, ok := snapshot["ip_v6_addresses"].([]any); ok && len(addrs) > 0 {
+		ipv6, _ = addrs[0].(string)
+	}
+	gw4, _ := snapshot["gateway_v4"].(string)
+	gw6, _ := snapshot["gateway_v6"].(string)
+
+	rollMode := "dhcp"
+	if ipv4 != "" {
+		rollMode = "static"
+	}
+
 	snapshotParams := map[string]any{
 		"interface":      iface,
-		"mode":           snapshotField(snapshot, "ipv4", "mode", "dhcp"),
+		"mode":           rollMode,
 		"ip_version":     "both",
-		"new_ip_v4":      snapshotField(snapshot, "ipv4", "address", ""),
-		"new_ip_v6":      snapshotField(snapshot, "ipv6", "address", ""),
-		"new_gateway_v4": snapshotField(snapshot, "ipv4", "gateway", ""),
-		"new_gateway_v6": snapshotField(snapshot, "ipv6", "gateway", ""),
+		"new_ip_v4":      ipv4,
+		"new_ip_v6":      ipv6,
+		"new_gateway_v4": gw4,
+		"new_gateway_v6": gw6,
 	}
-	return map[string]any{"rolled_back": true}, applyIPChange(method, iface, snapshotParams["mode"].(string), "both", snapshotParams)
+	return map[string]any{"rolled_back": true}, applyIPChange(method, iface, rollMode, "both", snapshotParams)
 }
 
 type networkManager int
@@ -93,14 +275,207 @@ func detectNetworkManager() networkManager {
 	return nmRHEL
 }
 
-func captureSnapshot(iface string) (map[string]any, error) {
-	out, _ := exec.Command("ip", "addr", "show", iface).Output()
-	gwOut, _ := exec.Command("ip", "route", "show", "dev", iface).Output()
-	return map[string]any{
-		"interface": iface,
-		"ip_output": strings.TrimSpace(string(out)),
-		"gw_output": strings.TrimSpace(string(gwOut)),
-	}, nil
+func captureSnapshot(iface string) (*Snapshot, error) {
+	s := &Snapshot{Interface: iface}
+
+	// --- IPv4 and IPv6 addresses ---
+	addrOut, err := execCommand("ip", "-o", "addr", "show", iface).Output()
+	if err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(addrOut)), "\n") {
+			fields := strings.Fields(line)
+			// fields: index iface inet|inet6 cidr ...
+			if len(fields) < 4 {
+				continue
+			}
+			family := fields[2]
+			cidr := fields[3]
+			switch family {
+			case "inet":
+				s.IPv4Addresses = append(s.IPv4Addresses, cidr)
+			case "inet6":
+				s.IPv6Addresses = append(s.IPv6Addresses, cidr)
+			}
+		}
+	}
+
+	// --- Routes ---
+	routeOut, _ := execCommand("ip", "route", "show", "dev", iface).Output()
+	for _, line := range strings.Split(strings.TrimSpace(string(routeOut)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		entry := RouteEntry{Dst: fields[0], Dev: iface}
+		for i, f := range fields {
+			if f == "via" && i+1 < len(fields) {
+				entry.Gw = fields[i+1]
+			}
+		}
+		if entry.Dst == "default" {
+			s.GatewayV4 = entry.Gw
+		}
+		s.Routes = append(s.Routes, entry)
+	}
+
+	// --- MTU ---
+	linkOut, _ := execCommand("ip", "link", "show", iface).Output()
+	for _, line := range strings.Split(string(linkOut), "\n") {
+		if strings.Contains(line, "mtu") {
+			fields := strings.Fields(line)
+			for i, f := range fields {
+				if f == "mtu" && i+1 < len(fields) {
+					fmt.Sscanf(fields[i+1], "%d", &s.MTU)
+				}
+			}
+		}
+	}
+
+	// --- Network manager type and connection name ---
+	nm := detectNetworkManager()
+	switch nm {
+	case nmNetworkManager:
+		s.NetworkManager = "NetworkManager"
+		conOut, _ := execCommand("nmcli", "-t", "-f", "NAME,DEVICE", "con", "show", "--active").Output()
+		for _, line := range strings.Split(string(conOut), "\n") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 && strings.TrimSpace(parts[1]) == iface {
+				s.ConnectionName = strings.TrimSpace(parts[0])
+			}
+		}
+	case nmSystemd:
+		s.NetworkManager = "systemd-networkd"
+	case nmDebian:
+		s.NetworkManager = "interfaces"
+	default:
+		s.NetworkManager = "ifcfg"
+	}
+
+	// --- DNS: try resolvectl first, fall back to /etc/resolv.conf ---
+	resOut, err := execCommand("resolvectl", "status", iface).Output()
+	if err == nil {
+		for _, line := range strings.Split(string(resOut), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "DNS Servers:") {
+				raw := strings.TrimPrefix(line, "DNS Servers:")
+				for _, srv := range strings.Fields(raw) {
+					s.DNSServers = append(s.DNSServers, strings.TrimSpace(srv))
+				}
+			}
+			if strings.HasPrefix(line, "DNS Domain:") {
+				raw := strings.TrimPrefix(line, "DNS Domain:")
+				for _, d := range strings.Fields(raw) {
+					s.DNSSearchDomains = append(s.DNSSearchDomains, strings.TrimSpace(d))
+				}
+			}
+		}
+	} else {
+		rcData, _ := os.ReadFile("/etc/resolv.conf")
+		for _, line := range strings.Split(string(rcData), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "nameserver ") {
+				s.DNSServers = append(s.DNSServers, strings.TrimPrefix(line, "nameserver "))
+			}
+			if strings.HasPrefix(line, "search ") {
+				for _, d := range strings.Fields(strings.TrimPrefix(line, "search ")) {
+					s.DNSSearchDomains = append(s.DNSSearchDomains, d)
+				}
+			}
+		}
+	}
+
+	return s, nil
+}
+
+// configureDNS configures DNS servers and search domains for an interface.
+// conName is the NetworkManager connection name (used only when nm == nmNetworkManager).
+func configureDNS(nm networkManager, iface, conName string, servers, searchDomains []string) error {
+	if len(servers) == 0 {
+		return nil
+	}
+	switch nm {
+	case nmNetworkManager:
+		con := conName
+		if con == "" {
+			con = iface
+		}
+		dnsVal := strings.Join(servers, " ")
+		if err := runCmd("nmcli", "con", "mod", con, "ipv4.dns", dnsVal); err != nil {
+			return fmt.Errorf("nmcli ipv4.dns: %w", err)
+		}
+		if err := runCmd("nmcli", "con", "mod", con, "ipv6.dns", dnsVal); err != nil {
+			return fmt.Errorf("nmcli ipv6.dns: %w", err)
+		}
+		if len(searchDomains) > 0 {
+			if err := runCmd("nmcli", "con", "mod", con, "ipv4.dns-search", strings.Join(searchDomains, " ")); err != nil {
+				return fmt.Errorf("nmcli ipv4.dns-search: %w", err)
+			}
+		}
+		return runCmd("nmcli", "con", "up", con)
+
+	case nmSystemd:
+		args := append([]string{"dns", iface}, servers...)
+		if err := runCmd("resolvectl", args...); err != nil {
+			return fmt.Errorf("resolvectl dns: %w", err)
+		}
+		if len(searchDomains) > 0 {
+			domArgs := append([]string{"domain", iface}, searchDomains...)
+			if err := runCmd("resolvectl", domArgs...); err != nil {
+				return fmt.Errorf("resolvectl domain: %w", err)
+			}
+		}
+		return nil
+
+	default:
+		// /etc/resolv.conf fallback: preserve non-nameserver lines, rewrite nameserver lines.
+		rcData, _ := os.ReadFile("/etc/resolv.conf")
+		var kept []string
+		for _, line := range strings.Split(string(rcData), "\n") {
+			if !strings.HasPrefix(strings.TrimSpace(line), "nameserver") &&
+				!strings.HasPrefix(strings.TrimSpace(line), "search") {
+				kept = append(kept, line)
+			}
+		}
+		for _, srv := range servers {
+			kept = append(kept, "nameserver "+srv)
+		}
+		if len(searchDomains) > 0 {
+			kept = append(kept, "search "+strings.Join(searchDomains, " "))
+		}
+		return os.WriteFile("/etc/resolv.conf", []byte(strings.Join(kept, "\n")+"\n"), 0644)
+	}
+}
+
+// AddSecondaryIP adds an additional IP to an interface without removing existing ones.
+// cidr must be in CIDR notation, e.g. "10.0.0.200/24".
+func AddSecondaryIP(iface, cidr string) error {
+	return runCmd("ip", "addr", "add", cidr, "dev", iface)
+}
+
+// RemoveSecondaryIP removes a specific IP from an interface.
+// cidr must be in CIDR notation, e.g. "10.0.0.200/24".
+func RemoveSecondaryIP(iface, cidr string) error {
+	return runCmd("ip", "addr", "del", cidr, "dev", iface)
+}
+
+// GetInterfaceAddresses returns all current IPs (IPv4 and IPv6) on an interface
+// in CIDR notation.
+func GetInterfaceAddresses(iface string) ([]string, error) {
+	out, err := execCommand("ip", "-o", "addr", "show", iface).Output()
+	if err != nil {
+		return nil, fmt.Errorf("ip addr show %s: %w", iface, err)
+	}
+	var addrs []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		family := fields[2]
+		if family == "inet" || family == "inet6" {
+			addrs = append(addrs, fields[3])
+		}
+	}
+	return addrs, nil
 }
 
 func applyIPChange(method networkManager, iface, mode, ipVersion string, params map[string]any) error {
@@ -227,7 +602,7 @@ func applyRHELIfcfg(iface, mode, ipVersion string, params map[string]any) error 
 }
 
 func runCmd(name string, args ...string) error {
-	out, err := exec.Command(name, args...).CombinedOutput()
+	out, err := execCommandForRun(name, args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s %v: %w (output: %s)", name, args, err, out)
 	}
