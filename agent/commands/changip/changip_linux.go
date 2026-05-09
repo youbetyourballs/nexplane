@@ -69,6 +69,9 @@ func executeOS(params map[string]any) (map[string]any, error) {
 	}
 	probeIntervalSecs := paramInt(params, "probe_interval_seconds", 5)
 	probeURL, _ := params["probe_url"].(string)
+	if probeURL == "" {
+		probeURL = os.Getenv("NP_CONTROL_PLANE")
+	}
 
 	var dnsServers []string
 	if raw, ok := params["dns_servers"].([]any); ok {

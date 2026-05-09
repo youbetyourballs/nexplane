@@ -10,6 +10,9 @@ async def _real_execute(creds: dict, parameters: dict) -> dict:
     instance_id = parameters['instance_id']
     document_name = parameters['document_name']
     doc_params = parameters.get('parameters', {})
+    # Support a bare `command` string — map it to the SSM document's Commands parameter.
+    if not doc_params and 'command' in parameters:
+        doc_params = {'commands': [parameters['command']]}
 
     def _call():
         resp = ssm.send_command(

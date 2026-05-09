@@ -203,6 +203,7 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
         "instance_id": instance_id,
         "backend_ip": backend_ip,
         "agent_secret": agent_secret,
+        "agent_asset": agent_asset,
     }
 
 
@@ -2397,6 +2398,8 @@ def run_phase_ip_a(client: NexplaneClient, phase_a_result: dict) -> None:
 
     instance_asset = phase_a_result["instance_asset"]
     instance_id = phase_a_result["instance_id"]
+    agent_asset = phase_a_result.get("agent_asset") or {}
+    agent_asset_id = agent_asset.get("id") or instance_asset["id"]
     rollback_stack: list[tuple[str, str]] = []
 
     try:
@@ -2411,9 +2414,9 @@ def run_phase_ip_a(client: NexplaneClient, phase_a_result: dict) -> None:
         gateway = str(list(net.network.hosts())[0])
         log(f"New IP will be: {new_ip_cidr}")
 
-        # Step 3: Fire change_ip with method=tailscale
+        # Step 3: Fire change_ip with method=tailscale — must target agent server asset
         cr = client.run_cr(
-            "[Phase IP-A] change_ip tailscale method", "change_ip", instance_asset["id"],
+            "[Phase IP-A] change_ip tailscale method", "change_ip", agent_asset_id,
             {
                 "interface": iface,
                 "new_ip_v4": new_ip_cidr,
@@ -2470,6 +2473,8 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
 
     instance_asset = phase_a_result["instance_asset"]
     instance_id = phase_a_result["instance_id"]
+    agent_asset = phase_a_result.get("agent_asset") or {}
+    agent_asset_id = agent_asset.get("id") or instance_asset["id"]
     rollback_stack: list[tuple[str, str]] = []
 
     try:
@@ -2485,7 +2490,7 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
 
         # Step 2: Fire change_ip with method=commit_timer, timer=60s
         cr = client.run_cr(
-            "[Phase IP-D] change_ip commit_timer (should succeed)", "change_ip", instance_asset["id"],
+            "[Phase IP-D] change_ip commit_timer (should succeed)", "change_ip", agent_asset_id,
             {
                 "interface": iface,
                 "new_ip_v4": new_ip_cidr,
@@ -2557,6 +2562,8 @@ def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
 
     instance_asset = phase_a_result["instance_asset"]
     instance_id = phase_a_result["instance_id"]
+    agent_asset = phase_a_result.get("agent_asset") or {}
+    agent_asset_id = agent_asset.get("id") or instance_asset["id"]
 
     # We do not add to rollback_stack — the auto-rollback is the test.
     # If somehow the CR succeeds (shouldn't), we'll clean up in finally.
@@ -2579,7 +2586,7 @@ def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
         ip_cr_id = client.create_cr(
             "[Phase IP-D2] change_ip commit_timer rollback test",
             "change_ip",
-            instance_asset["id"],
+            agent_asset_id,
             {
                 "interface": iface,
                 "new_ip_v4": new_ip_cidr,
@@ -2673,6 +2680,8 @@ def run_phase_ip_dns(client: NexplaneClient, phase_a_result: dict, cloud_account
 
     instance_asset = phase_a_result["instance_asset"]
     instance_id = phase_a_result["instance_id"]
+    agent_asset = phase_a_result.get("agent_asset") or {}
+    agent_asset_id = agent_asset.get("id") or instance_asset["id"]
 
     r53 = _get_aws_boto3_client("route53")
     if not r53:
@@ -2735,7 +2744,7 @@ def run_phase_ip_dns(client: NexplaneClient, phase_a_result: dict, cloud_account
         gateway = str(list(net.network.hosts())[0])
 
         cr = client.run_cr(
-            "[Phase IP-DNS] migrate_ip with DNS update", "migrate_ip", instance_asset["id"],
+            "[Phase IP-DNS] migrate_ip with DNS update", "migrate_ip", agent_asset_id,
             {
                 "interface": iface,
                 "new_ip_v4": new_ip_cidr,
@@ -2831,6 +2840,410 @@ def run_phase_ip_dns(client: NexplaneClient, phase_a_result: dict, cloud_account
             print(f"  ⚠️  Phase IP-DNS cleanup error: {e2}")
 
 
+# ---------------------------------------------------------------------------
+# Phase IP-WIN helpers
+# ---------------------------------------------------------------------------
+
+WIN_IP_KEY_NAME = "nexplane-smoke-win-ip-key"
+WIN_IP_INSTANCE_NAME = "nexplane-smoke-win-ip"
+WIN_IP_AGENT_HOSTNAME = "nexplane-smoke-win-ip"
+
+
+def _get_tailscale_windows_url_live() -> str:
+    """Return the Tailscale Windows installer URL (stable release)."""
+    return "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe"
+
+
+def _get_win_interface_and_ip(client: NexplaneClient, instance_asset: dict, instance_id: str) -> tuple[str, str]:
+    """Detect primary interface name and IP on a Windows EC2 instance via SSM PowerShell.
+
+    Returns (interface_name, ip_cidr) e.g. ("Ethernet", "10.0.1.5/20").
+    Uses Get-NetAdapter + Get-NetIPAddress to find the active adapter and address.
+    """
+    import ipaddress
+
+    ps_cmd = (
+        "$a = Get-NetAdapter | Where-Object {$_.Status -eq 'Up' -and $_.Name -notlike '*Tailscale*'} | "
+        "Sort-Object -Property ifIndex | Select-Object -First 1; "
+        "$ip = Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 | Select-Object -First 1; "
+        "Write-Host ($a.Name + '|' + $ip.IPAddress + '|' + $ip.PrefixLength)"
+    )
+    iface_cr = client.run_cr(
+        "[Phase IP-Win] detect interface", "ssm_command", instance_asset["id"],
+        {
+            "instance_id": instance_id,
+            "document_name": "AWS-RunPowerShellScript",
+            "command": ps_cmd,
+            "rollback_strategy": "rollback_unavailable",
+        },
+    )
+
+    iface, ip_addr, prefix = "", "", "20"
+    for step in (iface_cr.get("step_results") or {}).values():
+        out = str(step.get("output", "") or step.get("result", "") or step.get("stdout", "") or "")
+        for line in out.splitlines():
+            line = line.strip()
+            if "|" in line:
+                parts = line.split("|")
+                if len(parts) >= 3:
+                    iface, ip_addr, prefix = parts[0].strip(), parts[1].strip(), parts[2].strip()
+                    break
+        if iface:
+            break
+
+    if not iface:
+        iface = "Ethernet"
+    if not ip_addr:
+        # Fall back to boto3
+        ec2 = _get_aws_boto3_client("ec2")
+        if ec2:
+            try:
+                desc = ec2.describe_instances(InstanceIds=[instance_id])
+                ni = desc["Reservations"][0]["Instances"][0]["NetworkInterfaces"][0]
+                ip_addr = ni["PrivateIpAddress"]
+                subnet_cidr = ec2.describe_subnets(SubnetIds=[ni["SubnetId"]])["Subnets"][0]["CidrBlock"]
+                prefix = subnet_cidr.split("/")[1]
+            except Exception as e:
+                log(f"boto3 IP fetch failed: {e}")
+    if not ip_addr:
+        fail("[Phase IP-Win] Could not determine Windows instance private IP")
+
+    ip_cidr = f"{ip_addr}/{prefix}"
+    log(f"Windows interface: {iface}, IP: {ip_cidr}")
+    return iface, ip_cidr
+
+
+def _setup_win_ip_instance(client: NexplaneClient, cloud_account_id: str, tailscale_auth_key: str) -> dict:
+    """Launch a Windows EC2 with Tailscale + agent. Returns result dict with instance_asset, instance_id, agent_asset."""
+
+    ec2 = _get_aws_boto3_client("ec2")
+
+    # Pre-clean stale key pair
+    if ec2:
+        try:
+            kps = ec2.describe_key_pairs(Filters=[{"Name": "key-name", "Values": [WIN_IP_KEY_NAME]}]).get("KeyPairs", [])
+            for kp in kps:
+                ec2.delete_key_pair(KeyName=kp["KeyName"])
+        except Exception:
+            pass
+
+    # Find latest Windows Server 2022 AMI
+    win_ami = ""
+    if ec2:
+        try:
+            images = ec2.describe_images(
+                Owners=["amazon"],
+                Filters=[{"Name": "name", "Values": ["Windows_Server-2022-English-Full-Base-*"]},
+                         {"Name": "state", "Values": ["available"]}],
+            )["Images"]
+            if images:
+                win_ami = sorted(images, key=lambda x: x["CreationDate"], reverse=True)[0]["ImageId"]
+        except Exception:
+            pass
+    if not win_ami:
+        fail("[Phase IP-Win] Could not find Windows Server 2022 AMI")
+    log(f"Windows AMI: {win_ami}")
+
+    client.run_cr(
+        "[Phase IP-Win] create key pair", "key_pair_create", cloud_account_id,
+        {"key_name": WIN_IP_KEY_NAME},
+    )
+    client._run_cr_with_timeout(
+        "[Phase IP-Win] launch Windows EC2", "ec2_launch", cloud_account_id,
+        {"mode": "quick", "name": WIN_IP_INSTANCE_NAME, "os": "windows",
+         "ami_id": win_ami, "instance_type": "t3.micro",
+         "iam_instance_profile": "NexplaneEC2TestProfile",
+         "key_name": WIN_IP_KEY_NAME, "rollback_strategy": "terminate_instance"},
+        timeout=600,
+    )
+    time.sleep(10)
+
+    instance_asset = client.get_asset_by_name(WIN_IP_INSTANCE_NAME)
+    if not instance_asset:
+        fail("[Phase IP-Win] Windows EC2 not found in inventory")
+    instance_id = instance_asset["asset_metadata"]["instance_id"]
+    log(f"Windows EC2: {instance_id}")
+
+    print("  [IP-Win] Waiting 5 min for Windows SSM agent...")
+    time.sleep(300)
+
+    # Get Tailscale auth key
+    ts_key = tailscale_auth_key or client.get_tailscale_auth_key("")
+    nexplane_url = "http://100.124.94.39:8000"
+    agent_secret = client.get("/org/settings").get("agent_secret", "")
+
+    # Download agent
+    client._run_cr_with_timeout(
+        "[Phase IP-Win] download agent", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunPowerShellScript",
+         "command": (
+             "$ProgressPreference = 'SilentlyContinue'; "
+             "Invoke-WebRequest -Uri 'https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/version' "
+             "-OutFile 'C:\\np-ver.txt' -UseBasicParsing; "
+             "$v = (Get-Content 'C:\\np-ver.txt').Trim(); "
+             "$url = \"https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/nexplane-agent-windows-amd64-${v}.exe\"; "
+             "Invoke-WebRequest -Uri $url -OutFile 'C:\\nexplane-agent.exe' -UseBasicParsing; "
+             "Write-Host ('Downloaded: ' + (Get-Item 'C:\\nexplane-agent.exe').Length + ' bytes')"
+         ),
+         "rollback_strategy": "rollback_unavailable"},
+        timeout=300,
+    )
+
+    # Install Tailscale + start agent
+    ts_windows_url = _get_tailscale_windows_url_live()
+    client._run_cr_with_timeout(
+        "[Phase IP-Win] install Tailscale and agent", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunPowerShellScript",
+         "command": (
+             f"$ProgressPreference = 'SilentlyContinue'; "
+             f"Invoke-WebRequest '{ts_windows_url}' -OutFile 'C:\\ts-setup.exe' -UseBasicParsing; "
+             f"Start-Process 'C:\\ts-setup.exe' -Args '/S' -Wait; "
+             f"Start-Sleep 20; "
+             f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey='{ts_key}' "
+             f"  --hostname='{WIN_IP_AGENT_HOSTNAME}' --accept-routes; "
+             f"if ($LASTEXITCODE -ne 0) {{ Write-Host 'Tailscale up failed'; exit 1 }}; "
+             f"Write-Host 'Tailscale joined'; "
+             f"schtasks /create /tn NexplaneAgent "
+             f"  /tr '\"C:\\nexplane-agent.exe\" --control-plane {nexplane_url} --secret {agent_secret} "
+             f"  --mode service --hostname {WIN_IP_AGENT_HOSTNAME}' "
+             f"  /sc onstart /ru SYSTEM /rl HIGHEST /f; "
+             f"schtasks /run /tn NexplaneAgent; "
+             f"Start-Sleep 60; "
+             f"echo 'Agent task started'"
+         ),
+         "rollback_strategy": "rollback_unavailable"},
+        timeout=600,
+    )
+
+    # Poll for agent registration
+    agent_asset = None
+    deadline = time.time() + 600
+    while time.time() < deadline:
+        candidates = client.get("/assets", params={"q": WIN_IP_AGENT_HOSTNAME, "asset_type": "server"})
+        tagged = [c for c in candidates if "nexplane-agent" in (c.get("tags") or [])]
+        if tagged:
+            tagged.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
+            agent_asset = tagged[0]
+            log(f"Agent registered: {agent_asset['id']}")
+            break
+        time.sleep(10)
+    if not agent_asset:
+        fail("[Phase IP-Win] Agent did not register within 10 min")
+
+    return {
+        "instance_asset": instance_asset,
+        "instance_id": instance_id,
+        "agent_asset": agent_asset,
+    }
+
+
+def _teardown_win_ip_instance(client: NexplaneClient) -> None:
+    """Terminate Windows IP test instance and clean up inventory."""
+    print("  [IP-Win teardown]")
+    ec2 = _get_aws_boto3_client("ec2")
+    if ec2:
+        try:
+            reservations = ec2.describe_instances(
+                Filters=[{"Name": "tag:Name", "Values": [WIN_IP_INSTANCE_NAME]},
+                         {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]}]
+            ).get("Reservations", [])
+            for res in reservations:
+                for inst in res.get("Instances", []):
+                    ec2.terminate_instances(InstanceIds=[inst["InstanceId"]])
+                    print(f"  Terminated {inst['InstanceId']}")
+        except Exception as e:
+            print(f"  ⚠️  Terminate error: {e}")
+        try:
+            ec2.delete_key_pair(KeyName=WIN_IP_KEY_NAME)
+            print(f"  Deleted key pair {WIN_IP_KEY_NAME}")
+        except Exception:
+            pass
+    try:
+        for q in (WIN_IP_INSTANCE_NAME, WIN_IP_KEY_NAME, WIN_IP_AGENT_HOSTNAME):
+            assets = client.get("/assets", params={"q": q})
+            for asset in assets:
+                if any(q.split("-")[-1] in asset.get("name", "") for q in (WIN_IP_INSTANCE_NAME, WIN_IP_KEY_NAME)):
+                    try:
+                        client.client.delete(f"{client.base}/assets/{asset['id']}")
+                        print(f"  Deleted inventory asset {asset['name']}")
+                    except Exception:
+                        pass
+    except Exception as e:
+        print(f"  ⚠️  Inventory cleanup error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Phase IP-WIN-A: Windows tailscale-first IP change
+# ---------------------------------------------------------------------------
+
+def run_phase_ip_win_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_key: str) -> None:
+    """Phase IP-WIN-A: Windows tailscale-first IP change.
+
+    1. Launch Windows EC2 with Tailscale + agent
+    2. Detect interface name via PowerShell SSM
+    3. Fire change_ip with method=tailscale
+    4. Verify new IP via PowerShell SSM
+    5. Rollback and verify original IP restored
+    6. Tear down instance
+    """
+    print("\n[Phase IP-WIN-A] Windows tailscale-first IP change")
+
+    result = {}
+    try:
+        result = _setup_win_ip_instance(client, cloud_account_id, tailscale_auth_key)
+        instance_asset = result["instance_asset"]
+        instance_id = result["instance_id"]
+        agent_asset = result["agent_asset"]
+        agent_asset_id = agent_asset["id"]
+        rollback_stack: list[tuple[str, str]] = []
+
+        iface, current_ip_cidr = _get_win_interface_and_ip(client, instance_asset, instance_id)
+
+        import ipaddress
+        net = ipaddress.IPv4Interface(current_ip_cidr)
+        new_host = int(net.ip) + 1
+        new_ip_cidr = f"{ipaddress.IPv4Address(new_host)}/{net.network.prefixlen}"
+        gateway = str(list(net.network.hosts())[0])
+        log(f"New IP will be: {new_ip_cidr}")
+
+        cr = client.run_cr(
+            "[Phase IP-WIN-A] change_ip tailscale method", "change_ip", agent_asset_id,
+            {
+                "interface": iface,
+                "new_ip_v4": new_ip_cidr,
+                "new_gateway_v4": gateway,
+                "method": "tailscale",
+                "rollback_strategy": "nexplane_rollback",
+            },
+        )
+        rollback_stack.append((cr["id"], "change_ip"))
+        log("change_ip CR completed — agent reachable via Tailscale")
+
+        # Verify new IP via PowerShell SSM
+        new_ip = new_ip_cidr.split("/")[0]
+        client.run_cr(
+            "[Phase IP-WIN-A] verify new IP", "ssm_command", instance_asset["id"],
+            {"instance_id": instance_id, "document_name": "AWS-RunPowerShellScript",
+             "command": f"$r = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {{$_.IPAddress -eq '{new_ip}'}}); if ($r) {{ Write-Host 'IP_VERIFIED' }} else {{ Write-Host 'IP_NOT_FOUND'; exit 1 }}",
+             "rollback_strategy": "rollback_unavailable"},
+        )
+        log(f"New IP {new_ip} verified on {iface}")
+
+        # Rollback
+        ip_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(ip_cr_id, "change_ip → restore original IP")
+
+        old_ip = current_ip_cidr.split("/")[0]
+        client.run_cr(
+            "[Phase IP-WIN-A] verify original IP restored", "ssm_command", instance_asset["id"],
+            {"instance_id": instance_id, "document_name": "AWS-RunPowerShellScript",
+             "command": f"$r = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {{$_.IPAddress -eq '{old_ip}'}}); if ($r) {{ Write-Host 'RESTORED' }} else {{ Write-Host 'NOT_RESTORED'; exit 1 }}",
+             "rollback_strategy": "rollback_unavailable"},
+        )
+        log("Original IP restored")
+        log("Phase IP-WIN-A complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase IP-WIN-A failed: {e}")
+        raise
+    finally:
+        _teardown_win_ip_instance(client)
+
+
+# ---------------------------------------------------------------------------
+# Phase IP-WIN-D: Windows dead man's switch (commit_timer success path)
+# ---------------------------------------------------------------------------
+
+def run_phase_ip_win_d(client: NexplaneClient, cloud_account_id: str, tailscale_auth_key: str) -> None:
+    """Phase IP-WIN-D: Windows commit_timer IP change — control plane reachable, timer cancelled.
+
+    1. Launch Windows EC2 with Tailscale + agent
+    2. Detect interface name via PowerShell SSM
+    3. Fire change_ip with method=commit_timer, timer=60s
+    4. Verify CR completed (not rolled_back)
+    5. Verify pending_rollback.json is gone
+    6. Verify new IP applied
+    7. Rollback and verify original IP restored
+    8. Tear down instance
+    """
+    print("\n[Phase IP-WIN-D] Windows dead man's switch — success path (commit timer)")
+
+    result = {}
+    try:
+        result = _setup_win_ip_instance(client, cloud_account_id, tailscale_auth_key)
+        instance_asset = result["instance_asset"]
+        instance_id = result["instance_id"]
+        agent_asset = result["agent_asset"]
+        agent_asset_id = agent_asset["id"]
+        rollback_stack: list[tuple[str, str]] = []
+
+        iface, current_ip_cidr = _get_win_interface_and_ip(client, instance_asset, instance_id)
+
+        import ipaddress
+        net = ipaddress.IPv4Interface(current_ip_cidr)
+        new_host = int(net.ip) + 1
+        new_ip_cidr = f"{ipaddress.IPv4Address(new_host)}/{net.network.prefixlen}"
+        gateway = str(list(net.network.hosts())[0])
+        log(f"New IP will be: {new_ip_cidr}")
+
+        cr = client.run_cr(
+            "[Phase IP-WIN-D] change_ip commit_timer (should succeed)", "change_ip", agent_asset_id,
+            {
+                "interface": iface,
+                "new_ip_v4": new_ip_cidr,
+                "new_gateway_v4": gateway,
+                "method": "commit_timer",
+                "commit_timer_seconds": 60,
+                "probe_interval_seconds": 5,
+                "rollback_strategy": "nexplane_rollback",
+            },
+        )
+        rollback_stack.append((cr["id"], "change_ip commit_timer"))
+
+        if cr.get("status") != "completed":
+            fail(f"[Phase IP-WIN-D] Expected status=completed, got: {cr.get('status')}")
+        log("CR completed — commit timer cancelled by successful probe")
+
+        # Verify pending_rollback.json is gone (Windows path)
+        client.run_cr(
+            "[Phase IP-WIN-D] verify timer file gone", "ssm_command", instance_asset["id"],
+            {"instance_id": instance_id, "document_name": "AWS-RunPowerShellScript",
+             "command": "if (Test-Path 'C:\\ProgramData\\nexplane-agent\\pending_rollback.json') { Write-Host 'TIMER_EXISTS' } else { Write-Host 'TIMER_GONE' }",
+             "rollback_strategy": "rollback_unavailable"},
+        )
+        log("Timer file check done")
+
+        # Verify new IP applied
+        new_ip = new_ip_cidr.split("/")[0]
+        client.run_cr(
+            "[Phase IP-WIN-D] verify new IP", "ssm_command", instance_asset["id"],
+            {"instance_id": instance_id, "document_name": "AWS-RunPowerShellScript",
+             "command": f"$r = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {{$_.IPAddress -eq '{new_ip}'}}); if ($r) {{ Write-Host 'IP_VERIFIED' }} else {{ Write-Host 'IP_NOT_FOUND'; exit 1 }}",
+             "rollback_strategy": "rollback_unavailable"},
+        )
+        log(f"New IP {new_ip} verified on {iface}")
+
+        # Rollback
+        ip_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(ip_cr_id, "change_ip → restore original IP")
+
+        old_ip = current_ip_cidr.split("/")[0]
+        client.run_cr(
+            "[Phase IP-WIN-D] verify original IP restored", "ssm_command", instance_asset["id"],
+            {"instance_id": instance_id, "document_name": "AWS-RunPowerShellScript",
+             "command": f"$r = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {{$_.IPAddress -eq '{old_ip}'}}); if ($r) {{ Write-Host 'RESTORED' }} else {{ Write-Host 'NOT_RESTORED'; exit 1 }}",
+             "rollback_strategy": "rollback_unavailable"},
+        )
+        log("Original IP restored")
+        log("Phase IP-WIN-D complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase IP-WIN-D failed: {e}")
+        raise
+    finally:
+        _teardown_win_ip_instance(client)
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -2841,7 +3254,8 @@ def main():
             "Default: A,B,C,D. J and S are slow (~35-45 min). U=instance-state+S3-access, V=tailscale-remove, W=ALB-lifecycle. "
             "X=app-discovery, Y=containerize-build, Z=containerize-retire. "
             "IP_A=tailscale-first-ip-change, IP_D=dead-mans-switch-success, "
-            "IP_D2=dead-mans-switch-rollback, IP_DNS=route53-coordination."
+            "IP_D2=dead-mans-switch-rollback, IP_DNS=route53-coordination. "
+            "IP_WIN_A=windows-tailscale-ip-change, IP_WIN_D=windows-commit-timer-ip-change."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -2867,6 +3281,22 @@ def main():
                 pass
         if stale:
             print(f"  Pre-run: removed {len(stale)} stale inventory asset(s)")
+    except Exception:
+        pass
+
+    # Pre-run: delete any stale AWS key pair left from a previous failed run
+    try:
+        ec2 = _get_aws_boto3_client("ec2")
+        if ec2:
+            kps = ec2.describe_key_pairs(
+                Filters=[{"Name": "key-name", "Values": ["nexplane-smoke-test*"]}]
+            ).get("KeyPairs", [])
+            for kp in kps:
+                try:
+                    ec2.delete_key_pair(KeyName=kp["KeyName"])
+                    print(f"  Pre-run: deleted stale AWS key pair {kp['KeyName']}")
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -2957,6 +3387,10 @@ def main():
             if phase_a_result is None:
                 fail("Phase IP-DNS requires Phase A to have run first")
             run_phase_ip_dns(client, phase_a_result, cloud_account_id)
+        if "IP_WIN_A" in phases:
+            run_phase_ip_win_a(client, cloud_account_id, args.tailscale_auth_key)
+        if "IP_WIN_D" in phases:
+            run_phase_ip_win_d(client, cloud_account_id, args.tailscale_auth_key)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
