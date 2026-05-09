@@ -109,9 +109,8 @@ async def dispatch_agent_job(
                 if job.status == AgentJobStatus.completed:
                     return job.result or {"command": command, "status": "completed"}
                 elif job.status == AgentJobStatus.failed:
-                    raise RuntimeError(
-                        f"Agent job {command} failed: {(job.result or {}).get('error', 'unknown error')}"
-                    )
+                    err_msg = job.error or (job.result or {}).get("error") or "unknown error"
+                    raise RuntimeError(f"Agent job {command} failed: {err_msg}")
 
     raise RuntimeError(
         f"Agent job {command} timed out after {timeout_seconds}s (job_id={job_id})"
