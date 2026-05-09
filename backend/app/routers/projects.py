@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,15 @@ from app.services.audit_service import record_event
 from app.services.ai_service import AIService
 from app.services.secrets_service import SecretsService
 from app.config import settings as app_settings
+
+
+def _resolve_asset_ids(proposed_crs: list[dict], name_to_id: dict[str, str]) -> list[dict]:
+    """Resolve target_assets names to UUIDs, adding target_asset_ids to each CR dict."""
+    for cr in proposed_crs:
+        cr["target_asset_ids"] = [
+            name_to_id[n] for n in cr.get("target_assets", []) if n in name_to_id
+        ]
+    return proposed_crs
 
 
 class AIChatRequest(BaseModel):
@@ -385,7 +394,53 @@ async def ai_chat(
     project.ai_context = conversation
     await db.commit()
 
+    # Resolve target_assets names to UUIDs using the already-loaded asset list
+    if result_dict.get("proposed_crs"):
+        name_to_id = {a.name: str(a.id) for a in assets}
+        result_dict["proposed_crs"] = _resolve_asset_ids(result_dict["proposed_crs"], name_to_id)
+
     return AIChatResponse(
         reply=result_dict["reply"],
         proposed_crs=result_dict["proposed_crs"],
     )
+
+
+@router.get("/{project_id}/ai/prompt-preview")
+async def get_prompt_preview(
+    project_id: uuid.UUID,
+    draft_message: str | None = Query(None),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the full assembled prompt string for this project (no AI call)."""
+    project = await _get_project(db, project_id, user.organization_id)
+
+    from sqlalchemy.orm import selectinload as _selectinload
+    assets_result = await db.execute(
+        select(Asset)
+        .options(_selectinload(Asset.connector))
+        .where(Asset.organization_id == user.organization_id)
+    )
+    assets = assets_result.scalars().all()
+    asset_context = [
+        {
+            "name": a.name,
+            "asset_type": a.asset_type.value,
+            "environment": a.environment.value,
+            "criticality": a.criticality.value if a.criticality else None,
+            "connector_type": a.connector.connector_type.value if a.connector else None,
+            "tags": a.tags or [],
+        }
+        for a in assets
+    ]
+
+    secrets = SecretsService(app_settings.SECRET_KEY)
+    ai_service = AIService(secrets)
+
+    prompt = ai_service.build_prompt_preview(
+        goal=project.goal or project.name,
+        asset_context=asset_context,
+        conversation=list(project.ai_context or []),
+        draft_message=draft_message,
+    )
+    return {"prompt": prompt}
