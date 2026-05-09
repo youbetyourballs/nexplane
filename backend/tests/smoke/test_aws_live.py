@@ -81,14 +81,16 @@ def cleanup(client: NexplaneClient) -> None:
 
     # Delete smoke test assets from Nexplane inventory
     try:
-        assets = client.get("/assets", params={"q": "nexplane-smoke-test"})
-        for asset in assets:
-            if "smoke-test" in asset.get("name", ""):
-                try:
-                    client.client.delete(f"{client.base}/assets/{asset['id']}")
-                    print(f"  Deleted inventory asset {asset['name']} ({asset['id']})")
-                except Exception as e:
-                    print(f"  ⚠️  Could not delete inventory asset {asset['name']}: {e}")
+        seen = set()
+        for q, term in [("nexplane-smoke-test", "smoke-test"), ("nexplane-smoke-ec2", "smoke-ec2")]:
+            for asset in client.get("/assets", params={"q": q}):
+                if term in asset.get("name", "") and asset["id"] not in seen:
+                    seen.add(asset["id"])
+                    try:
+                        client.client.delete(f"{client.base}/assets/{asset['id']}")
+                        print(f"  Deleted inventory asset {asset['name']} ({asset['id']})")
+                    except Exception as e:
+                        print(f"  ⚠️  Could not delete inventory asset {asset['name']}: {e}")
     except Exception as e:
         print(f"  ⚠️  Inventory cleanup error: {e}")
 
@@ -2171,10 +2173,15 @@ def main():
     log("Authenticated")
 
     try:
-        stale = [a for a in client.get("/assets", params={"q": "nexplane-smoke-test"})
-                 if "smoke-test" in a.get("name", "")]
+        stale = []
+        for q in ("nexplane-smoke-test", "nexplane-smoke-ec2"):
+            stale += [a for a in client.get("/assets", params={"q": q})
+                      if q.split("-")[2] in a.get("name", "")]
         for asset in stale:
-            client.client.delete(f"{client.base}/assets/{asset['id']}")
+            try:
+                client.client.delete(f"{client.base}/assets/{asset['id']}")
+            except Exception:
+                pass
         if stale:
             print(f"  Pre-run: removed {len(stale)} stale inventory asset(s)")
     except Exception:
