@@ -705,6 +705,53 @@ export function AssetDetail() {
               </div>
             )}
           </div>
+
+          {/* Applications (containerization discovery) */}
+          {(asset.asset_type === "server" || asset.asset_type === "endpoint") && (
+            <div className="bg-white border border-slate-200 rounded-lg p-5 mt-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-slate-900">Applications</h2>
+                <button
+                  onClick={() => alert("Run discovery: Create a change request with type 'Agent: Discover Applications'")}
+                  className="text-xs text-brand-600 hover:underline"
+                >
+                  Re-scan
+                </button>
+              </div>
+              {Array.isArray((asset.asset_metadata as Record<string, unknown>)?.applications) ? (
+                <div className="space-y-1.5">
+                  {((asset.asset_metadata as Record<string, unknown>).applications as Array<Record<string, unknown>>).map((app, i) => (
+                    <div key={i} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-md px-3 py-2 text-xs">
+                      <div>
+                        <span className="font-medium text-slate-900">{String(app.name)}</span>
+                        {Array.isArray(app.listening_ports) && (app.listening_ports as Array<Record<string, unknown>>).length > 0 && (
+                          <span className="text-slate-400 ml-2">
+                            :{(app.listening_ports as Array<Record<string, unknown>>).map(p => String(p.port)).join(", :")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {app.stateful ? (
+                          <span className="px-1.5 py-0.5 rounded text-amber-700 bg-amber-50 border border-amber-200">
+                            stateful{app.estimated_data_size_gb ? ` · ${Number(app.estimated_data_size_gb).toFixed(1)} GB` : ""}
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded text-slate-500 bg-slate-100">
+                            stateless
+                          </span>
+                        )}
+                        <span className="text-slate-400">{String(app.containerization_status ?? "not_started")}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-slate-400 bg-slate-50 rounded-md px-3 py-4 text-center border border-slate-100">
+                  No applications discovered — run a scan to detect running services
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
