@@ -373,6 +373,156 @@ New AWS smoke test phases:
 
 ---
 
+## DNS Name Awareness and Coordination
+
+### Problem
+
+When an asset's IP changes, any DNS A/AAAA records pointing to the old IP become stale. If TTL is long (e.g., 3600s), clients continue hitting the old IP for up to an hour after the change. If the IP change rolls back, any DNS records already updated point to an IP that no longer works. The order of operations matters and is TTL-dependent.
+
+### DNS Inventory Discovery
+
+Before executing any `change_ip` or `migrate_ip` CR, the backend queries the asset inventory for all DNS names associated with the target asset:
+
+1. **Asset metadata**: `asset_metadata.dns_names[]` — populated by DNS connector ingest (Route53, Azure DNS, GCP Cloud DNS, Cloudflare). Example: `["api.corp.example.com", "web-01.internal.example.com"]`
+2. **Asset hostname field**: the asset's registered hostname, which may be a DNS name
+3. **Reverse DNS lookup**: query PTR record for the current IP — surfaces DNS names not captured in the connector ingest
+4. **Cross-reference**: query each DNS connector for A/AAAA records matching the current IP — catches records that exist but aren't linked to the asset yet
+
+The result is a `dns_records` list attached to the CR context:
+```json
+{
+  "dns_records": [
+    {
+      "name": "api.corp.example.com",
+      "type": "A",
+      "value": "10.0.0.100",
+      "ttl": 3600,
+      "provider": "route53",
+      "hosted_zone_id": "Z1234567890",
+      "connector_id": "..."
+    },
+    {
+      "name": "web-01.internal.example.com",
+      "type": "A",
+      "value": "10.0.0.100",
+      "ttl": 60,
+      "provider": "azure_dns",
+      "connector_id": "..."
+    }
+  ]
+}
+```
+
+If DNS records are discovered, the CR UI surfaces them for operator review before execution. The operator can include, exclude, or override each record.
+
+### TTL-Aware Ordering
+
+The migration sequence depends on the maximum TTL across all DNS records pointing to the current IP:
+
+**Short TTL (≤ 120s) — single CR:**
+```
+1. Lower all record TTLs to 60s (if not already ≤ 60s)
+2. Wait 60s for propagation (or skip if already short)
+3. Change IP (method A/B/D/C)
+4. Update DNS A/AAAA records to new IP
+5. Restore TTLs to original values
+```
+
+**Long TTL (> 120s) — two-CR sequence:**
+
+CR 1: `prepare_dns_for_ip_change`
+```
+1. For each DNS record: lower TTL to 60s
+2. Record original TTLs in snapshot
+3. Wait max(original_TTL) seconds — operator-configurable skip
+4. Status: "DNS prepared — proceed with migration within 24h"
+```
+
+CR 2: `migrate_ip` (must follow CR 1 within `dns_prep_valid_for_hours`, default 24)
+```
+1. Verify DNS TTLs are still low (re-check, fail if TTLs restored)
+2. Validate that CR 1 completed successfully
+3. Execute IP change
+4. Update DNS records to new IP
+5. Restore TTLs (or leave at 60s — operator choice)
+```
+
+**Rollback DNS ordering:**
+If the IP change rolls back, DNS updates are reverted in reverse order:
+1. Revert DNS A/AAAA records to old IP
+2. Restore original TTLs
+3. Post rollback confirmation
+
+DNS rollback is attempted even if the IP rollback fails — the goal is to prevent split-brain where DNS points to an IP that no longer exists.
+
+### `migrate_ip` Stages (Updated)
+
+The multi-step workflow now includes DNS stages:
+
+```
+0. dns_discovery        Discover all DNS names → asset IP mapping
+1. preflight            Interface validation, ARP probe, routability
+2. dns_prepare          Lower TTLs on all discovered records (skip if short)
+3. dns_wait             Wait for TTL propagation (configurable, skip in test mode)
+4. add_secondary        Add new IP as secondary (Method B only)
+5. verify_secondary     Control plane probes new IP (Method B only)
+6. apply_change         Execute the IP swap
+7. verify_new           Confirm control plane reachable at new address
+8. dns_update           Update A/AAAA records to new IP across all providers
+9. dns_verify           Resolve each DNS name and confirm new IP returned
+10. remove_old          Remove old IP (Method B cleanup)
+11. restore_ttl         Restore TTLs to original values
+12. commit              Mark permanent; disable further auto-rollback
+```
+
+Stage `confirm_at_stage` defaults to `verify_new` — operator reviews connectivity before DNS is updated.
+
+### DNS Provider Integration
+
+DNS updates are dispatched through existing Nexplane DNS connectors:
+
+| Provider | Connector type | Update mechanism |
+|---|---|---|
+| AWS Route53 | `aws` | `change_route53_record` CR via route53 executor |
+| Azure DNS | `azure` | `update_azure_dns_record` CR |
+| GCP Cloud DNS | `gcp` | `update_gcp_dns_record` CR |
+| Cloudflare | `cloudflare` | Cloudflare API via connector executor |
+| Generic DNS | `dns_zone` | RFC 2136 dynamic DNS update (nsupdate) |
+| Internal AD DNS | `active_directory` | `dns_record_update` via AD connector |
+
+Each DNS update is dispatched as a sub-CR within the `migrate_ip` workflow. Sub-CRs are tracked in `step_results`. If any DNS update fails, the migration halts at stage 8 and triggers rollback of all previous DNS changes.
+
+### Asset Metadata Update
+
+After a successful IP change and DNS update:
+
+1. Update `asset.asset_metadata.ip_addresses` to reflect new IP
+2. Update `asset.asset_metadata.dns_names` if any names changed (rare — names stay the same, only records update)
+3. Write a change event to the audit log: old IP → new IP, DNS records updated
+
+For the `ip_campaign`, a post-campaign asset inventory refresh is triggered automatically to ensure all assets reflect their new IPs.
+
+### Smoke Test: DNS Coordination (Phase IP-DNS)
+
+**Setup:** Target EC2 instance with a Route53 A record pointing to its IP (using a test hosted zone `smoke.nexplane.internal`).
+
+**Steps:**
+1. Verify `asset_metadata.dns_names` populated after Route53 ingest
+2. Fire `migrate_ip` targeting the EC2 instance with a new IP in the same subnet
+3. Verify stage `dns_prepare` lowers Route53 record TTL to 60s
+4. Verify stage `dns_update` updates the A record to the new IP
+5. Resolve `smoke.nexplane.internal` and assert new IP returned
+6. Fire rollback
+7. Verify A record reverted to old IP
+8. Verify TTL restored
+
+**Rollback-only test:**
+1. Configure Route53 A record for the test host
+2. Start `migrate_ip` with `commit_timer_seconds: 15` and an invalid gateway (ensures rollback fires)
+3. Verify: IP rolled back AND DNS A record rolled back to old IP within 20 seconds
+
+---
+
 ## What Is Not In Scope (v1)
 
 - VLAN tagging / 802.1Q
