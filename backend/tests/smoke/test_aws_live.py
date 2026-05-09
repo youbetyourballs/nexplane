@@ -2026,10 +2026,11 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
     """
     log("\n[Phase X] Application Discovery")
 
-    instance_asset_id = phase_a_result.get("instance_asset_id")
+    instance_asset = phase_a_result.get("instance_asset", {})
+    instance_asset_id = instance_asset.get("id")
     instance_id = phase_a_result.get("instance_id")
     if not instance_asset_id or not instance_id:
-        fail("Phase X requires phase_a_result['instance_asset_id'] and ['instance_id']")
+        fail("Phase X requires phase_a_result['instance_asset']['id'] and ['instance_id']")
 
     # Step 1: Install the known test application via SSM
     log("[Phase X] Installing nexplane-smoketest service via SSM")
