@@ -317,7 +317,10 @@ export type ChangeType =
   | "agent_appdiscovery"
   | "agent_containerize_build"
   | "agent_containerize_retire"
-  | "k8s_workload_deploy";
+  | "k8s_workload_deploy"
+  | "change_ip"
+  | "migrate_ip"
+  | "ip_campaign";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
