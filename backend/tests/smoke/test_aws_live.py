@@ -177,6 +177,7 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
     # Agent downloads binary from the public S3 bucket (NEXPLANE_AGENT_DOWNLOAD_URL default).
     # nexplane_url is the Tailscale IP so agent heartbeats reach the backend within the tailnet.
     nexplane_url = f"http://{backend_ip}:8000"
+    deploy_time = time.time()
     client.run_cr(
         "[Phase A] deploy nexplane agent", "deploy_nexplane_agent", instance_asset["id"],
         {"instance_id": instance_id, "nexplane_url": nexplane_url, "nexplane_secret": agent_secret,
@@ -189,9 +190,13 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
     while time.time() < deadline:
         candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
         # Only accept assets whose name is exactly "nexplane-smoke-ec2" (the hostname we set)
+        # AND that were created/updated after we started the deploy (avoids stale assets)
+        import datetime as _dt
+        deploy_dt = _dt.datetime.utcfromtimestamp(deploy_time).strftime("%Y-%m-%dT%H:%M:%S")
         tagged = [c for c in candidates
                   if "nexplane-agent" in (c.get("tags") or [])
-                  and c.get("name") == "nexplane-smoke-ec2"]
+                  and c.get("name") == "nexplane-smoke-ec2"
+                  and (c.get("created_at") or "") >= deploy_dt]
         if tagged:
             tagged.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
             agent_asset = tagged[0]
@@ -3278,6 +3283,11 @@ def main():
         for q in ("nexplane-smoke-test", "nexplane-smoke-ec2"):
             stale += [a for a in client.get("/assets", params={"q": q})
                       if q.split("-")[2] in a.get("name", "")]
+        # Also clean stale nexplane-smoke-ec2 agent-registered server assets
+        for a in client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"}):
+            if a.get("name") == "nexplane-smoke-ec2" and "nexplane-agent" in (a.get("tags") or []):
+                if a["id"] not in {x["id"] for x in stale}:
+                    stale.append(a)
         for asset in stale:
             try:
                 client.client.delete(f"{client.base}/assets/{asset['id']}")
