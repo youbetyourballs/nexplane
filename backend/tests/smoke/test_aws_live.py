@@ -5,8 +5,8 @@ Nexplane AWS Live Smoke Test — Phases A–K (and new P–T).
 Usage:
     python backend/tests/smoke/test_aws_live.py \\
         --base-url http://localhost:8000 \\
-        --email admin@nexplane.local \\
-        --password changeme \\
+        --email admin@acme.example \\
+        --password admin123 \\
         --phases A,B,C,D,E,F,G,H,I,K \\
         --tailscale-auth-key tskey-auth-<key>
 

@@ -113,29 +113,35 @@ class NexplaneClient:
         try:
             import asyncio as _asyncio
             import threading as _threading
-            from app.database import AsyncSessionLocal as _Session
             from app.models.connector import Connector as _Connector
             from app.models.connector_credential import ConnectorCredential as _CC
             from app.services.secrets_service import SecretsService as _Secrets
             from app.config import settings as _cfg
             from sqlalchemy import select as _select
+            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession as _AsyncSession
+            from sqlalchemy.orm import sessionmaker as _sessionmaker
 
             async def _fetch() -> str:
-                async with _Session() as db:
-                    row = await db.execute(
-                        _select(_Connector).where(_Connector.connector_type == "tailscale")
-                    )
-                    conn = row.scalar_one_or_none()
-                    if not conn:
-                        return ""
-                    cred_row = await db.execute(
-                        _select(_CC).where(_CC.connector_id == conn.id)
-                    )
-                    cred = cred_row.scalar_one_or_none()
-                    if not cred:
-                        return ""
-                    svc = _Secrets(_cfg.SECRET_KEY)
-                    return svc.decrypt_json(cred.credentials_encrypted).get("auth_key", "")
+                engine = create_async_engine(_cfg.DATABASE_URL, pool_pre_ping=False)
+                _sess = _sessionmaker(engine, class_=_AsyncSession, expire_on_commit=False)
+                try:
+                    async with _sess() as db:
+                        row = await db.execute(
+                            _select(_Connector).where(_Connector.connector_type == "tailscale")
+                        )
+                        conn = row.scalar_one_or_none()
+                        if not conn:
+                            return ""
+                        cred_row = await db.execute(
+                            _select(_CC).where(_CC.connector_id == conn.id)
+                        )
+                        cred = cred_row.scalar_one_or_none()
+                        if not cred:
+                            return ""
+                        svc = _Secrets(_cfg.SECRET_KEY)
+                        return svc.decrypt_json(cred.credentials_encrypted).get("auth_key", "")
+                finally:
+                    await engine.dispose()
 
             # Run in a separate thread to avoid event-loop conflicts in the
             # pytest async environment (same pattern as _get_aws_boto3_client).
@@ -317,21 +323,30 @@ def _get_aws_boto3_client(service: str):
     import threading
     global _aws_creds_cache
     if not _aws_creds_cache:
-        from app.database import AsyncSessionLocal
+        from app.config import settings
         from app.models.connector import Connector, ConnectorType
         from app.services.connector_service import _attach_credentials
         import asyncio, sqlalchemy as sa
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
         result_holder: list = [None]
         async def _get():
-            async with AsyncSessionLocal() as db:
-                result = await db.execute(
-                    sa.select(Connector).where(Connector.connector_type == ConnectorType.aws)
-                )
-                conn = result.scalars().first()
-                if not conn:
-                    return None
-                await _attach_credentials(conn, db)
-                return getattr(conn, 'credentials', {})
+            # Create a fresh engine bound to this thread's event loop to avoid
+            # "Future attached to a different loop" errors from AsyncSessionLocal.
+            engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=False)
+            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            try:
+                async with async_session() as db:
+                    result = await db.execute(
+                        sa.select(Connector).where(Connector.connector_type == ConnectorType.aws)
+                    )
+                    conn = result.scalars().first()
+                    if not conn:
+                        return None
+                    await _attach_credentials(conn, db)
+                    return getattr(conn, 'credentials', {})
+            finally:
+                await engine.dispose()
         def _run_in_thread():
             result_holder[0] = asyncio.run(_get())
         t = threading.Thread(target=_run_in_thread)
@@ -359,21 +374,28 @@ def _get_gcp_compute_client():
     import threading
     global _gcp_creds_cache
     if not _gcp_creds_cache:
-        from app.database import AsyncSessionLocal
+        from app.config import settings
         from app.models.connector import Connector, ConnectorType
         from app.services.connector_service import _attach_credentials
         import asyncio, sqlalchemy as sa
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
         result_holder: list = [None]
         async def _get():
-            async with AsyncSessionLocal() as db:
-                result = await db.execute(
-                    sa.select(Connector).where(Connector.connector_type == ConnectorType.gcp)
-                )
-                conn = result.scalars().first()
-                if not conn:
-                    return None
-                await _attach_credentials(conn, db)
-                return getattr(conn, 'credentials', {})
+            engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=False)
+            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            try:
+                async with async_session() as db:
+                    result = await db.execute(
+                        sa.select(Connector).where(Connector.connector_type == ConnectorType.gcp)
+                    )
+                    conn = result.scalars().first()
+                    if not conn:
+                        return None
+                    await _attach_credentials(conn, db)
+                    return getattr(conn, 'credentials', {})
+            finally:
+                await engine.dispose()
         def _run_in_thread():
             result_holder[0] = asyncio.run(_get())
         t = threading.Thread(target=_run_in_thread)
@@ -408,21 +430,28 @@ def _get_azure_compute_client():
     import threading
     global _azure_creds_cache
     if not _azure_creds_cache:
-        from app.database import AsyncSessionLocal
+        from app.config import settings
         from app.models.connector import Connector, ConnectorType
         from app.services.connector_service import _attach_credentials
         import asyncio, sqlalchemy as sa
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
         result_holder: list = [None]
         async def _get():
-            async with AsyncSessionLocal() as db:
-                result = await db.execute(
-                    sa.select(Connector).where(Connector.connector_type == ConnectorType.azure)
-                )
-                conn = result.scalars().first()
-                if not conn:
-                    return None
-                await _attach_credentials(conn, db)
-                return getattr(conn, 'credentials', {})
+            engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=False)
+            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            try:
+                async with async_session() as db:
+                    result = await db.execute(
+                        sa.select(Connector).where(Connector.connector_type == ConnectorType.azure)
+                    )
+                    conn = result.scalars().first()
+                    if not conn:
+                        return None
+                    await _attach_credentials(conn, db)
+                    return getattr(conn, 'credentials', {})
+            finally:
+                await engine.dispose()
         def _run_in_thread():
             result_holder[0] = asyncio.run(_get())
         t = threading.Thread(target=_run_in_thread)
