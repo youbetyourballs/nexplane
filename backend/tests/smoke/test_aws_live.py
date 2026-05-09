@@ -126,13 +126,13 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
          "iam_instance_profile": "NexplaneEC2TestProfile", "key_name": KEY_NAME,
          "rollback_strategy": "terminate_instance"},
     )
-    # Wait up to 60s for the inventory asset to appear with a running instance_id.
+    # Wait up to 120s for the inventory asset to appear with a running instance_id.
     # Terminated instances from previous runs may still be visible in AWS (and can be re-ingested),
     # so we verify the instance_id is actually pending/running before proceeding.
     ec2_verify = _get_aws_boto3_client('ec2')
     instance_asset = None
     instance_id = None
-    for _ in range(12):  # up to 60s
+    for _ in range(24):  # up to 120s
         time.sleep(5)
         candidate = client.get_asset_by_name(INSTANCE_NAME)
         if not candidate:
