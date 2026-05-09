@@ -7,6 +7,7 @@ no time.sleep, no random) so it can be replayed safely if backed by Temporal.
 """
 import logging
 
+from app.database import AsyncSessionLocal
 from app.workflows.runner import WorkflowInput
 from app.workflows.activities import (
     load_change_request_and_plan,
@@ -108,6 +109,13 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
         await activity_write_appdiscovery_metadata(
             cr_id, data["target_asset_ids"], execution_result
         )
+
+    if data.get("change_type") == "agent_containerize_build":
+        from app.services.build_result_service import write_build_result_to_metadata
+        async with AsyncSessionLocal() as post_db:
+            await write_build_result_to_metadata(
+                post_db, data["target_asset_ids"], execution_result
+            )
 
     await write_audit_event(
         organization_id=org_id,
