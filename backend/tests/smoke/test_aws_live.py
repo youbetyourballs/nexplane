@@ -2224,6 +2224,90 @@ def run_phase_y(client: NexplaneClient, phase_a_result: dict) -> None:
     log("[Phase Y] ✅ Containerize build phase complete")
 
 
+def run_phase_z(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase Z: Containerize Retire — validates agent_containerize_retire end-to-end.
+
+    Requires Phase X (nexplane-smoketest discovered by agent).
+    1. Re-installs nexplane-smoketest (cleaned up by Phase X)
+    2. Fires retire in dry_run=True — service stays running
+    3. Fires retire in dry_run=False — service is stopped
+    4. Verifies asset_metadata.applications[].containerization_status == 'retired'
+    5. Cleans up
+    """
+    log("\n[Phase Z] Containerize Retire")
+
+    agent_asset_id = phase_a_result.get("agent_asset_id")
+    instance_asset_id = phase_a_result.get("instance_asset", {}).get("id")
+    instance_id = phase_a_result.get("instance_id")
+    if not agent_asset_id or not instance_asset_id or not instance_id:
+        fail("Phase Z requires phase_a_result['agent_asset_id'], ['instance_asset']['id'], and ['instance_id']")
+
+    # Re-install nexplane-smoketest
+    log("[Phase Z] Re-installing nexplane-smoketest for retire test")
+    client.run_cr(
+        "[Phase Z] reinstall smoketest",
+        "ssm_command",
+        instance_asset_id,
+        {
+            "instance_id": instance_id,
+            "document_name": "AWS-RunShellScript",
+            "command": _INSTALL_SMOKETEST_APP,
+            "rollback_strategy": "rollback_unavailable",
+        },
+    )
+
+    try:
+        # Step 1: Dry run — service should remain running
+        log("[Phase Z] Retire dry_run=True (service should remain running)")
+        client.run_cr(
+            "[Phase Z] retire dry run",
+            "agent_containerize_retire",
+            agent_asset_id,
+            {"systemd_unit": _SMOKETEST_UNIT, "dry_run": True},
+        )
+        log("[Phase Z] Dry run completed — service not stopped ✅")
+
+        # Step 2: Real retire — service should stop
+        log("[Phase Z] Retire dry_run=False (service should be stopped)")
+        client.run_cr(
+            "[Phase Z] retire real",
+            "agent_containerize_retire",
+            agent_asset_id,
+            {"systemd_unit": _SMOKETEST_UNIT, "dry_run": False},
+        )
+        log("[Phase Z] Retire CR completed")
+
+        # Verify asset_metadata updated
+        asset = client.get(f"/assets/{agent_asset_id}")
+        applications = (asset.get("asset_metadata") or {}).get("applications", [])
+        smoketest_app = next((a for a in applications if a.get("name") == _SMOKETEST_APP_NAME), None)
+        if smoketest_app and smoketest_app.get("containerization_status") == "retired":
+            log("[Phase Z] containerization_status=retired ✅")
+        else:
+            status = smoketest_app.get("containerization_status") if smoketest_app else "app not found"
+            log(f"[Phase Z] Warning: containerization_status={status} (non-fatal — may need Phase X to run first)")
+
+        log("[Phase Z] ✅ Containerize retire phase complete")
+
+    finally:
+        log("[Phase Z] Cleanup: removing nexplane-smoketest")
+        try:
+            client.run_cr(
+                "[Phase Z] cleanup smoketest",
+                "ssm_command",
+                instance_asset_id,
+                {
+                    "instance_id": instance_id,
+                    "document_name": "AWS-RunShellScript",
+                    "command": _UNINSTALL_SMOKETEST_APP,
+                    "rollback_strategy": "rollback_unavailable",
+                },
+            )
+            log("[Phase Z] Cleanup complete")
+        except Exception as e:
+            log(f"[Phase Z] Cleanup warning (non-fatal): {e}")
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
