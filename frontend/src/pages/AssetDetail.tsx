@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Edit, Save, X, Plus, Zap } from "lucide-react";
+import { ArrowLeft, Edit, Save, X, Plus, Zap, Network } from "lucide-react";
 import { assetsApi } from "../api/endpoints";
 import { changeRequestsApi } from "../api/endpoints";
 import { RiskBadge } from "../components/RiskBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { PageLoading } from "../components/LoadingSpinner";
 import type { Asset, AssetType, Criticality } from "../types/api";
+import { IPMigrationWizard } from "../components/IPMigrationWizard";
 
 // Maps asset type → eligible change types with label + title/description templates
 interface QuickAction {
@@ -430,6 +431,7 @@ export function AssetDetail() {
   const [editMetadata, setEditMetadata] = useState("");
   const [metadataError, setMetadataError] = useState("");
   const [tagInput, setTagInput] = useState("");
+  const [showIPWizard, setShowIPWizard] = useState(false);
 
   const { data: asset, isLoading } = useQuery({
     queryKey: ["asset", id],
@@ -608,6 +610,61 @@ export function AssetDetail() {
               )
             )}
           </div>
+
+          {/* Network — shown for server and endpoint assets */}
+          {(asset.asset_type === "server" || asset.asset_type === "endpoint") && (
+            <div className="bg-white border border-slate-200 rounded-lg p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                  <Network className="w-4 h-4 text-slate-400" />
+                  Network
+                </h2>
+                <button
+                  onClick={() => setShowIPWizard(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-600 text-white rounded-md hover:bg-brand-700"
+                >
+                  Change IP
+                </button>
+              </div>
+              <dl className="space-y-2">
+                {Array.isArray(asset.asset_metadata.ip_addresses) &&
+                  (asset.asset_metadata.ip_addresses as string[]).length > 0 ? (
+                    <div>
+                      <dt className="text-xs text-slate-400">IP Addresses</dt>
+                      <dd className="mt-0.5 flex flex-wrap gap-1">
+                        {(asset.asset_metadata.ip_addresses as string[]).map((ip) => (
+                          <span key={ip} className="font-mono text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded">
+                            {ip}
+                          </span>
+                        ))}
+                      </dd>
+                    </div>
+                  ) : asset.asset_metadata.private_ip ? (
+                    <div>
+                      <dt className="text-xs text-slate-400">IP Address</dt>
+                      <dd className="font-mono text-sm text-slate-900 mt-0.5">
+                        {asset.asset_metadata.private_ip as string}
+                      </dd>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-400">No IP address recorded in metadata.</p>
+                  )}
+                {Array.isArray(asset.asset_metadata.dns_names) &&
+                  (asset.asset_metadata.dns_names as string[]).length > 0 && (
+                    <div>
+                      <dt className="text-xs text-slate-400">DNS Names</dt>
+                      <dd className="mt-0.5 flex flex-wrap gap-1">
+                        {(asset.asset_metadata.dns_names as string[]).map((name) => (
+                          <span key={name} className="font-mono text-xs bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded">
+                            {name}
+                          </span>
+                        ))}
+                      </dd>
+                    </div>
+                  )}
+              </dl>
+            </div>
+          )}
         </div>
 
         {/* Right: Tags + Change Requests */}
@@ -754,6 +811,25 @@ export function AssetDetail() {
           )}
         </div>
       </div>
+
+      {/* IP Migration Wizard modal */}
+      {showIPWizard && (
+        <IPMigrationWizard
+          assetId={asset.id}
+          currentIp={
+            Array.isArray(asset.asset_metadata.ip_addresses)
+              ? (asset.asset_metadata.ip_addresses as string[])[0]
+              : (asset.asset_metadata.private_ip as string | undefined)
+          }
+          currentGateway={asset.asset_metadata.gateway as string | undefined}
+          currentDnsNames={
+            Array.isArray(asset.asset_metadata.dns_names)
+              ? (asset.asset_metadata.dns_names as string[])
+              : []
+          }
+          onClose={() => setShowIPWizard(false)}
+        />
+      )}
     </div>
   );
 }
