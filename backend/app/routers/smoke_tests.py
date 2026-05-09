@@ -38,7 +38,7 @@ SUITES = [
         "id": "aws",
         "name": "AWS",
         "file": "test_aws_live.py",
-        "default_phases": "A,B,C,D,E,F,G,H,I,K,P,Q,R,T,U,V,W",
+        "default_phases": "A,B,C,D,E,F,G,H,I,K,P,Q,R,T,U,V,W,X",
         "slow_phases": "J,S",
         "description": "EC2, IAM, S3, Route53, CloudWatch, RDS, ALB, agent lifecycle",
     },
