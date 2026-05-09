@@ -1373,6 +1373,40 @@
                         "parameters": [{"name": "dry_run", "type": "boolean", "required": false, "default": false}],
                         "executor": "nexplane_agent.app_discovery",
                         "estimated_duration_seconds": 30
+                    },
+                    {
+                        "action_id": "agent_containerize_build",
+                        "generic_action": "agent_containerize_build",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Containerize Application",
+                        "description": "Generate Dockerfile + k8s manifests, build container image, push to registry",
+                        "applicable_asset_types": ["server", "endpoint"],
+                        "parameters": [
+                            {"name": "app_name", "type": "string", "required": true},
+                            {"name": "registry", "type": "string", "required": true},
+                            {"name": "namespace", "type": "string", "required": false, "default": "default"},
+                            {"name": "cpu_request", "type": "string", "required": false, "default": "100m"},
+                            {"name": "mem_request", "type": "string", "required": false, "default": "128Mi"},
+                            {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+                        ],
+                        "executor": "nexplane_agent.containerize_build",
+                        "estimated_duration_seconds": 300
+                    },
+                    {
+                        "action_id": "agent_containerize_retire",
+                        "generic_action": "agent_containerize_retire",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Retire Legacy Service",
+                        "description": "Stop and disable the legacy systemd service after containerization",
+                        "applicable_asset_types": ["server", "endpoint"],
+                        "parameters": [
+                            {"name": "systemd_unit", "type": "string", "required": true},
+                            {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+                        ],
+                        "executor": "nexplane_agent.containerize_retire",
+                        "estimated_duration_seconds": 60
                     }
                 ]
 }

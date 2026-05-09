@@ -2067,6 +2067,8 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
                 tagged.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
                 agent_asset_id = tagged[0]["id"]
                 log(f"[Phase X] Agent registered: {agent_asset_id}")
+                # Store for Phase Y/Z
+                phase_a_result["agent_asset_id"] = agent_asset_id
                 break
             _time.sleep(10)
         if not agent_asset_id:
@@ -2150,6 +2152,76 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
             log("[Phase X] nexplane-smoketest service removed")
         except Exception as e:
             log(f"[Phase X] Warning: cleanup failed (non-fatal): {e}")
+
+
+def run_phase_y(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase Y: Containerize Build (dry_run) — validates agent_containerize_build CR.
+
+    Requires Phase X to have run (agent registered, nexplane-smoketest in applications[]).
+    Uses dry_run=True so no Docker daemon is required on the test instance.
+    Verifies Dockerfile + k8s manifests were generated and stored on asset_metadata.
+    """
+    log("\n[Phase Y] Containerize Build (dry_run)")
+
+    agent_asset_id = phase_a_result.get("agent_asset_id")
+    if not agent_asset_id:
+        fail("Phase Y requires phase_a_result['agent_asset_id'] (set by Phase X)")
+
+    # Fire the build CR in dry_run mode — no Docker daemon required
+    log("[Phase Y] Firing agent_containerize_build CR (dry_run=True)")
+    client.run_cr(
+        "[Phase Y] containerize build dry run",
+        "agent_containerize_build",
+        agent_asset_id,
+        {
+            "app_name": "nexplane-smoketest",
+            "registry": "smoke-test-registry.example.com/nexplane",
+            "namespace": "smoke-test",
+            "dry_run": True,
+        },
+    )
+    log("[Phase Y] CR completed")
+
+    # Verify build results stored on asset_metadata
+    log("[Phase Y] Verifying build results written to asset_metadata")
+    asset = client.get(f"/assets/{agent_asset_id}")
+    if not asset:
+        fail(f"[Phase Y] Agent asset {agent_asset_id} not found")
+
+    build_results = (asset.get("asset_metadata") or {}).get("build_results", {})
+    if "nexplane-smoketest" not in build_results:
+        fail(
+            f"[Phase Y] build_results['nexplane-smoketest'] not found in asset_metadata. "
+            f"Got keys: {list(build_results.keys())}"
+        )
+
+    result = build_results["nexplane-smoketest"]
+
+    # Verify Dockerfile was generated
+    dockerfile = result.get("dockerfile", "")
+    if not dockerfile:
+        fail("[Phase Y] No Dockerfile in build_results")
+    if "FROM" not in dockerfile:
+        fail(f"[Phase Y] Dockerfile looks invalid: {dockerfile[:100]}")
+    log("[Phase Y] Dockerfile generated ✅")
+
+    # Verify k8s manifests were generated
+    manifests = result.get("manifests", {})
+    if not manifests.get("deployment"):
+        fail("[Phase Y] No Deployment manifest in build_results.manifests")
+    if "kind: Deployment" not in manifests["deployment"]:
+        fail(f"[Phase Y] Deployment manifest looks invalid: {manifests['deployment'][:100]}")
+    log("[Phase Y] Kubernetes manifests generated ✅")
+
+    # Verify containerization_status updated
+    applications = (asset.get("asset_metadata") or {}).get("applications", [])
+    smoketest_app = next((a for a in applications if a.get("name") == "nexplane-smoketest"), None)
+    if smoketest_app and smoketest_app.get("containerization_status") in ("dockerfile_generated", "image_pushed"):
+        log(f"[Phase Y] containerization_status: {smoketest_app['containerization_status']} ✅")
+    else:
+        log("[Phase Y] Warning: containerization_status not updated (non-fatal)")
+
+    log("[Phase Y] ✅ Containerize build phase complete")
 
 
 def main():
@@ -2247,6 +2319,14 @@ def main():
             if phase_a_result is None:
                 fail("Phase X requires Phase A to have run first")
             run_phase_x(client, phase_a_result)
+        if "Y" in phases:
+            if phase_a_result is None:
+                fail("Phase Y requires Phase A to have run first")
+            run_phase_y(client, phase_a_result)
+        if "Z" in phases:
+            if phase_a_result is None:
+                fail("Phase Z requires Phase A to have run first")
+            run_phase_z(client, phase_a_result)
         if "T" in phases:
             if phase_a_result is None:
                 fail("Phase T requires Phase A to have run first")
