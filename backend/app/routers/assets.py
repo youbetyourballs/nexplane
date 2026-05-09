@@ -169,6 +169,17 @@ async def delete_asset(
         raise HTTPException(status_code=404, detail="Asset not found")
     await record_event(db, user.organization_id, "asset.deleted",
                        {"asset_id": str(asset.id), "name": asset.name}, actor_id=user.id)
+    # Cascade-delete agent jobs and registrations before deleting the asset
+    # to avoid FK violations (agent_registrations references assets).
+    from sqlalchemy import select as _select, delete as _delete
+    from app.models.agent import AgentRegistration, AgentJob
+    reg_ids_result = await db.execute(
+        _select(AgentRegistration.id).where(AgentRegistration.asset_id == asset_id)
+    )
+    reg_ids = [r[0] for r in reg_ids_result.fetchall()]
+    if reg_ids:
+        await db.execute(_delete(AgentJob).where(AgentJob.agent_registration_id.in_(reg_ids)))
+        await db.execute(_delete(AgentRegistration).where(AgentRegistration.asset_id == asset_id))
     await db.delete(asset)
     await db.commit()
 
