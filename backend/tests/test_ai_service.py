@@ -114,6 +114,8 @@ def test_parse_proposal_handles_old_field_names_for_backward_compat():
     assert result[0]["title"] == "Old format"
     assert result[0]["target_assets"] == ["prod-web-01"]
     assert result[0]["desired_outcome"] == {"dry_run": True}
+    assert result[0].get("seq") is None
+    assert result[0].get("depends_on") == []
 
 
 def test_build_prompt_preview_returns_full_assembled_prompt():
@@ -132,3 +134,21 @@ def test_build_prompt_preview_returns_full_assembled_prompt():
     assert "prod-web-01" in preview
     assert "First message" in preview
     assert "What should I do next?" in preview
+
+
+def test_build_system_prompt_handles_braces_in_goal():
+    from app.services.ai_service import AIService
+    from unittest.mock import MagicMock
+    svc = AIService(MagicMock())
+    assets = []
+    # Should not raise KeyError even when goal contains curly braces
+    prompt = svc._build_system_prompt("Deploy {service} to {env}", assets)
+    assert "Deploy {service} to {env}" in prompt
+
+
+def test_parse_proposal_returns_none_for_non_list_json():
+    from app.services.ai_service import AIService
+    from unittest.mock import MagicMock
+    svc = AIService(MagicMock())
+    text = '<nexplane-proposal>{"not": "a list"}</nexplane-proposal>'
+    assert svc._parse_proposal(text) is None
