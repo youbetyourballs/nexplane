@@ -31,7 +31,10 @@ export type AssetType =
   | "load_balancer"
   | "endpoint"
   | "container_cluster"
-  | "key_pair";
+  | "key_pair"
+  | "kubernetes_cluster"
+  | "kubernetes_workload"
+  | "container_image";
 
 export type Environment = "dev" | "staging" | "prod";
 export type Criticality = "low" | "medium" | "high" | "critical";
