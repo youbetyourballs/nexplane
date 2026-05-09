@@ -117,6 +117,53 @@ func TestRemoveSecondaryIP_CallsIPAddrDel(t *testing.T) {
 	}
 }
 
+func TestRollbackRestoresDNS(t *testing.T) {
+	var calls [][]string
+	execCommandForRun = func(name string, args ...string) *exec.Cmd {
+		calls = append(calls, append([]string{name}, args...))
+		return exec.Command("true")
+	}
+	t.Cleanup(func() { execCommandForRun = exec.Command })
+
+	snapshot := map[string]any{
+		"interface":          "eth0",
+		"ip_v4_addresses":    []any{"192.168.1.100/24"},
+		"ip_v6_addresses":    []any{},
+		"gateway_v4":         "192.168.1.1",
+		"gateway_v6":         "",
+		"dns_servers":        []any{"8.8.8.8", "8.8.4.4"},
+		"dns_search_domains": []any{"example.com"},
+		"network_manager":    "systemd-networkd",
+		"connection_name":    "",
+	}
+
+	params := map[string]any{
+		"snapshot":  snapshot,
+		"interface": "eth0",
+	}
+
+	result, err := rollbackOS(params)
+	if err != nil {
+		t.Fatalf("rollbackOS: %v", err)
+	}
+	if result["rolled_back"] != true {
+		t.Errorf("expected rolled_back=true, got %v", result)
+	}
+
+	// Verify that at least one call involved DNS configuration (resolvectl dns or nmcli dns).
+	foundDNS := false
+	for _, call := range calls {
+		joined := strings.Join(call, " ")
+		if strings.Contains(joined, "resolvectl") || strings.Contains(joined, "dns") {
+			foundDNS = true
+			break
+		}
+	}
+	if !foundDNS {
+		t.Errorf("expected DNS configuration call, got calls: %v", calls)
+	}
+}
+
 func TestGetInterfaceAddresses_ReturnsAddresses(t *testing.T) {
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		// Simulate `ip -o addr show lo` output.

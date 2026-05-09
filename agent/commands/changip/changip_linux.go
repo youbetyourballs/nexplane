@@ -5,6 +5,7 @@ package changip
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -250,7 +251,39 @@ func rollbackOS(params map[string]any) (map[string]any, error) {
 		"new_gateway_v4": gw4,
 		"new_gateway_v6": gw6,
 	}
-	return map[string]any{"rolled_back": true}, applyIPChange(method, iface, rollMode, "both", snapshotParams)
+	if err := applyIPChange(method, iface, rollMode, "both", snapshotParams); err != nil {
+		return nil, err
+	}
+
+	if dnsServers, ok := snapshot["dns_servers"].([]any); ok && len(dnsServers) > 0 {
+		servers := make([]string, 0, len(dnsServers))
+		for _, s := range dnsServers {
+			if str, ok := s.(string); ok {
+				servers = append(servers, str)
+			}
+		}
+		domains := []string{}
+		if dd, ok := snapshot["dns_search_domains"].([]any); ok {
+			for _, d := range dd {
+				if str, ok := d.(string); ok {
+					domains = append(domains, str)
+				}
+			}
+		}
+		nm, _ := snapshot["network_manager"].(string)
+		_ = nm
+		conName, _ := snapshot["connection_name"].(string)
+		if iface == "" {
+			if ifaceParam, ok := params["interface"].(string); ok {
+				iface = ifaceParam
+			}
+		}
+		if err := configureDNS(method, iface, conName, servers, domains); err != nil {
+			log.Printf("Warning: DNS restore during rollback failed: %v", err)
+		}
+	}
+
+	return map[string]any{"rolled_back": true}, nil
 }
 
 type networkManager int
