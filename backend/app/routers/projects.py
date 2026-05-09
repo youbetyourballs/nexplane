@@ -405,7 +405,7 @@ async def ai_chat(
     )
 
 
-@router.get("/{project_id}/ai/prompt-preview")
+@router.get("/{project_id}/ai/prompt-preview", response_model=dict)
 async def get_prompt_preview(
     project_id: uuid.UUID,
     draft_message: str | None = Query(None),
