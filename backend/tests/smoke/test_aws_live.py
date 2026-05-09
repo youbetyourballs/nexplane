@@ -1985,10 +1985,7 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
 
     # Step 2: Fetch the asset and verify asset_metadata.applications is populated
     log("[Phase X] Verifying asset_metadata.applications was written")
-    assets = client.get("/assets")
-    instance_asset = next(
-        (a for a in assets if a["id"] == instance_asset_id), None
-    )
+    instance_asset = client.get(f"/assets/{instance_asset_id}")
     if not instance_asset:
         fail(f"[Phase X] Instance asset {instance_asset_id} not found after discovery")
 

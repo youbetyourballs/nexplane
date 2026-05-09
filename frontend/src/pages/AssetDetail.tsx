@@ -721,12 +721,12 @@ export function AssetDetail() {
               {Array.isArray((asset.asset_metadata as Record<string, unknown>)?.applications) ? (
                 <div className="space-y-1.5">
                   {((asset.asset_metadata as Record<string, unknown>).applications as Array<Record<string, unknown>>).map((app, i) => (
-                    <div key={i} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-md px-3 py-2 text-xs">
+                    <div key={String(app.id ?? i)} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-md px-3 py-2 text-xs">
                       <div>
                         <span className="font-medium text-slate-900">{String(app.name)}</span>
                         {Array.isArray(app.listening_ports) && (app.listening_ports as Array<Record<string, unknown>>).length > 0 && (
                           <span className="text-slate-400 ml-2">
-                            :{(app.listening_ports as Array<Record<string, unknown>>).map(p => String(p.port)).join(", :")}
+                            :{(app.listening_ports as Array<Record<string, unknown>>).map(p => String(p.port ?? p)).join(", :")}
                           </span>
                         )}
                       </div>
