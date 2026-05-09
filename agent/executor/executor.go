@@ -18,6 +18,7 @@ import (
 	"nexplane-agent/commands/appdiscovery"
 	"nexplane-agent/commands/dbadmin"
 	"nexplane-agent/commands/containerizebuild"
+	"nexplane-agent/commands/containerizeretire"
 )
 
 // Result is the outcome of a command execution.
@@ -85,6 +86,8 @@ var commands = map[string]CommandFunc{
 	"discover_applications": appdiscovery.DiscoverApplicationsExecute,
 	// Containerize build
 	"containerize_build": containerizebuild.ContainerizeBuildExecute,
+	// Containerize retire
+	"containerize_retire": containerizeretire.ContainerizeRetireExecute,
 	// Database administration
 	"provision_db_user":    dbadmin.ExecuteCommand,
 	"deprovision_db_user":  dbadmin.ExecuteCommand,
@@ -130,6 +133,7 @@ var rollbacks = map[string]CommandFunc{
 	"manage_tls_certificates": crossplatform.ManageTLSCertificatesRollback,
 	"configure_dns_resolver":  crossplatform.ConfigureDNSResolverRollback,
 	"upgrade_linux_instance":  linuxupgrade.UpgradeLinuxInstanceRollback,
+	"containerize_retire":     containerizeretire.ContainerizeRetireRollback,
 }
 
 // Dispatch routes a command to its implementation.
