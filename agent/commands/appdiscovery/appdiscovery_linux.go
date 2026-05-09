@@ -22,8 +22,9 @@ func discoverApplicationsOS(params map[string]any) ([]Application, error) {
 		binName := filepath.Base(all[i].Binary)
 		if ports, ok := portMap[binName]; ok {
 			all[i].ListeningPorts = ports
-			all[i].Stateful = len(all[i].DataDirectories) > 0
 		}
+		// Stateful if it has any data directories regardless of port binding
+		all[i].Stateful = len(all[i].DataDirectories) > 0
 	}
 
 	return all, nil
@@ -166,17 +167,22 @@ func discoverListeningPorts() map[string][]PortBinding {
 }
 
 func discoverNonPackageBinaries(existing []Application) []Application {
-	searchDirs := []string{"/opt", "/usr/local/bin", "/usr/local/sbin"}
+	// Search these directories flat
+	flatDirs := []string{"/usr/local/bin", "/usr/local/sbin"}
+	// Search these directories one level deep (e.g. /opt/myapp/bin/myapp)
+	deepDirs := []string{"/opt"}
+
 	knownBinaries := map[string]bool{}
 	for _, a := range existing {
 		knownBinaries[filepath.Base(a.Binary)] = true
 	}
 
 	var apps []Application
-	for _, dir := range searchDirs {
+
+	collectBinaries := func(dir string) {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			continue
+			return
 		}
 		for _, e := range entries {
 			if e.IsDir() || knownBinaries[e.Name()] {
@@ -203,6 +209,29 @@ func discoverNonPackageBinaries(existing []Application) []Application {
 			})
 		}
 	}
+
+	for _, dir := range flatDirs {
+		collectBinaries(dir)
+	}
+
+	// For deep dirs: check immediate subdirectories for bin/ folders
+	for _, baseDir := range deepDirs {
+		vendorEntries, err := os.ReadDir(baseDir)
+		if err != nil {
+			continue
+		}
+		for _, vendor := range vendorEntries {
+			if !vendor.IsDir() {
+				continue
+			}
+			// Check <vendor>/bin/ directly
+			binDir := filepath.Join(baseDir, vendor.Name(), "bin")
+			collectBinaries(binDir)
+			// Also check the vendor dir itself for direct binaries
+			collectBinaries(filepath.Join(baseDir, vendor.Name()))
+		}
+	}
+
 	return apps
 }
 
