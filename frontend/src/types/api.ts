@@ -310,7 +310,11 @@ export type ChangeType =
   | "azure_vm_reboot"
   | "azure_vm_delete"
   | "azure_vm_snapshot"
-  | "azure_run_command";
+  | "azure_run_command"
+  | "agent_appdiscovery"
+  | "agent_containerize_build"
+  | "agent_containerize_retire"
+  | "k8s_workload_deploy";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
