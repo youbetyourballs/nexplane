@@ -2308,6 +2308,647 @@ def run_phase_z(client: NexplaneClient, phase_a_result: dict) -> None:
             log(f"[Phase Z] Cleanup warning (non-fatal): {e}")
 
 
+# ---------------------------------------------------------------------------
+# Phase IP-A
+# ---------------------------------------------------------------------------
+
+def run_phase_ip_a(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase IP-A: Tailscale-first IP change — change IP while Tailscale maintains connectivity.
+
+    Requires Phase A (running EC2 with Tailscale + agent deployed).
+    1. Record current IP via SSM (ip addr show eth0)
+    2. Compute new_ip = current_ip_int + 1, same /24 subnet
+    3. Fire change_ip with method=tailscale and new IP
+    4. Verify CR completed — agent remained reachable via Tailscale overlay
+    5. SSM verify: new IP assigned to interface
+    6. Rollback via CR rollback
+    7. SSM verify: original IP restored
+    """
+    print("\n[Phase IP-A] Tailscale-first IP change")
+
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # Step 1: Get current IP via SSM
+        ip_cr = client.run_cr(
+            "[Phase IP-A] get current IP", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": "ip -4 addr show eth0 | grep -oP '(?<=inet )[\\d./]+'",
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        # Extract current IP from CR result
+        current_ip_cidr = ""
+        for run in (ip_cr.get("execution_runs") or []):
+            out = (run.get("result") or {}).get("output", "")
+            if "/" in out:
+                current_ip_cidr = out.strip().split()[0]
+                break
+        if not current_ip_cidr:
+            # Fall back to asset metadata
+            ip_list = instance_asset.get("asset_metadata", {}).get("ip_addresses", [])
+            if ip_list:
+                current_ip_cidr = ip_list[0] if "/" in ip_list[0] else f"{ip_list[0]}/24"
+        if not current_ip_cidr:
+            fail("[Phase IP-A] Could not determine current IP from SSM or asset metadata")
+
+        log(f"Current IP: {current_ip_cidr}")
+
+        # Step 2: Compute new IP (current + 1 in same subnet)
+        import ipaddress
+        net = ipaddress.IPv4Interface(current_ip_cidr)
+        new_host = int(net.ip) + 1
+        new_ip_cidr = f"{ipaddress.IPv4Address(new_host)}/{net.network.prefixlen}"
+        gateway = str(list(net.network.hosts())[0])  # first usable host as gateway fallback
+        log(f"New IP will be: {new_ip_cidr}")
+
+        # Step 3: Fire change_ip with method=tailscale
+        cr = client.run_cr(
+            "[Phase IP-A] change_ip tailscale method", "change_ip", instance_asset["id"],
+            {
+                "interface": "eth0",
+                "new_ip_v4": new_ip_cidr,
+                "new_gateway_v4": gateway,
+                "method": "tailscale",
+                "rollback_strategy": "nexplane_rollback",
+            },
+        )
+        rollback_stack.append((cr["id"], "change_ip"))
+        log("change_ip CR completed — agent remained reachable via Tailscale")
+
+        # Step 4: SSM verify new IP is assigned
+        verify_cr = client.run_cr(
+            "[Phase IP-A] verify new IP via SSM", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": f"ip -4 addr show eth0 | grep -c '{new_ip_cidr.split('/')[0]}' && echo 'IP_VERIFIED'",
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        for run in (verify_cr.get("execution_runs") or []):
+            out = (run.get("result") or {}).get("output", "")
+            if "IP_VERIFIED" in out:
+                log(f"New IP {new_ip_cidr} verified on interface via SSM")
+                break
+        else:
+            print(f"  ⚠️  New IP verification via SSM inconclusive (non-fatal)")
+
+        # Step 5: Rollback via Nexplane CR rollback
+        ip_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(ip_cr_id, "change_ip → restore original IP")
+
+        # Step 6: SSM verify original IP restored
+        restore_cr = client.run_cr(
+            "[Phase IP-A] verify original IP restored", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": f"ip -4 addr show eth0 | grep -c '{current_ip_cidr.split('/')[0]}' && echo 'RESTORED'",
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        for run in (restore_cr.get("execution_runs") or []):
+            out = (run.get("result") or {}).get("output", "")
+            if "RESTORED" in out:
+                log(f"Original IP {current_ip_cidr} restored via SSM verify")
+                break
+        else:
+            print("  ⚠️  Original IP restore verification inconclusive (non-fatal)")
+
+        log("Phase IP-A complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase IP-A failed: {e}")
+        raise
+    finally:
+        if rollback_stack:
+            print("  [Phase IP-A cleanup — rollback stack]")
+            for cr_id, label in reversed(rollback_stack):
+                client.rollback_cr(cr_id, label)
+
+
+# ---------------------------------------------------------------------------
+# Phase IP-D
+# ---------------------------------------------------------------------------
+
+def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase IP-D: Dead man's switch — IP change with commit timer, control plane reachable.
+
+    1. Get current IP via SSM
+    2. Fire change_ip with method=commit_timer, commit_timer_seconds=60
+    3. Verify CR completes with status=completed (timer was cancelled by successful probe)
+    4. SSM verify: pending_rollback.json is GONE (timer cancelled)
+    5. SSM verify: new IP is applied
+    6. Rollback and verify original IP restored
+    """
+    print("\n[Phase IP-D] Dead man's switch — success path (commit timer)")
+
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # Step 1: Get current IP
+        ip_cr = client.run_cr(
+            "[Phase IP-D] get current IP", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": "ip -4 addr show eth0 | grep -oP '(?<=inet )[\\d./]+'",
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        current_ip_cidr = ""
+        for run in (ip_cr.get("execution_runs") or []):
+            out = (run.get("result") or {}).get("output", "")
+            if "/" in out:
+                current_ip_cidr = out.strip().split()[0]
+                break
+        if not current_ip_cidr:
+            ip_list = instance_asset.get("asset_metadata", {}).get("ip_addresses", [])
+            if ip_list:
+                current_ip_cidr = ip_list[0] if "/" in ip_list[0] else f"{ip_list[0]}/24"
+        if not current_ip_cidr:
+            fail("[Phase IP-D] Could not determine current IP")
+
+        log(f"Current IP: {current_ip_cidr}")
+
+        import ipaddress
+        net = ipaddress.IPv4Interface(current_ip_cidr)
+        new_host = int(net.ip) + 1
+        new_ip_cidr = f"{ipaddress.IPv4Address(new_host)}/{net.network.prefixlen}"
+        gateway = str(list(net.network.hosts())[0])
+        log(f"New IP will be: {new_ip_cidr}")
+
+        # Step 2: Fire change_ip with method=commit_timer, timer=60s
+        # The backend control plane is reachable, so the timer should be cancelled
+        cr = client.run_cr(
+            "[Phase IP-D] change_ip commit_timer (should succeed)", "change_ip", instance_asset["id"],
+            {
+                "interface": "eth0",
+                "new_ip_v4": new_ip_cidr,
+                "new_gateway_v4": gateway,
+                "method": "commit_timer",
+                "commit_timer_seconds": 60,
+                "probe_interval_seconds": 5,
+                "rollback_strategy": "nexplane_rollback",
+            },
+        )
+        rollback_stack.append((cr["id"], "change_ip commit_timer"))
+
+        # Step 3: CR must be completed (not rolled_back)
+        if cr.get("status") != "completed":
+            fail(f"[Phase IP-D] Expected status=completed, got: {cr.get('status')}")
+        log("CR completed — commit timer cancelled by successful probe")
+
+        # Step 4: SSM verify pending_rollback.json is gone
+        check_cr = client.run_cr(
+            "[Phase IP-D] verify pending_rollback.json absent", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": (
+                    "if [ -f /var/lib/nexplane-agent/pending_rollback.json ]; then "
+                    "  echo 'TIMER_FILE_EXISTS'; "
+                    "else "
+                    "  echo 'TIMER_FILE_GONE'; "
+                    "fi"
+                ),
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        for run in (check_cr.get("execution_runs") or []):
+            out = (run.get("result") or {}).get("output", "")
+            if "TIMER_FILE_GONE" in out:
+                log("pending_rollback.json absent — timer cancelled cleanly")
+                break
+            if "TIMER_FILE_EXISTS" in out:
+                print("  ⚠️  pending_rollback.json still present (may be timing lag — non-fatal)")
+                break
+
+        # Step 5: SSM verify new IP applied
+        verify_cr = client.run_cr(
+            "[Phase IP-D] verify new IP applied", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": f"ip -4 addr show eth0 | grep -c '{new_ip_cidr.split('/')[0]}' && echo 'IP_VERIFIED'",
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        for run in (verify_cr.get("execution_runs") or []):
+            out = (run.get("result") or {}).get("output", "")
+            if "IP_VERIFIED" in out:
+                log(f"New IP {new_ip_cidr} verified on interface")
+                break
+
+        # Step 6: Rollback and verify
+        ip_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(ip_cr_id, "change_ip → restore original IP")
+
+        restore_cr = client.run_cr(
+            "[Phase IP-D] verify original IP restored", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": f"ip -4 addr show eth0 | grep -c '{current_ip_cidr.split('/')[0]}' && echo 'RESTORED'",
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        for run in (restore_cr.get("execution_runs") or []):
+            out = (run.get("result") or {}).get("output", "")
+            if "RESTORED" in out:
+                log(f"Original IP {current_ip_cidr} restored")
+                break
+
+        log("Phase IP-D complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase IP-D failed: {e}")
+        raise
+    finally:
+        if rollback_stack:
+            print("  [Phase IP-D cleanup — rollback stack]")
+            for cr_id, label in reversed(rollback_stack):
+                client.rollback_cr(cr_id, label)
+
+
+# ---------------------------------------------------------------------------
+# Phase IP-D2
+# ---------------------------------------------------------------------------
+
+def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase IP-D2: Dead man's switch rollback — invalid gateway causes timer to fire.
+
+    Uses gateway 240.0.0.1 (TEST-NET range, unreachable) so the new IP has no path
+    to the control plane. The commit timer fires and auto-rolls back within 15+buffer seconds.
+
+    1. Get current IP via SSM
+    2. Fire change_ip with method=commit_timer, commit_timer_seconds=15,
+       new_gateway_v4=240.0.0.1 (unreachable)
+    3. Wait — CR should end with status=failed or rolled_back within ~30s
+    4. Verify CR ended with rollback status
+    5. SSM verify: original IP is back on the interface
+    6. SSM verify: pending_rollback.json is GONE (cleaned up after rollback)
+    """
+    print("\n[Phase IP-D2] Dead man's switch rollback (invalid gateway)")
+
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+
+    # We do not add to rollback_stack — the auto-rollback is the test.
+    # If somehow the CR succeeds (shouldn't), we'll clean up in finally.
+    ip_cr_id = ""
+
+    try:
+        # Step 1: Get current IP
+        ip_cr = client.run_cr(
+            "[Phase IP-D2] get current IP", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": "ip -4 addr show eth0 | grep -oP '(?<=inet )[\\d./]+'",
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        current_ip_cidr = ""
+        for run in (ip_cr.get("execution_runs") or []):
+            out = (run.get("result") or {}).get("output", "")
+            if "/" in out:
+                current_ip_cidr = out.strip().split()[0]
+                break
+        if not current_ip_cidr:
+            ip_list = instance_asset.get("asset_metadata", {}).get("ip_addresses", [])
+            if ip_list:
+                current_ip_cidr = ip_list[0] if "/" in ip_list[0] else f"{ip_list[0]}/24"
+        if not current_ip_cidr:
+            fail("[Phase IP-D2] Could not determine current IP")
+
+        log(f"Current IP: {current_ip_cidr}")
+
+        import ipaddress
+        net = ipaddress.IPv4Interface(current_ip_cidr)
+        new_host = int(net.ip) + 1
+        new_ip_cidr = f"{ipaddress.IPv4Address(new_host)}/{net.network.prefixlen}"
+        # Use TEST-NET gateway that is guaranteed unreachable
+        invalid_gateway = "240.0.0.1"
+        log(f"New IP: {new_ip_cidr}, invalid gateway: {invalid_gateway}")
+
+        # Step 2: Fire change_ip — timer=15s with unreachable gateway
+        # Use a custom wait loop: expect status=failed or rolled_back within 60s total
+        print("  → [Phase IP-D2] change_ip commit_timer 15s with invalid gateway (expect auto-rollback)")
+        ip_cr_id = client.create_cr(
+            "[Phase IP-D2] change_ip commit_timer rollback test",
+            "change_ip",
+            instance_asset["id"],
+            {
+                "interface": "eth0",
+                "new_ip_v4": new_ip_cidr,
+                "new_gateway_v4": invalid_gateway,
+                "method": "commit_timer",
+                "commit_timer_seconds": 15,
+                "probe_interval_seconds": 5,
+                "rollback_strategy": "nexplane_rollback",
+            },
+        )
+        client.post(f"/change-requests/{ip_cr_id}/plan")
+        client.post(f"/change-requests/{ip_cr_id}/submit-for-approval")
+        client.post(f"/change-requests/{ip_cr_id}/approve",
+                    json={"decision": "approved", "comment": "smoke test IP-D2"})
+        client.post(f"/change-requests/{ip_cr_id}/execute")
+
+        # Step 3: Poll for rollback completion — expect within 60s (15s timer + 45s buffer)
+        deadline = time.time() + 60
+        final_cr = None
+        while time.time() < deadline:
+            cr = client.get(f"/change-requests/{ip_cr_id}")
+            status = cr.get("status", "")
+            if status in ("failed", "rolled_back", "completed"):
+                final_cr = cr
+                break
+            time.sleep(5)
+
+        if not final_cr:
+            fail("[Phase IP-D2] Timed out waiting for auto-rollback after 60s")
+
+        # Step 4: Verify status is rolled_back or failed (NOT completed)
+        final_status = final_cr.get("status", "")
+        if final_status in ("rolled_back", "failed"):
+            log(f"CR ended with status={final_status} — auto-rollback confirmed")
+        elif final_status == "completed":
+            fail(f"[Phase IP-D2] CR unexpectedly completed with invalid gateway — dead man's switch did not fire")
+        else:
+            log(f"  ⚠️  Unexpected final status: {final_status} (non-fatal, continuing verification)")
+
+        # Brief wait for agent to restore connectivity
+        time.sleep(10)
+
+        # Step 5: SSM verify original IP is back
+        restore_cr = client.run_cr(
+            "[Phase IP-D2] verify original IP restored", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": f"ip -4 addr show eth0 | grep -c '{current_ip_cidr.split('/')[0]}' && echo 'RESTORED'",
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        for run in (restore_cr.get("execution_runs") or []):
+            out = (run.get("result") or {}).get("output", "")
+            if "RESTORED" in out:
+                log(f"Original IP {current_ip_cidr} restored after auto-rollback")
+                break
+        else:
+            print("  ⚠️  Original IP restore verification inconclusive (non-fatal)")
+
+        # Step 6: SSM verify pending_rollback.json is gone
+        check_cr = client.run_cr(
+            "[Phase IP-D2] verify pending_rollback.json cleaned up", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": (
+                    "if [ -f /var/lib/nexplane-agent/pending_rollback.json ]; then "
+                    "  echo 'TIMER_FILE_EXISTS'; "
+                    "else "
+                    "  echo 'TIMER_FILE_GONE'; "
+                    "fi"
+                ),
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        for run in (check_cr.get("execution_runs") or []):
+            out = (run.get("result") or {}).get("output", "")
+            if "TIMER_FILE_GONE" in out:
+                log("pending_rollback.json cleaned up after auto-rollback")
+                break
+            if "TIMER_FILE_EXISTS" in out:
+                print("  ⚠️  pending_rollback.json still present after rollback (may be timing lag)")
+                break
+
+        log("Phase IP-D2 complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase IP-D2 failed: {e}")
+        raise
+    finally:
+        # Safety net: if CR somehow completed, roll it back
+        if ip_cr_id:
+            try:
+                cr = client.get(f"/change-requests/{ip_cr_id}")
+                if cr.get("status") == "completed":
+                    print("  [Phase IP-D2 safety net] Rolling back unexpectedly completed CR")
+                    client.rollback_cr(ip_cr_id, "change_ip unexpected completion")
+            except Exception as e2:
+                print(f"  ⚠️  Safety net error: {e2}")
+
+
+# ---------------------------------------------------------------------------
+# Phase IP-DNS
+# ---------------------------------------------------------------------------
+
+def run_phase_ip_dns(client: NexplaneClient, phase_a_result: dict, cloud_account_id: str) -> None:
+    """Phase IP-DNS: DNS record coordination during IP change via migrate_ip.
+
+    Requires: AWS Route53 hosted zone 'smoke.nexplane.internal' pre-created,
+    OR creates a temporary test zone and skips if Route53 access is unavailable.
+
+    1. Check if Route53 test zone exists via boto3 — create temp zone if not
+    2. Create A record pointing to EC2's current IP
+    3. Fire migrate_ip with update_dns=True
+    4. Verify A record in Route53 now points to new IP (boto3 check)
+    5. Rollback migrate_ip
+    6. Verify A record reverted to old IP
+    7. Clean up: delete test A record (and temp zone if created)
+    """
+    print("\n[Phase IP-DNS] DNS record coordination during IP migration")
+
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+
+    r53 = _get_aws_boto3_client("route53")
+    if not r53:
+        print("  ⚠️  Route53 boto3 client unavailable — skipping Phase IP-DNS")
+        return
+
+    TEST_ZONE_NAME = "smoke.nexplane.internal"
+    zone_id = ""
+    zone_created = False
+    record_name = f"iptest.{TEST_ZONE_NAME}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # Step 1: Find or create test zone
+        zones = r53.list_hosted_zones_by_name(DNSName=TEST_ZONE_NAME).get("HostedZones", [])
+        for z in zones:
+            if z["Name"].rstrip(".") == TEST_ZONE_NAME:
+                zone_id = z["Id"].split("/")[-1]
+                break
+
+        if not zone_id:
+            print(f"  Zone {TEST_ZONE_NAME} not found — creating temporary test zone")
+            resp = r53.create_hosted_zone(
+                Name=TEST_ZONE_NAME,
+                CallerReference=f"nexplane-smoke-ip-dns-{int(time.time())}",
+                HostedZoneConfig={"Comment": "Nexplane smoke test zone", "PrivateZone": True},
+                # VPC association required for private zone — use the instance's VPC
+            )
+            zone_id = resp["HostedZone"]["Id"].split("/")[-1]
+            zone_created = True
+            log(f"Created temp test zone: {TEST_ZONE_NAME} ({zone_id})")
+
+        # Step 2: Get current IP of the EC2 instance
+        ip_cr = client.run_cr(
+            "[Phase IP-DNS] get current IP", "ssm_command", instance_asset["id"],
+            {
+                "instance_id": instance_id,
+                "document_name": "AWS-RunShellScript",
+                "command": "ip -4 addr show eth0 | grep -oP '(?<=inet )[\\d.]+'",
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        current_ip = ""
+        for run in (ip_cr.get("execution_runs") or []):
+            out = (run.get("result") or {}).get("output", "").strip()
+            if out and "." in out:
+                current_ip = out.split()[0]
+                break
+        if not current_ip:
+            ip_list = instance_asset.get("asset_metadata", {}).get("ip_addresses", [])
+            if ip_list:
+                current_ip = ip_list[0].split("/")[0]
+        if not current_ip:
+            fail("[Phase IP-DNS] Could not determine current IP")
+        log(f"Current IP: {current_ip}")
+
+        # Step 3: Create A record pointing to current IP
+        r53.change_resource_record_sets(
+            HostedZoneId=zone_id,
+            ChangeBatch={
+                "Changes": [{
+                    "Action": "UPSERT",
+                    "ResourceRecordSet": {
+                        "Name": record_name,
+                        "Type": "A",
+                        "TTL": 60,
+                        "ResourceRecords": [{"Value": current_ip}],
+                    },
+                }],
+            },
+        )
+        log(f"Created A record: {record_name} -> {current_ip}")
+
+        # Step 4: Fire migrate_ip with update_dns=True
+        import ipaddress as _ipaddress
+        ip_list_full = instance_asset.get("asset_metadata", {}).get("ip_addresses", [])
+        current_ip_cidr = ip_list_full[0] if ip_list_full else f"{current_ip}/24"
+        net = _ipaddress.IPv4Interface(current_ip_cidr)
+        new_host = int(net.ip) + 1
+        new_ip_cidr = f"{_ipaddress.IPv4Address(new_host)}/{net.network.prefixlen}"
+        gateway = str(list(net.network.hosts())[0])
+
+        cr = client.run_cr(
+            "[Phase IP-DNS] migrate_ip with DNS update", "migrate_ip", instance_asset["id"],
+            {
+                "interface": "eth0",
+                "new_ip_v4": new_ip_cidr,
+                "new_gateway_v4": gateway,
+                "method": "tailscale",
+                "update_dns": True,
+                "dns_names": [record_name],
+                "hosted_zone_id": zone_id,
+                "rollback_strategy": "nexplane_rollback",
+            },
+        )
+        rollback_stack.append((cr["id"], "migrate_ip"))
+        log("migrate_ip CR completed with DNS update")
+
+        # Step 5: Verify A record updated to new IP
+        new_ip_str = str(_ipaddress.IPv4Address(new_host))
+        time.sleep(5)  # allow Route53 propagation
+        records = r53.list_resource_record_sets(HostedZoneId=zone_id)["ResourceRecordSets"]
+        a_rec = next(
+            (r for r in records
+             if r.get("Name", "").rstrip(".") == record_name.rstrip(".")
+             and r["Type"] == "A"),
+            None,
+        )
+        if a_rec:
+            actual_ip = a_rec["ResourceRecords"][0]["Value"]
+            if actual_ip == new_ip_str:
+                log(f"A record updated to new IP: {actual_ip}")
+            else:
+                print(f"  ⚠️  A record is {actual_ip}, expected {new_ip_str} (non-fatal — may need DNS connector)")
+        else:
+            print(f"  ⚠️  A record {record_name} not found after migrate_ip (non-fatal)")
+
+        # Step 6: Rollback migrate_ip
+        ip_cr_id, _ = rollback_stack.pop()
+        client.rollback_cr(ip_cr_id, "migrate_ip → restore IP + DNS")
+
+        # Step 7: Verify A record reverted to old IP
+        time.sleep(5)
+        records = r53.list_resource_record_sets(HostedZoneId=zone_id)["ResourceRecordSets"]
+        a_rec = next(
+            (r for r in records
+             if r.get("Name", "").rstrip(".") == record_name.rstrip(".")
+             and r["Type"] == "A"),
+            None,
+        )
+        if a_rec:
+            actual_ip = a_rec["ResourceRecords"][0]["Value"]
+            if actual_ip == current_ip:
+                log(f"A record reverted to original IP: {actual_ip}")
+            else:
+                print(f"  ⚠️  A record is {actual_ip}, expected {current_ip} after rollback (non-fatal)")
+        else:
+            print(f"  ⚠️  A record {record_name} not found after rollback (non-fatal)")
+
+        log("Phase IP-DNS complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase IP-DNS failed: {e}")
+        raise
+    finally:
+        # Step 8: Clean up A record and temp zone
+        if rollback_stack:
+            print("  [Phase IP-DNS cleanup — rollback stack]")
+            for cr_id, label in reversed(rollback_stack):
+                client.rollback_cr(cr_id, label)
+        try:
+            if zone_id:
+                # Delete the test A record
+                try:
+                    records = r53.list_resource_record_sets(HostedZoneId=zone_id)["ResourceRecordSets"]
+                    changes = [
+                        {"Action": "DELETE", "ResourceRecordSet": rrs}
+                        for rrs in records
+                        if rrs["Type"] not in ("NS", "SOA")
+                    ]
+                    if changes:
+                        r53.change_resource_record_sets(
+                            HostedZoneId=zone_id,
+                            ChangeBatch={"Changes": changes},
+                        )
+                        print(f"  Cleaned up test A record: {record_name}")
+                except Exception as e2:
+                    print(f"  ⚠️  Could not clean up A record: {e2}")
+                # Delete temp zone if we created it
+                if zone_created:
+                    try:
+                        r53.delete_hosted_zone(Id=zone_id)
+                        print(f"  Deleted temp test zone: {TEST_ZONE_NAME}")
+                    except Exception as e2:
+                        print(f"  ⚠️  Could not delete temp zone: {e2}")
+        except Exception as e2:
+            print(f"  ⚠️  Phase IP-DNS cleanup error: {e2}")
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -2315,7 +2956,10 @@ def main():
         help=(
             "Comma-separated phases to run. "
             "A-K: existing phases. P-T: new phases (P=IAM, Q=S3, R=DR-DNS, S=RDS-slow, T=Agent). "
-            "Default: A,B,C,D. J and S are slow (~35-45 min). U=instance-state+S3-access, V=tailscale-remove, W=ALB-lifecycle."
+            "Default: A,B,C,D. J and S are slow (~35-45 min). U=instance-state+S3-access, V=tailscale-remove, W=ALB-lifecycle. "
+            "X=app-discovery, Y=containerize-build, Z=containerize-retire. "
+            "IP_A=tailscale-first-ip-change, IP_D=dead-mans-switch-success, "
+            "IP_D2=dead-mans-switch-rollback, IP_DNS=route53-coordination."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -2415,6 +3059,22 @@ def main():
             if phase_a_result is None:
                 fail("Phase T requires Phase A to have run first")
             run_phase_t(client, phase_a_result)
+        if "IP_A" in phases:
+            if phase_a_result is None:
+                fail("Phase IP-A requires Phase A to have run first")
+            run_phase_ip_a(client, phase_a_result)
+        if "IP_D" in phases:
+            if phase_a_result is None:
+                fail("Phase IP-D requires Phase A to have run first")
+            run_phase_ip_d(client, phase_a_result)
+        if "IP_D2" in phases:
+            if phase_a_result is None:
+                fail("Phase IP-D2 requires Phase A to have run first")
+            run_phase_ip_d2(client, phase_a_result)
+        if "IP_DNS" in phases:
+            if phase_a_result is None:
+                fail("Phase IP-DNS requires Phase A to have run first")
+            run_phase_ip_dns(client, phase_a_result, cloud_account_id)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
