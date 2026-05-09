@@ -29,7 +29,7 @@ export function AIPanel({ projectId, projectGoal, initialConversation, onClose }
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const { data: previewData, isLoading: isLoadingPreview } = useQuery({
+  const { data: previewData, isLoading: isLoadingPreview, isError: isPreviewError } = useQuery({
     queryKey: ["prompt-preview", projectId, showPreview ? input : ""],
     queryFn: () => projectsApi.getPromptPreview(projectId, input || undefined),
     enabled: showPreview,
@@ -252,6 +252,8 @@ export function AIPanel({ projectId, projectGoal, initialConversation, onClose }
             <div className="flex-1 overflow-y-auto p-3 min-h-0">
               {isLoadingPreview ? (
                 <p className="text-xs text-slate-400 animate-pulse">Loading…</p>
+              ) : isPreviewError ? (
+                <p className="text-xs text-red-500">Failed to load preview.</p>
               ) : previewData?.prompt ? (
                 <pre className="text-xs text-slate-600 whitespace-pre-wrap font-mono leading-relaxed">
                   {previewData.prompt}
