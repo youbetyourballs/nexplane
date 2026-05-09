@@ -150,11 +150,21 @@ export interface OrgSettings {
 }
 
 export interface AIProposedCR {
+  seq: number | null;
   title: string;
   change_type: ChangeType;
-  suggested_assets: string[];
-  desired_outcome_sketch: Record<string, unknown>;
+  target_assets: string[];
+  target_asset_ids: string[];
+  desired_outcome: Record<string, unknown>;
+  depends_on: number[];
   notes?: string;
+  // backward-compat aliases (may be present in old AI responses)
+  suggested_assets?: string[];
+  desired_outcome_sketch?: Record<string, unknown>;
+}
+
+export interface PromptPreviewResponse {
+  prompt: string;
 }
 
 export interface AIChatResponse {
