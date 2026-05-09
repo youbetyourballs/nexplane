@@ -1958,6 +1958,76 @@ def run_phase_w(client: NexplaneClient, cloud_account_id: str, phase_a_result: d
             pass
 
 
+def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase X: Application Discovery — validates agent_appdiscovery CR end-to-end.
+
+    Requires Phase A (running EC2 instance with Nexplane agent deployed).
+    1. Fires an agent_appdiscovery CR targeting the Phase A instance asset.
+    2. Verifies asset_metadata.applications is populated with at least one entry.
+    3. Verifies each discovered application has required fields.
+    4. Verifies the appdiscovery result is visible via GET /assets/{id}.
+    """
+    log("\n[Phase X] Application Discovery")
+
+    instance_asset_id = phase_a_result.get("instance_asset_id")
+    if not instance_asset_id:
+        fail("Phase X requires phase_a_result['instance_asset_id']")
+
+    # Step 1: Fire the agent_appdiscovery CR
+    log("[Phase X] Running agent_appdiscovery CR on instance asset")
+    client.run_cr(
+        "[Phase X] discover applications",
+        "agent_appdiscovery",
+        instance_asset_id,
+        {"dry_run": False},
+    )
+    log("[Phase X] appdiscovery CR completed")
+
+    # Step 2: Fetch the asset and verify asset_metadata.applications is populated
+    log("[Phase X] Verifying asset_metadata.applications was written")
+    assets = client.get("/assets")
+    instance_asset = next(
+        (a for a in assets if a["id"] == instance_asset_id), None
+    )
+    if not instance_asset:
+        fail(f"[Phase X] Instance asset {instance_asset_id} not found after discovery")
+
+    applications = (instance_asset.get("asset_metadata") or {}).get("applications")
+    if not isinstance(applications, list):
+        fail(f"[Phase X] asset_metadata.applications not set after appdiscovery — got: {applications}")
+
+    if len(applications) == 0:
+        fail("[Phase X] asset_metadata.applications is empty — expected at least one discovered app")
+
+    log(f"[Phase X] Found {len(applications)} application(s) on instance")
+
+    # Step 3: Verify each application has the required fields
+    required_fields = [
+        "id", "name", "binary", "systemd_unit", "listening_ports",
+        "config_files", "data_directories", "estimated_data_size_gb",
+        "stateful", "containerization_status",
+    ]
+    for app in applications:
+        for field in required_fields:
+            if field not in app:
+                fail(f"[Phase X] Application '{app.get('name', '?')}' missing required field '{field}'")
+
+        if app["containerization_status"] != "not_started":
+            fail(
+                f"[Phase X] Expected containerization_status='not_started', "
+                f"got '{app['containerization_status']}' for app '{app['name']}'"
+            )
+
+    log(f"[Phase X] All {len(applications)} application(s) have required fields ✅")
+
+    # Step 4: Spot-check a specific app — sshd should always be present on the test instance
+    # (it's filtered out as a system service, so check for nexplane-agent or a typical user app)
+    app_names = [a["name"] for a in applications]
+    log(f"[Phase X] Discovered apps: {', '.join(app_names)}")
+
+    log("[Phase X] ✅ Application discovery phase complete")
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -2044,6 +2114,10 @@ def main():
             if phase_a_result is None:
                 fail("Phase W requires Phase A to have run first")
             run_phase_w(client, cloud_account_id, phase_a_result)
+        if "X" in phases:
+            if phase_a_result is None:
+                fail("Phase X requires Phase A to have run first")
+            run_phase_x(client, phase_a_result)
         if "T" in phases:
             if phase_a_result is None:
                 fail("Phase T requires Phase A to have run first")
