@@ -112,6 +112,7 @@ class NexplaneClient:
         # the same way the executor service does via _attach_credentials().
         try:
             import asyncio as _asyncio
+            import threading as _threading
             from app.database import AsyncSessionLocal as _Session
             from app.models.connector import Connector as _Connector
             from app.models.connector_credential import ConnectorCredential as _CC
@@ -136,7 +137,15 @@ class NexplaneClient:
                     svc = _Secrets(_cfg.SECRET_KEY)
                     return svc.decrypt_json(cred.credentials_encrypted).get("auth_key", "")
 
-            key = _asyncio.run(_fetch())
+            # Run in a separate thread to avoid event-loop conflicts in the
+            # pytest async environment (same pattern as _get_aws_boto3_client).
+            _result: list = [None]
+            def _run():
+                _result[0] = _asyncio.run(_fetch())
+            t = _threading.Thread(target=_run)
+            t.start()
+            t.join()
+            key = _result[0] or ""
             if key:
                 log("Tailscale auth key retrieved from connector credentials")
                 return key
