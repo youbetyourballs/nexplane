@@ -122,6 +122,13 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
         async with AsyncSessionLocal() as post_db:
             await mark_asset_retired(post_db, data["target_asset_ids"], execution_result)
 
+    if data.get("change_type") in ("change_ip", "migrate_ip"):
+        from app.services.ip_change_service import update_asset_ip_metadata
+        async with AsyncSessionLocal() as post_db:
+            await update_asset_ip_metadata(
+                post_db, data["target_asset_ids"], execution_result
+            )
+
     if data.get("change_type") == "k8s_workload_deploy":
         from app.services.workload_deploy_service import register_workload_asset
         async with AsyncSessionLocal() as post_db:
