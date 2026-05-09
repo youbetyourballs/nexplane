@@ -209,12 +209,16 @@ class AIService:
 
     def _build_system_prompt(self, goal: str, asset_context: list[dict]) -> str:
         assets_text = _build_asset_context_text(asset_context)
-        return _SYSTEM_PROMPT_TEMPLATE.format(
-            goal=goal,
+        safe_goal = goal.replace("{", "{{").replace("}", "}}")
+        safe_assets_text = assets_text.replace("{", "{{").replace("}", "}}")
+        rendered = _SYSTEM_PROMPT_TEMPLATE.format(
+            goal=safe_goal,
             asset_count=len(asset_context),
-            assets_text=assets_text,
+            assets_text=safe_assets_text,
             change_types=_CHANGE_TYPES_TEXT,
         )
+        # Restore literal braces that were escaped in user-supplied text
+        return rendered.replace("{{", "{").replace("}}", "}")
 
     def _parse_proposal(self, text: str) -> list[dict] | None:
         match = re.search(r"<nexplane-proposal>(.*?)</nexplane-proposal>", text, re.DOTALL)
@@ -224,7 +228,11 @@ class AIService:
             items = json.loads(match.group(1).strip())
         except (json.JSONDecodeError, ValueError):
             return None
+        if not isinstance(items, list):
+            return None
         for item in items:
+            if not isinstance(item, dict):
+                return None
             if "suggested_assets" in item and "target_assets" not in item:
                 item["target_assets"] = item.pop("suggested_assets")
             if "desired_outcome_sketch" in item and "desired_outcome" not in item:
