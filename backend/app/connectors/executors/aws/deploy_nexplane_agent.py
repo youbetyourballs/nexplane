@@ -16,6 +16,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     instance_id = parameters.get('instance_id', '')
     nexplane_url = parameters.get('nexplane_url', '')
     nexplane_secret = parameters.get('nexplane_secret', '')
+    nexplane_hostname = parameters.get('hostname', '')
     download_url = parameters.get('download_url', '') or _DEFAULT_DOWNLOAD_URL
 
     if not creds:
@@ -64,7 +65,7 @@ After=network.target
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/local/bin/nexplane-agent -control-plane {nexplane_url} -secret {nexplane_secret} -mode service
+ExecStart=/usr/local/bin/nexplane-agent -control-plane {nexplane_url} -secret {nexplane_secret} -mode service{' -hostname ' + nexplane_hostname if nexplane_hostname else ''}
 Restart=always
 RestartSec=15
 

@@ -179,7 +179,8 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
     nexplane_url = f"http://{backend_ip}:8000"
     client.run_cr(
         "[Phase A] deploy nexplane agent", "deploy_nexplane_agent", instance_asset["id"],
-        {"instance_id": instance_id, "nexplane_url": nexplane_url, "nexplane_secret": agent_secret},
+        {"instance_id": instance_id, "nexplane_url": nexplane_url, "nexplane_secret": agent_secret,
+         "hostname": "nexplane-smoke-ec2"},
     )
 
     print("  Waiting up to 3min for agent to register...")
@@ -187,7 +188,10 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
     agent_asset = None
     while time.time() < deadline:
         candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
-        tagged = [c for c in candidates if "nexplane-agent" in (c.get("tags") or [])]
+        # Only accept assets whose name is exactly "nexplane-smoke-ec2" (the hostname we set)
+        tagged = [c for c in candidates
+                  if "nexplane-agent" in (c.get("tags") or [])
+                  and c.get("name") == "nexplane-smoke-ec2"]
         if tagged:
             tagged.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
             agent_asset = tagged[0]
