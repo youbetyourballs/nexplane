@@ -187,8 +187,10 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
     agent_asset = None
     while time.time() < deadline:
         candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
-        if candidates:
-            agent_asset = candidates[0]
+        tagged = [c for c in candidates if "nexplane-agent" in (c.get("tags") or [])]
+        if tagged:
+            tagged.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
+            agent_asset = tagged[0]
             log(f"Agent registered as server asset: {agent_asset['id']}")
             break
         time.sleep(10)
@@ -2058,13 +2060,12 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
         agent_asset_id = None
         while _time.time() < deadline:
             candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
-            # Filter to the agent-registered asset (has 'nexplane-agent' tag or hostname metadata)
-            for c in candidates:
-                tags = c.get("tags") or []
-                if "nexplane-agent" in tags:
-                    agent_asset_id = c["id"]
-                    break
-            if agent_asset_id:
+            # Pick the most recently updated agent-tagged asset to avoid stale registrations
+            tagged = [c for c in candidates if "nexplane-agent" in (c.get("tags") or [])]
+            if tagged:
+                # Sort by updated_at descending; fall back to any if field missing
+                tagged.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
+                agent_asset_id = tagged[0]["id"]
                 log(f"[Phase X] Agent registered: {agent_asset_id}")
                 break
             _time.sleep(10)
