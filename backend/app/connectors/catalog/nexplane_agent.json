@@ -1,0 +1,1378 @@
+{
+    "connector_type":  "nexplane_agent",
+    "display_name":  "Nexplane Agent",
+    "credential_fields":  [
+
+                          ],
+    "actions":  [
+                    {
+                        "display_name":  "Estimate Image Size \u0026 Check Space",
+                        "description":  "Checks source disk size and available destination space. Run this before virtualize_for_migration to prevent filling the disk.",
+                        "parameters":  [
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "source_device"
+                                           },
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "destination_path"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "estimated_duration_seconds":  5,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.estimate_image_size",
+                        "generic_action":  "estimate_image_size",
+                        "action_id":  "estimate_image_size"
+                    },
+                    {
+                        "display_name":  "Change IP Address",
+                        "description":  "Changes the IP address on a network interface. Supports IPv4, IPv6, static, and DHCP modes.",
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "interface"
+                                           },
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "mode"
+                                           },
+                                           {
+                                               "default":  "4",
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "ip_version"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "new_ip_v4"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "new_ip_v6"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "new_gateway_v4"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "new_gateway_v6"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "array",
+                                               "name":  "dns_servers"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "change_ip",
+                        "estimated_duration_seconds":  10,
+                        "blast_radius_hint":  "network_connectivity_loss",
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.change_ip",
+                        "safety_notes":  [
+                                             "Changing IP may temporarily disconnect the agent from the control plane"
+                                         ],
+                        "generic_action":  "change_ip",
+                        "action_id":  "change_ip"
+                    },
+                    {
+                        "display_name":  "Configure Syslog Forwarding",
+                        "description":  "Configures rsyslog/syslog-ng (Linux) or NXLog/WEF (Windows) to forward logs to a remote collector.",
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "destination_host"
+                                           },
+                                           {
+                                               "required":  true,
+                                               "type":  "integer",
+                                               "name":  "destination_port"
+                                           },
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "protocol"
+                                           },
+                                           {
+                                               "default":  "*",
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "facility"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "configure_syslog",
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.configure_syslog",
+                        "generic_action":  "configure_syslog",
+                        "action_id":  "configure_syslog"
+                    },
+                    {
+                        "display_name":  "Virtualize Machine for Migration",
+                        "description":  "Creates a disk image of the machine and pre-configures the target IP inside the image. Run estimate_image_size first.",
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "image_path"
+                                           },
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "target_mode"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "target_ip_v4"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "target_ip_v6"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "target_gateway_v4"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "target_gateway_v6"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "array",
+                                               "name":  "target_dns_servers"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "target_interface"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "source_device"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "virtualize_for_migration",
+                        "estimated_duration_seconds":  3600,
+                        "blast_radius_hint":  "disk_io_impact",
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.virtualize_for_migration",
+                        "safety_notes":  [
+                                             "Run estimate_image_size first to verify sufficient disk space"
+                                         ],
+                        "generic_action":  "virtualize_for_migration",
+                        "action_id":  "virtualize_for_migration"
+                    },
+                    {
+                        "display_name":  "Upload Image to Object Storage",
+                        "description":  "Uploads a disk image to S3 (or compatible object storage) using multipart upload.",
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "image_path"
+                                           },
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "destination_uri"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "region"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "access_key_id"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "secret_access_key"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "upload_image",
+                        "estimated_duration_seconds":  1800,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.upload_image",
+                        "generic_action":  "upload_image",
+                        "action_id":  "upload_image"
+                    },
+                    {
+                        "display_name":  "Configure PAM Hardening",
+                        "description":  "Applies CIS/STIG PAM policies: password complexity, account lockout, session timeout. Supports pam_pwquality and pam_faillock (modern) or pam_cracklib and pam_tally2 (legacy).",
+                        "parameters":  [
+                                           {
+                                               "default":  "cis_level1",
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "profile"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "object",
+                                               "name":  "params"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "configure_pam",
+                        "estimated_duration_seconds":  15,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.configure_pam",
+                        "safety_notes":  [
+                                             "Misconfigured PAM can lock out all users including root - test in non-production first",
+                                             "lockout_duration_seconds applies to all accounts; ensure break-glass access exists"
+                                         ],
+                        "generic_action":  "configure_pam",
+                        "action_id":  "configure_pam"
+                    },
+                    {
+                        "display_name":  "Harden SSH Configuration",
+                        "description":  "Writes /etc/ssh/sshd_config.d/99-nexplane-hardening.conf with secure defaults: no root login, key-only auth, cipher/MAC allowlist, idle timeout. Validates with sshd -t before reloading.",
+                        "parameters":  [
+                                           {
+                                               "required":  false,
+                                               "type":  "object",
+                                               "name":  "settings"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "harden_ssh",
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.harden_ssh",
+                        "safety_notes":  [
+                                             "Disabling password_authentication requires key-based auth to be working first",
+                                             "Changing SSH port requires updating external firewall rules before reloading"
+                                         ],
+                        "generic_action":  "harden_ssh",
+                        "action_id":  "harden_ssh"
+                    },
+                    {
+                        "display_name":  "Audit Users and Groups",
+                        "description":  "Read-only audit: surfaces accounts with no password expiry, UID 0 non-root accounts, service accounts with interactive shells, empty passwords, and sudo group members.",
+                        "parameters":  [
+
+                                       ],
+                        "execution_tier":  3,
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "identity"
+                                                   ],
+                        "action_type":  "ingest",
+                        "executor":  "nexplane_agent.audit_users_and_groups",
+                        "generic_action":  "audit_users_and_groups",
+                        "action_id":  "audit_users_and_groups"
+                    },
+                    {
+                        "display_name":  "Audit Privilege Escalation Vulnerabilities",
+                        "description":  "Detection-only check for known Linux LPE conditions: PwnKit (CVE-2021-4034), DirtyPipe (CVE-2022-0847), Dirty COW (CVE-2016-5195), unexpected SUID binaries, writable cron/service files, misconfigured sudo rules.",
+                        "parameters":  [
+
+                                       ],
+                        "execution_tier":  3,
+                        "estimated_duration_seconds":  30,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "ingest",
+                        "executor":  "nexplane_agent.audit_privesc_vulnerabilities",
+                        "generic_action":  "audit_privesc_vulnerabilities",
+                        "action_id":  "audit_privesc_vulnerabilities"
+                    },
+                    {
+                        "display_name":  "Manage CA Certificates",
+                        "description":  "Installs or removes CA certificates in the OS trust store. Detects Debian (update-ca-certificates) vs RHEL (update-ca-trust extract). Validates PEM before installing.",
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "action"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "certificate"
+                                           },
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "cert_name"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "manage_ca_certificates",
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.manage_ca_certificates",
+                        "safety_notes":  [
+                                             "Installing an untrusted CA certificate compromises TLS security for all processes on this host"
+                                         ],
+                        "generic_action":  "manage_ca_certificates",
+                        "action_id":  "manage_ca_certificates"
+                    },
+                    {
+                        "display_name":  "Configure NTP Time Sources",
+                        "description":  "Configures NTP servers via chrony, systemd-timesyncd, or ntpd (auto-detected). Critical for audit log timestamp integrity. Supports iburst and chrony makestep.",
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "array",
+                                               "name":  "servers"
+                                           },
+                                           {
+                                               "default":  true,
+                                               "required":  false,
+                                               "type":  "boolean",
+                                               "name":  "require_iburst"
+                                           },
+                                           {
+                                               "default":  "1.0 3",
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "makestep"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "configure_ntp",
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.configure_ntp",
+                        "safety_notes":  [
+                                             "NTP misconfiguration causes clock drift which invalidates audit log timestamps"
+                                         ],
+                        "generic_action":  "configure_ntp",
+                        "action_id":  "configure_ntp"
+                    },
+                    {
+                        "display_name":  "Configure SELinux",
+                        "description":  "Set SELinux mode (enforcing/permissive/disabled), install policy modules, or generate policy from audit log denials.",
+                        "parameters":  [
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "mode"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "policy_module_path"
+                                           },
+                                           {
+                                               "default":  false,
+                                               "required":  false,
+                                               "type":  "boolean",
+                                               "name":  "generate_from_audit_log"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "configure_selinux",
+                        "estimated_duration_seconds":  15,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.configure_selinux",
+                        "generic_action":  "configure_selinux",
+                        "action_id":  "configure_selinux"
+                    },
+                    {
+                        "display_name":  "Configure AppArmor",
+                        "description":  "Load AppArmor profiles and set enforce/complain/disable mode.",
+                        "parameters":  [
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "profile_name"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "profile_content"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "mode"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "configure_apparmor",
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.configure_apparmor",
+                        "generic_action":  "configure_apparmor",
+                        "action_id":  "configure_apparmor"
+                    },
+                    {
+                        "display_name":  "Configure Seccomp Filter",
+                        "description":  "Apply a seccomp filter profile to a systemd service via drop-in override.",
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "service_name"
+                                           },
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "profile"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "configure_seccomp",
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.configure_seccomp",
+                        "generic_action":  "configure_seccomp",
+                        "action_id":  "configure_seccomp"
+                    },
+                    {
+                        "display_name":  "Apply Sysctl Hardening",
+                        "description":  "Apply CIS-level sysctl parameters: disable IP forwarding, enable SYN cookies, disable ICMP redirects, enable source route validation. Writes /etc/sysctl.d/99-nexplane-hardening.conf.",
+                        "parameters":  [
+                                           {
+                                               "required":  false,
+                                               "type":  "object",
+                                               "name":  "settings"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "apply_sysctl_hardening",
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.apply_sysctl_hardening",
+                        "generic_action":  "apply_sysctl_hardening",
+                        "action_id":  "apply_sysctl_hardening"
+                    },
+                    {
+                        "display_name":  "Configure Host Firewall",
+                        "description":  "Add or remove iptables/nftables/firewalld rules on the host. Auto-detects firewall tool.",
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "action"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "object",
+                                               "name":  "rule"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "configure_host_firewall",
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.configure_host_firewall",
+                        "safety_notes":  [
+                                             "Incorrect firewall rules can lock out remote management access"
+                                         ],
+                        "generic_action":  "configure_host_firewall",
+                        "action_id":  "configure_host_firewall"
+                    },
+                    {
+                        "display_name":  "Blacklist Kernel Modules",
+                        "description":  "Prevent loading of specified kernel modules via /etc/modprobe.d/nexplane-blacklist.conf.",
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "array",
+                                               "name":  "modules"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "blacklist_kernel_modules",
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.blacklist_kernel_modules",
+                        "generic_action":  "blacklist_kernel_modules",
+                        "action_id":  "blacklist_kernel_modules"
+                    },
+                    {
+                        "display_name":  "Harden Mount Options",
+                        "description":  "Apply noexec/nosuid/nodev to /tmp, /dev/shm, /var/tmp via /etc/fstab. Remounts affected filesystems.",
+                        "parameters":  [
+                                           {
+                                               "required":  false,
+                                               "type":  "object",
+                                               "name":  "targets"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "harden_mount_options",
+                        "estimated_duration_seconds":  15,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.harden_mount_options",
+                        "generic_action":  "harden_mount_options",
+                        "action_id":  "harden_mount_options"
+                    },
+                    {
+                        "display_name":  "Deploy Auditd Rules",
+                        "description":  "Install CIS Level 1/2 or custom auditd rule sets to /etc/audit/rules.d/. Reloads auditd.",
+                        "parameters":  [
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "profile"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "rules"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "deploy_auditd_rules",
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.deploy_auditd_rules",
+                        "generic_action":  "deploy_auditd_rules",
+                        "action_id":  "deploy_auditd_rules"
+                    },
+                    {
+                        "display_name":  "Setup File Integrity Monitoring",
+                        "description":  "Initialize AIDE or Tripwire baseline database (init), or run a check against the baseline (check).",
+                        "parameters":  [
+                                           {
+                                               "default":  "init",
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "action"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "setup_file_integrity_monitoring",
+                        "estimated_duration_seconds":  120,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.setup_file_integrity_monitoring",
+                        "generic_action":  "setup_file_integrity_monitoring",
+                        "action_id":  "setup_file_integrity_monitoring"
+                    },
+                    {
+                        "display_name":  "Audit OS Security Posture",
+                        "description":  "Read-only: reports current SELinux mode, AppArmor profiles, auditd status, and recent MAC denials.",
+                        "parameters":  [
+
+                                       ],
+                        "execution_tier":  3,
+                        "estimated_duration_seconds":  15,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "ingest",
+                        "executor":  "nexplane_agent.audit_os_security_posture",
+                        "generic_action":  "audit_os_security_posture",
+                        "action_id":  "audit_os_security_posture"
+                    },
+                    {
+                        "display_name":  "Deploy eBPF Policy",
+                        "description":  "Load and attach a compiled eBPF program to a kernel hook (kprobe, tracepoint, tc, xdp, cgroup, lsm).",
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "program_path"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "attach_type"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "attach_target"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "deploy_ebpf_policy",
+                        "estimated_duration_seconds":  30,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.deploy_ebpf_policy",
+                        "safety_notes":  [
+                                             "Requires kernel 5.8+ and CAP_BPF capability"
+                                         ],
+                        "generic_action":  "deploy_ebpf_policy",
+                        "action_id":  "deploy_ebpf_policy"
+                    },
+                    {
+                        "display_name":  "Configure eBPF Security Policy",
+                        "description":  "Apply a declarative security policy via an installed eBPF framework (Cilium, Falco, Tetragon, bpfd).",
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "framework"
+                                           },
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "policy"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "configure_ebpf_security_policy",
+                        "estimated_duration_seconds":  30,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.configure_ebpf_security_policy",
+                        "generic_action":  "configure_ebpf_security_policy",
+                        "action_id":  "configure_ebpf_security_policy"
+                    },
+                    {
+                        "display_name":  "Audit eBPF Posture",
+                        "description":  "Read-only: lists all loaded eBPF programs and network attachments. Flags programs not deployed by Nexplane.",
+                        "parameters":  [
+
+                                       ],
+                        "execution_tier":  3,
+                        "estimated_duration_seconds":  10,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "ingest",
+                        "executor":  "nexplane_agent.audit_ebpf_posture",
+                        "generic_action":  "audit_ebpf_posture",
+                        "action_id":  "audit_ebpf_posture"
+                    },
+                    {
+                        "description":  "Enable or disable Local Administrator Password Solution to randomize local admin passwords.",
+                        "execution_tier":  3,
+                        "display_name":  "Configure LAPS",
+                        "estimated_duration_seconds":  15,
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "action"
+                                           },
+                                           {
+                                               "default":  30,
+                                               "required":  false,
+                                               "type":  "integer",
+                                               "name":  "password_age_days"
+                                           },
+                                           {
+                                               "default":  14,
+                                               "required":  false,
+                                               "type":  "integer",
+                                               "name":  "password_length"
+                                           }
+                                       ],
+                        "rollback_action":  "configure_laps",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.configure_laps",
+                        "generic_action":  "configure_laps",
+                        "action_id":  "configure_laps"
+                    },
+                    {
+                        "description":  "Enable VBS-based Credential Guard to protect credential material in LSASS. Requires reboot.",
+                        "execution_tier":  3,
+                        "safety_notes":  [
+                                             "Requires reboot to take effect",
+                                             "UEFI lock prevents registry rollback"
+                                         ],
+                        "display_name":  "Enable Credential Guard",
+                        "estimated_duration_seconds":  10,
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "action"
+                                           },
+                                           {
+                                               "default":  false,
+                                               "required":  false,
+                                               "type":  "boolean",
+                                               "name":  "require_uefi_lock"
+                                           }
+                                       ],
+                        "rollback_action":  "enable_credential_guard",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.enable_credential_guard",
+                        "generic_action":  "enable_credential_guard",
+                        "action_id":  "enable_credential_guard"
+                    },
+                    {
+                        "description":  "Enforce PowerShell Constrained Language Mode via registry key.",
+                        "execution_tier":  3,
+                        "display_name":  "Enforce PowerShell CLM",
+                        "estimated_duration_seconds":  10,
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "action"
+                                           },
+                                           {
+                                               "default":  "registry",
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "mechanism"
+                                           }
+                                       ],
+                        "rollback_action":  "enforce_powershell_clm",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.enforce_powershell_clm",
+                        "generic_action":  "enforce_powershell_clm",
+                        "action_id":  "enforce_powershell_clm"
+                    },
+                    {
+                        "description":  "Deploy AppLocker application allowlist policies. Defaults to AuditOnly mode before enforcing.",
+                        "execution_tier":  3,
+                        "safety_notes":  [
+                                             "Test in AuditOnly mode before enforcing"
+                                         ],
+                        "display_name":  "Deploy AppLocker Policy",
+                        "estimated_duration_seconds":  15,
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "policy"
+                                           },
+                                           {
+                                               "default":  false,
+                                               "required":  false,
+                                               "type":  "boolean",
+                                               "name":  "enforce"
+                                           }
+                                       ],
+                        "rollback_action":  "deploy_applocker_policy",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.deploy_applocker_policy",
+                        "generic_action":  "deploy_applocker_policy",
+                        "action_id":  "deploy_applocker_policy"
+                    },
+                    {
+                        "description":  "Disable SMBv1, require signing, disable guest access.",
+                        "execution_tier":  3,
+                        "display_name":  "Harden SMB",
+                        "estimated_duration_seconds":  15,
+                        "parameters":  [
+                                           {
+                                               "default":  true,
+                                               "required":  false,
+                                               "type":  "boolean",
+                                               "name":  "disable_smb1"
+                                           },
+                                           {
+                                               "default":  true,
+                                               "required":  false,
+                                               "type":  "boolean",
+                                               "name":  "require_signing"
+                                           },
+                                           {
+                                               "default":  true,
+                                               "required":  false,
+                                               "type":  "boolean",
+                                               "name":  "disable_guest_access"
+                                           }
+                                       ],
+                        "rollback_action":  "harden_smb",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.harden_smb",
+                        "generic_action":  "harden_smb",
+                        "action_id":  "harden_smb"
+                    },
+                    {
+                        "description":  "Enable BitLocker full disk encryption. Recovery key returned in result - store securely.",
+                        "execution_tier":  3,
+                        "safety_notes":  [
+                                             "Save the recovery key - it cannot be recovered later",
+                                             "Rollback after encryption requires full decryption"
+                                         ],
+                        "display_name":  "Enable BitLocker",
+                        "estimated_duration_seconds":  30,
+                        "parameters":  [
+                                           {
+                                               "default":  "C:",
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "drive_letter"
+                                           },
+                                           {
+                                               "default":  "tpm",
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "protector"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "pin"
+                                           },
+                                           {
+                                               "default":  "XtsAes256",
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "encryption_method"
+                                           }
+                                       ],
+                        "rollback_action":  "enable_bitlocker",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.enable_bitlocker",
+                        "generic_action":  "enable_bitlocker",
+                        "action_id":  "enable_bitlocker"
+                    },
+                    {
+                        "description":  "Add/remove firewall rules or set default inbound/outbound actions.",
+                        "execution_tier":  3,
+                        "safety_notes":  [
+                                             "Setting default inbound=Block without an allow rule for RDP/WinRM will lock out remote management"
+                                         ],
+                        "display_name":  "Configure Windows Firewall",
+                        "estimated_duration_seconds":  10,
+                        "parameters":  [
+                                           {
+                                               "required":  true,
+                                               "type":  "string",
+                                               "name":  "action"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "object",
+                                               "name":  "rule"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "object",
+                                               "name":  "default_action"
+                                           }
+                                       ],
+                        "rollback_action":  "configure_windows_firewall",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.configure_windows_firewall",
+                        "generic_action":  "configure_windows_firewall",
+                        "action_id":  "configure_windows_firewall"
+                    },
+                    {
+                        "description":  "Disable SSL/TLS 1.0/1.1, enforce TLS 1.2/1.3 via SCHANNEL registry. Requires reboot.",
+                        "execution_tier":  3,
+                        "safety_notes":  [
+                                             "Requires reboot to take effect",
+                                             "Disabling TLS 1.0/1.1 breaks legacy .NET clients"
+                                         ],
+                        "display_name":  "Harden TLS Protocols",
+                        "estimated_duration_seconds":  10,
+                        "parameters":  [
+                                           {
+                                               "required":  false,
+                                               "type":  "array",
+                                               "name":  "disable_protocols"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "array",
+                                               "name":  "enabled_protocols"
+                                           }
+                                       ],
+                        "rollback_action":  "harden_tls_protocols",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.harden_tls_protocols",
+                        "generic_action":  "harden_tls_protocols",
+                        "action_id":  "harden_tls_protocols"
+                    },
+                    {
+                        "description":  "Require NLA, set encryption level, configure idle/disconnect timeout.",
+                        "execution_tier":  3,
+                        "display_name":  "Harden RDP",
+                        "estimated_duration_seconds":  15,
+                        "parameters":  [
+                                           {
+                                               "default":  true,
+                                               "required":  false,
+                                               "type":  "boolean",
+                                               "name":  "require_nla"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "integer",
+                                               "name":  "idle_timeout_minutes"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "integer",
+                                               "name":  "port"
+                                           }
+                                       ],
+                        "rollback_action":  "harden_rdp",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.harden_rdp",
+                        "generic_action":  "harden_rdp",
+                        "action_id":  "harden_rdp"
+                    },
+                    {
+                        "description":  "Apply CIS/STIG auditpol settings for logon, object access, privilege use, process creation.",
+                        "execution_tier":  3,
+                        "display_name":  "Configure Windows Audit Policy",
+                        "estimated_duration_seconds":  15,
+                        "parameters":  [
+                                           {
+                                               "default":  "cis_level1",
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "profile"
+                                           }
+                                       ],
+                        "rollback_action":  "configure_windows_audit_policy",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.configure_windows_audit_policy",
+                        "generic_action":  "configure_windows_audit_policy",
+                        "action_id":  "configure_windows_audit_policy"
+                    },
+                    {
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "executor":  "nexplane_agent.audit_scheduled_tasks",
+                        "display_name":  "Audit Scheduled Tasks",
+                        "description":  "Read-only: enumerate all scheduled tasks, flag privileged, hidden, unregistered, and writable-binary tasks.",
+                        "action_type":  "ingest",
+                        "execution_tier":  3,
+                        "estimated_duration_seconds":  15,
+                        "generic_action":  "audit_scheduled_tasks",
+                        "parameters":  [
+
+                                       ],
+                        "action_id":  "audit_scheduled_tasks"
+                    },
+                    {
+                        "description":  "Apply CIS registry hardening: disable autorun, LM hash, NTLMv1, WDigest; enforce UAC; enable safe DLL search.",
+                        "execution_tier":  3,
+                        "safety_notes":  [
+                                             "disable_ntlmv1 breaks auth to legacy systems that only support NTLMv1"
+                                         ],
+                        "display_name":  "Harden Registry",
+                        "estimated_duration_seconds":  15,
+                        "parameters":  [
+                                           {
+                                               "default":  "cis_level1",
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "profile"
+                                           }
+                                       ],
+                        "rollback_action":  "harden_registry",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.harden_registry",
+                        "generic_action":  "harden_registry",
+                        "action_id":  "harden_registry"
+                    },
+                    {
+                        "action_id":  "manage_tls_certificates",
+                        "generic_action":  "manage_tls_certificates",
+                        "action_type":  "change",
+                        "execution_tier":  3,
+                        "display_name":  "Manage TLS Certificates",
+                        "description":  "Deploy, renew, or validate TLS certificates. Supports ACME (Let\u0027s Encrypt), internal CA, and manual PEM upload. Linux: nginx/apache. Windows: IIS.",
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "parameters":  [
+                                           {
+                                               "name":  "action",
+                                               "type":  "string",
+                                               "required":  true
+                                           },
+                                           {
+                                               "name":  "service",
+                                               "type":  "string",
+                                               "required":  true
+                                           },
+                                           {
+                                               "name":  "source",
+                                               "type":  "string",
+                                               "required":  false
+                                           },
+                                           {
+                                               "name":  "domain",
+                                               "type":  "string",
+                                               "required":  false
+                                           },
+                                           {
+                                               "name":  "acme_email",
+                                               "type":  "string",
+                                               "required":  false
+                                           },
+                                           {
+                                               "name":  "cert_pem",
+                                               "type":  "string",
+                                               "required":  false
+                                           },
+                                           {
+                                               "name":  "key_pem",
+                                               "type":  "string",
+                                               "required":  false
+                                           }
+                                       ],
+                        "executor":  "nexplane_agent.manage_tls_certificates",
+                        "rollback_action":  "manage_tls_certificates",
+                        "estimated_duration_seconds":  60
+                    },
+                    {
+                        "action_id":  "configure_dns_resolver",
+                        "generic_action":  "configure_dns_resolver",
+                        "action_type":  "change",
+                        "execution_tier":  3,
+                        "display_name":  "Configure DNS Resolver",
+                        "description":  "Configure DNS resolvers on Linux (resolv.conf/systemd-resolved) or Windows. Supports plain, DoH, and DoT.",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "parameters":  [
+                                           {
+                                               "name":  "resolvers",
+                                               "type":  "array",
+                                               "required":  true
+                                           },
+                                           {
+                                               "name":  "mode",
+                                               "type":  "string",
+                                               "required":  false,
+                                               "default":  "plain"
+                                           },
+                                           {
+                                               "name":  "doh_url",
+                                               "type":  "string",
+                                               "required":  false
+                                           }
+                                       ],
+                        "executor":  "nexplane_agent.configure_dns_resolver",
+                        "rollback_action":  "configure_dns_resolver",
+                        "estimated_duration_seconds":  10
+                    },
+                    {
+                        "action_id":  "audit_software_inventory",
+                        "generic_action":  "audit_software_inventory",
+                        "action_type":  "ingest",
+                        "execution_tier":  3,
+                        "display_name":  "Audit Software Inventory",
+                        "description":  "Read-only: enumerate installed packages with versions. Linux: dpkg/rpm. Windows: registry uninstall keys.",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "parameters":  [
+
+                                       ],
+                        "executor":  "nexplane_agent.audit_software_inventory",
+                        "estimated_duration_seconds":  30
+                    },
+                    {
+                        "action_id":  "upgrade_linux_instance",
+                        "generic_action":  "upgrade_linux_instance",
+                        "action_type":  "change",
+                        "execution_tier":  3,
+                        "display_name":  "Upgrade Linux Instance",
+                        "description":  "In-place kernel/package upgrade with cloud or dd snapshot rollback, or containerize-and-migrate path for major OS version upgrades.",
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "parameters":  [
+                                           {
+                                               "name":  "path",
+                                               "type":  "string",
+                                               "required":  true
+                                           },
+                                           {
+                                               "name":  "upgrade_type",
+                                               "type":  "string",
+                                               "required":  false,
+                                               "default":  "security"
+                                           },
+                                           {
+                                               "name":  "snapshot_method",
+                                               "type":  "string",
+                                               "required":  false,
+                                               "default":  "cloud"
+                                           },
+                                           {
+                                               "name":  "snapshot_target_path",
+                                               "type":  "string",
+                                               "required":  false
+                                           },
+                                           {
+                                               "name":  "reboot_delay_seconds",
+                                               "type":  "integer",
+                                               "required":  false,
+                                               "default":  60
+                                           },
+                                           {
+                                               "name":  "health_check_url",
+                                               "type":  "string",
+                                               "required":  false
+                                           },
+                                           {
+                                               "name":  "container_registry",
+                                               "type":  "string",
+                                               "required":  false
+                                           },
+                                           {
+                                               "name":  "target_os",
+                                               "type":  "string",
+                                               "required":  false
+                                           }
+                                       ],
+                        "executor":  "nexplane_agent.upgrade_linux_instance",
+                        "rollback_action":  "upgrade_linux_instance",
+                        "estimated_duration_seconds":  300,
+                        "safety_notes":  [
+                                             "Always take a cloud snapshot before running",
+                                             "dd-based rollback requires booting from rescue media",
+                                             "dist upgrade is potentially destructive - test on non-production first"
+                                         ]
+                    },
+                    {
+                        "action_id": "apply_linux_patches",
+                        "generic_action": "apply_linux_patches",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Apply Linux Patches",
+                        "description": "Apply security patches on a Linux host using apt, dnf, or yum. Supports security-only mode, specific package, or CVE-targeted patching. Captures before/after versions and detects reboot requirement.",
+                        "applicable_asset_types": ["server"],
+                        "parameters": [
+                            {"name": "mode",         "type": "string",  "required": true},
+                            {"name": "package_name", "type": "string",  "required": false},
+                            {"name": "cve_id",       "type": "string",  "required": false},
+                            {"name": "dry_run",      "type": "boolean", "required": false, "default": false},
+                            {"name": "defer_reboot", "type": "boolean", "required": false, "default": false}
+                        ],
+                        "executor": "nexplane_agent.apply_linux_patches",
+                        "rollback_action": "apply_linux_patches",
+                        "estimated_duration_seconds": 120,
+                        "safety_notes": [
+                            "Use dry_run=true first to preview changes",
+                            "Reboot may be required after applying kernel or glibc patches"
+                        ]
+                    },
+                    {
+                        "action_id": "audit_linux_patch_status",
+                        "generic_action": "audit_linux_patch_status",
+                        "action_type": "ingest",
+                        "execution_tier": 3,
+                        "display_name": "Audit Linux Patch Status",
+                        "description": "Read-only: returns installed packages, available security updates, days since last security patch, and reboot-required status.",
+                        "applicable_asset_types": ["server"],
+                        "parameters": [],
+                        "executor": "nexplane_agent.audit_linux_patch_status",
+                        "estimated_duration_seconds": 30
+                    },
+                    {
+                        "action_id": "apply_windows_patches",
+                        "generic_action": "apply_windows_patches",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Apply Windows Patches",
+                        "description": "Install Windows Updates using the Windows Update Agent COM API. Supports security-only mode or a specific KB article. Schedules reboot via Task Scheduler if required.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [
+                            {"name": "mode",          "type": "string",  "required": true},
+                            {"name": "kb_id",         "type": "string",  "required": false},
+                            {"name": "dry_run",       "type": "boolean", "required": false, "default": false},
+                            {"name": "defer_reboot",  "type": "boolean", "required": false, "default": false},
+                            {"name": "reboot_window", "type": "string",  "required": false}
+                        ],
+                        "executor": "nexplane_agent.apply_windows_patches",
+                        "rollback_action": "apply_windows_patches",
+                        "estimated_duration_seconds": 300,
+                        "safety_notes": [
+                            "Use dry_run=true first to preview pending updates",
+                            "Reboot is often required; use defer_reboot=true to prevent automatic scheduling",
+                            "Rollback uninstalls the KB - not all KBs support uninstallation"
+                        ]
+                    },
+                    {
+                        "action_id": "audit_windows_patch_status",
+                        "generic_action": "audit_windows_patch_status",
+                        "action_type": "ingest",
+                        "execution_tier": 3,
+                        "display_name": "Audit Windows Patch Status",
+                        "description": "Read-only: returns installed KBs, pending security updates with severity and CVE IDs, last update check time, and reboot-pending status.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "executor": "nexplane_agent.audit_windows_patch_status",
+                        "estimated_duration_seconds": 30
+                    },
+                    {
+                        "action_id": "check_patch_compliance",
+                        "generic_action": "check_patch_compliance",
+                        "action_type": "ingest",
+                        "execution_tier": 3,
+                        "display_name": "Check Patch Compliance",
+                        "description": "Evaluates all assets against a patch age threshold. Flags hosts whose last_security_patch_at metadata is older than max_patch_age_days. Optionally creates patch_packages change requests for non-compliant hosts.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [
+                            {"name": "max_patch_age_days",    "type": "integer", "required": false, "default": 30},
+                            {"name": "asset_filter",          "type": "object",  "required": false},
+                            {"name": "os_family",             "type": "string",  "required": false},
+                            {"name": "create_change_request", "type": "boolean", "required": false, "default": false}
+                        ],
+                        "executor": "nexplane_agent.check_patch_compliance",
+                        "estimated_duration_seconds": 10
+                    },
+                    {
+                        "action_id": "run_patch_campaign",
+                        "generic_action": "run_patch_campaign",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Run Patch Campaign",
+                        "description": "Fan out patching across all hosts affected by a CVE or vulnerable package version. Patches in rolling batches and aborts if the failure rate exceeds the configured threshold.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [
+                            {"name": "cve_id",               "type": "string",  "required": false},
+                            {"name": "package_name",         "type": "string",  "required": false},
+                            {"name": "affected_version_lt",  "type": "string",  "required": false},
+                            {"name": "asset_filter",         "type": "object",  "required": false},
+                            {"name": "batch_size",           "type": "integer", "required": false, "default": 10},
+                            {"name": "abort_error_threshold","type": "number",  "required": false, "default": 0.2},
+                            {"name": "dry_run",              "type": "boolean", "required": false, "default": false},
+                            {"name": "defer_reboot",         "type": "boolean", "required": false, "default": false}
+                        ],
+                        "executor": "nexplane_agent.run_patch_campaign",
+                        "estimated_duration_seconds": 3600,
+                        "safety_notes": [
+                            "Use dry_run=true to preview affected hosts before executing",
+                            "Set abort_error_threshold conservatively (0.1-0.2) for production fleets",
+                            "Ensure agents are reachable and not mid-reboot before starting a campaign"
+                        ]
+                    },
+                    {
+                        "action_id": "agent_scan_host_applications",
+                        "generic_action": "agent_scan_host_applications",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Scan Host Applications",
+                        "description": "Discover applications running on the host (systemd services, listening ports, non-package binaries)",
+                        "applicable_asset_types": ["server", "endpoint"],
+                        "parameters": [{"name": "dry_run", "type": "boolean", "required": false, "default": false}],
+                        "executor": "nexplane_agent.app_discovery",
+                        "estimated_duration_seconds": 30
+                    }
+                ]
+}
