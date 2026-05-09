@@ -117,6 +117,16 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
                 post_db, data["target_asset_ids"], execution_result
             )
 
+    if data.get("change_type") == "agent_containerize_retire":
+        from app.services.retire_service import mark_asset_retired
+        async with AsyncSessionLocal() as post_db:
+            await mark_asset_retired(post_db, data["target_asset_ids"], execution_result)
+
+    if data.get("change_type") == "k8s_workload_deploy":
+        from app.services.workload_deploy_service import register_workload_asset
+        async with AsyncSessionLocal() as post_db:
+            await register_workload_asset(post_db, data["target_asset_ids"], execution_result)
+
     await write_audit_event(
         organization_id=org_id,
         event_type="execution.completed",
