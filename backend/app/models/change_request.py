@@ -183,6 +183,10 @@ class ChangeType(str, enum.Enum):
     agent_containerize_build = "agent_containerize_build"
     k8s_workload_deploy = "k8s_workload_deploy"
     agent_containerize_retire = "agent_containerize_retire"
+    # IP address migration
+    change_ip = "change_ip"
+    migrate_ip = "migrate_ip"
+    ip_campaign = "ip_campaign"
 
 
 class RiskLevel(str, enum.Enum):
