@@ -1958,71 +1958,173 @@ def run_phase_w(client: NexplaneClient, cloud_account_id: str, phase_a_result: d
             pass
 
 
+_SMOKETEST_APP_NAME = "nexplane-smoketest"
+_SMOKETEST_UNIT = "nexplane-smoketest.service"
+_SMOKETEST_PORT = 8099
+
+_INSTALL_SMOKETEST_APP = r"""
+set -e
+# Write the test HTTP server
+cat > /opt/nexplane-smoketest.py << 'PYEOF'
+import http.server, socketserver, signal, sys
+
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200); self.end_headers()
+        self.wfile.write(b"nexplane-smoketest-ok")
+    def log_message(self, *a): pass
+
+with socketserver.TCPServer(("", 8099), H) as s:
+    signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
+    s.serve_forever()
+PYEOF
+chmod +x /opt/nexplane-smoketest.py
+
+# Install systemd unit
+cat > /etc/systemd/system/nexplane-smoketest.service << 'SVCEOF'
+[Unit]
+Description=Nexplane Smoke Test HTTP App
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/nexplane-smoketest.py
+Restart=always
+User=nobody
+WorkingDirectory=/tmp
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+systemctl daemon-reload
+systemctl enable nexplane-smoketest
+systemctl start nexplane-smoketest
+sleep 2
+systemctl is-active nexplane-smoketest && echo "OK: smoketest app running" || (journalctl -u nexplane-smoketest --no-pager -n 20; exit 1)
+""".strip()
+
+_UNINSTALL_SMOKETEST_APP = r"""
+systemctl stop nexplane-smoketest 2>/dev/null || true
+systemctl disable nexplane-smoketest 2>/dev/null || true
+rm -f /etc/systemd/system/nexplane-smoketest.service /opt/nexplane-smoketest.py
+systemctl daemon-reload
+echo "OK: smoketest app removed"
+""".strip()
+
+
 def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
     """Phase X: Application Discovery — validates agent_appdiscovery CR end-to-end.
 
     Requires Phase A (running EC2 instance with Nexplane agent deployed).
-    1. Fires an agent_appdiscovery CR targeting the Phase A instance asset.
-    2. Verifies asset_metadata.applications is populated with at least one entry.
-    3. Verifies each discovered application has required fields.
-    4. Verifies the appdiscovery result is visible via GET /assets/{id}.
+    1. Installs a known test HTTP service (nexplane-smoketest) via SSM as a
+       deterministic discovery target on port 8099 at /opt/nexplane-smoketest.py.
+    2. Fires an agent_appdiscovery CR targeting the Phase A instance asset.
+    3. Verifies asset_metadata.applications contains the known test app.
+    4. Verifies each discovered application has all required fields and correct
+       containerization_status.
+    5. Cleans up the test service via SSM after verification.
     """
     log("\n[Phase X] Application Discovery")
 
     instance_asset_id = phase_a_result.get("instance_asset_id")
-    if not instance_asset_id:
-        fail("Phase X requires phase_a_result['instance_asset_id']")
+    instance_id = phase_a_result.get("instance_id")
+    if not instance_asset_id or not instance_id:
+        fail("Phase X requires phase_a_result['instance_asset_id'] and ['instance_id']")
 
-    # Step 1: Fire the agent_appdiscovery CR
-    log("[Phase X] Running agent_appdiscovery CR on instance asset")
+    # Step 1: Install the known test application via SSM
+    log("[Phase X] Installing nexplane-smoketest service via SSM")
     client.run_cr(
-        "[Phase X] discover applications",
-        "agent_appdiscovery",
+        "[Phase X] install smoketest app",
+        "ssm_command",
         instance_asset_id,
-        {"dry_run": False},
+        {
+            "instance_id": instance_id,
+            "document_name": "AWS-RunShellScript",
+            "command": _INSTALL_SMOKETEST_APP,
+            "rollback_strategy": "rollback_unavailable",
+        },
     )
-    log("[Phase X] appdiscovery CR completed")
+    log(f"[Phase X] nexplane-smoketest service running on port {_SMOKETEST_PORT}")
 
-    # Step 2: Fetch the asset and verify asset_metadata.applications is populated
-    log("[Phase X] Verifying asset_metadata.applications was written")
-    instance_asset = client.get(f"/assets/{instance_asset_id}")
-    if not instance_asset:
-        fail(f"[Phase X] Instance asset {instance_asset_id} not found after discovery")
+    try:
+        # Step 2: Fire the agent_appdiscovery CR
+        log("[Phase X] Running agent_appdiscovery CR on instance asset")
+        client.run_cr(
+            "[Phase X] discover applications",
+            "agent_appdiscovery",
+            instance_asset_id,
+            {"dry_run": False},
+        )
+        log("[Phase X] appdiscovery CR completed")
 
-    applications = (instance_asset.get("asset_metadata") or {}).get("applications")
-    if not isinstance(applications, list):
-        fail(f"[Phase X] asset_metadata.applications not set after appdiscovery — got: {applications}")
+        # Step 3: Fetch the asset via per-asset endpoint and verify applications
+        log("[Phase X] Verifying asset_metadata.applications was written")
+        instance_asset = client.get(f"/assets/{instance_asset_id}")
+        if not instance_asset:
+            fail(f"[Phase X] Instance asset {instance_asset_id} not found after discovery")
 
-    if len(applications) == 0:
-        fail("[Phase X] asset_metadata.applications is empty — expected at least one discovered app")
+        applications = (instance_asset.get("asset_metadata") or {}).get("applications")
+        if not isinstance(applications, list):
+            fail(f"[Phase X] asset_metadata.applications not set — got: {applications}")
+        if len(applications) == 0:
+            fail("[Phase X] asset_metadata.applications is empty — expected nexplane-smoketest at minimum")
 
-    log(f"[Phase X] Found {len(applications)} application(s) on instance")
+        log(f"[Phase X] Found {len(applications)} application(s): {', '.join(a.get('name','?') for a in applications)}")
 
-    # Step 3: Verify each application has the required fields
-    required_fields = [
-        "id", "name", "binary", "systemd_unit", "listening_ports",
-        "config_files", "data_directories", "estimated_data_size_gb",
-        "stateful", "containerization_status",
-    ]
-    for app in applications:
-        for field in required_fields:
-            if field not in app:
-                fail(f"[Phase X] Application '{app.get('name', '?')}' missing required field '{field}'")
+        # Step 4: Verify all required fields on every discovered app
+        required_fields = [
+            "id", "name", "binary", "systemd_unit", "listening_ports",
+            "config_files", "data_directories", "estimated_data_size_gb",
+            "stateful", "containerization_status",
+        ]
+        for app in applications:
+            for field in required_fields:
+                if field not in app:
+                    fail(f"[Phase X] App '{app.get('name','?')}' missing required field '{field}'")
+            if app["containerization_status"] != "not_started":
+                fail(
+                    f"[Phase X] Expected containerization_status='not_started', "
+                    f"got '{app['containerization_status']}' for app '{app['name']}'"
+                )
 
-        if app["containerization_status"] != "not_started":
+        # Step 5: Assert the known test app was specifically discovered
+        app_names = [a.get("name", "") for a in applications]
+        if _SMOKETEST_APP_NAME not in app_names:
             fail(
-                f"[Phase X] Expected containerization_status='not_started', "
-                f"got '{app['containerization_status']}' for app '{app['name']}'"
+                f"[Phase X] Expected '{_SMOKETEST_APP_NAME}' in discovered apps, "
+                f"got: {app_names}"
             )
 
-    log(f"[Phase X] All {len(applications)} application(s) have required fields ✅")
+        smoketest_app = next(a for a in applications if a["name"] == _SMOKETEST_APP_NAME)
+        # Verify the port was discovered
+        ports = [p.get("port") for p in (smoketest_app.get("listening_ports") or [])]
+        if _SMOKETEST_PORT not in ports:
+            log(f"[Phase X] Warning: port {_SMOKETEST_PORT} not in discovered ports {ports} "
+                f"(may not yet appear in ss output — non-fatal)")
+        else:
+            log(f"[Phase X] nexplane-smoketest discovered on port {_SMOKETEST_PORT} ✅")
 
-    # Step 4: Spot-check a specific app — sshd should always be present on the test instance
-    # (it's filtered out as a system service, so check for nexplane-agent or a typical user app)
-    app_names = [a["name"] for a in applications]
-    log(f"[Phase X] Discovered apps: {', '.join(app_names)}")
+        log(f"[Phase X] All {len(applications)} application(s) have required fields ✅")
+        log("[Phase X] ✅ Application discovery phase complete")
 
-    log("[Phase X] ✅ Application discovery phase complete")
+    finally:
+        # Step 6: Always clean up the test service
+        log("[Phase X] Cleaning up nexplane-smoketest service")
+        try:
+            client.run_cr(
+                "[Phase X] remove smoketest app",
+                "ssm_command",
+                instance_asset_id,
+                {
+                    "instance_id": instance_id,
+                    "document_name": "AWS-RunShellScript",
+                    "command": _UNINSTALL_SMOKETEST_APP,
+                    "rollback_strategy": "rollback_unavailable",
+                },
+            )
+            log("[Phase X] nexplane-smoketest service removed")
+        except Exception as e:
+            log(f"[Phase X] Warning: cleanup failed (non-fatal): {e}")
 
 
 def main():
