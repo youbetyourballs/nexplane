@@ -25,6 +25,7 @@ class AssetType(str, enum.Enum):
     key_pair = "key_pair"
     kubernetes_cluster = "kubernetes_cluster"
     container_image = "container_image"
+    kubernetes_workload = "kubernetes_workload"
 
 
 class Environment(str, enum.Enum):
