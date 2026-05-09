@@ -2426,14 +2426,15 @@ def run_phase_ip_a(client: NexplaneClient, phase_a_result: dict) -> None:
     DUMMY_IP_2 = "192.168.200.11/24"
 
     try:
-        # Step 1: Create a dummy interface via NetworkManager so nmcli can manage it.
+        # Step 1: Create a dummy interface using ip commands.
         # Changing ens5 on AWS breaks connectivity (ENI-managed IP); dummy interface is safe.
+        # Use ip directly — nmcli may not be in SSM's restricted PATH.
+        # The Go agent's applyNmcli falls back to ip addr add for unmanaged interfaces.
         _ssm(client, instance_asset["id"], instance_id, "IP-A",
              "create dummy interface",
-             f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && "
-             f"nmcli con add type dummy ifname {DUMMY_IFACE} con-name {DUMMY_IFACE} "
-             f"ipv4.method manual ipv4.addresses {DUMMY_IP_1} connection.autoconnect yes && "
-             f"nmcli con up {DUMMY_IFACE} && echo 'dummy up'")
+             f"ip link add {DUMMY_IFACE} type dummy && "
+             f"ip addr add {DUMMY_IP_1} dev {DUMMY_IFACE} && "
+             f"ip link set {DUMMY_IFACE} up && echo 'dummy up'")
         log(f"Dummy interface {DUMMY_IFACE} created with {DUMMY_IP_1}")
 
         # Step 2: Fire change_ip on the dummy interface using tailscale method.
@@ -2479,7 +2480,7 @@ def run_phase_ip_a(client: NexplaneClient, phase_a_result: dict) -> None:
         try:
             _ssm(client, instance_asset["id"], instance_id, "IP-A",
                  "teardown dummy interface",
-                 f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && nmcli con del {DUMMY_IFACE} 2>/dev/null || true && echo 'dummy removed'")
+                 f"ip link del {DUMMY_IFACE} 2>/dev/null || true && echo 'dummy removed'")
         except Exception:
             pass
 
@@ -2510,13 +2511,12 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
     DUMMY_IP_2 = "192.168.201.11/24"
 
     try:
-        # Create dummy interface via NetworkManager so nmcli can manage it
+        # Create dummy interface using ip commands (nmcli may not be in SSM PATH)
         _ssm(client, instance_asset["id"], instance_id, "IP-D",
              "create dummy interface",
-             f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && "
-             f"nmcli con add type dummy ifname {DUMMY_IFACE} con-name {DUMMY_IFACE} "
-             f"ipv4.method manual ipv4.addresses {DUMMY_IP_1} connection.autoconnect yes && "
-             f"nmcli con up {DUMMY_IFACE} && echo 'dummy up'")
+             f"ip link add {DUMMY_IFACE} type dummy && "
+             f"ip addr add {DUMMY_IP_1} dev {DUMMY_IFACE} && "
+             f"ip link set {DUMMY_IFACE} up && echo 'dummy up'")
         log(f"Dummy interface {DUMMY_IFACE} created with {DUMMY_IP_1}")
 
         # Step 2: Fire change_ip with method=commit_timer, timer=60s
@@ -2572,7 +2572,7 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
         try:
             _ssm(client, instance_asset["id"], instance_id, "IP-D",
                  "teardown dummy interface",
-                 f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && nmcli con del {DUMMY_IFACE} 2>/dev/null || true && echo 'dummy removed'")
+                 f"ip link del {DUMMY_IFACE} 2>/dev/null || true && echo 'dummy removed'")
         except Exception:
             pass
 
@@ -2609,13 +2609,12 @@ def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
     ip_cr_id = ""
 
     try:
-        # Create dummy interface via NetworkManager so nmcli can manage it
+        # Create dummy interface using ip commands (nmcli may not be in SSM PATH)
         _ssm(client, instance_asset["id"], instance_id, "IP-D2",
              "create dummy interface",
-             f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && "
-             f"nmcli con add type dummy ifname {DUMMY_IFACE2} con-name {DUMMY_IFACE2} "
-             f"ipv4.method manual ipv4.addresses {DUMMY_IP_D2A} connection.autoconnect yes && "
-             f"nmcli con up {DUMMY_IFACE2} && echo 'dummy up'")
+             f"ip link add {DUMMY_IFACE2} type dummy && "
+             f"ip addr add {DUMMY_IP_D2A} dev {DUMMY_IFACE2} && "
+             f"ip link set {DUMMY_IFACE2} up && echo 'dummy up'")
         log(f"Dummy interface {DUMMY_IFACE2} created with {DUMMY_IP_D2A}")
 
         # Step 2: Fire change_ip — timer=15s with probe_url pointing to unreachable endpoint.
@@ -2699,7 +2698,7 @@ def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
         try:
             _ssm(client, instance_asset["id"], instance_id, "IP-D2",
                  "teardown dummy interface",
-                 f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && nmcli con del {DUMMY_IFACE2} 2>/dev/null || true && echo 'dummy removed'")
+                 f"ip link del {DUMMY_IFACE2} 2>/dev/null || true && echo 'dummy removed'")
         except Exception:
             pass
 
