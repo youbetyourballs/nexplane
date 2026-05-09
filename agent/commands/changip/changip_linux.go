@@ -546,7 +546,8 @@ func applyNmcli(iface, mode, ipVersion string, params map[string]any) error {
 				args = append(args, "ipv4.gateway", gw)
 			}
 			if err := runCmd("nmcli", args...); err != nil {
-				return err
+				// Fallback: interface not managed by NetworkManager — use ip addr directly.
+				return applyIPAddrFallback(iface, mode, ipVersion, params)
 			}
 		}
 		if v6, ok := params["new_ip_v6"].(string); ok && v6 != "" {
@@ -559,7 +560,35 @@ func applyNmcli(iface, mode, ipVersion string, params map[string]any) error {
 			}
 		}
 	}
-	return runCmd("nmcli", "con", "up", iface)
+	if err := runCmd("nmcli", "con", "up", iface); err != nil {
+		// Fallback: bring up via ip link if nmcli can't manage the connection.
+		return runCmd("ip", "link", "set", iface, "up")
+	}
+	return nil
+}
+
+// applyIPAddrFallback uses ip addr add/del for interfaces not managed by NetworkManager.
+func applyIPAddrFallback(iface, mode, _ string, params map[string]any) error {
+	// Remove existing IPv4 addresses on the interface.
+	addrOut, _ := execCommandForRun("ip", "-o", "-4", "addr", "show", iface).Output()
+	for _, line := range strings.Split(string(addrOut), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 4 {
+			_ = runCmd("ip", "addr", "del", fields[3], "dev", iface)
+		}
+	}
+	if mode == "static" {
+		if v4, ok := params["new_ip_v4"].(string); ok && v4 != "" {
+			if err := runCmd("ip", "addr", "add", v4, "dev", iface); err != nil {
+				return err
+			}
+		}
+		if gw, ok := params["new_gateway_v4"].(string); ok && gw != "" {
+			// Only set gateway if the interface has a route to the gateway.
+			_ = runCmd("ip", "route", "replace", "default", "via", gw, "dev", iface)
+		}
+	}
+	return runCmd("ip", "link", "set", iface, "up")
 }
 
 func applySystemdNetworkd(iface, mode, ipVersion string, params map[string]any) error {

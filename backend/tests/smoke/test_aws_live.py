@@ -2430,6 +2430,7 @@ def run_phase_ip_a(client: NexplaneClient, phase_a_result: dict) -> None:
         # Changing ens5 on AWS breaks connectivity (ENI-managed IP); dummy interface is safe.
         _ssm(client, instance_asset["id"], instance_id, "IP-A",
              "create dummy interface",
+             f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && "
              f"nmcli con add type dummy ifname {DUMMY_IFACE} con-name {DUMMY_IFACE} "
              f"ipv4.method manual ipv4.addresses {DUMMY_IP_1} connection.autoconnect yes && "
              f"nmcli con up {DUMMY_IFACE} && echo 'dummy up'")
@@ -2478,7 +2479,7 @@ def run_phase_ip_a(client: NexplaneClient, phase_a_result: dict) -> None:
         try:
             _ssm(client, instance_asset["id"], instance_id, "IP-A",
                  "teardown dummy interface",
-                 f"nmcli con del {DUMMY_IFACE} 2>/dev/null || true && echo 'dummy removed'")
+                 f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && nmcli con del {DUMMY_IFACE} 2>/dev/null || true && echo 'dummy removed'")
         except Exception:
             pass
 
@@ -2512,6 +2513,7 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
         # Create dummy interface via NetworkManager so nmcli can manage it
         _ssm(client, instance_asset["id"], instance_id, "IP-D",
              "create dummy interface",
+             f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && "
              f"nmcli con add type dummy ifname {DUMMY_IFACE} con-name {DUMMY_IFACE} "
              f"ipv4.method manual ipv4.addresses {DUMMY_IP_1} connection.autoconnect yes && "
              f"nmcli con up {DUMMY_IFACE} && echo 'dummy up'")
@@ -2570,7 +2572,7 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
         try:
             _ssm(client, instance_asset["id"], instance_id, "IP-D",
                  "teardown dummy interface",
-                 f"nmcli con del {DUMMY_IFACE} 2>/dev/null || true && echo 'dummy removed'")
+                 f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && nmcli con del {DUMMY_IFACE} 2>/dev/null || true && echo 'dummy removed'")
         except Exception:
             pass
 
@@ -2610,6 +2612,7 @@ def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
         # Create dummy interface via NetworkManager so nmcli can manage it
         _ssm(client, instance_asset["id"], instance_id, "IP-D2",
              "create dummy interface",
+             f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && "
              f"nmcli con add type dummy ifname {DUMMY_IFACE2} con-name {DUMMY_IFACE2} "
              f"ipv4.method manual ipv4.addresses {DUMMY_IP_D2A} connection.autoconnect yes && "
              f"nmcli con up {DUMMY_IFACE2} && echo 'dummy up'")
@@ -2696,7 +2699,7 @@ def run_phase_ip_d2(client: NexplaneClient, phase_a_result: dict) -> None:
         try:
             _ssm(client, instance_asset["id"], instance_id, "IP-D2",
                  "teardown dummy interface",
-                 f"nmcli con del {DUMMY_IFACE2} 2>/dev/null || true && echo 'dummy removed'")
+                 f"export PATH=$PATH:/usr/bin:/usr/sbin:/sbin && nmcli con del {DUMMY_IFACE2} 2>/dev/null || true && echo 'dummy removed'")
         except Exception:
             pass
 
