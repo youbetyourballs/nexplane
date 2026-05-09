@@ -69,15 +69,20 @@ async def dispatch_agent_job(
         if org_settings and org_settings.agent_secret_encrypted:
             agent_secret_plain = svc.decrypt(org_settings.agent_secret_encrypted)
 
-        payload = json.dumps({"command": command, "parameters": parameters}, sort_keys=True)
+        # Generate job_id up front so it can be included in the HMAC.
+        # Go agent's agenthmac.Sign format: "{jobID}:{command}:{canonicalJSON(params)}"
+        job_id = uuid.uuid4()
+        canonical_params = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
+        message = f"{job_id}:{command}:{canonical_params}"
         sig = _hmac.new(
             agent_secret_plain.encode() if agent_secret_plain else b"",
-            payload.encode(),
+            message.encode(),
             hashlib.sha256,
         ).hexdigest()
 
         # Create a pending AgentJob
         job = AgentJob(
+            id=job_id,
             organization_id=org_id,
             agent_registration_id=registration.id,
             command=command,

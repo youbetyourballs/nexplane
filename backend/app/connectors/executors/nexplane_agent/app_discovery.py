@@ -16,11 +16,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             timeout_seconds=120,
         )
         return result
-    except RuntimeError as exc:
-        raise RuntimeError(
-            f"No Nexplane agent registered for target asset(s) {asset_ids}. "
-            "Deploy the agent before running agent_appdiscovery."
-        ) from exc
+    except RuntimeError:
+        raise
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
