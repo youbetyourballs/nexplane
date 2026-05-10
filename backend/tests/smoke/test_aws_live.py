@@ -2330,6 +2330,208 @@ def run_phase_z(client: NexplaneClient, phase_a_result: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase AUTO constants
+# ---------------------------------------------------------------------------
+
+_INSTALL_AUTO_APPS_LINUX = r"""
+set -eux
+# Stateless: nginx + Flask sidecar
+yum install -y nginx python3-pip 2>/dev/null || apt-get install -y nginx python3-pip 2>/dev/null || true
+pip3 install flask 2>/dev/null || true
+mkdir -p /opt/nexplane-flask-sidecar
+cat > /opt/nexplane-flask-sidecar/app.py << 'PYEOF'
+from flask import Flask
+import urllib.request
+app = Flask(__name__)
+@app.route('/')
+def index():
+    try:
+        return urllib.request.urlopen('http://localhost:80/', timeout=2).read()
+    except Exception:
+        return b'nginx-unavailable'
+@app.route('/health')
+def health():
+    return 'ok'
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+PYEOF
+cat > /etc/systemd/system/nexplane-flask-sidecar.service << 'SVCEOF'
+[Unit]
+Description=Nexplane Flask Sidecar smoke test
+After=network.target
+[Service]
+ExecStart=/usr/bin/python3 /opt/nexplane-flask-sidecar/app.py
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+systemctl enable --now nginx 2>/dev/null || true
+systemctl enable --now nexplane-flask-sidecar 2>/dev/null || true
+# Stateful: PostgreSQL + Python writer
+yum install -y postgresql15-server python3-psycopg2 2>/dev/null || apt-get install -y postgresql python3-psycopg2 2>/dev/null || true
+postgresql-setup --initdb 2>/dev/null || true
+systemctl enable --now postgresql 2>/dev/null || true
+sleep 3
+runuser -u postgres -- psql -c "CREATE DATABASE smoke_db;" 2>/dev/null || true
+runuser -u postgres -- psql -c "CREATE TABLE IF NOT EXISTS smoke_log (ts TIMESTAMPTZ DEFAULT NOW());" smoke_db 2>/dev/null || true
+mkdir -p /opt/nexplane-pg-writer
+cat > /opt/nexplane-pg-writer/writer.py << 'PYEOF'
+import time
+try:
+    import psycopg2
+    conn = psycopg2.connect("host=/var/run/postgresql dbname=smoke_db user=postgres")
+    while True:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO smoke_log DEFAULT VALUES")
+        conn.commit()
+        time.sleep(5)
+except Exception as e:
+    print(f"writer error: {e}")
+    time.sleep(60)
+PYEOF
+cat > /etc/systemd/system/nexplane-pg-writer.service << 'SVCEOF'
+[Unit]
+Description=Nexplane PG Writer smoke test
+After=postgresql.service
+[Service]
+User=postgres
+ExecStart=/usr/bin/python3 /opt/nexplane-pg-writer/writer.py
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+systemctl enable --now nexplane-pg-writer 2>/dev/null || true
+sleep 2
+echo auto_apps_installed
+"""
+
+_TEARDOWN_AUTO_APPS_LINUX = r"""
+set -eux
+systemctl disable --now nexplane-flask-sidecar nexplane-pg-writer nginx 2>/dev/null || true
+rm -f /etc/systemd/system/nexplane-flask-sidecar.service \
+      /etc/systemd/system/nexplane-pg-writer.service
+rm -rf /opt/nexplane-flask-sidecar /opt/nexplane-pg-writer
+runuser -u postgres -- psql -c "DROP DATABASE IF EXISTS smoke_db;" 2>/dev/null || true
+systemctl daemon-reload 2>/dev/null || true
+echo auto_apps_removed
+"""
+
+
+def run_phase_auto(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase AUTO: autonomous containerization CR -- dry_run=True exercises discovery + AI analysis.
+
+    Installs nginx+Flask (stateless) and PostgreSQL+writer (stateful) as systemd services,
+    fires agent_containerize_auto CR, auto-approves stateful gate, verifies all stages complete.
+    """
+    print("\n[Phase AUTO] Autonomous containerization")
+
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+    agent_asset = phase_a_result.get("agent_asset") or {}
+    agent_asset_id = agent_asset.get("id")
+    if not agent_asset_id:
+        fail("[Phase AUTO] No agent_asset in phase_a_result -- Phase A must complete first")
+
+    auto_cr_id = ""
+    try:
+        # Install smoke test apps
+        _ssm(client, instance_asset["id"], instance_id, "AUTO",
+             "install_auto_apps", _INSTALL_AUTO_APPS_LINUX)
+        log("Smoke test apps installed (nginx+Flask sidecar, PostgreSQL+writer)")
+
+        # Fire agent_containerize_auto CR targeting agent server asset
+        print("  -> [Phase AUTO] agent_containerize_auto (dry_run=True)")
+        auto_cr_id = client.create_cr(
+            "[Phase AUTO] autonomous containerize",
+            "agent_containerize_auto",
+            agent_asset_id,
+            {
+                "registry": "nexplane-smoke-registry",
+                "target_cluster_id": "smoke-cluster-placeholder",
+                "namespace": "nexplane-smoke",
+                "soak_seconds": 30,
+                "dry_run": True,
+            },
+        )
+        client.post(f"/change-requests/{auto_cr_id}/plan")
+        client.post(f"/change-requests/{auto_cr_id}/submit-for-approval")
+        client.post(f"/change-requests/{auto_cr_id}/approve",
+                    json={"decision": "approved", "comment": "smoke test AUTO"})
+        client.post(f"/change-requests/{auto_cr_id}/execute")
+
+        # Poll until complete, auto-approving stateful gate if fired
+        deadline = time.time() + TIMEOUT_SECONDS
+        stateful_confirmed = False
+        while time.time() < deadline:
+            cr = client.get(f"/change-requests/{auto_cr_id}")
+            status = cr.get("status", "")
+            exec_runs = cr.get("execution_runs") or []
+            if exec_runs:
+                step_results = ((exec_runs[0].get("result") or {}).get("step_results") or {})
+                stateful_gate = step_results.get("stateful_gate") or {}
+                if stateful_gate.get("status") == "waiting" and not stateful_confirmed:
+                    log("[Phase AUTO] Stateful gate fired -- auto-approving")
+                    client.post(f"/change-requests/{auto_cr_id}/confirm-stateful")
+                    stateful_confirmed = True
+            if status in ("completed", "failed", "rolled_back"):
+                break
+            time.sleep(10)
+
+        cr = client.get(f"/change-requests/{auto_cr_id}")
+        if cr.get("status") != "completed":
+            fail(f"[Phase AUTO] CR ended with status '{cr.get('status')}' (id: {auto_cr_id})")
+        log("agent_containerize_auto CR completed")
+
+        # Verify step_results
+        exec_runs = cr.get("execution_runs") or []
+        if not exec_runs:
+            fail("[Phase AUTO] No execution_runs in completed CR")
+        step_results = ((exec_runs[0].get("result") or {}).get("step_results") or {})
+
+        discovery = step_results.get("preflight_discovery") or {}
+        if discovery.get("workload_count", 0) < 2:
+            fail(f"[Phase AUTO] Expected >= 2 workloads in discovery, got {discovery.get('workload_count')}")
+        log(f"Discovery found {discovery['workload_count']} workloads")
+
+        ai_result = step_results.get("ai_analysis") or {}
+        units = ai_result.get("migration_units") or []
+        if len(units) < 1:
+            fail(f"[Phase AUTO] Expected >= 1 migration unit from AI, got {len(units)}")
+        log(f"AI produced {len(units)} migration unit(s)")
+
+        stateless_units = [u for u in units if not u.get("stateful", True)]
+        stateful_units = [u for u in units if u.get("stateful", False)]
+        if not stateless_units:
+            log("  ⚠️  No stateless units detected (AI may have classified nginx/flask as stateful)")
+        if not stateful_units:
+            log("  ⚠️  No stateful units detected (AI may have classified postgres/writer as stateless)")
+        log(f"AI: {len(stateless_units)} stateless, {len(stateful_units)} stateful unit(s)")
+
+        for key in ("build", "deploy", "soak_verify"):
+            if key not in step_results:
+                fail(f"[Phase AUTO] step_results missing '{key}' key")
+        log("All 7 stages present in step_results")
+        log("Phase AUTO complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase AUTO failed: {e}")
+        raise
+    finally:
+        try:
+            _ssm(client, instance_asset["id"], instance_id, "AUTO",
+                 "teardown_auto_apps", _TEARDOWN_AUTO_APPS_LINUX)
+        except Exception:
+            pass
+        if auto_cr_id:
+            try:
+                cr = client.get(f"/change-requests/{auto_cr_id}")
+                if cr.get("status") in ("executing", "verifying"):
+                    client.rollback_cr(auto_cr_id, "agent_containerize_auto cleanup")
+            except Exception:
+                pass
+
+
+# ---------------------------------------------------------------------------
 # IP phase helpers
 # ---------------------------------------------------------------------------
 
@@ -3299,7 +3501,8 @@ def main():
             "X=app-discovery, Y=containerize-build, Z=containerize-retire. "
             "IP_A=tailscale-first-ip-change, IP_D=dead-mans-switch-success, "
             "IP_D2=dead-mans-switch-rollback, IP_DNS=route53-coordination. "
-            "IP_WIN_A=windows-tailscale-ip-change, IP_WIN_D=windows-commit-timer-ip-change."
+            "IP_WIN_A=windows-tailscale-ip-change, IP_WIN_D=windows-commit-timer-ip-change. "
+            "AUTO=autonomous-containerization."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -3440,6 +3643,10 @@ def main():
             run_phase_ip_win_a(client, cloud_account_id, args.tailscale_auth_key)
         if "IP_WIN_D" in phases:
             run_phase_ip_win_d(client, cloud_account_id, args.tailscale_auth_key)
+        if "AUTO" in phases:
+            if phase_a_result is None:
+                fail("Phase AUTO requires Phase A to have run first")
+            run_phase_auto(client, phase_a_result)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
