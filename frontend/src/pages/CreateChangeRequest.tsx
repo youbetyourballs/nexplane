@@ -6,7 +6,7 @@ import { changeRequestsApi, assetsApi } from "../api/endpoints";
 import { PageHeader } from "../components/PageHeader";
 import type { AssetType, ChangeType } from "../types/api";
 
-const CHANGE_TYPE_META: Record<ChangeType, { label: string; description: string; outcomeTemplate: string }> = {
+const CHANGE_TYPE_META: Partial<Record<ChangeType, { label: string; description: string; outcomeTemplate: string }>> = {
   dns_update: {
     label: "DNS Update",
     description: "Update a DNS record (A, CNAME, MX, TXT)",
@@ -572,7 +572,7 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   },
   {
     label: "Patching",
-    types: ["patch_packages", "patch_campaign"],
+    types: ["patch_packages", "patch_campaign", "ip_campaign"],
   },
   {
     label: "Identity",
@@ -761,6 +761,9 @@ const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   endpoint: "endpoint",
   container_cluster: "container cluster",
   key_pair: "key pair",
+  kubernetes_cluster: "Kubernetes cluster",
+  kubernetes_workload: "Kubernetes workload",
+  container_image: "container image",
 };
 
 export function CreateChangeRequest() {
@@ -789,7 +792,7 @@ export function CreateChangeRequest() {
     const preType = searchParams.get("changeType") as ChangeType | null;
     if (!preType || !(preType in CHANGE_TYPE_META)) return;
 
-    let template = JSON.parse(CHANGE_TYPE_META[preType].outcomeTemplate);
+    let template = JSON.parse(CHANGE_TYPE_META[preType]?.outcomeTemplate ?? "{}");
 
     const preAssetId = searchParams.get("assetId");
     if (preAssetId && assets) {
@@ -858,7 +861,7 @@ export function CreateChangeRequest() {
 
   function handleTypeChange(type: ChangeType) {
     setChangeType(type);
-    setOutcomeJson(CHANGE_TYPE_META[type].outcomeTemplate);
+    setOutcomeJson(CHANGE_TYPE_META[type]?.outcomeTemplate ?? "{}");
     setJsonError("");
     const filter = CHANGE_TYPE_ASSET_FILTER[type];
     setAutoTypeFilter(filter !== undefined ? (filter ?? null) : null);
@@ -927,8 +930,8 @@ export function CreateChangeRequest() {
                           : "border-slate-200 hover:border-slate-300 text-slate-700"
                       }`}
                     >
-                      <div className="font-medium">{CHANGE_TYPE_META[type].label}</div>
-                      <div className="text-xs text-slate-400 mt-0.5">{CHANGE_TYPE_META[type].description}</div>
+                      <div className="font-medium">{CHANGE_TYPE_META[type]?.label ?? type.replace(/_/g, " ")}</div>
+                      <div className="text-xs text-slate-400 mt-0.5">{CHANGE_TYPE_META[type]?.description ?? ""}</div>
                     </button>
                   ))}
                 </div>

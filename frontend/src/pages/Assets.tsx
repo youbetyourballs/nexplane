@@ -22,6 +22,9 @@ const ASSET_TYPE_ICONS: Record<AssetType, string> = {
   endpoint: "💻",
   container_cluster: "🐳",
   key_pair: "🔐",
+  kubernetes_cluster: "☸️",
+  kubernetes_workload: "📦",
+  container_image: "🐋",
 };
 
 // Parses "payments env:prod tag:pci-scope" into { q: "payments", filters: { env: "prod", tag: "pci-scope" } }
