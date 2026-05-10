@@ -1,0 +1,18 @@
+{
+  "change_type": "agent_containerize_auto",
+  "display_name": "Autonomous Containerization",
+  "description": "AI-directed migration from legacy services to Kubernetes. Deep discovery maps all workloads and dependencies (including brownfield containers), AI analysis determines migration units and stateful classification, then builds, deploys, and verifies via a soak window. Retirement of legacy services requires separate human approval.",
+  "uses_ai": true,
+  "rollback_supported": true,
+  "preflight_checks": ["asset_exists", "agent_registered"],
+  "steps": [
+    {"generic_action": "agent_containerize_auto", "purpose": "execute", "required": true}
+  ],
+  "parameters": {
+    "registry":          {"type": "string",  "required": true,  "description": "Image registry prefix (e.g. 123456.dkr.ecr.us-east-1.amazonaws.com)"},
+    "target_cluster_id": {"type": "string",  "required": true,  "description": "Nexplane asset ID of the target Kubernetes cluster"},
+    "namespace":         {"type": "string",  "required": false, "default": "nexplane-migrations"},
+    "soak_seconds":      {"type": "integer", "required": false, "default": 120, "description": "Health probe soak window before auto-rollback (10-600)"},
+    "dry_run":           {"type": "boolean", "required": false, "default": false, "description": "Run discovery and AI analysis but skip build/deploy/soak"}
+  }
+}
