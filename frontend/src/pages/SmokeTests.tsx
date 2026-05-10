@@ -65,10 +65,21 @@ interface RunModalProps {
 }
 
 function RunModal({ suite, onClose, onRun, isRunning }: RunModalProps) {
+  const [includeSlow, setIncludeSlow] = useState(false);
   const [phases, setPhases] = useState(suite.default_phases);
   const [tailscaleKey, setTailscaleKey] = useState("");
   const [gcpProject, setGcpProject] = useState("");
   const [azureRg, setAzureRg] = useState("");
+
+  // Sync phases field when include-slow toggle changes
+  const handleIncludeSlow = (checked: boolean) => {
+    setIncludeSlow(checked);
+    if (checked && suite.slow_phases) {
+      setPhases(`${suite.default_phases},${suite.slow_phases}`);
+    } else {
+      setPhases(suite.default_phases);
+    }
+  };
 
   const handleRun = () => {
     onRun({
@@ -106,9 +117,18 @@ function RunModal({ suite, onClose, onRun, isRunning }: RunModalProps) {
               placeholder={suite.default_phases || "e.g. A,B,C,D"}
             />
             {suite.slow_phases && (
-              <p className="text-slate-500 text-xs mt-1">
-                Slow phases (excluded by default): {suite.slow_phases}
-              </p>
+              <label className="flex items-center gap-2 mt-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={includeSlow}
+                  onChange={(e) => handleIncludeSlow(e.target.checked)}
+                  className="rounded border-slate-600 bg-navy accent-blue-500"
+                />
+                <span className="text-slate-300 text-sm">
+                  Include slow phases
+                  <span className="text-slate-500 text-xs ml-1">({suite.slow_phases})</span>
+                </span>
+              </label>
             )}
           </div>
         )}
