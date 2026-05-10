@@ -154,3 +154,114 @@ async def _run_scanner_poll():
     for org_id in org_ids:
         async with _db_factory() as db:
             await poll_crowdstrike(db, org_id)
+
+
+async def dispatch_due_reboots():
+    """Dispatch scheduled_reboot CRs whose reboot_at time has passed."""
+    if _db_factory is None:
+        return
+    from datetime import datetime, timezone
+    from sqlalchemy import select
+    from app.models.change_request import ChangeRequest, ChangeType, ChangeRequestStatus
+
+    async with _db_factory() as db:
+        result = await db.execute(
+            select(ChangeRequest).where(
+                ChangeRequest.change_type == ChangeType.scheduled_reboot,
+                ChangeRequest.status == ChangeRequestStatus.approved,
+            )
+        )
+        crs = result.scalars().all()
+
+    now = datetime.now(timezone.utc)
+    for cr in crs:
+        reboot_at_str = (cr.metadata or {}).get("reboot_at") if hasattr(cr, "metadata") else None
+        if not reboot_at_str:
+            continue
+        try:
+            reboot_at = datetime.fromisoformat(reboot_at_str)
+            if reboot_at.tzinfo is None:
+                reboot_at = reboot_at.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            continue
+        if reboot_at <= now:
+            target = getattr(cr, "target_asset_id", None)
+            if target:
+                await _dispatch_agent_reboot_job(target, cr)
+
+
+async def _dispatch_agent_reboot_job(asset_id: str, cr) -> None:
+    """Dispatch a reboot job via agent for a given asset."""
+    pass  # Implemented when agent reboot executor is wired
+
+
+async def check_access_review_schedules():
+    """Create AccessReview records for overdue review schedules."""
+    if _db_factory is None:
+        return
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import text
+    from app.models.access_review import AccessReview
+
+    async with _db_factory() as db:
+        result = await db.execute(text("SELECT * FROM access_review_schedules WHERE enabled = true") if True else None)
+        schedules = result.scalars().all()
+
+        now = datetime.now(timezone.utc)
+        for sched in schedules:
+            if not getattr(sched, "enabled", True):
+                continue
+            freq_days = getattr(sched, "frequency_days", None)
+            last_at = getattr(sched, "last_review_created_at", None)
+            if freq_days is None:
+                continue
+            if last_at and (now - last_at) < timedelta(days=freq_days):
+                continue
+            review = AccessReview(
+                id=uuid.uuid4(),
+                created_by=getattr(sched, "created_by", uuid.uuid4()),
+                title=f"Scheduled Review {now.date().isoformat()}",
+                scope={},
+                snapshot={},
+                decisions={},
+            )
+            db.add(review)
+        await db.commit()
+
+
+async def run_weekly_compliance_scans():
+    """Dispatch CIS audit agent jobs to all managed Linux server assets."""
+    if _db_factory is None:
+        return
+    from sqlalchemy import select
+    from app.models.asset import Asset, AssetType
+
+    async with _db_factory() as db:
+        result = await db.execute(
+            select(Asset).where(Asset.asset_type == AssetType.server)
+        )
+        assets = result.scalars().all()
+
+    for asset in assets:
+        await _dispatch_cis_audit_job(asset.id)
+
+
+async def _dispatch_cis_audit_job(asset_id) -> None:
+    """Dispatch a CIS audit job for a given asset."""
+    pass  # Implemented when compliance scheduler is wired
+
+
+async def promote_queued_changes(db) -> None:
+    """Promote queued_for_maintenance CRs when their maintenance window opens."""
+    from sqlalchemy import select, text
+    from app.models.change_request import ChangeRequest, ChangeRequestStatus
+
+    result = await db.execute(
+        select(ChangeRequest).where(
+            ChangeRequest.status == ChangeRequestStatus.queued_for_maintenance
+        )
+    )
+    crs = result.scalars().all()
+    # For each CR, check if a maintenance window is open; if so, promote to approved
+    for cr in crs:
+        pass  # Window check and promotion logic wired when maintenance window service is active

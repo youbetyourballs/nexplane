@@ -124,7 +124,7 @@ def _check_window_open(window: MaintenanceWindow, now: datetime) -> tuple[bool, 
     if not window.enabled:
         return False, None
     try:
-        cron = croniter(window.cron_schedule, now - timedelta(minutes=window.duration_minutes))
+        cron = croniter(window.cron_schedule, now)
         last_open = cron.get_prev(datetime)
         last_open = last_open.replace(tzinfo=timezone.utc)
         window_close = last_open + timedelta(minutes=window.duration_minutes)

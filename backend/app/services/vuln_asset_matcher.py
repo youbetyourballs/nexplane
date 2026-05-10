@@ -19,11 +19,12 @@ async def match_asset(
     Asset IP and hostname are stored in asset_metadata JSON under keys
     'ip_address' and 'hostname'.
     """
+    from sqlalchemy import cast, String
     if ip:
         result = await db.execute(
             select(Asset.id).where(
                 Asset.organization_id == organization_id,
-                Asset.asset_metadata["ip_address"].astext == ip,
+                cast(Asset.asset_metadata["ip_address"], String) == f'"{ip}"',
             ).limit(1)
         )
         row = result.scalar_one_or_none()
@@ -34,7 +35,7 @@ async def match_asset(
         result = await db.execute(
             select(Asset.id).where(
                 Asset.organization_id == organization_id,
-                Asset.asset_metadata["hostname"].astext == hostname,
+                cast(Asset.asset_metadata["hostname"], String) == f'"{hostname}"',
             ).limit(1)
         )
         row = result.scalar_one_or_none()

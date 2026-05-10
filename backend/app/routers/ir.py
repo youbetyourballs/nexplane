@@ -12,7 +12,7 @@ from app.models.ir_playbook_template import IRPlaybookTemplate
 from app.models.user import User, UserRole
 from app.routers import current_user
 
-router = APIRouter(prefix="/ir", tags=["Incident Response"])
+router = APIRouter(prefix="/api/ir", tags=["Incident Response"])
 
 
 def _require_ir_role(user: User) -> None:
@@ -75,10 +75,7 @@ async def instantiate_ir_playbook(
         description=merged_params.get("reason", ""),
         change_type=change_type,
         target_asset_ids=[merged_params["asset_id"]] if "asset_id" in merged_params else [],
-        desired_outcome=merged_params,
-        incident_response=True,
-        ir_playbook_type=playbook_type,
-        ir_template_id=template.id,
+        desired_outcome={**merged_params, "ir_playbook_type": playbook_type, "ir_template_id": str(template.id)},
         status=initial_status,
     )
     db.add(cr)

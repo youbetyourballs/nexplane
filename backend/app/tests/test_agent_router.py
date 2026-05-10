@@ -1,7 +1,31 @@
 import uuid
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+from app.database import get_db
 from app.main import app
+
+import os
+_TEST_DB_URL = os.environ.get("TEST_DATABASE_URL", "postgresql+asyncpg://nexplane:nexplane_dev@db:5432/nexplane")
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def override_db():
+    """Override get_db with a per-test engine so asyncpg doesn't cross event loops."""
+    _engine = create_async_engine(_TEST_DB_URL, echo=False)
+    async with _engine.connect() as conn:
+        session = AsyncSession(bind=conn, expire_on_commit=False)
+        async def _get_db_override():
+            yield session
+        app.dependency_overrides[get_db] = _get_db_override
+        try:
+            yield
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            await session.close()
+    await _engine.dispose()
 
 
 @pytest.mark.asyncio

@@ -14,38 +14,42 @@ from app.models.change_request import ChangeRequest, ChangeType, RiskLevel, Chan
 from app.models.access_review import AccessReview  # noqa: F401 — ensures table is created in test DB
 from app.services.auth_service import hash_password, create_access_token
 
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-TestSession = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+import os
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://nexplane:nexplane_dev@db:5432/nexplane",
+)
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def create_tables():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+@pytest.fixture(scope="session", autouse=True)
+def create_tables():
+    # create_all against PostgreSQL is a no-op for tables that already exist.
+    # Run synchronously so we don't need a session-scoped event loop.
+    async def _create():
+        _engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+        async with _engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await _engine.dispose()
+
+    asyncio.run(_create())
     yield
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
 
 
 @pytest_asyncio.fixture
 async def db():
-    async with engine.connect() as conn:
-        await conn.begin()
-        session = AsyncSession(bind=conn, expire_on_commit=False)
-        try:
-            yield session
-        finally:
-            await session.close()
-            await conn.rollback()
+    # Each test gets a fresh engine+connection in its own event loop.
+    _engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    try:
+        async with _engine.connect() as conn:
+            await conn.begin()
+            session = AsyncSession(bind=conn, expire_on_commit=False)
+            try:
+                yield session
+            finally:
+                await session.close()
+                await conn.rollback()
+    finally:
+        await _engine.dispose()
 
 
 @pytest_asyncio.fixture

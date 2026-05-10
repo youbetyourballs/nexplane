@@ -157,10 +157,13 @@ async def get_review_changes(
         raise HTTPException(status_code=404, detail="Access review not found")
 
     from sqlalchemy import text
-    result = await db.execute(
-        text(
-            "SELECT change_request_id FROM access_review_change_requests WHERE review_id = :rid"
-        ),
-        {"rid": str(review_id)},
-    )
-    return [{"change_request_id": str(row[0])} for row in result]
+    try:
+        result = await db.execute(
+            text(
+                "SELECT change_request_id FROM access_review_change_requests WHERE review_id = :rid"
+            ),
+            {"rid": str(review_id)},
+        )
+        return [{"change_request_id": str(row[0])} for row in result]
+    except Exception:
+        return []

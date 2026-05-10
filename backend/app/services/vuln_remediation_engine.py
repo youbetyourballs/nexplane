@@ -94,7 +94,15 @@ async def generate_change_request_for_finding(
         select(User).where(User.organization_id == finding.organization_id).limit(1)
     )
     system_user = user_result.scalar_one_or_none()
-    requester_id = system_user.id if system_user else finding.organization_id
+    if system_user is None:
+        # No user in org — look for any admin in the system as a fallback
+        any_user = await db.execute(select(User).limit(1))
+        system_user = any_user.scalar_one_or_none()
+    if system_user is None:
+        raise RuntimeError(
+            "Cannot generate auto-remediation CR: no users exist in the system"
+        )
+    requester_id = system_user.id
 
     cr = ChangeRequest(
         organization_id=finding.organization_id,

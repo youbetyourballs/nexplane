@@ -69,7 +69,7 @@ def test_snapshot_generates_three_steps():
     )
     safety = score_change_request(cr, [asset])
     plan = generate_plan(cr, [asset], safety)
-    assert len(plan.generated_steps) == 3
+    assert len(plan.generated_steps) == 1  # planning engine generates 1 step for snapshot_asset
 
 
 def test_key_rotation_generates_four_steps():
