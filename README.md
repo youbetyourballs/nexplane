@@ -103,7 +103,7 @@ Nexplane gives security teams a governed execution layer:
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS, TanStack Query v5, React Router v6 |
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 async, Pydantic v2 |
 | Database | PostgreSQL 16 |
-| Migrations | Alembic (37+ migrations, 30+ tables) |
+| Migrations | Alembic (38+ migrations, 30+ tables) |
 | Workflow | Temporal-pattern abstraction (asyncio MVP, Temporal-ready) |
 | Auth | JWT + bcrypt |
 | AI | Anthropic Claude + OpenAI (multi-provider, default configurable) |
@@ -166,6 +166,7 @@ Full lifecycle: Draft → Planned → Awaiting Approval → Approved → Executi
 | EC2 | `ec2_launch`, `ec2_start`, `ec2_stop`, `ec2_reboot`, `ec2_terminate`, `key_pair_create`, `key_pair_delete` |
 | SSM | `ssm_command` (run any approved SSM document against an EC2 instance) |
 | Network | `tailscale_join`, `tailscale_remove` |
+| IP Migration | `change_ip`, `migrate_ip`, `ip_campaign` |
 | Agent | `deploy_nexplane_agent`, `patch_packages`, `patch_campaign`, `isolate_host`, `rolling_restart`, `canary_config_push`, `distribute_file`, `fleet_health_check` |
 | Identity | `offboard_user`, `onboard_user`, `key_rotation`, `rotate_db_credentials`, `rotate_ssh_keys`, `rotate_api_key`, `rotate_service_account` |
 | IAM | `iam_user_create`, `iam_user_delete` |
@@ -263,6 +264,45 @@ The Tailscale connector enables secure mesh networking as a tracked change:
 - **Auth key management** — store a reusable pre-authorized key in the connector credentials; no OAuth complexity
 
 The backend container itself joins the tailnet during smoke tests using kernel TUN mode (`/dev/net/tun`) so EC2 instances can reach the control plane via Tailscale after joining.
+
+### IP Migration
+
+Nexplane orchestrates IP address changes on live hosts with automatic rollback safety. The `change_ip` change type dispatches to the Nexplane agent, which captures a full network snapshot before making any change and restores it on rollback.
+
+**Methods -- applied in order of risk (lowest to highest):**
+
+| # | Method | When to use | Connectivity guarantee |
+|---|--------|-------------|----------------------|
+| 1 | `tailscale` | Tailscale is active on the host | Agent stays reachable via Tailscale overlay; physical IP change is transparent |
+| 2 | `secondary_swap` | Secondary IP can be assigned to the ENI/NIC | Old IP stays active until new IP is confirmed; two-phase commit |
+| 3 | `commit_timer` | Tailscale not available; commit timer safety net required | Agent probes control plane after change; auto-rolls back if unreachable within the timer window |
+| 4 | `manual` | Planned maintenance with human confirmation | Change is applied; operator confirms before it is committed |
+
+`auto` (the default) selects the lowest-risk method available at execution time.
+
+**Dead man's switch (commit_timer):**
+
+Before applying the change, the agent writes `pending_rollback.json` to disk. A background goroutine probes `{control-plane}/health` every N seconds. If the probe succeeds within the timer window the file is deleted and the change is committed. If the probe never succeeds (or the agent crashes and restarts), `pending_rollback.json` is detected at startup and the original configuration is restored automatically.
+
+The timer window is configurable per CR (`commit_timer_seconds`, default 30s, range 10-300s). The probe URL defaults to the agent's configured control plane URL (`NP_CONTROL_PLANE` env var).
+
+**Multi-host campaigns (`ip_campaign`):**
+
+Orchestrates IP changes across a fleet with `batch_size` control and an abort threshold -- if the error rate across a batch exceeds `abort_error_threshold`, the campaign halts and rolls back completed hosts.
+
+**DNS coordination (`migrate_ip`):**
+
+The `migrate_ip` change type is a multi-stage orchestrator that handles DNS TTL-aware ordering:
+- Short TTL records (<= 120s): single CR updates IP and DNS together
+- Long TTL records (> 120s): two-CR sequence -- `prepare_dns` lowers TTL first, then `migrate_ip` changes the IP once propagation is confirmed
+
+**IP Migration Wizard (UI):**
+
+Available on server and endpoint asset detail pages via the "Change IP" button in the Network section. Guides the operator through four steps: Configure (interface, new IP, gateway, DNS, method, timer) -> Pre-flight (live dry-run checks via CR) -> Execute (stage progress + commit timer countdown) -> Verify (connectivity confirmation + rollback button).
+
+**Rollback:**
+
+`change_ip_rollback` restores all pre-change state from the snapshot: IP addresses, gateway, routes, DNS servers, and MTU. Rollback can be triggered manually from the CR detail page, automatically by the dead man's switch timer, or by calling `client.rollback_cr()` from the smoke tests.
 
 ### Database Administration
 
@@ -386,7 +426,7 @@ The service principal needs two roles assigned at the subscription scope:
 
 - Use a **reusable** auth key (not single-use). Single-use keys are consumed on the first node join and break subsequent smoke test runs.
 - The key must be **pre-authorized** (no manual approval step in the Tailscale admin console).
-- Pass the key via `--tailscale-auth-key tskey-auth-<key>` when running agent smoke tests.
+- Pass the key via `--tailscale-auth-key tskey-auth-<key>` when running smoke tests, or leave it unset and configure the Tailscale connector with the key -- the smoke test runner reads from the connector automatically when no flag is provided. The Smoke Tests UI has the same behavior: leave the Tailscale Auth Key field blank to use the connector key.
 
 ### Nexplane Agent
 
@@ -414,6 +454,7 @@ https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/
 
 | Package | Commands | Platform |
 |---------|----------|----------|
+| `changip` | `change_ip` (tailscale/secondary_swap/commit_timer/manual methods, dead man's switch, snapshot+rollback), `change_ip_rollback` | Linux + Windows |
 | `linuxpatch` | `apply_linux_patches` (apt/yum/dnf, security-only or CVE-targeted, dry-run, before/after diff), `audit_linux_patch_status` | Linux |
 | `winpatch` | `apply_windows_patches` (WUA COM API, specific KB, reboot scheduling), `audit_windows_patch_status` | Windows |
 | `isolation` | `isolate_host` (flush iptables/nftables, allow management CIDR only), `restore_network_access` | Linux + Windows |
@@ -467,6 +508,11 @@ nexplane/
 │   ├── poller/                          # Ephemeral and service modes
 │   ├── executor/                        # Command dispatcher (30+ commands registered)
 │   └── commands/
+│       ├── changip/                     # IP change: tailscale/secondary_swap/commit_timer/manual
+│       │                                # changip_linux.go (nmcli + ip addr fallback)
+│       │                                # changip_windows.go (netsh)
+│       │                                # changip_deadman.go (dead man's switch, platform-neutral)
+│       │                                # changip_tailscale.go (Tailscale detection, platform-neutral)
 │       ├── linuxpatch/                  # apt/yum/dnf security patches
 │       ├── winpatch/                    # Windows Update via WUA COM API
 │       ├── isolation/                   # Network isolation (iptables/nftables/WF)
@@ -489,7 +535,7 @@ nexplane/
 │   │                                    # Includes: Tailscale, Terraform 1.7.5, Ansible,
 │   │                                    # community.aws collection, session-manager-plugin
 │   ├── seed.py                          # Demo data (org, users, assets, connectors, CRs, projects)
-│   ├── alembic/versions/                # 37+ migrations (001→037), 30+ tables
+│   ├── alembic/versions/                # 38+ migrations (001->038), 30+ tables
 │   └── app/
 │       ├── main.py                      # App factory + router registration
 │       ├── models/
@@ -620,6 +666,7 @@ Start-Service NexplaneAgent
 | `--control-plane` | `NP_CONTROL_PLANE` | (required) |
 | `--secret` | `NP_SECRET` | (required) |
 | `--mode` | `NP_MODE` | `service` |
+| `--hostname` | `NP_HOSTNAME` | OS hostname |
 | `--poll-interval` | `NP_POLL_INTERVAL` | `30s` |
 
 ---
@@ -633,7 +680,7 @@ Nexplane has a live smoke test suite that verifies end-to-end functionality agai
 | File | Coverage |
 |------|----------|
 | `smoke_helpers.py` | Shared infrastructure (NexplaneClient, cloud SDK helpers, constants, per-provider client factories) |
-| `test_aws_live.py` | AWS phases A–W: EC2, IAM, S3, Route53, RDS, CloudWatch, ALB, Terraform, Ansible, agent |
+| `test_aws_live.py` | AWS phases A-X + IP_A/IP_D/IP_D2: EC2, IAM, S3, Route53, RDS, CloudWatch, ALB, Terraform, Ansible, agent, IP migration |
 | `test_gcp_live.py` | GCP phases L–R: GCE, firewall, storage, service accounts, Terraform, Ansible |
 | `test_azure_live.py` | Azure phases N–Z: VM, NSG, blob storage, managed identity, RBAC, VNet, DNS, SQL Database, Monitor alerts, tagging, Terraform, Ansible |
 | `test_agent_live.py` | All Linux agent command groups (12 packages) × AWS; stub tracks for GCP/Azure/Windows |
@@ -645,10 +692,20 @@ All smoke test files are independently runnable from inside the backend containe
 
 ```bash
 # AWS phases A-D (default, no slow RDS/EC2-stop phases)
+# --tailscale-auth-key is optional; if omitted the Tailscale connector key is used automatically
 docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --email admin@acme.example --password admin123 \
-  --phases A,B,C,D \
-  --tailscale-auth-key tskey-auth-<key>
+  --phases A,B,C,D
+
+# AWS IP migration phases (Linux, runs after Phase A -- shares the same EC2 instance)
+docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
+  --email admin@acme.example --password admin123 \
+  --phases A,IP_A,IP_D,IP_D2
+
+# AWS IP migration phases (Windows -- slow, ~15 min per phase)
+docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
+  --email admin@acme.example --password admin123 \
+  --phases IP_WIN_A,IP_WIN_D
 
 # AWS new phases P-T (IAM advanced, S3 policy, DNS failover, agent lifecycle)
 docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
@@ -740,21 +797,19 @@ docker exec nexplane-backend-1 python tests/smoke/test_multicloud_live.py \
 End-to-end integration test that creates and destroys real AWS resources against a live account. Verifies the full chain from Nexplane CR → AWS API → asset inventory. All phases use the **rollback stack pattern** — each CR is pushed to a LIFO stack; the `finally` block triggers Nexplane's own rollback system in reverse order, followed by boto3 safety-net cleanup.
 
 ```bash
-# Quick run (no RDS — ~15–25 minutes depending on phases)
+# Default phases -- no RDS, ~15-25 minutes. Tailscale key pulled from connector if omitted.
 docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --base-url http://localhost:8000 \
   --email admin@acme.example \
   --password admin123 \
-  --phases A,B,C,D,E,F,G,H,I,K \
-  --tailscale-auth-key tskey-auth-<your-key>
+  --phases A,B,C,D,E,F,G,H,I,K,IP_A,IP_D,IP_D2
 
-# Full run including RDS (~35 min additional for Phase J)
+# Full run including RDS and Windows IP phases (~60 min)
 docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
-  --phases A,B,C,D,E,F,G,H,I,J,K \
-  --tailscale-auth-key tskey-auth-<your-key> \
   --base-url http://localhost:8000 \
   --email admin@acme.example \
-  --password admin123
+  --password admin123 \
+  --phases A,B,C,D,E,F,G,H,I,J,K,IP_A,IP_D,IP_D2,IP_WIN_A,IP_WIN_D
 ```
 
 **Prerequisites:**
@@ -777,7 +832,20 @@ docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
 | **H** | S3 bucket create → lifecycle → bucket policy → public access block → delete | S3 bucket (deleted) | — |
 | **I** | Route53 private zone + A record create/update/delete; boto3 verification | Hosted zone (deleted) | — |
 | **J** | RDS db.t3.micro create → snapshot → verify → delete (~25–35 min) | RDS instance + snapshot (deleted) | — |
-| **K** | CloudWatch alarms create → trigger via SSM custom metric → verify ALARM state → rollback | CloudWatch alarms (deleted) | Phase A |
+| **K** | CloudWatch alarms create -> trigger via SSM custom metric -> verify ALARM state -> rollback | CloudWatch alarms (deleted) | Phase A |
+| **IP_A** | change_ip (tailscale method) on dummy interface -> verify new IP applied -> rollback -> verify restored | dummy NM interface (deleted) | Phase A |
+| **IP_D** | change_ip (commit_timer, success path) -> verify timer cancelled -> verify new IP -> rollback | dummy NM interface (deleted) | Phase A |
+| **IP_D2** | change_ip (commit_timer, unreachable probe URL) -> wait for dead man's switch to fire -> verify original IP restored | dummy NM interface (deleted) | Phase A |
+| **IP_DNS** | migrate_ip with Route53 DNS update -> verify A record updated -> rollback -> verify A record reverted | Route53 A record (deleted); skipped if no test zone | Phase A |
+| **IP_WIN_A** | Windows EC2: change_ip (tailscale method) -> verify new IP via PowerShell -> rollback | Windows EC2 (terminated) | -- (slow) |
+| **IP_WIN_D** | Windows EC2: change_ip (commit_timer, success) -> verify timer file gone -> verify new IP -> rollback | Windows EC2 (terminated) | -- (slow) |
+
+**IP phase design notes:**
+
+- IP_A, IP_D, IP_D2 use a temporary dummy network interface (`ip link add type dummy`) so the real EC2 ENI IP is never changed, which would break SSM and Tailscale connectivity on AWS.
+- IP_WIN_A and IP_WIN_D spin up their own Windows EC2 instance with Tailscale and the Nexplane agent installed. They are in `slow_phases` and opt-in via the "Include slow phases" checkbox in the Smoke Tests UI.
+- IP_DNS is skipped gracefully if the Route53 hosted zone `smoke.nexplane.internal` does not exist.
+- All IP phases use the agent server asset (not the raw EC2 inventory asset) as the CR target, because `change_ip` dispatches to the agent registration, not to the cloud connector.
 
 All resources are created under `nexplane-smoke-*` / `nexplane-smoke-test-*` naming prefixes and cleaned up even on failure. The `cleanup()` function in Phase A handles EC2/key-pair teardown; each phase's `finally` block handles its own resources via the rollback stack + boto3 safety net.
 
@@ -861,14 +929,14 @@ cd agent
 go test ./...
 
 # Live AWS smoke test (requires AWS credentials + real account)
-# Quick (no RDS):
+# Tailscale key is optional -- omit to use the Tailscale connector key
 docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --base-url http://localhost:8000 \
   --email admin@acme.example \
   --password admin123 \
-  --phases A,B,C,D,E,F,G,H,I,K \
-  --tailscale-auth-key tskey-auth-<key>
-# Full (includes RDS ~30 min): --phases A,B,C,D,E,F,G,H,I,J,K
+  --phases A,B,C,D,E,F,G,H,I,K,IP_A,IP_D,IP_D2
+# With RDS (~30 min extra): add J
+# With Windows IP phases (~15 min per): add IP_WIN_A,IP_WIN_D
 ```
 
 > **Note:** When running via Docker Compose on Windows, Vite's file watcher may not pick up changes. Run:
