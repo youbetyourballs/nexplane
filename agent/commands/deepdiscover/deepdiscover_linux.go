@@ -4,6 +4,7 @@ package deepdiscover
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -28,12 +29,16 @@ func executeOS(_ map[string]any) (*DeepDiscoveryResult, error) {
 	kubeWorkloads := detectKubePodsLinux()
 	workloads = append(workloads, kubeWorkloads...)
 
-	// Attach listening ports to workloads (shared port map)
 	listeningPorts := collectListeningPortsLinux()
-	_ = listeningPorts // ports are returned independently; workloads carry their own slice
+	establishedConns := collectEstablishedConnsLinux()
 
-	// Attach established connections
-	_ = collectEstablishedConnsLinux()
+	// Attach all listening ports and established connections to workloads.
+	// v1: attach ports to all workloads (PID-level attribution deferred to v2).
+	// Connections are stored at result level for fleet cross-reference.
+	for i := range workloads {
+		workloads[i].ListeningPorts = listeningPorts
+		workloads[i].OutboundConns = establishedConns
+	}
 
 	// Attach IPC sockets
 	attachIPCSockets(workloads)
@@ -336,9 +341,10 @@ func detectKubePodsLinux() []DiscoveredWorkload {
 	kubeletSock := "/var/run/kubelet.sock"
 	containerdSock := "/run/containerd/containerd.sock"
 
+	socketPaths := []string{kubeletSock, containerdSock}
 	found := false
-	for _, sockPath := range []string{kubeletSock, containerdSock} {
-		if err := execCommandLinux("test", "-S", sockPath).Run(); err == nil {
+	for _, p := range socketPaths {
+		if fi, err := os.Stat(p); err == nil && fi.Mode()&os.ModeSocket != 0 {
 			found = true
 			break
 		}
