@@ -320,7 +320,54 @@ export type ChangeType =
   | "k8s_workload_deploy"
   | "change_ip"
   | "migrate_ip"
-  | "ip_campaign";
+  | "ip_campaign"
+  | "patch_packages"
+  | "patch_campaign"
+  | "offboard_user"
+  | "onboard_user"
+  | "rotate_db_credentials"
+  | "rotate_ssh_keys"
+  | "rotate_api_key"
+  | "rotate_service_account"
+  | "isolate_host"
+  | "lockdown_account"
+  | "phishing_response"
+  | "preserve_evidence"
+  | "terraform_apply"
+  | "ansible_playbook"
+  | "helm_upgrade"
+  | "provision_db_user"
+  | "deprovision_db_user"
+  | "db_permission_change"
+  | "configure_db_audit"
+  | "promote_db_replica"
+  | "db_connection_config"
+  | "create_backup"
+  | "verify_backup"
+  | "enforce_cis_benchmark"
+  | "dr_failover"
+  | "iam_enforce_mfa"
+  | "s3_block_public_access"
+  | "agent_linux_patch"
+  | "agent_ossecurity"
+  | "agent_linuxauth"
+  | "agent_crossplatform"
+  | "agent_compliance"
+  | "agent_forensics"
+  | "agent_fleet"
+  | "agent_backup"
+  | "agent_reboot"
+  | "agent_credrotation"
+  | "agent_iac"
+  | "agent_linuxupgrade"
+  | "agent_win_patch"
+  | "agent_winharden"
+  | "restore_files"
+  | "scheduled_reboot"
+  | "collect_evidence"
+  | "generic_remediation"
+  | "notify_only"
+  | "suppress";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
@@ -406,6 +453,8 @@ export interface BlastRadius {
   affected_services: string[];
   recovery_time_estimate: string;
   rollback_available: boolean;
+  impact_description?: string;
+  panel_title?: string;
 }
 
 export interface ChangePlan {

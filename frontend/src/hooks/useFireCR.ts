@@ -21,8 +21,10 @@ export function useFireCR() {
         target_asset_ids: [params.targetAssetId],
         desired_outcome: params.parameters,
       });
-      // Auto-execute: generate plan then execute
+      // Auto-execute: full workflow (plan → submit → approve → execute)
       await changeRequestsApi.generatePlan(cr.id);
+      await changeRequestsApi.submitForApproval(cr.id);
+      await changeRequestsApi.approve(cr.id, { decision: "approved", comment: "Auto-approved by wizard" });
       const run = await changeRequestsApi.execute(cr.id);
       return (run as unknown as Record<string, unknown>) ?? {};
     } finally {

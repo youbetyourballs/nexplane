@@ -417,6 +417,42 @@ const ASSET_ACTIONS: Record<AssetType, QuickAction[]> = {
       description: (a) => `Delete and recreate key pair ${a.asset_metadata?.key_name ?? a.name}.`,
     },
   ],
+  kubernetes_cluster: [
+    {
+      changeType: "helm_upgrade",
+      label: "Helm Upgrade",
+      title: (a) => `Helm upgrade on ${a.name}`,
+      description: (a) => `Upgrade a Helm release on cluster ${a.name}.`,
+    },
+    {
+      changeType: "rolling_restart",
+      label: "Rolling Restart",
+      title: (a) => `Rolling restart on ${a.name}`,
+      description: (a) => `Rolling restart of all workloads on cluster ${a.name}.`,
+    },
+  ],
+  kubernetes_workload: [
+    {
+      changeType: "helm_upgrade",
+      label: "Helm Upgrade",
+      title: (a) => `Upgrade ${a.name}`,
+      description: (a) => `Upgrade Helm release for workload ${a.name}.`,
+    },
+    {
+      changeType: "rolling_restart",
+      label: "Rolling Restart",
+      title: (a) => `Restart ${a.name}`,
+      description: (a) => `Rolling restart of workload ${a.name}.`,
+    },
+  ],
+  container_image: [
+    {
+      changeType: "patch_packages",
+      label: "Patch Image",
+      title: (a) => `Patch ${a.name}`,
+      description: (a) => `Apply security patches and rebuild container image ${a.name}.`,
+    },
+  ],
 };
 
 export function AssetDetail() {

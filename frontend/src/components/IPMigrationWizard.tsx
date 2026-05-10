@@ -67,7 +67,7 @@ export function IPMigrationWizard({
   const [currentStep, setCurrentStep] = useState(1);
 
   // Step 1 form state
-  const [iface, setIface] = useState("eth0");
+  const [iface, setIface] = useState("ens5");
   const [newIp, setNewIp] = useState("");
   const [newGateway, setNewGateway] = useState(currentGateway);
   const [dnsServers, setDnsServers] = useState("");
@@ -271,9 +271,9 @@ export function IPMigrationWizard({
           try {
             const cr = await apiClient.get(`/change-requests/${crId}`);
             const status: string = (cr.data as Record<string, unknown>)?.status as string ?? "";
+            const execRun = ((cr.data as Record<string, unknown>)?.execution_runs as Array<Record<string, unknown>>)?.[0];
             const stepResults: Record<string, unknown> =
-              ((cr.data as Record<string, unknown>)?.execution_runs as Array<Record<string, unknown>>)?.[0]
-                ?.result?.step_results as Record<string, unknown> ?? {};
+              ((execRun?.result as Record<string, unknown>)?.step_results as Record<string, unknown>) ?? {};
 
             setStages(mapCRToStages(stepResults));
 
@@ -371,8 +371,7 @@ export function IPMigrationWizard({
 
   const step1Valid =
     iface.trim().length > 0 &&
-    /^[\d.]+\/\d+$/.test(newIp.trim()) &&
-    newGateway.trim().length > 0;
+    /^[\d.]+\/\d+$/.test(newIp.trim());
 
   const showTimerSlider = method === "commit_timer" || method === "auto";
 
@@ -461,7 +460,7 @@ export function IPMigrationWizard({
                     type="text"
                     value={iface}
                     onChange={(e) => setIface(e.target.value)}
-                    placeholder="eth0"
+                    placeholder="ens5 / eth0 / Ethernet"
                     className="w-full text-sm border border-slate-200 rounded px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono"
                   />
                 </div>
@@ -483,7 +482,7 @@ export function IPMigrationWizard({
                 {/* New Gateway */}
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    New Gateway
+                    New Gateway <span className="text-slate-400 font-normal">(optional)</span>
                   </label>
                   <input
                     type="text"
