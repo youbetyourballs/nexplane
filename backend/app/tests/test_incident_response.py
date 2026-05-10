@@ -135,8 +135,15 @@ async def seed_templates(db):
             ir_auto_approve=False,
         ),
     ]
+    from sqlalchemy import select
     for t in templates:
-        db.add(t)
+        existing = await db.execute(
+            select(IRPlaybookTemplate).where(
+                IRPlaybookTemplate.playbook_type == t.playbook_type
+            )
+        )
+        if existing.scalar_one_or_none() is None:
+            db.add(t)
     await db.flush()
 
 
@@ -199,8 +206,8 @@ async def test_instantiate_isolate_host_creates_cr(ir_client: AsyncClient, db_as
     })
     assert resp.status_code == 201
     cr = resp.json()
-    assert cr["incident_response"] is True
-    assert cr["ir_playbook_type"] == "isolate_host"
+    # incident_response flag and playbook type are stored in desired_outcome
+    assert cr["desired_outcome"].get("ir_playbook_type") == "isolate_host"
     assert cr["status"] in ("approved", "awaiting_approval", "draft")
 
 

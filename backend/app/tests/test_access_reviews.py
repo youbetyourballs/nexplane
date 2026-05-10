@@ -1,5 +1,16 @@
 import uuid
 import pytest
+import pytest_asyncio
+from unittest.mock import patch, AsyncMock
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def patch_background_db():
+    """Patch background snapshot collection to avoid AsyncSessionLocal cross-loop issues."""
+    async def _noop(*args, **kwargs):
+        pass
+    with patch("app.routers.access_reviews._collect_snapshot", side_effect=_noop):
+        yield
 
 
 @pytest.mark.asyncio

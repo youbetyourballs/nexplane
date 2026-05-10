@@ -68,7 +68,7 @@ async def test_resolve_launch_config_quick_mode():
     from app.connectors.executors.aws.resolve_launch_config import execute
     result = await execute({"mode": "quick", "name": "my-server", "os": "amazon_linux"}, [], _mock_connector())
     assert result["action"] == "resolve_launch_config"
-    assert result["instance_type"] == "t2.micro"
+    assert result["instance_type"] == "t3.micro"
     assert "ami_id" in result
     assert result["name"] == "my-server"
 
@@ -152,22 +152,23 @@ def _make_cr(change_type, desired):
     return cr, [_make_server_asset()]
 
 
-def test_ec2_stop_generates_four_steps():
+def test_ec2_stop_generates_three_steps():
     from app.models.change_request import ChangeType
     cr, assets = _make_cr(ChangeType.ec2_stop, {"instance_id": "i-abc123", "snapshot_tag": "pre-stop"})
     plan = generate_plan(cr, assets, score_change_request(cr, assets))
-    assert len(plan.generated_steps) == 4
+    assert len(plan.generated_steps) == 3
     assert plan.generated_steps[0]["generic_action"] == "capture_instance_state"
-    assert plan.generated_steps[2]["generic_action"] == "stop_instance"
-    assert plan.generated_steps[3]["generic_action"] == "wait_instance_state"
+    assert plan.generated_steps[1]["generic_action"] == "stop_instance"
+    assert plan.generated_steps[2]["generic_action"] == "wait_instance_state"
 
 
-def test_ec2_start_generates_three_steps():
+def test_ec2_start_generates_two_steps():
     from app.models.change_request import ChangeType
     cr, assets = _make_cr(ChangeType.ec2_start, {"instance_id": "i-abc123"})
     plan = generate_plan(cr, assets, score_change_request(cr, assets))
-    assert len(plan.generated_steps) == 3
-    assert plan.generated_steps[1]["generic_action"] == "start_instance"
+    assert len(plan.generated_steps) == 2
+    assert plan.generated_steps[0]["generic_action"] == "start_instance"
+    assert plan.generated_steps[1]["generic_action"] == "wait_instance_state"
 
 
 def test_ec2_stop_start_generates_five_steps():

@@ -18,9 +18,7 @@ def make_finding(**kwargs) -> VulnerabilityFinding:
         title="Test finding",
     )
     defaults.update(kwargs)
-    f = VulnerabilityFinding.__new__(VulnerabilityFinding)
-    for k, v in defaults.items():
-        setattr(f, k, v)
+    f = VulnerabilityFinding(**defaults)
     return f
 
 
@@ -37,9 +35,7 @@ def make_policy(**kwargs) -> RemediationPolicy:
         enabled=True,
     )
     defaults.update(kwargs)
-    p = RemediationPolicy.__new__(RemediationPolicy)
-    for k, v in defaults.items():
-        setattr(p, k, v)
+    p = RemediationPolicy(**defaults)
     return p
 
 
@@ -112,7 +108,7 @@ async def test_generate_change_request_creates_draft(db_session, test_org, test_
     ):
         cr = await generate_change_request_for_finding(test_finding, None, db_session)
 
-    assert str(cr.status) == "draft"
+    assert cr.status.value == "draft"
     assert cr.source == "auto_remediation"
     assert test_finding.change_request_id == cr.id
     assert test_finding.status == "change_request_generated"
@@ -128,4 +124,4 @@ async def test_generate_change_request_uses_policy_action(db_session, test_org, 
     ):
         cr = await generate_change_request_for_finding(test_finding, policy, db_session)
 
-    assert str(cr.change_type) == "security_group_update"
+    assert cr.change_type.value == "security_group_update"
