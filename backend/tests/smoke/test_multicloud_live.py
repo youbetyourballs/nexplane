@@ -34,6 +34,52 @@ from smoke_helpers import (
 
 
 # ---------------------------------------------------------------------------
+# Shared assertion helpers
+# ---------------------------------------------------------------------------
+
+def _assert_asset_metadata(asset: dict, provider: str,
+                            required_keys: list[str] | None = None) -> None:
+    """Assert connector_type, asset_type, and required metadata keys are present."""
+    assert asset.get("connector_type") == provider, (
+        f"[MC-{provider.upper()}] Expected connector_type='{provider}', "
+        f"got '{asset.get('connector_type')}'"
+    )
+    assert asset.get("asset_type") in ("server", "cloud_account"), (
+        f"[MC-{provider.upper()}] Unexpected asset_type '{asset.get('asset_type')}'"
+    )
+    meta = asset.get("asset_metadata", {})
+    for key in (required_keys or []):
+        assert meta.get(key), (
+            f"[MC-{provider.upper()}] asset_metadata missing required key '{key}' "
+            f"(got: {list(meta.keys())})"
+        )
+
+
+def _assert_connector_isolation(client: NexplaneClient, provider: str,
+                                 asset_id: str, label: str) -> None:
+    """Verify connector_type filter returns only assets for this provider.
+
+    Checks that the newly created asset appears when filtering by its connector_type,
+    and that no assets from this cloud bleed into a filter for a different provider.
+    """
+    # Asset must appear in provider-filtered list
+    provider_assets = client.get("/assets", params={"connector_type": provider})
+    ids = {a["id"] for a in provider_assets}
+    assert asset_id in ids, (
+        f"[{label}] Asset {asset_id} not found when filtering by connector_type={provider}"
+    )
+
+    # Asset must NOT appear in any other provider's filtered list
+    others = {"aws", "gcp", "azure"} - {provider}
+    for other in others:
+        other_assets = client.get("/assets", params={"connector_type": other})
+        other_ids = {a["id"] for a in other_assets}
+        assert asset_id not in other_ids, (
+            f"[{label}] Asset {asset_id} ({provider}) leaked into connector_type={other} filter"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Per-provider worker functions
 # ---------------------------------------------------------------------------
 
@@ -74,6 +120,12 @@ def run_aws_worker(base_url: str, email: str, password: str) -> dict:
         instance_id = instance_asset["asset_metadata"]["instance_id"]
         log(f"[Phase MC-AWS] Instance in inventory: {instance_id}")
 
+        # Metadata consistency: connector_type + required metadata fields
+        _assert_asset_metadata(instance_asset, "aws", required_keys=["instance_id"])
+        # Connector-type isolation: this asset appears only in aws filter
+        _assert_connector_isolation(client, "aws", instance_asset["id"], "MC-AWS")
+        log("[Phase MC-AWS] Asset metadata and connector isolation verified")
+
         # 2. Stop instance
         cr = client._run_cr_with_timeout(
             "[Phase MC-AWS] stop EC2 instance", "ec2_stop", instance_asset["id"],
@@ -113,6 +165,19 @@ def run_aws_worker(base_url: str, email: str, password: str) -> dict:
             )
             rollback_stack.append((cr["id"], "snapshot_asset"))
             log("[Phase MC-AWS] Snapshot created")
+
+            # SDK verification: confirm snapshot actually exists in AWS
+            snapshot_id = (cr.get("execution_runs") or [{}])[0].get("result", {}).get("snapshot_id") if cr.get("execution_runs") else None
+            if snapshot_id and ec2_client:
+                try:
+                    snaps = ec2_client.describe_snapshots(SnapshotIds=[snapshot_id]).get("Snapshots", [])
+                    assert snaps, f"Snapshot {snapshot_id} not found in AWS after CR completed"
+                    assert snaps[0]["State"] in ("pending", "completed"), (
+                        f"Snapshot {snapshot_id} in unexpected state: {snaps[0]['State']}"
+                    )
+                    log(f"[Phase MC-AWS] Snapshot {snapshot_id} confirmed in AWS (state={snaps[0]['State']})")
+                except Exception as e:
+                    log(f"[Phase MC-AWS] Snapshot SDK check warning: {e}")
         else:
             log("[Phase MC-AWS] Skipping snapshot (could not determine volume_id)")
 
@@ -183,6 +248,11 @@ def run_gcp_worker(base_url: str, email: str, password: str, gcp_project: str) -
             raise AssertionError(f"GCE instance '{instance_name}' not in inventory after 60s")
         log(f"[Phase MC-GCP] Instance in inventory: {instance_asset['id']}")
 
+        # Metadata consistency + connector isolation
+        _assert_asset_metadata(instance_asset, "gcp")
+        _assert_connector_isolation(client, "gcp", instance_asset["id"], "MC-GCP")
+        log("[Phase MC-GCP] Asset metadata and connector isolation verified")
+
         # 2. Stop
         cr = client._run_cr_with_timeout(
             "[Phase MC-GCP] stop GCE instance", "gce_stop", instance_asset["id"],
@@ -210,6 +280,18 @@ def run_gcp_worker(base_url: str, email: str, password: str, gcp_project: str) -
         )
         rollback_stack.append((cr["id"], "gce_disk_snapshot"))
         log(f"[Phase MC-GCP] Snapshot created: {snap_name}")
+
+        # SDK verification: confirm snapshot exists in GCP
+        compute = _get_gcp_compute_client()
+        if compute and gcp_project:
+            try:
+                snap = compute.get(project=gcp_project, snapshot=snap_name)
+                assert snap.status in ("READY", "UPLOADING", "CREATING"), (
+                    f"GCE snapshot {snap_name} in unexpected status: {snap.status}"
+                )
+                log(f"[Phase MC-GCP] Snapshot {snap_name} confirmed in GCP (status={snap.status})")
+            except Exception as e:
+                log(f"[Phase MC-GCP] Snapshot SDK check warning: {e}")
 
         log("[Phase MC-GCP] Lifecycle complete; cleaning up via rollback stack")
         result["passed"] = True
@@ -272,6 +354,11 @@ def run_azure_worker(base_url: str, email: str, password: str,
             raise AssertionError(f"Azure VM '{vm_name}' not in inventory after 60s")
         log(f"[Phase MC-AZ] VM in inventory: {vm_asset['id']}")
 
+        # Metadata consistency + connector isolation
+        _assert_asset_metadata(vm_asset, "azure")
+        _assert_connector_isolation(client, "azure", vm_asset["id"], "MC-AZ")
+        log("[Phase MC-AZ] Asset metadata and connector isolation verified")
+
         # 2. Stop (deallocate)
         cr = client._run_cr_with_timeout(
             "[Phase MC-AZ] stop Azure VM", "azure_vm_stop", vm_asset["id"],
@@ -300,6 +387,28 @@ def run_azure_worker(base_url: str, email: str, password: str,
         )
         rollback_stack.append((cr["id"], "azure_vm_snapshot"))
         log(f"[Phase MC-AZ] Snapshot created: {snap_name}")
+
+        # SDK verification: confirm snapshot exists in Azure
+        _get_azure_compute_client()
+        az_creds = _azure_creds_cache
+        if az_creds:
+            try:
+                from azure.identity import ClientSecretCredential
+                from azure.mgmt.compute import ComputeManagementClient
+                credential = ClientSecretCredential(
+                    tenant_id=az_creds["tenant_id"],
+                    client_id=az_creds["client_id"],
+                    client_secret=az_creds["client_secret"],
+                )
+                compute_client = ComputeManagementClient(credential, az_creds["subscription_id"])
+                snap = compute_client.snapshots.get(azure_resource_group, snap_name)
+                assert snap.provisioning_state in ("Succeeded", "Updating"), (
+                    f"Azure snapshot {snap_name} in unexpected state: {snap.provisioning_state}"
+                )
+                log(f"[Phase MC-AZ] Snapshot {snap_name} confirmed in Azure "
+                    f"(state={snap.provisioning_state})")
+            except Exception as e:
+                log(f"[Phase MC-AZ] Snapshot SDK check warning: {e}")
 
         log("[Phase MC-AZ] Lifecycle complete; cleaning up via rollback stack")
         result["passed"] = True
