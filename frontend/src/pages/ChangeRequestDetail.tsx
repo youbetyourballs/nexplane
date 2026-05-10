@@ -46,6 +46,7 @@ function PlanOutputPanel({ title, output }: { title: string; output: string }) {
   );
 }
 import { changeRequestsApi } from "../api/endpoints";
+import { apiClient } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import { RiskBadge } from "../components/RiskBadge";
 import { PageLoading } from "../components/LoadingSpinner";
@@ -247,6 +248,12 @@ export function ChangeRequestDetail() {
   const rollbackMutation = useMutation({
     mutationFn: () => changeRequestsApi.rollback(id!),
     onSuccess: invalidate,
+  });
+
+  const confirmStatefulMutation = useMutation({
+    mutationFn: () =>
+      apiClient.post(`/change-requests/${cr?.id}/confirm-stateful`).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["change-request", id] }),
   });
 
   if (isLoading || !cr) return <PageLoading />;
@@ -570,6 +577,67 @@ export function ChangeRequestDetail() {
             ))}
           </Section>
         )}
+
+        {cr.change_type === "agent_containerize_auto" && (() => {
+          const execRun = (cr.execution_runs ?? [])[0];
+          const stepResults = (execRun?.result as Record<string, unknown> | undefined)?.step_results as Record<string, unknown> | undefined;
+          const aiResult = stepResults?.ai_analysis as Record<string, unknown> | undefined;
+          const statefulGate = stepResults?.stateful_gate as Record<string, unknown> | undefined;
+          const needsStatefulConfirm = statefulGate?.status === "waiting";
+
+          return (
+            <div className="bg-white border border-slate-200 rounded-lg p-5 mt-4">
+              <h2 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                <span className="text-purple-500">&#10024;</span> AI Migration Analysis
+              </h2>
+              {!aiResult && (
+                <p className="text-sm text-slate-400">Analysis running or not yet started.</p>
+              )}
+              {aiResult && Array.isArray((aiResult as Record<string, unknown>).migration_units) && (
+                <div className="space-y-2">
+                  {((aiResult as Record<string, unknown>).migration_units as Array<Record<string, unknown>>).map((unit, i) => (
+                    <div key={i} className="border border-slate-100 rounded-md p-3 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-slate-900">{String(unit.name ?? "")}</span>
+                        <div className="flex gap-2">
+                          <span className={`px-2 py-0.5 rounded text-xs ${unit.stateful ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-green-50 text-green-700 border border-green-200"}`}>
+                            {unit.stateful ? "stateful" : "stateless"}
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600">
+                            {String(unit.pattern ?? "")}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        Apps: {((unit.apps ?? []) as string[]).join(", ")}
+                      </div>
+                      {!!unit.reasoning && (
+                        <div className="text-xs text-slate-400 mt-1 italic">{String(unit.reasoning)}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {needsStatefulConfirm && (
+                <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                  <h3 className="text-sm font-semibold text-amber-800 mb-1">
+                    Stateful workloads detected &#8212; confirmation required
+                  </h3>
+                  <p className="text-xs text-amber-700 mb-3">
+                    The AI identified stateful workloads. Review the classification above and confirm to proceed to build.
+                  </p>
+                  <button
+                    onClick={() => confirmStatefulMutation.mutate()}
+                    disabled={confirmStatefulMutation.isPending}
+                    className="px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-md hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {confirmStatefulMutation.isPending ? "Confirming..." : "Confirm classification and proceed to build"}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {auditEvents && auditEvents.length > 0 && (
           <Section title="Audit Trail" icon={FileText}>

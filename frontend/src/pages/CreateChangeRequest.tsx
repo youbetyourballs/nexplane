@@ -559,6 +559,17 @@ const CHANGE_TYPE_META: Partial<Record<ChangeType, { label: string; description:
     description: "Suppress a scanner finding with a justification.",
     outcomeTemplate: JSON.stringify({ finding_id: null, reason: "", expiry_days: 90, rollback_strategy: "unsuppress_finding" }, null, 2),
   },
+  agent_containerize_auto: {
+    label: "Autonomous Containerization ✨ AI",
+    description: "AI-directed migration from legacy services to Kubernetes. Discovers workloads, maps dependencies (including brownfield containers), builds and deploys containers, verifies with a configurable soak window. Retirement requires human approval. Requires AI provider configured.",
+    outcomeTemplate: JSON.stringify({
+      registry: "",
+      target_cluster_id: "",
+      namespace: "nexplane-migrations",
+      soak_seconds: 120,
+      dry_run: false,
+    }, null, 2),
+  },
 };
 
 const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
@@ -638,6 +649,10 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   {
     label: "Compliance",
     types: ["enforce_cis_benchmark", "collect_evidence"],
+  },
+  {
+    label: "Containerization",
+    types: ["agent_appdiscovery", "agent_containerize_auto", "agent_containerize_build", "agent_containerize_retire"],
   },
   {
     label: "Other",

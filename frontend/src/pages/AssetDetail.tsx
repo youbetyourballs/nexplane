@@ -164,6 +164,12 @@ const ASSET_ACTIONS: Record<AssetType, QuickAction[]> = {
       description: (a) => `Execute a shell command on Azure VM ${a.asset_metadata?.vm_name ?? a.name} via Azure Run Command.`,
       connectorType: "azure",
     },
+    {
+      changeType: "agent_containerize_auto",
+      label: "Migrate to Kubernetes ✨ AI",
+      title: (a: Asset) => `Containerize ${a.name}`,
+      description: (a: Asset) => `AI-directed autonomous migration of workloads on ${a.name} to Kubernetes. Requires AI provider and Kubernetes connector configured.`,
+    },
   ],
   cloud_account: [
     {
