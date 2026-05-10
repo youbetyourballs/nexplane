@@ -139,12 +139,15 @@ function RunModal({ suite, onClose, onRun, isRunning }: RunModalProps) {
           <div>
             <label className="block text-slate-300 text-sm font-medium mb-1">
               Tailscale Auth Key
+              <span className="ml-2 text-xs font-normal text-emerald-400">
+                uses connector key if blank
+              </span>
             </label>
             <input
-              className="w-full bg-navy border border-navy-border rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+              className="w-full bg-navy border border-navy-border rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 placeholder:text-slate-600"
               value={tailscaleKey}
               onChange={(e) => setTailscaleKey(e.target.value)}
-              placeholder="tskey-auth-..."
+              placeholder="Leave blank to use the Tailscale connector key"
             />
           </div>
         )}
