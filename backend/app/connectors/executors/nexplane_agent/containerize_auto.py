@@ -341,8 +341,6 @@ async def _stage_soak_verify(
     probe_results: dict[str, list[dict]] = {app: [] for app in deploy_results}
     end_time = asyncio.get_event_loop().time() + soak_seconds
     consecutive_passes = 0
-    required_passes = max(1, soak_seconds // 10)
-
     async with httpx.AsyncClient(timeout=5.0) as client:
         while asyncio.get_event_loop().time() < end_time:
             tick_passed = True
@@ -502,28 +500,37 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         await _stage_stateful_gate(current_cr_id)
         step_results["stateful_gate"]["status"] = "approved"
 
-    # Stage 5: build
-    if not dry_run:
-        build_results = await _stage_build(migration_units, asset_ids, parameters, dry_run=False)
-    else:
-        build_results = {
-            app: {"image_tag": f"dry-run/{app}:latest", "manifests": {}, "dry_run": True}
-            for unit in migration_units for app in unit.get("apps", [])
-        }
-    step_results["build"] = build_results
+    # Stages 5-7 wrapped so step_results are preserved on failure
+    try:
+        # Stage 5: build
+        if not dry_run:
+            build_results = await _stage_build(migration_units, asset_ids, parameters, dry_run=False)
+        else:
+            build_results = {
+                app: {"image_tag": f"dry-run/{app}:latest", "manifests": {}, "dry_run": True}
+                for unit in migration_units for app in unit.get("apps", [])
+            }
+        step_results["build"] = build_results
 
-    # Stage 6: deploy
-    deploy_results = await _stage_deploy(
-        migration_units, asset_ids, build_results, parameters, dry_run=dry_run
-    )
-    step_results["deploy"] = deploy_results
+        # Stage 6: deploy
+        deploy_results = await _stage_deploy(
+            migration_units, asset_ids, build_results, parameters, dry_run=dry_run
+        )
+        step_results["deploy"] = deploy_results
 
-    # Stage 7: soak_verify
-    if not dry_run:
-        soak_result = await _stage_soak_verify(deploy_results, soak_seconds)
-    else:
-        soak_result = {"soak_seconds": 0, "probe_results": {}, "passed": True, "dry_run": True}
-    step_results["soak_verify"] = soak_result
+        # Stage 7: soak_verify
+        if not dry_run:
+            soak_result = await _stage_soak_verify(deploy_results, soak_seconds)
+        else:
+            soak_result = {"soak_seconds": 0, "probe_results": {}, "passed": True, "dry_run": True}
+        step_results["soak_verify"] = soak_result
+
+    except Exception as exc:
+        step_results["execution_error"] = {"stage": "build_deploy_soak", "error": str(exc)}
+        raise RuntimeError(
+            f"containerize_auto failed at execution stage: {exc}. "
+            f"Stages completed: {list(step_results.keys())}"
+        ) from exc
 
     # Spawn retirement CR (skip in dry_run)
     if not dry_run and soak_result.get("passed") and org_id and requester_id:
