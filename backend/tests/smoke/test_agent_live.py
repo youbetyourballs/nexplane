@@ -1288,6 +1288,112 @@ def run_backup_windows_aws_cr(
     )
 
 
+_INSTALL_AUTO_APPS_WINDOWS = (
+    "$ProgressPreference = 'SilentlyContinue'; "
+    "Install-WindowsFeature -Name Web-Server -ErrorAction SilentlyContinue | Out-Null; "
+    "Start-Service W3SVC -ErrorAction SilentlyContinue | Out-Null; "
+    "pip install flask --quiet 2>&1 | Out-Null; "
+    "New-Item -ItemType Directory -Force -Path C:\\nexplane-flask-win | Out-Null; "
+    "Set-Content -Path C:\\nexplane-flask-win\\app.py -Encoding UTF8 -Value @'\n"
+    "from flask import Flask\nimport urllib.request\n"
+    "app = Flask(__name__)\n"
+    "@app.route('/')\ndef index():\n    return urllib.request.urlopen('http://localhost:80/').read()\n"
+    "@app.route('/health')\ndef health():\n    return 'ok'\n"
+    "if __name__ == '__main__':\n    app.run(host='0.0.0.0', port=5001)\n'@; "
+    "schtasks /create /tn NexplaneFlaskWin "
+    "  /tr 'python C:\\nexplane-flask-win\\app.py' "
+    "  /sc onstart /ru SYSTEM /rl HIGHEST /f 2>&1 | Out-Null; "
+    "schtasks /run /tn NexplaneFlaskWin 2>&1 | Out-Null; "
+    "Start-Sleep 5; "
+    "Write-Host 'auto_apps_win_installed'"
+)
+
+_TEARDOWN_AUTO_APPS_WINDOWS = (
+    "schtasks /delete /tn NexplaneFlaskWin /f 2>&1 | Out-Null; "
+    "Remove-Item -Recurse -Force C:\\nexplane-flask-win -ErrorAction SilentlyContinue | Out-Null; "
+    "Write-Host 'auto_apps_win_removed'"
+)
+
+
+def run_containerize_windows_aws_cr(
+    client: NexplaneClient, endpoint_asset_id: str,
+    instance_asset_id: str, instance_id: str,
+) -> None:
+    """Windows containerize: install IIS + Flask sidecar, run agent_containerize_auto (dry_run).
+    Verifies deep_discover finds Windows services."""
+    print("\n  [containerize-windows via CR -- dry_run]")
+    phase = "containerize-aws-windows"
+    auto_cr_id = ""
+
+    try:
+        _win_ssm(client, instance_asset_id, instance_id, phase,
+                 "install_auto_apps_win", _INSTALL_AUTO_APPS_WINDOWS)
+        log(f"{phase}: Windows smoke apps installed (IIS + Flask sidecar)")
+
+        auto_cr_id = client.create_cr(
+            f"[Phase {phase}] agent_containerize_auto (Windows dry_run)",
+            "agent_containerize_auto",
+            endpoint_asset_id,
+            {
+                "registry": "nexplane-smoke-registry",
+                "target_cluster_id": "smoke-cluster-placeholder",
+                "namespace": "nexplane-smoke-win",
+                "soak_seconds": 30,
+                "dry_run": True,
+            },
+        )
+        client.post(f"/change-requests/{auto_cr_id}/plan")
+        client.post(f"/change-requests/{auto_cr_id}/submit-for-approval")
+        client.post(f"/change-requests/{auto_cr_id}/approve",
+                    json={"decision": "approved", "comment": f"smoke test {phase}"})
+        client.post(f"/change-requests/{auto_cr_id}/execute")
+
+        deadline = time.time() + 600
+        stateful_confirmed = False
+        while time.time() < deadline:
+            cr = client.get(f"/change-requests/{auto_cr_id}")
+            status = cr.get("status", "")
+            exec_runs = cr.get("execution_runs") or []
+            if exec_runs:
+                step_results = ((exec_runs[0].get("result") or {}).get("step_results") or {})
+                gate = step_results.get("stateful_gate") or {}
+                if gate.get("status") == "waiting" and not stateful_confirmed:
+                    client.post(f"/change-requests/{auto_cr_id}/confirm-stateful")
+                    stateful_confirmed = True
+            if status in ("completed", "failed", "rolled_back"):
+                break
+            time.sleep(10)
+
+        cr = client.get(f"/change-requests/{auto_cr_id}")
+        if cr.get("status") != "completed":
+            fail(f"[{phase}] CR ended with status '{cr.get('status')}'")
+
+        exec_runs = cr.get("execution_runs") or []
+        step_results = ((exec_runs[0].get("result") or {}).get("step_results") or {}) if exec_runs else {}
+        discovery = step_results.get("preflight_discovery") or {}
+        if discovery.get("workload_count", 0) < 1:
+            fail(f"[{phase}] Expected >= 1 workload in Windows discovery, got {discovery.get('workload_count')}")
+        log(f"{phase}: Windows discovery found {discovery.get('workload_count')} workload(s)")
+        log(f"{phase}: containerize-windows complete")
+
+    except Exception as e:
+        print(f"\n  ❌ [{phase}] Failed: {e}")
+        raise
+    finally:
+        try:
+            _win_ssm(client, instance_asset_id, instance_id, phase,
+                     "teardown_auto_apps_win", _TEARDOWN_AUTO_APPS_WINDOWS)
+        except Exception:
+            pass
+        if auto_cr_id:
+            try:
+                cr = client.get(f"/change-requests/{auto_cr_id}")
+                if cr.get("status") in ("executing", "verifying"):
+                    client.rollback_cr(auto_cr_id, f"{phase} cleanup")
+            except Exception:
+                pass
+
+
 def _run_all_windows_agent_crs(
     client: NexplaneClient, endpoint_asset_id: str, label: str,
     instance_asset_id: str = "", instance_id: str = "",
@@ -1307,6 +1413,7 @@ def _run_all_windows_agent_crs(
         run_credrotation_windows_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
         run_forensics_windows_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
         run_backup_windows_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+        run_containerize_windows_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
     else:
         # GCP/Azure: dry_run fallback (no SSM)
         _WINDOWS_AGENT_CRS = [

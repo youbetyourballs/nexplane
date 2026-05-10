@@ -39,7 +39,7 @@ SUITES = [
         "name": "AWS",
         "file": "test_aws_live.py",
         "default_phases": "A,B,C,D,E,F,G,H,I,K,P,Q,R,T,U,V,W,X,IP_A,IP_D,IP_D2",
-        "slow_phases": "J,S,IP_WIN_A,IP_WIN_D",
+        "slow_phases": "J,S,IP_WIN_A,IP_WIN_D,AUTO",
         "description": "EC2, IAM, S3, Route53, CloudWatch, RDS, ALB, agent lifecycle, IP migration (Linux + Windows)",
     },
     {
