@@ -19,6 +19,7 @@ import (
 	"nexplane-agent/commands/dbadmin"
 	"nexplane-agent/commands/containerizebuild"
 	"nexplane-agent/commands/containerizeretire"
+	"nexplane-agent/commands/deepdiscover"
 )
 
 // Result is the outcome of a command execution.
@@ -88,6 +89,8 @@ var commands = map[string]CommandFunc{
 	"containerize_build": containerizebuild.ContainerizeBuildExecute,
 	// Containerize retire
 	"containerize_retire": containerizeretire.ContainerizeRetireExecute,
+	// Deep discover (containerization)
+	"deep_discover": deepdiscover.Execute,
 	// Database administration
 	"provision_db_user":    dbadmin.ExecuteCommand,
 	"deprovision_db_user":  dbadmin.ExecuteCommand,
