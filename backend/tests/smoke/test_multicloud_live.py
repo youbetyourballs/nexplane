@@ -56,26 +56,50 @@ def _assert_asset_metadata(asset: dict, provider: str,
 
 
 def _assert_connector_isolation(client: NexplaneClient, provider: str,
-                                 asset_id: str, label: str) -> None:
-    """Verify connector_type filter returns only assets for this provider.
+                                 asset: dict, label: str) -> None:
+    """Verify asset has correct connector_type and appears under its connector's ID filter.
 
-    Checks that the newly created asset appears when filtering by its connector_type,
-    and that no assets from this cloud bleed into a filter for a different provider.
+    The /assets endpoint filters by connector_id (UUID), not connector_type string.
+    This checks:
+      1. The asset's connector_type field matches the provider.
+      2. The asset appears when filtered by its own connector's UUID.
+      3. The asset does NOT appear when filtered by any other provider's connector UUID.
     """
-    # Asset must appear in provider-filtered list
-    provider_assets = client.get("/assets", params={"connector_type": provider})
-    ids = {a["id"] for a in provider_assets}
-    assert asset_id in ids, (
-        f"[{label}] Asset {asset_id} not found when filtering by connector_type={provider}"
+    asset_id = asset["id"]
+
+    # 1. Field-level connector_type check (value on the asset itself)
+    assert asset.get("connector_type") == provider, (
+        f"[{label}] Expected connector_type='{provider}', "
+        f"got '{asset.get('connector_type')}'"
     )
 
-    # Asset must NOT appear in any other provider's filtered list
-    others = {"aws", "gcp", "azure"} - {provider}
-    for other in others:
-        other_assets = client.get("/assets", params={"connector_type": other})
+    # 2. Get connector UUIDs for each cloud provider
+    connectors = client.get("/connectors")
+    connector_ids: dict[str, str] = {}
+    for c in connectors:
+        ct = c.get("connector_type", "")
+        if ct in ("aws", "gcp", "azure") and ct not in connector_ids:
+            connector_ids[ct] = c["id"]
+
+    # 3. Asset must appear under its own connector_id filter
+    own_connector_id = connector_ids.get(provider)
+    if own_connector_id:
+        own_assets = client.get("/assets", params={"connector_id": own_connector_id})
+        own_ids = {a["id"] for a in own_assets}
+        assert asset_id in own_ids, (
+            f"[{label}] Asset {asset_id} not found when filtering by "
+            f"connector_id={own_connector_id} ({provider})"
+        )
+
+    # 4. Asset must NOT appear under any other provider's connector_id filter
+    for other, other_connector_id in connector_ids.items():
+        if other == provider:
+            continue
+        other_assets = client.get("/assets", params={"connector_id": other_connector_id})
         other_ids = {a["id"] for a in other_assets}
         assert asset_id not in other_ids, (
-            f"[{label}] Asset {asset_id} ({provider}) leaked into connector_type={other} filter"
+            f"[{label}] Asset {asset_id} ({provider}) leaked into "
+            f"connector_id filter for {other}"
         )
 
 
@@ -123,7 +147,7 @@ def run_aws_worker(base_url: str, email: str, password: str) -> dict:
         # Metadata consistency: connector_type + required metadata fields
         _assert_asset_metadata(instance_asset, "aws", required_keys=["instance_id"])
         # Connector-type isolation: this asset appears only in aws filter
-        _assert_connector_isolation(client, "aws", instance_asset["id"], "MC-AWS")
+        _assert_connector_isolation(client, "aws", instance_asset, "MC-AWS")
         log("[Phase MC-AWS] Asset metadata and connector isolation verified")
 
         # 2. Stop instance
@@ -250,7 +274,7 @@ def run_gcp_worker(base_url: str, email: str, password: str, gcp_project: str) -
 
         # Metadata consistency + connector isolation
         _assert_asset_metadata(instance_asset, "gcp")
-        _assert_connector_isolation(client, "gcp", instance_asset["id"], "MC-GCP")
+        _assert_connector_isolation(client, "gcp", instance_asset, "MC-GCP")
         log("[Phase MC-GCP] Asset metadata and connector isolation verified")
 
         # 2. Stop
@@ -356,7 +380,7 @@ def run_azure_worker(base_url: str, email: str, password: str,
 
         # Metadata consistency + connector isolation
         _assert_asset_metadata(vm_asset, "azure")
-        _assert_connector_isolation(client, "azure", vm_asset["id"], "MC-AZ")
+        _assert_connector_isolation(client, "azure", vm_asset, "MC-AZ")
         log("[Phase MC-AZ] Asset metadata and connector isolation verified")
 
         # 2. Stop (deallocate)
