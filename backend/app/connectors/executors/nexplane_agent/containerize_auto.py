@@ -139,8 +139,25 @@ async def _stage_ai_analysis(
     discovery_result: dict,
     graph_result: dict,
     org_id: str,
+    dry_run: bool = False,
 ) -> dict:
     """Call AI provider directly to analyze workloads and produce migration units."""
+    if dry_run:
+        workloads = discovery_result.get("workloads", [])
+        units = []
+        for w in workloads:
+            units.append({
+                "app_name": w.get("name", "unknown"),
+                "migration_type": "stateless",
+                "rationale": "dry_run: mock analysis",
+                "data_directories": [],
+                "required_env_vars": [],
+                "inbound_ports": [p.get("port") for p in w.get("listening_ports", [])],
+                "health_check_path": "/health",
+                "confidence": 0.9,
+            })
+        return {"migration_units": units or [{"app_name": "dry-run-app", "migration_type": "stateless", "rationale": "dry_run: no workloads discovered", "data_directories": [], "required_env_vars": [], "inbound_ports": [], "health_check_path": "/", "confidence": 0.9}], "dry_run": True}
+
     from sqlalchemy import select
     from app.database import AsyncSessionLocal
     from app.models.org_settings import OrganizationSettings
@@ -488,7 +505,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Stage 3: ai_analysis
     if not org_id:
         raise RuntimeError("Could not determine org_id from asset")
-    analysis = await _stage_ai_analysis(discovery, graph, org_id)
+    analysis = await _stage_ai_analysis(discovery, graph, org_id, dry_run=dry_run)
     step_results["ai_analysis"] = analysis
 
     migration_units: list[dict] = analysis.get("migration_units", [])

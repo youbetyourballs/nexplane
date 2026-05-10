@@ -96,6 +96,7 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.agent_containerize_build,
     ChangeType.k8s_workload_deploy,
     ChangeType.agent_containerize_retire,
+    ChangeType.agent_containerize_auto,
 }
 
 

@@ -224,6 +224,7 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
         "backend_ip": backend_ip,
         "agent_secret": agent_secret,
         "agent_asset": agent_asset,
+        "deploy_time": deploy_time,
     }
 
 
@@ -2427,10 +2428,29 @@ def run_phase_auto(client: NexplaneClient, phase_a_result: dict) -> None:
 
     instance_asset = phase_a_result["instance_asset"]
     instance_id = phase_a_result["instance_id"]
+    deploy_time = phase_a_result.get("deploy_time", 0)
     agent_asset = phase_a_result.get("agent_asset") or {}
     agent_asset_id = agent_asset.get("id")
     if not agent_asset_id:
-        fail("[Phase AUTO] No agent_asset in phase_a_result -- Phase A must complete first")
+        # Phase A timed out waiting for agent; give it another 3 minutes
+        import datetime as _dt
+        deploy_dt = _dt.datetime.utcfromtimestamp(deploy_time).strftime("%Y-%m-%dT%H:%M:%S") if deploy_time else ""
+        print("  ⏳ Waiting up to 3min for agent to register (Phase A timed out)...")
+        deadline2 = time.time() + 180
+        while time.time() < deadline2:
+            candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
+            tagged = [c for c in candidates
+                      if "nexplane-agent" in (c.get("tags") or [])
+                      and c.get("name") == "nexplane-smoke-ec2"
+                      and ((not deploy_dt) or (c.get("created_at") or "") >= deploy_dt)]
+            if tagged:
+                tagged.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
+                agent_asset_id = tagged[0]["id"]
+                log(f"Agent registered: {agent_asset_id}")
+                break
+            time.sleep(10)
+        if not agent_asset_id:
+            fail("[Phase AUTO] Agent never registered in inventory")
 
     auto_cr_id = ""
     try:
@@ -2486,7 +2506,11 @@ def run_phase_auto(client: NexplaneClient, phase_a_result: dict) -> None:
         exec_runs = cr.get("execution_runs") or []
         if not exec_runs:
             fail("[Phase AUTO] No execution_runs in completed CR")
-        step_results = ((exec_runs[0].get("result") or {}).get("step_results") or {})
+        run_result = exec_runs[0].get("result") or {}
+        # Result is nested: result.execution.steps[-1].result.step_results
+        steps = (run_result.get("execution") or {}).get("steps") or []
+        last_step_result = steps[-1].get("result", {}) if steps else {}
+        step_results = last_step_result.get("step_results") or {}
 
         discovery = step_results.get("preflight_discovery") or {}
         if discovery.get("workload_count", 0) < 2:
@@ -2499,8 +2523,8 @@ def run_phase_auto(client: NexplaneClient, phase_a_result: dict) -> None:
             fail(f"[Phase AUTO] Expected >= 1 migration unit from AI, got {len(units)}")
         log(f"AI produced {len(units)} migration unit(s)")
 
-        stateless_units = [u for u in units if not u.get("stateful", True)]
-        stateful_units = [u for u in units if u.get("stateful", False)]
+        stateless_units = [u for u in units if u.get("migration_type") == "stateless"]
+        stateful_units = [u for u in units if u.get("migration_type") == "stateful"]
         if not stateless_units:
             log("  ⚠️  No stateless units detected (AI may have classified nginx/flask as stateful)")
         if not stateful_units:
