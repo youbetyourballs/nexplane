@@ -183,6 +183,7 @@ class ChangeType(str, enum.Enum):
     agent_containerize_build = "agent_containerize_build"
     k8s_workload_deploy = "k8s_workload_deploy"
     agent_containerize_retire = "agent_containerize_retire"
+    agent_containerize_auto = "agent_containerize_auto"
     # IP address migration
     change_ip = "change_ip"
     migrate_ip = "migrate_ip"
@@ -240,6 +241,9 @@ class ChangeRequest(Base):
     # Vulnerability remediation fields
     finding_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    stateful_approved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="change_requests")
     requester: Mapped["User"] = relationship("User", back_populates="change_requests")
