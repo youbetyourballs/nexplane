@@ -642,15 +642,186 @@ export function AssetDetail() {
                 />
                 {metadataError && <p className="text-xs text-red-500 mt-1">{metadataError}</p>}
               </>
-            ) : (
-              Object.keys(asset.asset_metadata).length === 0 ? (
-                <p className="text-sm text-slate-400">No metadata.</p>
-              ) : (
+            ) : Object.keys(asset.asset_metadata).length === 0 ? (
+              <p className="text-sm text-slate-400">No metadata.</p>
+            ) : (() => {
+              const m = asset.asset_metadata as Record<string, unknown>;
+              const row = (label: string, value: unknown) => value != null && value !== "" ? (
+                <div key={label}>
+                  <dt className="text-xs text-slate-400">{label}</dt>
+                  <dd className="text-sm text-slate-900 mt-0.5 font-mono">{String(value)}</dd>
+                </div>
+              ) : null;
+              const badge = (text: string, color = "slate") => (
+                <span className={`inline-block px-2 py-0.5 text-xs rounded bg-${color}-100 text-${color}-700`}>{text}</span>
+              );
+
+              if (asset.asset_type === "cloud_account") return (
+                <dl className="space-y-2">
+                  {row("Account ID", m.account_id)}
+                  {row("Account Alias", m.account_alias)}
+                  {row("Region", m.region)}
+                  {row("Provider", m.provider || m.connector_type)}
+                  {row("Subscription / Project", m.subscription_id ?? m.project_id)}
+                  {row("Tenant / Org", m.tenant_id ?? m.organization_id)}
+                </dl>
+              );
+
+              if (asset.asset_type === "dns_zone") return (
+                <dl className="space-y-2">
+                  {row("Zone Name", m.zone_name ?? m.name)}
+                  {row("Zone ID", m.zone_id ?? m.hosted_zone_id)}
+                  {row("Type", m.private_zone === true ? "Private" : m.private_zone === false ? "Public" : m.type)}
+                  {row("Record Count", m.record_count ?? m.resource_record_set_count)}
+                  {row("TTL Default", m.default_ttl)}
+                </dl>
+              );
+
+              if (asset.asset_type === "firewall") return (
+                <dl className="space-y-2">
+                  {row("Group ID", m.group_id ?? m.security_group_id)}
+                  {row("Group Name", m.group_name)}
+                  {row("VPC", m.vpc_id)}
+                  {row("Inbound Rules", m.inbound_rule_count ?? (Array.isArray(m.inbound_rules) ? (m.inbound_rules as unknown[]).length : undefined))}
+                  {row("Outbound Rules", m.outbound_rule_count ?? (Array.isArray(m.outbound_rules) ? (m.outbound_rules as unknown[]).length : undefined))}
+                </dl>
+              );
+
+              if (asset.asset_type === "identity" || asset.asset_type === "identity_provider") return (
+                <dl className="space-y-2">
+                  {row("Username / ID", m.username ?? m.user_id ?? m.provider_id)}
+                  {row("Email", m.email)}
+                  {row("Provider Type", m.provider_type ?? m.type)}
+                  {row("Domain", m.domain ?? m.sso_domain)}
+                  {m.mfa_enabled != null && (
+                    <div key="mfa">
+                      <dt className="text-xs text-slate-400">MFA</dt>
+                      <dd className="mt-0.5">{badge(m.mfa_enabled ? "Enabled" : "Disabled", m.mfa_enabled ? "green" : "red")}</dd>
+                    </div>
+                  )}
+                  {row("Last Login", m.last_login ?? m.last_sign_in)}
+                  {row("SSO URL", m.sso_url)}
+                </dl>
+              );
+
+              if (asset.asset_type === "database") return (
+                <dl className="space-y-2">
+                  {row("Engine", m.engine ?? m.db_engine)}
+                  {row("Version", m.engine_version ?? m.version)}
+                  {row("Endpoint", m.endpoint ?? m.host)}
+                  {row("Port", m.port)}
+                  {row("Instance Class", m.db_instance_class ?? m.instance_class)}
+                  {m.multi_az != null && (
+                    <div key="multi_az">
+                      <dt className="text-xs text-slate-400">Multi-AZ</dt>
+                      <dd className="mt-0.5">{badge(m.multi_az ? "Yes" : "No", m.multi_az ? "green" : "slate")}</dd>
+                    </div>
+                  )}
+                  {row("Status", m.db_instance_status ?? m.status)}
+                  {row("Storage (GB)", m.allocated_storage)}
+                </dl>
+              );
+
+              if (asset.asset_type === "storage_bucket") return (
+                <dl className="space-y-2">
+                  {row("Bucket Name", m.bucket_name ?? m.name)}
+                  {row("Region", m.region ?? m.location)}
+                  {row("ARN", m.arn)}
+                  {m.versioning_enabled != null && (
+                    <div key="ver">
+                      <dt className="text-xs text-slate-400">Versioning</dt>
+                      <dd className="mt-0.5">{badge(m.versioning_enabled ? "Enabled" : "Disabled", m.versioning_enabled ? "green" : "slate")}</dd>
+                    </div>
+                  )}
+                  {m.public_access_blocked != null && (
+                    <div key="pub">
+                      <dt className="text-xs text-slate-400">Public Access</dt>
+                      <dd className="mt-0.5">{badge(m.public_access_blocked ? "Blocked" : "Open", m.public_access_blocked ? "green" : "red")}</dd>
+                    </div>
+                  )}
+                  {row("Storage Class", m.storage_class)}
+                </dl>
+              );
+
+              if (asset.asset_type === "load_balancer") return (
+                <dl className="space-y-2">
+                  {row("DNS Name", m.dns_name)}
+                  {row("ARN", m.load_balancer_arn ?? m.arn)}
+                  {row("Type", m.load_balancer_type ?? m.type)}
+                  {row("Scheme", m.scheme)}
+                  {row("VPC", m.vpc_id)}
+                  {row("State", m.state_code ?? m.state)}
+                  {Array.isArray(m.availability_zones) && (
+                    <div key="az">
+                      <dt className="text-xs text-slate-400">Availability Zones</dt>
+                      <dd className="mt-0.5 text-sm text-slate-700">{(m.availability_zones as string[]).join(", ")}</dd>
+                    </div>
+                  )}
+                </dl>
+              );
+
+              if (asset.asset_type === "key_pair") return (
+                <dl className="space-y-2">
+                  {row("Key Name", m.key_name ?? m.name)}
+                  {row("Key ID", m.key_pair_id ?? m.key_id)}
+                  {row("Fingerprint", m.key_fingerprint ?? m.fingerprint)}
+                  {row("Type", m.key_type)}
+                  {row("Region", m.region)}
+                </dl>
+              );
+
+              if (asset.asset_type === "container_cluster" || asset.asset_type === "kubernetes_cluster") return (
+                <dl className="space-y-2">
+                  {row("Cluster Name", m.cluster_name ?? m.name)}
+                  {row("Version", m.version ?? m.kubernetes_version)}
+                  {row("Node Count", m.node_count ?? m.node_group_count)}
+                  {row("Endpoint", m.endpoint)}
+                  {row("Region", m.region ?? m.location)}
+                  {row("Status", m.status)}
+                  {row("Platform", m.platform ?? m.cloud_provider)}
+                </dl>
+              );
+
+              if (asset.asset_type === "kubernetes_workload") return (
+                <dl className="space-y-2">
+                  {row("Kind", m.kind)}
+                  {row("Namespace", m.namespace)}
+                  {row("Image", m.image ?? (Array.isArray(m.images) ? (m.images as string[]).join(", ") : undefined))}
+                  {row("Replicas", m.replicas ?? m.desired_replicas)}
+                  {row("Ready", m.ready_replicas != null ? `${m.ready_replicas} / ${m.replicas ?? "?"}` : undefined)}
+                  {row("Cluster", m.cluster_name ?? m.cluster)}
+                </dl>
+              );
+
+              if (asset.asset_type === "container_image") return (
+                <dl className="space-y-2">
+                  {row("Repository", m.repository ?? m.repo)}
+                  {row("Tag", m.tag)}
+                  {row("Digest", m.digest)}
+                  {row("Size", m.size_mb != null ? `${m.size_mb} MB` : m.size)}
+                  {row("Registry", m.registry)}
+                  {row("Pushed At", m.pushed_at ?? m.created_at)}
+                </dl>
+              );
+
+              if (asset.asset_type === "application") return (
+                <dl className="space-y-2">
+                  {row("Version", m.version ?? m.app_version)}
+                  {row("Deployment Type", m.deployment_type ?? m.type)}
+                  {row("Endpoint / URL", m.endpoint ?? m.url)}
+                  {row("Namespace", m.namespace)}
+                  {row("Chart", m.chart_name ?? m.helm_chart)}
+                  {row("Replicas", m.replicas)}
+                </dl>
+              );
+
+              // Generic fallback for any other type
+              return (
                 <pre className="text-xs font-mono text-slate-700 bg-slate-50 rounded p-3 overflow-auto">
                   {JSON.stringify(asset.asset_metadata, null, 2)}
                 </pre>
-              )
-            )}
+              );
+            })()}
           </div>
 
           {/* Network — shown for server and endpoint assets */}

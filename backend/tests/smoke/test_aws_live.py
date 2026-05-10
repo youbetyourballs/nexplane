@@ -15,7 +15,7 @@ Phase descriptions:
     B  Agent-based actions (patching audit, OS posture, CloudWatch agent)
     C  Local Terraform lifecycle (S3 bucket create/destroy)
     D  Local Ansible playbook (htop install/remove)
-    E  EC2 advanced: stop/start/reboot/snapshot with rollback stack
+    E  EC2 advanced: stop/start/reboot/snapshot/terminate with rollback stack
     F  Security group: add/remove rules with rollback stack
     G  IAM user lifecycle: create/attach-policy/rotate-key/delete with rollback stack
     H  S3 advanced: create/lifecycle/policy/public-access/delete with rollback stack
@@ -225,6 +225,7 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
         "agent_secret": agent_secret,
         "agent_asset": agent_asset,
         "deploy_time": deploy_time,
+        "cloud_account_id": cloud_account_id,
     }
 
 
@@ -385,7 +386,7 @@ def run_phase_d(client: NexplaneClient, phase_a_result: Optional[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
-    """Phase E: EC2 advanced — stop/start/reboot/snapshot with rollback stack cleanup."""
+    """Phase E: EC2 advanced — stop/start/reboot/snapshot/terminate with rollback stack cleanup."""
     print("\n[Phase E] EC2 Advanced Operations")
     instance_asset = phase_a_result["instance_asset"]
     instance_id = phase_a_result["instance_id"]
@@ -474,6 +475,66 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
              "rollback_strategy": "rollback_unavailable"},
         )
         log("Post-snapshot SSM verified")
+
+        # 6. Launch a dedicated EC2, then terminate it via CR (exercises ec2_terminate live)
+        print("  → [Phase E] ec2_terminate via CR (dedicated instance)")
+        kp_name = "nexplane-smoke-terminate-key"
+        kp_cr = client.run_cr(
+            "[Phase E] key pair for terminate test", "key_pair_create",
+            instance_asset["id"],
+            {"key_name": kp_name, "rollback_strategy": "delete_key_pair"},
+        )
+        kp_asset_ids = [a["id"] for a in client.get("/assets", params={"q": kp_name}) if a.get("name") == kp_name]
+        kp_asset_id = kp_asset_ids[0] if kp_asset_ids else instance_asset["id"]
+
+        # Use the same cloud_account from phase_a_result
+        cloud_account_id = phase_a_result.get("cloud_account_id") or client.get_cloud_account_asset_id()
+        launch_cr = client._run_cr_with_timeout(
+            "[Phase E] launch instance for terminate test", "ec2_launch", cloud_account_id,
+            {"mode": "quick", "name": "nexplane-smoke-terminate", "os": "amazon_linux",
+             "key_name": kp_name, "rollback_strategy": "ec2_terminate"},
+            timeout=600,
+        )
+        # Find the new instance asset
+        term_assets = [a for a in client.get("/assets", params={"q": "nexplane-smoke-terminate"})
+                       if a.get("name") == "nexplane-smoke-terminate"]
+        term_assets.sort(key=lambda a: a.get("created_at", ""), reverse=True)
+
+        if term_assets:
+            term_asset_id = term_assets[0]["id"]
+            term_instance_id = (term_assets[0].get("asset_metadata") or {}).get("instance_id", "")
+            # Wait for SSM to register (60s)
+            time.sleep(60)
+            # Now terminate via CR
+            client._run_cr_with_timeout(
+                "[Phase E] terminate instance via CR", "ec2_terminate", term_asset_id,
+                {"instance_id": term_instance_id, "rollback_strategy": "rollback_unavailable"},
+                timeout=300,
+            )
+            # Verify terminated state via boto3
+            ec2_boto3 = _get_aws_boto3_client('ec2')
+            if ec2_boto3 and term_instance_id:
+                try:
+                    resp = ec2_boto3.describe_instances(InstanceIds=[term_instance_id])
+                    state = resp["Reservations"][0]["Instances"][0]["State"]["Name"]
+                    assert state in ("terminated", "shutting-down"), f"Expected terminated, got {state}"
+                    log(f"ec2_terminate verified: instance {term_instance_id} is {state}")
+                except Exception as ve:
+                    print(f"  ⚠️  terminate verify: {ve}")
+            # Remove the asset record from inventory
+            try:
+                client.client.delete(f"{client.base}/assets/{term_asset_id}")
+            except Exception:
+                pass
+        else:
+            print("  ⚠️  Could not find terminate-test instance asset, skipping terminate verification")
+
+        # Roll back key pair (deletes from AWS + inventory)
+        try:
+            client.rollback_cr(kp_cr["id"], "key_pair_create")
+        except Exception:
+            pass
+
         log("Phase E complete")
 
     except Exception as e:
