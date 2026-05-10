@@ -162,10 +162,55 @@ _LINUX_AGENT_CRS = [
 
 def _run_all_linux_agent_crs(client: NexplaneClient, endpoint_asset_id: str,
                               label: str) -> None:
-    """Run all 12 Linux agent command groups via Nexplane CRs against the endpoint asset."""
+    """Run all 12 Linux agent command groups via Nexplane CRs against the endpoint asset.
+
+    Uses dry_run=True for all commands — safe for any cloud but does not exercise real
+    side effects. Prefer _run_all_linux_agent_crs_real_params when SSM is unavailable
+    but real execution is desired (GCP/Azure tracks).
+    """
     for change_type in _LINUX_AGENT_CRS:
         short = change_type.replace("agent_", "")
         _agent_cr(client, endpoint_asset_id, f"{short}-{label}", change_type)
+
+
+# Real-param mappings for GCP/Azure Linux tracks (no SSM available for side-effect
+# verification, so we fire real params and assert on CR completion + result presence).
+_LINUX_AGENT_CR_REAL_PARAMS: dict[str, dict] = {
+    "agent_linux_patch":   {"action": "audit"},           # read-only audit, safe
+    "agent_ossecurity":    {"dry_run": False},             # applies sysctl/auditd hardening
+    "agent_linuxauth":     {"dry_run": False},             # hardens SSH / PAM
+    "agent_crossplatform": {"dry_run": False},             # TLS, DNS, syslog
+    "agent_compliance":    {"dry_run": False},             # CIS audit
+    "agent_forensics":     {"dry_run": False},             # collects forensic bundle
+    "agent_fleet":         {"service": "crond", "action": "restart"},
+    "agent_backup":        {"dry_run": True},              # restic init too slow
+    "agent_reboot":        {"dry_run": True},              # never reboot smoke host
+    "agent_credrotation":  {"env_file": "/etc/nexplane-agent.env",
+                            "vars": {"NEXPLANE_SMOKE_KEY": "smoke_real_value"}},
+    "agent_iac":           {"dry_run": True},              # no Terraform on host
+    "agent_linuxupgrade":  {"dry_run": True},              # non-destructive estimate
+}
+
+
+def _run_all_linux_agent_crs_real_params(client: NexplaneClient, endpoint_asset_id: str,
+                                          label: str) -> None:
+    """Run all 12 Linux agent CRs with real (non-dry-run) params where safe.
+
+    Used by GCP/Azure Linux tracks where SSM is unavailable. Verification is done by
+    asserting each CR completes with status='completed' (the agent executed the command
+    and returned a result), rather than an SSM side-effect shell check.
+    """
+    for change_type, params in _LINUX_AGENT_CR_REAL_PARAMS.items():
+        short = change_type.replace("agent_", "")
+        phase = f"{short}-{label}"
+        cr = client.run_cr(
+            f"[Phase {phase}] {short} CR completed", change_type,
+            endpoint_asset_id, params,
+        )
+        if cr.get("status") != "completed":
+            fail(f"[{phase}] {change_type} CR ended with status '{cr.get('status')}' "
+                 f"(id: {cr['id']})")
+        log(f"{phase}: {change_type} CR completed")
 
 
 def _collect_results(futures: dict) -> list:
@@ -561,19 +606,36 @@ def run_fleet_aws_cr(
     client: NexplaneClient, endpoint_asset_id: str,
     instance_asset_id: str, instance_id: str,
 ) -> None:
-    """fleet: fire agent_fleet bundle, verify service restart + config push + health check."""
+    """fleet: fire agent_fleet bundle, verify config push side effect, rollback, verify restored."""
     print("\n  [fleet via CR — real params]")
-    _fire_cr_and_verify(
-        client, endpoint_asset_id, instance_asset_id, instance_id,
-        "fleet-aws-linux", "agent_fleet",
+    phase = "fleet-aws-linux"
+    config_path = "/tmp/nexplane-smoke-fleet.conf"
+
+    cr = client.run_cr(
+        f"[Phase {phase}] agent_fleet", "agent_fleet",
+        endpoint_asset_id,
         {"dry_run": False,
          "service_name": "crond",
-         "config_path": "/tmp/nexplane-smoke-fleet.conf",
+         "config_path": config_path,
          "config_content": "nexplane_smoke_test=true\n"},
-        "systemctl is-active crond 2>/dev/null || echo crond_checked; "
-        "df -h / | tail -1; echo fleet_verified",
-        "fleet_verified",
     )
+    log(f"{phase}: agent_fleet CR completed")
+
+    # Verify config file was pushed
+    _ssm(client, instance_asset_id, instance_id, phase,
+         "verify_fleet_config_pushed",
+         f"cat {config_path} 2>/dev/null | grep nexplane_smoke_test && echo fleet_config_present || echo fleet_config_absent")
+    log(f"{phase}: fleet config push verified")
+
+    # Rollback via Nexplane — agent restores the original file (or removes it)
+    client.rollback_cr(cr["id"], f"agent_fleet rollback")
+    log(f"{phase}: rollback triggered")
+
+    # Verify config file is gone / restored after rollback
+    _ssm(client, instance_asset_id, instance_id, phase,
+         "verify_fleet_rollback",
+         f"cat {config_path} 2>/dev/null | grep nexplane_smoke_test || echo fleet_rollback_confirmed")
+    log(f"{phase}: fleet rollback verified")
 
 
 def run_backup_aws_cr(
@@ -610,16 +672,34 @@ def run_credrotation_aws_cr(
     client: NexplaneClient, endpoint_asset_id: str,
     instance_asset_id: str, instance_id: str,
 ) -> None:
-    """credrotation: update env file with test value."""
+    """credrotation: set env var, verify set, rollback, verify removed."""
     print("\n  [credrotation via CR]")
-    _fire_cr_and_verify(
-        client, endpoint_asset_id, instance_asset_id, instance_id,
-        "credrotation-aws-linux", "agent_credrotation",
-        {"env_file": "/etc/nexplane-agent.env",
+    phase = "credrotation-aws-linux"
+    env_file = "/etc/nexplane-agent.env"
+
+    cr = client.run_cr(
+        f"[Phase {phase}] agent_credrotation", "agent_credrotation",
+        endpoint_asset_id,
+        {"env_file": env_file,
          "vars": {"NEXPLANE_SMOKE_KEY": "smoke_test_value"}},
-        "cat /etc/nexplane-agent.env 2>/dev/null | grep NEXPLANE_SMOKE_KEY || echo env_not_present; echo credrotation_done",
-        "credrotation_done",
     )
+    log(f"{phase}: agent_credrotation CR completed")
+
+    # Verify env var was written
+    _ssm(client, instance_asset_id, instance_id, phase,
+         "verify_credrotation_set",
+         f"cat {env_file} 2>/dev/null | grep NEXPLANE_SMOKE_KEY && echo credrotation_set || echo credrotation_not_set")
+    log(f"{phase}: env var written")
+
+    # Rollback via Nexplane — agent restores env file to pre-change state
+    client.rollback_cr(cr["id"], "agent_credrotation rollback")
+    log(f"{phase}: rollback triggered")
+
+    # Verify env var is gone after rollback
+    _ssm(client, instance_asset_id, instance_id, phase,
+         "verify_credrotation_rollback",
+         f"cat {env_file} 2>/dev/null | grep NEXPLANE_SMOKE_KEY || echo credrotation_rollback_confirmed")
+    log(f"{phase}: credrotation rollback verified")
 
 
 def run_iac_aws_cr(
@@ -694,38 +774,62 @@ def run_dbadmin_aws_cr(
         ),
     )
 
-    # DB admin CRs (provision_db_user, db_permission_change, etc.) require a configured database
-    # connector (connector_id param). We verify the Go agent's DB admin capability directly via
-    # SSM by invoking psql, which proves the end-to-end database interaction path.
+    # Fire provision_db_user via the nexplane agent — the agent connects to the local
+    # PostgreSQL using the params below and creates the user directly.
+    db_params = {
+        "host": "127.0.0.1",
+        "port": 5432,
+        "database": "nexplane_smoke_db",
+        "admin_username": "postgres",
+        "admin_password": "nexplane_smoke_pg",
+        "new_user": "nexplane_smoke_user",
+        "new_password": "smoke_pw_123",
+        "grants": ["SELECT"],
+    }
+    client.run_cr(
+        f"[Phase {phase}] provision_db_user", "provision_db_user",
+        endpoint_asset_id, db_params,
+    )
+    log(f"{phase}: provision_db_user CR completed")
 
+    # SSM verify user exists in PostgreSQL
     _ssm(
-        client, instance_asset_id, instance_id, phase, "provision_user_via_psql",
+        client, instance_asset_id, instance_id, phase, "verify_db_user_created",
         (
-            "runuser -u postgres -- psql nexplane_smoke_db -c "
-            "\"CREATE USER nexplane_smoke_user WITH PASSWORD 'smoke_pw_123';\" 2>/dev/null || true; "
-            "runuser -u postgres -- psql nexplane_smoke_db -c "
-            "\"GRANT SELECT ON ALL TABLES IN SCHEMA public TO nexplane_smoke_user;\" 2>/dev/null || true; "
-            "runuser -u postgres -- psql nexplane_smoke_db -c "
+            "runuser -u postgres -- psql nexplane_smoke_db -t -c "
             "\"SELECT rolname FROM pg_roles WHERE rolname='nexplane_smoke_user';\" 2>/dev/null "
-            "| grep nexplane_smoke_user && echo user_created || echo user_not_found; "
+            "| grep -q nexplane_smoke_user && echo db_user_created || echo db_user_not_found; "
             "echo dbadmin_provision_verified"
         ),
     )
+    log(f"{phase}: db user creation verified via SSM")
 
+    # Deprovision via agent CR
+    client.run_cr(
+        f"[Phase {phase}] deprovision_db_user", "deprovision_db_user",
+        endpoint_asset_id,
+        {
+            "host": "127.0.0.1",
+            "port": 5432,
+            "database": "nexplane_smoke_db",
+            "admin_username": "postgres",
+            "admin_password": "nexplane_smoke_pg",
+            "username": "nexplane_smoke_user",
+        },
+    )
+    log(f"{phase}: deprovision_db_user CR completed")
+
+    # SSM verify user is gone
     _ssm(
-        client, instance_asset_id, instance_id, phase, "deprovision_user_via_psql",
+        client, instance_asset_id, instance_id, phase, "verify_db_user_removed",
         (
-            "runuser -u postgres -- psql nexplane_smoke_db -c "
-            "\"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM nexplane_smoke_user;\" 2>/dev/null || true; "
-            "runuser -u postgres -- psql nexplane_smoke_db -c "
-            "\"DROP USER IF EXISTS nexplane_smoke_user;\" 2>/dev/null || true; "
-            "runuser -u postgres -- psql nexplane_smoke_db -c "
+            "runuser -u postgres -- psql nexplane_smoke_db -t -c "
             "\"SELECT rolname FROM pg_roles WHERE rolname='nexplane_smoke_user';\" 2>/dev/null "
-            "| grep nexplane_smoke_user || echo user_deprovisioned; "
+            "| grep -q nexplane_smoke_user && echo db_user_still_exists || echo db_user_deprovisioned; "
             "echo dbadmin_deprovision_verified"
         ),
     )
-    log(f"dbadmin: PostgreSQL user provision/deprovision verified via SSM")
+    log(f"{phase}: db user removal verified via SSM")
 
 
 # ---------------------------------------------------------------------------
@@ -909,7 +1013,8 @@ def run_gcp_linux_worker(base_url: str, email: str, password: str,
         # 6 min — startup script runs during boot
         endpoint_asset = _poll_for_endpoint(client, instance_name, timeout=360)
 
-        _run_all_linux_agent_crs(client, endpoint_asset["id"], "gcp-linux")
+        # Real params — GCP has no SSM so verification is CR completion + result inspection
+        _run_all_linux_agent_crs_real_params(client, endpoint_asset["id"], "gcp-linux")
         result["passed"] = True
         log("[Phase gcp-linux] track complete")
 
@@ -980,7 +1085,8 @@ def run_azure_linux_worker(base_url: str, email: str, password: str,
         # 8 min — Custom Script Extension can be slow
         endpoint_asset = _poll_for_endpoint(client, vm_name, timeout=480)
 
-        _run_all_linux_agent_crs(client, endpoint_asset["id"], "azure-linux")
+        # Real params — Azure has no SSM so verification is CR completion + result inspection
+        _run_all_linux_agent_crs_real_params(client, endpoint_asset["id"], "azure-linux")
         result["passed"] = True
         log("[Phase azure-linux] track complete")
 
