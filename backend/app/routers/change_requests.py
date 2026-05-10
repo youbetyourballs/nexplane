@@ -509,6 +509,51 @@ async def manual_rollback(
     return result.scalar_one()
 
 
+@router.post("/{cr_id}/confirm-stateful", status_code=200)
+async def confirm_stateful(
+    cr_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve the stateful classification gate in an agent_containerize_auto CR.
+
+    Sets stateful_approved_at so the executor polling loop can proceed to build.
+    """
+    from datetime import datetime, timezone as _tz
+    from app.models.change_request import ChangeRequestStatus
+
+    cr = await _get_cr(db, cr_id, user.organization_id)
+
+    if cr.change_type.value != "agent_containerize_auto":
+        raise HTTPException(
+            status_code=400,
+            detail="confirm-stateful is only valid for agent_containerize_auto change requests"
+        )
+    if cr.status not in (ChangeRequestStatus.executing, ChangeRequestStatus.verifying):
+        raise HTTPException(
+            status_code=400,
+            detail=f"CR must be executing to confirm stateful gate (current: {cr.status.value})"
+        )
+    if cr.stateful_approved_at is not None:
+        return {
+            "message": "already confirmed",
+            "stateful_approved_at": cr.stateful_approved_at.isoformat(),
+        }
+
+    cr.stateful_approved_at = datetime.now(_tz.utc)
+    await record_event(
+        db, user.organization_id, "containerize_auto.stateful_confirmed",
+        {"change_request_id": str(cr.id)},
+        actor_id=user.id,
+        change_request_id=cr.id,
+    )
+    await db.commit()
+    return {
+        "message": "stateful classification confirmed",
+        "stateful_approved_at": cr.stateful_approved_at.isoformat(),
+    }
+
+
 @router.get("/{cr_id}/progress")
 async def get_change_request_progress(
     cr_id: uuid.UUID,
