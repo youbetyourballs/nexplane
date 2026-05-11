@@ -2236,6 +2236,19 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
                 log(f"[Phase X] Agent refresh warning: CR {cr_status} — continuing")
                 break
 
+    # Restart the nexplane-agent systemd service via SSM — it may have hit its
+    # restart rate limit after repeated failures during Phase V Tailscale removal.
+    try:
+        client.run_cr(
+            "[Phase X] restart agent service", "ssm_command", instance_asset_id,
+            {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+             "command": "systemctl reset-failed nexplane-agent.service 2>/dev/null; systemctl restart nexplane-agent.service 2>&1 || true; sleep 5; systemctl status nexplane-agent.service --no-pager 2>&1 || true",
+             "rollback_strategy": "rollback_unavailable"},
+        )
+        log("[Phase X] Agent service restarted via SSM")
+    except Exception as e:
+        log(f"[Phase X] Agent restart warning: {e}")
+
     try:
         # Step 2: Wait for agent to register AND have a recent last_seen (actively polling)
         log("[Phase X] Waiting for Nexplane agent to be active (up to 6 min)")
