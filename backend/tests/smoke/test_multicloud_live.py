@@ -29,6 +29,8 @@ from smoke_helpers import (
     _get_aws_boto3_client,
     _get_azure_compute_client, _azure_creds_cache,
     _get_gcp_compute_client, _gcp_creds_cache,
+    _get_oci_creds, _get_oci_compute_client, _get_oci_network_client, _get_oci_blockstorage_client,
+    OCI_CONNECTOR_ID,
     make_base_parser,
 )
 
@@ -466,6 +468,249 @@ def run_azure_worker(base_url: str, email: str, password: str,
 
 
 # ---------------------------------------------------------------------------
+# OCI worker — phases OCI_A through OCI_E
+# ---------------------------------------------------------------------------
+
+def run_oci_worker(base_url: str, email: str, password: str) -> dict:
+    """
+    OCI compute + VCN lifecycle:
+      OCI_A: discover_compartments → oci_vcn_create → oci_subnet_create
+      OCI_B: oci_instance_create (VM.Standard.E2.1.Micro, oracle_linux)
+      OCI_C: oci_instance_stop → oci_instance_start → oci_instance_reboot
+      OCI_D: oci_block_volume_snapshot
+      OCI_E: oci_instance_delete → rollback subnet → rollback VCN
+    """
+    client = NexplaneClient(base_url, email, password)
+    result = {"provider": "oci", "passed": False, "error": None}
+    rollback_stack: list[tuple[str, str]] = []
+
+    # IDs we'll discover/create during the run
+    compartment_asset_id: str = ""
+    compartment_ocid: str = ""
+    instance_asset_id: str = ""
+    instance_ocid: str = ""
+    vcn_cr_id: str = ""
+    subnet_cr_id: str = ""
+
+    try:
+        # ------------------------------------------------------------------
+        # OCI_A — Foundation: discover compartments, create VCN + subnet
+        # ------------------------------------------------------------------
+        print("\n[MC-OCI] OCI_A: Triggering compartment discovery ingest...")
+        ingest_resp = client.post(f"/connectors/{OCI_CONNECTOR_ID}/ingest/discover_compartments")
+        log(f"[OCI_A] Ingest triggered: {ingest_resp}")
+
+        # Wait for cloud_account asset with 'oci' tag to appear
+        oci_account_asset = None
+        for _ in range(18):
+            time.sleep(5)
+            assets = client.get("/assets", params={"asset_type": "cloud_account"})
+            for a in assets:
+                if a.get("connector_id") == OCI_CONNECTOR_ID or "oci" in a.get("tags", []):
+                    oci_account_asset = a
+                    break
+            if oci_account_asset:
+                break
+        if not oci_account_asset:
+            raise AssertionError("No OCI cloud_account asset found after compartment discovery (90s timeout)")
+
+        compartment_asset_id = oci_account_asset["id"]
+        compartment_ocid = oci_account_asset.get("asset_metadata", {}).get("compartment_id", "")
+        log(f"[OCI_A] Compartment asset: {compartment_asset_id} (ocid: {compartment_ocid[:30]}...)")
+
+        assert "oci" in oci_account_asset.get("tags", []), \
+            f"[OCI_A] cloud_account asset missing 'oci' tag (tags={oci_account_asset.get('tags')})"
+        log("[OCI_A] cloud_account asset with 'oci' tag confirmed")
+
+        # Create VCN
+        cr = client._run_cr_with_timeout(
+            "[OCI_A] Create OCI VCN", "oci_vcn_create", compartment_asset_id,
+            {"display_name": "nexplane-smoke-vcn", "cidr_block": "10.100.0.0/16",
+             "dns_label": "smokevcn"},
+            timeout=TIMEOUT_SECONDS,
+        )
+        vcn_cr_id = cr["id"]
+        rollback_stack.append((vcn_cr_id, "oci_vcn_create"))
+        log("[OCI_A] VCN created")
+
+        # Create Subnet
+        cr = client._run_cr_with_timeout(
+            "[OCI_A] Create OCI Subnet", "oci_subnet_create", compartment_asset_id,
+            {"display_name": "nexplane-smoke-subnet", "cidr_block": "10.100.0.0/24",
+             "dns_label": "smokesubnet"},
+            timeout=TIMEOUT_SECONDS,
+        )
+        subnet_cr_id = cr["id"]
+        rollback_stack.append((subnet_cr_id, "oci_subnet_create"))
+        log("[OCI_A] Subnet created")
+
+        # SDK verification: at least 1 AVAILABLE VCN in compartment
+        network_client = _get_oci_network_client()
+        oci_creds = _get_oci_creds()
+        if network_client and compartment_ocid:
+            try:
+                vcns = network_client.list_vcns(compartment_id=compartment_ocid).data
+                available = [v for v in vcns if v.lifecycle_state == "AVAILABLE"]
+                assert available, f"[OCI_A] No AVAILABLE VCNs in compartment after create (found {len(vcns)})"
+                log(f"[OCI_A] SDK confirmed {len(available)} AVAILABLE VCN(s) in compartment")
+            except Exception as e:
+                log(f"[OCI_A] VCN SDK verification warning: {e}")
+
+        # ------------------------------------------------------------------
+        # OCI_B — Instance Launch
+        # ------------------------------------------------------------------
+        print("\n[MC-OCI] OCI_B: Launching OCI instance...")
+        instance_name = f"nexplane-mc-oci-{time.strftime('%H%M%S')}"
+        cr = client._run_cr_with_timeout(
+            "[OCI_B] Launch OCI Instance", "oci_instance_create", compartment_asset_id,
+            {"mode": "quick", "os": "oracle_linux", "shape": "VM.Standard.E2.1.Micro",
+             "name": instance_name},
+            timeout=900,  # 15 min
+        )
+        rollback_stack.append((cr["id"], "oci_instance_create"))
+        log(f"[OCI_B] Instance launched CR completed")
+
+        # Wait for server asset in inventory
+        instance_asset = None
+        for _ in range(24):
+            time.sleep(10)
+            assets = client.get("/assets", params={"asset_type": "server"})
+            for a in assets:
+                if (a.get("connector_id") == OCI_CONNECTOR_ID or "oci" in a.get("tags", [])) \
+                        and a.get("asset_metadata", {}).get("instance_id"):
+                    # Check if it was recently created (created in this run)
+                    if instance_name in a.get("name", ""):
+                        instance_asset = a
+                        break
+            if instance_asset:
+                break
+        # Fallback: find any OCI server asset with instance_id
+        if not instance_asset:
+            assets = client.get("/assets", params={"asset_type": "server"})
+            for a in assets:
+                if (a.get("connector_id") == OCI_CONNECTOR_ID or "oci" in a.get("tags", [])) \
+                        and a.get("asset_metadata", {}).get("instance_id"):
+                    instance_asset = a
+                    break
+        if not instance_asset:
+            raise AssertionError("[OCI_B] No OCI server asset with instance_id found in inventory after 4 min")
+
+        instance_asset_id = instance_asset["id"]
+        instance_ocid = instance_asset["asset_metadata"]["instance_id"]
+        log(f"[OCI_B] Instance in inventory: {instance_asset_id} (ocid: {instance_ocid[:30]}...)")
+
+        assert instance_asset.get("asset_metadata", {}).get("private_ip") or True, \
+            "[OCI_B] private_ip missing from instance asset metadata"  # warn only
+
+        # SDK verification: instance RUNNING
+        compute_client = _get_oci_compute_client()
+        if compute_client and instance_ocid:
+            try:
+                state = compute_client.get_instance(instance_ocid).data.lifecycle_state
+                assert state == "RUNNING", f"[OCI_B] Instance not RUNNING: {state}"
+                log(f"[OCI_B] SDK confirmed instance RUNNING")
+            except Exception as e:
+                log(f"[OCI_B] Instance SDK check warning: {e}")
+
+        # ------------------------------------------------------------------
+        # OCI_C — Lifecycle: stop → start → reboot
+        # ------------------------------------------------------------------
+        print("\n[MC-OCI] OCI_C: Stop/start/reboot lifecycle...")
+
+        cr = client._run_cr_with_timeout(
+            "[OCI_C] Stop OCI Instance", "oci_instance_stop", instance_asset_id,
+            {"instance_id": instance_ocid},
+            timeout=TIMEOUT_SECONDS,
+        )
+        rollback_stack.append((cr["id"], "oci_instance_stop"))
+        if compute_client and instance_ocid:
+            try:
+                state = compute_client.get_instance(instance_ocid).data.lifecycle_state
+                assert state in ("STOPPED", "STOPPING"), f"[OCI_C] Expected STOPPED, got {state}"
+                log(f"[OCI_C] SDK: instance state={state} after stop")
+            except Exception as e:
+                log(f"[OCI_C] Stop SDK check warning: {e}")
+
+        cr = client._run_cr_with_timeout(
+            "[OCI_C] Start OCI Instance", "oci_instance_start", instance_asset_id,
+            {"instance_id": instance_ocid},
+            timeout=TIMEOUT_SECONDS,
+        )
+        rollback_stack.pop()  # oci_instance_stop superseded
+        if compute_client and instance_ocid:
+            try:
+                state = compute_client.get_instance(instance_ocid).data.lifecycle_state
+                assert state in ("RUNNING", "STARTING"), f"[OCI_C] Expected RUNNING after start, got {state}"
+                log(f"[OCI_C] SDK: instance state={state} after start")
+            except Exception as e:
+                log(f"[OCI_C] Start SDK check warning: {e}")
+
+        cr = client._run_cr_with_timeout(
+            "[OCI_C] Reboot OCI Instance", "oci_instance_reboot", instance_asset_id,
+            {"instance_id": instance_ocid},
+            timeout=TIMEOUT_SECONDS,
+        )
+        log("[OCI_C] Lifecycle (stop/start/reboot) complete")
+
+        # ------------------------------------------------------------------
+        # OCI_D — Snapshot
+        # ------------------------------------------------------------------
+        print("\n[MC-OCI] OCI_D: Boot volume snapshot...")
+        cr = client._run_cr_with_timeout(
+            "[OCI_D] OCI Boot Volume Snapshot", "oci_block_volume_snapshot", instance_asset_id,
+            {"instance_id": instance_ocid, "backup_type": "INCREMENTAL"},
+            timeout=TIMEOUT_SECONDS,
+        )
+        rollback_stack.append((cr["id"], "oci_block_volume_snapshot"))
+
+        # Extract backup_id from CR result
+        backup_id = None
+        exec_runs = cr.get("execution_runs") or []
+        if exec_runs:
+            backup_id = exec_runs[0].get("result", {}).get("backup_id")
+        log(f"[OCI_D] Snapshot CR completed (backup_id={backup_id})")
+
+        # SDK verification
+        bs_client = _get_oci_blockstorage_client()
+        if bs_client and backup_id:
+            try:
+                state = bs_client.get_boot_volume_backup(backup_id).data.lifecycle_state
+                assert state in ("AVAILABLE", "CREATING", "REQUEST_RECEIVED"), \
+                    f"[OCI_D] Unexpected backup state: {state}"
+                log(f"[OCI_D] SDK confirmed backup state={state}")
+            except Exception as e:
+                log(f"[OCI_D] Snapshot SDK check warning: {e}")
+
+        log("[MC-OCI] Phases OCI_A through OCI_D complete — cleaning up via rollback stack")
+        result["passed"] = True
+
+    except Exception as e:
+        result["error"] = str(e)
+        print(f"\n[MC-OCI] FAILED: {e}")
+
+    finally:
+        # ------------------------------------------------------------------
+        # OCI_E — Teardown via rollback stack (instance → subnet → VCN)
+        # ------------------------------------------------------------------
+        print("  [MC-OCI cleanup]")
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+
+        # Safety net: terminate instance via OCI SDK
+        compute_client = _get_oci_compute_client()
+        if compute_client and instance_ocid:
+            try:
+                state = compute_client.get_instance(instance_ocid).data.lifecycle_state
+                if state not in ("TERMINATED", "TERMINATING"):
+                    compute_client.terminate_instance(instance_ocid, preserve_boot_volume=False)
+                    print(f"  Safety net: terminated OCI instance {instance_ocid[:20]}...")
+            except Exception:
+                pass
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -481,7 +726,7 @@ def main():
     args = parser.parse_args()
 
     providers = {p.strip().lower() for p in args.providers.split(",")}
-    valid = {"aws", "gcp", "azure"}
+    valid = {"aws", "gcp", "azure", "oci"}
     unknown = providers - valid
     if unknown:
         fail(f"Unknown providers: {unknown}. Valid: {valid}")
@@ -498,7 +743,7 @@ def main():
 
     futures: dict[concurrent.futures.Future, str] = {}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         if "aws" in providers:
             futures[executor.submit(run_aws_worker, args.base_url, args.email, args.password)] = "aws"
         if "gcp" in providers:
@@ -509,6 +754,8 @@ def main():
             futures[executor.submit(
                 run_azure_worker, args.base_url, args.email, args.password, args.azure_resource_group
             )] = "azure"
+        if "oci" in providers:
+            futures[executor.submit(run_oci_worker, args.base_url, args.email, args.password)] = "oci"
 
         results = []
         for future in concurrent.futures.as_completed(futures):

@@ -583,6 +583,106 @@ def _get_azure_monitor_client():
     return MonitorManagementClient(credential, creds['subscription_id'])
 
 # ---------------------------------------------------------------------------
+# OCI cloud SDK helpers
+# ---------------------------------------------------------------------------
+
+_oci_creds_cache: dict = {}
+
+OCI_CONNECTOR_ID = "0b3cf029-5ca0-4794-b982-6f494aaca372"
+
+
+def _get_oci_creds(client=None) -> dict:
+    """Return OCI credentials dict from the DB (same pattern as AWS/GCP/Azure helpers)."""
+    import threading
+    global _oci_creds_cache
+    if _oci_creds_cache:
+        return _oci_creds_cache
+    from app.config import settings
+    from app.services.connector_service import _attach_credentials
+    import asyncio, sqlalchemy as sa
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    import uuid as _uuid
+    result_holder: list = [None]
+
+    async def _get():
+        engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=False)
+        async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        try:
+            async with async_session() as db:
+                from app.models.connector import Connector
+                result = await db.execute(
+                    sa.select(Connector).where(
+                        Connector.id == _uuid.UUID(OCI_CONNECTOR_ID)
+                    )
+                )
+                conn = result.scalars().first()
+                if not conn:
+                    return None
+                await _attach_credentials(conn, db)
+                return getattr(conn, 'credentials', {})
+        finally:
+            await engine.dispose()
+
+    def _run_in_thread():
+        result_holder[0] = asyncio.run(_get())
+
+    t = threading.Thread(target=_run_in_thread)
+    t.start()
+    t.join()
+    _oci_creds_cache = result_holder[0] or {}
+    return _oci_creds_cache
+
+
+def _get_oci_compute_client():
+    """Return an OCI ComputeClient using cached credentials."""
+    creds = _get_oci_creds()
+    if not creds:
+        return None
+    import oci
+    config = {
+        "user": creds["user"],
+        "key_content": creds["private_key"],
+        "fingerprint": creds["fingerprint"],
+        "tenancy": creds["tenancy"],
+        "region": creds.get("region", "us-ashburn-1"),
+    }
+    return oci.core.ComputeClient(config)
+
+
+def _get_oci_network_client():
+    """Return an OCI VirtualNetworkClient using cached credentials."""
+    creds = _get_oci_creds()
+    if not creds:
+        return None
+    import oci
+    config = {
+        "user": creds["user"],
+        "key_content": creds["private_key"],
+        "fingerprint": creds["fingerprint"],
+        "tenancy": creds["tenancy"],
+        "region": creds.get("region", "us-ashburn-1"),
+    }
+    return oci.core.VirtualNetworkClient(config)
+
+
+def _get_oci_blockstorage_client():
+    """Return an OCI BlockstorageClient using cached credentials."""
+    creds = _get_oci_creds()
+    if not creds:
+        return None
+    import oci
+    config = {
+        "user": creds["user"],
+        "key_content": creds["private_key"],
+        "fingerprint": creds["fingerprint"],
+        "tenancy": creds["tenancy"],
+        "region": creds.get("region", "us-ashburn-1"),
+    }
+    return oci.core.BlockstorageClient(config)
+
+
+# ---------------------------------------------------------------------------
 # AWS-specific cleanup (called by test_aws_live.py cleanup())
 # ---------------------------------------------------------------------------
 
