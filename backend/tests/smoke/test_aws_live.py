@@ -222,6 +222,7 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
         "instance_asset": instance_asset,
         "instance_id": instance_id,
         "backend_ip": backend_ip,
+        "tailscale_auth_key": auth_key,
         "agent_secret": agent_secret,
         "agent_asset": agent_asset,
         "deploy_time": deploy_time,
@@ -2144,22 +2145,45 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
     )
     log(f"[Phase X] nexplane-smoketest service running on port {_SMOKETEST_PORT}")
 
-    # Re-deploy agent to pick up current backend Tailscale IP (may differ from Phase A if
-    # backend was restarted since then — Tailscale state is ephemeral in the container).
+    # Re-join Tailscale (Phase V removes it; re-establish so agent can reach backend).
+    # Also re-deploy agent with current backend IP (may differ from Phase A after restarts).
     backend_ip = phase_a_result.get("backend_ip", "")
+    tailscale_auth_key = phase_a_result.get("tailscale_auth_key", "")
+    if tailscale_auth_key and instance_id:
+        try:
+            client.run_cr(
+                "[Phase X] re-join Tailscale", "tailscale_join", instance_asset_id,
+                {"instance_id": instance_id, "auth_key": tailscale_auth_key,
+                 "hostname": "nexplane-smoke-ec2"},
+            )
+            log("[Phase X] Tailscale re-joined")
+        except Exception:
+            log("[Phase X] Tailscale re-join skipped (no auth key or already joined)")
     if backend_ip:
         agent_secret = client.get_agent_secret()
         control_plane_url = f"http://{backend_ip}:8000"
-        try:
-            client.run_cr(
-                "[Phase X] refresh agent backend URL", "deploy_nexplane_agent",
-                instance_asset_id,
-                {"instance_id": instance_id, "nexplane_url": control_plane_url,
-                 "nexplane_secret": agent_secret, "rollback_strategy": "remove_nexplane_agent"},
-            )
-            log(f"[Phase X] Agent refreshed to connect to {control_plane_url}")
-        except Exception as e:
-            log(f"[Phase X] Agent refresh warning: {e}")
+        cr_id = client.create_cr(
+            "[Phase X] refresh agent backend URL", "deploy_nexplane_agent",
+            instance_asset_id,
+            {"instance_id": instance_id, "nexplane_url": control_plane_url,
+             "nexplane_secret": agent_secret, "rollback_strategy": "remove_nexplane_agent"},
+        )
+        client.post(f"/change-requests/{cr_id}/plan")
+        client.post(f"/change-requests/{cr_id}/submit-for-approval")
+        client.post(f"/change-requests/{cr_id}/approve",
+                    json={"decision": "approved", "comment": "Phase X agent refresh"})
+        client.post(f"/change-requests/{cr_id}/execute")
+        # Wait up to 3 min — non-fatal if it fails (agent may already be connected)
+        import time as _t
+        for _ in range(18):
+            _t.sleep(10)
+            cr_status = client.get(f"/change-requests/{cr_id}").get("status", "")
+            if cr_status == "completed":
+                log(f"[Phase X] Agent refreshed to connect to {control_plane_url}")
+                break
+            if cr_status in ("failed", "rejected"):
+                log(f"[Phase X] Agent refresh warning: CR {cr_status} — continuing")
+                break
 
     try:
         # Step 2: Wait for the Nexplane agent to register as a server asset
