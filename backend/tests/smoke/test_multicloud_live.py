@@ -892,15 +892,15 @@ def run_oci_worker(base_url: str, email: str, password: str) -> dict:
         if bv_id and instance_ocid and instance_asset_id:
             try:
                 attach_cr = client._run_cr_with_timeout(
-                    "[OCI_G] Attach Block Volume", "oci_attach_block_volume", instance_asset_id,
+                    "[OCI_G] Attach Block Volume", "oci_block_volume_attach", instance_asset_id,
                     {"instance_id": instance_ocid, "volume_id": bv_id},
                     timeout=TIMEOUT_SECONDS,
                 )
-                rollback_stack.append((attach_cr["id"], "oci_attach_block_volume"))
+                rollback_stack.append((attach_cr["id"], "oci_block_volume_attach"))
                 log("[OCI_G] Block volume attached")
 
                 # Detach (rollback the attach CR)
-                client.rollback_cr(attach_cr["id"], "oci_attach_block_volume")
+                client.rollback_cr(attach_cr["id"], "oci_block_volume_attach")
                 rollback_stack.pop()
                 log("[OCI_G] Block volume detached via rollback")
             except Exception as e:
@@ -1127,7 +1127,7 @@ def run_oci_worker(base_url: str, email: str, password: str) -> dict:
             alarm_cr = client._run_cr_with_timeout(
                 "[OCI_N] Create Monitoring Alarm", "oci_alarm_create", compartment_asset_id,
                 {"compartment_id": compartment_ocid or tenancy_id,
-                 "display_name": "nexplane-smoke-alarm",
+                 "display_name": f"nexplane-smoke-alarm-{time.strftime('%H%M%S')}",
                  "namespace": "oci_computeagent",
                  "query": "CpuUtilization[1m].mean() > 80",
                  "severity": "CRITICAL",
@@ -1146,12 +1146,13 @@ def run_oci_worker(base_url: str, email: str, password: str) -> dict:
             log(f"[OCI_N] Alarm test warning: {e}")
 
         try:
+            log_group_name = f"nexplane-smoke-logs-{time.strftime('%H%M%S')}"
             log_cr = client._run_cr_with_timeout(
                 "[OCI_N] Enable OCI Logging", "oci_logging_enable", compartment_asset_id,
                 {"compartment_id": compartment_ocid or tenancy_id,
-                 "log_group_name": "nexplane-smoke-logs",
-                 "log_name": "nexplane-smoke-audit-log",
-                 "log_type": "AUDIT",
+                 "log_group_name": log_group_name,
+                 "log_name": f"nexplane-smoke-audit-{time.strftime('%H%M%S')}",
+                 "log_type": "CUSTOM",
                  "is_enabled": True,
                  "retention_duration": 30},
                 timeout=TIMEOUT_SECONDS,

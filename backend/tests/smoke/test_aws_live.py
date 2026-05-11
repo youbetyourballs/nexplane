@@ -454,8 +454,10 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
         )
         rollback_stack.append((cr["id"], "snapshot_asset"))
 
-        # Find the snapshot ID from AWS
-        if ec2_boto:
+        # Get snapshot_id from CR result first (most reliable)
+        snapshot_id = client.get_cr_step_result(cr).get("snapshot_id")
+        # Fallback: boto3 describe if not in CR result
+        if not snapshot_id and ec2_boto:
             snaps = ec2_boto.describe_snapshots(
                 Filters=[
                     {"Name": "description", "Values": [f"*{instance_id}*"]},
@@ -467,7 +469,15 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
                 snapshot_id = snaps[0]["SnapshotId"]
         log(f"EBS snapshot created: {snapshot_id or 'unknown'}")
 
-        # 5. Verify via SSM
+        # 5a. Verify snapshot via Nexplane CR (exercises verify_snapshot executor live)
+        if snapshot_id:
+            client.run_cr(
+                "[Phase E] verify EBS snapshot", "verify_snapshot", instance_asset["id"],
+                {"snapshot_id": snapshot_id},
+            )
+            log(f"EBS snapshot verified via CR: {snapshot_id}")
+
+        # 5b. Verify via SSM
         client.run_cr(
             "[Phase E] SSM verify post-snapshot", "ssm_command", instance_asset["id"],
             {"instance_id": instance_id, "document_name": "AWS-RunShellScript",

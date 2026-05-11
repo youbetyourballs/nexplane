@@ -60,9 +60,26 @@ class NexplaneClient:
         resp.raise_for_status()
         return resp.json()
 
+    @staticmethod
+    def get_cr_step_result(cr: dict, step_number: int = 1) -> dict:
+        """Extract the result dict for a specific step from a completed CR execution run."""
+        for run in cr.get("execution_runs", []):
+            if "rollback" in run.get("workflow_id", ""):
+                continue
+            steps = (run.get("result") or {}).get("execution", {}).get("steps", [])
+            for step in steps:
+                if step.get("step_number") == step_number:
+                    return step.get("result") or {}
+        return {}
+
     def post(self, path: str, **kwargs) -> dict:
         resp = self.client.post(f"{self.base}{path}", **kwargs)
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+            except Exception:
+                body = resp.text
+            raise Exception(f"HTTP {resp.status_code} {path}: {body}")
         return resp.json()
 
     def get_cloud_account_asset_id(self) -> str:
