@@ -2144,6 +2144,23 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
     )
     log(f"[Phase X] nexplane-smoketest service running on port {_SMOKETEST_PORT}")
 
+    # Re-deploy agent to pick up current backend Tailscale IP (may differ from Phase A if
+    # backend was restarted since then — Tailscale state is ephemeral in the container).
+    backend_ip = phase_a_result.get("backend_ip", "")
+    if backend_ip:
+        agent_secret = client.get_agent_secret()
+        control_plane_url = f"http://{backend_ip}:8000"
+        try:
+            client.run_cr(
+                "[Phase X] refresh agent backend URL", "deploy_nexplane_agent",
+                instance_asset_id,
+                {"instance_id": instance_id, "nexplane_url": control_plane_url,
+                 "nexplane_secret": agent_secret, "rollback_strategy": "remove_nexplane_agent"},
+            )
+            log(f"[Phase X] Agent refreshed to connect to {control_plane_url}")
+        except Exception as e:
+            log(f"[Phase X] Agent refresh warning: {e}")
+
     try:
         # Step 2: Wait for the Nexplane agent to register as a server asset
         # The agent registers under name=hostname ('nexplane-smoke-ec2') with asset_type=server.
