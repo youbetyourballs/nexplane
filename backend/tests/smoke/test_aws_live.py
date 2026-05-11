@@ -2152,6 +2152,8 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
     try:
         backend_ip = setup_backend_tailscale(tailscale_auth_key)
         log(f"[Phase X] Current backend Tailscale IP: {backend_ip}")
+        # Propagate current IP so Phase T and IP phases use the right URL
+        phase_a_result["backend_ip"] = backend_ip
     except Exception as e:
         backend_ip = phase_a_result.get("backend_ip", "")
         log(f"[Phase X] Could not refresh backend Tailscale IP, using Phase A IP: {backend_ip}")
