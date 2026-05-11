@@ -42,3 +42,17 @@ def get_objectstorage_client(creds: dict):
     import oci
     config = get_oci_config(creds)
     return oci.object_storage.ObjectStorageClient(config)
+
+
+def get_loadbalancer_client(creds: dict):
+    """Return an OCI LoadBalancerClient using stored credentials."""
+    import oci
+    config = get_oci_config(creds)
+    return oci.load_balancer.LoadBalancerClient(config)
+
+
+def get_dns_client(creds: dict):
+    """Return an OCI DnsClient using stored credentials."""
+    import oci
+    config = get_oci_config(creds)
+    return oci.dns.DnsClient(config)
