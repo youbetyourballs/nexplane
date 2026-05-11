@@ -50,6 +50,20 @@ def run_phase_l(client: NexplaneClient, cloud_account_id: str,
     rollback_stack: list[tuple[str, str]] = []
     instance_created = False
 
+    # Pre-run: delete stale GCE instance if it exists from a previous run
+    try:
+        gcp_compute = _get_gcp_compute_client()
+        if gcp_compute:
+            try:
+                gcp_compute.get(project=gcp_project, zone=GCE_ZONE, instance=GCE_SMOKE_INSTANCE)
+                log(f"[Phase L] Deleting stale GCE instance: {GCE_SMOKE_INSTANCE}")
+                gcp_compute.delete(project=gcp_project, zone=GCE_ZONE, instance=GCE_SMOKE_INSTANCE)
+                import time as _t; _t.sleep(10)
+            except Exception:
+                pass  # Instance doesn't exist, nothing to clean up
+    except Exception:
+        pass
+
     try:
         cr = client.run_cr(
             "[Phase L] launch GCE instance", "gce_instance_create", cloud_account_id,
