@@ -35,3 +35,10 @@ def get_blockstorage_client(creds: dict):
     import oci
     config = get_oci_config(creds)
     return oci.core.BlockstorageClient(config)
+
+
+def get_objectstorage_client(creds: dict):
+    """Return an OCI ObjectStorageClient authenticated with stored credentials."""
+    import oci
+    config = get_oci_config(creds)
+    return oci.object_storage.ObjectStorageClient(config)

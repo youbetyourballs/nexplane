@@ -621,6 +621,97 @@ const CHANGE_TYPE_META: Partial<Record<ChangeType, { label: string; description:
     description: "Create an OCI subnet with SSH + ICMP security list. Rollback: delete subnet.",
     outcomeTemplate: JSON.stringify({ compartment_id: "", vcn_id: "", display_name: "nexplane-subnet", cidr_block: "10.0.0.0/24", dns_label: "nexplanesubnet", prohibit_public_ip_on_vnic: false, rollback_strategy: "delete_subnet" }, null, 2),
   },
+  oci_bucket_create: {
+    label: "Create Object Storage Bucket",
+    description: "Create a new OCI Object Storage bucket.",
+    outcomeTemplate: JSON.stringify({
+      compartment_id: "ocid1.compartment.oc1..aaaa",
+      name: "nexplane-bucket",
+      storage_tier: "Standard",
+      public_access_type: "NoPublicAccess",
+      versioning: "Disabled",
+      rollback_strategy: "delete_bucket",
+    }, null, 2),
+  },
+  oci_bucket_delete: {
+    label: "Delete Object Storage Bucket",
+    description: "Delete an OCI Object Storage bucket (must be empty).",
+    outcomeTemplate: JSON.stringify({
+      bucket_name: "",
+      namespace: "",
+      rollback_strategy: "rollback_unavailable",
+    }, null, 2),
+  },
+  oci_bucket_lifecycle_set: {
+    label: "Configure Bucket Lifecycle",
+    description: "Set lifecycle rules on an OCI Object Storage bucket.",
+    outcomeTemplate: JSON.stringify({
+      bucket_name: "",
+      namespace: "",
+      rules: [{ name: "expire-objects", action: "DELETE", time_amount: 90, time_unit: "DAYS", is_enabled: true }],
+      rollback_strategy: "clear_lifecycle_rules",
+    }, null, 2),
+  },
+  oci_bucket_block_public: {
+    label: "Block Bucket Public Access",
+    description: "Set public_access_type to NoPublicAccess on an OCI bucket.",
+    outcomeTemplate: JSON.stringify({
+      bucket_name: "",
+      namespace: "",
+      rollback_strategy: "restore_previous_access_type",
+    }, null, 2),
+  },
+  oci_block_volume_create: {
+    label: "Create Block Volume",
+    description: "Create an OCI Block Volume.",
+    outcomeTemplate: JSON.stringify({
+      compartment_id: "ocid1.compartment.oc1..aaaa",
+      display_name: "nexplane-volume",
+      size_in_gbs: 50,
+      vpus_per_gb: 10,
+      availability_domain: "",
+      rollback_strategy: "delete_block_volume",
+    }, null, 2),
+  },
+  oci_block_volume_attach: {
+    label: "Attach Block Volume",
+    description: "Attach an OCI Block Volume to a compute instance. Requires instance asset + block-volume asset as targets.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "",
+      volume_id: "",
+      display_name: "nexplane-attachment",
+      type: "paravirtualized",
+      is_read_only: false,
+      rollback_strategy: "detach_block_volume",
+    }, null, 2),
+  },
+  oci_block_volume_detach: {
+    label: "Detach Block Volume",
+    description: "Detach an OCI Block Volume from a compute instance. Requires instance asset + block-volume asset as targets.",
+    outcomeTemplate: JSON.stringify({
+      instance_id: "",
+      volume_id: "",
+      rollback_strategy: "reattach_block_volume",
+    }, null, 2),
+  },
+  oci_block_volume_delete: {
+    label: "Delete Block Volume",
+    description: "Delete an OCI Block Volume (must be detached first).",
+    outcomeTemplate: JSON.stringify({
+      volume_id: "",
+      rollback_strategy: "rollback_unavailable",
+    }, null, 2),
+  },
+  oci_block_volume_backup: {
+    label: "Create Block Volume Backup",
+    description: "Create an incremental backup of an OCI Block Volume.",
+    outcomeTemplate: JSON.stringify({
+      volume_id: "",
+      display_name: "nexplane-backup",
+      type: "INCREMENTAL",
+      rollback_strategy: "delete_backup",
+    }, null, 2),
+  },
 };
 
 const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
@@ -720,6 +811,15 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
       "oci_block_volume_snapshot",
       "oci_vcn_create",
       "oci_subnet_create",
+      "oci_bucket_create",
+      "oci_bucket_delete",
+      "oci_bucket_lifecycle_set",
+      "oci_bucket_block_public",
+      "oci_block_volume_create",
+      "oci_block_volume_attach",
+      "oci_block_volume_detach",
+      "oci_block_volume_delete",
+      "oci_block_volume_backup",
     ] as ChangeType[],
   },
 ];
@@ -825,6 +925,15 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   oci_instance_reboot: "server" as AssetType,
   oci_instance_delete: "server" as AssetType,
   oci_block_volume_snapshot: "server" as AssetType,
+  oci_bucket_create: "cloud_account" as AssetType,
+  oci_bucket_delete: "storage_bucket" as AssetType,
+  oci_bucket_lifecycle_set: "storage_bucket" as AssetType,
+  oci_bucket_block_public: "storage_bucket" as AssetType,
+  oci_block_volume_create: "cloud_account" as AssetType,
+  oci_block_volume_attach: "server" as AssetType,
+  oci_block_volume_detach: "server" as AssetType,
+  oci_block_volume_delete: "storage_bucket" as AssetType,
+  oci_block_volume_backup: "storage_bucket" as AssetType,
   // Database actions
   rotate_db_credentials: "database",
   promote_db_replica: "database",
