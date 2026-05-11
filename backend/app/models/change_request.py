@@ -153,6 +153,15 @@ class ChangeType(str, enum.Enum):
     azure_sql_database_delete = "azure_sql_database_delete"
     azure_metric_alert_create = "azure_metric_alert_create"
     azure_metric_alert_delete = "azure_metric_alert_delete"
+    # OCI Compute — Sub-project 1
+    oci_instance_create = "oci_instance_create"
+    oci_instance_stop = "oci_instance_stop"
+    oci_instance_start = "oci_instance_start"
+    oci_instance_reboot = "oci_instance_reboot"
+    oci_instance_delete = "oci_instance_delete"
+    oci_block_volume_snapshot = "oci_block_volume_snapshot"
+    oci_vcn_create = "oci_vcn_create"
+    oci_subnet_create = "oci_subnet_create"
     # Agent command group change types (Plans 4)
     agent_linux_patch = "agent_linux_patch"
     agent_ossecurity = "agent_ossecurity"
