@@ -82,3 +82,31 @@ def get_vaults_management_client(creds: dict):
     import oci
     config = get_oci_config(creds)
     return oci.key_management.KmsVaultClient(config)
+
+
+def get_database_client(creds: dict):
+    """Return oci.database.DatabaseClient authenticated with stored credentials."""
+    import oci
+    config = get_oci_config(creds)
+    return oci.database.DatabaseClient(config)
+
+
+def get_mysql_client(creds: dict):
+    """Return oci.mysql.DbSystemClient authenticated with stored credentials."""
+    import oci
+    config = get_oci_config(creds)
+    return oci.mysql.DbSystemClient(config)
+
+
+def get_monitoring_client(creds: dict):
+    """Return oci.monitoring.MonitoringClient authenticated with stored credentials."""
+    import oci
+    config = get_oci_config(creds)
+    return oci.monitoring.MonitoringClient(config)
+
+
+def get_logging_client(creds: dict):
+    """Return oci.logging.LoggingManagementClient authenticated with stored credentials."""
+    import oci
+    config = get_oci_config(creds)
+    return oci.logging.LoggingManagementClient(config)
