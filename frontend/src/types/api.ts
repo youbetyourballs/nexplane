@@ -410,6 +410,18 @@ export type ChangeType =
   | "oci_vault_secret_delete"
   | "oci_compartment_create"
   | "oci_compartment_delete"
+  | "oci_adb_create"
+  | "oci_adb_stop"
+  | "oci_adb_start"
+  | "oci_adb_delete"
+  | "oci_adb_backup"
+  | "oci_mysql_create"
+  | "oci_mysql_stop"
+  | "oci_mysql_start"
+  | "oci_mysql_delete"
+  | "oci_alarm_create"
+  | "oci_alarm_delete"
+  | "oci_logging_enable"
   | "suppress";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";

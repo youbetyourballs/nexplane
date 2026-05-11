@@ -970,6 +970,133 @@ const CHANGE_TYPE_META: Partial<Record<ChangeType, { label: string; description:
       rollback_strategy: "rollback_unavailable",
     }, null, 2),
   },
+  // Oracle Cloud — Database + Observability (SP5)
+  oci_adb_create: {
+    label: "Create Autonomous Database",
+    description: "Provision an OCI Autonomous Database (Always Free tier). ADB provisioning takes up to 15 minutes.",
+    outcomeTemplate: JSON.stringify({
+      compartment_id: "",
+      display_name: "nexplane-adb",
+      db_name: "nexplaneadb",
+      admin_password: "Nexplane1234!",
+      db_workload: "OLTP",
+      cpu_core_count: 1,
+      data_storage_size_in_tbs: 1,
+      is_auto_scaling_enabled: false,
+      is_free_tier: true,
+      license_model: "LICENSE_INCLUDED",
+      rollback_strategy: "oci_adb_delete",
+    }, null, 2),
+  },
+  oci_adb_stop: {
+    label: "Stop Autonomous Database",
+    description: "Stop a running OCI Autonomous Database instance.",
+    outcomeTemplate: JSON.stringify({
+      db_id: "",
+      rollback_strategy: "oci_adb_start",
+    }, null, 2),
+  },
+  oci_adb_start: {
+    label: "Start Autonomous Database",
+    description: "Start a stopped OCI Autonomous Database instance.",
+    outcomeTemplate: JSON.stringify({
+      db_id: "",
+      rollback_strategy: "oci_adb_stop",
+    }, null, 2),
+  },
+  oci_adb_delete: {
+    label: "Delete Autonomous Database",
+    description: "Permanently terminate an OCI Autonomous Database instance. This action is irreversible.",
+    outcomeTemplate: JSON.stringify({
+      db_id: "",
+      rollback_strategy: "rollback_unavailable",
+    }, null, 2),
+  },
+  oci_adb_backup: {
+    label: "Create ADB Manual Backup",
+    description: "Create a manual backup of an OCI Autonomous Database. Backup activation can take up to 30 minutes.",
+    outcomeTemplate: JSON.stringify({
+      db_id: "",
+      display_name: "nexplane-backup",
+      rollback_strategy: "delete_backup",
+    }, null, 2),
+  },
+  oci_mysql_create: {
+    label: "Create MySQL HeatWave DB System",
+    description: "Provision an OCI MySQL HeatWave DB System. MySQL provisioning takes up to 20 minutes.",
+    outcomeTemplate: JSON.stringify({
+      compartment_id: "",
+      display_name: "nexplane-mysql",
+      admin_username: "nexplane",
+      admin_password: "Nexplane1234!",
+      shape_name: "MySQL.VM.Standard.E4.1.8GB",
+      mysql_version: "8.0.36",
+      subnet_id: "",
+      data_storage_size_in_gbs: 50,
+      availability_domain: "",
+      rollback_strategy: "oci_mysql_delete",
+    }, null, 2),
+  },
+  oci_mysql_stop: {
+    label: "Stop MySQL HeatWave DB System",
+    description: "Stop a running OCI MySQL HeatWave DB System.",
+    outcomeTemplate: JSON.stringify({
+      db_system_id: "",
+      rollback_strategy: "oci_mysql_start",
+    }, null, 2),
+  },
+  oci_mysql_start: {
+    label: "Start MySQL HeatWave DB System",
+    description: "Start a stopped OCI MySQL HeatWave DB System.",
+    outcomeTemplate: JSON.stringify({
+      db_system_id: "",
+      rollback_strategy: "oci_mysql_stop",
+    }, null, 2),
+  },
+  oci_mysql_delete: {
+    label: "Delete MySQL HeatWave DB System",
+    description: "Delete an OCI MySQL HeatWave DB System. This action is irreversible.",
+    outcomeTemplate: JSON.stringify({
+      db_system_id: "",
+      rollback_strategy: "rollback_unavailable",
+    }, null, 2),
+  },
+  oci_alarm_create: {
+    label: "Create OCI Monitoring Alarm",
+    description: "Create an OCI Monitoring alarm. Uses MQL query syntax — e.g. CpuUtilization[1m].mean() > 80.",
+    outcomeTemplate: JSON.stringify({
+      compartment_id: "",
+      display_name: "nexplane-alarm",
+      namespace: "oci_computeagent",
+      query: "CpuUtilization[1m].mean() > 80",
+      severity: "CRITICAL",
+      body: "CPU utilization exceeded 80%",
+      destinations: [],
+      is_enabled: true,
+      rollback_strategy: "oci_alarm_delete",
+    }, null, 2),
+  },
+  oci_alarm_delete: {
+    label: "Delete OCI Monitoring Alarm",
+    description: "Delete an OCI Monitoring alarm by its OCID.",
+    outcomeTemplate: JSON.stringify({
+      alarm_id: "",
+      rollback_strategy: "rollback_unavailable",
+    }, null, 2),
+  },
+  oci_logging_enable: {
+    label: "Enable OCI Logging",
+    description: "Create an OCI Log Group and Log to enable compartment-level audit logging.",
+    outcomeTemplate: JSON.stringify({
+      compartment_id: "",
+      log_group_name: "nexplane-logs",
+      log_name: "nexplane-audit-log",
+      log_type: "AUDIT",
+      is_enabled: true,
+      retention_duration: 30,
+      rollback_strategy: "disable_logging",
+    }, null, 2),
+  },
 };
 
 const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
@@ -1102,6 +1229,18 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
       "oci_vault_secret_delete",
       "oci_compartment_create",
       "oci_compartment_delete",
+      "oci_adb_create",
+      "oci_adb_stop",
+      "oci_adb_start",
+      "oci_adb_delete",
+      "oci_adb_backup",
+      "oci_mysql_create",
+      "oci_mysql_stop",
+      "oci_mysql_start",
+      "oci_mysql_delete",
+      "oci_alarm_create",
+      "oci_alarm_delete",
+      "oci_logging_enable",
     ] as ChangeType[],
   },
 ];
@@ -1241,6 +1380,19 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   oci_vault_secret_delete: "application" as AssetType,
   oci_compartment_create: "cloud_account" as AssetType,
   oci_compartment_delete: "cloud_account" as AssetType,
+  // OCI SP5 — ADB, MySQL, Monitoring, Logging
+  oci_adb_create: "cloud_account" as AssetType,
+  oci_adb_stop: "database" as AssetType,
+  oci_adb_start: "database" as AssetType,
+  oci_adb_delete: "database" as AssetType,
+  oci_adb_backup: "database" as AssetType,
+  oci_mysql_create: "cloud_account" as AssetType,
+  oci_mysql_stop: "database" as AssetType,
+  oci_mysql_start: "database" as AssetType,
+  oci_mysql_delete: "database" as AssetType,
+  oci_alarm_create: "cloud_account" as AssetType,
+  oci_alarm_delete: "cloud_account" as AssetType,
+  oci_logging_enable: "cloud_account" as AssetType,
   // Database actions
   rotate_db_credentials: "database",
   promote_db_replica: "database",

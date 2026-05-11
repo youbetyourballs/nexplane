@@ -125,6 +125,13 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.k8s_workload_deploy,
     ChangeType.agent_containerize_retire,
     ChangeType.agent_containerize_auto,
+    # OCI Sub-project 5 — Autonomous Database, MySQL HeatWave, Monitoring, Logging
+    ChangeType.oci_adb_create, ChangeType.oci_adb_stop, ChangeType.oci_adb_start,
+    ChangeType.oci_adb_delete, ChangeType.oci_adb_backup,
+    ChangeType.oci_mysql_create, ChangeType.oci_mysql_stop, ChangeType.oci_mysql_start,
+    ChangeType.oci_mysql_delete,
+    ChangeType.oci_alarm_create, ChangeType.oci_alarm_delete,
+    ChangeType.oci_logging_enable,
 }
 
 
