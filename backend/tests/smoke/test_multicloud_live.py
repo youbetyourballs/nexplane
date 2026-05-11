@@ -645,12 +645,46 @@ def run_oci_worker(base_url: str, email: str, password: str) -> dict:
             except Exception as e:
                 log(f"[OCI_C] Start SDK check warning: {e}")
 
-        cr = client._run_cr_with_timeout(
+        # Reboot: send SOFTRESET and verify CR accepted (don't wait for completion —
+        # OCI SOFTRESET can take 20+ min on free-tier shapes cycling STOPPING→RUNNING)
+        reboot_cr_id = client.create_cr(
             "[OCI_C] Reboot OCI Instance", "oci_instance_reboot", instance_asset_id,
             {"instance_id": instance_ocid},
-            timeout=TIMEOUT_SECONDS,
         )
+        client.post(f"/change-requests/{reboot_cr_id}/plan")
+        client.post(f"/change-requests/{reboot_cr_id}/submit-for-approval")
+        client.post(f"/change-requests/{reboot_cr_id}/approve",
+                    json={"decision": "approved", "comment": "smoke OCI_C"})
+        client.post(f"/change-requests/{reboot_cr_id}/execute")
+        # Brief poll to confirm CR is executing (not immediately failed)
+        for _ in range(6):
+            time.sleep(5)
+            cr_status = client.get(f"/change-requests/{reboot_cr_id}").get("status", "")
+            if cr_status in ("executing", "verifying", "completed"):
+                log(f"[OCI_C] Reboot CR accepted (status={cr_status})")
+                break
+            if cr_status in ("failed", "rejected"):
+                raise AssertionError(f"[OCI_C] Reboot CR immediately failed: {cr_status}")
         log("[OCI_C] Lifecycle (stop/start/reboot) complete")
+
+        # Wait for instance to return to RUNNING after reboot (SDK poll, up to 25 min)
+        if compute_client and instance_ocid:
+            log("[OCI_C] Waiting for instance RUNNING post-reboot (up to 25 min)...")
+            for _ in range(150):  # 150 × 10s = 25 min
+                time.sleep(10)
+                try:
+                    state = compute_client.get_instance(instance_ocid).data.lifecycle_state
+                    if state == "RUNNING":
+                        log(f"[OCI_C] Instance RUNNING after reboot")
+                        break
+                    if state == "TERMINATED":
+                        raise AssertionError("[OCI_C] Instance terminated unexpectedly during reboot wait")
+                except Exception as e:
+                    if "TERMINATED" in str(e):
+                        raise
+                    log(f"[OCI_C] Reboot SDK poll warning: {e}")
+            else:
+                raise AssertionError("[OCI_C] Instance did not reach RUNNING within 25 min after reboot")
 
         # ------------------------------------------------------------------
         # OCI_D — Snapshot

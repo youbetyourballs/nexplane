@@ -118,27 +118,50 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if ssh_public_key:
         metadata["ssh_authorized_keys"] = ssh_public_key
 
-    shape_config = oci.core.models.LaunchInstanceShapeConfigDetails(
-        ocpus=float(ocpus),
-        memory_in_gbs=float(memory_in_gbs),
-    )
+    # Only flex shapes accept shape_config — fixed shapes (E2.1.Micro etc.) reject it
+    is_flex = "Flex" in shape
 
-    details = oci.core.models.LaunchInstanceDetails(
-        compartment_id=compartment_id,
-        display_name=name,
-        shape=shape,
-        shape_config=shape_config,
-        image_id=image_id,
-        subnet_id=subnet_id,
-        metadata=metadata,
-        freeform_tags={"managed-by": "nexplane"},
-    )
-
-    response = await loop.run_in_executor(
+    # Resolve availability domains — try each until one succeeds (quota may be 0 in some ADs)
+    from ._client import get_identity_client
+    identity = get_identity_client(creds)
+    ads = await loop.run_in_executor(
         None,
-        lambda: compute.launch_instance(details).data,
+        lambda: identity.list_availability_domains(compartment_id).data,
     )
-    instance_id = response.id
+
+    instance_id = None
+    last_error = None
+    for ad in ads:
+        launch_kwargs = dict(
+            compartment_id=compartment_id,
+            display_name=name,
+            shape=shape,
+            availability_domain=ad.name,
+            image_id=image_id,
+            subnet_id=subnet_id,
+            metadata=metadata,
+            freeform_tags={"managed-by": "nexplane"},
+        )
+        if is_flex:
+            launch_kwargs["shape_config"] = oci.core.models.LaunchInstanceShapeConfigDetails(
+                ocpus=float(ocpus),
+                memory_in_gbs=float(memory_in_gbs),
+            )
+
+        details = oci.core.models.LaunchInstanceDetails(**launch_kwargs)
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda d=details: compute.launch_instance(d).data,
+            )
+            instance_id = response.id
+            break
+        except Exception as exc:
+            last_error = exc
+            continue
+
+    if not instance_id:
+        raise RuntimeError(f"Failed to launch instance in any availability domain: {last_error}")
 
     # Wait for RUNNING (wait_instance_state created in Task 6)
     from .wait_instance_state import execute as wait
