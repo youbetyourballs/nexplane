@@ -22,7 +22,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     compute = get_compute_client(creds)
     loop = asyncio.get_running_loop()
 
-    max_polls = 60  # 60 x 10s = 10 minutes
+    max_polls = 120  # 120 x 10s = 20 minutes (OCI SOFTRESET cycles STOPPING->STOPPED->STARTING->RUNNING)
     for attempt in range(max_polls):
         instance = await loop.run_in_executor(
             None,
