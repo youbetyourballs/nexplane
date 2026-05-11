@@ -105,7 +105,7 @@ function RunModal({ suite, onClose, onRun, isRunning }: RunModalProps) {
         </h2>
         <p className="text-slate-400 text-sm">{suite.description}</p>
 
-        {suite.id !== "parallel" && (
+        {suite.id !== "parallel" && suite.id !== "oci" && (
           <div>
             <label className="block text-slate-300 text-sm font-medium mb-1">
               Phases

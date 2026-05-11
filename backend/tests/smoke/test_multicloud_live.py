@@ -511,26 +511,95 @@ def run_oci_worker(base_url: str, email: str, password: str) -> dict:
 
     try:
         # ------------------------------------------------------------------
-        # Pre-run: terminate any stale OCI instances from previous runs
-        # (prevents LimitExceeded on free-tier VM.Standard.E2.1.Micro quota=2)
+        # Pre-run: clean up stale OCI resources from previous runs
         # ------------------------------------------------------------------
+        oci_creds_pre = _get_oci_creds()
+        tenancy_id_pre = oci_creds_pre.get("tenancy", "") if oci_creds_pre else ""
+
+        # Terminate stale instances (prevents LimitExceeded on free-tier quota=2)
         compute_client = _get_oci_compute_client()
-        if compute_client:
-            creds = _get_oci_creds()
-            tenancy_id = creds.get("tenancy", "")
-            if tenancy_id:
-                instances = compute_client.list_instances(tenancy_id).data
-                for inst in instances:
-                    if inst.lifecycle_state not in ("TERMINATED", "TERMINATING") and \
-                            "nexplane-mc-oci" in (inst.display_name or ""):
+        if compute_client and tenancy_id_pre:
+            instances = compute_client.list_instances(tenancy_id_pre).data
+            for inst in instances:
+                if inst.lifecycle_state not in ("TERMINATED", "TERMINATING") and \
+                        "nexplane-mc-oci" in (inst.display_name or ""):
+                    try:
+                        compute_client.terminate_instance(inst.id, preserve_boot_volume=False)
+                        log(f"[OCI pre-clean] Terminated stale instance: {inst.display_name}")
+                    except Exception:
+                        pass
+            if any(i.lifecycle_state not in ("TERMINATED", "TERMINATING") for i in instances
+                   if "nexplane-mc-oci" in (i.display_name or "")):
+                time.sleep(15)
+
+        # Delete stale nexplane-managed VCNs (accumulate due to failed rollbacks)
+        network_client_pre = _get_oci_network_client()
+        if network_client_pre and tenancy_id_pre:
+            try:
+                vcns = network_client_pre.list_vcns(compartment_id=tenancy_id_pre).data
+                stale = [v for v in vcns
+                         if v.lifecycle_state == "AVAILABLE"
+                         and "nexplane-smoke" in (v.display_name or "")
+                         and (v.freeform_tags or {}).get("managed-by") == "nexplane"]
+                if stale:
+                    log(f"[OCI pre-clean] Found {len(stale)} stale nexplane VCNs — deleting...")
+                for vcn in stale:
+                    try:
+                        import oci as _oci
+                        # Clear route table rules first (required before IGW deletion)
                         try:
-                            compute_client.terminate_instance(inst.id, preserve_boot_volume=False)
-                            log(f"[OCI pre-clean] Terminated stale instance: {inst.display_name}")
+                            rt_id = vcn.default_route_table_id
+                            if rt_id:
+                                network_client_pre.update_route_table(
+                                    rt_id,
+                                    _oci.core.models.UpdateRouteTableDetails(route_rules=[]),
+                                )
                         except Exception:
                             pass
-                if any(i.lifecycle_state not in ("TERMINATED", "TERMINATING") for i in instances
-                       if "nexplane-mc-oci" in (i.display_name or "")):
-                    time.sleep(15)  # Brief wait for terminations to register
+                        # Clear default security list rules (required before subnet/VCN deletion)
+                        try:
+                            sls = network_client_pre.list_security_lists(
+                                compartment_id=tenancy_id_pre, vcn_id=vcn.id
+                            ).data
+                            for sl in sls:
+                                try:
+                                    network_client_pre.update_security_list(
+                                        sl.id,
+                                        _oci.core.models.UpdateSecurityListDetails(
+                                            egress_security_rules=[],
+                                            ingress_security_rules=[],
+                                        ),
+                                    )
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                        # Delete subnets
+                        subnets = network_client_pre.list_subnets(
+                            compartment_id=tenancy_id_pre, vcn_id=vcn.id
+                        ).data
+                        for subnet in subnets:
+                            if subnet.lifecycle_state not in ("TERMINATED", "TERMINATING"):
+                                try:
+                                    network_client_pre.delete_subnet(subnet.id)
+                                    time.sleep(2)
+                                except Exception:
+                                    pass
+                        # Delete IGW
+                        igws = network_client_pre.list_internet_gateways(
+                            compartment_id=tenancy_id_pre, vcn_id=vcn.id
+                        ).data
+                        for igw in igws:
+                            try:
+                                network_client_pre.delete_internet_gateway(igw.id)
+                            except Exception:
+                                pass
+                        network_client_pre.delete_vcn(vcn.id)
+                        log(f"[OCI pre-clean] Deleted stale VCN: {vcn.display_name}")
+                    except Exception as e:
+                        log(f"[OCI pre-clean] VCN cleanup warning ({vcn.display_name}): {e}")
+            except Exception as e:
+                log(f"[OCI pre-clean] VCN scan warning: {e}")
 
         # ------------------------------------------------------------------
         # OCI_A — Foundation: discover compartments, create VCN + subnet
@@ -720,11 +789,7 @@ def run_oci_worker(base_url: str, email: str, password: str) -> dict:
         )
         rollback_stack.append((cr["id"], "oci_block_volume_snapshot"))
 
-        # Extract backup_id from CR result
-        backup_id = None
-        exec_runs = cr.get("execution_runs") or []
-        if exec_runs:
-            backup_id = exec_runs[0].get("result", {}).get("backup_id")
+        backup_id = _get_cr_step_result(cr).get("backup_id")
         log(f"[OCI_D] Snapshot CR completed (backup_id={backup_id})")
 
         # SDK verification
