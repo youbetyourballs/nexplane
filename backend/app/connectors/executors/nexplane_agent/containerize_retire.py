@@ -16,7 +16,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "dry_run": bool(parameters.get("dry_run", False)),
         },
         asset_ids=list(asset_ids),
-        timeout_seconds=120,
+        timeout_seconds=300,
     )
     # Embed asset_ids in result so rollback can target the same hosts
     if isinstance(result, dict):

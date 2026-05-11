@@ -13,7 +13,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             command="discover_applications",
             parameters=parameters,
             asset_ids=list(asset_ids),
-            timeout_seconds=120,
+            timeout_seconds=300,
         )
         return result
     except RuntimeError:

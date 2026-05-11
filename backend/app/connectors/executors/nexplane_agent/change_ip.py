@@ -102,6 +102,6 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         command="change_ip_rollback",
         parameters=rollback_params,
         asset_ids=asset_ids,
-        timeout_seconds=120,
+        timeout_seconds=300,
     )
     return {"rolled_back": True, "action": "change_ip", "agent_result": result}
