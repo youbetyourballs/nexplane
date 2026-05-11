@@ -57,8 +57,13 @@ def run_phase_l(client: NexplaneClient, cloud_account_id: str,
             try:
                 gcp_compute.get(project=gcp_project, zone=GCE_ZONE, instance=GCE_SMOKE_INSTANCE)
                 log(f"[Phase L] Deleting stale GCE instance: {GCE_SMOKE_INSTANCE}")
-                gcp_compute.delete(project=gcp_project, zone=GCE_ZONE, instance=GCE_SMOKE_INSTANCE)
-                import time as _t; _t.sleep(10)
+                op = gcp_compute.delete(project=gcp_project, zone=GCE_ZONE, instance=GCE_SMOKE_INSTANCE)
+                # Wait for delete to complete (async operation)
+                try:
+                    op.result(timeout=120)
+                    log(f"[Phase L] Stale instance deleted")
+                except Exception:
+                    import time as _t; _t.sleep(30)  # fallback wait
             except Exception:
                 pass  # Instance doesn't exist, nothing to clean up
     except Exception:
