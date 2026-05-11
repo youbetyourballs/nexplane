@@ -1,0 +1,20 @@
+{
+  "change_type": "oci_nsg_create",
+  "display_name": "Create OCI NSG",
+  "steps": [
+    {
+      "generic_action": "create_nsg",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable",
+    "asset_exists"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "delete_nsg",
+  "rollback_connector_type": "oci"
+}

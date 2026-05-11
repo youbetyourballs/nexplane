@@ -52,6 +52,7 @@ class ConnectorType(str, enum.Enum):
     tailscale = "tailscale"
     terraform_local = "terraform_local"
     ansible_local = "ansible_local"
+    oci = "oci"
 
 
 class ConnectorStatus(str, enum.Enum):

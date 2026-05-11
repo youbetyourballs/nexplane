@@ -1,0 +1,18 @@
+{
+  "change_type": "oci_logging_enable",
+  "display_name": "Enable OCI Logging",
+  "steps": [
+    {
+      "generic_action": "enable_logging",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable",
+    "asset_exists"
+  ],
+  "verification_methods": [
+    "api_check"
+  ]
+}

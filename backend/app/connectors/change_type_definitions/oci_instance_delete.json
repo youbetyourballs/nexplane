@@ -1,0 +1,18 @@
+{
+  "change_type": "oci_instance_delete",
+  "display_name": "Terminate OCI Instance",
+  "steps": [
+    {
+      "generic_action": "terminate_instance",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable",
+    "asset_exists"
+  ],
+  "verification_methods": [
+    "api_check"
+  ]
+}

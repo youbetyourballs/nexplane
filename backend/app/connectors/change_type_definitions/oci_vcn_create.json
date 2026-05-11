@@ -1,0 +1,20 @@
+{
+  "change_type": "oci_vcn_create",
+  "display_name": "Create OCI VCN",
+  "steps": [
+    {
+      "generic_action": "create_network",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable",
+    "asset_exists"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "delete_vcn",
+  "rollback_connector_type": "oci"
+}

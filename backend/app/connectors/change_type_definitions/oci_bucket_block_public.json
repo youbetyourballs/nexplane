@@ -1,0 +1,18 @@
+{
+  "change_type": "oci_bucket_block_public",
+  "display_name": "Block OCI Bucket Public Access",
+  "steps": [
+    {
+      "generic_action": "block_public_access",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable",
+    "asset_exists"
+  ],
+  "verification_methods": [
+    "api_check"
+  ]
+}
