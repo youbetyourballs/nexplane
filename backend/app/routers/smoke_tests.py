@@ -67,6 +67,14 @@ SUITES = [
         "description": "All agent commands x 3 clouds (Linux + Windows)",
     },
     {
+        "id": "oci",
+        "name": "OCI",
+        "file": "test_oci_live.py",
+        "default_phases": "",
+        "slow_phases": "",
+        "description": "OCI compute, VCN, block volumes, object storage, security lists, NSGs, IAM, DNS, monitoring",
+    },
+    {
         "id": "parallel",
         "name": "Parallel",
         "file": "test_parallel_live.py",
@@ -121,8 +129,26 @@ def _parse_results(log_path: Path) -> dict:
         p = m.group(1)
         if p not in phases_failed:
             phases_failed.append(p)
-    overall_passed = "ALL SELECTED PHASES PASSED" in content or "ALL TRACKS PASSED" in content
-    overall_failed = "SMOKE TEST FAILED" in content or "ONE OR MORE TRACKS FAILED" in content
+    # OCI phase patterns: ✅ [OCI_A] ..., ✅ [MC-OCI] Phases OCI_A through OCI_D complete
+    for m in re.finditer(r"\[MC-OCI\] (OCI_[A-Z]+):", content):
+        p = m.group(1)
+        if p not in phases_passed:
+            phases_passed.append(p)
+    for m in re.finditer(r"✅ \[OCI_([A-Z])\]", content):
+        p = f"OCI_{m.group(1)}"
+        if p not in phases_passed:
+            phases_passed.append(p)
+
+    overall_passed = (
+        "ALL SELECTED PHASES PASSED" in content
+        or "ALL TRACKS PASSED" in content
+        or "ALL PROVIDERS PASSED" in content
+    )
+    overall_failed = (
+        "SMOKE TEST FAILED" in content
+        or "ONE OR MORE TRACKS FAILED" in content
+        or "ONE OR MORE PROVIDERS FAILED" in content
+    )
     if overall_passed:
         status = "passed"
     elif overall_failed:
