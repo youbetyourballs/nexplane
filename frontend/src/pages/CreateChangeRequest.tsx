@@ -855,6 +855,121 @@ const CHANGE_TYPE_META: Partial<Record<ChangeType, { label: string; description:
       rollback_strategy: "restore_previous_record",
     }, null, 2),
   },
+  // Oracle Cloud — Identity
+  oci_iam_user_create: {
+    label: "Create OCI IAM User",
+    description: "Create an OCI IAM user (tenancy-scoped). Optionally assign to a group.",
+    outcomeTemplate: JSON.stringify({
+      name: "nexplane-user",
+      description: "Created by Nexplane",
+      email: "",
+      group_id: "",
+      rollback_strategy: "oci_iam_user_delete",
+    }, null, 2),
+  },
+  oci_iam_user_delete: {
+    label: "Delete OCI IAM User",
+    description: "Remove all group memberships and permanently delete an OCI IAM user.",
+    outcomeTemplate: JSON.stringify({
+      user_id: "ocid1.user.oc1..",
+      rollback_strategy: "rollback_unavailable",
+    }, null, 2),
+  },
+  oci_iam_user_disable: {
+    label: "Disable OCI IAM User",
+    description: "Block console login and API key access for an OCI IAM user.",
+    outcomeTemplate: JSON.stringify({
+      user_id: "ocid1.user.oc1..",
+      rollback_strategy: "oci_iam_user_enable",
+    }, null, 2),
+  },
+  oci_iam_user_enable: {
+    label: "Enable OCI IAM User",
+    description: "Restore console login and API key access for an OCI IAM user.",
+    outcomeTemplate: JSON.stringify({
+      user_id: "ocid1.user.oc1..",
+      can_use_console_password: true,
+      can_use_api_keys: true,
+      rollback_strategy: "oci_iam_user_disable",
+    }, null, 2),
+  },
+  oci_iam_group_create: {
+    label: "Create OCI IAM Group",
+    description: "Create an OCI IAM group and optionally add users.",
+    outcomeTemplate: JSON.stringify({
+      name: "nexplane-group",
+      description: "Created by Nexplane",
+      user_ids: [],
+      rollback_strategy: "oci_iam_group_delete",
+    }, null, 2),
+  },
+  oci_iam_group_delete: {
+    label: "Delete OCI IAM Group",
+    description: "Remove all memberships and permanently delete an OCI IAM group.",
+    outcomeTemplate: JSON.stringify({
+      group_id: "ocid1.group.oc1..",
+      rollback_strategy: "rollback_unavailable",
+    }, null, 2),
+  },
+  oci_iam_policy_create: {
+    label: "Create OCI IAM Policy",
+    description: "Create an OCI IAM policy with policy statements.",
+    outcomeTemplate: JSON.stringify({
+      compartment_id: "",
+      name: "nexplane-policy",
+      description: "Created by Nexplane",
+      statements: ["Allow group nexplane-group to read all-resources in tenancy"],
+      rollback_strategy: "oci_iam_policy_delete",
+    }, null, 2),
+  },
+  oci_iam_policy_delete: {
+    label: "Delete OCI IAM Policy",
+    description: "Permanently delete an OCI IAM policy.",
+    outcomeTemplate: JSON.stringify({
+      policy_id: "ocid1.policy.oc1..",
+      rollback_strategy: "rollback_unavailable",
+    }, null, 2),
+  },
+  oci_vault_secret_create: {
+    label: "Create OCI Vault Secret",
+    description: "Create a secret in OCI Vault. Requires an ACTIVE vault in the compartment.",
+    outcomeTemplate: JSON.stringify({
+      compartment_id: "",
+      vault_id: "",
+      key_id: "",
+      secret_name: "nexplane-secret",
+      secret_content: "changeme",
+      description: "Created by Nexplane",
+      rollback_strategy: "oci_vault_secret_delete",
+    }, null, 2),
+  },
+  oci_vault_secret_delete: {
+    label: "Delete OCI Vault Secret",
+    description: "Schedule an OCI Vault secret for deferred deletion (minimum 1 day).",
+    outcomeTemplate: JSON.stringify({
+      secret_id: "ocid1.vaultsecret.oc1..",
+      deletion_time_days: 1,
+      rollback_strategy: "cancel_vault_secret_deletion",
+    }, null, 2),
+  },
+  oci_compartment_create: {
+    label: "Create OCI Compartment",
+    description: "Create a child compartment under the target compartment.",
+    outcomeTemplate: JSON.stringify({
+      parent_compartment_id: "",
+      name: "nexplane-compartment",
+      description: "Created by Nexplane",
+      rollback_strategy: "oci_compartment_delete",
+    }, null, 2),
+  },
+  oci_compartment_delete: {
+    label: "Delete OCI Compartment",
+    description: "Delete an OCI compartment. Compartment must be empty.",
+    outcomeTemplate: JSON.stringify({
+      compartment_id: "ocid1.compartment.oc1..",
+      rollback_strategy: "rollback_unavailable",
+    }, null, 2),
+  },
 };
 
 const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
@@ -975,6 +1090,18 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
       "oci_listener_create",
       "oci_dns_zone_create",
       "oci_dns_record_upsert",
+      "oci_iam_user_create",
+      "oci_iam_user_delete",
+      "oci_iam_user_disable",
+      "oci_iam_user_enable",
+      "oci_iam_group_create",
+      "oci_iam_group_delete",
+      "oci_iam_policy_create",
+      "oci_iam_policy_delete",
+      "oci_vault_secret_create",
+      "oci_vault_secret_delete",
+      "oci_compartment_create",
+      "oci_compartment_delete",
     ] as ChangeType[],
   },
 ];
@@ -1101,6 +1228,19 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   oci_listener_create: "load_balancer" as AssetType,
   oci_dns_zone_create: "cloud_account" as AssetType,
   oci_dns_record_upsert: "dns_zone" as AssetType,
+  // OCI identity — Sub-project 4
+  oci_iam_user_create: "cloud_account" as AssetType,
+  oci_iam_user_delete: "identity" as AssetType,
+  oci_iam_user_disable: "identity" as AssetType,
+  oci_iam_user_enable: "identity" as AssetType,
+  oci_iam_group_create: "cloud_account" as AssetType,
+  oci_iam_group_delete: "application" as AssetType,
+  oci_iam_policy_create: "cloud_account" as AssetType,
+  oci_iam_policy_delete: "application" as AssetType,
+  oci_vault_secret_create: "cloud_account" as AssetType,
+  oci_vault_secret_delete: "application" as AssetType,
+  oci_compartment_create: "cloud_account" as AssetType,
+  oci_compartment_delete: "cloud_account" as AssetType,
   // Database actions
   rotate_db_credentials: "database",
   promote_db_replica: "database",
