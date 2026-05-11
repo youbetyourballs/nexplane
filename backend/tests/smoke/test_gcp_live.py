@@ -420,10 +420,18 @@ def run_phase_p(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
         )
         rollback_stack.append((cr["id"], "gcp_disable_service_account"))
 
-        sa_info = iam_svc.projects().serviceAccounts().get(
-            name=f"projects/{gcp_project}/serviceAccounts/{sa_email}"
-        ).execute()
-        assert sa_info.get("disabled"), "Service account not disabled"
+        # GCP SA disable has eventual consistency — retry up to 30s
+        import time as _t
+        sa_disabled = False
+        for _ in range(6):
+            _t.sleep(5)
+            sa_info = iam_svc.projects().serviceAccounts().get(
+                name=f"projects/{gcp_project}/serviceAccounts/{sa_email}"
+            ).execute()
+            if sa_info.get("disabled"):
+                sa_disabled = True
+                break
+        assert sa_disabled, "Service account not disabled after 30s"
         log("Service account disabled (SDK verified)")
 
         log("Phase P complete")

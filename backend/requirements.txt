@@ -27,6 +27,7 @@ azure-mgmt-authorization>=4.0.0
 azure-mgmt-dns>=8.0.0
 azure-mgmt-sql>=3.0.0
 azure-mgmt-monitor>=7.0.0
+azure-mgmt-resource>=23.0.0
 azure-storage-blob>=12.23.0
 oci>=2.130.0
 ldap3>=2.9.1
