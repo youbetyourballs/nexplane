@@ -1642,16 +1642,41 @@ def run_phase_t(client: NexplaneClient, phase_a_result: dict) -> None:
         rollback_stack.append((cr["id"], "deploy_nexplane_agent"))
         log("Nexplane agent redeployed via CR")
 
-        # Wait up to 2 min for the re-deployed agent to re-register and start polling
+        # Wait up to 4 min for the re-deployed agent to actively reconnect.
+        # Check /agent/status/{asset_id} — last_seen within 60s means the agent
+        # is polling and ready to accept jobs.
         import time as _t
-        log("[Phase T] Waiting up to 2 min for re-deployed agent to reconnect...")
-        for _ in range(12):
-            _t.sleep(10)
+        agent_asset_id = phase_a_result.get("agent_asset_id")
+        if not agent_asset_id:
+            # Find it from inventory
             agents = [a for a in client.get("/assets", params={"q": "nexplane-smoke", "asset_type": "server"})
                       if "nexplane-agent" in (a.get("tags") or [])]
             if agents:
-                log(f"[Phase T] Agent asset confirmed in inventory: {agents[0]['id']}")
-                break
+                agent_asset_id = agents[0]["id"]
+
+        log("[Phase T] Waiting up to 4 min for re-deployed agent to reconnect (checking last_seen)...")
+        reconnected = False
+        for attempt in range(24):  # 24 × 10s = 4 min
+            _t.sleep(10)
+            if agent_asset_id:
+                try:
+                    status = client.get(f"/agent/status/{agent_asset_id}")
+                    seconds_ago = status.get("seconds_ago")
+                    if status.get("registered") and seconds_ago is not None and seconds_ago < 60:
+                        log(f"[Phase T] Agent reconnected (last_seen {seconds_ago}s ago)")
+                        reconnected = True
+                        break
+                except Exception:
+                    pass
+            # Fallback: just check asset exists in inventory
+            if attempt % 3 == 2:
+                agents = [a for a in client.get("/assets", params={"q": "nexplane-smoke", "asset_type": "server"})
+                          if "nexplane-agent" in (a.get("tags") or [])]
+                if agents and not agent_asset_id:
+                    agent_asset_id = agents[0]["id"]
+
+        if not reconnected:
+            log("[Phase T] Warning: agent reconnect not confirmed within 4 min — IP phases may time out")
 
         log("Phase T complete")
 
@@ -2212,27 +2237,37 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
                 break
 
     try:
-        # Step 2: Wait for the Nexplane agent to register as a server asset
-        # The agent registers under name=hostname ('nexplane-smoke-ec2') with asset_type=server.
-        log("[Phase X] Waiting for Nexplane agent to register (up to 6 min)")
+        # Step 2: Wait for agent to register AND have a recent last_seen (actively polling)
+        log("[Phase X] Waiting for Nexplane agent to be active (up to 6 min)")
         import time as _time
         deadline = _time.time() + 360
         agent_asset_id = None
         while _time.time() < deadline:
             candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
-            # Pick the most recently updated agent-tagged asset to avoid stale registrations
             tagged = [c for c in candidates if "nexplane-agent" in (c.get("tags") or [])]
             if tagged:
-                # Sort by updated_at descending; fall back to any if field missing
                 tagged.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
-                agent_asset_id = tagged[0]["id"]
-                log(f"[Phase X] Agent registered: {agent_asset_id}")
-                # Store for Phase Y/Z
-                phase_a_result["agent_asset_id"] = agent_asset_id
-                break
+                candidate_id = tagged[0]["id"]
+                # Verify agent is actively polling (last_seen within 60s)
+                try:
+                    status = client.get(f"/agent/status/{candidate_id}")
+                    seconds_ago = status.get("seconds_ago")
+                    if status.get("registered") and seconds_ago is not None and seconds_ago < 60:
+                        agent_asset_id = candidate_id
+                        log(f"[Phase X] Agent active (last_seen {seconds_ago}s ago): {agent_asset_id}")
+                        phase_a_result["agent_asset_id"] = agent_asset_id
+                        break
+                    elif status.get("registered"):
+                        log(f"[Phase X] Agent found but stale (last_seen {seconds_ago}s ago) — waiting...")
+                except Exception:
+                    # Endpoint not yet deployed or other error — fall back to asset presence
+                    agent_asset_id = candidate_id
+                    log(f"[Phase X] Agent registered: {agent_asset_id}")
+                    phase_a_result["agent_asset_id"] = agent_asset_id
+                    break
             _time.sleep(10)
         if not agent_asset_id:
-            fail("[Phase X] Nexplane agent did not register within 6 minutes — cannot run discovery")
+            fail("[Phase X] Nexplane agent did not become active within 6 minutes — cannot run discovery")
 
         # Step 3: Fire the agent_appdiscovery CR targeting the agent's registered asset
         log("[Phase X] Running agent_appdiscovery CR on agent asset")

@@ -294,7 +294,7 @@ def setup_backend_tailscale(auth_key: str) -> str:
         capture=False,
     )
     time.sleep(2)
-    _run("tailscaled --statedir=/tmp/tailscale-state >/tmp/tailscaled.log 2>&1 &", capture=False)
+    _run("tailscaled --statedir=/var/lib/tailscale-state >/tmp/tailscaled.log 2>&1 &", capture=False)
     time.sleep(5)
     _run(f"tailscale up --authkey={auth_key} --hostname=nexplane-backend --accept-routes --accept-dns=false")
 
