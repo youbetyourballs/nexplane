@@ -82,7 +82,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         command="change_ip",
         parameters=agent_params,
         asset_ids=asset_ids,
-        timeout_seconds=commit_timer_seconds + 120,
+        timeout_seconds=commit_timer_seconds + 270,
     )
     return result
 
