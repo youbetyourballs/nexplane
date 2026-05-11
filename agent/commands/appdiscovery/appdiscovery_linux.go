@@ -237,10 +237,34 @@ func discoverNonPackageBinaries(existing []Application) []Application {
 
 func estimateDirSizeGB(dirs []string) float64 {
 	var totalBytes int64
+	const maxDepth = 3
+	const maxFiles = 10000
+
+	counted := 0
 	for _, dir := range dirs {
+		base := filepath.Clean(dir)
 		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err == nil && !info.IsDir() {
+			if err != nil {
+				return nil
+			}
+			// Limit walk depth relative to base
+			rel, err := filepath.Rel(base, path)
+			if err != nil {
+				return nil
+			}
+			depth := len(strings.Split(rel, string(os.PathSeparator)))
+			if depth > maxDepth {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !info.IsDir() {
 				totalBytes += info.Size()
+				counted++
+				if counted >= maxFiles {
+					return fmt.Errorf("limit reached")
+				}
 			}
 			return nil
 		})
