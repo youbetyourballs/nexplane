@@ -2147,9 +2147,9 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
     try:
         # Step 2: Wait for the Nexplane agent to register as a server asset
         # The agent registers under name=hostname ('nexplane-smoke-ec2') with asset_type=server.
-        log("[Phase X] Waiting for Nexplane agent to register (up to 3 min)")
+        log("[Phase X] Waiting for Nexplane agent to register (up to 6 min)")
         import time as _time
-        deadline = _time.time() + 180
+        deadline = _time.time() + 360
         agent_asset_id = None
         while _time.time() < deadline:
             candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
@@ -2165,7 +2165,7 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
                 break
             _time.sleep(10)
         if not agent_asset_id:
-            fail("[Phase X] Nexplane agent did not register within 3 minutes — cannot run discovery")
+            fail("[Phase X] Nexplane agent did not register within 6 minutes — cannot run discovery")
 
         # Step 3: Fire the agent_appdiscovery CR targeting the agent's registered asset
         log("[Phase X] Running agent_appdiscovery CR on agent asset")
