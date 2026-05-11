@@ -39,14 +39,14 @@ async def dispatch_agent_job(
 
         org_id = asset.organization_id
 
-        # Find the AgentRegistration for this asset
+        # Find the most-recent AgentRegistration for this asset (multiple exist after re-deploys)
         reg_result = await db.execute(
             select(AgentRegistration).where(
                 and_(
                     AgentRegistration.asset_id == asset_id,
                     AgentRegistration.organization_id == org_id,
                 )
-            )
+            ).order_by(AgentRegistration.last_seen.desc()).limit(1)
         )
         registration = reg_result.scalar_one_or_none()
         if not registration:
