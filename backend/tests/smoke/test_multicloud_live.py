@@ -494,6 +494,28 @@ def run_oci_worker(base_url: str, email: str, password: str) -> dict:
 
     try:
         # ------------------------------------------------------------------
+        # Pre-run: terminate any stale OCI instances from previous runs
+        # (prevents LimitExceeded on free-tier VM.Standard.E2.1.Micro quota=2)
+        # ------------------------------------------------------------------
+        compute_client = _get_oci_compute_client()
+        if compute_client:
+            creds = _get_oci_creds()
+            tenancy_id = creds.get("tenancy", "")
+            if tenancy_id:
+                instances = compute_client.list_instances(tenancy_id).data
+                for inst in instances:
+                    if inst.lifecycle_state not in ("TERMINATED", "TERMINATING") and \
+                            "nexplane-mc-oci" in (inst.display_name or ""):
+                        try:
+                            compute_client.terminate_instance(inst.id, preserve_boot_volume=False)
+                            log(f"[OCI pre-clean] Terminated stale instance: {inst.display_name}")
+                        except Exception:
+                            pass
+                if any(i.lifecycle_state not in ("TERMINATED", "TERMINATING") for i in instances
+                       if "nexplane-mc-oci" in (i.display_name or "")):
+                    time.sleep(15)  # Brief wait for terminations to register
+
+        # ------------------------------------------------------------------
         # OCI_A — Foundation: discover compartments, create VCN + subnet
         # ------------------------------------------------------------------
         print("\n[MC-OCI] OCI_A: Triggering compartment discovery ingest...")
