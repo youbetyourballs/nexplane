@@ -56,3 +56,29 @@ def get_dns_client(creds: dict):
     import oci
     config = get_oci_config(creds)
     return oci.dns.DnsClient(config)
+
+
+def _make_config(creds: dict) -> dict:
+    """Alias for get_oci_config — used internally for vault/KMS client factories."""
+    return get_oci_config(creds)
+
+
+def get_vault_client(creds: dict):
+    """Return oci.vault.VaultsClient (for listing secrets and vaults)."""
+    import oci
+    config = get_oci_config(creds)
+    return oci.vault.VaultsClient(config)
+
+
+def get_secrets_client(creds: dict):
+    """Return oci.secrets.SecretsClient (for reading secret bundles)."""
+    import oci
+    config = get_oci_config(creds)
+    return oci.secrets.SecretsClient(config)
+
+
+def get_vaults_management_client(creds: dict):
+    """Return oci.key_management.KmsVaultClient."""
+    import oci
+    config = get_oci_config(creds)
+    return oci.key_management.KmsVaultClient(config)

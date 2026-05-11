@@ -398,6 +398,18 @@ export type ChangeType =
   | "oci_listener_create"
   | "oci_dns_zone_create"
   | "oci_dns_record_upsert"
+  | "oci_iam_user_create"
+  | "oci_iam_user_delete"
+  | "oci_iam_user_disable"
+  | "oci_iam_user_enable"
+  | "oci_iam_group_create"
+  | "oci_iam_group_delete"
+  | "oci_iam_policy_create"
+  | "oci_iam_policy_delete"
+  | "oci_vault_secret_create"
+  | "oci_vault_secret_delete"
+  | "oci_compartment_create"
+  | "oci_compartment_delete"
   | "suppress";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";

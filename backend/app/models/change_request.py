@@ -220,6 +220,19 @@ class ChangeType(str, enum.Enum):
     change_ip = "change_ip"
     migrate_ip = "migrate_ip"
     ip_campaign = "ip_campaign"
+    # OCI identity — Sub-project 4
+    oci_iam_user_create = "oci_iam_user_create"
+    oci_iam_user_delete = "oci_iam_user_delete"
+    oci_iam_user_disable = "oci_iam_user_disable"
+    oci_iam_user_enable = "oci_iam_user_enable"
+    oci_iam_group_create = "oci_iam_group_create"
+    oci_iam_group_delete = "oci_iam_group_delete"
+    oci_iam_policy_create = "oci_iam_policy_create"
+    oci_iam_policy_delete = "oci_iam_policy_delete"
+    oci_vault_secret_create = "oci_vault_secret_create"
+    oci_vault_secret_delete = "oci_vault_secret_delete"
+    oci_compartment_create = "oci_compartment_create"
+    oci_compartment_delete = "oci_compartment_delete"
 
 
 class RiskLevel(str, enum.Enum):

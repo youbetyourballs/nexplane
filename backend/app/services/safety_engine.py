@@ -102,6 +102,13 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.oci_listener_create,
     ChangeType.oci_dns_zone_create,
     ChangeType.oci_dns_record_upsert,
+    # OCI identity — Sub-project 4
+    ChangeType.oci_iam_user_create, ChangeType.oci_iam_user_delete,
+    ChangeType.oci_iam_user_disable, ChangeType.oci_iam_user_enable,
+    ChangeType.oci_iam_group_create, ChangeType.oci_iam_group_delete,
+    ChangeType.oci_iam_policy_create, ChangeType.oci_iam_policy_delete,
+    ChangeType.oci_vault_secret_create, ChangeType.oci_vault_secret_delete,
+    ChangeType.oci_compartment_create, ChangeType.oci_compartment_delete,
     ChangeType.agent_linux_patch, ChangeType.agent_ossecurity,
     ChangeType.agent_linuxauth, ChangeType.agent_crossplatform,
     ChangeType.agent_compliance, ChangeType.agent_forensics,
