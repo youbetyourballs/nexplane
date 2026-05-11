@@ -205,3 +205,33 @@ async def post_job_result(
     job.completed_at = datetime.now(timezone.utc)
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/status/{asset_id}")
+async def get_agent_status(
+    asset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the most-recent agent registration's last_seen for an asset.
+
+    Used by smoke tests to verify the agent has actively reconnected
+    to the backend after a re-deploy (last_seen within the last 60s).
+    """
+    result = await db.execute(
+        select(AgentRegistration).where(
+            AgentRegistration.asset_id == asset_id,
+        ).order_by(AgentRegistration.last_seen.desc()).limit(1)
+    )
+    reg = result.scalar_one_or_none()
+    if not reg:
+        return {"registered": False, "last_seen": None, "seconds_ago": None}
+    now = datetime.now(timezone.utc)
+    last_seen = reg.last_seen
+    if last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+    seconds_ago = (now - last_seen).total_seconds()
+    return {
+        "registered": True,
+        "last_seen": last_seen.isoformat(),
+        "seconds_ago": int(seconds_ago),
+    }
