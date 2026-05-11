@@ -1,0 +1,18 @@
+{
+  "change_type": "oci_bucket_lifecycle_set",
+  "display_name": "Configure OCI Bucket Lifecycle",
+  "steps": [
+    {
+      "generic_action": "configure_lifecycle",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable",
+    "asset_exists"
+  ],
+  "verification_methods": [
+    "api_check"
+  ]
+}

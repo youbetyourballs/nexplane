@@ -1,0 +1,18 @@
+{
+  "change_type": "oci_adb_start",
+  "display_name": "Start OCI ADB",
+  "steps": [
+    {
+      "generic_action": "start_database",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable",
+    "asset_exists"
+  ],
+  "verification_methods": [
+    "api_check"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "change_type": "oci_security_list_add_rule",
+  "display_name": "Add OCI Security List Rule",
+  "steps": [
+    {
+      "generic_action": "update_security_list",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable",
+    "asset_exists"
+  ],
+  "verification_methods": [
+    "api_check"
+  ]
+}

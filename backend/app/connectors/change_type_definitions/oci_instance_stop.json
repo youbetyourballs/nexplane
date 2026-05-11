@@ -1,0 +1,20 @@
+{
+  "change_type": "oci_instance_stop",
+  "display_name": "Stop OCI Instance",
+  "steps": [
+    {
+      "generic_action": "stop_instance",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable",
+    "asset_exists"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "oci_instance_start",
+  "rollback_connector_type": "oci"
+}

@@ -1,0 +1,20 @@
+{
+  "change_type": "oci_block_volume_create",
+  "display_name": "Create OCI Block Volume",
+  "steps": [
+    {
+      "generic_action": "create_volume",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable",
+    "asset_exists"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "delete_volume",
+  "rollback_connector_type": "oci"
+}
