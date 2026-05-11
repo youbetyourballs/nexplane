@@ -386,6 +386,18 @@ export type ChangeType =
   | "oci_block_volume_detach"
   | "oci_block_volume_delete"
   | "oci_block_volume_backup"
+  | "oci_security_list_add_rule"
+  | "oci_security_list_remove_rule"
+  | "oci_nsg_create"
+  | "oci_nsg_delete"
+  | "oci_nsg_rule_add"
+  | "oci_nsg_rule_remove"
+  | "oci_load_balancer_create"
+  | "oci_load_balancer_delete"
+  | "oci_backend_set_create"
+  | "oci_listener_create"
+  | "oci_dns_zone_create"
+  | "oci_dns_record_upsert"
   | "suppress";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
