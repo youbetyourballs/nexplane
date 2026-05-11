@@ -377,6 +377,15 @@ export type ChangeType =
   | "oci_block_volume_snapshot"
   | "oci_vcn_create"
   | "oci_subnet_create"
+  | "oci_bucket_create"
+  | "oci_bucket_delete"
+  | "oci_bucket_lifecycle_set"
+  | "oci_bucket_block_public"
+  | "oci_block_volume_create"
+  | "oci_block_volume_attach"
+  | "oci_block_volume_detach"
+  | "oci_block_volume_delete"
+  | "oci_block_volume_backup"
   | "suppress";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";

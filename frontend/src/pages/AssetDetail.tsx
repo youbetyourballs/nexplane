@@ -17,6 +17,7 @@ interface QuickAction {
   title: (a: Asset) => string;
   description: (a: Asset) => string;
   connectorType?: string;
+  condition?: (a: Asset) => boolean;
 }
 
 const ASSET_ACTIONS: Record<AssetType, QuickAction[]> = {
@@ -324,6 +325,64 @@ const ASSET_ACTIONS: Record<AssetType, QuickAction[]> = {
     { changeType: "s3_lifecycle_configure", label: "Configure Lifecycle", title: (a) => `Configure lifecycle on ${a.name}`, description: (a) => `Set object expiration rules on bucket ${a.asset_metadata?.bucket_name ?? a.name}.` },
     { changeType: "s3_bucket_delete", label: "Delete Bucket", title: (a) => `Delete bucket ${a.name}`, description: (a) => `Empty and delete S3 bucket ${a.asset_metadata?.bucket_name ?? a.name}.` },
     { changeType: "create_backup", label: "Create Backup", title: (a) => `Backup ${a.name}`, description: (a) => `Create a backup of bucket ${a.name}.` },
+    // OCI Object Storage actions
+    {
+      changeType: "oci_bucket_lifecycle_set",
+      label: "Configure Lifecycle",
+      title: (a) => `Configure lifecycle on ${a.name}`,
+      description: (a) => `Set object lifecycle rules on OCI bucket ${a.asset_metadata?.bucket_name ?? a.name}.`,
+      connectorType: "oci",
+      condition: (a) => Array.isArray(a.tags) && a.tags.includes("object-storage") && !a.tags.includes("block-volume"),
+    },
+    {
+      changeType: "oci_bucket_block_public",
+      label: "Block Public Access",
+      title: (a) => `Block public access on ${a.name}`,
+      description: (a) => `Set public_access_type to NoPublicAccess on OCI bucket ${a.asset_metadata?.bucket_name ?? a.name}.`,
+      connectorType: "oci",
+      condition: (a) => Array.isArray(a.tags) && a.tags.includes("object-storage") && !a.tags.includes("block-volume"),
+    },
+    {
+      changeType: "oci_bucket_delete",
+      label: "Delete Bucket",
+      title: (a) => `Delete OCI bucket ${a.name}`,
+      description: (a) => `Delete OCI Object Storage bucket ${a.asset_metadata?.bucket_name ?? a.name} (must be empty).`,
+      connectorType: "oci",
+      condition: (a) => Array.isArray(a.tags) && a.tags.includes("object-storage") && !a.tags.includes("block-volume"),
+    },
+    // OCI Block Volume actions
+    {
+      changeType: "oci_block_volume_attach",
+      label: "Attach Volume",
+      title: (a) => `Attach block volume ${a.name}`,
+      description: (a) => `Attach OCI block volume ${a.asset_metadata?.volume_id ?? a.name} to a compute instance.`,
+      connectorType: "oci",
+      condition: (a) => Array.isArray(a.tags) && (a.tags.includes("block-volume") || a.tags.includes("oci-block-volume")),
+    },
+    {
+      changeType: "oci_block_volume_detach",
+      label: "Detach Volume",
+      title: (a) => `Detach block volume ${a.name}`,
+      description: (a) => `Detach OCI block volume ${a.asset_metadata?.volume_id ?? a.name} from its compute instance.`,
+      connectorType: "oci",
+      condition: (a) => Array.isArray(a.tags) && (a.tags.includes("block-volume") || a.tags.includes("oci-block-volume")),
+    },
+    {
+      changeType: "oci_block_volume_backup",
+      label: "Backup Volume",
+      title: (a) => `Backup block volume ${a.name}`,
+      description: (a) => `Create an incremental backup of OCI block volume ${a.asset_metadata?.volume_id ?? a.name}.`,
+      connectorType: "oci",
+      condition: (a) => Array.isArray(a.tags) && (a.tags.includes("block-volume") || a.tags.includes("oci-block-volume")),
+    },
+    {
+      changeType: "oci_block_volume_delete",
+      label: "Delete Volume",
+      title: (a) => `Delete block volume ${a.name}`,
+      description: (a) => `Delete OCI block volume ${a.asset_metadata?.volume_id ?? a.name} (must be detached first).`,
+      connectorType: "oci",
+      condition: (a) => Array.isArray(a.tags) && (a.tags.includes("block-volume") || a.tags.includes("oci-block-volume")),
+    },
   ],
   load_balancer: [
     {
@@ -923,7 +982,9 @@ export function AssetDetail() {
 
           {(() => {
             const actions = (ASSET_ACTIONS[asset.asset_type] ?? []).filter(
-              (action) => !action.connectorType || action.connectorType === asset.connector_type
+              (action) =>
+                (!action.connectorType || action.connectorType === asset.connector_type) &&
+                (!action.condition || action.condition(asset))
             );
             return actions.length > 0 && (
             <div className="bg-white border border-slate-200 rounded-lg p-5">

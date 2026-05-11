@@ -162,6 +162,16 @@ class ChangeType(str, enum.Enum):
     oci_block_volume_snapshot = "oci_block_volume_snapshot"
     oci_vcn_create = "oci_vcn_create"
     oci_subnet_create = "oci_subnet_create"
+    # OCI Sub-project 2 — Object Storage and Block Volumes
+    oci_bucket_create = "oci_bucket_create"
+    oci_bucket_delete = "oci_bucket_delete"
+    oci_bucket_lifecycle_set = "oci_bucket_lifecycle_set"
+    oci_bucket_block_public = "oci_bucket_block_public"
+    oci_block_volume_create = "oci_block_volume_create"
+    oci_block_volume_attach = "oci_block_volume_attach"
+    oci_block_volume_detach = "oci_block_volume_detach"
+    oci_block_volume_delete = "oci_block_volume_delete"
+    oci_block_volume_backup = "oci_block_volume_backup"
     # Agent command group change types (Plans 4)
     agent_linux_patch = "agent_linux_patch"
     agent_ossecurity = "agent_ossecurity"
