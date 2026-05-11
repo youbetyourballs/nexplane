@@ -3,7 +3,7 @@
   "display_name": "Enable OCI Logging",
   "steps": [
     {
-      "generic_action": "enable_logging",
+      "generic_action": "oci_logging_enable",
       "purpose": "execute",
       "required": true
     }

@@ -3,7 +3,7 @@
   "display_name": "Delete OCI NSG",
   "steps": [
     {
-      "generic_action": "delete_nsg",
+      "generic_action": "oci_nsg_delete",
       "purpose": "execute",
       "required": true
     }

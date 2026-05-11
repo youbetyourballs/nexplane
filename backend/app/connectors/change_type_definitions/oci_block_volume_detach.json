@@ -3,7 +3,7 @@
   "display_name": "Detach OCI Block Volume",
   "steps": [
     {
-      "generic_action": "detach_volume",
+      "generic_action": "detach_block_volume",
       "purpose": "execute",
       "required": true
     }

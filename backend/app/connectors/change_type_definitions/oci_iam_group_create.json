@@ -3,7 +3,7 @@
   "display_name": "Create OCI IAM Group",
   "steps": [
     {
-      "generic_action": "create_iam_group",
+      "generic_action": "oci_iam_group_create",
       "purpose": "execute",
       "required": true
     }

@@ -682,6 +682,54 @@ def _get_oci_blockstorage_client():
     return oci.core.BlockstorageClient(config)
 
 
+def _get_oci_identity_client():
+    """Return an OCI IdentityClient using cached credentials."""
+    creds = _get_oci_creds()
+    if not creds:
+        return None
+    import oci
+    config = {
+        "user": creds["user"],
+        "key_content": creds["private_key"],
+        "fingerprint": creds["fingerprint"],
+        "tenancy": creds["tenancy"],
+        "region": creds.get("region", "us-ashburn-1"),
+    }
+    return oci.identity.IdentityClient(config)
+
+
+def _get_oci_object_storage_client():
+    """Return an OCI ObjectStorageClient using cached credentials."""
+    creds = _get_oci_creds()
+    if not creds:
+        return None
+    import oci
+    config = {
+        "user": creds["user"],
+        "key_content": creds["private_key"],
+        "fingerprint": creds["fingerprint"],
+        "tenancy": creds["tenancy"],
+        "region": creds.get("region", "us-ashburn-1"),
+    }
+    return oci.object_storage.ObjectStorageClient(config)
+
+
+def _get_oci_lb_client():
+    """Return an OCI LoadBalancerClient using cached credentials."""
+    creds = _get_oci_creds()
+    if not creds:
+        return None
+    import oci
+    config = {
+        "user": creds["user"],
+        "key_content": creds["private_key"],
+        "fingerprint": creds["fingerprint"],
+        "tenancy": creds["tenancy"],
+        "region": creds.get("region", "us-ashburn-1"),
+    }
+    return oci.load_balancer.LoadBalancerClient(config)
+
+
 # ---------------------------------------------------------------------------
 # AWS-specific cleanup (called by test_aws_live.py cleanup())
 # ---------------------------------------------------------------------------

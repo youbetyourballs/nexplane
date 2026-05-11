@@ -3,7 +3,7 @@
   "display_name": "Delete OCI MySQL",
   "steps": [
     {
-      "generic_action": "delete_database",
+      "generic_action": "oci_mysql_delete",
       "purpose": "execute",
       "required": true
     }

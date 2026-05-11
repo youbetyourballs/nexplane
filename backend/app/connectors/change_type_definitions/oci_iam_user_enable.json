@@ -3,7 +3,7 @@
   "display_name": "Enable OCI IAM User",
   "steps": [
     {
-      "generic_action": "enable_iam_user",
+      "generic_action": "oci_iam_user_enable",
       "purpose": "execute",
       "required": true
     }

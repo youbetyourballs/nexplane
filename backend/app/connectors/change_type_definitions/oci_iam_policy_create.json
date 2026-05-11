@@ -3,7 +3,7 @@
   "display_name": "Create OCI IAM Policy",
   "steps": [
     {
-      "generic_action": "create_iam_policy",
+      "generic_action": "oci_iam_policy_create",
       "purpose": "execute",
       "required": true
     }

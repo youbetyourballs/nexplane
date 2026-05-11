@@ -3,7 +3,7 @@
   "display_name": "Attach OCI Block Volume",
   "steps": [
     {
-      "generic_action": "attach_volume",
+      "generic_action": "attach_block_volume",
       "purpose": "execute",
       "required": true
     }

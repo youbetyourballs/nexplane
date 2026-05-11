@@ -3,7 +3,7 @@
   "display_name": "Create OCI NSG",
   "steps": [
     {
-      "generic_action": "create_nsg",
+      "generic_action": "oci_nsg_create",
       "purpose": "execute",
       "required": true
     }

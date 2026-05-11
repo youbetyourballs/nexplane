@@ -3,7 +3,7 @@
   "display_name": "Block OCI Bucket Public Access",
   "steps": [
     {
-      "generic_action": "block_public_access",
+      "generic_action": "block_bucket_public_access",
       "purpose": "execute",
       "required": true
     }

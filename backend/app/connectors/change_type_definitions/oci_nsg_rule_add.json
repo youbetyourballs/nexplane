@@ -3,7 +3,7 @@
   "display_name": "Add OCI NSG Rule",
   "steps": [
     {
-      "generic_action": "add_nsg_rule",
+      "generic_action": "oci_nsg_rule_add",
       "purpose": "execute",
       "required": true
     }

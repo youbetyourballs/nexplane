@@ -3,7 +3,7 @@
   "display_name": "Create OCI Load Balancer",
   "steps": [
     {
-      "generic_action": "create_load_balancer",
+      "generic_action": "oci_load_balancer_create",
       "purpose": "execute",
       "required": true
     }

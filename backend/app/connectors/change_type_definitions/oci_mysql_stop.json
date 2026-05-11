@@ -3,7 +3,7 @@
   "display_name": "Stop OCI MySQL",
   "steps": [
     {
-      "generic_action": "stop_database",
+      "generic_action": "oci_mysql_stop",
       "purpose": "execute",
       "required": true
     }

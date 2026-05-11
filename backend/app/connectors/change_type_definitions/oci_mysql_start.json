@@ -3,7 +3,7 @@
   "display_name": "Start OCI MySQL",
   "steps": [
     {
-      "generic_action": "start_database",
+      "generic_action": "oci_mysql_start",
       "purpose": "execute",
       "required": true
     }

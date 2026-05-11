@@ -3,7 +3,7 @@
   "display_name": "Start OCI ADB",
   "steps": [
     {
-      "generic_action": "start_database",
+      "generic_action": "oci_adb_start",
       "purpose": "execute",
       "required": true
     }

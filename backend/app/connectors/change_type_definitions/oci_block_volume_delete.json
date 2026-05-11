@@ -3,7 +3,7 @@
   "display_name": "Delete OCI Block Volume",
   "steps": [
     {
-      "generic_action": "delete_volume",
+      "generic_action": "delete_block_volume",
       "purpose": "execute",
       "required": true
     }

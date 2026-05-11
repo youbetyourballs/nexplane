@@ -3,7 +3,7 @@
   "display_name": "Delete OCI IAM Policy",
   "steps": [
     {
-      "generic_action": "delete_iam_policy",
+      "generic_action": "oci_iam_policy_delete",
       "purpose": "execute",
       "required": true
     }

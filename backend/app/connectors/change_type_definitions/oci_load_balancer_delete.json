@@ -3,7 +3,7 @@
   "display_name": "Delete OCI Load Balancer",
   "steps": [
     {
-      "generic_action": "delete_load_balancer",
+      "generic_action": "oci_load_balancer_delete",
       "purpose": "execute",
       "required": true
     }

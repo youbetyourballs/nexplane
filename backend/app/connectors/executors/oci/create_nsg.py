@@ -33,11 +33,11 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "executed_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    from ._client import get_network_client, get_compartment_id
+    from ._client import get_network_client
     import oci as oci_sdk
     loop = asyncio.get_running_loop()
     network = get_network_client(creds)
-    comp_id = compartment_id or get_compartment_id(creds)
+    comp_id = compartment_id or creds.get("tenancy", "")
 
     details = oci_sdk.core.models.CreateNetworkSecurityGroupDetails(
         compartment_id=comp_id,

@@ -34,11 +34,13 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     def _call():
         import oci
+        # OCI IDCS requires a primary email — generate one if not provided
+        effective_email = email or f"{name.lower().replace(' ', '-')}@example.com"
         details = oci.identity.models.CreateUserDetails(
             compartment_id=tenancy_id,
             name=name,
             description=description,
-            email=email or None,
+            email=effective_email,
         )
         user = client.create_user(details).data
         if group_id:

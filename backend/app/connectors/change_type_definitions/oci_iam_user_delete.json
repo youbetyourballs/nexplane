@@ -3,7 +3,7 @@
   "display_name": "Delete OCI IAM User",
   "steps": [
     {
-      "generic_action": "delete_iam_user",
+      "generic_action": "oci_iam_user_delete",
       "purpose": "execute",
       "required": true
     }

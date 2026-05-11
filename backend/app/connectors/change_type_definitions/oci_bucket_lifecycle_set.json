@@ -3,7 +3,7 @@
   "display_name": "Configure OCI Bucket Lifecycle",
   "steps": [
     {
-      "generic_action": "configure_lifecycle",
+      "generic_action": "configure_bucket_lifecycle",
       "purpose": "execute",
       "required": true
     }

@@ -3,7 +3,7 @@
   "display_name": "Delete OCI Compartment",
   "steps": [
     {
-      "generic_action": "delete_compartment",
+      "generic_action": "oci_compartment_delete",
       "purpose": "execute",
       "required": true
     }
