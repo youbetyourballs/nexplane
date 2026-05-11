@@ -2146,9 +2146,15 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
     log(f"[Phase X] nexplane-smoketest service running on port {_SMOKETEST_PORT}")
 
     # Re-join Tailscale (Phase V removes it; re-establish so agent can reach backend).
-    # Also re-deploy agent with current backend IP (may differ from Phase A after restarts).
-    backend_ip = phase_a_result.get("backend_ip", "")
+    # Also re-deploy agent with CURRENT backend IP (may differ from Phase A after restarts).
     tailscale_auth_key = phase_a_result.get("tailscale_auth_key", "")
+    # Get the CURRENT backend Tailscale IP (not the stale Phase A one)
+    try:
+        backend_ip = setup_backend_tailscale(tailscale_auth_key)
+        log(f"[Phase X] Current backend Tailscale IP: {backend_ip}")
+    except Exception as e:
+        backend_ip = phase_a_result.get("backend_ip", "")
+        log(f"[Phase X] Could not refresh backend Tailscale IP, using Phase A IP: {backend_ip}")
     if tailscale_auth_key and instance_id:
         try:
             client.run_cr(
