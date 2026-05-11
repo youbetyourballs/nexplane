@@ -219,7 +219,8 @@ export type ConnectorType =
   | "google_workspace"
   | "tailscale"
   | "terraform_local"
-  | "ansible_local";
+  | "ansible_local"
+  | "oci";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 
@@ -368,6 +369,14 @@ export type ChangeType =
   | "collect_evidence"
   | "generic_remediation"
   | "notify_only"
+  | "oci_instance_create"
+  | "oci_instance_stop"
+  | "oci_instance_start"
+  | "oci_instance_reboot"
+  | "oci_instance_delete"
+  | "oci_block_volume_snapshot"
+  | "oci_vcn_create"
+  | "oci_subnet_create"
   | "suppress";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";

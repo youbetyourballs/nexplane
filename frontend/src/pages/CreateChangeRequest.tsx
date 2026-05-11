@@ -570,6 +570,57 @@ const CHANGE_TYPE_META: Partial<Record<ChangeType, { label: string; description:
       dry_run: false,
     }, null, 2),
   },
+  oci_instance_create: {
+    label: "Launch OCI Instance ✨ AI",
+    description: "Create a new Oracle Cloud compute instance (VM.Standard.E2.1.Micro, always-free eligible). Auto-resolves subnet. Rollback: terminate.",
+    outcomeTemplate: JSON.stringify({
+      name: "nexplane-oci-instance",
+      mode: "quick",
+      os: "oracle_linux",
+      shape: "VM.Standard.E2.1.Micro",
+      ocpus: 1,
+      memory_in_gbs: 1,
+      compartment_id: "",
+      subnet_id: "",
+      ssh_public_key: "",
+      rollback_strategy: "terminate_instance",
+    }, null, 2),
+  },
+  oci_instance_stop: {
+    label: "Stop OCI Instance",
+    description: "Gracefully stop a running OCI compute instance. Rollback: start.",
+    outcomeTemplate: JSON.stringify({ instance_id: "", rollback_strategy: "start_instance" }, null, 2),
+  },
+  oci_instance_start: {
+    label: "Start OCI Instance",
+    description: "Start a stopped OCI compute instance. Rollback: stop.",
+    outcomeTemplate: JSON.stringify({ instance_id: "", rollback_strategy: "stop_instance" }, null, 2),
+  },
+  oci_instance_reboot: {
+    label: "Reboot OCI Instance",
+    description: "Graceful reboot (SOFTRESET) of a running OCI compute instance.",
+    outcomeTemplate: JSON.stringify({ instance_id: "", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  oci_instance_delete: {
+    label: "Terminate OCI Instance",
+    description: "Permanently terminate an OCI compute instance. This is destructive.",
+    outcomeTemplate: JSON.stringify({ instance_id: "", preserve_boot_volume: false, rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  oci_block_volume_snapshot: {
+    label: "Create OCI Boot Volume Snapshot",
+    description: "Create an incremental boot volume backup for an OCI instance. Rollback: delete backup.",
+    outcomeTemplate: JSON.stringify({ instance_id: "", display_name: "nexplane-snapshot", backup_type: "INCREMENTAL", rollback_strategy: "delete_boot_volume_backup" }, null, 2),
+  },
+  oci_vcn_create: {
+    label: "Create OCI VCN",
+    description: "Create an OCI Virtual Cloud Network with internet gateway and route table. Rollback: delete VCN.",
+    outcomeTemplate: JSON.stringify({ compartment_id: "", display_name: "nexplane-vcn", cidr_block: "10.0.0.0/16", dns_label: "nexplanevcn", rollback_strategy: "delete_vcn" }, null, 2),
+  },
+  oci_subnet_create: {
+    label: "Create OCI Subnet",
+    description: "Create an OCI subnet with SSH + ICMP security list. Rollback: delete subnet.",
+    outcomeTemplate: JSON.stringify({ compartment_id: "", vcn_id: "", display_name: "nexplane-subnet", cidr_block: "10.0.0.0/24", dns_label: "nexplanesubnet", prohibit_public_ip_on_vnic: false, rollback_strategy: "delete_subnet" }, null, 2),
+  },
 };
 
 const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
@@ -657,6 +708,19 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   {
     label: "Other",
     types: ["telemetry_agent_deploy", "remote_command", "s3_block_public_access", "iam_enforce_mfa", "generic_remediation", "notify_only", "suppress"],
+  },
+  {
+    label: "Oracle Cloud",
+    types: [
+      "oci_instance_create",
+      "oci_instance_stop",
+      "oci_instance_start",
+      "oci_instance_reboot",
+      "oci_instance_delete",
+      "oci_block_volume_snapshot",
+      "oci_vcn_create",
+      "oci_subnet_create",
+    ] as ChangeType[],
   },
 ];
 
@@ -752,6 +816,15 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   azure_vm_delete: "server",
   azure_vm_snapshot: "server",
   azure_run_command: "server",
+  // OCI change types
+  oci_instance_create: "cloud_account" as AssetType,
+  oci_vcn_create: "cloud_account" as AssetType,
+  oci_subnet_create: "cloud_account" as AssetType,
+  oci_instance_stop: "server" as AssetType,
+  oci_instance_start: "server" as AssetType,
+  oci_instance_reboot: "server" as AssetType,
+  oci_instance_delete: "server" as AssetType,
+  oci_block_volume_snapshot: "server" as AssetType,
   // Database actions
   rotate_db_credentials: "database",
   promote_db_replica: "database",
