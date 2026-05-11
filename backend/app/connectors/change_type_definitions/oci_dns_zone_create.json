@@ -3,7 +3,7 @@
   "display_name": "Create OCI DNS Zone",
   "steps": [
     {
-      "generic_action": "create_dns_zone",
+      "generic_action": "oci_dns_zone_create",
       "purpose": "execute",
       "required": true
     }

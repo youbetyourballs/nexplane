@@ -3,7 +3,7 @@
   "display_name": "Create OCI Autonomous Database",
   "steps": [
     {
-      "generic_action": "create_database",
+      "generic_action": "oci_adb_create",
       "purpose": "execute",
       "required": true
     }

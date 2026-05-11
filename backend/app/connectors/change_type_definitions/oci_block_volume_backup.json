@@ -3,7 +3,7 @@
   "display_name": "Backup OCI Block Volume",
   "steps": [
     {
-      "generic_action": "create_backup",
+      "generic_action": "create_block_volume_backup",
       "purpose": "execute",
       "required": true
     }

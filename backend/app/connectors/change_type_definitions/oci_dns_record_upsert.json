@@ -3,7 +3,7 @@
   "display_name": "Upsert OCI DNS Record",
   "steps": [
     {
-      "generic_action": "upsert_dns_record",
+      "generic_action": "oci_dns_record_upsert",
       "purpose": "execute",
       "required": true
     }

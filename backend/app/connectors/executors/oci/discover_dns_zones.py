@@ -30,10 +30,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "discovered_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    from ._client import get_dns_client, get_compartment_id
+    from ._client import get_dns_client
     loop = asyncio.get_running_loop()
     dns_client = get_dns_client(creds)
-    comp_id = compartment_id or get_compartment_id(creds)
+    comp_id = compartment_id or creds.get("tenancy", "")
 
     zones = await loop.run_in_executor(
         None, lambda: dns_client.list_zones(compartment_id=comp_id).data

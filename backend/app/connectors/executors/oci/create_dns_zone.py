@@ -35,11 +35,11 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "executed_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    from ._client import get_dns_client, get_compartment_id
+    from ._client import get_dns_client
     import oci as oci_sdk
     loop = asyncio.get_running_loop()
     dns_client = get_dns_client(creds)
-    comp_id = compartment_id or get_compartment_id(creds)
+    comp_id = compartment_id or creds.get("tenancy", "")
 
     details = oci_sdk.dns.models.CreateZoneDetails(
         compartment_id=comp_id,
@@ -49,6 +49,21 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     zone = await loop.run_in_executor(
         None, lambda: dns_client.create_zone(details).data
     )
+
+    # Wait for ACTIVE state (up to 2 min)
+    zone_id = zone.id
+    for _ in range(24):
+        await asyncio.sleep(5)
+        zone = await loop.run_in_executor(
+            None, lambda: dns_client.get_zone(zone_id).data
+        )
+        if zone.lifecycle_state == "ACTIVE":
+            break
+        if zone.lifecycle_state == "FAILED":
+            raise RuntimeError(
+                f"DNS zone '{name}' reached FAILED state — "
+                "this may indicate a quota limit or invalid zone name on this tenancy."
+            )
 
     auto_asset["asset_metadata"].update({
         "zone_id": zone.id,

@@ -3,7 +3,7 @@
   "display_name": "Disable OCI IAM User",
   "steps": [
     {
-      "generic_action": "disable_iam_user",
+      "generic_action": "oci_iam_user_disable",
       "purpose": "execute",
       "required": true
     }

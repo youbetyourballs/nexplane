@@ -3,7 +3,7 @@
   "display_name": "Add OCI Security List Rule",
   "steps": [
     {
-      "generic_action": "update_security_list",
+      "generic_action": "oci_security_list_add_rule",
       "purpose": "execute",
       "required": true
     }

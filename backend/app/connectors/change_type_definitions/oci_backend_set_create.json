@@ -3,7 +3,7 @@
   "display_name": "Create OCI Backend Set",
   "steps": [
     {
-      "generic_action": "create_backend_set",
+      "generic_action": "oci_backend_set_create",
       "purpose": "execute",
       "required": true
     }

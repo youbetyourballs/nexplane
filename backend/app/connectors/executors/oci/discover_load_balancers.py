@@ -32,10 +32,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "discovered_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    from ._client import get_loadbalancer_client, get_compartment_id
+    from ._client import get_loadbalancer_client
     loop = asyncio.get_running_loop()
     lb_client = get_loadbalancer_client(creds)
-    comp_id = compartment_id or get_compartment_id(creds)
+    comp_id = compartment_id or creds.get("tenancy", "")
 
     lbs = await loop.run_in_executor(
         None, lambda: lb_client.list_load_balancers(compartment_id=comp_id).data

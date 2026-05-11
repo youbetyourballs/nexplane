@@ -29,7 +29,19 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             compartment_id=compartment_id,
             display_name=log_group_name,
         )
-        return log_client.create_log_group(create_log_group_details=details).data
+        response = log_client.create_log_group(create_log_group_details=details)
+        # OCI may return 202 with a work request; poll list_log_groups to get the ID
+        if response.data and getattr(response.data, "id", None):
+            return response.data
+        # Work request path — poll until the log group appears
+        import time
+        for _ in range(30):
+            time.sleep(5)
+            groups = log_client.list_log_groups(compartment_id=compartment_id).data
+            for g in groups:
+                if g.display_name == log_group_name:
+                    return g
+        raise RuntimeError(f"Log group '{log_group_name}' not found after creation")
 
     log_group = await loop.run_in_executor(None, _create_group)
     log_group_id = log_group.id

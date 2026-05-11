@@ -3,7 +3,7 @@
   "display_name": "Delete OCI ADB",
   "steps": [
     {
-      "generic_action": "delete_database",
+      "generic_action": "oci_adb_delete",
       "purpose": "execute",
       "required": true
     }

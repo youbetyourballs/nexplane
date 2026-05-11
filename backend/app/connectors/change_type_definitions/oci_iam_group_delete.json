@@ -3,7 +3,7 @@
   "display_name": "Delete OCI IAM Group",
   "steps": [
     {
-      "generic_action": "delete_iam_group",
+      "generic_action": "oci_iam_group_delete",
       "purpose": "execute",
       "required": true
     }

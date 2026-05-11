@@ -3,7 +3,7 @@
   "display_name": "Create OCI Monitoring Alarm",
   "steps": [
     {
-      "generic_action": "create_alarm",
+      "generic_action": "oci_alarm_create",
       "purpose": "execute",
       "required": true
     }

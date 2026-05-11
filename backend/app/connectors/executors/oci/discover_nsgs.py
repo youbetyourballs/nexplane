@@ -28,10 +28,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "discovered_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    from ._client import get_network_client, get_compartment_id
+    from ._client import get_network_client
     loop = asyncio.get_running_loop()
     network = get_network_client(creds)
-    comp_id = compartment_id or get_compartment_id(creds)
+    comp_id = compartment_id or creds.get("tenancy", "")
 
     nsgs = await loop.run_in_executor(
         None, lambda: network.list_network_security_groups(compartment_id=comp_id).data

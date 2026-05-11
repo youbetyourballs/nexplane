@@ -3,7 +3,7 @@
   "display_name": "Create OCI Block Volume",
   "steps": [
     {
-      "generic_action": "create_volume",
+      "generic_action": "create_block_volume",
       "purpose": "execute",
       "required": true
     }

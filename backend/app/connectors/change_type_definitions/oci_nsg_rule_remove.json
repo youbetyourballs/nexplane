@@ -3,7 +3,7 @@
   "display_name": "Remove OCI NSG Rule",
   "steps": [
     {
-      "generic_action": "remove_nsg_rule",
+      "generic_action": "oci_nsg_rule_remove",
       "purpose": "execute",
       "required": true
     }

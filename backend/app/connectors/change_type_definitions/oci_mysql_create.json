@@ -3,7 +3,7 @@
   "display_name": "Create OCI MySQL DB System",
   "steps": [
     {
-      "generic_action": "create_database",
+      "generic_action": "oci_mysql_create",
       "purpose": "execute",
       "required": true
     }

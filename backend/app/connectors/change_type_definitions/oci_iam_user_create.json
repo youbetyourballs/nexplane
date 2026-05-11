@@ -3,7 +3,7 @@
   "display_name": "Create OCI IAM User",
   "steps": [
     {
-      "generic_action": "create_iam_user",
+      "generic_action": "oci_iam_user_create",
       "purpose": "execute",
       "required": true
     }

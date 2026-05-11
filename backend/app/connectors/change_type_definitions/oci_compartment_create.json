@@ -3,7 +3,7 @@
   "display_name": "Create OCI Compartment",
   "steps": [
     {
-      "generic_action": "create_compartment",
+      "generic_action": "oci_compartment_create",
       "purpose": "execute",
       "required": true
     }

@@ -3,7 +3,7 @@
   "display_name": "Create OCI Listener",
   "steps": [
     {
-      "generic_action": "create_listener",
+      "generic_action": "oci_listener_create",
       "purpose": "execute",
       "required": true
     }
