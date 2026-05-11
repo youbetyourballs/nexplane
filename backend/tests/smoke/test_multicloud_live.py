@@ -888,8 +888,20 @@ def run_oci_worker(base_url: str, email: str, password: str) -> dict:
                         pass
                     time.sleep(10)
 
-        # Attach to instance (wrapped in try/except — attach needs RUNNING instance)
+        # Attach to instance — only when instance is RUNNING (reboot from OCI_C may still be in progress)
+        instance_running = False
         if bv_id and instance_ocid and instance_asset_id:
+            compute_client_g = _get_oci_compute_client()
+            if compute_client_g:
+                try:
+                    inst_state = compute_client_g.get_instance(instance_ocid).data.lifecycle_state
+                    instance_running = inst_state == "RUNNING"
+                    if not instance_running:
+                        log(f"[OCI_G] Skipping attach — instance is {inst_state} (still rebooting from OCI_C)")
+                except Exception:
+                    pass
+
+        if bv_id and instance_ocid and instance_asset_id and instance_running:
             try:
                 attach_cr = client._run_cr_with_timeout(
                     "[OCI_G] Attach Block Volume", "oci_block_volume_attach", instance_asset_id,
@@ -904,9 +916,7 @@ def run_oci_worker(base_url: str, email: str, password: str) -> dict:
                 rollback_stack.pop()
                 log("[OCI_G] Block volume detached via rollback")
             except Exception as e:
-                log(f"[OCI_G] Attach/detach warning (instance may be rebooting): {e}")
-        else:
-            log(f"[OCI_G] Skipping attach (bv_id={bool(bv_id)}, instance_ocid={bool(instance_ocid)}, asset_id={bool(instance_asset_id)})")
+                log(f"[OCI_G] Attach/detach warning: {e}")
 
         log("[OCI_G] Block Volume lifecycle complete")
 
