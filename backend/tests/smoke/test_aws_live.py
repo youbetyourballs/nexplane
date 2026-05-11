@@ -490,6 +490,13 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
         # 6. Launch a dedicated EC2, then terminate it via CR (exercises ec2_terminate live)
         print("  → [Phase E] ec2_terminate via CR (dedicated instance)")
         kp_name = "nexplane-smoke-terminate-key"
+        # Pre-run: delete stale key pair if it exists
+        _ec2_pre = _get_aws_boto3_client("ec2")
+        if _ec2_pre:
+            try:
+                _ec2_pre.delete_key_pair(KeyName=kp_name)
+            except Exception:
+                pass
         kp_cr = client.run_cr(
             "[Phase E] key pair for terminate test", "key_pair_create",
             instance_asset["id"],
