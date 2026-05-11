@@ -1635,6 +1635,17 @@ def run_phase_t(client: NexplaneClient, phase_a_result: dict) -> None:
         rollback_stack.append((cr["id"], "deploy_nexplane_agent"))
         log("Nexplane agent redeployed via CR")
 
+        # Wait up to 2 min for the re-deployed agent to re-register and start polling
+        import time as _t
+        log("[Phase T] Waiting up to 2 min for re-deployed agent to reconnect...")
+        for _ in range(12):
+            _t.sleep(10)
+            agents = [a for a in client.get("/assets", params={"q": "nexplane-smoke", "asset_type": "server"})
+                      if "nexplane-agent" in (a.get("tags") or [])]
+            if agents:
+                log(f"[Phase T] Agent asset confirmed in inventory: {agents[0]['id']}")
+                break
+
         log("Phase T complete")
 
     except Exception as e:
