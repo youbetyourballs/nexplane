@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
+import { apiClient } from "../api/client";
 import { changeRequestsApi } from "../api/endpoints";
 import { StatusBadge } from "../components/StatusBadge";
 import { RiskBadge } from "../components/RiskBadge";
@@ -73,6 +74,15 @@ export function ChangeRequestList() {
   const [status, setStatus] = useState("");
   const [riskLevel, setRiskLevel] = useState("");
   const [changeType, setChangeType] = useState("");
+  const queryClient = useQueryClient();
+
+  const cleanupMutation = useMutation({
+    mutationFn: () => apiClient.post("/change-requests/cleanup-stuck").then((r) => r.data),
+    onSuccess: (data: { cleaned: number }) => {
+      queryClient.invalidateQueries({ queryKey: ["change-requests"] });
+      alert(`Cleaned up ${data.cleaned} stuck change request(s).`);
+    },
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ["change-requests", status, riskLevel, changeType],
@@ -142,13 +152,28 @@ export function ChangeRequestList() {
             title="Change Requests"
             subtitle="All governed infrastructure change requests"
             actions={
-              <Link
-                to="/change-requests/new"
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                New Request
-              </Link>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    if (confirm("Mark all executing/verifying CRs as failed? This clears phantom activity from crashed runs.")) {
+                      cleanupMutation.mutate();
+                    }
+                  }}
+                  disabled={cleanupMutation.isPending}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded-md transition-colors disabled:opacity-50"
+                  title="Clear stuck executing/verifying CRs orphaned by server restarts"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Clean Up Stuck
+                </button>
+                <Link
+                  to="/change-requests/new"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  New Request
+                </Link>
+              </div>
             }
           />
 
