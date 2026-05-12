@@ -104,7 +104,7 @@ class TestChangeIpExecutor:
                 connector=None,
             ))
 
-        assert captured["timeout"] == 180  # 60 + 120
+        assert captured["timeout"] == 330  # 60 + 270 (270s buffer for connect + retry)
 
 
 # ---------------------------------------------------------------------------
