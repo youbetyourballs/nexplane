@@ -4246,29 +4246,39 @@ def run_phase_demo_a(client: NexplaneClient, ec2_client, ssm_client,
          "rollback_strategy": "terminate_instance"},
     )
 
-    # Wait for inventory asset (up to 4 min — ingest may take time after EC2 launch)
+    # Wait for inventory asset (up to 4 min) — scan all candidates to skip stale terminated ones
     instance_asset = None
     instance_id = None
     for _ in range(48):
         time.sleep(5)
-        candidate = client.get_asset_by_name(instance_name)
-        if not candidate:
-            continue
-        cid = candidate.get("asset_metadata", {}).get("instance_id", "")
-        if not cid:
-            continue
-        if ec2_client:
-            try:
-                state = ec2_client.describe_instances(InstanceIds=[cid])["Reservations"][0]["Instances"][0]["State"]["Name"]
-                if state in ("pending", "running"):
-                    instance_asset = candidate
-                    instance_id = cid
-                    break
-            except Exception:
-                pass
-        else:
-            instance_asset = candidate
-            instance_id = cid
+        all_candidates = [a for a in client.get("/assets", params={"q": instance_name})
+                          if a["name"] == instance_name]
+        for candidate in sorted(all_candidates, key=lambda a: a.get("updated_at", ""), reverse=True):
+            cid = candidate.get("asset_metadata", {}).get("instance_id", "")
+            if not cid:
+                continue
+            if ec2_client:
+                try:
+                    reservations = ec2_client.describe_instances(InstanceIds=[cid]).get("Reservations", [])
+                    if not reservations:
+                        continue
+                    state = reservations[0]["Instances"][0]["State"]["Name"]
+                    if state in ("pending", "running"):
+                        instance_asset = candidate
+                        instance_id = cid
+                        break
+                    # stale terminated asset — remove from inventory
+                    try:
+                        client.client.delete(f"{client.base}/assets/{candidate['id']}")
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            else:
+                instance_asset = candidate
+                instance_id = cid
+                break
+        if instance_asset:
             break
     if not instance_asset or not instance_id:
         from smoke_helpers import fail as _fail
@@ -4481,14 +4491,21 @@ def main():
 
     try:
         stale = []
-        for q in ("nexplane-smoke-test", "nexplane-smoke-ec2"):
+        for q in ("nexplane-smoke-test", "nexplane-smoke-ec2", "nexplane-demo-payments"):
             stale += [a for a in client.get("/assets", params={"q": q})
-                      if q.split("-")[2] in a.get("name", "")]
+                      if a.get("name", "").startswith(q.rsplit("-", 1)[0].replace("nexplane-", "nexplane-"))]
+        # Simpler: just match any asset whose name contains the smoke/demo marker
+        stale = []
+        for q in ("nexplane-smoke-test", "nexplane-smoke-ec2", "nexplane-demo-payments"):
+            stale += [a for a in client.get("/assets", params={"q": q})
+                      if q in a.get("name", "")]
         # Also clean stale nexplane-smoke-ec2 agent-registered server assets
+        seen_ids = {a["id"] for a in stale}
         for a in client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"}):
             if a.get("name") == "nexplane-smoke-ec2" and "nexplane-agent" in (a.get("tags") or []):
-                if a["id"] not in {x["id"] for x in stale}:
+                if a["id"] not in seen_ids:
                     stale.append(a)
+                    seen_ids.add(a["id"])
         for asset in stale:
             try:
                 client.client.delete(f"{client.base}/assets/{asset['id']}")
