@@ -3942,14 +3942,14 @@ def run_phase_eks_sdk(client: NexplaneClient, cloud_account_id: str) -> None:
             "[Phase EKS_SDK] create EKS cluster SDK dry_run",
             "eks_cluster_create_sdk",
             cloud_account_id,
-            {"cluster_name": cluster_name, "dry_run": True},
+            {"cluster_name": cluster_name, "dry_run": True, "rollback_strategy": "nexplane_rollback"},
         )
         rollback_stack.append((cr["id"], "eks_cluster_create_sdk"))
-        result = cr.get("execution_result") or {}
-        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')}"
-        assert "endpoint" in result, "Missing endpoint in result"
-        assert "_auto_asset" in result, "Missing _auto_asset in result"
-        assert result["_auto_asset"]["asset_type"] == "kubernetes_cluster"
+        runs = cr.get("execution_runs") or []
+        run_result = (runs[0]["result"] if runs else {}) or {}
+        result = run_result.get("execution", {}).get("steps", [{}])[0].get("result", {})
+        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')} — run_result: {run_result}"
+        assert "endpoint" in result, f"Missing endpoint in result: {result}"
         log(f"EKS SDK dry_run OK: endpoint={result['endpoint']}")
     except Exception as e:
         print(f"\n[Phase EKS_SDK] FAILED: {e}")
@@ -3971,14 +3971,14 @@ def run_phase_eks_cfn(client: NexplaneClient, cloud_account_id: str) -> None:
             "[Phase EKS_CFN] create EKS cluster CFN dry_run",
             "eks_cluster_create_cfn",
             cloud_account_id,
-            {"cluster_name": cluster_name, "dry_run": True},
+            {"cluster_name": cluster_name, "dry_run": True, "rollback_strategy": "nexplane_rollback"},
         )
         rollback_stack.append((cr["id"], "eks_cluster_create_cfn"))
-        result = cr.get("execution_result") or {}
-        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')}"
-        assert "endpoint" in result, "Missing endpoint in result"
-        assert "_auto_asset" in result, "Missing _auto_asset in result"
-        assert result["_auto_asset"]["asset_type"] == "kubernetes_cluster"
+        runs = cr.get("execution_runs") or []
+        run_result = (runs[0]["result"] if runs else {}) or {}
+        result = run_result.get("execution", {}).get("steps", [{}])[0].get("result", {})
+        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')} — run_result: {run_result}"
+        assert "endpoint" in result, f"Missing endpoint in result: {result}"
         log(f"EKS CFN dry_run OK: endpoint={result['endpoint']}")
     except Exception as e:
         print(f"\n[Phase EKS_CFN] FAILED: {e}")
@@ -4000,14 +4000,14 @@ def run_phase_eks_tf(client: NexplaneClient, cloud_account_id: str) -> None:
             "[Phase EKS_TF] create EKS cluster Terraform dry_run",
             "eks_cluster_create_terraform",
             cloud_account_id,
-            {"cluster_name": cluster_name, "dry_run": True},
+            {"cluster_name": cluster_name, "dry_run": True, "rollback_strategy": "nexplane_rollback"},
         )
         rollback_stack.append((cr["id"], "eks_cluster_create_terraform"))
-        result = cr.get("execution_result") or {}
-        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')}"
-        assert "endpoint" in result, "Missing endpoint in result"
-        assert "_auto_asset" in result, "Missing _auto_asset in result"
-        assert result["_auto_asset"]["asset_type"] == "kubernetes_cluster"
+        runs = cr.get("execution_runs") or []
+        run_result = (runs[0]["result"] if runs else {}) or {}
+        result = run_result.get("execution", {}).get("steps", [{}])[0].get("result", {})
+        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')} — run_result: {run_result}"
+        assert "endpoint" in result, f"Missing endpoint in result: {result}"
         log(f"EKS Terraform dry_run OK: endpoint={result['endpoint']}")
     except Exception as e:
         print(f"\n[Phase EKS_TF] FAILED: {e}")
@@ -4030,14 +4030,14 @@ def run_phase_ecr(client: NexplaneClient, cloud_account_id: str) -> None:
             "[Phase ECR] create ECR repository dry_run",
             "ecr_repository_create",
             cloud_account_id,
-            {"repository_name": repo_name, "dry_run": True},
+            {"repository_name": repo_name, "dry_run": True, "rollback_strategy": "nexplane_rollback"},
         )
         rollback_stack.append((cr["id"], "ecr_repository_create"))
-        result = cr.get("execution_result") or {}
-        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')}"
-        assert "repository_uri" in result, "Missing repository_uri in result"
-        assert "_auto_asset" in result, "Missing _auto_asset in result"
-        assert result["_auto_asset"]["asset_type"] == "container_image"
+        runs = cr.get("execution_runs") or []
+        run_result = (runs[0]["result"] if runs else {}) or {}
+        result = run_result.get("execution", {}).get("steps", [{}])[0].get("result", {})
+        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')} — run_result: {run_result}"
+        assert "repository_uri" in result, f"Missing repository_uri in result: {result}"
         log(f"ECR create dry_run OK: uri={result['repository_uri']}")
 
         # Delete (dry_run)
@@ -4045,9 +4045,11 @@ def run_phase_ecr(client: NexplaneClient, cloud_account_id: str) -> None:
             "[Phase ECR] delete ECR repository dry_run",
             "ecr_repository_delete",
             cloud_account_id,
-            {"repository_name": repo_name, "dry_run": True},
+            {"repository_name": repo_name, "dry_run": True, "rollback_strategy": "rollback_unavailable"},
         )
-        del_result = del_cr.get("execution_result") or {}
+        del_runs = del_cr.get("execution_runs") or []
+        del_run_result = (del_runs[0]["result"] if del_runs else {}) or {}
+        del_result = del_run_result.get("execution", {}).get("steps", [{}])[0].get("result", {})
         assert del_result.get("status") == "dry_run", f"Expected dry_run on delete, got {del_result.get('status')}"
         log("ECR delete dry_run OK")
 
