@@ -1,0 +1,58 @@
+name: Publish Agent Binary to S3
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'agent/**'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "0.2.0")
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build linux-amd64 binary
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          cd agent
+          go build -o nexplane-agent-linux-amd64-${{ steps.version.outputs.VERSION }} ./cmd/agent
+
+      - name: Upload binary to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          aws s3 cp agent/nexplane-agent-linux-amd64-$VERSION \
+            s3://nexplane-agent-downloads/nexplane-agent-linux-amd64-$VERSION \
+            --no-progress
+
+      - name: Update version file
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          echo "$VERSION" | aws s3 cp - s3://nexplane-agent-downloads/version --no-progress
