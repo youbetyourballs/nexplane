@@ -2276,9 +2276,11 @@ echo "=== Agent log ===" && journalctl -u nexplane-agent.service -n 10 --no-page
              "rollback_strategy": "rollback_unavailable"},
             timeout=120,
         )
-        step_res = NexplaneClient.get_cr_step_result(diag_cr)
-        step_out = step_res.get("stdout", step_res.get("output", str(step_res)[:500]))
-        log(f"[Phase X] SSM output:\n{step_out[:3000]}")
+        if "diag_cr" in dir():
+            step_res = NexplaneClient.get_cr_step_result(diag_cr)
+            step_out = step_res.get("stdout", step_res.get("output", ""))
+            if step_out:
+                log(f"[Phase X] SSM output:\n{step_out[:2000]}")
         log(f"[Phase X] Agent reconfigured with backend_ip={backend_ip} and restarted")
     except Exception as e:
         log(f"[Phase X] Agent reconfigure warning: {e}")
