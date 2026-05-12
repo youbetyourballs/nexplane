@@ -2298,33 +2298,35 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
     # NOTE: agent_secret is already fetched above if backend_ip is set; fall back to API
     agent_secret_x = agent_secret if backend_ip else client.get_agent_secret()
     try:
-        client._run_cr_with_timeout(
-            "[Phase X] reconfigure + restart agent", "ssm_command", instance_asset_id,
-            {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
-             "command": f"""#!/bin/bash
-# Check Tailscale connectivity first
-echo "=== Tailscale status ===" && tailscale ip -4 2>&1 || echo "Tailscale IP not assigned"
-echo "=== Backend connectivity ===" && curl -sf --max-time 5 http://{backend_ip}:8000/health 2>&1 && echo "BACKEND REACHABLE" || echo "BACKEND NOT REACHABLE - agent cannot connect"
-# Write drop-in regardless, then restart
+        # Use direct boto3 SSM to bypass connector_id resolution issues on EC2 asset
+        # after tailscale_join/deploy_nexplane_agent may have drifted the asset's connector_id.
+        import time as _tr
+        _ssm_reconfig = _get_aws_boto3_client("ssm")
+        if _ssm_reconfig and instance_id:
+            _reconfig_script = f"""#!/bin/bash
 mkdir -p /etc/systemd/system/nexplane-agent.service.d
 printf '[Service]\\nEnvironment="NP_CONTROL_PLANE=http://{backend_ip}:8000"\\nEnvironment="NP_SECRET={agent_secret_x}"\\n' > /etc/systemd/system/nexplane-agent.service.d/control-plane.conf
-cat /etc/systemd/system/nexplane-agent.service.d/control-plane.conf
 systemctl daemon-reload
 systemctl reset-failed nexplane-agent.service 2>/dev/null || true
-systemctl restart nexplane-agent.service
+systemctl restart nexplane-agent.service || (sleep 2 && systemctl start nexplane-agent.service) || echo "START_FAILED"
 sleep 5
-echo "=== Agent status ===" && systemctl is-active nexplane-agent.service && systemctl status nexplane-agent.service --no-pager 2>&1 | tail -5 || true
-echo "=== Agent log ===" && journalctl -u nexplane-agent.service -n 10 --no-pager 2>&1 || true
-""",
-             "rollback_strategy": "rollback_unavailable"},
-            timeout=120,
-        )
-        if "diag_cr" in dir():
-            step_res = NexplaneClient.get_cr_step_result(diag_cr)
-            step_out = step_res.get("stdout", step_res.get("output", ""))
-            if step_out:
-                log(f"[Phase X] SSM output:\n{step_out[:2000]}")
-        log(f"[Phase X] Agent reconfigured with backend_ip={backend_ip} and restarted")
+systemctl is-active nexplane-agent.service && echo "AGENT_ACTIVE" || echo "AGENT_INACTIVE"
+journalctl -u nexplane-agent.service -n 10 --no-pager 2>&1 || true
+echo "RECONFIGURE_DONE"
+"""
+            _rc_resp = _ssm_reconfig.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [_reconfig_script]},
+                TimeoutSeconds=120,
+            )
+            _tr.sleep(20)
+            _rc_inv = _ssm_reconfig.get_command_invocation(
+                CommandId=_rc_resp["Command"]["CommandId"], InstanceId=instance_id
+            )
+            _rc_out = _rc_inv.get("StandardOutputContent", "")
+            log(f"[Phase X] Reconfigure output:\n{_rc_out[:1000]}")
+            log(f"[Phase X] Agent reconfigured with backend_ip={backend_ip} and restarted")
     except Exception as e:
         log(f"[Phase X] Agent reconfigure warning: {e}")
 
