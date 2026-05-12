@@ -32,8 +32,10 @@ export default function MitigationPanel({ findingId, onApplied }: Props) {
   });
 
   // Pre-select recommended controls when data loads (React Query v5: no onSuccess in useQuery)
+  const initialized = React.useRef(false);
   useEffect(() => {
-    if (data?.suggestions) {
+    if (data?.suggestions && !initialized.current) {
+      initialized.current = true;
       setSelected(new Set(data.suggestions.filter(s => s.recommended).map(s => s.control)));
     }
   }, [data]);
@@ -72,9 +74,13 @@ export default function MitigationPanel({ findingId, onApplied }: Props) {
         <div
           key={s.control}
           onClick={() => toggle(s.control)}
-          className={`px-3 py-2.5 border-b border-slate-100 flex gap-3 cursor-pointer hover:bg-slate-50 transition-colors ${
-            selected.has(s.control) ? "bg-green-50" : ""
-          } ${s.impact === "high" ? "bg-red-50 hover:bg-red-100" : ""}`}
+          className={`px-3 py-2.5 border-b border-slate-100 flex gap-3 cursor-pointer transition-colors ${
+            selected.has(s.control)
+              ? "bg-green-50 hover:bg-slate-50"
+              : s.impact === "high"
+              ? "bg-red-50 hover:bg-red-100"
+              : "hover:bg-slate-50"
+          }`}
         >
           <div className={`w-5 h-5 mt-0.5 rounded flex-shrink-0 flex items-center justify-center border-2 ${
             selected.has(s.control) ? "bg-green-500 border-green-500" : "border-slate-300"
