@@ -37,6 +37,27 @@ func TestDetectContainerRuntimesNoError(t *testing.T) {
 	}
 }
 
+// TestWorkloadHasEnrichmentFields verifies that workload maps include enrichment fields.
+func TestWorkloadHasEnrichmentFields(t *testing.T) {
+	result, err := Execute(map[string]any{})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	workloads, ok := result["workloads"].([]map[string]any)
+	if !ok {
+		t.Skip("no workloads on this machine")
+	}
+	if len(workloads) == 0 {
+		t.Skip("no workloads on this machine")
+	}
+	w := workloads[0]
+	for _, key := range []string{"pid_found", "env_var_names", "open_files", "runtime_deps", "config_intelligence"} {
+		if _, ok := w[key]; !ok {
+			t.Errorf("workload missing key: %s", key)
+		}
+	}
+}
+
 // TestExecCommandHookable verifies that execCommandLinux is mockable.
 func TestExecCommandHookable(t *testing.T) {
 	var called []string
