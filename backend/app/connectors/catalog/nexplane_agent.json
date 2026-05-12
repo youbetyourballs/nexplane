@@ -1220,6 +1220,21 @@
                         "estimated_duration_seconds":  30
                     },
                     {
+                        "action_id":  "list_installed_packages",
+                        "generic_action":  "list_installed_packages",
+                        "action_type":  "ingest",
+                        "execution_tier":  3,
+                        "display_name":  "List Installed Packages",
+                        "description":  "CIS Control 2: enumerate all installed packages with name, version, and package manager. Linux: dpkg/rpm/apk/snap. Windows: registry uninstall keys. Capped at 1000 packages.",
+                        "applicable_asset_types":  [
+                                                       "server",
+                                                       "workstation"
+                                                   ],
+                        "parameters":  [],
+                        "executor":  "nexplane_agent.list_packages",
+                        "estimated_duration_seconds":  30
+                    },
+                    {
                         "action_id":  "upgrade_linux_instance",
                         "generic_action":  "upgrade_linux_instance",
                         "action_type":  "change",
