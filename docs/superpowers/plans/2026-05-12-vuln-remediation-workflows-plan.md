@@ -10,6 +10,32 @@
 
 ---
 
+## ⚠️ Errata — Fix These Before Executing
+
+These issues were found during pre-execution review and must be applied as corrections when implementing each task:
+
+**E1 — Migration revision conflict:** Task 1 specifies `revision = '048'` and `down_revision = '047'`. Revision 048 is already taken by `048_add_agent_os_upgrade_change_type.py`. Use `revision = '049'` and `down_revision = '048'` instead. All references to migration `048_vuln_remediation_extensions.py` in the plan should be renamed `049_vuln_remediation_extensions.py`.
+
+**E2 — `ChangeRequest` field is `desired_outcome`, not `parameters`:** Every place the plan creates a `ChangeRequest(parameters=...)`, change to `desired_outcome=...`. The model column is `desired_outcome: Mapped[dict]`. Affects: `_create_patch_cr`, `mitigate_finding`, campaign executor.
+
+**E3 — `generate_plan` signature:** The plan calls `generate_plan(cr, db)` — wrong. The real signature is `generate_plan(change_request, assets, safety_result, catalog=None)`. For auto-generated CRs, skip `generate_plan` entirely and set `status=ChangeRequestStatus.pending` so the workflow engine handles planning. Remove all `generate_plan` calls from `_create_patch_cr`.
+
+**E4 — Campaign executor `requester_id`:** Task 4's `execute_campaign` sets `requester_id=campaign.organization_id` which will fail (FK to `users.id`). Instead look up any user in the org: `from sqlalchemy import select; from app.models.user import User; ur = await db.execute(select(User).where(User.organization_id == campaign.organization_id).limit(1)); u = ur.scalars().first(); requester_id = u.id if u else campaign.organization_id`.
+
+**E5 — React Query v5 `onSuccess` removed:** Task 8's `MitigationPanel` uses `onSuccess: (data) => { setSelected(...) }` inside `useQuery`. This was removed in v5. Replace with a `useEffect`:
+```tsx
+const { data, isLoading, error } = useQuery({ ... }); // remove onSuccess
+useEffect(() => {
+  if (data?.suggestions) {
+    setSelected(new Set(data.suggestions.filter(s => s.recommended).map(s => s.control)));
+  }
+}, [data]);
+```
+
+**E6 — `SLAConfigExtended` replaces `SLAConfig` on existing endpoint:** Task 2 adds `SLAConfigExtended` but the existing `PUT /sla/config` router uses `SLAConfig(extra="forbid")`. Change the `PUT /sla/config` endpoint to accept `SLAConfigExtended` and update `GET /sla/config` to return it. The existing `SLAConfig` Pydantic model can stay for backward compat — just update the endpoint signatures.
+
+---
+
 ## File Map
 
 **New backend files:**
