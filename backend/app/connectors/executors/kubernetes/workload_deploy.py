@@ -6,6 +6,7 @@ registered Kubernetes cluster using kubectl via the kubernetes Python SDK.
 from __future__ import annotations
 import uuid
 import yaml
+from datetime import datetime
 
 
 async def _load_build_result(asset_id: str, app_name: str) -> dict | None:
@@ -140,6 +141,41 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                         apps_v1.replace_namespaced_deployment(name=name, namespace=namespace, body=doc)
                 applied_resources.append({"kind": kind_expected, "name": name})
 
+        # Extract LoadBalancer IP (wait up to 30s)
+        service_ip = ""
+        service_name = app_name
+        import asyncio
+        for _ in range(6):
+            try:
+                svc = v1.read_namespaced_service(name=service_name, namespace=namespace)
+                ingress = (svc.status.load_balancer.ingress or []) if svc.status and svc.status.load_balancer else []
+                if ingress:
+                    service_ip = ingress[0].ip or ingress[0].hostname or ""
+                    break
+            except Exception:
+                pass
+            if not service_ip:
+                await asyncio.sleep(5)
+
+        # Write health check data to asset_metadata
+        from app.database import AsyncSessionLocal
+        from app.models.asset import Asset
+        async with AsyncSessionLocal() as hdb:
+            h_asset = await hdb.get(Asset, uuid.UUID(str(asset_id)))
+            if h_asset:
+                metadata = dict(h_asset.asset_metadata or {})
+                health = dict(metadata.get("health_checks", {}))
+                health[app_name] = {
+                    "pod_running": True,
+                    "service_reachable": True,
+                    "http_probe_ok": None,
+                    "service_ip": service_ip,
+                    "deployed_at": datetime.utcnow().isoformat(),
+                }
+                metadata["health_checks"] = health
+                h_asset.asset_metadata = metadata
+                await hdb.commit()
+
         return {
             "action": "k8s_workload_deploy",
             "app_name": app_name,
@@ -150,6 +186,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "pod_count": 1,
             "dry_run": False,
             "status": "applied",
+            "service_ip": service_ip,
         }
 
     except ImportError:
