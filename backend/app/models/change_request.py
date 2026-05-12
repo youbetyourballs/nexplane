@@ -246,6 +246,9 @@ class ChangeType(str, enum.Enum):
     oci_alarm_create = "oci_alarm_create"
     oci_alarm_delete = "oci_alarm_delete"
     oci_logging_enable = "oci_logging_enable"
+    # RDS restore and backup verification
+    restore_rds_snapshot = "restore_rds_snapshot"
+    verify_rds_backup = "verify_rds_backup"
     # EKS cluster provisioning — SP2
     eks_cluster_create_sdk = "eks_cluster_create_sdk"
     eks_cluster_create_cfn = "eks_cluster_create_cfn"

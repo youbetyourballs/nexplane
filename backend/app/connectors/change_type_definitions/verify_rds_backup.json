@@ -1,0 +1,10 @@
+{
+  "change_type": "verify_rds_backup",
+  "display_name": "Verify RDS Backup",
+  "steps": [
+    {"generic_action": "verify_rds_backup", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": null
+}

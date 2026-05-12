@@ -1,0 +1,11 @@
+{
+  "change_type": "restore_rds_snapshot",
+  "display_name": "Restore RDS Snapshot",
+  "steps": [
+    {"generic_action": "restore_rds_snapshot", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_rds_instance",
+  "rollback_connector_type": "aws"
+}
