@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 
+const MitigationPanel = React.lazy(() => import("./MitigationPanel"));
+
 interface Finding {
   id: string;
   cve_id: string | null;
@@ -150,8 +152,6 @@ export default function FindingActionPanel({ finding, onClose, onUpdated }: Prop
 }
 
 function MitigationInlinePanelLoader({ findingId, onApplied }: { findingId: string; onApplied: () => void }) {
-  // Lazy-load MitigationPanel — implemented in Task 8
-  const MitigationPanel = React.lazy(() => import("./MitigationPanel"));
   return (
     <React.Suspense fallback={<p className="text-sm text-slate-500">Loading suggestions…</p>}>
       <MitigationPanel findingId={findingId} onApplied={onApplied} />
