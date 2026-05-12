@@ -27,7 +27,10 @@ async def _get_probe_url(asset_ids: list) -> str:
     from app.models.agent import AgentRegistration
     from app.models.asset import Asset
 
-    asset_id = uuid.UUID(asset_ids[0]) if isinstance(asset_ids[0], str) else asset_ids[0]
+    try:
+        asset_id = uuid.UUID(asset_ids[0]) if isinstance(asset_ids[0], str) else asset_ids[0]
+    except (ValueError, AttributeError):
+        return ""
     async with AsyncSessionLocal() as db:
         asset = await db.get(Asset, asset_id)
         if not asset:

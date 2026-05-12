@@ -36,11 +36,26 @@ def test_appdiscovery_in_implicit_rollback_types():
 
 
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 
-def test_app_discovery_executor_returns_applications():
+def test_app_discovery_executor_dispatches_agent_job():
+    """app_discovery executor calls dispatch_agent_job and surfaces the result."""
     from app.connectors.executors.nexplane_agent.app_discovery import execute
-    result = asyncio.run(execute({}, [], None))
+
+    fake_result = {
+        "action": "discover_applications",
+        "applications": [
+            {"name": "nginx", "stateful": False, "containerization_status": "none"},
+        ],
+    }
+
+    with patch(
+        "app.connectors.executors.nexplane_agent._dispatch.dispatch_agent_job",
+        new=AsyncMock(return_value=fake_result),
+    ):
+        result = asyncio.run(execute({}, ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"], None))
+
     assert result["action"] == "discover_applications"
     assert isinstance(result["applications"], list)
     assert len(result["applications"]) > 0
@@ -50,17 +65,18 @@ def test_app_discovery_executor_returns_applications():
     assert "containerization_status" in app
 
 
-def test_workload_deploy_executor_requires_target_cluster():
+def test_workload_deploy_executor_requires_app_name():
+    """workload_deploy raises ValueError when app_name is missing."""
     from app.connectors.executors.kubernetes.workload_deploy import execute
-    with pytest.raises(ValueError, match="target_cluster"):
+    with pytest.raises(ValueError, match="app_name"):
         asyncio.run(execute({}, [], None))
 
 
-def test_workload_deploy_executor_succeeds_with_target_cluster():
+def test_workload_deploy_executor_requires_target_cluster_id():
+    """workload_deploy raises ValueError when target_cluster_id is missing."""
     from app.connectors.executors.kubernetes.workload_deploy import execute
-    result = asyncio.run(execute({"target_cluster": "eks-prod"}, [], None))
-    assert result["action"] == "k8s_workload_deploy"
-    assert result["pods_ready"] >= 1
+    with pytest.raises(ValueError, match="target_cluster_id"):
+        asyncio.run(execute({"app_name": "payments-api"}, [], None))
 
 
 def test_write_discovered_apps_to_metadata_sets_applications():
