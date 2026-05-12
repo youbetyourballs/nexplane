@@ -2208,6 +2208,20 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
                  "hostname": "nexplane-smoke-ec2"},
             )
             log("[Phase X] Tailscale re-joined")
+            # Verify EC2 can reach the backend via Tailscale
+            import time as _t2; _t2.sleep(5)
+            try:
+                ping_cr = client._run_cr_with_timeout(
+                    "[Phase X] verify EC2→backend connectivity", "ssm_command", instance_asset_id,
+                    {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+                     "command": f"curl -sf --max-time 5 http://{backend_ip}:8000/health 2>&1 && echo 'BACKEND_OK' || echo 'BACKEND_UNREACHABLE'; tailscale status 2>&1 | head -3 || echo 'TAILSCALE_NOT_RUNNING'",
+                     "rollback_strategy": "rollback_unavailable"},
+                    timeout=60,
+                )
+                ping_out = NexplaneClient.get_cr_step_result(ping_cr).get("stdout", "")
+                log(f"[Phase X] Connectivity check: {ping_out[:300]}")
+            except Exception as e2:
+                log(f"[Phase X] Connectivity check warning: {e2}")
         except Exception:
             log("[Phase X] Tailscale re-join skipped (no auth key or already joined)")
     if backend_ip:
@@ -2262,8 +2276,9 @@ echo "=== Agent log ===" && journalctl -u nexplane-agent.service -n 10 --no-page
              "rollback_strategy": "rollback_unavailable"},
             timeout=120,
         )
-        step_out = NexplaneClient.get_cr_step_result(diag_cr).get("output", "")
-        log(f"[Phase X] SSM output:\n{step_out[:2000]}")
+        step_res = NexplaneClient.get_cr_step_result(diag_cr)
+        step_out = step_res.get("stdout", step_res.get("output", str(step_res)[:500]))
+        log(f"[Phase X] SSM output:\n{step_out[:3000]}")
         log(f"[Phase X] Agent reconfigured with backend_ip={backend_ip} and restarted")
     except Exception as e:
         log(f"[Phase X] Agent reconfigure warning: {e}")
