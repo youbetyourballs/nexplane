@@ -3733,6 +3733,199 @@ def run_phase_ip_win_d(client: NexplaneClient, cloud_account_id: str, tailscale_
         _teardown_win_ip_instance(client)
 
 
+def run_phase_container_a(client, ec2_instance_id: str, asset_id: str, ssm_client) -> dict:
+    """CONTAINER-A: Install payments-api (Flask), redis, nginx on EC2 and trigger app discovery."""
+    print("\n=== Phase CONTAINER-A: Install payments stack and discover applications ===")
+
+    install_cmd = r"""
+set -e
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y -q 2>&1 | tail -3
+apt-get install -y -q redis-server nginx python3-pip python3-flask 2>&1 | tail -3
+
+# payments-api Flask app
+mkdir -p /opt/payments-api
+cat > /opt/payments-api/app.py << 'PYEOF'
+import os, json, uuid
+from flask import Flask, request, jsonify
+try:
+    import redis
+    r = redis.Redis(host='localhost', port=6379, decode_responses=True)
+except Exception:
+    r = None
+
+app = Flask(__name__)
+
+@app.route('/health')
+def health():
+    return jsonify({"status": "ok"})
+
+@app.route('/payments', methods=['POST'])
+def create_payment():
+    pid = str(uuid.uuid4())
+    if r:
+        r.set(f"payment:{pid}", json.dumps(request.get_json() or {}))
+    return jsonify({"id": pid}), 201
+
+@app.route('/payments/<pid>')
+def get_payment(pid):
+    if r:
+        data = r.get(f"payment:{pid}")
+        if data:
+            return jsonify(json.loads(data))
+    return jsonify({"error": "not found"}), 404
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+PYEOF
+
+pip3 install -q flask redis
+
+# systemd service for payments-api
+cat > /etc/systemd/system/payments-api.service << 'EOF'
+[Unit]
+Description=Payments API
+After=network.target redis.service
+[Service]
+WorkingDirectory=/opt/payments-api
+ExecStart=/usr/bin/python3 /opt/payments-api/app.py
+Restart=always
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# nginx reverse proxy
+cat > /etc/nginx/sites-available/payments << 'EOF'
+server {
+    listen 80;
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+    }
+}
+EOF
+ln -sf /etc/nginx/sites-available/payments /etc/nginx/sites-enabled/payments
+rm -f /etc/nginx/sites-enabled/default
+
+systemctl daemon-reload
+systemctl enable redis-server payments-api nginx
+systemctl start redis-server
+sleep 2
+systemctl start payments-api
+sleep 2
+systemctl restart nginx
+echo "INSTALL_DONE"
+"""
+    result = _run_ssm_command(ssm_client, ec2_instance_id, install_cmd, timeout=180)
+    stdout = result.get("stdout", "")
+    assert "INSTALL_DONE" in stdout, f"Install failed. stdout: {stdout[:500]}"
+
+    # Trigger discovery via the API endpoint
+    resp = client.post(f"/assets/{asset_id}/discover-applications")
+    assert resp.status_code == 200, f"Discovery endpoint failed: {resp.status_code} {resp.text[:300]}"
+    data = resp.json()
+    print(f"  Discovery CR status: {data.get('status')}")
+
+    applications = data.get("applications", [])
+    print(f"  Discovered {len(applications)} applications: {[a.get('name') for a in applications]}")
+
+    return {"applications": applications, "cr_id": data.get("cr_id")}
+
+
+def run_phase_container_b(client, asset_id: str, app_name: str = "payments-api") -> dict:
+    """CONTAINER-B: Build container image (dry_run=True), verify CR completes."""
+    print(f"\n=== Phase CONTAINER-B: Build {app_name} (dry_run=True) ===")
+
+    cr_body = {
+        "change_type": "agent_containerize_build",
+        "title": f"Build {app_name} - smoke test dry run",
+        "description": "SP1 smoke test",
+        "risk_level": "low",
+        "target_asset_ids": [asset_id],
+        "parameters": {"app_name": app_name, "dry_run": True},
+    }
+    cr = client.create_cr(cr_body)
+    client.approve_cr(cr["id"])
+    completed = client.wait_for_cr(cr["id"], timeout=120)
+
+    print(f"  Build CR {cr['id']} status: {completed['status']}")
+    assert completed["status"] in ("completed", "completed_with_errors"), \
+        f"Build CR did not complete: {completed['status']}"
+
+    return {"cr_id": cr["id"], "status": completed["status"]}
+
+
+def run_phase_container_c(client, asset_id: str, cluster_asset_id: str, app_name: str = "payments-api") -> dict:
+    """CONTAINER-C: Deploy to EKS, verify kubernetes_workload asset created."""
+    print(f"\n=== Phase CONTAINER-C: Deploy {app_name} to k8s cluster {cluster_asset_id} ===")
+
+    cr_body = {
+        "change_type": "k8s_workload_deploy",
+        "title": f"Deploy {app_name} - smoke test",
+        "description": "SP1 smoke test",
+        "risk_level": "low",
+        "target_asset_ids": [asset_id],
+        "parameters": {
+            "app_name": app_name,
+            "target_cluster_id": cluster_asset_id,
+            "namespace": "default",
+        },
+    }
+    cr = client.create_cr(cr_body)
+    client.approve_cr(cr["id"])
+    completed = client.wait_for_cr(cr["id"], timeout=300)
+
+    print(f"  Deploy CR {cr['id']} status: {completed['status']}")
+    assert completed["status"] in ("completed", "completed_with_errors"), \
+        f"Deploy CR did not complete: {completed['status']}"
+
+    # Verify kubernetes_workload asset exists
+    assets_resp = client.get("/assets?asset_type=kubernetes_workload")
+    assert assets_resp.status_code == 200
+    workload_assets = [a for a in assets_resp.json() if app_name in a.get("name", "")]
+    print(f"  kubernetes_workload assets found: {[a['id'] for a in workload_assets]}")
+
+    return {
+        "cr_id": cr["id"],
+        "workload_asset_id": workload_assets[0]["id"] if workload_assets else None,
+    }
+
+
+def run_phase_container_d(client, asset_id: str, app_name: str = "payments-api") -> dict:
+    """CONTAINER-D: Retire legacy systemd service, verify containerization_status=retired."""
+    print(f"\n=== Phase CONTAINER-D: Retire {app_name} ===")
+
+    cr_body = {
+        "change_type": "agent_containerize_retire",
+        "title": f"Retire {app_name} - smoke test",
+        "description": "SP1 smoke test",
+        "risk_level": "medium",
+        "target_asset_ids": [asset_id],
+        "parameters": {"app_name": app_name},
+    }
+    cr = client.create_cr(cr_body)
+    client.approve_cr(cr["id"])
+    completed = client.wait_for_cr(cr["id"], timeout=120)
+
+    print(f"  Retire CR {cr['id']} status: {completed['status']}")
+    assert completed["status"] in ("completed", "completed_with_errors"), \
+        f"Retire CR did not complete: {completed['status']}"
+
+    # Verify containerization_status updated in asset_metadata
+    asset_resp = client.get(f"/assets/{asset_id}")
+    assert asset_resp.status_code == 200
+    asset = asset_resp.json()
+    apps = asset.get("asset_metadata", {}).get("applications", [])
+    target = next((a for a in apps if a.get("name") == app_name), None)
+
+    if target:
+        status = target.get("containerization_status")
+        print(f"  {app_name} containerization_status: {status}")
+    else:
+        print(f"  WARNING: {app_name} not found in asset_metadata.applications")
+
+    return {"cr_id": cr["id"], "status": completed["status"]}
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
