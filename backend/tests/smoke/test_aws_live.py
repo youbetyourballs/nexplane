@@ -4159,14 +4159,17 @@ if [ -d /etc/nginx/sites-enabled ]; then
 fi
 
 systemctl daemon-reload
-systemctl enable redis-server payments-api nginx
-systemctl start redis-server
+# redis service name differs by distro (redis-server on Debian, redis on RHEL/AL)
+REDIS_SVC=redis-server
+systemctl list-unit-files redis.service &>/dev/null && REDIS_SVC=redis
+systemctl enable $REDIS_SVC payments-api nginx
+systemctl start $REDIS_SVC
 sleep 2
 systemctl start payments-api
 sleep 2
 systemctl restart nginx
 sleep 1
-systemctl is-active redis-server && echo "redis OK" || true
+systemctl is-active $REDIS_SVC && echo "redis OK" || true
 systemctl is-active payments-api && echo "payments-api OK" || true
 systemctl is-active nginx && echo "nginx OK" || true
 echo "DONE"
@@ -4204,8 +4207,7 @@ def _install_payments_stack(ssm_client, instance_id: str) -> str:
 
 
 def run_phase_demo_a(client: NexplaneClient, ec2_client, ssm_client,
-                     key_name: str,
-                     ami_id: str = "ami-0c02fb55956c7d316") -> dict:
+                     key_name: str) -> dict:
     """DEMO-A: Launch EC2, install payments stack, verify all 3 services running."""
     print("\n[Phase DEMO-A] Launch EC2 + install payments stack")
 
@@ -4215,8 +4217,8 @@ def run_phase_demo_a(client: NexplaneClient, ec2_client, ssm_client,
     # Launch EC2 using Nexplane CR
     client.run_cr(
         "[DEMO-A] launch EC2 instance", "ec2_launch", cloud_account_id,
-        {"mode": "quick", "name": instance_name, "os": "ubuntu",
-         "ami_id": ami_id, "instance_type": "t3.micro",
+        {"mode": "quick", "name": instance_name, "os": "amazon_linux",
+         "instance_type": "t3.micro",
          "iam_instance_profile": "NexplaneEC2TestProfile",
          "rollback_strategy": "terminate_instance"},
     )
