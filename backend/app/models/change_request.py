@@ -257,6 +257,8 @@ class ChangeType(str, enum.Enum):
     ecr_repository_delete = "ecr_repository_delete"
     # CIS Control 2 — software inventory
     agent_listpkgs = "agent_listpkgs"
+    # OS major version upgrade with snapshot-first safety
+    agent_os_upgrade = "agent_os_upgrade"
 
 
 class RiskLevel(str, enum.Enum):

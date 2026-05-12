@@ -79,6 +79,10 @@ var commands = map[string]CommandFunc{
 	"audit_software_inventory": crossplatform.AuditSoftwareInventoryExecute,
 	// Linux upgrade (Spec 5e)
 	"upgrade_linux_instance":   linuxupgrade.UpgradeLinuxInstanceExecute,
+	// OS major version upgrade commands
+	"preflight_os_upgrade": linuxupgrade.PreflightExecute,
+	"execute_os_upgrade":   linuxupgrade.UpgradeLinuxInstanceExecute,
+	"verify_os_upgrade":    linuxupgrade.VerifyExecute,
 	// Fleet operations
 	"restart_service":  fleet.RestartServiceExecute,
 	"push_config_file": fleet.PushConfigFileExecute,
@@ -139,6 +143,7 @@ var rollbacks = map[string]CommandFunc{
 	"manage_tls_certificates": crossplatform.ManageTLSCertificatesRollback,
 	"configure_dns_resolver":  crossplatform.ConfigureDNSResolverRollback,
 	"upgrade_linux_instance":  linuxupgrade.UpgradeLinuxInstanceRollback,
+	"execute_os_upgrade":      linuxupgrade.UpgradeLinuxInstanceRollback,
 	"containerize_retire":     containerizeretire.ContainerizeRetireRollback,
 }
 
