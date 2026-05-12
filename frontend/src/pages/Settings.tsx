@@ -32,12 +32,16 @@ export function Settings() {
     queryFn: () => apiClient.get("/settings/ai-providers").then((r) => r.data),
   });
 
+  const S3_DOWNLOAD_BASE =
+    (import.meta.env.VITE_AGENT_DOWNLOAD_URL as string) ||
+    "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com";
+
   const { data: agentVersion } = useQuery<string | null>({
     queryKey: ["agent-version"],
     queryFn: () =>
-      apiClient
-        .get<string>("/downloads/version", { responseType: "text" })
-        .then((r) => (typeof r.data === "string" ? r.data.trim() : null))
+      fetch(`${S3_DOWNLOAD_BASE}/version`)
+        .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+        .then((t) => t.trim())
         .catch(() => null),
     staleTime: 300_000, // 5 min
     enabled: !!(settings?.agent_configured || generatedSecret),
@@ -311,12 +315,8 @@ export function Settings() {
         {(settings?.agent_configured || generatedSecret) && (() => {
           const secret = generatedSecret ?? "<YOUR-SECRET>";
           const controlPlane = window.location.origin;
-          // S3 public bucket (flat layout, no /downloads/ prefix).
-          // Falls back to the control plane origin for self-hosted deployments
-          // that serve binaries from the backend's /downloads/ route.
-          const s3Base = import.meta.env.VITE_AGENT_DOWNLOAD_URL as string;
-          const isS3 = s3Base && s3Base.includes("amazonaws.com");
-          const downloadBase = s3Base || controlPlane;
+          // Binaries are hosted on the public S3 bucket (flat layout).
+          const downloadBase = S3_DOWNLOAD_BASE;
 
           const version = agentVersion ?? "<VERSION>";
           const binaryName = agentPlatform === "windows"
@@ -327,13 +327,9 @@ export function Settings() {
 
           const agentBin = agentPlatform === "windows" ? "nexplane-agent.exe" : "nexplane-agent";
 
-          // S3 bucket is flat; self-hosted backend serves under /downloads/
-          const binaryUrl = isS3
-            ? `${downloadBase}/${binaryName}`
-            : `${downloadBase}/downloads/${binaryName}`;
-          const sha256Url = isS3
-            ? `${downloadBase}/${binaryName}.sha256`
-            : `${downloadBase}/downloads/${binaryName}.sha256`;
+          // S3 bucket uses flat layout — no /downloads/ prefix needed.
+          const binaryUrl = `${downloadBase}/${binaryName}`;
+          const sha256Url = `${downloadBase}/${binaryName}.sha256`;
 
           const linuxDownload = `curl -fsSL ${binaryUrl} -o ${agentBin} && chmod +x ${agentBin}`;
           const linuxVerify = `curl -fsSL ${sha256Url} | awk '{print $1 "  ${agentBin}"}' | sha256sum -c`;
