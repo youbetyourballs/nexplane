@@ -1512,6 +1512,127 @@
                         ]
                     },
                     {
+                        "action_id": "apply_patches",
+                        "generic_action": "apply_patches",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Apply Patches",
+                        "description": "Apply security patches to a Linux or Windows host. Dispatches apply_linux_patches or apply_windows_patches based on OS family. Updates last_security_patch_at metadata on success.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [
+                            {"name": "os_family",    "type": "string",  "required": false},
+                            {"name": "mode",         "type": "string",  "required": false, "default": "security_only"},
+                            {"name": "package_name", "type": "string",  "required": false},
+                            {"name": "cve_id",       "type": "string",  "required": false},
+                            {"name": "kb_id",        "type": "string",  "required": false},
+                            {"name": "dry_run",      "type": "boolean", "required": false, "default": false},
+                            {"name": "defer_reboot", "type": "boolean", "required": false, "default": false}
+                        ],
+                        "executor": "nexplane_agent.apply_patches",
+                        "rollback_action": "apply_patches",
+                        "estimated_duration_seconds": 600,
+                        "safety_notes": [
+                            "Use dry_run=true first to preview changes",
+                            "Reboot may be required after applying kernel or glibc patches"
+                        ]
+                    },
+                    {
+                        "action_id": "audit_patch_status",
+                        "generic_action": "audit_patch_status",
+                        "action_type": "ingest",
+                        "execution_tier": 3,
+                        "display_name": "Audit Patch Status",
+                        "description": "Read-only: runs audit_patch_status agent command to return installed packages, available security updates, and reboot-required status.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "executor": "nexplane_agent.audit_patch_status",
+                        "estimated_duration_seconds": 120
+                    },
+                    {
+                        "action_id": "verify_patch_status",
+                        "generic_action": "verify_patch_status",
+                        "action_type": "ingest",
+                        "execution_tier": 3,
+                        "display_name": "Verify Patch Status",
+                        "description": "Verifies a patch was applied by checking the installed package version against an expected minimum version. Returns verified=true if the package meets the expected version.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [
+                            {"name": "package_name",     "type": "string", "required": false},
+                            {"name": "expected_version",  "type": "string", "required": false},
+                            {"name": "fixed_version",     "type": "string", "required": false}
+                        ],
+                        "executor": "nexplane_agent.verify_patch_status",
+                        "estimated_duration_seconds": 120
+                    },
+                    {
+                        "action_id": "preflight_os_upgrade",
+                        "generic_action": "preflight_os_upgrade",
+                        "action_type": "ingest",
+                        "execution_tier": 3,
+                        "display_name": "OS Upgrade Preflight",
+                        "description": "Check disk space, list running services, and verify no active connections before a major OS upgrade.",
+                        "applicable_asset_types": ["server"],
+                        "parameters": [
+                            {"name": "target_version", "type": "string",  "required": false},
+                            {"name": "dry_run",         "type": "boolean", "required": false, "default": false}
+                        ],
+                        "executor": "nexplane_agent.os_upgrade_preflight",
+                        "estimated_duration_seconds": 30
+                    },
+                    {
+                        "action_id": "snapshot_before_upgrade",
+                        "generic_action": "snapshot_before_upgrade",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Snapshot Before OS Upgrade",
+                        "description": "Take a VM snapshot (EBS or equivalent) before executing the OS upgrade, for rollback on failure.",
+                        "applicable_asset_types": ["server"],
+                        "parameters": [
+                            {"name": "skip_snapshot", "type": "boolean", "required": false, "default": false}
+                        ],
+                        "executor": "nexplane_agent.os_upgrade",
+                        "estimated_duration_seconds": 120,
+                        "safety_notes": [
+                            "Skipping the snapshot removes the ability to auto-rollback after a failed upgrade"
+                        ]
+                    },
+                    {
+                        "action_id": "execute_os_upgrade",
+                        "generic_action": "execute_os_upgrade",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "Execute OS Major Version Upgrade",
+                        "description": "Run do-release-upgrade (Ubuntu) or leapp (RHEL/CentOS) to upgrade the host to the next major OS release. Causes downtime.",
+                        "applicable_asset_types": ["server"],
+                        "parameters": [
+                            {"name": "target_version", "type": "string",  "required": false},
+                            {"name": "snapshot_id",    "type": "string",  "required": false},
+                            {"name": "defer_reboot",   "type": "boolean", "required": false, "default": false}
+                        ],
+                        "executor": "nexplane_agent.os_upgrade",
+                        "estimated_duration_seconds": 7200,
+                        "safety_notes": [
+                            "This operation causes extended downtime (30-120 minutes typical)",
+                            "Ensure a pre-upgrade snapshot exists before running",
+                            "Config file migrations may require manual review after upgrade"
+                        ]
+                    },
+                    {
+                        "action_id": "verify_os_upgrade",
+                        "generic_action": "verify_os_upgrade",
+                        "action_type": "ingest",
+                        "execution_tier": 3,
+                        "display_name": "Verify OS Upgrade",
+                        "description": "Confirm the new OS version is running and all previously-running services have come back up after the upgrade.",
+                        "applicable_asset_types": ["server"],
+                        "parameters": [
+                            {"name": "target_version",       "type": "string", "required": false},
+                            {"name": "pre_upgrade_services", "type": "array",  "required": false}
+                        ],
+                        "executor": "nexplane_agent.os_upgrade",
+                        "estimated_duration_seconds": 120
+                    },
+                    {
                         "action_id": "ip_campaign",
                         "generic_action": "ip_campaign",
                         "action_type": "change",
