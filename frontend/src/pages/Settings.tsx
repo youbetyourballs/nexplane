@@ -317,6 +317,7 @@ export function Settings() {
           const controlPlane = window.location.origin;
           // Binaries are hosted on the public S3 bucket (flat layout).
           const downloadBase = S3_DOWNLOAD_BASE;
+          const isS3 = downloadBase.includes("amazonaws.com");
 
           const version = agentVersion ?? "<VERSION>";
           const binaryName = agentPlatform === "windows"
