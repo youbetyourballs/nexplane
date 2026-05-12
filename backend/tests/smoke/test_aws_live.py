@@ -2236,16 +2236,23 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
                 log(f"[Phase X] Agent refresh warning: CR {cr_status} — continuing")
                 break
 
-    # Restart the nexplane-agent systemd service via SSM — it may have hit its
-    # restart rate limit after repeated failures during Phase V Tailscale removal.
+    # Diagnose and fix agent connectivity after Phase V Tailscale removal.
     try:
-        client.run_cr(
-            "[Phase X] restart agent service", "ssm_command", instance_asset_id,
+        diag_cr = client._run_cr_with_timeout(
+            "[Phase X] diagnose + restart agent", "ssm_command", instance_asset_id,
             {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
-             "command": "systemctl reset-failed nexplane-agent.service 2>/dev/null; systemctl restart nexplane-agent.service 2>&1 || true; sleep 5; systemctl status nexplane-agent.service --no-pager 2>&1 || true",
+             "command": f"""#!/bin/bash
+echo "=== Tailscale status ===" && tailscale status 2>&1 | head -5 || echo "tailscale not running"
+echo "=== Connectivity to backend {backend_ip} ===" && curl -sf --max-time 5 http://{backend_ip}:8000/health 2>&1 || echo "CANNOT REACH BACKEND"
+echo "=== Agent service status ===" && systemctl status nexplane-agent.service --no-pager 2>&1 | head -10
+echo "=== Resetting and restarting agent ===" && systemctl reset-failed nexplane-agent.service 2>/dev/null; systemctl restart nexplane-agent.service; sleep 5
+echo "=== Agent env ===" && systemctl show nexplane-agent.service -p Environment 2>&1 | head -3 || true""",
              "rollback_strategy": "rollback_unavailable"},
+            timeout=120,
         )
-        log("[Phase X] Agent service restarted via SSM")
+        step_result = NexplaneClient.get_cr_step_result(diag_cr)
+        ssm_output = step_result.get("output", step_result.get("stdout", ""))
+        log(f"[Phase X] SSM diagnostics:\n{ssm_output[:1500]}")
     except Exception as e:
         log(f"[Phase X] Agent restart warning: {e}")
 
