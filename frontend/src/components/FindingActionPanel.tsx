@@ -43,7 +43,7 @@ export default function FindingActionPanel({ finding, onClose, onUpdated }: Prop
   const acceptMutation = useMutation({
     mutationFn: () => apiClient.post(`/api/v1/vulnerability/findings/${finding.id}/accept-risk`, {
       reason: acceptReason,
-      expires_at: new Date(acceptExpiry).toISOString(),
+      expires_at: new Date(acceptExpiry + "T23:59:59Z").toISOString(),
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["findings"] }); onUpdated(); },
   });
@@ -146,6 +146,18 @@ export default function FindingActionPanel({ finding, onClose, onUpdated }: Prop
       )}
       {acceptMutation.isSuccess && (
         <p className="text-sm text-green-700">✓ Risk accepted until {acceptExpiry}</p>
+      )}
+      {patchMutation.isError && (
+        <p className="text-sm text-red-600">✗ Failed to create patch CR. Please try again.</p>
+      )}
+      {acceptMutation.isError && (
+        <p className="text-sm text-red-600">✗ Failed to accept risk. Please try again.</p>
+      )}
+      {fpMutation.isSuccess && (
+        <p className="text-sm text-green-700">✓ Marked as false positive</p>
+      )}
+      {fpMutation.isError && (
+        <p className="text-sm text-red-600">✗ Failed to mark as false positive.</p>
       )}
     </div>
   );
