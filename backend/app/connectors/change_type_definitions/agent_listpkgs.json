@@ -1,0 +1,9 @@
+{
+  "change_type": "agent_listpkgs",
+  "display_name": "Agent: List Installed Packages",
+  "steps": [
+    {"generic_action": "list_installed_packages", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}

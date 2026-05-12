@@ -20,6 +20,7 @@ import (
 	"nexplane-agent/commands/containerizebuild"
 	"nexplane-agent/commands/containerizeretire"
 	"nexplane-agent/commands/deepdiscover"
+	"nexplane-agent/commands/listpkgs"
 )
 
 // Result is the outcome of a command execution.
@@ -97,6 +98,8 @@ var commands = map[string]CommandFunc{
 	"db_permission_change": dbadmin.ExecuteCommand,
 	"configure_db_audit":   dbadmin.ExecuteCommand,
 	"db_connection_config": dbadmin.ExecuteCommand,
+	// Software inventory (CIS Control 2)
+	"list_installed_packages": listpkgs.Execute,
 }
 
 var rollbacks = map[string]CommandFunc{

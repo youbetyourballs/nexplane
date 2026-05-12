@@ -252,6 +252,8 @@ class ChangeType(str, enum.Enum):
     eks_cluster_create_terraform = "eks_cluster_create_terraform"
     ecr_repository_create = "ecr_repository_create"
     ecr_repository_delete = "ecr_repository_delete"
+    # CIS Control 2 — software inventory
+    agent_listpkgs = "agent_listpkgs"
 
 
 class RiskLevel(str, enum.Enum):
