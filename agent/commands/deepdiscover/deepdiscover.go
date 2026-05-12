@@ -54,6 +54,20 @@ type DiscoveredWorkload struct {
 	IPCSockets      []string    `json:"ipc_sockets"`
 	DataDirectories []DirInfo   `json:"data_directories"`
 	Dependencies    []string    `json:"dependencies"`
+
+	// Enrichment fields
+	PIDFound           bool          `json:"pid_found"`
+	EnvVarNames        []string      `json:"env_var_names"`
+	OpenFiles          []string      `json:"open_files"`
+	RuntimeDeps        []string      `json:"runtime_deps"`
+	ConfigIntelligence []ConfigEntry `json:"config_intelligence"`
+}
+
+// ConfigEntry holds structured metadata parsed from a config file.
+type ConfigEntry struct {
+	File   string            `json:"file"`
+	Type   string            `json:"type"`   // "nginx", "apache", "iis", "generic"
+	Fields map[string]string `json:"fields"` // e.g. {"server_name": "payments.internal"}
 }
 
 // HybridEdge represents a cross-runtime network connection.
@@ -118,6 +132,11 @@ func workloadsToMaps(workloads []DiscoveredWorkload) []map[string]any {
 			"ipc_sockets":          w.IPCSockets,
 			"data_directories":     dirInfosToMaps(w.DataDirectories),
 			"dependencies":         w.Dependencies,
+			"pid_found":            w.PIDFound,
+			"env_var_names":        w.EnvVarNames,
+			"open_files":           w.OpenFiles,
+			"runtime_deps":         w.RuntimeDeps,
+			"config_intelligence":  configEntriesToMaps(w.ConfigIntelligence),
 		})
 	}
 	return out
@@ -174,6 +193,19 @@ func dirInfosToMaps(dirs []DirInfo) []map[string]any {
 		out = append(out, map[string]any{
 			"path":       d.Path,
 			"size_bytes": d.SizeBytes,
+		})
+	}
+	return out
+}
+
+// configEntriesToMaps converts []ConfigEntry to []map[string]any.
+func configEntriesToMaps(entries []ConfigEntry) []map[string]any {
+	out := make([]map[string]any, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, map[string]any{
+			"file":   e.File,
+			"type":   e.Type,
+			"fields": e.Fields,
 		})
 	}
 	return out

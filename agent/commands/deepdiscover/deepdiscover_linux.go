@@ -83,15 +83,20 @@ func collectSystemdServicesLinux() []DiscoveredWorkload {
 
 		deps := collectSystemdDepsLinux(unitName)
 		workloads = append(workloads, DiscoveredWorkload{
-			Name:            strings.TrimSuffix(unitName, ".service"),
-			RuntimeType:     RuntimeSystemd,
-			SystemdUnit:     unitName,
-			ListeningPorts:  []PortEntry{},
-			OutboundConns:   []ConnEdge{},
-			InboundConns:    []ConnEdge{},
-			IPCSockets:      []string{},
-			DataDirectories: []DirInfo{},
-			Dependencies:    deps,
+			Name:               strings.TrimSuffix(unitName, ".service"),
+			RuntimeType:        RuntimeSystemd,
+			SystemdUnit:        unitName,
+			ListeningPorts:     []PortEntry{},
+			OutboundConns:      []ConnEdge{},
+			InboundConns:       []ConnEdge{},
+			IPCSockets:         []string{},
+			DataDirectories:    []DirInfo{},
+			Dependencies:       deps,
+			PIDFound:           false,
+			EnvVarNames:        []string{},
+			OpenFiles:          []string{},
+			RuntimeDeps:        []string{},
+			ConfigIntelligence: []ConfigEntry{},
 		})
 	}
 	return workloads
@@ -245,16 +250,21 @@ func collectDockerWorkloads() []DiscoveredWorkload {
 		id, _ := row["ID"].(string)
 		image, _ := row["Image"].(string)
 		workloads = append(workloads, DiscoveredWorkload{
-			Name:            name,
-			RuntimeType:     RuntimeDocker,
-			ContainerID:     id,
-			ImageName:       image,
-			ListeningPorts:  []PortEntry{},
-			OutboundConns:   []ConnEdge{},
-			InboundConns:    []ConnEdge{},
-			IPCSockets:      []string{},
-			DataDirectories: []DirInfo{},
-			Dependencies:    []string{},
+			Name:               name,
+			RuntimeType:        RuntimeDocker,
+			ContainerID:        id,
+			ImageName:          image,
+			ListeningPorts:     []PortEntry{},
+			OutboundConns:      []ConnEdge{},
+			InboundConns:       []ConnEdge{},
+			IPCSockets:         []string{},
+			DataDirectories:    []DirInfo{},
+			Dependencies:       []string{},
+			PIDFound:           false,
+			EnvVarNames:        []string{},
+			OpenFiles:          []string{},
+			RuntimeDeps:        []string{},
+			ConfigIntelligence: []ConfigEntry{},
 		})
 	}
 	return workloads
@@ -284,16 +294,21 @@ func collectCrictlWorkloads() []DiscoveredWorkload {
 	var workloads []DiscoveredWorkload
 	for _, c := range payload.Containers {
 		workloads = append(workloads, DiscoveredWorkload{
-			Name:            c.Metadata.Name,
-			RuntimeType:     RuntimeContainerd,
-			ContainerID:     c.ID,
-			ImageName:       c.Image.Image,
-			ListeningPorts:  []PortEntry{},
-			OutboundConns:   []ConnEdge{},
-			InboundConns:    []ConnEdge{},
-			IPCSockets:      []string{},
-			DataDirectories: []DirInfo{},
-			Dependencies:    []string{},
+			Name:               c.Metadata.Name,
+			RuntimeType:        RuntimeContainerd,
+			ContainerID:        c.ID,
+			ImageName:          c.Image.Image,
+			ListeningPorts:     []PortEntry{},
+			OutboundConns:      []ConnEdge{},
+			InboundConns:       []ConnEdge{},
+			IPCSockets:         []string{},
+			DataDirectories:    []DirInfo{},
+			Dependencies:       []string{},
+			PIDFound:           false,
+			EnvVarNames:        []string{},
+			OpenFiles:          []string{},
+			RuntimeDeps:        []string{},
+			ConfigIntelligence: []ConfigEntry{},
 		})
 	}
 	return workloads
@@ -321,16 +336,21 @@ func collectPodmanWorkloads() []DiscoveredWorkload {
 			name = c.Names[0]
 		}
 		workloads = append(workloads, DiscoveredWorkload{
-			Name:            name,
-			RuntimeType:     RuntimePodman,
-			ContainerID:     c.ID,
-			ImageName:       c.Image,
-			ListeningPorts:  []PortEntry{},
-			OutboundConns:   []ConnEdge{},
-			InboundConns:    []ConnEdge{},
-			IPCSockets:      []string{},
-			DataDirectories: []DirInfo{},
-			Dependencies:    []string{},
+			Name:               name,
+			RuntimeType:        RuntimePodman,
+			ContainerID:        c.ID,
+			ImageName:          c.Image,
+			ListeningPorts:     []PortEntry{},
+			OutboundConns:      []ConnEdge{},
+			InboundConns:       []ConnEdge{},
+			IPCSockets:         []string{},
+			DataDirectories:    []DirInfo{},
+			Dependencies:       []string{},
+			PIDFound:           false,
+			EnvVarNames:        []string{},
+			OpenFiles:          []string{},
+			RuntimeDeps:        []string{},
+			ConfigIntelligence: []ConfigEntry{},
 		})
 	}
 	return workloads
@@ -382,16 +402,21 @@ func detectKubePodsLinux() []DiscoveredWorkload {
 			image = item.Spec.Containers[0].Image
 		}
 		workloads = append(workloads, DiscoveredWorkload{
-			Name:            item.Metadata.Name,
-			RuntimeType:     RuntimeKubePod,
-			PodName:         item.Metadata.Name,
-			ImageName:       image,
-			ListeningPorts:  []PortEntry{},
-			OutboundConns:   []ConnEdge{},
-			InboundConns:    []ConnEdge{},
-			IPCSockets:      []string{},
-			DataDirectories: []DirInfo{},
-			Dependencies:    []string{},
+			Name:               item.Metadata.Name,
+			RuntimeType:        RuntimeKubePod,
+			PodName:            item.Metadata.Name,
+			ImageName:          image,
+			ListeningPorts:     []PortEntry{},
+			OutboundConns:      []ConnEdge{},
+			InboundConns:       []ConnEdge{},
+			IPCSockets:         []string{},
+			DataDirectories:    []DirInfo{},
+			Dependencies:       []string{},
+			PIDFound:           false,
+			EnvVarNames:        []string{},
+			OpenFiles:          []string{},
+			RuntimeDeps:        []string{},
+			ConfigIntelligence: []ConfigEntry{},
 		})
 	}
 	return workloads
