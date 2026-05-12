@@ -100,13 +100,11 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         }
         encrypted = svc.encrypt_json(credentials_payload)
 
-        # Use a nil UUID as updated_by for programmatic/system registration.
-        system_user_id = uuid.UUID(int=0)
         cred = ConnectorCredential(
             connector_id=new_connector.id,
             organization_id=organization_id,
             credentials_encrypted=encrypted,
-            updated_by=system_user_id,
+            updated_by=None,
         )
         db.add(cred)
         await db.commit()
