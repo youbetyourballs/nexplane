@@ -17,7 +17,7 @@ export default function CreateCampaignDrawer({ onClose }: Props) {
   const [abortThreshold, setAbortThreshold] = useState(20);
 
   const { data: blastRadius, isFetching } = useQuery({
-    queryKey: ["blast-radius", searchedCve],
+    queryKey: ["campaign-blast-radius", searchedCve],
     queryFn: () =>
       apiClient.get(`/api/v1/vulnerability/cve/${searchedCve}/blast-radius`).then(r => r.data),
     enabled: !!searchedCve,
