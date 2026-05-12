@@ -84,3 +84,22 @@ func TestParseConfigFileUnknownReturnsEmpty(t *testing.T) {
 		t.Errorf("expected empty for unknown config type, got %d entries", len(entries))
 	}
 }
+
+func TestParseIISConfig(t *testing.T) {
+	input := `<site name="PaymentsApp" id="1">
+    <bindings>
+        <binding protocol="http" bindingInformation="*:80:payments.internal" />
+    </bindings>
+</site>`
+	entries := parseConfigFile("/Windows/System32/inetsrv/config/applicationHost.config", input)
+	if len(entries) == 0 {
+		t.Fatal("expected at least one entry")
+	}
+	e := entries[0]
+	if e.Type != "iis" {
+		t.Errorf("expected type=iis, got %q", e.Type)
+	}
+	if e.Fields["server_name"] != "payments.internal" {
+		t.Errorf("expected server_name=payments.internal, got %q", e.Fields["server_name"])
+	}
+}
