@@ -1,0 +1,9 @@
+{
+  "change_type": "eks_cluster_create_sdk",
+  "display_name": "AWS: Create EKS Cluster (SDK)",
+  "steps": [
+    {"generic_action": "eks_create_cluster_sdk", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
