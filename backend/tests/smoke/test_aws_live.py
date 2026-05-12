@@ -2289,7 +2289,8 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
     # Fix agent connectivity: inject correct backend URL via systemd drop-in override,
     # then restart. The service file's Environment may have been cleared by Phase T
     # re-deploy or other operations.
-    agent_secret_x = phase_a_result.get("agent_secret", "")
+    # NOTE: agent_secret is already fetched above if backend_ip is set; fall back to API
+    agent_secret_x = agent_secret if backend_ip else client.get_agent_secret()
     try:
         client._run_cr_with_timeout(
             "[Phase X] reconfigure + restart agent", "ssm_command", instance_asset_id,
