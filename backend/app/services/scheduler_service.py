@@ -42,6 +42,13 @@ async def start():
         id="scanner_poll",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _run_vuln_sla_escalation,
+        trigger="interval",
+        minutes=15,
+        id="vuln_sla_escalation",
+        replace_existing=True,
+    )
 
     if _db_factory is None:
         return
@@ -124,6 +131,11 @@ async def _run_ingest_job(schedule_id: str):
         schedule.last_run_at = datetime.now(timezone.utc)
         schedule.next_run_at = datetime.now(timezone.utc) + timedelta(hours=schedule.interval_hours)
         await db.commit()
+
+
+async def _run_vuln_sla_escalation():
+    from app.jobs.vuln_sla_escalation import run_sla_escalation_for_all_orgs
+    await run_sla_escalation_for_all_orgs()
 
 
 async def _run_sla_enforcement():
