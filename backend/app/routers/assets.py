@@ -1,15 +1,23 @@
+import asyncio
 import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal
 from app.models.asset import Asset, Environment, AssetType, Criticality
+from app.models.change_plan import ChangePlan, PlanGeneratedBy
+from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType, RiskLevel
 from app.models.user import User
 from app.routers import current_user
 from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate, BulkTagOperation
 from app.services.audit_service import record_event
+from app.services.planning_engine import generate_plan
+from app.services.safety_engine import score_change_request
+from app.workflows import runner as workflow_runner
+from app.workflows.execute_change_workflow import execute_change_workflow
 
 router = APIRouter(prefix="/assets", tags=["Assets"])
 
@@ -214,3 +222,131 @@ async def update_asset(
         connector_name=None,
         connector_type=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# App discovery helpers
+# ---------------------------------------------------------------------------
+
+async def _fire_appdiscovery_cr(
+    asset_id: uuid.UUID,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    db: AsyncSession,
+) -> ChangeRequest:
+    """Create an agent_appdiscovery CR, generate its plan, then fire the workflow."""
+    cr = ChangeRequest(
+        organization_id=org_id,
+        requester_id=user_id,
+        title=f"Application discovery for asset {asset_id}",
+        description="Automated application discovery triggered via API",
+        change_type=ChangeType.agent_appdiscovery,
+        target_asset_ids=[str(asset_id)],
+        desired_outcome={"asset_id": str(asset_id)},
+        risk_level=RiskLevel.low,
+        status=ChangeRequestStatus.draft,
+    )
+    db.add(cr)
+    await db.flush()
+
+    # Generate plan
+    asset_result = await db.execute(
+        select(Asset).options(selectinload(Asset.connector)).where(Asset.id == asset_id)
+    )
+    asset = asset_result.scalar_one_or_none()
+    assets = [asset] if asset else []
+
+    safety_result = score_change_request(cr, assets)
+    plan_data = generate_plan(cr, assets, safety_result)
+
+    plan = ChangePlan(
+        change_request_id=cr.id,
+        generated_steps=plan_data.generated_steps,
+        preflight_checks=plan_data.preflight_checks,
+        blast_radius=plan_data.blast_radius,
+        rollback_plan=plan_data.rollback_plan,
+        verification_plan=plan_data.verification_plan,
+        generated_by=PlanGeneratedBy.system,
+    )
+    db.add(plan)
+
+    cr.risk_level = safety_result.risk_level
+    cr.status = ChangeRequestStatus.planned
+    cr.updated_at = datetime.now(timezone.utc)
+
+    await db.flush()
+    await db.commit()
+    await db.refresh(cr)
+
+    # Fire workflow in background
+    wf_input = workflow_runner.WorkflowInput(
+        change_request_id=str(cr.id),
+        organization_id=str(org_id),
+        initiator_id=str(user_id),
+    )
+    workflow_id = f"appdiscovery-{cr.id}"
+    asyncio.create_task(
+        workflow_runner.start_workflow(execute_change_workflow, wf_input, workflow_id=workflow_id)
+    )
+
+    return cr
+
+
+async def _poll_cr_until_done(cr_id: uuid.UUID, timeout: int = 300) -> ChangeRequest:
+    """Poll a CR until it reaches a terminal status or timeout is exceeded."""
+    terminal = {
+        ChangeRequestStatus.completed,
+        ChangeRequestStatus.failed,
+        ChangeRequestStatus.rolled_back,
+        ChangeRequestStatus.completed_with_errors,
+    }
+    deadline = asyncio.get_event_loop().time() + timeout
+    while True:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ChangeRequest).where(ChangeRequest.id == cr_id)
+            )
+            cr = result.scalar_one_or_none()
+        if cr and cr.status in terminal:
+            return cr
+        if asyncio.get_event_loop().time() >= deadline:
+            return cr
+        await asyncio.sleep(3)
+
+
+@router.post("/{asset_id}/discover-applications")
+async def discover_applications(
+    asset_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger agent-based application discovery on an asset and wait for results."""
+    # Verify asset belongs to user's org
+    asset_result = await db.execute(
+        select(Asset).where(
+            Asset.id == asset_id,
+            Asset.organization_id == user.organization_id,
+        )
+    )
+    asset = asset_result.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    cr = await _fire_appdiscovery_cr(asset_id, user.organization_id, user.id, db)
+    cr = await _poll_cr_until_done(cr.id, timeout=300)
+
+    # Re-read asset to get updated metadata written by executor
+    async with AsyncSessionLocal() as session:
+        refreshed_result = await session.execute(
+            select(Asset).where(Asset.id == asset_id)
+        )
+        refreshed_asset = refreshed_result.scalar_one_or_none()
+
+    metadata = (refreshed_asset.asset_metadata or {}) if refreshed_asset else {}
+    applications = metadata.get("applications", [])
+
+    return {
+        "cr_id": str(cr.id) if cr else None,
+        "status": cr.status.value if cr else "timeout",
+        "applications": applications,
+    }
