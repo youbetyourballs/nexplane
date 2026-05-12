@@ -4,11 +4,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Edit, Save, X, Plus, Zap, Network } from "lucide-react";
 import { assetsApi } from "../api/endpoints";
 import { changeRequestsApi } from "../api/endpoints";
+import { apiClient } from "../api/client";
 import { RiskBadge } from "../components/RiskBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { PageLoading } from "../components/LoadingSpinner";
 import type { Asset, AssetType, Criticality } from "../types/api";
 import { IPMigrationWizard } from "../components/IPMigrationWizard";
+import { ContainerizationWizard } from "../components/ContainerizationWizard";
 
 // Maps asset type → eligible change types with label + title/description templates
 interface QuickAction {
@@ -639,6 +641,10 @@ export function AssetDetail() {
   const [metadataError, setMetadataError] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [showIPWizard, setShowIPWizard] = useState(false);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+  const [showContainerizeWizard, setShowContainerizeWizard] = useState(false);
+  const [containerizeApp, setContainerizeApp] = useState<any>(null);
 
   const { data: asset, isLoading } = useQuery({
     queryKey: ["asset", id],
@@ -696,6 +702,19 @@ export function AssetDetail() {
     setMetadataError("");
     setTagInput("");
   }
+
+  const handleDiscoverApplications = async () => {
+    setDiscoverLoading(true);
+    setDiscoverError(null);
+    try {
+      await apiClient.post(`/assets/${asset?.id}/discover-applications`);
+      qc.invalidateQueries({ queryKey: ["asset", id] });
+    } catch (err: any) {
+      setDiscoverError(err?.response?.data?.detail || "Discovery failed");
+    } finally {
+      setDiscoverLoading(false);
+    }
+  };
 
   function addTag() {
     const tag = tagInput.trim();
@@ -1149,12 +1168,16 @@ export function AssetDetail() {
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-slate-900">Applications</h2>
                 <button
-                  onClick={() => alert("Run discovery: Create a change request with type 'Agent: Discover Applications'")}
-                  className="text-xs text-brand-600 hover:underline"
+                  onClick={handleDiscoverApplications}
+                  disabled={discoverLoading}
+                  className="text-xs text-brand-600 hover:underline disabled:opacity-50"
                 >
-                  Re-scan
+                  {discoverLoading ? "Scanning…" : "Re-scan"}
                 </button>
               </div>
+              {discoverError && (
+                <p className="text-xs text-red-500 mb-2">{discoverError}</p>
+              )}
               {Array.isArray((asset.asset_metadata as Record<string, unknown>)?.applications) ? (
                 <div className="space-y-1.5">
                   {((asset.asset_metadata as Record<string, unknown>).applications as Array<Record<string, unknown>>).map((app, i) => (
@@ -1178,6 +1201,12 @@ export function AssetDetail() {
                           </span>
                         )}
                         <span className="text-slate-400">{String(app.containerization_status ?? "not_started")}</span>
+                        <button
+                          onClick={() => { setContainerizeApp(app); setShowContainerizeWizard(true); }}
+                          className="px-2 py-0.5 rounded bg-brand-600 text-white hover:bg-brand-700 text-xs"
+                        >
+                          Containerize
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1208,6 +1237,15 @@ export function AssetDetail() {
               : []
           }
           onClose={() => setShowIPWizard(false)}
+        />
+      )}
+
+      {/* Containerization Wizard modal */}
+      {showContainerizeWizard && (
+        <ContainerizationWizard
+          assetId={asset.id}
+          preselectedApp={containerizeApp}
+          onClose={() => { setShowContainerizeWizard(false); setContainerizeApp(null); }}
         />
       )}
     </div>

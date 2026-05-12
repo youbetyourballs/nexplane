@@ -21,6 +21,7 @@ interface App {
 interface ContainerizationWizardProps {
   assetId: string;
   onClose?: () => void;
+  preselectedApp?: any;
 }
 
 const STEP_LABELS = [
@@ -31,20 +32,20 @@ const STEP_LABELS = [
   "Retire",
 ];
 
-export function ContainerizationWizard({ assetId, onClose }: ContainerizationWizardProps) {
-  const [currentStep, setCurrentStep] = useState(1);
-  const [selectedApps, setSelectedApps] = useState<App[]>([]);
+export function ContainerizationWizard({ assetId, onClose, preselectedApp }: ContainerizationWizardProps) {
+  const [currentStep, setCurrentStep] = useState(preselectedApp ? 2 : 1);
+  const [selectedApps, setSelectedApps] = useState<App[]>(preselectedApp ? [preselectedApp as App] : []);
   const [buildResults, setBuildResults] = useState<Record<string, { imageDigest: string; manifests: Record<string, string>; dockerfile?: string }>>({});
   const [deployResults, setDeployResults] = useState<Record<string, { workloadAssetId: string }>>({});
 
-  // Step 1: discover apps on the asset
+  // Step 1: discover apps on the asset (skipped if preselectedApp provided)
   const { data: discoveredApps, isLoading: discovering, error: discoverError } = useQuery<App[]>({
     queryKey: ["containerize-discover", assetId],
     queryFn: async () => {
-      const res = await apiClient.get(`/assets/${assetId}/containerize/discover`);
-      return res.data ?? [];
+      const res = await apiClient.post(`/assets/${assetId}/discover-applications`);
+      return res.data?.applications ?? [];
     },
-    enabled: currentStep === 1,
+    enabled: currentStep === 1 && !preselectedApp,
   });
 
   const toggleApp = (app: App) => {
