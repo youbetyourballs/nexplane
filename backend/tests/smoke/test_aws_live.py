@@ -2316,6 +2316,18 @@ echo "=== Agent log ===" && journalctl -u nexplane-agent.service -n 10 --no-page
                     break
             _time.sleep(10)
         if not agent_asset_id:
+            # Diagnostic: check agent service status on the EC2 instance
+            try:
+                diag2 = client._run_cr_with_timeout(
+                    "[Phase X] agent service diagnostic", "ssm_command", instance_asset_id,
+                    {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+                     "command": "systemctl status nexplane-agent --no-pager 2>&1 | tail -20; journalctl -u nexplane-agent --no-pager -n 30 2>&1 | tail -30; ls -la /usr/local/bin/nexplane-agent 2>&1",
+                     "rollback_strategy": "rollback_unavailable"}, timeout=60,
+                )
+                diag2_out = NexplaneClient.get_cr_step_result(diag2).get("stdout", "")
+                print(f"  [Phase X] Agent diagnostic:\n{diag2_out[:3000]}")
+            except Exception as de:
+                print(f"  [Phase X] Diagnostic failed: {de}")
             fail("[Phase X] Nexplane agent did not become active within 6 minutes — cannot run discovery")
 
         # Step 3: Fire the agent_appdiscovery CR targeting the agent's registered asset
@@ -4225,10 +4237,10 @@ def run_phase_demo_a(client: NexplaneClient, ec2_client, ssm_client,
          "rollback_strategy": "terminate_instance"},
     )
 
-    # Wait for inventory asset
+    # Wait for inventory asset (up to 4 min — ingest may take time after EC2 launch)
     instance_asset = None
     instance_id = None
-    for _ in range(24):
+    for _ in range(48):
         time.sleep(5)
         candidate = client.get_asset_by_name(instance_name)
         if not candidate:
@@ -4251,7 +4263,7 @@ def run_phase_demo_a(client: NexplaneClient, ec2_client, ssm_client,
             break
     if not instance_asset or not instance_id:
         from smoke_helpers import fail as _fail
-        _fail("DEMO-A: EC2 instance not in inventory within 2 min")
+        _fail("DEMO-A: EC2 instance not in inventory within 4 min")
 
     log(f"[DEMO-A] Instance: {instance_id}")
 
