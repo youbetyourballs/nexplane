@@ -58,6 +58,27 @@ func TestWorkloadHasEnrichmentFields(t *testing.T) {
 	}
 }
 
+func TestCollectEnvVarNamesForPid1(t *testing.T) {
+	// PID 1 always exists on Linux; may be unreadable in some containers
+	names := collectEnvVarNamesLinux(1)
+	// Must not panic; result may be empty in restricted environments
+	_ = names
+}
+
+func TestCollectOpenFilesForPid1(t *testing.T) {
+	files := collectOpenFilesLinux(1)
+	if files == nil {
+		t.Error("expected non-nil slice from collectOpenFilesLinux")
+	}
+}
+
+func TestCollectRuntimeDepsForBinary(t *testing.T) {
+	// /bin/sh exists on all Linux systems
+	deps := collectRuntimeDepsLinux("/bin/sh")
+	// ldd output may be empty for static binaries; must not panic
+	_ = deps
+}
+
 // TestExecCommandHookable verifies that execCommandLinux is mockable.
 func TestExecCommandHookable(t *testing.T) {
 	var called []string
