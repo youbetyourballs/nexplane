@@ -70,6 +70,46 @@ for ($i=0; $i -lt $ToInstall.Count; $i++) {
 } | ConvertTo-Json -Compress
 `
 
+const psInstallByCVEScript = `
+param([string]$CVEFilter)
+$Session   = New-Object -ComObject Microsoft.Update.Session
+$Searcher  = $Session.CreateUpdateSearcher()
+$Query     = "IsInstalled=0 and Type='Software' and BrowseOnly=0 and IsAssigned=1"
+$Results   = $Searcher.Search($Query)
+$ToInstall = New-Object -ComObject Microsoft.Update.UpdateColl
+foreach ($u in $Results.Updates) {
+    if ($u.CVEIDs -notcontains $CVEFilter) { continue }
+    $u.AcceptEula()
+    $ToInstall.Add($u) | Out-Null
+}
+if ($ToInstall.Count -eq 0) {
+    Write-Output '{"installed":[],"reboot_required":false}'
+    exit 0
+}
+$Downloader            = $Session.CreateUpdateDownloader()
+$Downloader.Updates    = $ToInstall
+$Downloader.Download() | Out-Null
+$Installer             = $Session.CreateUpdateInstaller()
+$Installer.Updates     = $ToInstall
+$InstallResult         = $Installer.Install()
+$installed = @()
+for ($i=0; $i -lt $ToInstall.Count; $i++) {
+    $u  = $ToInstall.Item($i)
+    $kb = ($u.KBArticleIDs | Select-Object -First 1)
+    $installed += [PSCustomObject]@{
+        kb_id        = "KB$kb"
+        title        = $u.Title
+        size_bytes   = $u.MaxDownloadSize
+        cve_ids      = $u.CVEIDs
+        installed_at = (Get-Date -Format o)
+    }
+}
+[PSCustomObject]@{
+    installed       = $installed
+    reboot_required = $InstallResult.RebootRequired
+} | ConvertTo-Json -Compress
+`
+
 const psRebootPendingScript = `
 $pending = $false
 $keys = @(
@@ -104,10 +144,20 @@ func applyPatchesOS(params map[string]any) (map[string]any, error) {
 		}, nil
 	}
 
-	script := fmt.Sprintf(`& { %s } -Mode '%s' -KBFilter '%s'`, psInstallScript, mode, strings.ReplaceAll(kbID, "'", "''"))
-	out, err := runPS(script)
-	if err != nil {
-		return nil, fmt.Errorf("patch installation failed: %w", err)
+	cveID, _ := params["cve_id"].(string)
+	var (
+		out    string
+		runErr error
+	)
+	if mode == "cve" && cveID != "" {
+		script := fmt.Sprintf(`& { %s } -CVEFilter '%s'`, psInstallByCVEScript, strings.ReplaceAll(cveID, "'", "''"))
+		out, runErr = runPS(script)
+	} else {
+		script := fmt.Sprintf(`& { %s } -Mode '%s' -KBFilter '%s'`, psInstallScript, mode, strings.ReplaceAll(kbID, "'", "''"))
+		out, runErr = runPS(script)
+	}
+	if runErr != nil {
+		return nil, fmt.Errorf("patch installation failed: %w", runErr)
 	}
 
 	var result struct {
