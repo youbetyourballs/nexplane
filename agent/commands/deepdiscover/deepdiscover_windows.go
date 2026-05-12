@@ -4,7 +4,10 @@ package deepdiscover
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -85,15 +88,51 @@ func collectWindowsServices() []DiscoveredWorkload {
 		if name == "" {
 			name = svc.DisplayName
 		}
+
+		// Look up PID via tasklist
+		pid := 0
+		if name != "" {
+			out2, err2 := execCommandWindows("tasklist", "/FI",
+				fmt.Sprintf("IMAGENAME eq %s.exe", name),
+				"/FO", "CSV", "/NH").Output()
+			if err2 == nil {
+				lines := strings.Split(strings.TrimSpace(string(out2)), "\n")
+				if len(lines) > 0 {
+					fields := strings.Split(lines[0], ",")
+					if len(fields) >= 2 {
+						fmt.Sscanf(strings.Trim(fields[1], `"`), "%d", &pid)
+					}
+				}
+			}
+		}
+
+		// Collect config files from common Windows service directories
+		var cfgFiles []string
+		for _, baseDir := range []string{`C:\ProgramData`, `C:\Program Files`, `C:\Program Files (x86)`} {
+			dir := filepath.Join(baseDir, name)
+			if entries, err2 := os.ReadDir(dir); err2 == nil {
+				for _, e := range entries {
+					if !e.IsDir() {
+						cfgFiles = append(cfgFiles, filepath.Join(dir, e.Name()))
+					}
+				}
+			}
+		}
+
 		workloads = append(workloads, DiscoveredWorkload{
-			Name:            name,
-			RuntimeType:     RuntimeSystemd,
-			ListeningPorts:  []PortEntry{},
-			OutboundConns:   []ConnEdge{},
-			InboundConns:    []ConnEdge{},
-			IPCSockets:      []string{},
-			DataDirectories: []DirInfo{},
-			Dependencies:    []string{},
+			Name:               name,
+			RuntimeType:        RuntimeSystemd,
+			ListeningPorts:     []PortEntry{},
+			OutboundConns:      []ConnEdge{},
+			InboundConns:       []ConnEdge{},
+			IPCSockets:         []string{},
+			DataDirectories:    []DirInfo{},
+			Dependencies:       []string{},
+			PIDFound:           pid > 0,
+			EnvVarNames:        collectEnvVarNamesWindows(pid),
+			OpenFiles:          collectOpenFilesWindows(pid),
+			RuntimeDeps:        collectRuntimeDepsWindows(name),
+			ConfigIntelligence: parseConfigFiles(cfgFiles),
 		})
 	}
 
@@ -195,4 +234,95 @@ func detectDockerContainersWindows() []DiscoveredWorkload {
 // detectHybridEdgesWindows returns empty hybrid edges (v1).
 func detectHybridEdgesWindows(_ []DiscoveredWorkload) []HybridEdge {
 	return []HybridEdge{}
+}
+
+// collectEnvVarNamesWindows returns environment variable key names for a process via wmic.
+// Returns empty slice for PID 0 or on error.
+func collectEnvVarNamesWindows(pid int) []string {
+	if pid <= 0 {
+		return []string{}
+	}
+	out, err := execCommandWindows("wmic", "process",
+		fmt.Sprintf("where ProcessId=%d", pid),
+		"get", "EnvironmentVariables", "/format:csv").Output()
+	if err != nil {
+		return []string{}
+	}
+	var names []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		idx := strings.LastIndex(line, ",")
+		if idx < 0 {
+			continue
+		}
+		pairs := strings.Split(line[idx+1:], ";")
+		for _, pair := range pairs {
+			eqIdx := strings.IndexByte(pair, '=')
+			if eqIdx <= 0 {
+				continue
+			}
+			key := strings.TrimSpace(pair[:eqIdx])
+			if key != "" && !seen[key] {
+				seen[key] = true
+				names = append(names, key)
+			}
+		}
+	}
+	return names
+}
+
+// collectOpenFilesWindows returns open file paths for a process using handle.exe.
+// Returns empty slice if handle.exe is not available or on error.
+func collectOpenFilesWindows(pid int) []string {
+	if pid <= 0 {
+		return []string{}
+	}
+	out, err := execCommandWindows("handle.exe", "-p", fmt.Sprintf("%d", pid), "-nobanner").Output()
+	if err != nil {
+		return []string{}
+	}
+	files := []string{}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "File") && strings.Contains(line, `:\`) {
+			// Find the drive letter path (e.g., C:\path\to\file)
+			start := strings.LastIndex(line[:strings.LastIndex(line, `\`)], " ")
+			if start >= 0 {
+				path := strings.TrimSpace(line[start:])
+				if len(path) > 2 && path[1] == ':' && !seen[path] {
+					seen[path] = true
+					files = append(files, path)
+				}
+			}
+		}
+	}
+	return files
+}
+
+// collectRuntimeDepsWindows returns DLL paths loaded by a named binary using PowerShell.
+// Returns empty slice if binary is empty or on error.
+func collectRuntimeDepsWindows(binary string) []string {
+	if binary == "" {
+		return []string{}
+	}
+	procName := strings.TrimSuffix(filepath.Base(binary), ".exe")
+	script := fmt.Sprintf(
+		`(Get-Process -Name '%s' -ErrorAction SilentlyContinue | Select-Object -First 1).Modules.FileName -join ","`,
+		procName,
+	)
+	out, err := execCommandWindows("powershell", "-NoProfile", "-Command", script).Output()
+	if err != nil {
+		return []string{}
+	}
+	deps := []string{}
+	seen := map[string]bool{}
+	for _, p := range strings.Split(strings.TrimSpace(string(out)), ",") {
+		p = strings.TrimSpace(p)
+		if p != "" && strings.HasSuffix(strings.ToLower(p), ".dll") && !seen[p] {
+			seen[p] = true
+			deps = append(deps, p)
+		}
+	}
+	return deps
 }

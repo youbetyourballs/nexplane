@@ -27,6 +27,27 @@ func TestCollectWindowsServicesNoError(t *testing.T) {
 	}
 }
 
+func TestCollectEnvVarNamesWindows(t *testing.T) {
+	names := collectEnvVarNamesWindows(0)
+	if names == nil {
+		t.Error("expected non-nil slice")
+	}
+}
+
+func TestCollectOpenFilesWindows(t *testing.T) {
+	files := collectOpenFilesWindows(0)
+	if files == nil {
+		t.Error("expected non-nil slice")
+	}
+}
+
+func TestCollectRuntimeDepsWindows(t *testing.T) {
+	deps := collectRuntimeDepsWindows("")
+	if deps == nil {
+		t.Error("expected non-nil slice")
+	}
+}
+
 func TestExecCommandWindowsHookable(t *testing.T) {
 	called := false
 	orig := execCommandWindows
