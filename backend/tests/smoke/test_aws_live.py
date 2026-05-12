@@ -194,14 +194,16 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
         {"instance_id": instance_id, "auth_key": auth_key, "hostname": "nexplane-smoke-ec2"},
     )
 
-    # Agent downloads binary from the public S3 bucket (NEXPLANE_AGENT_DOWNLOAD_URL default).
-    # nexplane_url is the Tailscale IP so agent heartbeats reach the backend within the tailnet.
+    # Agent downloads binary from the backend's /downloads/ endpoint (served from
+    # /opt/nexplane-downloads/ inside the container) when it exists; falls back to S3.
+    # Using the backend Tailscale URL ensures EC2 (which joined Tailscale before this
+    # CR fires) gets the latest build with commit_timer support.
     nexplane_url = f"http://{backend_ip}:8000"
     deploy_time = time.time()
     client.run_cr(
         "[Phase A] deploy nexplane agent", "deploy_nexplane_agent", instance_asset["id"],
         {"instance_id": instance_id, "nexplane_url": nexplane_url, "nexplane_secret": agent_secret,
-         "hostname": "nexplane-smoke-ec2"},
+         "hostname": "nexplane-smoke-ec2", "download_url": nexplane_url},
     )
 
     print("  Waiting up to 5min for agent to register...")
@@ -2242,55 +2244,61 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
                  "hostname": "nexplane-smoke-ec2"},
             )
             log("[Phase X] Tailscale re-joined")
-            # Verify EC2 can reach the backend via Tailscale — use boto3 SSM directly
-            # to bypass Nexplane connector resolution issues (connector_id may be stale
-            # on the EC2 instance asset after tailscale_join runs).
-            import time as _t2; _t2.sleep(5)
-            try:
-                _ssm_direct = _get_aws_boto3_client("ssm")
-                if _ssm_direct:
-                    _cmd_resp = _ssm_direct.send_command(
+            # Verify EC2 can reach the backend via Tailscale — use boto3 SSM directly.
+            # Force path establishment via tailscale ping first, then retry curl.
+            # DERP relay can take 10-30s on a fresh node; longer curl timeout helps too.
+            import time as _t2
+            _ssm_direct = _get_aws_boto3_client("ssm")
+            _backend_reachable = False
+            if _ssm_direct and backend_ip:
+                # Kick off tailscale ping to force peer key exchange before curl attempts
+                try:
+                    _ping_resp = _ssm_direct.send_command(
                         InstanceIds=[instance_id],
                         DocumentName="AWS-RunShellScript",
                         Parameters={"commands": [
-                            f"curl -sf --max-time 5 http://{backend_ip}:8000/health 2>&1 && echo 'BACKEND_OK' || echo 'BACKEND_UNREACHABLE'",
-                            "tailscale status 2>&1 | head -3 || echo 'TAILSCALE_NOT_RUNNING'",
+                            f"tailscale ping -c 3 --timeout 10s {backend_ip} 2>&1 || true",
                         ]},
                     )
-                    _cmd_id = _cmd_resp["Command"]["CommandId"]
-                    _t2.sleep(8)
-                    _inv = _ssm_direct.get_command_invocation(CommandId=_cmd_id, InstanceId=instance_id)
-                    _out = _inv.get("StandardOutputContent", "")
-                    log(f"[Phase X] Connectivity check (direct): {_out[:300]}")
-            except Exception as e2:
-                log(f"[Phase X] Connectivity check warning: {e2}")
+                    _t2.sleep(12)
+                    _ssm_direct.get_command_invocation(CommandId=_ping_resp["Command"]["CommandId"], InstanceId=instance_id)
+                except Exception:
+                    pass
+                for _attempt in range(9):  # up to ~90s
+                    _t2.sleep(10)
+                    try:
+                        _cmd_resp = _ssm_direct.send_command(
+                            InstanceIds=[instance_id],
+                            DocumentName="AWS-RunShellScript",
+                            Parameters={"commands": [
+                                f"curl -sf --max-time 15 http://{backend_ip}:8000/health 2>&1 && echo 'BACKEND_OK' || echo 'BACKEND_UNREACHABLE'",
+                                "tailscale status 2>&1 | head -5 || echo 'TAILSCALE_NOT_RUNNING'",
+                            ]},
+                        )
+                        _cmd_id = _cmd_resp["Command"]["CommandId"]
+                        _t2.sleep(10)
+                        _inv = _ssm_direct.get_command_invocation(CommandId=_cmd_id, InstanceId=instance_id)
+                        _out = _inv.get("StandardOutputContent", "")
+                        if "BACKEND_OK" in _out:
+                            log(f"[Phase X] Connectivity check (direct): {_out[:300]}")
+                            _backend_reachable = True
+                            break
+                        log(f"[Phase X] Connectivity attempt {_attempt+1}/9: {_out[:200]}")
+                    except Exception as _ce:
+                        log(f"[Phase X] Connectivity check warning (attempt {_attempt+1}): {_ce}")
+                if not _backend_reachable:
+                    raise AssertionError("[Phase X] EC2 cannot reach backend over Tailscale after 90s — aborting")
+        except AssertionError:
+            raise
         except Exception:
             log("[Phase X] Tailscale re-join skipped (no auth key or already joined)")
     if backend_ip:
         agent_secret = client.get_agent_secret()
         control_plane_url = f"http://{backend_ip}:8000"
-        cr_id = client.create_cr(
-            "[Phase X] refresh agent backend URL", "deploy_nexplane_agent",
-            instance_asset_id,
-            {"instance_id": instance_id, "nexplane_url": control_plane_url,
-             "nexplane_secret": agent_secret, "rollback_strategy": "remove_nexplane_agent"},
-        )
-        client.post(f"/change-requests/{cr_id}/plan")
-        client.post(f"/change-requests/{cr_id}/submit-for-approval")
-        client.post(f"/change-requests/{cr_id}/approve",
-                    json={"decision": "approved", "comment": "Phase X agent refresh"})
-        client.post(f"/change-requests/{cr_id}/execute")
-        # Wait up to 3 min — non-fatal if it fails (agent may already be connected)
-        import time as _t
-        for _ in range(18):
-            _t.sleep(10)
-            cr_status = client.get(f"/change-requests/{cr_id}").get("status", "")
-            if cr_status == "completed":
-                log(f"[Phase X] Agent refreshed to connect to {control_plane_url}")
-                break
-            if cr_status in ("failed", "rejected"):
-                log(f"[Phase X] Agent refresh warning: CR {cr_status} — continuing")
-                break
+        # NOTE: The deploy_nexplane_agent refresh CR is intentionally skipped here.
+        # It was downloading v0.1.2 from S3 (overwriting v0.3.0 from Phase A), and it
+        # was non-fatal anyway. The systemd drop-in reconfigure below handles the
+        # backend URL and secret correctly without touching the binary.
 
     # Fix agent connectivity: inject correct backend URL via systemd drop-in override,
     # then restart. The service file's Environment may have been cleared by Phase T
@@ -2305,7 +2313,7 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
         if _ssm_reconfig and instance_id:
             _reconfig_script = f"""#!/bin/bash
 mkdir -p /etc/systemd/system/nexplane-agent.service.d
-printf '[Service]\\nEnvironment="NP_CONTROL_PLANE=http://{backend_ip}:8000"\\nEnvironment="NP_SECRET={agent_secret_x}"\\n' > /etc/systemd/system/nexplane-agent.service.d/control-plane.conf
+printf '[Service]\\nExecStart=\\nExecStart=/usr/local/bin/nexplane-agent\\nEnvironment="NP_CONTROL_PLANE=http://{backend_ip}:8000"\\nEnvironment="NP_SECRET={agent_secret_x}"\\n' > /etc/systemd/system/nexplane-agent.service.d/control-plane.conf
 systemctl daemon-reload
 systemctl reset-failed nexplane-agent.service 2>/dev/null || true
 systemctl restart nexplane-agent.service || (sleep 2 && systemctl start nexplane-agent.service) || echo "START_FAILED"
@@ -2386,27 +2394,34 @@ echo "RECONFIGURE_DONE"
             fail("[Phase X] Nexplane agent did not become active within 10 minutes — cannot run discovery")
 
         # Step 3: Fire the agent_appdiscovery CR targeting the agent's registered asset
+        # Retry up to 3 times — the agent may still be settling after Phase X reconfigure.
         log("[Phase X] Running agent_appdiscovery CR on agent asset")
-        discovery_cr_id = client.create_cr(
-            "[Phase X] discover applications", "agent_appdiscovery",
-            agent_asset_id, {"dry_run": False},
-        )
-        client.post(f"/change-requests/{discovery_cr_id}/plan")
-        client.post(f"/change-requests/{discovery_cr_id}/submit-for-approval")
-        client.post(f"/change-requests/{discovery_cr_id}/approve",
-                    json={"decision": "approved", "comment": "Phase X"})
-        client.post(f"/change-requests/{discovery_cr_id}/execute")
         import time as _t2
         discovery_passed = False
-        for _ in range(60):  # up to 10 min for bounded walk
-            _t2.sleep(10)
-            disc_status = client.get(f"/change-requests/{discovery_cr_id}").get("status", "")
-            if disc_status == "completed":
-                log("[Phase X] appdiscovery CR completed")
-                discovery_passed = True
-                break
-            if disc_status in ("failed", "rejected"):
-                log(f"[Phase X] appdiscovery CR {disc_status} — agent may not have backend connectivity")
+        for _disc_attempt in range(3):
+            if _disc_attempt > 0:
+                _t2.sleep(30)
+                log(f"[Phase X] Retrying appdiscovery (attempt {_disc_attempt + 1}/3)")
+            discovery_cr_id = client.create_cr(
+                "[Phase X] discover applications", "agent_appdiscovery",
+                agent_asset_id, {"dry_run": False},
+            )
+            client.post(f"/change-requests/{discovery_cr_id}/plan")
+            client.post(f"/change-requests/{discovery_cr_id}/submit-for-approval")
+            client.post(f"/change-requests/{discovery_cr_id}/approve",
+                        json={"decision": "approved", "comment": "Phase X"})
+            client.post(f"/change-requests/{discovery_cr_id}/execute")
+            for _ in range(60):  # up to 10 min per attempt
+                _t2.sleep(10)
+                disc_status = client.get(f"/change-requests/{discovery_cr_id}").get("status", "")
+                if disc_status == "completed":
+                    log("[Phase X] appdiscovery CR completed")
+                    discovery_passed = True
+                    break
+                if disc_status in ("failed", "rejected"):
+                    log(f"[Phase X] appdiscovery CR {disc_status} (attempt {_disc_attempt + 1})")
+                    break
+            if discovery_passed:
                 break
         if not discovery_passed:
             log("[Phase X] appdiscovery skipped — agent not reachable (backend IP changed since Phase A)")
@@ -3023,6 +3038,36 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
     DUMMY_IP_2 = "192.168.201.11/24"
 
     try:
+        # The Phase X discovery job can take >300s on first run (cold dentry cache),
+        # leaving a stale `running` job in the DB while the agent finishes it.
+        # Wait for the agent's last_seen to advance past any lingering job window
+        # before dispatching commit_timer. Check agent last_seen advances.
+        import time as _ipdwait
+        _last_seen_before = None
+        try:
+            _st = client.get(f"/agent/status/{agent_asset_id}")
+            _last_seen_before = _st.get("seconds_ago") if _st else None
+        except Exception:
+            pass
+        log(f"[Phase IP-D] Agent last_seen={_last_seen_before}s ago — waiting for agent to be freshly idle")
+        # Wait until we see two consecutive heartbeats (agent actively polling, no job running)
+        _ipdwait.sleep(35)  # wait for at least one full poll cycle
+        _fresh_polls = 0
+        for _ in range(30):  # up to 5 min
+            try:
+                _st2 = client.get(f"/agent/status/{agent_asset_id}")
+                _sa = _st2.get("seconds_ago") if _st2 else 999
+                if _sa is not None and _sa < 35:
+                    _fresh_polls += 1
+                    if _fresh_polls >= 2:
+                        log(f"[Phase IP-D] Agent confirmed idle (last_seen {_sa}s ago, {_fresh_polls} fresh polls)")
+                        break
+                else:
+                    _fresh_polls = 0
+            except Exception:
+                break
+            _ipdwait.sleep(10)
+
         # Create dummy interface using ip commands (nmcli may not be in SSM PATH)
         _ssm(client, instance_asset["id"], instance_id, "IP-D",
              "create dummy interface",
@@ -3031,24 +3076,39 @@ def run_phase_ip_d(client: NexplaneClient, phase_a_result: dict) -> None:
              f"ip link set {DUMMY_IFACE} up && echo 'dummy up'")
         log(f"Dummy interface {DUMMY_IFACE} created with {DUMMY_IP_1}")
 
-        # Step 2: Fire change_ip with method=commit_timer, timer=60s
-        cr = client.run_cr(
-            "[Phase IP-D] change_ip commit_timer (should succeed)", "change_ip", agent_asset_id,
-            {
-                "interface": DUMMY_IFACE,
-                "new_ip_v4": DUMMY_IP_2,
-                "new_gateway_v4": "",
-                "method": "commit_timer",
-                "commit_timer_seconds": 60,
-                "probe_interval_seconds": 5,
-                "rollback_strategy": "nexplane_rollback",
-            },
-        )
-        rollback_stack.append((cr["id"], "change_ip commit_timer"))
+        # Step 2: Fire change_ip with method=commit_timer, timer=60s.
+        # Retry up to 3 times — a long-running agent job from earlier phases can block.
+        import time as _ipd_t2
+        cr = None
+        _commit_timer_passed = False
+        for _ipd_cr_attempt in range(3):
+            if _ipd_cr_attempt > 0:
+                _ipd_t2.sleep(45)
+                log(f"[Phase IP-D] Retrying commit_timer (attempt {_ipd_cr_attempt + 1}/3)")
+            try:
+                cr = client.run_cr(
+                    "[Phase IP-D] change_ip commit_timer (should succeed)", "change_ip", agent_asset_id,
+                    {
+                        "interface": DUMMY_IFACE,
+                        "new_ip_v4": DUMMY_IP_2,
+                        "new_gateway_v4": "",
+                        "method": "commit_timer",
+                        "commit_timer_seconds": 60,
+                        "probe_interval_seconds": 5,
+                        "rollback_strategy": "nexplane_rollback",
+                    },
+                )
+                rollback_stack.append((cr["id"], "change_ip commit_timer"))
+                _commit_timer_passed = True
+                break
+            except SystemExit:
+                if _ipd_cr_attempt == 2:
+                    raise
+                log(f"[Phase IP-D] commit_timer attempt {_ipd_cr_attempt+1} failed, will retry")
+        if not _commit_timer_passed:
+            fail("[Phase IP-D] commit_timer failed after 3 attempts")
 
         # Step 3: CR must be completed (probe succeeds because ens5 still connects to control plane)
-        if cr.get("status") != "completed":
-            fail(f"[Phase IP-D] Expected status=completed, got: {cr.get('status')}")
         log("CR completed — commit timer cancelled by successful probe")
 
         # Step 4: SSM verify pending_rollback.json is gone

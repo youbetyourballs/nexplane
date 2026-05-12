@@ -3,6 +3,7 @@
 package changip
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,6 +18,36 @@ var execCommand = exec.Command
 
 // execCommandForRun is the hook used by runCmd (and configureDNS).
 var execCommandForRun = exec.Command
+
+// nmcliTimeout is the maximum time to wait for any nmcli command.
+// NetworkManager's D-Bus can get stuck after interface operations, so we cap it.
+const nmcliTimeout = 10 * time.Second
+
+// runNmcli runs an nmcli command with a timeout to prevent D-Bus hangs.
+func runNmcli(args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), nmcliTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "nmcli", args...)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return fmt.Errorf("nmcli %v: timed out after %s", args, nmcliTimeout)
+	}
+	if err != nil {
+		return fmt.Errorf("nmcli %v: %w (output: %s)", args, err, out)
+	}
+	return nil
+}
+
+// execNmcli runs nmcli with a timeout and returns its output.
+func execNmcli(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), nmcliTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "nmcli", args...).Output()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("nmcli %v: timed out", args)
+	}
+	return out, err
+}
 
 // Snapshot holds everything needed to restore a network interface.
 type Snapshot struct {
@@ -371,7 +402,7 @@ func captureSnapshot(iface string) (*Snapshot, error) {
 	switch nm {
 	case nmNetworkManager:
 		s.NetworkManager = "NetworkManager"
-		conOut, _ := execCommand("nmcli", "-t", "-f", "NAME,DEVICE", "con", "show", "--active").Output()
+		conOut, _ := execNmcli("-t", "-f", "NAME,DEVICE", "con", "show", "--active")
 		for _, line := range strings.Split(string(conOut), "\n") {
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 && strings.TrimSpace(parts[1]) == iface {
@@ -435,18 +466,18 @@ func configureDNS(nm networkManager, iface, conName string, servers, searchDomai
 			con = iface
 		}
 		dnsVal := strings.Join(servers, " ")
-		if err := runCmd("nmcli", "con", "mod", con, "ipv4.dns", dnsVal); err != nil {
+		if err := runNmcli("con", "mod", con, "ipv4.dns", dnsVal); err != nil {
 			return fmt.Errorf("nmcli ipv4.dns: %w", err)
 		}
-		if err := runCmd("nmcli", "con", "mod", con, "ipv6.dns", dnsVal); err != nil {
+		if err := runNmcli("con", "mod", con, "ipv6.dns", dnsVal); err != nil {
 			return fmt.Errorf("nmcli ipv6.dns: %w", err)
 		}
 		if len(searchDomains) > 0 {
-			if err := runCmd("nmcli", "con", "mod", con, "ipv4.dns-search", strings.Join(searchDomains, " ")); err != nil {
+			if err := runNmcli("con", "mod", con, "ipv4.dns-search", strings.Join(searchDomains, " ")); err != nil {
 				return fmt.Errorf("nmcli ipv4.dns-search: %w", err)
 			}
 		}
-		return runCmd("nmcli", "con", "up", con)
+		return runNmcli("con", "up", con)
 
 	case nmSystemd:
 		args := append([]string{"dns", iface}, servers...)
@@ -530,12 +561,12 @@ func applyIPChange(method networkManager, iface, mode, ipVersion string, params 
 func applyNmcli(iface, mode, ipVersion string, params map[string]any) error {
 	if mode == "dhcp" {
 		if ipVersion == "4" || ipVersion == "both" {
-			if err := runCmd("nmcli", "con", "mod", iface, "ipv4.method", "auto"); err != nil {
+			if err := runNmcli("con", "mod", iface, "ipv4.method", "auto"); err != nil {
 				return err
 			}
 		}
 		if ipVersion == "6" || ipVersion == "both" {
-			if err := runCmd("nmcli", "con", "mod", iface, "ipv6.method", "auto"); err != nil {
+			if err := runNmcli("con", "mod", iface, "ipv6.method", "auto"); err != nil {
 				return err
 			}
 		}
@@ -545,7 +576,7 @@ func applyNmcli(iface, mode, ipVersion string, params map[string]any) error {
 			if gw, ok := params["new_gateway_v4"].(string); ok && gw != "" {
 				args = append(args, "ipv4.gateway", gw)
 			}
-			if err := runCmd("nmcli", args...); err != nil {
+			if err := runNmcli(args...); err != nil {
 				// Fallback: interface not managed by NetworkManager — use ip addr directly.
 				return applyIPAddrFallback(iface, mode, ipVersion, params)
 			}
@@ -555,12 +586,12 @@ func applyNmcli(iface, mode, ipVersion string, params map[string]any) error {
 			if gw, ok := params["new_gateway_v6"].(string); ok && gw != "" {
 				args = append(args, "ipv6.gateway", gw)
 			}
-			if err := runCmd("nmcli", args...); err != nil {
+			if err := runNmcli(args...); err != nil {
 				return err
 			}
 		}
 	}
-	if err := runCmd("nmcli", "con", "up", iface); err != nil {
+	if err := runNmcli("con", "up", iface); err != nil {
 		// Fallback: bring up via ip link if nmcli can't manage the connection.
 		return runCmd("ip", "link", "set", iface, "up")
 	}

@@ -56,6 +56,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         asset_ids=asset_ids,
         timeout_seconds=commit_timer_seconds + 270,
     )
+    # Store asset_ids so the rollback executor can dispatch change_ip_rollback to the agent.
+    result["_asset_ids"] = [str(a) for a in asset_ids]
     return result
 
 
