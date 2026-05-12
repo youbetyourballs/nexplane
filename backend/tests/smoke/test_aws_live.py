@@ -2236,25 +2236,35 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
                 log(f"[Phase X] Agent refresh warning: CR {cr_status} — continuing")
                 break
 
-    # Diagnose and fix agent connectivity after Phase V Tailscale removal.
+    # Fix agent connectivity: inject correct backend URL via systemd drop-in override,
+    # then restart. The service file's Environment may have been cleared by Phase T
+    # re-deploy or other operations.
+    agent_secret_x = phase_a_result.get("agent_secret", "")
     try:
-        diag_cr = client._run_cr_with_timeout(
-            "[Phase X] diagnose + restart agent", "ssm_command", instance_asset_id,
+        client._run_cr_with_timeout(
+            "[Phase X] reconfigure + restart agent", "ssm_command", instance_asset_id,
             {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
              "command": f"""#!/bin/bash
-echo "=== Tailscale status ===" && tailscale status 2>&1 | head -5 || echo "tailscale not running"
-echo "=== Connectivity to backend {backend_ip} ===" && curl -sf --max-time 5 http://{backend_ip}:8000/health 2>&1 || echo "CANNOT REACH BACKEND"
-echo "=== Agent service status ===" && systemctl status nexplane-agent.service --no-pager 2>&1 | head -10
-echo "=== Resetting and restarting agent ===" && systemctl reset-failed nexplane-agent.service 2>/dev/null; systemctl restart nexplane-agent.service; sleep 5
-echo "=== Agent env ===" && systemctl show nexplane-agent.service -p Environment 2>&1 | head -3 || true""",
+set -e
+# Write a drop-in override with the correct backend URL
+mkdir -p /etc/systemd/system/nexplane-agent.service.d
+cat > /etc/systemd/system/nexplane-agent.service.d/control-plane.conf << 'DROPIN_EOF'
+[Service]
+Environment="NP_CONTROL_PLANE=http://{backend_ip}:8000"
+Environment="NP_SECRET={agent_secret_x}"
+DROPIN_EOF
+systemctl daemon-reload
+systemctl reset-failed nexplane-agent.service 2>/dev/null || true
+systemctl restart nexplane-agent.service
+sleep 3
+systemctl is-active nexplane-agent.service && echo "Agent service: ACTIVE" || echo "Agent service: INACTIVE"
+""",
              "rollback_strategy": "rollback_unavailable"},
             timeout=120,
         )
-        step_result = NexplaneClient.get_cr_step_result(diag_cr)
-        ssm_output = step_result.get("output", step_result.get("stdout", ""))
-        log(f"[Phase X] SSM diagnostics:\n{ssm_output[:1500]}")
+        log(f"[Phase X] Agent reconfigured with backend_ip={backend_ip} and restarted")
     except Exception as e:
-        log(f"[Phase X] Agent restart warning: {e}")
+        log(f"[Phase X] Agent reconfigure warning: {e}")
 
     try:
         # Step 2: Wait for agent to register AND have a recent last_seen (actively polling)
