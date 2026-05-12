@@ -4067,9 +4067,20 @@ def run_phase_ecr(client: NexplaneClient, cloud_account_id: str) -> None:
 
 _INSTALL_PAYMENTS_STACK_CMD = r"""
 set -e
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -y -q 2>&1 | tail -3
-apt-get install -y -q redis-server nginx python3-pip 2>&1 | tail -5
+# Detect package manager and install deps (supports Ubuntu/Debian and Amazon Linux/RHEL)
+if command -v apt-get &>/dev/null; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y -q 2>&1 | tail -3
+    apt-get install -y -q redis-server nginx python3-pip 2>&1 | tail -5
+elif command -v dnf &>/dev/null; then
+    dnf install -y redis nginx python3-pip 2>&1 | tail -5
+    systemctl enable redis
+elif command -v yum &>/dev/null; then
+    yum install -y redis nginx python3-pip 2>&1 | tail -5
+    systemctl enable redis
+else
+    echo "ERROR: no supported package manager found"; exit 1
+fi
 pip3 install -q flask redis 2>&1 | tail -3
 
 # payments-api Flask app
@@ -4121,8 +4132,16 @@ Restart=always
 WantedBy=multi-user.target
 SVCEOF
 
-# nginx: payments-web virtual host (port 80 -> 5000) and separate payments-web named vhost
-cat > /etc/nginx/sites-available/payments << 'NGINX'
+# nginx: write config to whichever location the distro uses
+NGINX_CONF=""
+if [ -d /etc/nginx/sites-available ]; then
+    NGINX_CONF=/etc/nginx/sites-available/payments
+elif [ -d /etc/nginx/conf.d ]; then
+    NGINX_CONF=/etc/nginx/conf.d/payments.conf
+else
+    NGINX_CONF=/etc/nginx/nginx.conf
+fi
+cat > "$NGINX_CONF" << 'NGINX'
 upstream payments_backend {
     server 127.0.0.1:5000;
 }
@@ -4133,16 +4152,11 @@ server {
         proxy_pass http://payments_backend;
     }
 }
-server {
-    listen 8080;
-    server_name payments-web;
-    location / {
-        proxy_pass http://payments_backend;
-    }
-}
 NGINX
-ln -sf /etc/nginx/sites-available/payments /etc/nginx/sites-enabled/payments
-rm -f /etc/nginx/sites-enabled/default
+if [ -d /etc/nginx/sites-enabled ]; then
+    ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/payments
+    rm -f /etc/nginx/sites-enabled/default
+fi
 
 systemctl daemon-reload
 systemctl enable redis-server payments-api nginx
