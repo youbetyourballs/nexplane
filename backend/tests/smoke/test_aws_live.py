@@ -2245,23 +2245,25 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
             "[Phase X] reconfigure + restart agent", "ssm_command", instance_asset_id,
             {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
              "command": f"""#!/bin/bash
-set -e
-# Write a drop-in override with the correct backend URL
+# Check Tailscale connectivity first
+echo "=== Tailscale status ===" && tailscale ip -4 2>&1 || echo "Tailscale IP not assigned"
+echo "=== Backend connectivity ===" && curl -sf --max-time 5 http://{backend_ip}:8000/health 2>&1 && echo "BACKEND REACHABLE" || echo "BACKEND NOT REACHABLE - agent cannot connect"
+# Write drop-in regardless, then restart
 mkdir -p /etc/systemd/system/nexplane-agent.service.d
-cat > /etc/systemd/system/nexplane-agent.service.d/control-plane.conf << 'DROPIN_EOF'
-[Service]
-Environment="NP_CONTROL_PLANE=http://{backend_ip}:8000"
-Environment="NP_SECRET={agent_secret_x}"
-DROPIN_EOF
+printf '[Service]\\nEnvironment="NP_CONTROL_PLANE=http://{backend_ip}:8000"\\nEnvironment="NP_SECRET={agent_secret_x}"\\n' > /etc/systemd/system/nexplane-agent.service.d/control-plane.conf
+cat /etc/systemd/system/nexplane-agent.service.d/control-plane.conf
 systemctl daemon-reload
 systemctl reset-failed nexplane-agent.service 2>/dev/null || true
 systemctl restart nexplane-agent.service
-sleep 3
-systemctl is-active nexplane-agent.service && echo "Agent service: ACTIVE" || echo "Agent service: INACTIVE"
+sleep 5
+echo "=== Agent status ===" && systemctl is-active nexplane-agent.service && systemctl status nexplane-agent.service --no-pager 2>&1 | tail -5 || true
+echo "=== Agent log ===" && journalctl -u nexplane-agent.service -n 10 --no-pager 2>&1 || true
 """,
              "rollback_strategy": "rollback_unavailable"},
             timeout=120,
         )
+        step_out = NexplaneClient.get_cr_step_result(diag_cr).get("output", "")
+        log(f"[Phase X] SSM output:\n{step_out[:2000]}")
         log(f"[Phase X] Agent reconfigured with backend_ip={backend_ip} and restarted")
     except Exception as e:
         log(f"[Phase X] Agent reconfigure warning: {e}")
