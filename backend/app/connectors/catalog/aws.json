@@ -1320,11 +1320,71 @@
         "cloud_account"
       ], 
       "action_type": "change", 
-      "executor": "aws.create_rds_snapshot", 
-      "generic_action": "create_rds_snapshot", 
-      "action_id": "create_rds_snapshot", 
+      "executor": "aws.create_rds_snapshot",
+      "generic_action": "create_rds_snapshot",
+      "action_id": "create_rds_snapshot",
       "description": "Create a manual snapshot of an RDS DB instance."
-    }, 
+    },
+    {
+      "display_name": "Restore RDS Snapshot",
+      "estimated_duration_seconds": 900,
+      "parameters": [
+        {
+          "required": true,
+          "type": "string",
+          "name": "snapshot_identifier"
+        },
+        {
+          "required": true,
+          "type": "string",
+          "name": "db_instance_identifier"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "db_instance_class"
+        }
+      ],
+      "execution_tier": 2,
+      "rollback_action": "delete_rds_instance",
+      "rollback_connector_type": "aws",
+      "applicable_asset_types": [
+        "database",
+        "cloud_account"
+      ],
+      "action_type": "change",
+      "executor": "aws.restore_rds_snapshot",
+      "generic_action": "restore_rds_snapshot",
+      "action_id": "restore_rds_snapshot",
+      "description": "Restore an RDS DB instance from a manual snapshot."
+    },
+    {
+      "display_name": "Verify RDS Backup",
+      "estimated_duration_seconds": 1800,
+      "parameters": [
+        {
+          "required": true,
+          "type": "string",
+          "name": "snapshot_identifier"
+        },
+        {
+          "required": false,
+          "type": "boolean",
+          "name": "terminate_after_verify"
+        }
+      ],
+      "execution_tier": 2,
+      "rollback_action": null,
+      "applicable_asset_types": [
+        "database",
+        "cloud_account"
+      ],
+      "action_type": "change",
+      "executor": "aws.verify_rds_backup",
+      "generic_action": "verify_rds_backup",
+      "action_id": "verify_rds_backup",
+      "description": "Verify an RDS backup by restoring a temporary instance from a snapshot and checking availability."
+    },
     {
       "display_name": "Create CloudWatch Alarm", 
       "estimated_duration_seconds": 5, 

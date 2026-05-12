@@ -1056,8 +1056,14 @@ def run_phase_i(client: NexplaneClient, cloud_account_id: str) -> None:
 # Phase J
 # ---------------------------------------------------------------------------
 
-def run_phase_j(client: NexplaneClient, cloud_account_id: str) -> None:
-    """Phase J: RDS Full Lifecycle — create/snapshot/verify/delete (~25-35 min)."""
+def run_phase_j(client: NexplaneClient, cloud_account_id: str, keep_resources: bool = False) -> dict:
+    """Phase J: RDS Full Lifecycle — create/snapshot/verify/delete (~25-35 min).
+
+    When keep_resources=True, skip deletion of the snapshot and instance at the
+    end of normal execution and return their identifiers so that downstream phases
+    (RDS_RESTORE, RDS_VERIFY) can consume them.  Cleanup then becomes the
+    responsibility of those phases.
+    """
     print("\n[Phase J] RDS Full Lifecycle (~25-35 min)")
 
     ts = int(time.time())
@@ -1127,6 +1133,26 @@ def run_phase_j(client: NexplaneClient, cloud_account_id: str) -> None:
             else:
                 print("  ⚠️  Snapshot not found via boto3")
 
+        if keep_resources:
+            # Downstream phases (RDS_RESTORE/RDS_VERIFY) will handle cleanup.
+            # Clear the rollback stack so finally-block doesn't delete them.
+            rollback_stack.clear()
+            created_db_ids.clear()
+            created_snap_ids.clear()
+            log(f"Phase J complete (resources kept for downstream phases: db={db_id} snap={snap_id})")
+
+            # Resolve the RDS asset id if available in inventory
+            rds_asset_id: str = cloud_account_id
+            assets = client.get("/assets", params={"q": db_id, "asset_type": "database"})
+            if assets:
+                rds_asset_id = assets[0]["id"]
+
+            return {
+                "db_instance_identifier": db_id,
+                "snapshot_identifier": snap_id,
+                "rds_asset_id": rds_asset_id,
+            }
+
         # 4. Delete snapshot via rollback of snapshot CR
         snap_cr_id, _ = rollback_stack.pop()
         client.rollback_cr(snap_cr_id, "rds_snapshot_create → delete_rds_snapshot")
@@ -1141,6 +1167,7 @@ def run_phase_j(client: NexplaneClient, cloud_account_id: str) -> None:
         log("RDS instance deleted via CR rollback")
 
         log("Phase J complete")
+        return {}
 
     except Exception as e:
         print(f"\n❌ Phase J failed: {e}")
@@ -4469,6 +4496,96 @@ def run_phase_demo_f(ec2_client, instance_id: str) -> dict:
     return {"instance_id": instance_id, "terminated": True}
 
 
+# ---------------------------------------------------------------------------
+# Phase RDS-Restore
+# ---------------------------------------------------------------------------
+
+def run_phase_rds_restore(client: NexplaneClient, cloud_account_id: str, phase_j_result: dict) -> dict:
+    """Phase RDS-Restore: restore RDS snapshot to a new instance, verify connectivity, delete."""
+    print("\n[Phase RDS-Restore] Restore RDS snapshot")
+
+    snapshot_id = phase_j_result.get("snapshot_identifier", "")
+    db_id = phase_j_result.get("db_instance_identifier", "")
+    if not snapshot_id:
+        fail("[Phase RDS-Restore] No snapshot_identifier in phase_j_result — run Phase J first")
+
+    restore_db_id = f"{db_id}-restored"
+    rollback_stack = []
+
+    try:
+        # Check if restore_rds_snapshot change type exists
+        cr = client.run_cr(
+            "[Phase RDS-Restore] restore from snapshot", "restore_rds_snapshot", cloud_account_id,
+            {
+                "snapshot_identifier": snapshot_id,
+                "db_instance_identifier": restore_db_id,
+                "db_instance_class": "db.t3.micro",
+                "rollback_strategy": "delete_rds_instance",
+            },
+        )
+        rollback_stack.append((cr["id"], "restore_rds_snapshot"))
+        log(f"[Phase RDS-Restore] Restore CR completed: {cr['id']}")
+
+        # Verify the restored instance exists via boto3
+        rds = _get_aws_boto3_client("rds")
+        if rds:
+            instances = rds.describe_db_instances(DBInstanceIdentifier=restore_db_id)
+            state = instances["DBInstances"][0]["DBInstanceStatus"]
+            log(f"[Phase RDS-Restore] Restored instance status: {state}")
+
+        return {"restored_db_id": restore_db_id, "snapshot_id": snapshot_id}
+    except Exception as e:
+        print(f"\n[Phase RDS-Restore] FAILED: {e}")
+        raise
+    finally:
+        # Cleanup: delete the restored instance
+        for cr_id, label in reversed(rollback_stack):
+            try:
+                client.rollback_cr(cr_id, label)
+            except Exception:
+                # Direct cleanup
+                try:
+                    rds = _get_aws_boto3_client("rds")
+                    if rds:
+                        rds.delete_db_instance(
+                            DBInstanceIdentifier=restore_db_id,
+                            SkipFinalSnapshot=True,
+                        )
+                except Exception:
+                    pass
+
+
+# ---------------------------------------------------------------------------
+# Phase RDS-Verify
+# ---------------------------------------------------------------------------
+
+def run_phase_rds_verify(client: NexplaneClient, cloud_account_id: str, phase_j_result: dict) -> dict:
+    """Phase RDS-Verify: run verify_rds_backup CR against an existing snapshot."""
+    print("\n[Phase RDS-Verify] Verify RDS backup")
+
+    snapshot_id = phase_j_result.get("snapshot_identifier", "")
+    rds_asset_id = phase_j_result.get("rds_asset_id") or cloud_account_id
+    if not snapshot_id:
+        fail("[Phase RDS-Verify] No snapshot_identifier in phase_j_result — run Phase J first")
+
+    try:
+        cr = client.run_cr(
+            "[Phase RDS-Verify] verify backup", "verify_rds_backup", rds_asset_id,
+            {
+                "snapshot_identifier": snapshot_id,
+                "rollback_strategy": "rollback_unavailable",
+            },
+        )
+        runs = cr.get("execution_runs") or []
+        run_result = (runs[0]["result"] if runs else {}) or {}
+        step_result = run_result.get("execution", {}).get("steps", [{}])[0].get("result", {})
+        log(f"[Phase RDS-Verify] Backup verified: {step_result}")
+        return {"snapshot_id": snapshot_id, "verified": True}
+    except Exception as e:
+        print(f"\n[Phase RDS-Verify] FAILED: {e}")
+        raise
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -4484,7 +4601,8 @@ def main():
             "AUTO=autonomous-containerization. "
             "EKS_SDK/EKS_CFN/EKS_TF/ECR=SP2 EKS+ECR provisioning (dry_run). "
             "DEMO_A=launch-payments-ec2, DEMO_B=discover-apps, DEMO_C=build-images, "
-            "DEMO_D=deploy-eks, DEMO_E=retire-legacy, DEMO_F=teardown-ec2."
+            "DEMO_D=deploy-eks, DEMO_E=retire-legacy, DEMO_F=teardown-ec2. "
+            "RDS_RESTORE=restore-rds-snapshot (requires J), RDS_VERIFY=verify-rds-backup (requires J)."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -4570,8 +4688,10 @@ def main():
             run_phase_h(client, cloud_account_id)
         if "I" in phases:
             run_phase_i(client, cloud_account_id)
+        phase_j_result: Optional[dict] = None
         if "J" in phases:
-            run_phase_j(client, cloud_account_id)
+            _j_keep = bool({"RDS_RESTORE", "RDS_VERIFY"} & phases)
+            phase_j_result = run_phase_j(client, cloud_account_id, keep_resources=_j_keep)
         if "K" in phases:
             if phase_a_result is None:
                 fail("Phase K requires Phase A to have run first")
@@ -4584,6 +4704,14 @@ def main():
             run_phase_r(client, cloud_account_id)
         if "S" in phases:
             run_phase_s(client, cloud_account_id)
+        if "RDS_RESTORE" in phases:
+            if phase_j_result is None:
+                fail("Phase RDS-Restore requires Phase J")
+            run_phase_rds_restore(client, cloud_account_id, phase_j_result)
+        if "RDS_VERIFY" in phases:
+            if phase_j_result is None:
+                fail("Phase RDS-Verify requires Phase J")
+            run_phase_rds_verify(client, cloud_account_id, phase_j_result)
         if "U" in phases:
             if phase_a_result is None:
                 fail("Phase U requires Phase A to have run first")
