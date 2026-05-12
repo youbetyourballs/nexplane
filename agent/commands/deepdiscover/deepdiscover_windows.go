@@ -248,7 +248,7 @@ func collectEnvVarNamesWindows(pid int) []string {
 	if err != nil {
 		return []string{}
 	}
-	var names []string
+	names := []string{}
 	seen := map[string]bool{}
 	for _, line := range strings.Split(string(out), "\n") {
 		idx := strings.LastIndex(line, ",")
@@ -287,7 +287,11 @@ func collectOpenFilesWindows(pid int) []string {
 		line = strings.TrimSpace(line)
 		if strings.Contains(line, "File") && strings.Contains(line, `:\`) {
 			// Find the drive letter path (e.g., C:\path\to\file)
-			start := strings.LastIndex(line[:strings.LastIndex(line, `\`)], " ")
+			bsIdx := strings.LastIndex(line, `\`)
+			if bsIdx < 0 {
+				continue
+			}
+			start := strings.LastIndex(line[:bsIdx], " ")
 			if start >= 0 {
 				path := strings.TrimSpace(line[start:])
 				if len(path) > 2 && path[1] == ':' && !seen[path] {
