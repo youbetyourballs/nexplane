@@ -4296,7 +4296,8 @@ def run_phase_demo_a(client: NexplaneClient, ec2_client, ssm_client,
     log("[DEMO-A] Payments stack installed")
 
     # Verify all 3 services via NexplaneClient CR
-    for svc in ("redis-server", "payments-api", "nginx"):
+    # redis service name varies: redis6 on AL2023, redis-server on Debian
+    for svc in ("payments-api", "nginx"):
         client.run_cr(
             f"[DEMO-A] verify {svc}", "ssm_command", instance_asset["id"],
             {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
@@ -4304,6 +4305,14 @@ def run_phase_demo_a(client: NexplaneClient, ec2_client, ssm_client,
              "rollback_strategy": "rollback_unavailable"},
         )
         log(f"[DEMO-A] {svc} is active")
+    # Redis: try redis6 first (AL2023), then redis-server (Debian)
+    client.run_cr(
+        "[DEMO-A] verify redis", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": "systemctl is-active redis6 && echo 'redis6 active' || (systemctl is-active redis-server && echo 'redis-server active') || (systemctl is-active redis && echo 'redis active')",
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("[DEMO-A] redis is active")
 
     # Register as Nexplane asset (asset already created by ec2_launch CR; look it up)
     asset_id = instance_asset["id"]
