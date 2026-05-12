@@ -129,12 +129,17 @@ func parseIIS(path, content string) []ConfigEntry {
 		if !strings.Contains(line, "bindingInformation") {
 			continue
 		}
-		start := strings.Index(line, `"`)
-		end := strings.LastIndex(line, `"`)
-		if start < 0 || end <= start {
+		const marker = `bindingInformation="`
+		idx := strings.Index(line, marker)
+		if idx < 0 {
 			continue
 		}
-		val := line[start+1 : end]
+		rest := line[idx+len(marker):]
+		end := strings.Index(rest, `"`)
+		if end < 0 {
+			continue
+		}
+		val := rest[:end]
 		colonParts := strings.Split(val, ":")
 		if len(colonParts) == 3 && colonParts[2] != "" {
 			if _, exists := fields["server_name"]; !exists {
