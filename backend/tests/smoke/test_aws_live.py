@@ -137,33 +137,42 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
          "iam_instance_profile": "NexplaneEC2TestProfile", "key_name": KEY_NAME,
          "rollback_strategy": "terminate_instance"},
     )
-    # Wait up to 120s for the inventory asset to appear with a running instance_id.
+    # Wait up to 4 min for the inventory asset to appear with a running instance_id.
     # Terminated instances from previous runs may still be visible in AWS (and can be re-ingested),
     # so we verify the instance_id is actually pending/running before proceeding.
     ec2_verify = _get_aws_boto3_client('ec2')
     instance_asset = None
     instance_id = None
-    for _ in range(24):  # up to 120s
+    for _ in range(48):  # up to 240s
         time.sleep(5)
-        candidate = client.get_asset_by_name(INSTANCE_NAME)
-        if not candidate:
-            continue
-        cid = candidate.get("asset_metadata", {}).get("instance_id", "")
-        if not cid:
-            continue
-        if ec2_verify:
-            try:
-                state = ec2_verify.describe_instances(InstanceIds=[cid])["Reservations"][0]["Instances"][0]["State"]["Name"]
-                if state in ("pending", "running"):
-                    instance_asset = candidate
-                    instance_id = cid
-                    break
-                # stale asset with terminated instance — keep polling
-            except Exception:
-                pass
-        else:
-            instance_asset = candidate
-            instance_id = cid
+        # Check all assets with this name and pick the one with a running instance_id
+        all_candidates = [a for a in client.get("/assets", params={"q": INSTANCE_NAME}) if a["name"] == INSTANCE_NAME]
+        for candidate in sorted(all_candidates, key=lambda a: a.get("updated_at", ""), reverse=True):
+            cid = candidate.get("asset_metadata", {}).get("instance_id", "")
+            if not cid:
+                continue
+            if ec2_verify:
+                try:
+                    reservations = ec2_verify.describe_instances(InstanceIds=[cid]).get("Reservations", [])
+                    if not reservations:
+                        continue
+                    state = reservations[0]["Instances"][0]["State"]["Name"]
+                    if state in ("pending", "running"):
+                        instance_asset = candidate
+                        instance_id = cid
+                        break
+                    # stale terminated asset — delete from inventory and keep polling
+                    try:
+                        client.client.delete(f"{client.base}/assets/{candidate['id']}")
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            else:
+                instance_asset = candidate
+                instance_id = cid
+                break
+        if instance_asset:
             break
     if not instance_asset:
         fail(f"Instance '{INSTANCE_NAME}' not in inventory with a running instance_id")
