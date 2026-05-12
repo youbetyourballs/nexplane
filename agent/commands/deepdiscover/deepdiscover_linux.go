@@ -497,7 +497,7 @@ func collectEnvVarNamesLinux(pid int) []string {
 		return []string{}
 	}
 	seen := map[string]bool{}
-	var names []string
+	names := []string{}
 	for _, entry := range strings.Split(string(data), "\x00") {
 		idx := strings.IndexByte(entry, '=')
 		if idx <= 0 {
@@ -524,7 +524,7 @@ func collectOpenFilesLinux(pid int) []string {
 		return []string{}
 	}
 	seen := map[string]bool{}
-	var files []string
+	files := []string{}
 	for _, e := range entries {
 		link, err := os.Readlink(filepath.Join(fdDir, e.Name()))
 		if err != nil {
@@ -556,7 +556,7 @@ func collectRuntimeDepsLinux(binary string) []string {
 		return []string{}
 	}
 	seen := map[string]bool{}
-	var deps []string
+	deps := []string{}
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.Contains(line, ".so") {
