@@ -4638,13 +4638,13 @@ def main():
     log("Authenticated")
 
     try:
+        # Only clean demo assets when actually running DEMO phases to avoid
+        # race conditions when Phase A and DEMO runs execute concurrently.
+        cleanup_queries = ["nexplane-smoke-test", "nexplane-smoke-ec2"]
+        if any(p.startswith("DEMO") for p in phases):
+            cleanup_queries.append("nexplane-demo-payments")
         stale = []
-        for q in ("nexplane-smoke-test", "nexplane-smoke-ec2", "nexplane-demo-payments"):
-            stale += [a for a in client.get("/assets", params={"q": q})
-                      if a.get("name", "").startswith(q.rsplit("-", 1)[0].replace("nexplane-", "nexplane-"))]
-        # Simpler: just match any asset whose name contains the smoke/demo marker
-        stale = []
-        for q in ("nexplane-smoke-test", "nexplane-smoke-ec2", "nexplane-demo-payments"):
+        for q in cleanup_queries:
             stale += [a for a in client.get("/assets", params={"q": q})
                       if q in a.get("name", "")]
         # Also clean stale nexplane-smoke-ec2 agent-registered server assets
