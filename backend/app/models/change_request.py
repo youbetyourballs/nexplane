@@ -246,6 +246,12 @@ class ChangeType(str, enum.Enum):
     oci_alarm_create = "oci_alarm_create"
     oci_alarm_delete = "oci_alarm_delete"
     oci_logging_enable = "oci_logging_enable"
+    # EKS cluster provisioning — SP2
+    eks_cluster_create_sdk = "eks_cluster_create_sdk"
+    eks_cluster_create_cfn = "eks_cluster_create_cfn"
+    eks_cluster_create_terraform = "eks_cluster_create_terraform"
+    ecr_repository_create = "ecr_repository_create"
+    ecr_repository_delete = "ecr_repository_delete"
 
 
 class RiskLevel(str, enum.Enum):

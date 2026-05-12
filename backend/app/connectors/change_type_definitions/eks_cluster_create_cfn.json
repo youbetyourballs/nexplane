@@ -1,0 +1,9 @@
+{
+  "change_type": "eks_cluster_create_cfn",
+  "display_name": "AWS: Create EKS Cluster (CloudFormation)",
+  "steps": [
+    {"generic_action": "eks_create_cluster_cfn", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

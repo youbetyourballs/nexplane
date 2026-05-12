@@ -1,0 +1,9 @@
+{
+  "change_type": "eks_cluster_create_terraform",
+  "display_name": "AWS: Create EKS Cluster (Terraform)",
+  "steps": [
+    {"generic_action": "eks_create_cluster_terraform", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

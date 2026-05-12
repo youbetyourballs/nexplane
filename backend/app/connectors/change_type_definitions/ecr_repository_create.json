@@ -1,0 +1,9 @@
+{
+  "change_type": "ecr_repository_create",
+  "display_name": "AWS: Create ECR Repository",
+  "steps": [
+    {"generic_action": "ecr_create_repository", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

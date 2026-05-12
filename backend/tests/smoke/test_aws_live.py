@@ -3926,6 +3926,139 @@ def run_phase_container_d(client, asset_id: str, app_name: str = "payments-api")
     return {"cr_id": cr["id"], "status": completed["status"]}
 
 
+# ---------------------------------------------------------------------------
+# SP2 phases: EKS (SDK/CFN/Terraform) and ECR — dry_run only
+# ---------------------------------------------------------------------------
+
+def run_phase_eks_sdk(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase EKS_SDK: verify eks_cluster_create_sdk dry_run path."""
+    print("\n[Phase EKS_SDK] EKS cluster create via SDK (dry_run)")
+    import secrets as _secrets
+    cluster_name = f"nexplane-smoke-eks-sdk-{_secrets.token_hex(4)}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        cr = client.run_cr(
+            "[Phase EKS_SDK] create EKS cluster SDK dry_run",
+            "eks_cluster_create_sdk",
+            cloud_account_id,
+            {"cluster_name": cluster_name, "dry_run": True},
+        )
+        rollback_stack.append((cr["id"], "eks_cluster_create_sdk"))
+        result = cr.get("execution_result") or {}
+        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')}"
+        assert "endpoint" in result, "Missing endpoint in result"
+        assert "_auto_asset" in result, "Missing _auto_asset in result"
+        assert result["_auto_asset"]["asset_type"] == "kubernetes_cluster"
+        log(f"EKS SDK dry_run OK: endpoint={result['endpoint']}")
+    except Exception as e:
+        print(f"\n[Phase EKS_SDK] FAILED: {e}")
+        raise
+    finally:
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+
+
+def run_phase_eks_cfn(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase EKS_CFN: verify eks_cluster_create_cfn dry_run path."""
+    print("\n[Phase EKS_CFN] EKS cluster create via CloudFormation (dry_run)")
+    import secrets as _secrets
+    cluster_name = f"nexplane-smoke-eks-cfn-{_secrets.token_hex(4)}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        cr = client.run_cr(
+            "[Phase EKS_CFN] create EKS cluster CFN dry_run",
+            "eks_cluster_create_cfn",
+            cloud_account_id,
+            {"cluster_name": cluster_name, "dry_run": True},
+        )
+        rollback_stack.append((cr["id"], "eks_cluster_create_cfn"))
+        result = cr.get("execution_result") or {}
+        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')}"
+        assert "endpoint" in result, "Missing endpoint in result"
+        assert "_auto_asset" in result, "Missing _auto_asset in result"
+        assert result["_auto_asset"]["asset_type"] == "kubernetes_cluster"
+        log(f"EKS CFN dry_run OK: endpoint={result['endpoint']}")
+    except Exception as e:
+        print(f"\n[Phase EKS_CFN] FAILED: {e}")
+        raise
+    finally:
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+
+
+def run_phase_eks_tf(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase EKS_TF: verify eks_cluster_create_terraform dry_run path."""
+    print("\n[Phase EKS_TF] EKS cluster create via Terraform (dry_run)")
+    import secrets as _secrets
+    cluster_name = f"nexplane-smoke-eks-tf-{_secrets.token_hex(4)}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        cr = client.run_cr(
+            "[Phase EKS_TF] create EKS cluster Terraform dry_run",
+            "eks_cluster_create_terraform",
+            cloud_account_id,
+            {"cluster_name": cluster_name, "dry_run": True},
+        )
+        rollback_stack.append((cr["id"], "eks_cluster_create_terraform"))
+        result = cr.get("execution_result") or {}
+        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')}"
+        assert "endpoint" in result, "Missing endpoint in result"
+        assert "_auto_asset" in result, "Missing _auto_asset in result"
+        assert result["_auto_asset"]["asset_type"] == "kubernetes_cluster"
+        log(f"EKS Terraform dry_run OK: endpoint={result['endpoint']}")
+    except Exception as e:
+        print(f"\n[Phase EKS_TF] FAILED: {e}")
+        raise
+    finally:
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+
+
+def run_phase_ecr(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase ECR: verify ecr_repository_create and ecr_repository_delete dry_run paths."""
+    print("\n[Phase ECR] ECR repository create/delete (dry_run)")
+    import secrets as _secrets
+    repo_name = f"nexplane-smoke-ecr-{_secrets.token_hex(4)}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # Create
+        cr = client.run_cr(
+            "[Phase ECR] create ECR repository dry_run",
+            "ecr_repository_create",
+            cloud_account_id,
+            {"repository_name": repo_name, "dry_run": True},
+        )
+        rollback_stack.append((cr["id"], "ecr_repository_create"))
+        result = cr.get("execution_result") or {}
+        assert result.get("status") == "dry_run", f"Expected dry_run, got {result.get('status')}"
+        assert "repository_uri" in result, "Missing repository_uri in result"
+        assert "_auto_asset" in result, "Missing _auto_asset in result"
+        assert result["_auto_asset"]["asset_type"] == "container_image"
+        log(f"ECR create dry_run OK: uri={result['repository_uri']}")
+
+        # Delete (dry_run)
+        del_cr = client.run_cr(
+            "[Phase ECR] delete ECR repository dry_run",
+            "ecr_repository_delete",
+            cloud_account_id,
+            {"repository_name": repo_name, "dry_run": True},
+        )
+        del_result = del_cr.get("execution_result") or {}
+        assert del_result.get("status") == "dry_run", f"Expected dry_run on delete, got {del_result.get('status')}"
+        log("ECR delete dry_run OK")
+
+    except Exception as e:
+        print(f"\n[Phase ECR] FAILED: {e}")
+        raise
+    finally:
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -3938,7 +4071,8 @@ def main():
             "IP_A=tailscale-first-ip-change, IP_D=dead-mans-switch-success, "
             "IP_D2=dead-mans-switch-rollback, IP_DNS=route53-coordination. "
             "IP_WIN_A=windows-tailscale-ip-change, IP_WIN_D=windows-commit-timer-ip-change. "
-            "AUTO=autonomous-containerization."
+            "AUTO=autonomous-containerization. "
+            "EKS_SDK/EKS_CFN/EKS_TF/ECR=SP2 EKS+ECR provisioning (dry_run)."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -4083,6 +4217,14 @@ def main():
             if phase_a_result is None:
                 fail("Phase AUTO requires Phase A to have run first")
             run_phase_auto(client, phase_a_result)
+        if "EKS_SDK" in phases:
+            run_phase_eks_sdk(client, cloud_account_id)
+        if "EKS_CFN" in phases:
+            run_phase_eks_cfn(client, cloud_account_id)
+        if "EKS_TF" in phases:
+            run_phase_eks_tf(client, cloud_account_id)
+        if "ECR" in phases:
+            run_phase_ecr(client, cloud_account_id)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
