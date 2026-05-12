@@ -4073,8 +4073,9 @@ if command -v apt-get &>/dev/null; then
     apt-get update -y -q 2>&1 | tail -3
     apt-get install -y -q redis-server nginx python3-pip 2>&1 | tail -5
 elif command -v dnf &>/dev/null; then
-    dnf install -y redis nginx python3-pip 2>&1 | tail -5
-    systemctl enable redis
+    # Amazon Linux 2023 ships redis6, not redis
+    dnf install -y redis6 nginx python3-pip 2>&1 | tail -5 || dnf install -y redis nginx python3-pip 2>&1 | tail -5
+    systemctl enable redis6 2>/dev/null || systemctl enable redis 2>/dev/null || true
 elif command -v yum &>/dev/null; then
     yum install -y redis nginx python3-pip 2>&1 | tail -5
     systemctl enable redis
@@ -4159,9 +4160,10 @@ if [ -d /etc/nginx/sites-enabled ]; then
 fi
 
 systemctl daemon-reload
-# redis service name differs by distro (redis-server on Debian, redis on RHEL/AL)
+# redis service name differs by distro (redis-server on Debian, redis6 on AL2023, redis on RHEL/AL2)
 REDIS_SVC=redis-server
-systemctl list-unit-files redis.service &>/dev/null && REDIS_SVC=redis
+systemctl list-unit-files redis6.service &>/dev/null && REDIS_SVC=redis6
+systemctl list-unit-files redis.service &>/dev/null && [ "$REDIS_SVC" = "redis-server" ] && REDIS_SVC=redis
 systemctl enable $REDIS_SVC payments-api nginx
 systemctl start $REDIS_SVC
 sleep 2
@@ -4169,7 +4171,7 @@ systemctl start payments-api
 sleep 2
 systemctl restart nginx
 sleep 1
-systemctl is-active $REDIS_SVC && echo "redis OK" || true
+systemctl is-active $REDIS_SVC && echo "redis OK" || (echo "redis NOT active"; systemctl status $REDIS_SVC --no-pager | tail -5)
 systemctl is-active payments-api && echo "payments-api OK" || true
 systemctl is-active nginx && echo "nginx OK" || true
 echo "DONE"

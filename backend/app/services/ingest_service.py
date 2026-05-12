@@ -86,7 +86,7 @@ class IngestService:
                             Asset.asset_metadata[meta_key].as_string() == external_id,
                         )
                     )
-                    existing = result.scalar_one_or_none()
+                    existing = result.scalars().first()
                     if existing:
                         break
 
@@ -95,7 +95,7 @@ class IngestService:
                 result = await db.execute(
                     select(Asset).where(*base_where, Asset.name == name)
                 )
-                candidate = result.scalar_one_or_none()
+                candidate = result.scalars().first()
                 if candidate:
                     has_ext_id = any(
                         (candidate.asset_metadata or {}).get(k)
