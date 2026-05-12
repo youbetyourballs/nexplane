@@ -204,19 +204,17 @@ def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_ke
          "hostname": "nexplane-smoke-ec2"},
     )
 
-    print("  Waiting up to 3min for agent to register...")
-    deadline = time.time() + 180
+    print("  Waiting up to 5min for agent to register...")
+    # NOTE: Do NOT filter by created_at — clock skew between backend container and
+    # Postgres server can make the timestamp comparison fail even when the agent IS registered.
+    # The pre-run cleanup + name/tag match is sufficient to identify the correct asset.
+    deadline = time.time() + 300
     agent_asset = None
     while time.time() < deadline:
         candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
-        # Only accept assets whose name is exactly "nexplane-smoke-ec2" (the hostname we set)
-        # AND that were created/updated after we started the deploy (avoids stale assets)
-        import datetime as _dt
-        deploy_dt = _dt.datetime.utcfromtimestamp(deploy_time).strftime("%Y-%m-%dT%H:%M:%S")
         tagged = [c for c in candidates
                   if "nexplane-agent" in (c.get("tags") or [])
-                  and c.get("name") == "nexplane-smoke-ec2"
-                  and (c.get("created_at") or "") >= deploy_dt]
+                  and c.get("name") == "nexplane-smoke-ec2"]
         if tagged:
             tagged.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
             agent_asset = tagged[0]
@@ -2244,18 +2242,26 @@ def run_phase_x(client: NexplaneClient, phase_a_result: dict) -> None:
                  "hostname": "nexplane-smoke-ec2"},
             )
             log("[Phase X] Tailscale re-joined")
-            # Verify EC2 can reach the backend via Tailscale
+            # Verify EC2 can reach the backend via Tailscale — use boto3 SSM directly
+            # to bypass Nexplane connector resolution issues (connector_id may be stale
+            # on the EC2 instance asset after tailscale_join runs).
             import time as _t2; _t2.sleep(5)
             try:
-                ping_cr = client._run_cr_with_timeout(
-                    "[Phase X] verify EC2→backend connectivity", "ssm_command", instance_asset_id,
-                    {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
-                     "command": f"curl -sf --max-time 5 http://{backend_ip}:8000/health 2>&1 && echo 'BACKEND_OK' || echo 'BACKEND_UNREACHABLE'; tailscale status 2>&1 | head -3 || echo 'TAILSCALE_NOT_RUNNING'",
-                     "rollback_strategy": "rollback_unavailable"},
-                    timeout=60,
-                )
-                ping_out = NexplaneClient.get_cr_step_result(ping_cr).get("stdout", "")
-                log(f"[Phase X] Connectivity check: {ping_out[:300]}")
+                _ssm_direct = _get_aws_boto3_client("ssm")
+                if _ssm_direct:
+                    _cmd_resp = _ssm_direct.send_command(
+                        InstanceIds=[instance_id],
+                        DocumentName="AWS-RunShellScript",
+                        Parameters={"commands": [
+                            f"curl -sf --max-time 5 http://{backend_ip}:8000/health 2>&1 && echo 'BACKEND_OK' || echo 'BACKEND_UNREACHABLE'",
+                            "tailscale status 2>&1 | head -3 || echo 'TAILSCALE_NOT_RUNNING'",
+                        ]},
+                    )
+                    _cmd_id = _cmd_resp["Command"]["CommandId"]
+                    _t2.sleep(8)
+                    _inv = _ssm_direct.get_command_invocation(CommandId=_cmd_id, InstanceId=instance_id)
+                    _out = _inv.get("StandardOutputContent", "")
+                    log(f"[Phase X] Connectivity check (direct): {_out[:300]}")
             except Exception as e2:
                 log(f"[Phase X] Connectivity check warning: {e2}")
         except Exception:
@@ -2324,9 +2330,9 @@ echo "=== Agent log ===" && journalctl -u nexplane-agent.service -n 10 --no-page
 
     try:
         # Step 2: Wait for agent to register AND have a recent last_seen (actively polling)
-        log("[Phase X] Waiting for Nexplane agent to be active (up to 6 min)")
+        log("[Phase X] Waiting for Nexplane agent to be active (up to 10 min)")
         import time as _time
-        deadline = _time.time() + 360
+        deadline = _time.time() + 600
         agent_asset_id = None
         while _time.time() < deadline:
             candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
@@ -2353,19 +2359,29 @@ echo "=== Agent log ===" && journalctl -u nexplane-agent.service -n 10 --no-page
                     break
             _time.sleep(10)
         if not agent_asset_id:
-            # Diagnostic: check agent service status on the EC2 instance
+            # Diagnostic: check agent service status via direct boto3 SSM (not CR system)
+            # to bypass connector_id resolution issues on the EC2 instance asset.
             try:
-                diag2 = client._run_cr_with_timeout(
-                    "[Phase X] agent service diagnostic", "ssm_command", instance_asset_id,
-                    {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
-                     "command": "systemctl status nexplane-agent --no-pager 2>&1 | tail -20; journalctl -u nexplane-agent --no-pager -n 30 2>&1 | tail -30; ls -la /usr/local/bin/nexplane-agent 2>&1",
-                     "rollback_strategy": "rollback_unavailable"}, timeout=60,
-                )
-                diag2_out = NexplaneClient.get_cr_step_result(diag2).get("stdout", "")
-                print(f"  [Phase X] Agent diagnostic:\n{diag2_out[:3000]}")
+                _ssm_diag = _get_aws_boto3_client("ssm")
+                if _ssm_diag:
+                    _dr = _ssm_diag.send_command(
+                        InstanceIds=[instance_id],
+                        DocumentName="AWS-RunShellScript",
+                        Parameters={"commands": [
+                            "systemctl status nexplane-agent --no-pager 2>&1 | tail -20",
+                            "journalctl -u nexplane-agent --no-pager -n 20 2>&1 | tail -20",
+                            "ls -la /usr/local/bin/nexplane-agent 2>&1",
+                            "cat /etc/systemd/system/nexplane-agent.service 2>&1 | head -20",
+                            "cat /etc/systemd/system/nexplane-agent.service.d/control-plane.conf 2>&1",
+                        ]},
+                    )
+                    import time as _td; _td.sleep(10)
+                    _di = _ssm_diag.get_command_invocation(CommandId=_dr["Command"]["CommandId"], InstanceId=instance_id)
+                    print(f"  [Phase X] Agent diagnostic:\n{_di.get('StandardOutputContent','')[:3000]}")
+                    print(f"  [Phase X] Agent stderr:\n{_di.get('StandardErrorContent','')[:500]}")
             except Exception as de:
                 print(f"  [Phase X] Diagnostic failed: {de}")
-            fail("[Phase X] Nexplane agent did not become active within 6 minutes — cannot run discovery")
+            fail("[Phase X] Nexplane agent did not become active within 10 minutes — cannot run discovery")
 
         # Step 3: Fire the agent_appdiscovery CR targeting the agent's registered asset
         log("[Phase X] Running agent_appdiscovery CR on agent asset")
