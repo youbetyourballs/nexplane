@@ -645,6 +645,9 @@ export function AssetDetail() {
   const [discoverError, setDiscoverError] = useState<string | null>(null);
   const [showContainerizeWizard, setShowContainerizeWizard] = useState(false);
   const [containerizeApp, setContainerizeApp] = useState<any>(null);
+  const [scanPkgsLoading, setScanPkgsLoading] = useState(false);
+  const [scanPkgsError, setScanPkgsError] = useState<string | null>(null);
+  const [pkgFilter, setPkgFilter] = useState("");
 
   const { data: asset, isLoading } = useQuery({
     queryKey: ["asset", id],
@@ -713,6 +716,46 @@ export function AssetDetail() {
       setDiscoverError(err?.response?.data?.detail || "Discovery failed");
     } finally {
       setDiscoverLoading(false);
+    }
+  };
+
+  const handleScanPackages = async () => {
+    setScanPkgsLoading(true);
+    setScanPkgsError(null);
+    try {
+      const cr = await apiClient.post("/change-requests", {
+        change_type: "agent_listpkgs",
+        target_asset_ids: [asset?.id],
+        desired_outcome: {},
+        title: `Scan packages on ${asset?.name}`,
+        description: `Discover installed software packages on ${asset?.name}.`,
+      });
+      const crId = cr.data?.id ?? cr.data?.change_request?.id;
+      if (!crId) throw new Error("No CR id returned");
+      await apiClient.post(`/change-requests/${crId}/plan`);
+      await apiClient.post(`/change-requests/${crId}/submit-for-approval`);
+      await apiClient.post(`/change-requests/${crId}/approve`);
+      await apiClient.post(`/change-requests/${crId}/execute`);
+      // Poll until completed or failed
+      const poll = async () => {
+        for (let i = 0; i < 40; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const res = await apiClient.get(`/change-requests/${crId}`);
+          const status = res.data?.status;
+          if (status === "completed" || status === "failed") {
+            qc.invalidateQueries({ queryKey: ["asset", id] });
+            if (status === "failed") setScanPkgsError("Package scan failed.");
+            return;
+          }
+        }
+        setScanPkgsError("Scan timed out.");
+        qc.invalidateQueries({ queryKey: ["asset", id] });
+      };
+      poll().catch((e) => setScanPkgsError(e?.message ?? "Scan error")).finally(() => setScanPkgsLoading(false));
+      return; // loading stays true until poll completes
+    } catch (err: any) {
+      setScanPkgsError(err?.response?.data?.detail || err?.message || "Scan failed");
+      setScanPkgsLoading(false);
     }
   };
 
@@ -1161,6 +1204,76 @@ export function AssetDetail() {
               </div>
             )}
           </div>
+
+          {/* Software Inventory */}
+          {asset.asset_type === "server" && (() => {
+            const inventory = (asset.asset_metadata as Record<string, unknown>)?.software_inventory;
+            const packages = Array.isArray(inventory) ? (inventory as Array<Record<string, unknown>>) : [];
+            const filtered = pkgFilter.trim()
+              ? packages.filter((p) => String(p.name ?? "").toLowerCase().includes(pkgFilter.toLowerCase()))
+              : packages;
+            return (
+              <div className="bg-white border border-slate-200 rounded-lg p-5 mt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-slate-900">
+                    Software Inventory
+                    {packages.length > 0 && (
+                      <span className="ml-2 text-xs font-normal text-slate-400">({packages.length} packages)</span>
+                    )}
+                  </h2>
+                  <button
+                    onClick={handleScanPackages}
+                    disabled={scanPkgsLoading}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50"
+                  >
+                    {scanPkgsLoading ? "Scanning…" : "Scan Packages"}
+                  </button>
+                </div>
+                {scanPkgsError && (
+                  <p className="text-xs text-red-500 mb-2">{scanPkgsError}</p>
+                )}
+                {packages.length > 0 ? (
+                  <>
+                    <input
+                      type="text"
+                      value={pkgFilter}
+                      onChange={(e) => setPkgFilter(e.target.value)}
+                      placeholder="Filter packages…"
+                      className="w-full text-xs border border-slate-200 rounded px-2 py-1.5 mb-3 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                    <div className="overflow-auto max-h-72 rounded border border-slate-100">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 sticky top-0">
+                          <tr>
+                            <th className="text-left px-3 py-2 font-medium text-slate-500">Name</th>
+                            <th className="text-left px-3 py-2 font-medium text-slate-500">Version</th>
+                            <th className="text-left px-3 py-2 font-medium text-slate-500">Manager</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtered.length === 0 ? (
+                            <tr>
+                              <td colSpan={3} className="px-3 py-3 text-center text-slate-400">No packages match filter.</td>
+                            </tr>
+                          ) : filtered.map((pkg, i) => (
+                            <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
+                              <td className="px-3 py-1.5 font-mono text-slate-900">{String(pkg.name ?? "")}</td>
+                              <td className="px-3 py-1.5 text-slate-600">{String(pkg.version ?? "")}</td>
+                              <td className="px-3 py-1.5 text-slate-500">{String(pkg.manager ?? "")}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-xs text-slate-400 bg-slate-50 rounded-md px-3 py-4 text-center border border-slate-100">
+                    No package data — click Scan Packages to discover installed software
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Applications (containerization discovery) */}
           {(asset.asset_type === "server" || asset.asset_type === "endpoint") && (
