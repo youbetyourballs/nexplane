@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
+import FindingActionPanel from "./FindingActionPanel";
 
 interface Finding {
   id: string;
@@ -9,9 +10,14 @@ interface Finding {
   severity: string;
   cve_id: string | null;
   title: string;
+  description: string | null;
+  affected_package: string | null;
+  affected_version: string | null;
+  fixed_version: string | null;
   asset_id: string | null;
   asset_name: string | null;
   status: string;
+  assigned_to_user_id: string | null;
   change_request_id: string | null;
   ingested_at: string;
   sla_due_at: string | null;
@@ -84,6 +90,7 @@ export default function FindingQueue() {
   const [severityFilter, setSeverityFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("open");
   const [page, setPage] = useState(1);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const params = new URLSearchParams({ page: String(page), page_size: "25" });
@@ -154,54 +161,74 @@ export default function FindingQueue() {
                 <th className="text-left p-3 font-medium">Asset</th>
                 <th className="text-left p-3 font-medium">SLA</th>
                 <th className="text-left p-3 font-medium">Actions</th>
+                <th className="p-3 w-6"></th>
               </tr>
             </thead>
             <tbody>
               {data.findings.map((f) => (
-                <tr key={f.id} className="border-t hover:bg-gray-50">
-                  <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded border text-xs font-semibold uppercase ${SEVERITY_COLORS[f.severity] ?? ""}`}>
-                      {f.severity}
-                    </span>
-                  </td>
-                  <td className="p-3">
-                    <p className="font-medium text-sm">{f.cve_id ?? f.finding_type}</p>
-                    <p className="text-xs text-gray-500 truncate max-w-xs">{f.title}</p>
-                  </td>
-                  <td className="p-3 text-xs text-gray-700">{f.asset_name ?? "Unmatched"}</td>
-                  <td className="p-3">
-                    <SLABadge
-                      dueAt={f.sla_due_at}
-                      breached={f.sla_breached}
-                      escalated={f.sla_escalated}
-                    />
-                  </td>
-                  <td className="p-3 space-x-2">
-                    {f.change_request_id ? (
-                      <a
-                        href={`/change-requests/${f.change_request_id}`}
-                        className="text-blue-600 hover:underline text-xs"
-                      >
-                        Review CR
-                      </a>
-                    ) : (
+                <React.Fragment key={f.id}>
+                  <tr
+                    className="border-t hover:bg-gray-50 cursor-pointer"
+                    onClick={() => setExpandedId(expandedId === f.id ? null : f.id)}
+                  >
+                    <td className="p-3">
+                      <span className={`px-2 py-0.5 rounded border text-xs font-semibold uppercase ${SEVERITY_COLORS[f.severity] ?? ""}`}>
+                        {f.severity}
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      <p className="font-medium text-sm">{f.cve_id ?? f.finding_type}</p>
+                      <p className="text-xs text-gray-500 truncate max-w-xs">{f.title}</p>
+                    </td>
+                    <td className="p-3 text-xs text-gray-700">{f.asset_name ?? "Unmatched"}</td>
+                    <td className="p-3">
+                      <SLABadge
+                        dueAt={f.sla_due_at}
+                        breached={f.sla_breached}
+                        escalated={f.sla_escalated}
+                      />
+                    </td>
+                    <td className="p-3 space-x-2" onClick={(e) => e.stopPropagation()}>
+                      {f.change_request_id ? (
+                        <a
+                          href={`/change-requests/${f.change_request_id}`}
+                          className="text-blue-600 hover:underline text-xs"
+                        >
+                          Review CR
+                        </a>
+                      ) : (
+                        <button
+                          className="text-blue-600 hover:underline text-xs"
+                          onClick={() => generateCRMutation.mutate(f.id)}
+                          disabled={generateCRMutation.isPending}
+                        >
+                          Generate CR
+                        </button>
+                      )}
                       <button
-                        className="text-blue-600 hover:underline text-xs"
-                        onClick={() => generateCRMutation.mutate(f.id)}
-                        disabled={generateCRMutation.isPending}
+                        className="text-gray-500 hover:text-red-600 text-xs"
+                        onClick={() => suppressMutation.mutate(f.id)}
+                        disabled={suppressMutation.isPending}
                       >
-                        Generate CR
+                        Suppress
                       </button>
-                    )}
-                    <button
-                      className="text-gray-500 hover:text-red-600 text-xs"
-                      onClick={() => suppressMutation.mutate(f.id)}
-                      disabled={suppressMutation.isPending}
-                    >
-                      Suppress
-                    </button>
-                  </td>
-                </tr>
+                    </td>
+                    <td className="p-3 text-gray-400 text-xs select-none">
+                      {expandedId === f.id ? "▼" : "▶"}
+                    </td>
+                  </tr>
+                  {expandedId === f.id && (
+                    <tr key={`${f.id}-panel`}>
+                      <td colSpan={6} className="p-0">
+                        <FindingActionPanel
+                          finding={f}
+                          onClose={() => setExpandedId(null)}
+                          onUpdated={() => { setExpandedId(null); queryClient.invalidateQueries({ queryKey: ["findings"] }); }}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
