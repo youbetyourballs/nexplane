@@ -13,49 +13,18 @@ from __future__ import annotations
 from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 
 
-async def _get_probe_url(asset_ids: list) -> str:
-    """Return the backend's Tailscale URL for the dead-man's-switch probe.
-
-    Reads the nexplane_url stored in org settings (set during agent deploy).
-    Falls back to the Tailscale IP stored on the asset's AgentRegistration.
-    """
-    if not asset_ids:
-        return ""
-    import uuid
-    from sqlalchemy import select
-    from app.database import AsyncSessionLocal
-    from app.models.agent import AgentRegistration
-    from app.models.asset import Asset
-
-    try:
-        asset_id = uuid.UUID(asset_ids[0]) if isinstance(asset_ids[0], str) else asset_ids[0]
-    except (ValueError, AttributeError):
-        return ""
-    async with AsyncSessionLocal() as db:
-        asset = await db.get(Asset, asset_id)
-        if not asset:
-            return ""
-        reg_result = await db.execute(
-            select(AgentRegistration).where(
-                AgentRegistration.asset_id == asset_id,
-                AgentRegistration.organization_id == asset.organization_id,
-            )
-        )
-        reg = reg_result.scalar_one_or_none()
-        if reg and getattr(reg, "control_plane_url", None):
-            return reg.control_plane_url
-    return ""
-
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # Derive mode if not explicitly set: static when new_ip_v4 is provided, else dhcp.
     mode = parameters.get("mode") or ("static" if parameters.get("new_ip_v4") else "dhcp")
 
-    # Inject probe_url for dead-man's-switch if not provided by caller.
+    # Inject probe_url for dead-man's-switch if caller provided one.
+    # We do NOT look up the agent registration's control_plane_url here because it
+    # may be stale (e.g. after a Tailscale IP change). The Go agent falls back to
+    # its own NP_CONTROL_PLANE env var when probe_url is empty, which is always
+    # current (set by the systemd drop-in or service file on that host).
     probe_url = parameters.get("probe_url") or ""
-    if not probe_url and parameters.get("method") in ("commit_timer", "auto", None, ""):
-        probe_url = await _get_probe_url(asset_ids)
 
     commit_timer_seconds = int(parameters.get("commit_timer_seconds", 30))
 
