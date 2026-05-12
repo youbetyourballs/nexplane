@@ -4,8 +4,10 @@ package deepdiscover
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -82,6 +84,36 @@ func collectSystemdServicesLinux() []DiscoveredWorkload {
 		}
 
 		deps := collectSystemdDepsLinux(unitName)
+
+		pidOut, _ := execCommandLinux("systemctl", "show", "--property=MainPID", "--value", unitName).Output()
+		pid := 0
+		if pidStr := strings.TrimSpace(string(pidOut)); pidStr != "" && pidStr != "0" {
+			fmt.Sscanf(pidStr, "%d", &pid)
+		}
+
+		binOut, _ := execCommandLinux("systemctl", "show", "--property=ExecStart", "--value", unitName).Output()
+		binary := ""
+		if binStr := strings.TrimSpace(string(binOut)); binStr != "" {
+			if idx := strings.Index(binStr, "path="); idx >= 0 {
+				rest := binStr[idx+5:]
+				if end := strings.IndexAny(rest, " ;"); end > 0 {
+					binary = rest[:end]
+				} else {
+					binary = rest
+				}
+			}
+		}
+
+		confDir := "/etc/" + strings.TrimSuffix(unitName, ".service")
+		var cfgFiles []string
+		if entries, err := os.ReadDir(confDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					cfgFiles = append(cfgFiles, filepath.Join(confDir, e.Name()))
+				}
+			}
+		}
+
 		workloads = append(workloads, DiscoveredWorkload{
 			Name:               strings.TrimSuffix(unitName, ".service"),
 			RuntimeType:        RuntimeSystemd,
@@ -92,11 +124,11 @@ func collectSystemdServicesLinux() []DiscoveredWorkload {
 			IPCSockets:         []string{},
 			DataDirectories:    []DirInfo{},
 			Dependencies:       deps,
-			PIDFound:           false,
-			EnvVarNames:        []string{},
-			OpenFiles:          []string{},
-			RuntimeDeps:        []string{},
-			ConfigIntelligence: []ConfigEntry{},
+			PIDFound:           pid > 0,
+			EnvVarNames:        collectEnvVarNamesLinux(pid),
+			OpenFiles:          collectOpenFilesLinux(pid),
+			RuntimeDeps:        collectRuntimeDepsLinux(binary),
+			ConfigIntelligence: parseConfigFiles(cfgFiles),
 		})
 	}
 	return workloads
@@ -452,6 +484,106 @@ func detectHybridEdges(workloads []DiscoveredWorkload) []HybridEdge {
 	}
 
 	return edges
+}
+
+// collectEnvVarNamesLinux reads /proc/{pid}/environ and returns env var key names only.
+// Values are intentionally omitted to avoid capturing secrets.
+func collectEnvVarNamesLinux(pid int) []string {
+	if pid <= 0 {
+		return []string{}
+	}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+	if err != nil {
+		return []string{}
+	}
+	seen := map[string]bool{}
+	var names []string
+	for _, entry := range strings.Split(string(data), "\x00") {
+		idx := strings.IndexByte(entry, '=')
+		if idx <= 0 {
+			continue
+		}
+		key := entry[:idx]
+		if key != "" && !seen[key] {
+			seen[key] = true
+			names = append(names, key)
+		}
+	}
+	return names
+}
+
+// collectOpenFilesLinux reads /proc/{pid}/fd and returns paths to regular files.
+// Sockets, pipes, and anonymous fds are excluded.
+func collectOpenFilesLinux(pid int) []string {
+	if pid <= 0 {
+		return []string{}
+	}
+	fdDir := fmt.Sprintf("/proc/%d/fd", pid)
+	entries, err := os.ReadDir(fdDir)
+	if err != nil {
+		return []string{}
+	}
+	seen := map[string]bool{}
+	var files []string
+	for _, e := range entries {
+		link, err := os.Readlink(filepath.Join(fdDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		// Skip sockets, pipes, anon_inodes, and /proc or /dev paths
+		if strings.HasPrefix(link, "socket:") ||
+			strings.HasPrefix(link, "pipe:") ||
+			strings.HasPrefix(link, "anon_inode:") ||
+			strings.HasPrefix(link, "/proc/") ||
+			strings.HasPrefix(link, "/dev/") {
+			continue
+		}
+		if !seen[link] {
+			seen[link] = true
+			files = append(files, link)
+		}
+	}
+	return files
+}
+
+// collectRuntimeDepsLinux runs ldd on the binary and returns .so paths.
+func collectRuntimeDepsLinux(binary string) []string {
+	if binary == "" {
+		return []string{}
+	}
+	out, err := execCommandLinux("ldd", binary).Output()
+	if err != nil {
+		return []string{}
+	}
+	seen := map[string]bool{}
+	var deps []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, ".so") {
+			continue
+		}
+		// Format: "libssl.so.3 => /lib/x86_64-linux-gnu/libssl.so.3 (0x...)"
+		if idx := strings.Index(line, "=>"); idx >= 0 {
+			rest := strings.TrimSpace(line[idx+2:])
+			if i := strings.Index(rest, " ("); i >= 0 {
+				rest = strings.TrimSpace(rest[:i])
+			}
+			if rest != "" && rest != "not found" && !seen[rest] {
+				seen[rest] = true
+				deps = append(deps, rest)
+			}
+		} else {
+			parts := strings.Fields(line)
+			if len(parts) > 0 && strings.HasPrefix(parts[0], "/") {
+				p := parts[0]
+				if !seen[p] {
+					seen[p] = true
+					deps = append(deps, p)
+				}
+			}
+		}
+	}
+	return deps
 }
 
 // attachIPCSockets discovers Unix domain sockets and attaches them to workloads.
