@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +12,7 @@ from app.models.change_plan import ChangePlan, PlanGeneratedBy
 from app.models.change_request import ChangeRequest, ChangeRequestStatus, RiskLevel
 from app.models.execution_run import ExecutionRun, ExecutionStatus
 from app.models.user import User, UserRole
-from app.routers import current_user
+from app.routers import current_user, require_roles
 from app.schemas.approval import ApprovalCreate, ApprovalRead
 from app.schemas.change_plan import ChangePlanRead
 from app.schemas.change_request import ChangeRequestCreate, ChangeRequestRead, ChangeRequestSummary
@@ -103,6 +103,33 @@ async def create_change_request(
         select(ChangeRequest).where(ChangeRequest.id == cr.id).options(*_CR_OPTIONS)
     )
     return result.scalar_one()
+
+
+@router.post("/cleanup-stuck", dependencies=[Depends(require_roles(UserRole.admin))])
+async def cleanup_stuck_change_requests(
+    current_user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark all executing/verifying CRs as failed.
+
+    CRs stuck in these states were orphaned when the backend restarted
+    mid-execution. Call this to clear phantom activity from the dashboard.
+    """
+    result = await db.execute(
+        update(ChangeRequest)
+        .where(
+            ChangeRequest.status.in_([
+                ChangeRequestStatus.executing,
+                ChangeRequestStatus.verifying,
+            ]),
+            ChangeRequest.organization_id == current_user.organization_id,
+        )
+        .values(status=ChangeRequestStatus.failed, updated_at=datetime.now(timezone.utc))
+        .returning(ChangeRequest.id, ChangeRequest.title)
+    )
+    cleaned = [{"id": str(r[0]), "title": r[1]} for r in result.fetchall()]
+    await db.commit()
+    return {"cleaned": len(cleaned), "change_requests": cleaned}
 
 
 @router.get("/{cr_id}", response_model=ChangeRequestRead)

@@ -30,8 +30,52 @@ async def lifespan(app: FastAPI):
     init_catalog_service(pathlib.Path(__file__).parent / "connectors" / "catalog")
     scheduler_service.init_scheduler(lambda: AsyncSessionLocal())
     await scheduler_service.start()
+    # Scrub orphaned CRs — any CR still in-flight when the backend
+    # restarted will never complete; mark them failed now so the
+    # dashboard doesn't show phantom "executing" entries.
+    await _scrub_orphaned_crs()
     yield
     scheduler_service.stop()
+
+
+async def _scrub_orphaned_crs() -> None:
+    """Mark any executing/verifying CRs as failed on startup.
+
+    These CRs were mid-flight when the backend process exited. The
+    workflow engine has no context to resume them, so they are
+    permanently stuck. Marking them failed on startup keeps the
+    dashboard accurate and prevents the UI from showing phantom activity.
+    """
+    import logging
+    from sqlalchemy import update
+    from app.models.change_request import ChangeRequest, ChangeRequestStatus
+    from datetime import datetime, timezone
+
+    _log = logging.getLogger(__name__)
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                update(ChangeRequest)
+                .where(ChangeRequest.status.in_([
+                    ChangeRequestStatus.executing,
+                    ChangeRequestStatus.verifying,
+                ]))
+                .values(
+                    status=ChangeRequestStatus.failed,
+                    updated_at=datetime.now(timezone.utc),
+                )
+                .returning(ChangeRequest.id)
+            )
+            orphaned = result.fetchall()
+            await db.commit()
+            if orphaned:
+                _log.warning(
+                    "Scrubbed %d orphaned CR(s) (executing/verifying at startup): %s",
+                    len(orphaned),
+                    [str(r[0]) for r in orphaned],
+                )
+    except Exception as exc:
+        logging.getLogger(__name__).error("Failed to scrub orphaned CRs: %s", exc)
 
 
 app = FastAPI(
