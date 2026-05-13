@@ -173,7 +173,7 @@ function StepResultCard({
       )}
 
       {/* Condition result */}
-      {conditionResultPanel()}
+      {(conditionResultPanel() as unknown) as React.ReactNode}
 
       {/* Human checkpoint prompt + actions */}
       {sr.step_type === "human_checkpoint" && sr.status === "waiting_human" && (
