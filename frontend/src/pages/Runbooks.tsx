@@ -23,7 +23,7 @@ export function Runbooks() {
       <PageHeader
         title="Runbooks"
         subtitle="Composable, versioned workflows that chain change requests with conditional logic."
-        action={
+        actions={
           <button
             onClick={() => navigate("/runbooks/new")}
             className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-md hover:bg-brand-700 text-sm font-medium"
