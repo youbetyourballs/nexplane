@@ -183,9 +183,10 @@ async def _stage_ai_analysis(
         org_settings = org_settings_result.scalar_one_or_none()
 
     # Resolve provider/key/model
+    _DEFAULT_MODELS = {"openai": "gpt-4o", "anthropic": "claude-sonnet-4-6"}
     provider = "anthropic"
     api_key = ""
-    model = "claude-sonnet-4-6"
+    model = _DEFAULT_MODELS["anthropic"]
 
     if org_settings and org_settings.ai_providers_encrypted:
         data = secrets_svc.decrypt_json(org_settings.ai_providers_encrypted)
@@ -193,7 +194,7 @@ async def _stage_ai_analysis(
         providers = data.get("providers", {})
         if provider in providers and providers[provider].get("api_key"):
             api_key = providers[provider]["api_key"]
-            model = providers[provider].get("model") or model
+            model = providers[provider].get("model") or _DEFAULT_MODELS.get(provider, "gpt-4o")
     elif org_settings and org_settings.anthropic_api_key_encrypted:
         api_key = secrets_svc.decrypt(org_settings.anthropic_api_key_encrypted)
 
@@ -561,10 +562,17 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     except Exception as exc:
         step_results["execution_error"] = {"stage": "build_deploy_soak", "error": str(exc)}
-        raise RuntimeError(
-            f"containerize_auto failed at execution stage: {exc}. "
-            f"Stages completed: {list(step_results.keys())}"
-        ) from exc
+        # Return soft-failure dict so step_results (including ai_analysis) are stored in the CR.
+        # The workflow checks `failed: True` and marks the CR as failed.
+        return {
+            "action": "agent_containerize_auto",
+            "failed": True,
+            "error": str(exc),
+            "dry_run": dry_run,
+            "migration_units": migration_units,
+            "step_results": step_results,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     # Spawn retirement CR (skip in dry_run)
     if not dry_run and soak_result.get("passed") and org_id and requester_id:

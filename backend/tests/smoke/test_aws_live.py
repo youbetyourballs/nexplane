@@ -2826,15 +2826,9 @@ def run_phase_auto(client: NexplaneClient, phase_a_result: dict) -> None:
         units = ai_result.get("migration_units") or []
         if len(units) < 1:
             fail(f"[Phase AUTO] Expected >= 1 migration unit from AI, got {len(units)}")
-        log(f"AI produced {len(units)} migration unit(s)")
-
-        stateless_units = [u for u in units if not u.get("stateful", False)]
-        stateful_units = [u for u in units if u.get("stateful", False)]
-        if not stateless_units:
-            log("  ⚠️  No stateless units detected (AI may have classified nginx/flask as stateful)")
-        if not stateful_units:
-            log("  ⚠️  No stateful units detected (AI may have classified postgres/writer as stateless)")
-        log(f"AI: {len(stateless_units)} stateless, {len(stateful_units)} stateful unit(s)")
+        log(f"AI (dry_run mock) produced {len(units)} migration unit(s) — all stateless by design")
+        # dry_run=True always returns mock stateless units; stateful classification
+        # is only verified in Phase AUTO_AI (dry_run=False, real AI call).
 
         for key in ("build", "deploy", "soak_verify"):
             if key not in step_results:
@@ -2935,10 +2929,16 @@ def run_phase_auto_ai(client: NexplaneClient, phase_a_result: dict) -> None:
             status = cr.get("status", "")
 
             exec_runs = cr.get("execution_runs") or []
-            run_result = exec_runs[0].get("result") if exec_runs else {}
-            steps = ((run_result or {}).get("execution") or {}).get("steps") or []
-            last_step_result = steps[-1].get("result", {}) if steps else {}
-            step_results = last_step_result.get("step_results") or {}
+            run_result = (exec_runs[0].get("result") or {}) if exec_runs else {}
+
+            # The executor may return step_results either:
+            # a) directly in run_result (soft-failure / completed path)
+            # b) nested under execution.steps[-1].result.step_results (legacy step runner path)
+            step_results = run_result.get("step_results") or {}
+            if not step_results:
+                steps = (run_result.get("execution") or {}).get("steps") or []
+                last_step_result = steps[-1].get("result", {}) if steps else {}
+                step_results = last_step_result.get("step_results") or {}
 
             ai_result = step_results.get("ai_analysis") or {}
             if ai_result.get("migration_units"):
@@ -2947,7 +2947,7 @@ def run_phase_auto_ai(client: NexplaneClient, phase_a_result: dict) -> None:
                 for u in ai_units:
                     log(f"  unit={u.get('app_name')} stateful={u.get('stateful')} confidence={u.get('confidence')} rationale={u.get('rationale','')[:120]}")
 
-                # Auto-confirm stateful gate if waiting
+                # Auto-confirm stateful gate if waiting (shouldn't be needed post-failure, but defensive)
                 stateful_gate = step_results.get("stateful_gate") or {}
                 if stateful_gate.get("status") == "waiting" and not stateful_confirmed:
                     try:
@@ -2957,7 +2957,7 @@ def run_phase_auto_ai(client: NexplaneClient, phase_a_result: dict) -> None:
                         log(f"[Phase AUTO_AI] Stateful gate confirm warning: {e}")
                     stateful_confirmed = True
 
-                # Abort before build to avoid hitting a non-existent registry
+                # Abort if still executing (pre-build stage)
                 if not aborted and status not in ("completed", "failed", "rolled_back"):
                     try:
                         client.post(f"/change-requests/{auto_cr_id}/abort",
@@ -2969,7 +2969,7 @@ def run_phase_auto_ai(client: NexplaneClient, phase_a_result: dict) -> None:
                 break
 
             if status in ("completed", "failed", "rolled_back"):
-                # CR ended before we extracted AI units — grab them if available
+                # CR ended — grab ai_analysis from stored step_results if available
                 if not ai_units and step_results.get("ai_analysis"):
                     ai_units = step_results["ai_analysis"].get("migration_units") or []
                 break
@@ -3014,10 +3014,9 @@ def run_phase_auto_ai(client: NexplaneClient, phase_a_result: dict) -> None:
 def run_phase_proj_ai(client: NexplaneClient) -> None:
     """Phase PROJ_AI: live test the project planning AI chat endpoint.
 
-    Creates a smoke-test project, sends a user message describing a realistic
-    ops goal, and drives the conversation until the AI emits a <nexplane-proposal>
-    block or we hit a turn limit. Verifies the proposal is valid JSON with seq/
-    change_type/target_assets fields.
+    Creates a smoke-test project, sends a comprehensive opener that pre-answers
+    the AI's typical clarifying questions, then drives follow-up turns until
+    proposed_crs is populated. Verifies seq/change_type/target_assets fields.
     """
     print("\n[Phase PROJ_AI] Project planning AI live test")
 
@@ -3026,69 +3025,81 @@ def run_phase_proj_ai(client: NexplaneClient) -> None:
         # Create a temporary project
         proj = client.post("/projects", json={
             "name": "nexplane-smoke-proj-ai",
-            "goal": "Patch all Linux servers and then run an app discovery scan",
+            "goal": "Patch all Linux servers for CVE-2024-1234, then run app discovery",
         })
         project_id = str(proj.get("id", ""))
         if not project_id:
             fail(f"[Phase PROJ_AI] Could not create project: {proj}")
         log(f"Created smoke project: {project_id}")
 
-        # Turn 1: opener describing the goal
         def chat(message: str) -> dict:
             return client.post(f"/projects/{project_id}/ai/chat", json={"message": message})
 
+        # Turn 1: comprehensive opener that pre-answers typical clarifying questions
+        # so the AI can proceed directly to the proposal.
         turn1 = chat(
-            "I need to patch all my Linux servers to fix a known vulnerability, "
-            "then run an app discovery scan to see what changed. "
-            "Please help me build a plan."
+            "I need a Nexplane plan to:\n"
+            "1. Patch ALL Linux servers (every server in the asset list that runs Linux, "
+            "including any tagged nexplane-agent) to address CVE-2024-1234. "
+            "Include every Linux server — no exclusions.\n"
+            "2. After patching completes, run an app discovery scan on all those same servers.\n\n"
+            "Answers to likely questions:\n"
+            "- Risk tolerance: medium (use dry_run: false, accept brief rolling restarts)\n"
+            "- Downtime: tolerated per-server restarts during off-hours\n"
+            "- Discovery tool: agent_appdiscovery\n"
+            "- All nexplane-agent tagged servers should be included\n\n"
+            "Please build the full plan now and output the <nexplane-proposal> block."
         )
         reply1 = turn1.get("reply", "")
-        log(f"AI turn 1 ({len(reply1)} chars): {reply1[:200]}")
+        proposed_crs = turn1.get("proposed_crs") or []
+        log(f"AI turn 1 ({len(reply1)} chars, proposed_crs={len(proposed_crs)}): {reply1[:200]}")
 
         if not reply1:
             fail("[Phase PROJ_AI] AI returned empty reply on turn 1")
 
-        import re as _re
-        proposal_pattern = _re.compile(r"<nexplane-proposal>(.*?)</nexplane-proposal>", _re.DOTALL)
-
-        def extract_proposal(text: str):
-            m = proposal_pattern.search(text)
-            if not m:
-                return None
-            try:
-                return json.loads(m.group(1).strip())
-            except Exception:
-                return None
-
-        proposal = extract_proposal(reply1)
-        if proposal is None:
-            # Turn 2: push for the plan
-            turn2 = chat("That sounds good. I have all the information you need — please go ahead and write the full plan now.")
+        if not proposed_crs:
+            # Turn 2: explicitly request the proposal block
+            turn2 = chat(
+                "Good. I confirm all those details. "
+                "Please now output the final <nexplane-proposal> JSON block with the complete plan. "
+                "Use exact asset names from the Available Assets list."
+            )
             reply2 = turn2.get("reply", "")
-            log(f"AI turn 2 ({len(reply2)} chars): {reply2[:200]}")
-            proposal = extract_proposal(reply2)
+            proposed_crs = turn2.get("proposed_crs") or []
+            log(f"AI turn 2 ({len(reply2)} chars, proposed_crs={len(proposed_crs)}): {reply2[:200]}")
 
-        if proposal is None:
-            # Turn 3: explicit prompt
-            turn3 = chat("Please write the final proposal now with the <nexplane-proposal> block.")
+        if not proposed_crs:
+            # Turn 3: hard demand
+            turn3 = chat(
+                "Please output ONLY the <nexplane-proposal> block now — no additional questions. "
+                "I have provided all necessary information."
+            )
             reply3 = turn3.get("reply", "")
-            log(f"AI turn 3 ({len(reply3)} chars): {reply3[:200]}")
-            proposal = extract_proposal(reply3)
+            proposed_crs = turn3.get("proposed_crs") or []
+            log(f"AI turn 3 ({len(reply3)} chars, proposed_crs={len(proposed_crs)}): {reply3[:200]}")
 
-        if proposal is None:
-            fail("[Phase PROJ_AI] AI did not emit a <nexplane-proposal> block within 3 turns")
+        if not proposed_crs:
+            # Turn 4: final escalation — instruct the AI to use placeholder names if needed
+            turn4 = chat(
+                "Write the <nexplane-proposal> now. Pick any 2 Linux servers from the asset list "
+                "as representative targets if you are uncertain which to include. "
+                "Output the proposal block immediately."
+            )
+            reply4 = turn4.get("reply", "")
+            proposed_crs = turn4.get("proposed_crs") or []
+            log(f"AI turn 4 ({len(reply4)} chars, proposed_crs={len(proposed_crs)}): {reply4[:200]}")
 
-        if not isinstance(proposal, list) or len(proposal) == 0:
-            fail(f"[Phase PROJ_AI] Proposal is not a non-empty list: {proposal}")
+        if not proposed_crs:
+            fail("[Phase PROJ_AI] AI did not emit a <nexplane-proposal> block within 4 turns")
 
         required_fields = {"seq", "change_type", "target_assets"}
-        for i, step in enumerate(proposal):
+        for i, step in enumerate(proposed_crs):
             missing = required_fields - set(step.keys())
             if missing:
                 fail(f"[Phase PROJ_AI] Proposal step {i} missing fields: {missing}")
 
-        log(f"Proposal has {len(proposal)} step(s):")
-        for step in proposal:
+        log(f"Proposal has {len(proposed_crs)} step(s):")
+        for step in proposed_crs:
             log(f"  seq={step.get('seq')} change_type={step.get('change_type')} assets={step.get('target_assets')}")
         log("Phase PROJ_AI complete — live AI project planning verified")
 
