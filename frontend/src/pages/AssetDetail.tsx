@@ -11,6 +11,7 @@ import { PageLoading } from "../components/LoadingSpinner";
 import type { Asset, AssetType, Criticality } from "../types/api";
 import { IPMigrationWizard } from "../components/IPMigrationWizard";
 import { ContainerizationWizard } from "../components/ContainerizationWizard";
+import { MigrateDrawer } from "../components/MigrateDrawer";
 
 // Maps asset type → eligible change types with label + title/description templates
 interface QuickAction {
@@ -645,6 +646,7 @@ export function AssetDetail() {
   const [discoverError, setDiscoverError] = useState<string | null>(null);
   const [showContainerizeWizard, setShowContainerizeWizard] = useState(false);
   const [containerizeApp, setContainerizeApp] = useState<any>(null);
+  const [showMigrateDrawer, setShowMigrateDrawer] = useState(false);
   const [scanPkgsLoading, setScanPkgsLoading] = useState(false);
   const [scanPkgsError, setScanPkgsError] = useState<string | null>(null);
   const [pkgFilter, setPkgFilter] = useState("");
@@ -1164,6 +1166,10 @@ export function AssetDetail() {
                   <button
                     key={action.changeType}
                     onClick={() => {
+                      if (action.changeType === "agent_containerize_auto") {
+                        setShowMigrateDrawer(true);
+                        return;
+                      }
                       const params = new URLSearchParams({
                         changeType: action.changeType,
                         assetId: asset.id,
@@ -1359,6 +1365,15 @@ export function AssetDetail() {
           assetId={asset.id}
           preselectedApp={containerizeApp}
           onClose={() => { setShowContainerizeWizard(false); setContainerizeApp(null); }}
+        />
+      )}
+
+      {/* Migrate to Kubernetes drawer */}
+      {showMigrateDrawer && asset && (
+        <MigrateDrawer
+          assetId={asset.id}
+          assetName={asset.name}
+          onClose={() => setShowMigrateDrawer(false)}
         />
       )}
     </div>
