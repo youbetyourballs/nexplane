@@ -556,10 +556,11 @@ async def confirm_stateful(
             status_code=400,
             detail="confirm-stateful is only valid for agent_containerize_auto change requests"
         )
-    if cr.status not in (ChangeRequestStatus.executing, ChangeRequestStatus.verifying):
+    _terminal = {ChangeRequestStatus.completed, ChangeRequestStatus.failed, ChangeRequestStatus.rolled_back}
+    if cr.status in _terminal:
         raise HTTPException(
             status_code=400,
-            detail=f"CR must be executing to confirm stateful gate (current: {cr.status.value})"
+            detail=f"Cannot confirm stateful gate on a terminal CR (status: {cr.status.value})"
         )
     if cr.stateful_approved_at is not None:
         return {
