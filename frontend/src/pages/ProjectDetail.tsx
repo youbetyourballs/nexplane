@@ -68,14 +68,14 @@ export function ProjectDetail() {
   const [newCrOutcome, setNewCrOutcome] = useState("{}");
   const [newCrJsonError, setNewCrJsonError] = useState("");
 
-  const { data: project, isLoading } = useQuery({
+  const { data: project, isLoading } = useQuery<ProjectDetail>({
     queryKey: ["project", id],
     queryFn: () => projectsApi.get(id!),
     enabled: !isNew && !!id,
     refetchInterval: (query) => {
-      const data = (query as { state: { data?: typeof project } }).state?.data;
+      const data = (query.state as { data?: ProjectDetail }).data;
       if (!data) return false;
-      const active = data.members.some((m) =>
+      const active = data.members.some((m: ProjectDetail["members"][number]) =>
         ["executing", "verifying"].includes(m.change_request.status)
       );
       return active ? 5000 : false;

@@ -49,7 +49,7 @@ export function RunbookExecution() {
 
   if (isLoading || !ex) return <PageLoading />;
 
-  const runbookName = (ex as Record<string, unknown> & { runbook_snapshot?: { name?: string } }).runbook_snapshot?.name ?? "Runbook";
+  const runbookName = (ex as unknown as Record<string, unknown> & { runbook_snapshot?: { name?: string } }).runbook_snapshot?.name ?? "Runbook";
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
@@ -159,7 +159,7 @@ function StepResultCard({
         <div className="pl-6 mt-1 text-xs text-slate-500">
           Evaluated to:{" "}
           <span className={sr.result.evaluated_to ? "text-green-600" : "text-red-600"}>
-            {String(sr.result.evaluated_to)}
+            {String(sr.result.evaluated_to as unknown)}
           </span>
           {sr.result.jumped_to_step !== undefined && (
             <> → jumped to step {sr.result.jumped_to_step as number}</>

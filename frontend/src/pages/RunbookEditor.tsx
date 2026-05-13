@@ -65,7 +65,7 @@ export function RunbookEditor() {
       name,
       description: description || undefined,
       tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
-      steps,
+      steps: steps as unknown as RunbookStepOut[],
     };
     if (isNew) {
       const rb = await create.mutateAsync(payload);
