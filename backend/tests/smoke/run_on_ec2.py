@@ -40,7 +40,10 @@ AL2023_AMI = "ami-0953476d60561c955"
 RUNNER_USERDATA = """#!/bin/bash
 set -e
 dnf install -y python3-pip
+# Core deps for the smoke test runner
 pip3 install httpx boto3
+# Deps needed by app/ module (credential decryption helpers)
+pip3 install cryptography pydantic pydantic-settings sqlalchemy 2>/dev/null || true
 """
 
 
@@ -299,7 +302,7 @@ Examples:
         # Build the test command
         test_cmd_parts = [
             "cd /tmp/nexplane_smoke",
-            f"NEXPLANE_RUNNER_EC2=1 python3 smoke/test_aws_live.py"
+            f"NEXPLANE_RUNNER_EC2=1 PYTHONPATH=/tmp/nexplane_smoke python3 smoke/test_aws_live.py"
             f" --base-url {args.base_url}"
             f" --email {args.email}"
             f" --password {args.password}"
