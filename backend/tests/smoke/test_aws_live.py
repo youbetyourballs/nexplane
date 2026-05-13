@@ -2791,8 +2791,12 @@ def run_phase_auto(client: NexplaneClient, phase_a_result: dict) -> None:
                 step_results = ((exec_runs[0].get("result") or {}).get("step_results") or {})
                 stateful_gate = step_results.get("stateful_gate") or {}
                 if stateful_gate.get("status") == "waiting" and not stateful_confirmed:
-                    log("[Phase AUTO] Stateful gate fired -- auto-approving")
-                    client.post(f"/change-requests/{auto_cr_id}/confirm-stateful")
+                    log("[Phase AUTO] Stateful gate triggered — auto-confirming for smoke test")
+                    try:
+                        resp = client.post(f"/change-requests/{auto_cr_id}/confirm-stateful")
+                        log(f"[Phase AUTO] Stateful gate confirmed: {resp}")
+                    except Exception as e:
+                        log(f"[Phase AUTO] Stateful gate confirm warning: {e}")
                     stateful_confirmed = True
             if status in ("completed", "failed", "rolled_back"):
                 break
