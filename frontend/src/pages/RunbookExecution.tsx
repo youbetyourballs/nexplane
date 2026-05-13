@@ -155,17 +155,17 @@ function StepResultCard({
       )}
 
       {/* Condition result */}
-      {(sr.step_type === "condition" && sr.result?.evaluated_to !== undefined) && (
+      {sr.step_type === "condition" && sr.result?.evaluated_to !== undefined ? (
         <div className="pl-6 mt-1 text-xs text-slate-500">
           Evaluated to:{" "}
           <span className={sr.result.evaluated_to ? "text-green-600" : "text-red-600"}>
-            {String(sr.result.evaluated_to as unknown)}
+            {String(sr.result.evaluated_to)}
           </span>
-          {sr.result.jumped_to_step !== undefined && (
-            <> → jumped to step {sr.result.jumped_to_step as number}</>
-          )}
+          {sr.result.jumped_to_step !== undefined ? (
+            <> → jumped to step {String(sr.result.jumped_to_step)}</>
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* Human checkpoint prompt + actions */}
       {sr.step_type === "human_checkpoint" && sr.status === "waiting_human" && (
