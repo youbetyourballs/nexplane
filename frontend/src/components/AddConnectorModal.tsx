@@ -44,6 +44,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   tailscale: "Tailscale",
   terraform_local: "Terraform (Local CLI)",
   ansible_local: "Ansible (Local CLI)",
+  oci: "Oracle Cloud Infrastructure",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -87,6 +88,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   tailscale: "🔒",
   terraform_local: "🏗️",
   ansible_local: "⚙️",
+  oci: "🔶",
 };
 
 const ALL_TYPES = (Object.keys(CONNECTOR_LABELS) as ConnectorType[]).filter(

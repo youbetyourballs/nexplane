@@ -90,7 +90,7 @@ export function RunbookEditor() {
       <PageHeader
         title={isNew ? "New Runbook" : "Edit Runbook"}
         subtitle={isNew ? "Define steps to compose into a reusable workflow." : `Editing v${existing?.version ?? 1}`}
-        action={
+        actions={
           <div className="flex gap-2">
             {!isNew && (
               <button
