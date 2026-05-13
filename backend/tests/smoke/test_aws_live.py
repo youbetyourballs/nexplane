@@ -2916,12 +2916,22 @@ def run_phase_auto_ai(client: NexplaneClient, phase_a_result: dict) -> None:
                     json={"decision": "approved", "comment": "smoke test AUTO_AI"})
         client.post(f"/change-requests/{auto_cr_id}/execute")
 
+        # Pre-confirm the stateful gate immediately. The gate polls stateful_approved_at; if that
+        # field is set before the gate fires, it passes instantly. Without this pre-confirmation
+        # the gate blocks the executor (waiting for UI approval) and step_results are never stored,
+        # making it impossible for the poll loop below to detect the gate and confirm it normally.
+        try:
+            client.post(f"/change-requests/{auto_cr_id}/confirm-stateful")
+            log("[Phase AUTO_AI] Stateful gate pre-confirmed (will pass instantly when AI detects stateful workloads)")
+        except Exception as e:
+            log(f"[Phase AUTO_AI] Stateful gate pre-confirm note: {e}")
+
         # Poll until ai_analysis stage completes; then abort before build
         # The executor runs: discovery → fleet_cross_ref → ai_analysis → stateful_gate → build
         # We want to verify AI output, then abort before the build touches a real registry.
         deadline = time.time() + TIMEOUT_SECONDS * 2  # deep_discover can take 10-15 min on fresh EC2
         ai_units: list[dict] = []
-        stateful_confirmed = False
+        stateful_confirmed = True  # already confirmed above
         aborted = False
 
         while time.time() < deadline:
