@@ -109,6 +109,22 @@ export function RunbookExecution() {
   );
 }
 
+function ConditionResult({ result }: { result: Record<string, unknown> }) {
+  const val = result.evaluated_to;
+  if (val === undefined) return null;
+  return (
+    <div className="pl-6 mt-1 text-xs text-slate-500">
+      Evaluated to:{" "}
+      <span className={val ? "text-green-600" : "text-red-600"}>
+        {String(val)}
+      </span>
+      {result.jumped_to_step !== undefined && (
+        <> → jumped to step {String(result.jumped_to_step)}</>
+      )}
+    </div>
+  );
+}
+
 function StepResultCard({
   stepResult: sr,
   executionId: _executionId,
@@ -157,20 +173,7 @@ function StepResultCard({
       )}
 
       {/* Condition result */}
-      {
-        // @ts-ignore sr.result is Record<string,unknown>; children are safe at runtime
-        sr.step_type === "condition" && sr.result?.evaluated_to !== undefined && (
-          <div className="pl-6 mt-1 text-xs text-slate-500">
-            Evaluated to:{" "}
-            <span className={sr.result.evaluated_to ? "text-green-600" : "text-red-600"}>
-              {String(sr.result.evaluated_to)}
-            </span>
-            {sr.result.jumped_to_step !== undefined && (
-              <> → jumped to step {String(sr.result.jumped_to_step)}</>
-            )}
-          </div>
-        )
-      }
+      {sr.step_type === "condition" && <ConditionResult result={sr.result} />}
 
       {/* Human checkpoint prompt + actions */}
       {sr.step_type === "human_checkpoint" && sr.status === "waiting_human" && (
