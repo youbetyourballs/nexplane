@@ -73,7 +73,7 @@ export function RunbookExecution() {
             </span>
           </span>
         }
-        action={
+        actions={
           ["running", "waiting_human"].includes(ex.status) ? (
             <button
               onClick={() => abort.mutate()}
@@ -155,7 +155,7 @@ function StepResultCard({
       )}
 
       {/* Condition result */}
-      {sr.step_type === "condition" && sr.result?.evaluated_to !== undefined && (
+      {(sr.step_type === "condition" && sr.result?.evaluated_to !== undefined) && (
         <div className="pl-6 mt-1 text-xs text-slate-500">
           Evaluated to:{" "}
           <span className={sr.result.evaluated_to ? "text-green-600" : "text-red-600"}>
