@@ -114,12 +114,18 @@ def cleanup(client: NexplaneClient) -> None:
 # Phase A
 # ---------------------------------------------------------------------------
 
-def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_key: str = "") -> dict:
+def run_phase_a(client: NexplaneClient, cloud_account_id: str, tailscale_auth_key: str = "",
+                backend_tailscale_ip: str = "") -> dict:
     """Phase A: key pair + EC2 launch + Tailscale join + agent deploy."""
     print("\n[Phase A] EC2 launch + Tailscale + agent deploy")
 
     auth_key = client.get_tailscale_auth_key(tailscale_auth_key)
-    backend_ip = setup_backend_tailscale(auth_key)
+    if backend_tailscale_ip:
+        # Running from EC2 runner — backend already joined Tailscale in run_on_ec2.py
+        log(f"Backend Tailscale IP (pre-configured): {backend_tailscale_ip}")
+        backend_ip = backend_tailscale_ip
+    else:
+        backend_ip = setup_backend_tailscale(auth_key)
     agent_secret = client.get_agent_secret()
 
     client.run_cr(
@@ -4986,13 +4992,24 @@ def main():
     # Enforce EC2 runner policy: smoke tests should run from EC2, not local Docker.
     # Local Docker on Windows causes WatchFiles hot-reload interference that kills
     # in-flight backend workflow tasks. Use run_on_ec2.py to provision a runner.
-    _on_ec2 = False
-    try:
-        import urllib.request as _req
-        _r = _req.urlopen("http://169.254.169.254/latest/meta-data/instance-id", timeout=1)
-        _on_ec2 = bool(_r.read())
-    except Exception:
-        pass
+    import os as _os
+    _on_ec2 = bool(_os.environ.get("NEXPLANE_RUNNER_EC2"))  # set by run_on_ec2.py
+    if not _on_ec2:
+        # Fallback: detect EC2 via IMDSv2 token
+        try:
+            import urllib.request as _req
+            _tok_req = _req.Request(
+                "http://169.254.169.254/latest/api/token", method="PUT",
+                headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"}
+            )
+            _tok = _req.urlopen(_tok_req, timeout=1).read().decode()
+            _id_req = _req.Request(
+                "http://169.254.169.254/latest/meta-data/instance-id",
+                headers={"X-aws-ec2-metadata-token": _tok}
+            )
+            _on_ec2 = bool(_req.urlopen(_id_req, timeout=1).read())
+        except Exception:
+            pass
 
     if not _on_ec2 and not args.local:
         print("=" * 60)
@@ -5069,7 +5086,8 @@ def main():
 
     try:
         if "A" in phases:
-            phase_a_result = run_phase_a(client, cloud_account_id, args.tailscale_auth_key)
+            phase_a_result = run_phase_a(client, cloud_account_id, args.tailscale_auth_key,
+                                          getattr(args, "backend_tailscale_ip", ""))
         if "B" in phases:
             if phase_a_result is None:
                 fail("Phase B requires Phase A to have run first")
