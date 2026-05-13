@@ -127,7 +127,7 @@ function StepResultCard({
         )}s`
       : null;
 
-  const conditionResultPanel = (): JSX.Element | null => {
+  const conditionResultPanel = (): React.ReactElement | null => {
     if (sr.step_type !== "condition" || sr.result?.evaluated_to === undefined) return null;
     type CondResult = { evaluated_to: boolean; jumped_to_step?: number };
     const r = sr.result as unknown as CondResult;
