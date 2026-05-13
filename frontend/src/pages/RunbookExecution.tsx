@@ -112,15 +112,14 @@ export function RunbookExecution() {
 function ConditionResult({ result }: { result: Record<string, unknown> }) {
   const val = result.evaluated_to;
   if (val === undefined) return null;
+  const jumpedTo = typeof result.jumped_to_step === "number" ? result.jumped_to_step : null;
   return (
     <div className="pl-6 mt-1 text-xs text-slate-500">
       Evaluated to:{" "}
       <span className={val ? "text-green-600" : "text-red-600"}>
         {String(val)}
       </span>
-      {result.jumped_to_step !== undefined && (
-        <> → jumped to step {String(result.jumped_to_step)}</>
-      )}
+      {jumpedTo !== null ? <> → jumped to step {jumpedTo}</> : null}
     </div>
   );
 }
