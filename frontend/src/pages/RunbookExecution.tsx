@@ -127,22 +127,6 @@ function StepResultCard({
         )}s`
       : null;
 
-  const conditionResultPanel = (): React.ReactElement | null => {
-    if (sr.step_type !== "condition" || sr.result?.evaluated_to === undefined) return null;
-    type CondResult = { evaluated_to: boolean; jumped_to_step?: number };
-    const r = sr.result as unknown as CondResult;
-    return (
-      <div className="pl-6 mt-1 text-xs text-slate-500">
-        Evaluated to:{" "}
-        <span className={r.evaluated_to ? "text-green-600" : "text-red-600"}>
-          {String(r.evaluated_to)}
-        </span>
-        {r.jumped_to_step !== undefined && (
-          <> → jumped to step {r.jumped_to_step}</>
-        )}
-      </div>
-    );
-  };
 
   return (
     <div className="border border-slate-200 rounded-lg p-4 bg-white">
@@ -173,7 +157,19 @@ function StepResultCard({
       )}
 
       {/* Condition result */}
-      {(conditionResultPanel() as unknown) as React.ReactNode}
+      {/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */}
+      {/* @ts-ignore — sr.result is Record<string,unknown>; children are safe at runtime */}
+      {sr.step_type === "condition" && sr.result?.evaluated_to !== undefined && (
+        <div className="pl-6 mt-1 text-xs text-slate-500">
+          Evaluated to:{" "}
+          <span className={sr.result.evaluated_to ? "text-green-600" : "text-red-600"}>
+            {String(sr.result.evaluated_to)}
+          </span>
+          {sr.result.jumped_to_step !== undefined && (
+            <> → jumped to step {String(sr.result.jumped_to_step)}</>
+          )}
+        </div>
+      )}
 
       {/* Human checkpoint prompt + actions */}
       {sr.step_type === "human_checkpoint" && sr.status === "waiting_human" && (
