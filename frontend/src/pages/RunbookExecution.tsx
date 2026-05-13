@@ -126,8 +126,21 @@ function StepResultCard({
         )}s`
       : null;
 
-  const showConditionResult: boolean = sr.step_type === "condition" && sr.result?.evaluated_to !== undefined;
-  const evaluatedTo = showConditionResult ? sr.result.evaluated_to : undefined;
+  const conditionResultPanel = (): JSX.Element | null => {
+    if (sr.step_type !== "condition" || sr.result?.evaluated_to === undefined) return null;
+    const val = sr.result.evaluated_to;
+    return (
+      <div className="pl-6 mt-1 text-xs text-slate-500">
+        Evaluated to:{" "}
+        <span className={val ? "text-green-600" : "text-red-600"}>
+          {String(val)}
+        </span>
+        {sr.result.jumped_to_step !== undefined && (
+          <> → jumped to step {String(sr.result.jumped_to_step)}</>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="border border-slate-200 rounded-lg p-4 bg-white">
@@ -158,17 +171,7 @@ function StepResultCard({
       )}
 
       {/* Condition result */}
-      {showConditionResult && (
-        <div className="pl-6 mt-1 text-xs text-slate-500">
-          Evaluated to:{" "}
-          <span className={evaluatedTo ? "text-green-600" : "text-red-600"}>
-            {String(evaluatedTo)}
-          </span>
-          {sr.result.jumped_to_step !== undefined && (
-            <> → jumped to step {String(sr.result.jumped_to_step)}</>
-          )}
-        </div>
-      )}
+      {conditionResultPanel()}
 
       {/* Human checkpoint prompt + actions */}
       {sr.step_type === "human_checkpoint" && sr.status === "waiting_human" && (
