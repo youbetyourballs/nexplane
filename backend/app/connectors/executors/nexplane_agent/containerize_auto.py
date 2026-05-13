@@ -18,7 +18,7 @@ from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 # Stage 1: preflight_discovery
 # -------------------------------------------------------------------------
 
-async def _stage_preflight_discovery(asset_ids: list, timeout_seconds: int = 300) -> dict:
+async def _stage_preflight_discovery(asset_ids: list, timeout_seconds: int = 900) -> dict:
     """Run deep_discover agent job on the target asset."""
     return await dispatch_agent_job(
         command="deep_discover",
@@ -530,6 +530,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     from app.models.asset import Asset
     from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType
 
+    import logging as _logging
+    _log = _logging.getLogger("containerize_auto")
+    _log.info("[AUTO] execute() called asset_ids=%s dry_run=%s", asset_ids, parameters.get("dry_run"))
+
     if not asset_ids:
         raise RuntimeError("No asset_ids provided for agent_containerize_auto")
 
@@ -540,6 +544,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     org_id = ""
     requester_id = ""
     current_cr_id = ""
+    _log.info("[AUTO] opening DB session for org_id lookup")
     async with AsyncSessionLocal() as db:
         asset = await db.get(
             Asset,
@@ -562,6 +567,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             current_cr_id = str(current_cr.id) if current_cr else ""
             requester_id = str(current_cr.requester_id) if current_cr else org_id
 
+    _log.info("[AUTO] org_id=%s current_cr_id=%s — calling _stage_preflight_discovery", org_id, current_cr_id)
     step_results: dict[str, Any] = {}
 
     # Stage 1: preflight_discovery
