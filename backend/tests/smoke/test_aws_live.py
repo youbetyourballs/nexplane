@@ -2945,7 +2945,8 @@ def run_phase_auto_ai(client: NexplaneClient, phase_a_result: dict) -> None:
                 ai_units = ai_result["migration_units"]
                 log(f"[Phase AUTO_AI] AI analysis complete — {len(ai_units)} unit(s)")
                 for u in ai_units:
-                    log(f"  unit={u.get('app_name')} stateful={u.get('stateful')} confidence={u.get('confidence')} rationale={u.get('rationale','')[:120]}")
+                    apps = u.get("apps") or [u.get("name", "?")]
+                    log(f"  unit={apps} stateful={u.get('stateful')} data_risk={u.get('data_risk')} reasoning={u.get('reasoning','')[:120]}")
 
                 # Auto-confirm stateful gate if waiting (shouldn't be needed post-failure, but defensive)
                 stateful_gate = step_results.get("stateful_gate") or {}

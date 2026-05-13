@@ -110,10 +110,15 @@ async def _stage_fleet_cross_reference(
 # Stage 3: ai_analysis
 # -------------------------------------------------------------------------
 
-_ANALYSIS_SYSTEM_PROMPT = """You are a containerization migration expert analyzing workloads on a host.
-You will receive a dependency graph of running workloads and must determine the optimal containerization strategy.
+_ANALYSIS_SYSTEM_PROMPT = """You are a containerization migration expert analyzing application workloads on a Linux/Windows host.
+You will receive application-layer workloads (pre-filtered; OS daemons removed) and must determine the optimal containerization strategy for each.
 
-Each workload includes deep host enrichment: outbound_connections (real network peers), env_var_names (environment variable keys — no values for security), open_files (open file descriptors — hints at state), runtime_deps (.so/.dll paths), and config_intelligence (parsed config metadata such as nginx vhosts, upstream proxy targets, IIS site bindings). Use these to make accurate stateful/stateless and monolith/modular determinations.
+Each workload includes deep host enrichment:
+- outbound_connections: real network peers (IP:port)
+- env_var_names: environment variable keys — no values for security — look for DB_HOST, DATABASE_URL, POSTGRES_*, MYSQL_*, REDIS_URL, MONGO_URI, etc.
+- open_files: open file descriptors — database WAL files, socket files, data files indicate state
+- runtime_deps: .so/.dll paths — libpq (PostgreSQL), libmysqlclient (MySQL), etc. indicate DB client
+- config_intelligence: parsed config metadata — nginx vhosts, upstream targets, IIS bindings
 
 Return ONLY a JSON object matching this exact schema. No explanation text outside the JSON:
 {
@@ -125,22 +130,22 @@ Return ONLY a JSON object matching this exact schema. No explanation text outsid
       "pattern": "monolith",
       "stateful": false,
       "data_risk": "none",
-      "soak_seconds_recommended": 120,
-      "reasoning": "<one sentence explaining stateful/pattern classification based on the enrichment data>"
+      "soak_seconds_recommended": 60,
+      "reasoning": "<one sentence explaining stateful/pattern classification using specific enrichment signals>"
     }
   ],
   "migration_order": ["unit-1"],
   "warnings": []
 }
 
-Classification rules:
-- Stateful: any workload with data_directories, open_files pointing to databases or write-ahead logs, outbound_connections to database ports (5432, 3306, 1433, 6379, 27017), or env_var_names suggesting DB credentials (DB_HOST, DATABASE_URL, POSTGRES_*, REDIS_URL, etc.)
-- data_risk: "none" | "low" | "medium" | "high" — based on volume of open state files and database connections
-- pattern "monolith": workloads sharing IPC sockets or communicating only via localhost ports
-- pattern "modular": workloads on distinct network ports that could be independently deployed
-- config_intelligence vhosts/upstreams reveal service routing that affects whether apps are monolith or modular
-- Already-containerized workloads (docker/containerd/podman/kubernetes_pod) should be noted in warnings, not in migration_units
-- soak_seconds_recommended: 60 for stateless, 180-300 for stateful, 120 default"""
+Classification rules — apply to EACH workload independently:
+- Create one migration_unit per distinct application service (one for nginx, one for postgresql, one for redis, etc.)
+- Stateful = true if ANY of: data_directories present, open_files contain .db/.wal/.log/.mdb paths, outbound_connections to database ports (5432, 3306, 1433, 6379, 27017, 9200), env_var_names contain DB_HOST/DATABASE_URL/POSTGRES_*/MYSQL_*/REDIS_URL/MONGO_URI, runtime_deps contain libpq/libmysql/libsqlite, workload name is postgresql/mysql/mongodb/redis/mariadb/cassandra/elasticsearch
+- data_risk: "high" for primary DB servers, "medium" for DB-connected apps, "low" for file-backed apps, "none" for stateless
+- pattern "monolith": workloads communicating only via localhost or IPC (same unit)
+- pattern "modular": workloads on distinct external-facing ports that could be independently deployed
+- soak_seconds_recommended: 60 for stateless, 180 for DB-connected apps, 300 for primary DB servers
+- Already-containerized workloads (runtime_type: docker/containerd/podman/kubernetes_pod) go to warnings only"""
 
 
 async def _stage_ai_analysis(
@@ -201,8 +206,59 @@ async def _stage_ai_analysis(
     if not api_key:
         raise RuntimeError("No AI provider API key configured for this organization")
 
+    # Pre-filter: remove OS-level daemons that have no application signals.
+    # Keeping only workloads with at least one signal reduces context noise and
+    # helps the AI focus on application services rather than grouping everything.
+    _SYSTEM_DAEMON_NAMES = {
+        "systemd", "journald", "systemd-journald", "systemd-logind", "systemd-resolved",
+        "systemd-networkd", "systemd-udevd", "systemd-timesyncd", "systemd-oomd",
+        "dbus", "dbus-daemon", "dbus-broker",
+        "NetworkManager", "network-manager", "wpa_supplicant",
+        "kernel", "kthread", "ksoftirqd", "kworker", "migration",
+        "polkitd", "udisksd", "udevd", "acpid",
+        "sshd", "crond", "atd", "rsyslogd", "auditd", "chronyd",
+        "amazon-ssm-agent", "ssm-agent", "ssm-session-worker",
+        "snapd", "multipathd", "irqbalance", "lvm2", "lvmetad",
+        "agetty", "login", "bash", "sh", "python", "python3",
+    }
+
+    def _has_app_signal(w: dict) -> bool:
+        """Return True if the workload has any application-layer signal worth analyzing."""
+        if w.get("listening_ports"):
+            return True
+        if w.get("data_directories"):
+            return True
+        if w.get("env_var_names"):
+            return True
+        if any(
+            any(kw in f.lower() for kw in (".db", ".wal", ".log", ".mdb", ".sock", "postgres", "mysql", "redis"))
+            for f in w.get("open_files", [])
+        ):
+            return True
+        name_lower = (w.get("name") or "").lower()
+        if any(kw in name_lower for kw in ("postgres", "mysql", "redis", "mongo", "nginx", "apache", "flask", "django", "rails", "node", "java", "tomcat", "elastic", "kafka", "rabbit")):
+            return True
+        return False
+
+    app_workloads = [
+        w for w in discovery_result.get("workloads", [])
+        if w.get("name") not in _SYSTEM_DAEMON_NAMES and _has_app_signal(w)
+    ]
+    # Fallback: if filtering left nothing, send top-10 by signal richness
+    if not app_workloads:
+        app_workloads = sorted(
+            discovery_result.get("workloads", []),
+            key=lambda w: (
+                len(w.get("listening_ports", [])) * 3 +
+                len(w.get("env_var_names", [])) * 2 +
+                len(w.get("data_directories", [])) * 2 +
+                len(w.get("open_files", []))
+            ),
+            reverse=True,
+        )[:10]
+
     workloads_summary = []
-    for w in discovery_result.get("workloads", []):
+    for w in app_workloads:
         workloads_summary.append({
             "name": w.get("name"),
             "runtime_type": w.get("runtime_type"),
