@@ -126,6 +126,10 @@ function StepResultCard({
         )}s`
       : null;
 
+  const evaluatedTo = sr.step_type === "condition" && sr.result?.evaluated_to !== undefined
+    ? sr.result.evaluated_to
+    : undefined;
+
   return (
     <div className="border border-slate-200 rounded-lg p-4 bg-white">
       <div className="flex items-center gap-2 mb-1">
@@ -155,17 +159,17 @@ function StepResultCard({
       )}
 
       {/* Condition result */}
-      {sr.step_type === "condition" && sr.result?.evaluated_to !== undefined ? (
+      {evaluatedTo !== undefined && (
         <div className="pl-6 mt-1 text-xs text-slate-500">
           Evaluated to:{" "}
-          <span className={sr.result.evaluated_to ? "text-green-600" : "text-red-600"}>
-            {String(sr.result.evaluated_to)}
+          <span className={evaluatedTo ? "text-green-600" : "text-red-600"}>
+            {String(evaluatedTo)}
           </span>
-          {sr.result.jumped_to_step !== undefined ? (
+          {sr.result.jumped_to_step !== undefined && (
             <> → jumped to step {String(sr.result.jumped_to_step)}</>
-          ) : null}
+          )}
         </div>
-      ) : null}
+      )}
 
       {/* Human checkpoint prompt + actions */}
       {sr.step_type === "human_checkpoint" && sr.status === "waiting_human" && (
