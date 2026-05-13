@@ -172,7 +172,7 @@ function StepResultCard({
       )}
 
       {/* Condition result */}
-      {sr.step_type === "condition" && <ConditionResult result={sr.result} />}
+      {sr.step_type === "condition" ? <ConditionResult result={sr.result} /> : null}
 
       {/* Human checkpoint prompt + actions */}
       {sr.step_type === "human_checkpoint" && sr.status === "waiting_human" && (
