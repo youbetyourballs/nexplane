@@ -126,9 +126,8 @@ function StepResultCard({
         )}s`
       : null;
 
-  const evaluatedTo = sr.step_type === "condition" && sr.result?.evaluated_to !== undefined
-    ? sr.result.evaluated_to
-    : undefined;
+  const showConditionResult: boolean = sr.step_type === "condition" && sr.result?.evaluated_to !== undefined;
+  const evaluatedTo = showConditionResult ? sr.result.evaluated_to : undefined;
 
   return (
     <div className="border border-slate-200 rounded-lg p-4 bg-white">
@@ -159,7 +158,7 @@ function StepResultCard({
       )}
 
       {/* Condition result */}
-      {evaluatedTo !== undefined && (
+      {showConditionResult && (
         <div className="pl-6 mt-1 text-xs text-slate-500">
           Evaluated to:{" "}
           <span className={evaluatedTo ? "text-green-600" : "text-red-600"}>
