@@ -4975,8 +4975,41 @@ def main():
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
+    parser.add_argument(
+        "--local", action="store_true",
+        help="Acknowledge that you are running locally (not recommended). "
+             "Prefer: python tests/smoke/run_on_ec2.py to run from a dedicated EC2 runner."
+    )
     args = parser.parse_args()
     phases = {p.strip().upper() for p in args.phases.split(",")}
+
+    # Enforce EC2 runner policy: smoke tests should run from EC2, not local Docker.
+    # Local Docker on Windows causes WatchFiles hot-reload interference that kills
+    # in-flight backend workflow tasks. Use run_on_ec2.py to provision a runner.
+    _on_ec2 = False
+    try:
+        import urllib.request as _req
+        _r = _req.urlopen("http://169.254.169.254/latest/meta-data/instance-id", timeout=1)
+        _on_ec2 = bool(_r.read())
+    except Exception:
+        pass
+
+    if not _on_ec2 and not args.local:
+        print("=" * 60)
+        print("⚠️  NOT RUNNING ON EC2")
+        print("=" * 60)
+        print()
+        print("Smoke tests must run from a cloud runner to avoid local Docker")
+        print("hot-reload interference. Use the EC2 runner instead:")
+        print()
+        print("  python backend/tests/smoke/run_on_ec2.py \\")
+        print(f"    --email {args.email} --phases {args.phases}")
+        print()
+        print("To run locally anyway (not recommended):")
+        print(f"  Add --local to your command")
+        print()
+        import sys as _sys
+        _sys.exit(1)
 
     print("=" * 60)
     print(f"Nexplane AWS Live Smoke Test — phases: {', '.join(sorted(phases))}")
