@@ -104,6 +104,31 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
             await update_execution_run_status(execution_run_id, "failed", {"error": str(exc)})
         return
 
+    # Soft-failure: executor returned {"failed": True, ...} with partial step_results preserved.
+    # activity_execute_change wraps the executor result as {"steps": [{"result": executor_dict}]},
+    # so we check both the top-level result and the first step's result.
+    _executor_result = execution_result
+    if isinstance(execution_result, dict) and not execution_result.get("failed"):
+        _steps = execution_result.get("steps") or []
+        if _steps and isinstance(_steps[0].get("result"), dict):
+            _executor_result = _steps[0]["result"]
+    if isinstance(_executor_result, dict) and _executor_result.get("failed"):
+        await write_audit_event(
+            organization_id=org_id,
+            event_type="execution.failed",
+            event_payload={"error": execution_result.get("error", "executor soft-failure")},
+            actor_id=actor_id,
+            change_request_id=cr_id,
+        )
+        await update_change_request_status(cr_id, "failed")
+        if execution_run_id:
+            # Store in the same nested shape as a normal completion so consumers can read step_results.
+            await update_execution_run_status(
+                execution_run_id, "failed",
+                {"execution": execution_result, "soft_failure": True}
+            )
+        return
+
     # Post-execution: persist discovered applications to asset_metadata
     if data.get("change_type") == "agent_appdiscovery":
         await activity_write_appdiscovery_metadata(
