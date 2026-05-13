@@ -2919,7 +2919,7 @@ def run_phase_auto_ai(client: NexplaneClient, phase_a_result: dict) -> None:
         # Poll until ai_analysis stage completes; then abort before build
         # The executor runs: discovery → fleet_cross_ref → ai_analysis → stateful_gate → build
         # We want to verify AI output, then abort before the build touches a real registry.
-        deadline = time.time() + TIMEOUT_SECONDS
+        deadline = time.time() + TIMEOUT_SECONDS * 2  # deep_discover can take 10-15 min on fresh EC2
         ai_units: list[dict] = []
         stateful_confirmed = False
         aborted = False
