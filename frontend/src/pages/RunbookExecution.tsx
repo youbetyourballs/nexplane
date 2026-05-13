@@ -109,15 +109,12 @@ export function RunbookExecution() {
   );
 }
 
-function ConditionResult({ result }: { result: Record<string, unknown> }) {
-  const val = result.evaluated_to;
-  if (val === undefined) return null;
-  const jumpedTo = typeof result.jumped_to_step === "number" ? result.jumped_to_step : null;
+function ConditionResult({ evaluatedTo, jumpedTo }: { evaluatedTo: boolean; jumpedTo: number | null }) {
   return (
     <div className="pl-6 mt-1 text-xs text-slate-500">
       Evaluated to:{" "}
-      <span className={val ? "text-green-600" : "text-red-600"}>
-        {String(val)}
+      <span className={evaluatedTo ? "text-green-600" : "text-red-600"}>
+        {String(evaluatedTo)}
       </span>
       {jumpedTo !== null ? <> → jumped to step {jumpedTo}</> : null}
     </div>
@@ -172,7 +169,12 @@ function StepResultCard({
       )}
 
       {/* Condition result */}
-      {sr.step_type === "condition" ? <ConditionResult result={sr.result} /> : null}
+      {sr.step_type === "condition" ? (
+        <ConditionResult
+          evaluatedTo={Boolean(sr.result.evaluated_to)}
+          jumpedTo={typeof sr.result.jumped_to_step === "number" ? sr.result.jumped_to_step : null}
+        />
+      ) : null}
 
       {/* Human checkpoint prompt + actions */}
       {sr.step_type === "human_checkpoint" && sr.status === "waiting_human" && (
