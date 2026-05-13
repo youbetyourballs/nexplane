@@ -779,4 +779,10 @@ def make_base_parser(description: str) -> argparse.ArgumentParser:
     parser.add_argument("--base-url", default="http://localhost:8000")
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)
+    parser.add_argument(
+        "--backend-tailscale-ip", default="",
+        help="Pre-known backend Tailscale IP (set by run_on_ec2.py). "
+             "When provided, Phase A skips setup_backend_tailscale() since the "
+             "backend is already joined to Tailscale by the EC2 runner script."
+    )
     return parser
