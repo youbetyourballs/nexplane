@@ -105,7 +105,12 @@ async def dispatch_agent_job(
                 select(AgentJob).where(AgentJob.id == job_id)
             )
             job = result.scalar_one_or_none()
-            if job and job.status not in (AgentJobStatus.pending, AgentJobStatus.running):
+            if job is None:
+                # Job was deleted (e.g., cascade from asset deletion) — treat as immediate failure
+                raise RuntimeError(
+                    f"Agent job {job_id} disappeared from DB (asset or registration may have been deleted)"
+                )
+            if job.status not in (AgentJobStatus.pending, AgentJobStatus.running):
                 if job.status == AgentJobStatus.completed:
                     return job.result or {"command": command, "status": "completed"}
                 elif job.status == AgentJobStatus.failed:
