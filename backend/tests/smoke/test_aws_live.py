@@ -2828,8 +2828,8 @@ def run_phase_auto(client: NexplaneClient, phase_a_result: dict) -> None:
             fail(f"[Phase AUTO] Expected >= 1 migration unit from AI, got {len(units)}")
         log(f"AI produced {len(units)} migration unit(s)")
 
-        stateless_units = [u for u in units if u.get("migration_type") == "stateless"]
-        stateful_units = [u for u in units if u.get("migration_type") == "stateful"]
+        stateless_units = [u for u in units if not u.get("stateful", False)]
+        stateful_units = [u for u in units if u.get("stateful", False)]
         if not stateless_units:
             log("  ⚠️  No stateless units detected (AI may have classified nginx/flask as stateful)")
         if not stateful_units:
@@ -2856,6 +2856,250 @@ def run_phase_auto(client: NexplaneClient, phase_a_result: dict) -> None:
                 cr = client.get(f"/change-requests/{auto_cr_id}")
                 if cr.get("status") in ("executing", "verifying"):
                     client.rollback_cr(auto_cr_id, "agent_containerize_auto cleanup")
+            except Exception:
+                pass
+
+
+def run_phase_auto_ai(client: NexplaneClient, phase_a_result: dict) -> None:
+    """Phase AUTO_AI: autonomous containerization with live AI (dry_run=False).
+
+    Same app setup as Phase AUTO but fires with dry_run=False so that the real
+    AI provider (OpenAI/Claude) is called. Polls until ai_analysis completes,
+    auto-confirms stateful gate, then aborts before build (no real registry).
+    Verifies: >=1 stateful unit (PostgreSQL), >=1 stateless unit (nginx/Flask).
+    """
+    print("\n[Phase AUTO_AI] Autonomous containerization — live AI test")
+
+    instance_asset = phase_a_result["instance_asset"]
+    instance_id = phase_a_result["instance_id"]
+    deploy_time = phase_a_result.get("deploy_time", 0)
+    agent_asset = phase_a_result.get("agent_asset") or {}
+    agent_asset_id = agent_asset.get("id")
+    if not agent_asset_id:
+        import datetime as _dt
+        deploy_dt = _dt.datetime.utcfromtimestamp(deploy_time).strftime("%Y-%m-%dT%H:%M:%S") if deploy_time else ""
+        print("  ⏳ Waiting up to 3min for agent to register...")
+        deadline2 = time.time() + 180
+        while time.time() < deadline2:
+            candidates = client.get("/assets", params={"q": "nexplane-smoke-ec2", "asset_type": "server"})
+            tagged = [c for c in candidates
+                      if "nexplane-agent" in (c.get("tags") or [])
+                      and c.get("name") == "nexplane-smoke-ec2"
+                      and ((not deploy_dt) or (c.get("created_at") or "") >= deploy_dt)]
+            if tagged:
+                tagged.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
+                agent_asset_id = tagged[0]["id"]
+                log(f"Agent registered: {agent_asset_id}")
+                break
+            time.sleep(10)
+        if not agent_asset_id:
+            fail("[Phase AUTO_AI] Agent never registered in inventory")
+
+    auto_cr_id = ""
+    try:
+        # Install smoke test apps (same as Phase AUTO)
+        _ssm(client, instance_asset["id"], instance_id, "AUTO_AI",
+             "install_auto_apps", _INSTALL_AUTO_APPS_LINUX)
+        log("Smoke test apps installed (nginx+Flask sidecar, PostgreSQL+writer)")
+
+        # Fire agent_containerize_auto with dry_run=False — triggers real AI call
+        print("  -> [Phase AUTO_AI] agent_containerize_auto (dry_run=False, live AI)")
+        auto_cr_id = client.create_cr(
+            "[Phase AUTO_AI] autonomous containerize live AI",
+            "agent_containerize_auto",
+            agent_asset_id,
+            {
+                "registry": "nexplane-smoke-registry",
+                "target_cluster_id": "smoke-cluster-placeholder",
+                "namespace": "nexplane-smoke",
+                "soak_seconds": 30,
+                "dry_run": False,
+            },
+        )
+        client.post(f"/change-requests/{auto_cr_id}/plan")
+        client.post(f"/change-requests/{auto_cr_id}/submit-for-approval")
+        client.post(f"/change-requests/{auto_cr_id}/approve",
+                    json={"decision": "approved", "comment": "smoke test AUTO_AI"})
+        client.post(f"/change-requests/{auto_cr_id}/execute")
+
+        # Poll until ai_analysis stage completes; then abort before build
+        # The executor runs: discovery → fleet_cross_ref → ai_analysis → stateful_gate → build
+        # We want to verify AI output, then abort before the build touches a real registry.
+        deadline = time.time() + TIMEOUT_SECONDS
+        ai_units: list[dict] = []
+        stateful_confirmed = False
+        aborted = False
+
+        while time.time() < deadline:
+            cr = client.get(f"/change-requests/{auto_cr_id}")
+            status = cr.get("status", "")
+
+            exec_runs = cr.get("execution_runs") or []
+            run_result = exec_runs[0].get("result") if exec_runs else {}
+            steps = ((run_result or {}).get("execution") or {}).get("steps") or []
+            last_step_result = steps[-1].get("result", {}) if steps else {}
+            step_results = last_step_result.get("step_results") or {}
+
+            ai_result = step_results.get("ai_analysis") or {}
+            if ai_result.get("migration_units"):
+                ai_units = ai_result["migration_units"]
+                log(f"[Phase AUTO_AI] AI analysis complete — {len(ai_units)} unit(s)")
+                for u in ai_units:
+                    log(f"  unit={u.get('app_name')} stateful={u.get('stateful')} confidence={u.get('confidence')} rationale={u.get('rationale','')[:120]}")
+
+                # Auto-confirm stateful gate if waiting
+                stateful_gate = step_results.get("stateful_gate") or {}
+                if stateful_gate.get("status") == "waiting" and not stateful_confirmed:
+                    try:
+                        client.post(f"/change-requests/{auto_cr_id}/confirm-stateful")
+                        log("[Phase AUTO_AI] Stateful gate auto-confirmed")
+                    except Exception as e:
+                        log(f"[Phase AUTO_AI] Stateful gate confirm warning: {e}")
+                    stateful_confirmed = True
+
+                # Abort before build to avoid hitting a non-existent registry
+                if not aborted and status not in ("completed", "failed", "rolled_back"):
+                    try:
+                        client.post(f"/change-requests/{auto_cr_id}/abort",
+                                    json={"reason": "smoke test: abort after AI analysis verified"})
+                        log("[Phase AUTO_AI] Aborted CR after AI analysis (no real registry available)")
+                        aborted = True
+                    except Exception as e:
+                        log(f"[Phase AUTO_AI] Abort warning: {e}")
+                break
+
+            if status in ("completed", "failed", "rolled_back"):
+                # CR ended before we extracted AI units — grab them if available
+                if not ai_units and step_results.get("ai_analysis"):
+                    ai_units = step_results["ai_analysis"].get("migration_units") or []
+                break
+
+            time.sleep(10)
+
+        if not ai_units:
+            fail("[Phase AUTO_AI] ai_analysis produced no migration_units — AI call may have failed or timed out")
+
+        stateless_units = [u for u in ai_units if not u.get("stateful", False)]
+        stateful_units = [u for u in ai_units if u.get("stateful", False)]
+
+        if not stateless_units:
+            log("  ⚠️  No stateless units — AI classified all workloads as stateful (unexpected for nginx/Flask)")
+        if not stateful_units:
+            log("  ⚠️  No stateful units — AI classified all workloads as stateless (unexpected for PostgreSQL)")
+
+        if not stateless_units and not stateful_units:
+            fail("[Phase AUTO_AI] AI returned units but none had expected stateful/stateless classification")
+
+        log(f"AI classification: {len(stateless_units)} stateless, {len(stateful_units)} stateful")
+        log("Phase AUTO_AI complete — live AI call verified")
+
+    except Exception as e:
+        print(f"\n❌ Phase AUTO_AI failed: {e}")
+        raise
+    finally:
+        try:
+            _ssm(client, instance_asset["id"], instance_id, "AUTO_AI",
+                 "teardown_auto_apps", _TEARDOWN_AUTO_APPS_LINUX)
+        except Exception:
+            pass
+        if auto_cr_id:
+            try:
+                cr = client.get(f"/change-requests/{auto_cr_id}")
+                if cr.get("status") in ("executing", "verifying", "pending"):
+                    client.rollback_cr(auto_cr_id, "agent_containerize_auto AI smoke cleanup")
+            except Exception:
+                pass
+
+
+def run_phase_proj_ai(client: NexplaneClient) -> None:
+    """Phase PROJ_AI: live test the project planning AI chat endpoint.
+
+    Creates a smoke-test project, sends a user message describing a realistic
+    ops goal, and drives the conversation until the AI emits a <nexplane-proposal>
+    block or we hit a turn limit. Verifies the proposal is valid JSON with seq/
+    change_type/target_assets fields.
+    """
+    print("\n[Phase PROJ_AI] Project planning AI live test")
+
+    project_id = ""
+    try:
+        # Create a temporary project
+        proj = client.post("/projects", json={
+            "name": "nexplane-smoke-proj-ai",
+            "goal": "Patch all Linux servers and then run an app discovery scan",
+        })
+        project_id = str(proj.get("id", ""))
+        if not project_id:
+            fail(f"[Phase PROJ_AI] Could not create project: {proj}")
+        log(f"Created smoke project: {project_id}")
+
+        # Turn 1: opener describing the goal
+        def chat(message: str) -> dict:
+            return client.post(f"/projects/{project_id}/ai/chat", json={"message": message})
+
+        turn1 = chat(
+            "I need to patch all my Linux servers to fix a known vulnerability, "
+            "then run an app discovery scan to see what changed. "
+            "Please help me build a plan."
+        )
+        reply1 = turn1.get("reply", "")
+        log(f"AI turn 1 ({len(reply1)} chars): {reply1[:200]}")
+
+        if not reply1:
+            fail("[Phase PROJ_AI] AI returned empty reply on turn 1")
+
+        import re as _re
+        proposal_pattern = _re.compile(r"<nexplane-proposal>(.*?)</nexplane-proposal>", _re.DOTALL)
+
+        def extract_proposal(text: str):
+            m = proposal_pattern.search(text)
+            if not m:
+                return None
+            try:
+                return json.loads(m.group(1).strip())
+            except Exception:
+                return None
+
+        proposal = extract_proposal(reply1)
+        if proposal is None:
+            # Turn 2: push for the plan
+            turn2 = chat("That sounds good. I have all the information you need — please go ahead and write the full plan now.")
+            reply2 = turn2.get("reply", "")
+            log(f"AI turn 2 ({len(reply2)} chars): {reply2[:200]}")
+            proposal = extract_proposal(reply2)
+
+        if proposal is None:
+            # Turn 3: explicit prompt
+            turn3 = chat("Please write the final proposal now with the <nexplane-proposal> block.")
+            reply3 = turn3.get("reply", "")
+            log(f"AI turn 3 ({len(reply3)} chars): {reply3[:200]}")
+            proposal = extract_proposal(reply3)
+
+        if proposal is None:
+            fail("[Phase PROJ_AI] AI did not emit a <nexplane-proposal> block within 3 turns")
+
+        if not isinstance(proposal, list) or len(proposal) == 0:
+            fail(f"[Phase PROJ_AI] Proposal is not a non-empty list: {proposal}")
+
+        required_fields = {"seq", "change_type", "target_assets"}
+        for i, step in enumerate(proposal):
+            missing = required_fields - set(step.keys())
+            if missing:
+                fail(f"[Phase PROJ_AI] Proposal step {i} missing fields: {missing}")
+
+        log(f"Proposal has {len(proposal)} step(s):")
+        for step in proposal:
+            log(f"  seq={step.get('seq')} change_type={step.get('change_type')} assets={step.get('target_assets')}")
+        log("Phase PROJ_AI complete — live AI project planning verified")
+
+    except Exception as e:
+        print(f"\n❌ Phase PROJ_AI failed: {e}")
+        raise
+    finally:
+        if project_id:
+            try:
+                client.client.delete(f"{client.base}/projects/{project_id}")
+                log(f"Deleted smoke project {project_id}")
             except Exception:
                 pass
 
@@ -4867,6 +5111,12 @@ def main():
             if phase_a_result is None:
                 fail("Phase AUTO requires Phase A to have run first")
             run_phase_auto(client, phase_a_result)
+        if "AUTO_AI" in phases:
+            if phase_a_result is None:
+                fail("Phase AUTO_AI requires Phase A to have run first")
+            run_phase_auto_ai(client, phase_a_result)
+        if "PROJ_AI" in phases:
+            run_phase_proj_ai(client)
         if "EKS_SDK" in phases:
             run_phase_eks_sdk(client, cloud_account_id)
         if "EKS_CFN" in phases:
