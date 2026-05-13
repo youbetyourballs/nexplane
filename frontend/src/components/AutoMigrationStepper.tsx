@@ -115,10 +115,10 @@ export function AutoMigrationStepper({ stepResults, crStatus }: Props) {
                               {String(unit.pattern ?? "")}
                             </span>
                           </div>
-                          {unit.reasoning && (
+                          {!!unit.reasoning && (
                             <p className="text-slate-400 italic mt-1">{String(unit.reasoning)}</p>
                           )}
-                          {unit.data_risk && (
+                          {!!unit.data_risk && (
                             <p className="text-slate-500 mt-1">Data risk: <span className="font-medium">{String(unit.data_risk)}</span></p>
                           )}
                         </div>
