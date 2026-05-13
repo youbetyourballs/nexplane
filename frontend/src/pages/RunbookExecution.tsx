@@ -128,15 +128,16 @@ function StepResultCard({
 
   const conditionResultPanel = (): JSX.Element | null => {
     if (sr.step_type !== "condition" || sr.result?.evaluated_to === undefined) return null;
-    const val = sr.result.evaluated_to;
+    type CondResult = { evaluated_to: boolean; jumped_to_step?: number };
+    const r = sr.result as CondResult;
     return (
       <div className="pl-6 mt-1 text-xs text-slate-500">
         Evaluated to:{" "}
-        <span className={val ? "text-green-600" : "text-red-600"}>
-          {String(val)}
+        <span className={r.evaluated_to ? "text-green-600" : "text-red-600"}>
+          {String(r.evaluated_to)}
         </span>
-        {sr.result.jumped_to_step !== undefined && (
-          <> → jumped to step {String(sr.result.jumped_to_step)}</>
+        {r.jumped_to_step !== undefined && (
+          <> → jumped to step {r.jumped_to_step}</>
         )}
       </div>
     );
