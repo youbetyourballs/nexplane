@@ -112,6 +112,9 @@ async def _stage_fleet_cross_reference(
 
 _ANALYSIS_SYSTEM_PROMPT = """You are a containerization migration expert analyzing workloads on a host.
 You will receive a dependency graph of running workloads and must determine the optimal containerization strategy.
+
+Each workload includes deep host enrichment: outbound_connections (real network peers), env_var_names (environment variable keys — no values for security), open_files (open file descriptors — hints at state), runtime_deps (.so/.dll paths), and config_intelligence (parsed config metadata such as nginx vhosts, upstream proxy targets, IIS site bindings). Use these to make accurate stateful/stateless and monolith/modular determinations.
+
 Return ONLY a JSON object matching this exact schema. No explanation text outside the JSON:
 {
   "migration_units": [
@@ -123,16 +126,21 @@ Return ONLY a JSON object matching this exact schema. No explanation text outsid
       "stateful": false,
       "data_risk": "none",
       "soak_seconds_recommended": 120,
-      "reasoning": "<one sentence>"
+      "reasoning": "<one sentence explaining stateful/pattern classification based on the enrichment data>"
     }
   ],
   "migration_order": ["unit-1"],
   "warnings": []
 }
-Stateful criteria: unit is stateful if any workload has data directories, connects to a database port (5432, 3306, 1433, 6379, 27017), or has active connections to external persistent stores.
-Monolith: tightly coupled workloads sharing IPC or communicating only via localhost.
-Modular: workloads communicating over network ports that could be independently deployed.
-Already-containerized workloads (docker/containerd/podman/kubernetes_pod) should be noted in warnings, not in migration_units."""
+
+Classification rules:
+- Stateful: any workload with data_directories, open_files pointing to databases or write-ahead logs, outbound_connections to database ports (5432, 3306, 1433, 6379, 27017), or env_var_names suggesting DB credentials (DB_HOST, DATABASE_URL, POSTGRES_*, REDIS_URL, etc.)
+- data_risk: "none" | "low" | "medium" | "high" — based on volume of open state files and database connections
+- pattern "monolith": workloads sharing IPC sockets or communicating only via localhost ports
+- pattern "modular": workloads on distinct network ports that could be independently deployed
+- config_intelligence vhosts/upstreams reveal service routing that affects whether apps are monolith or modular
+- Already-containerized workloads (docker/containerd/podman/kubernetes_pod) should be noted in warnings, not in migration_units
+- soak_seconds_recommended: 60 for stateless, 180-300 for stateful, 120 default"""
 
 
 async def _stage_ai_analysis(
@@ -198,9 +206,18 @@ async def _stage_ai_analysis(
             "name": w.get("name"),
             "runtime_type": w.get("runtime_type"),
             "listening_ports": [p.get("port") for p in w.get("listening_ports", [])],
-            "outbound_connection_count": len(w.get("outbound_connections", [])),
+            "outbound_connections": [
+                {"remote_ip": c.get("remote_addr", "").split(":")[0],
+                 "remote_port": c.get("remote_addr", "").split(":")[-1]}
+                for c in w.get("outbound_connections", [])
+            ],
             "data_directories": [d.get("path") for d in w.get("data_directories", [])],
             "dependencies": w.get("dependencies", []),
+            # Deep enrichment fields from deep_discover
+            "env_var_names": w.get("env_var_names", []),
+            "open_files": w.get("open_files", []),
+            "runtime_deps": w.get("runtime_deps", []),
+            "config_intelligence": w.get("config_intelligence", []),
         })
 
     user_content = json.dumps({
