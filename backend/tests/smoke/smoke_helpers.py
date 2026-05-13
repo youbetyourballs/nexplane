@@ -340,6 +340,18 @@ def _get_aws_boto3_client(service: str):
     import threading
     global _aws_creds_cache
     if not _aws_creds_cache:
+        # When running on an EC2 runner, credentials come from environment variables
+        # (set by run_on_ec2.py) to avoid importing app.database which requires asyncpg.
+        _env_key = _os.environ.get("AWS_ACCESS_KEY_ID")
+        _env_secret = _os.environ.get("AWS_SECRET_ACCESS_KEY")
+        if _env_key and _env_secret:
+            _aws_creds_cache = {
+                "access_key_id": _env_key,
+                "secret_access_key": _env_secret,
+                "region": _os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+                "session_token": _os.environ.get("AWS_SESSION_TOKEN"),
+            }
+    if not _aws_creds_cache:
         from app.config import settings
         from app.models.connector import Connector, ConnectorType
         from app.services.connector_service import _attach_credentials

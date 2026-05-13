@@ -300,9 +300,19 @@ Examples:
         transfer_files(ssm, runner_id, tarball)
 
         # Build the test command
+        # Pass AWS creds as env vars so _get_aws_boto3_client() doesn't need asyncpg/DB
+        import os as _os
+        aws_key = _os.environ.get("AWS_ACCESS_KEY_ID", "")
+        aws_secret = _os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+        aws_region = _os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        aws_env = (
+            f"AWS_ACCESS_KEY_ID={aws_key} "
+            f"AWS_SECRET_ACCESS_KEY={aws_secret} "
+            f"AWS_DEFAULT_REGION={aws_region} "
+        )
         test_cmd_parts = [
             "cd /tmp/nexplane_smoke",
-            f"NEXPLANE_RUNNER_EC2=1 PYTHONPATH=/tmp/nexplane_smoke python3 smoke/test_aws_live.py"
+            f"{aws_env}NEXPLANE_RUNNER_EC2=1 PYTHONPATH=/tmp/nexplane_smoke python3 smoke/test_aws_live.py"
             f" --base-url {args.base_url}"
             f" --email {args.email}"
             f" --password {args.password}"
