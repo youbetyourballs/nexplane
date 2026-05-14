@@ -1,5 +1,22 @@
-from datetime import datetime, timezone
-async def execute(parameters, asset_ids, connector):
-    return {"disabled_protocols": parameters.get("disable_protocols", ["SSL 2.0", "SSL 3.0", "TLS 1.0", "TLS 1.1"]), "enabled_protocols": parameters.get("enabled_protocols", ["TLS 1.2", "TLS 1.3"]), "reboot_required": True, "snapshot": "", "applied_at": datetime.now(timezone.utc).isoformat()}
-async def rollback(parameters, execution_result, connector):
-    return {"rolled_back": True, "reboot_required": True, "action": "harden_tls_protocols"}
+from app.connectors.executors.nexplane_agent import _dispatch
+
+
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    result = await _dispatch.dispatch_agent_job(
+        command="harden_tls_protocols",
+        parameters=parameters,
+        asset_ids=list(asset_ids),
+        timeout_seconds=60,
+    )
+    result["_asset_ids"] = [str(a) for a in asset_ids]
+    return result
+
+
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    asset_ids = execution_result.get("_asset_ids") or []
+    return await _dispatch.dispatch_agent_job(
+        command="harden_tls_protocols",
+        parameters={"action": "restore", "snapshot_id": execution_result.get("snapshot_id", "")},
+        asset_ids=asset_ids,
+        timeout_seconds=60,
+    )
