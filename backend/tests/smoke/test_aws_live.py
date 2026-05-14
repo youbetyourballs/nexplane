@@ -5056,7 +5056,13 @@ def run_phase_ossec_wire(client: NexplaneClient, phase_a_result: Optional[dict] 
 
 def run_phase_bulk_patch(client: NexplaneClient, phase_a_result: Optional[dict] = None) -> None:
     """Phase BULK_PATCH: bulk CR create + bulk approve + execute."""
+    import re as _re
     print("\n[Phase BULK_PATCH] Testing bulk CR create and bulk approval")
+
+    # Setup: record initial CR count so we can verify new ones were created
+    initial_crs = client.get("/change-requests") or []
+    initial_cr_count = len(initial_crs) if isinstance(initial_crs, list) else 0
+    log(f"[BULK_PATCH] Initial CR count: {initial_cr_count}")
 
     # Find some server/ec2 assets to target
     assets_resp = client.get("/assets")
@@ -5078,6 +5084,7 @@ def run_phase_bulk_patch(client: NexplaneClient, phase_a_result: Optional[dict] 
 
     asset_ids = [a["id"] for a in server_assets]
     n = min(3, len(asset_ids))
+    expected_count = n
 
     # Batch create CRs
     batch_resp = client.post("/change-requests/batch", json={
@@ -5097,6 +5104,17 @@ def run_phase_bulk_patch(client: NexplaneClient, phase_a_result: Optional[dict] 
     if not cr_ids:
         fail("[BULK_PATCH] batch create returned no CR IDs")
 
+    # Assert batch_id looks like a UUID
+    _uuid_re = _re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", _re.IGNORECASE)
+    if batch_id and not _uuid_re.match(str(batch_id)):
+        fail(f"[BULK_PATCH] batch_id does not look like a UUID: {batch_id!r}")
+    log(f"[BULK_PATCH] batch_id UUID check passed: {batch_id}")
+
+    # Assert we got the expected number of CRs
+    if len(cr_ids) != expected_count:
+        fail(f"[BULK_PATCH] Expected {expected_count} CR IDs from batch, got {len(cr_ids)}")
+    log(f"[BULK_PATCH] Created {len(cr_ids)} CRs as expected")
+
     print(f"  Created batch {batch_id} with {len(cr_ids)} CRs")
 
     # Submit all for approval
@@ -5111,7 +5129,13 @@ def run_phase_bulk_patch(client: NexplaneClient, phase_a_result: Optional[dict] 
     bulk_resp = client.post("/change-requests/bulk-approve", json={
         "cr_ids": cr_ids, "decision": "approved"
     })
-    print(f"  Bulk approved: {bulk_resp.get('approved_count')} CRs")
+    approved_count = bulk_resp.get("approved_count")
+    print(f"  Bulk approved: {approved_count} CRs")
+
+    # Assert bulk-approve count matches what we sent
+    if approved_count != len(cr_ids):
+        fail(f"[BULK_PATCH] bulk-approve returned approved_count={approved_count}, expected {len(cr_ids)}")
+    log(f"[BULK_PATCH] bulk-approve count assertion passed: {approved_count} == {len(cr_ids)}")
 
     # Execute all
     for cr_id in cr_ids:
@@ -5122,21 +5146,47 @@ def run_phase_bulk_patch(client: NexplaneClient, phase_a_result: Optional[dict] 
 
     # Wait for all to reach terminal state
     deadline = time.time() + 120
-    completed = set()
-    while time.time() < deadline and len(completed) < len(cr_ids):
+    completed_ids = set()
+    terminal_crs: dict = {}
+    while time.time() < deadline and len(completed_ids) < len(cr_ids):
         for cr_id in cr_ids:
-            if cr_id in completed:
+            if cr_id in completed_ids:
                 continue
             try:
                 cr = client.get(f"/change-requests/{cr_id}")
                 if cr.get("status") in ("completed", "failed", "rolled_back"):
-                    completed.add(cr_id)
+                    completed_ids.add(cr_id)
+                    terminal_crs[cr_id] = cr
             except Exception:
                 pass
-        if len(completed) < len(cr_ids):
+        if len(completed_ids) < len(cr_ids):
             time.sleep(5)
 
-    print(f"  {len(completed)}/{len(cr_ids)} CRs reached terminal state")
+    print(f"  {len(completed_ids)}/{len(cr_ids)} CRs reached terminal state")
+
+    # Assert each completed CR has non-stub execution result
+    stub_detected = []
+    for cr_id, cr in terminal_crs.items():
+        exec_runs = cr.get("execution_runs") or []
+        if exec_runs:
+            result = exec_runs[0].get("result") or {}
+            stub_signatures = [
+                result == {},
+                result == {"status": "ok"},
+                result.get("stub") is True,
+            ]
+            if all(not sig for sig in stub_signatures):
+                log(f"[BULK_PATCH] CR {cr_id} has real execution result keys: {list(result.keys())}")
+            else:
+                stub_detected.append(cr_id)
+                log(f"[BULK_PATCH] WARNING: CR {cr_id} has stub-like result: {result}")
+        else:
+            # No execution_runs — CR may have failed before dispatch; log and continue
+            log(f"[BULK_PATCH] CR {cr_id} status={cr.get('status')} has no execution_runs (pre-dispatch failure)")
+
+    if stub_detected:
+        fail(f"[BULK_PATCH] Stub-like results detected for CRs: {stub_detected} — executor did not dispatch to agent")
+
     print("Phase BULK_PATCH complete")
 
 
@@ -5147,6 +5197,7 @@ def run_phase_bulk_patch(client: NexplaneClient, phase_a_result: Optional[dict] 
 def run_phase_user_isolate(client: NexplaneClient, cloud_account_id: str) -> None:
     """Phase USER_ISOLATE: create a test IAM user, run emergency_user_lockout CR,
     verify deny-all policy, rollback, run user_scope_reduction, verify, rollback."""
+    import json as _json
     print("\n[Phase USER_ISOLATE] IAM emergency lockout + scope reduction")
 
     import time as _time
@@ -5154,6 +5205,40 @@ def run_phase_user_isolate(client: NexplaneClient, cloud_account_id: str) -> Non
     iam_client = _get_aws_boto3_client("iam")
     if not iam_client:
         fail("Phase USER_ISOLATE requires AWS credentials (iam)")
+
+    # Pre-flight: verify AWS IAM credentials are working
+    try:
+        iam_client.get_account_summary()
+        log("[USER_ISOLATE] AWS IAM credentials verified")
+    except Exception as e:
+        fail(f"[USER_ISOLATE] AWS IAM credentials not working: {e}")
+
+    # Pre-flight: clean up any stale test user from a previous run
+    stale_prefix = "nexplane-smoke-isolate-"
+    try:
+        paginator = iam_client.get_paginator("list_users")
+        for page in paginator.paginate():
+            for u in page.get("Users", []):
+                if u["UserName"].startswith(stale_prefix):
+                    stale_name = u["UserName"]
+                    log(f"[USER_ISOLATE] Cleaning up stale test user from previous run: {stale_name}")
+                    for pol in iam_client.list_user_policies(UserName=stale_name).get("PolicyNames", []):
+                        try:
+                            iam_client.delete_user_policy(UserName=stale_name, PolicyName=pol)
+                        except Exception:
+                            pass
+                    for pol in iam_client.list_attached_user_policies(UserName=stale_name).get("AttachedPolicies", []):
+                        try:
+                            iam_client.detach_user_policy(UserName=stale_name, PolicyArn=pol["PolicyArn"])
+                        except Exception:
+                            pass
+                    try:
+                        iam_client.delete_user(UserName=stale_name)
+                        log(f"[USER_ISOLATE] Stale user {stale_name} cleaned up")
+                    except Exception as _e:
+                        log(f"[USER_ISOLATE] Could not delete stale user {stale_name}: {_e}")
+    except Exception as _e:
+        log(f"[USER_ISOLATE] Stale user scan skipped: {_e}")
 
     try:
         # 1. Create test IAM user directly via boto3
@@ -5168,19 +5253,34 @@ def run_phase_user_isolate(client: NexplaneClient, cloud_account_id: str) -> Non
         log(f"emergency_user_lockout CR completed: {lockout_cr['id']}")
 
         # 3. Verify deny-all policy was attached via boto3
-        policies = iam_client.list_user_policies(UserName=username).get("PolicyNames", [])
-        if "nexplane-emergency-lockout" not in policies:
-            fail(f"Expected 'nexplane-emergency-lockout' inline policy not found on {username}. Policies: {policies}")
-        log("Deny-all policy attached: nexplane-emergency-lockout")
+        locked_policies = iam_client.list_user_policies(UserName=username).get("PolicyNames", [])
+        if "nexplane-emergency-lockout" not in locked_policies:
+            fail(f"[USER_ISOLATE] Expected 'nexplane-emergency-lockout' inline policy not found on {username}. Policies: {locked_policies}")
+        log(f"[USER_ISOLATE] Deny-all policy attached: nexplane-emergency-lockout. All policies: {locked_policies}")
+
+        # 3b. Verify the policy document is actually a deny-all
+        lockout_policy_doc = iam_client.get_user_policy(UserName=username, PolicyName="nexplane-emergency-lockout")
+        import urllib.parse as _urlparse
+        raw_doc = lockout_policy_doc.get("PolicyDocument", "{}")
+        # AWS returns the policy document URL-encoded from get_user_policy
+        if isinstance(raw_doc, str) and "%" in raw_doc:
+            raw_doc = _urlparse.unquote(raw_doc)
+        doc = _json.loads(raw_doc) if isinstance(raw_doc, str) else raw_doc
+        stmt = doc.get("Statement", [{}])[0]
+        if stmt.get("Effect") != "Deny":
+            fail(f"[USER_ISOLATE] nexplane-emergency-lockout policy Effect is not Deny: {stmt}")
+        if stmt.get("Action") not in ("*", ["*"]):
+            fail(f"[USER_ISOLATE] nexplane-emergency-lockout policy Action is not '*': {stmt.get('Action')}")
+        log(f"[USER_ISOLATE] nexplane-emergency-lockout policy document verified: Effect=Deny, Action=*")
 
         # 4. Rollback the lockout CR via Nexplane
         client.rollback_cr(lockout_cr["id"], "[USER_ISOLATE] rollback emergency_user_lockout")
         log("Rollback of emergency_user_lockout CR completed")
 
-        # 5. Verify policy was removed
+        # 5. Verify policy was removed after rollback
         policies_after = iam_client.list_user_policies(UserName=username).get("PolicyNames", [])
         if "nexplane-emergency-lockout" in policies_after:
-            fail(f"Deny-all policy still present after rollback on {username}")
+            fail(f"[USER_ISOLATE] Deny-all policy still present after rollback on {username}. Remaining: {policies_after}")
         log("Deny-all policy removed after rollback")
 
         # 6. Run user_scope_reduction CR (demote_to_readonly)
@@ -5193,17 +5293,32 @@ def run_phase_user_isolate(client: NexplaneClient, cloud_account_id: str) -> Non
         # 7. Verify deny-write policy was attached
         policies2 = iam_client.list_user_policies(UserName=username).get("PolicyNames", [])
         if "nexplane-scope-reduction-deny-write" not in policies2:
-            fail(f"Expected 'nexplane-scope-reduction-deny-write' not found on {username}. Policies: {policies2}")
-        log("Deny-write policy attached: nexplane-scope-reduction-deny-write")
+            fail(f"[USER_ISOLATE] Expected 'nexplane-scope-reduction-deny-write' not found on {username}. Policies: {policies2}")
+        log(f"[USER_ISOLATE] Deny-write policy attached: nexplane-scope-reduction-deny-write. All policies: {policies2}")
+
+        # 7b. Verify the scope-reduction policy document is a deny-write
+        scope_policy_doc = iam_client.get_user_policy(UserName=username, PolicyName="nexplane-scope-reduction-deny-write")
+        raw_scope_doc = scope_policy_doc.get("PolicyDocument", "{}")
+        if isinstance(raw_scope_doc, str) and "%" in raw_scope_doc:
+            raw_scope_doc = _urlparse.unquote(raw_scope_doc)
+        scope_doc = _json.loads(raw_scope_doc) if isinstance(raw_scope_doc, str) else raw_scope_doc
+        scope_stmt = scope_doc.get("Statement", [{}])[0]
+        if scope_stmt.get("Effect") != "Deny":
+            fail(f"[USER_ISOLATE] nexplane-scope-reduction-deny-write policy Effect is not Deny: {scope_stmt}")
+        scope_action = scope_stmt.get("Action", [])
+        # Should deny write-like actions — not a blanket allow-all
+        if scope_action in ("*", ["*"]) and scope_stmt.get("Effect") == "Allow":
+            fail(f"[USER_ISOLATE] nexplane-scope-reduction-deny-write looks like an allow-all policy, not scope reduction: {scope_stmt}")
+        log(f"[USER_ISOLATE] nexplane-scope-reduction-deny-write policy document verified: Effect=Deny")
 
         # 8. Rollback scope reduction
         client.rollback_cr(scope_cr["id"], "[USER_ISOLATE] rollback user_scope_reduction")
         log("Rollback of user_scope_reduction CR completed")
 
-        # 9. Verify policy removed
+        # 9. Verify policy removed after rollback
         policies3 = iam_client.list_user_policies(UserName=username).get("PolicyNames", [])
         if "nexplane-scope-reduction-deny-write" in policies3:
-            fail(f"Deny-write policy still present after rollback on {username}")
+            fail(f"[USER_ISOLATE] Deny-write policy still present after rollback on {username}. Remaining: {policies3}")
         log("Deny-write policy removed after rollback")
 
         print("Phase USER_ISOLATE PASSED")
@@ -5232,21 +5347,31 @@ def run_phase_seccomp_pipeline(client: NexplaneClient, phase_a_result: Optional[
     """
     print("\n[Phase SECCOMP_PIPELINE] seccomp_learn → configure_seccomp")
 
-    # Resolve target asset
+    # Resolve target asset — prefer agent_connected assets
     asset_id: str | None = None
+    agent_connected = False
     if phase_a_result and phase_a_result.get("agent_asset"):
         asset_id = phase_a_result["agent_asset"]["id"]
-        log(f"Using Phase A agent asset: {asset_id}")
+        agent_connected = True
+        log(f"Using Phase A agent asset: {asset_id} (agent_connected=True)")
     else:
         servers = client.get("/assets", params={"asset_type": "server", "limit": 10})
-        linux_servers = [a for a in servers if "linux" in (a.get("tags") or [])]
-        if not linux_servers:
-            linux_servers = servers[:1]
-        if linux_servers:
-            asset_id = linux_servers[0]["id"]
-            log(f"Using first available server asset: {asset_id}")
+        servers = servers if isinstance(servers, list) else (servers.get("items") or [])
+        connected = [a for a in servers if a.get("agent_connected")]
+        if connected:
+            asset_id = connected[0]["id"]
+            agent_connected = True
+            log(f"Using agent-connected server asset: {asset_id}")
         else:
-            fail("SECCOMP_PIPELINE: no server asset available — run Phase A first or register a Linux server")
+            linux_servers = [a for a in servers if "linux" in (a.get("tags") or [])]
+            if not linux_servers:
+                linux_servers = servers[:1]
+            if linux_servers:
+                asset_id = linux_servers[0]["id"]
+                log(f"[SECCOMP_PIPELINE] WARNING: no agent_connected asset found — using first available server: {asset_id}. "
+                    "CR will likely fail with job timeout (expected).")
+            else:
+                fail("SECCOMP_PIPELINE: no server asset available — run Phase A first or register a Linux server")
 
     # Step 1: seccomp_learn CR (30s observation window)
     print("  → [SECCOMP_PIPELINE] Step 1: seccomp_learn (30s observe)")
@@ -5278,8 +5403,29 @@ def run_phase_seccomp_pipeline(client: NexplaneClient, phase_a_result: Optional[
     log(f"seccomp_learn terminal status: {learn_cr['status']}")
     assert learn_cr_id == learn_cr["id"], "CR id mismatch — response is not a stub"
 
+    # Assert the execution result is not a stub regardless of terminal status
+    learn_exec_runs = learn_cr.get("execution_runs") or []
+    if learn_exec_runs:
+        learn_result = learn_exec_runs[0].get("result") or {}
+        if learn_result:
+            if learn_result == {"status": "ok"} or learn_result.get("stub") is True:
+                fail(f"[SECCOMP_PIPELINE] seccomp_learn returned stub result: {learn_result}")
+            if learn_result.get("syscalls_seen") is not None:
+                syscalls_seen = learn_result["syscalls_seen"]
+                if not isinstance(syscalls_seen, list):
+                    fail(f"[SECCOMP_PIPELINE] syscalls_seen should be a list, got: {type(syscalls_seen)}")
+                log(f"[SECCOMP_PIPELINE] seccomp_learn captured {len(syscalls_seen)} syscalls")
+            elif learn_result.get("failed") or learn_result.get("error"):
+                log(f"[SECCOMP_PIPELINE] seccomp_learn agent ran, returned failure: {learn_result.get('error')}")
+            else:
+                log(f"[SECCOMP_PIPELINE] seccomp_learn real result keys: {list(learn_result.keys())}")
+        else:
+            log(f"[SECCOMP_PIPELINE] seccomp_learn execution_runs present but result is empty")
+    else:
+        log(f"[SECCOMP_PIPELINE] seccomp_learn has no execution_runs (pre-dispatch failure or agent not connected)")
+
     if learn_cr["status"] != "completed":
-        print(f"  ⚠️  seccomp_learn did not complete (status={learn_cr['status']}); "
+        print(f"  seccomp_learn did not complete (status={learn_cr['status']}); "
               "skipping configure_seccomp step (agent likely not installed)")
         print("Phase SECCOMP_PIPELINE PASSED (learn dispatched, agent not installed — expected)")
         return
@@ -5317,6 +5463,20 @@ def run_phase_seccomp_pipeline(client: NexplaneClient, phase_a_result: Optional[
         fail("SECCOMP_PIPELINE: configure_seccomp CR timed out")
 
     log(f"configure_seccomp terminal status: {enforce_cr['status']}")
+
+    # Assert configure_seccomp result is not a stub
+    enforce_exec_runs = enforce_cr.get("execution_runs") or []
+    if enforce_exec_runs:
+        enforce_result = enforce_exec_runs[0].get("result") or {}
+        if enforce_result:
+            if enforce_result == {"status": "ok"} or enforce_result.get("stub") is True:
+                fail(f"[SECCOMP_PIPELINE] configure_seccomp returned stub result: {enforce_result}")
+            log(f"[SECCOMP_PIPELINE] configure_seccomp real result keys: {list(enforce_result.keys())}")
+        else:
+            log(f"[SECCOMP_PIPELINE] configure_seccomp execution_runs present but result is empty")
+    else:
+        log(f"[SECCOMP_PIPELINE] configure_seccomp has no execution_runs")
+
     # Rollback the seccomp profile if it was applied
     if enforce_cr["status"] == "completed":
         client.rollback_cr(enforce_cr_id, "[SECCOMP_PIPELINE] rollback configure_seccomp")
