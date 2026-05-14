@@ -1,13 +1,86 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, FolderOpen } from "lucide-react";
+import { Plus, FolderOpen, LayoutTemplate, X } from "lucide-react";
 import { projectsApi } from "../api/endpoints";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
 import { StatusBadge } from "../components/StatusBadge";
 
+const PROJECT_TEMPLATES = [
+  {
+    id: "cis-hardening",
+    name: "CIS Hardening Rollout",
+    description: "Apply CIS Level 1 benchmarks across all production servers in rolling batches.",
+    icon: "🛡️",
+    goal: "Bring all production servers to CIS Level 1 compliance with zero unplanned downtime.",
+  },
+  {
+    id: "patch-campaign",
+    name: "Quarterly Patch Campaign",
+    description: "Patch all critical and high CVEs across the fleet before the quarterly deadline.",
+    icon: "🩹",
+    goal: "Remediate all critical CVEs within SLA and high CVEs within 7 days.",
+  },
+  {
+    id: "user-offboarding",
+    name: "User Offboarding Sprint",
+    description: "Bulk offboard departed users across all connected identity systems.",
+    icon: "👤",
+    goal: "Revoke access for all departed users within 24 hours of HR notification.",
+  },
+  {
+    id: "key-rotation",
+    name: "Credential Rotation",
+    description: "Rotate API keys, SSH keys, and service account credentials on a quarterly basis.",
+    icon: "🔑",
+    goal: "Rotate all long-lived credentials with zero service disruption.",
+  },
+  {
+    id: "dr-validation",
+    name: "DR Validation Exercise",
+    description: "Run failover drills, verify backup integrity, and document RTO/RPO measurements.",
+    icon: "♻️",
+    goal: "Validate DR readiness and confirm RTO < 4h and RPO < 1h for all critical services.",
+  },
+];
+
+function TemplateGallery({ onClose, onSelect }: { onClose: () => void; onSelect: (t: typeof PROJECT_TEMPLATES[0]) => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-slate-900">Project Templates</h2>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="space-y-3">
+          {PROJECT_TEMPLATES.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => onSelect(t)}
+              className="w-full text-left flex items-start gap-4 p-4 rounded-lg border border-slate-200 hover:border-brand-400 hover:bg-brand-50 transition-colors"
+            >
+              <span className="text-2xl shrink-0">{t.icon}</span>
+              <div>
+                <p className="text-sm font-semibold text-slate-900">{t.name}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{t.description}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Projects() {
   const navigate = useNavigate();
+  const [showTemplates, setShowTemplates] = useState(false);
 
   const { data: projects, isLoading } = useQuery({
     queryKey: ["projects"],
@@ -16,32 +89,59 @@ export function Projects() {
 
   if (isLoading) return <PageLoading />;
 
+  function handleTemplateSelect(t: typeof PROJECT_TEMPLATES[0]) {
+    setShowTemplates(false);
+    navigate(`/projects/new?name=${encodeURIComponent(t.name)}&goal=${encodeURIComponent(t.goal)}`);
+  }
+
   return (
     <div className="p-8">
       <PageHeader
         title="Projects"
         subtitle={`${projects?.length ?? 0} projects`}
         actions={
-          <button
-            onClick={() => navigate("/projects/new")}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700"
-          >
-            <Plus className="w-4 h-4" />
-            New Project
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowTemplates(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-200 text-slate-700 text-sm font-medium rounded-md hover:bg-slate-50"
+            >
+              <LayoutTemplate className="w-4 h-4" />
+              New from template
+            </button>
+            <button
+              onClick={() => navigate("/projects/new")}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700"
+            >
+              <Plus className="w-4 h-4" />
+              New Project
+            </button>
+          </div>
         }
       />
+
+      {showTemplates && (
+        <TemplateGallery onClose={() => setShowTemplates(false)} onSelect={handleTemplateSelect} />
+      )}
 
       {projects?.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-center">
           <FolderOpen className="w-12 h-12 text-slate-300 mb-4" />
           <p className="text-slate-500 text-sm">No projects yet.</p>
-          <button
-            onClick={() => navigate("/projects/new")}
-            className="mt-4 text-brand-600 text-sm hover:underline"
-          >
-            Create your first project
-          </button>
+          <div className="flex gap-3 mt-4">
+            <button
+              onClick={() => setShowTemplates(true)}
+              className="text-brand-600 text-sm hover:underline"
+            >
+              Start from a template
+            </button>
+            <span className="text-slate-300">·</span>
+            <button
+              onClick={() => navigate("/projects/new")}
+              className="text-brand-600 text-sm hover:underline"
+            >
+              Create blank project
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

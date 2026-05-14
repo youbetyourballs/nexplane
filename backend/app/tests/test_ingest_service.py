@@ -82,8 +82,14 @@ async def test_ingest_updates_existing_asset():
     mock_connector = MagicMock()
     mock_connector.connector_type = "crowdstrike"
 
+    # IngestService uses result.scalars().first() not scalar_one_or_none
+    scalars_mock = MagicMock()
+    scalars_mock.first = MagicMock(return_value=existing)
+    execute_result = MagicMock()
+    execute_result.scalars = MagicMock(return_value=scalars_mock)
+
     mock_db = AsyncMock(spec=AsyncSession)
-    mock_db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing)))
+    mock_db.execute = AsyncMock(return_value=execute_result)
     mock_db.add = MagicMock()
     mock_db.flush = AsyncMock()
 

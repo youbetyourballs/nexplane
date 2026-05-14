@@ -86,7 +86,7 @@ export function Assets() {
   const [showBulkRemove, setShowBulkRemove] = useState(false);
   const [bulkTagInput, setBulkTagInput] = useState("");
   const [showBulkCR, setShowBulkCR] = useState(false);
-  const [bulkCRType, setBulkCRType] = useState("agent_linux_patch");
+  const [bulkCRType, setBulkCRType] = useState("patch_packages");
 
   // Local input state — decoupled from URL so keystrokes don't re-mount the DOM
   const [inputValue, setInputValue] = useState(() => searchParams.get("search") ?? "");
@@ -465,7 +465,7 @@ export function Assets() {
                     onChange={(e) => setBulkCRType(e.target.value)}
                     className="w-full text-sm border border-slate-200 rounded px-2 py-1 mb-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
                   >
-                    {["agent_linux_patch", "security_group_update", "key_rotation", "remote_command"].map((t) => (
+                    {["patch_packages", "security_group_update", "key_rotation", "remote_command", "enforce_cis_benchmark", "isolate_host"].map((t) => (
                       <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
                     ))}
                   </select>

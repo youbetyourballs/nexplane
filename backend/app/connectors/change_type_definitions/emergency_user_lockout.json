@@ -1,0 +1,11 @@
+{
+  "change_type": "emergency_user_lockout",
+  "display_name": "Emergency User Lockout",
+  "steps": [
+    {"generic_action": "emergency_user_lockout", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "emergency_user_lockout",
+  "rollback_connector_type": "nexplane_agent"
+}
