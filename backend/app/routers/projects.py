@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from app.database import get_db
 from app.models.project import Project, ProjectChangeRequest, ProjectStatus
+from app.models.project_phase import ProjectPhase
 from app.models.change_request import ChangeRequest, ChangeRequestStatus
 from app.models.user import User
 from app.models.org_settings import OrganizationSettings
@@ -446,3 +447,71 @@ async def get_prompt_preview(
         draft_message=draft_message,
     )
     return {"prompt": prompt}
+
+
+# ---------------------------------------------------------------------------
+# Project phases (staged rollout)
+# ---------------------------------------------------------------------------
+
+class ProjectPhaseCreate(BaseModel):
+    name: str
+    sequence: int = 0
+    soak_hours: int = 72
+
+
+class ProjectPhaseRead(BaseModel):
+    model_config = {"from_attributes": True}
+    id: uuid.UUID
+    project_id: uuid.UUID
+    name: str
+    sequence: int
+    soak_hours: int
+    status: str
+    soak_started_at: datetime | None
+    soak_completed_at: datetime | None
+
+
+@router.post("/{project_id}/phases", response_model=ProjectPhaseRead, status_code=201)
+async def create_project_phase(
+    project_id: uuid.UUID,
+    body: ProjectPhaseCreate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    phase = ProjectPhase(
+        project_id=project_id,
+        name=body.name,
+        sequence=body.sequence,
+        soak_hours=body.soak_hours,
+    )
+    db.add(phase)
+    await db.commit()
+    return phase
+
+
+@router.get("/{project_id}/phases", response_model=list[ProjectPhaseRead])
+async def list_project_phases(
+    project_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ProjectPhase).where(ProjectPhase.project_id == project_id).order_by(ProjectPhase.sequence)
+    )
+    return result.scalars().all()
+
+
+@router.post("/{project_id}/phases/{phase_id}/start-soak", status_code=200)
+async def start_phase_soak(
+    project_id: uuid.UUID,
+    phase_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    phase = await db.get(ProjectPhase, phase_id)
+    if not phase:
+        raise HTTPException(404, "Phase not found")
+    phase.status = "soaking"
+    phase.soak_started_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"phase_id": str(phase_id), "status": "soaking", "soak_hours": phase.soak_hours}

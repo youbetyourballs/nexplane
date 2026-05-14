@@ -25,6 +25,7 @@ from app.routers.asset_timeline import router as asset_timeline_router
 from app.services import scheduler_service
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.workers.escalation_worker import check_emergency_escalations
+from app.workers.soak_timer_worker import check_soak_timers
 
 _escalation_scheduler: AsyncIOScheduler | None = None
 
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
     await scheduler_service.start()
     _escalation_scheduler = AsyncIOScheduler()
     _escalation_scheduler.add_job(check_emergency_escalations, "interval", minutes=5)
+    _escalation_scheduler.add_job(check_soak_timers, "interval", minutes=30)
     _escalation_scheduler.start()
     # Scrub orphaned CRs — any CR still in-flight when the backend
     # restarted will never complete; mark them failed now so the
