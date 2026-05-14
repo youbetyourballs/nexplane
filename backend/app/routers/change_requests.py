@@ -644,13 +644,16 @@ async def manual_rollback(
                         try:
                             from app.models.asset import Asset as _Asset
                             from app.models.connector import Connector as _Connector
-                            from sqlalchemy import select as _sel
+                            from app.services.connector_service import _attach_credentials
                             async with AsyncSessionLocal() as _rdb:
                                 for _aid in (cr.target_asset_ids or [])[:1]:
                                     try:
                                         _asset = await _rdb.get(_Asset, uuid.UUID(str(_aid)))
                                         if _asset and _asset.connector_id:
-                                            _connector = await _rdb.get(_Connector, _asset.connector_id)
+                                            _conn_obj = await _rdb.get(_Connector, _asset.connector_id)
+                                            if _conn_obj:
+                                                await _attach_credentials(_conn_obj, _rdb)
+                                                _connector = _conn_obj
                                             break
                                     except Exception:
                                         pass
