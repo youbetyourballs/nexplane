@@ -229,6 +229,27 @@ async def submit_for_approval(
     await record_event(db, user.organization_id, "change_request.submitted_for_approval",
                        {"change_request_id": str(cr.id), "risk_level": cr.risk_level.value},
                        actor_id=user.id, change_request_id=cr.id)
+
+    # Notify all approvers and admins in the organization
+    from app.services.notification_service import NotificationService, NotificationEvent
+    _approvers = (await db.execute(
+        select(User).where(
+            User.organization_id == cr.organization_id,
+            User.role.in_([UserRole.approver, UserRole.admin]),
+        )
+    )).scalars().all()
+    if _approvers:
+        _notif_svc = NotificationService(db)
+        await _notif_svc.emit(NotificationEvent(
+            event_type="cr.awaiting_approval",
+            organization_id=str(cr.organization_id),
+            actor_id=str(user.id),
+            resource_id=str(cr.id),
+            resource_type="change_request",
+            message=f"Change request '{cr.title}' is awaiting your approval",
+            recipients=[str(u.id) for u in _approvers],
+        ))
+
     await db.commit()
 
     result = await db.execute(
