@@ -1436,6 +1436,8 @@ export function CreateChangeRequest() {
   const [outcomeJson, setOutcomeJson] = useState("");
   const [jsonError, setJsonError] = useState("");
   const [submitError, setSubmitError] = useState("");
+  const [isEmergency, setIsEmergency] = useState(false);
+  const [emergencyReason, setEmergencyReason] = useState("");
 
   const { data: assets } = useQuery({
     queryKey: ["assets"],
@@ -1506,6 +1508,8 @@ export function CreateChangeRequest() {
         change_type: changeType as ChangeType,
         target_asset_ids: selectedAssets,
         desired_outcome: outcome,
+        priority: isEmergency ? "emergency" : "normal",
+        emergency_reason: isEmergency ? emergencyReason : undefined,
       });
     },
     onSuccess: (cr) => {
@@ -1556,6 +1560,33 @@ export function CreateChangeRequest() {
             className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
+
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={isEmergency}
+              onChange={(e) => setIsEmergency(e.target.checked)}
+              className="rounded border-slate-300 text-red-600 focus:ring-red-500"
+            />
+            <span className="text-sm font-medium text-red-700">Emergency priority</span>
+          </label>
+          {isEmergency && (
+            <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold">EMERGENCY</span>
+          )}
+        </div>
+        {isEmergency && (
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Emergency reason <span className="text-red-600">*</span></label>
+            <textarea
+              value={emergencyReason}
+              onChange={(e) => setEmergencyReason(e.target.value)}
+              placeholder="Describe the emergency (e.g. zero-day exploit, active incident)"
+              rows={2}
+              className="w-full text-sm border border-red-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500 resize-none bg-red-50"
+            />
+          </div>
+        )}
 
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1.5">Description</label>

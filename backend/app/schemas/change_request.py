@@ -15,6 +15,8 @@ class ChangeRequestCreate(BaseModel):
     finding_ids: list[str] = []
     snapshot_before: bool = False
     verification_checks: list[dict] = []
+    priority: str = "normal"
+    emergency_reason: str | None = None
 
 
 class ChangeRequestSummary(BaseModel):
@@ -45,6 +47,8 @@ class ChangeRequestRead(BaseModel):
     snapshot_before: bool = False
     verification_checks: list[dict] = []
     batch_id: uuid.UUID | None = None
+    priority: str = "normal"
+    emergency_reason: str | None = None
     risk_level: RiskLevel
     status: ChangeRequestStatus
     created_at: datetime
