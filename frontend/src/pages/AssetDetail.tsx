@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Edit, Save, X, Plus, Zap, Network } from "lucide-react";
+import { ArrowLeft, Edit, Save, X, Plus, Zap, Network, Clock } from "lucide-react";
 import { assetsApi } from "../api/endpoints";
 import { changeRequestsApi } from "../api/endpoints";
 import { apiClient } from "../api/client";
@@ -650,6 +650,7 @@ export function AssetDetail() {
   const [scanPkgsLoading, setScanPkgsLoading] = useState(false);
   const [scanPkgsError, setScanPkgsError] = useState<string | null>(null);
   const [pkgFilter, setPkgFilter] = useState("");
+  const [activeTab, setActiveTab] = useState<"overview" | "activity">("overview");
 
   const { data: asset, isLoading } = useQuery({
     queryKey: ["asset", id],
@@ -666,6 +667,21 @@ export function AssetDetail() {
     queryKey: ["change-requests", { asset_id: id }],
     queryFn: () => changeRequestsApi.list({ asset_id: id }),
     enabled: !!id,
+  });
+
+  const { data: timelineEvents, isLoading: timelineLoading } = useQuery({
+    queryKey: ["asset-timeline", id],
+    queryFn: () => apiClient.get(`/assets/${id}/timeline`).then((r) => r.data as Array<{
+      id: string;
+      timestamp: string;
+      event_type: string;
+      resource_type: string;
+      resource_id: string;
+      description: string;
+      actor_id: string | null;
+      outcome: string | null;
+    }>),
+    enabled: !!id && activeTab === "activity",
   });
 
   const updateMutation = useMutation({
@@ -820,6 +836,64 @@ export function AssetDetail() {
         </div>
       </div>
 
+      {/* Tab bar */}
+      <div className="flex gap-1 mb-6 border-b border-slate-200">
+        <button
+          onClick={() => setActiveTab("overview")}
+          className={`px-4 py-2 text-sm font-medium rounded-t-md border-b-2 transition-colors ${
+            activeTab === "overview"
+              ? "border-brand-600 text-brand-700 bg-brand-50"
+              : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          Overview
+        </button>
+        <button
+          onClick={() => setActiveTab("activity")}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-md border-b-2 transition-colors ${
+            activeTab === "activity"
+              ? "border-brand-600 text-brand-700 bg-brand-50"
+              : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5" />
+          Activity
+        </button>
+      </div>
+
+      {/* Activity tab */}
+      {activeTab === "activity" && (
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <h2 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-slate-400" />
+            Timeline
+          </h2>
+          {timelineLoading ? (
+            <p className="text-sm text-slate-400">Loading…</p>
+          ) : !timelineEvents || timelineEvents.length === 0 ? (
+            <p className="text-sm text-slate-400">No activity recorded for this asset.</p>
+          ) : (
+            <ol className="relative border-l border-slate-200 ml-3 space-y-5">
+              {timelineEvents.map((ev) => (
+                <li key={ev.id} className="ml-6">
+                  <span className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border-2 border-white bg-brand-400" />
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm text-slate-900">{ev.description}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {new Date(ev.timestamp).toLocaleString()} &middot; {ev.event_type}
+                        {ev.outcome && <span className="ml-1 text-slate-500">({ev.outcome})</span>}
+                      </p>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+
+      <div className={activeTab !== "overview" ? "hidden" : ""}>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Properties + Metadata */}
         <div className="lg:col-span-2 space-y-5">
@@ -1339,6 +1413,8 @@ export function AssetDetail() {
           )}
         </div>
       </div>
+
+      </div>{/* end overview wrapper */}
 
       {/* IP Migration Wizard modal */}
       {showIPWizard && (

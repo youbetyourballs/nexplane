@@ -21,6 +21,7 @@ from app.routers import access_reviews as access_reviews_router
 from app.routers import notifications as notifications_router
 from app.routers import current_user
 from app.routers.audit import list_cr_audit_events
+from app.routers.asset_timeline import router as asset_timeline_router
 from app.services import scheduler_service
 
 
@@ -118,6 +119,7 @@ app.include_router(ir_router.router)
 app.include_router(smoke_tests_router.router)
 app.include_router(access_reviews_router.router)
 app.include_router(notifications_router.router)
+app.include_router(asset_timeline_router)
 
 
 @app.get("/change-requests/{cr_id}/audit-events", tags=["Audit"])
