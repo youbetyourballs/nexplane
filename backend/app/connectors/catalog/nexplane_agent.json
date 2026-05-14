@@ -1657,6 +1657,67 @@
                             "Set abort_error_threshold conservatively (0.05-0.1) for production fleets",
                             "Completed batches are not automatically rolled back — operator initiates per-host recovery"
                         ]
+                    },
+                    {
+                        "display_name": "Emergency User Lockout",
+                        "description": "Immediately locks out a user across all specified systems (AWS IAM deny-all policy, Linux local user lock). Use for incident response.",
+                        "applicable_asset_types": ["cloud_account", "server"],
+                        "parameters": [
+                            {"name": "user_identifier", "type": "string", "required": true},
+                            {"name": "systems", "type": "array", "required": false, "default": ["aws_iam"]}
+                        ],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.emergency_user_lockout",
+                        "generic_action": "emergency_user_lockout",
+                        "action_id": "emergency_user_lockout",
+                        "estimated_duration_seconds": 15,
+                        "execution_tier": 3
+                    },
+                    {
+                        "display_name": "User Suspension",
+                        "description": "Suspends a user account with optional auto-reversal after a specified duration.",
+                        "applicable_asset_types": ["cloud_account", "server"],
+                        "parameters": [
+                            {"name": "user_identifier", "type": "string", "required": true},
+                            {"name": "duration_hours", "type": "number", "required": false, "default": 0},
+                            {"name": "systems", "type": "array", "required": false, "default": ["aws_iam"]}
+                        ],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.user_suspension",
+                        "generic_action": "user_suspension",
+                        "action_id": "user_suspension",
+                        "estimated_duration_seconds": 20,
+                        "execution_tier": 3
+                    },
+                    {
+                        "display_name": "User Scope Reduction",
+                        "description": "Reduces IAM user permissions: demote to read-only, require MFA, or restrict to IP range.",
+                        "applicable_asset_types": ["cloud_account"],
+                        "parameters": [
+                            {"name": "user_identifier", "type": "string", "required": true},
+                            {"name": "mode", "type": "string", "required": false, "default": "demote_to_readonly"},
+                            {"name": "allowed_cidr", "type": "string", "required": false}
+                        ],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.user_scope_reduction",
+                        "generic_action": "user_scope_reduction",
+                        "action_id": "user_scope_reduction",
+                        "estimated_duration_seconds": 15,
+                        "execution_tier": 2
+                    },
+                    {
+                        "display_name": "Enforce MFA",
+                        "description": "Attaches a deny-without-MFA IAM inline policy to an IAM user.",
+                        "applicable_asset_types": ["cloud_account"],
+                        "parameters": [
+                            {"name": "user_identifier", "type": "string", "required": true}
+                        ],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.enforce_mfa",
+                        "generic_action": "enforce_mfa",
+                        "action_id": "enforce_mfa",
+                        "estimated_duration_seconds": 10,
+                        "execution_tier": 2
                     }
                 ]
 }
