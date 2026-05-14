@@ -9,6 +9,7 @@ class ProjectCreate(BaseModel):
     name: str
     description: str = ""
     goal: str = ""
+    risk_context: dict | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -30,6 +31,7 @@ class ProjectRead(BaseModel):
     status: ProjectStatus
     created_at: datetime
     updated_at: datetime
+    risk_context: dict | None = None
 
 
 class ProjectSummary(ProjectRead):

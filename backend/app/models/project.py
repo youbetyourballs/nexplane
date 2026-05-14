@@ -32,6 +32,8 @@ class Project(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     ai_context: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    template: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    risk_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     members: Mapped[list["ProjectChangeRequest"]] = relationship(
         "ProjectChangeRequest",
