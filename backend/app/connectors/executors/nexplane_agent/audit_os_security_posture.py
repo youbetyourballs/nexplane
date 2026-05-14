@@ -1,5 +1,10 @@
-from datetime import datetime, timezone
-async def execute(parameters, asset_ids, connector):
-    return {"action": "audit_os_security_posture", "selinux": {"available": True, "status": "SELinux status: enabled\nCurrent mode: enforcing"}, "apparmor": {"available": False, "status": ""}, "auditd": {"available": True, "status": "enabled"}, "recent_denials": "", "audited_at": datetime.now(timezone.utc).isoformat()}
-async def rollback(parameters, execution_result, connector):
-    return {"rolled_back": False, "reason": "audit_os_security_posture is read-only"}
+from app.connectors.executors.nexplane_agent import _dispatch
+
+
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    return await _dispatch.dispatch_agent_job(
+        command="audit_os_security_posture",
+        parameters=parameters,
+        asset_ids=list(asset_ids),
+        timeout_seconds=60,
+    )
