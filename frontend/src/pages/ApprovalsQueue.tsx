@@ -72,6 +72,11 @@ export function ApprovalsQueue() {
                       {cr.title}
                       <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
                     </Link>
+                    {(cr as any).priority === "emergency" && (
+                      <span className="text-xs bg-red-600 text-white px-2 py-0.5 rounded-full font-bold tracking-wide animate-pulse">
+                        EMERGENCY
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <RiskBadge level={cr.risk_level} />
