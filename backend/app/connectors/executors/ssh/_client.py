@@ -36,5 +36,26 @@ def get_ssh_client(creds: dict) -> paramiko.SSHClient:
     return client
 
 
+WRITE_ALLOWED_PREFIXES = (
+    "sudo systemctl start",
+    "sudo systemctl stop",
+    "sudo systemctl restart",
+    "sudo systemctl enable",
+    "sudo systemctl disable",
+    "curl -fsSL",
+    "sudo /tmp/nexplane-agent",
+    "sudo apt-get install",
+    "sudo yum install",
+    "sudo dnf install",
+    "chmod +x",
+    "mkdir -p",
+    "sudo mkdir -p",
+)
+
+
 def is_allowed(cmd: str) -> bool:
     return any(cmd.strip().startswith(p) for p in ALLOWED_PREFIXES)
+
+
+def is_write_allowed(cmd: str) -> bool:
+    return any(cmd.strip().startswith(p) for p in WRITE_ALLOWED_PREFIXES)
