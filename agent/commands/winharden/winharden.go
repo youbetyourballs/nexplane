@@ -132,3 +132,19 @@ func HardenRegistryExecute(params map[string]any) (map[string]any, error) {
 func HardenRegistryRollback(params map[string]any) (map[string]any, error) {
 	return registryRollbackOS(params)
 }
+
+func WDACauditExecute(params map[string]any) (map[string]any, error) {
+	return wdacAuditExecuteOS(params)
+}
+
+func WDACenforceExecute(params map[string]any) (map[string]any, error) {
+	return wdacEnforceExecuteOS(params)
+}
+
+func WDACrollback(params map[string]any) (map[string]any, error) {
+	return wdacRollbackOS(params)
+}
+
+func ASRauditExecute(params map[string]any) (map[string]any, error)   { return asrAuditExecuteOS(params) }
+func ASRenforceExecute(params map[string]any) (map[string]any, error) { return asrEnforceExecuteOS(params) }
+func ASRrollback(params map[string]any) (map[string]any, error)       { return asrRollbackOS(params) }
