@@ -261,6 +261,11 @@ class ChangeType(str, enum.Enum):
     agent_listpkgs = "agent_listpkgs"
     # OS major version upgrade with snapshot-first safety
     agent_os_upgrade = "agent_os_upgrade"
+    # Identity Security — Phase 3
+    emergency_user_lockout = "emergency_user_lockout"
+    user_suspension = "user_suspension"
+    user_scope_reduction = "user_scope_reduction"
+    enforce_mfa = "enforce_mfa"
 
 
 class RiskLevel(str, enum.Enum):
@@ -325,6 +330,9 @@ class ChangeRequest(Base):
     batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     priority: Mapped[str] = mapped_column(String(16), default="normal", nullable=False)
     emergency_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    execute_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    access_expiry_hours: Mapped[float | None] = mapped_column(nullable=True)
+    scheduled_rollback_cr_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="change_requests")
     requester: Mapped["User"] = relationship("User", back_populates="change_requests")
