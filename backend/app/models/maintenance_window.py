@@ -17,3 +17,5 @@ class MaintenanceWindow(Base):
     # null = applies to all assets; otherwise list of tag name strings
     applies_to_tags = Column(JSON, nullable=True)
     enabled         = Column(Boolean, nullable=False, default=True)
+    # "advisory" = warn only; "hard" = block execution
+    enforcement     = Column(String(16), nullable=False, default="advisory")
