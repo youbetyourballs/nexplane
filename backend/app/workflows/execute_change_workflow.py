@@ -76,6 +76,19 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
         change_request_id=cr_id,
     )
 
+    # Pre-change snapshot if requested
+    if data.get("snapshot_before") and data.get("change_type") not in ("create_ebs_snapshot", "agent_appdiscovery"):
+        try:
+            from app.connectors.executors.aws.create_ebs_snapshot import execute as _snap_execute
+            for _asset_id in (data.get("target_asset_ids") or []):
+                _snap_result = await _snap_execute(
+                    {"description": f"pre-change-{cr_id[:8]}", "wait_for_completion": False},
+                    [_asset_id], None,
+                )
+                logger.info(f"Pre-change snapshot: {_snap_result.get('snapshot_id')} for asset {_asset_id}")
+        except Exception as _snap_err:
+            logger.warning(f"Pre-change snapshot failed (non-blocking): {_snap_err}")
+
     # Step 3: Execute change via mock connector
     await write_audit_event(
         organization_id=org_id,
@@ -202,6 +215,15 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
             change_request_id=cr_id,
         )
         await activity_post_completion_discovery(cr_id)
+        # Auto-close linked findings
+        try:
+            from app.services.finding_service import close_linked_findings as _clf
+            async with AsyncSessionLocal() as _find_db:
+                _closed = await _clf(_find_db, cr_id)
+                if _closed > 0:
+                    logger.info(f"Auto-closed {_closed} findings for CR {cr_id}")
+        except Exception as _fe:
+            logger.warning(f"Finding auto-closure failed: {_fe}")
     else:
         failed_verifications = [r for r in verification_result["results"] if not r["passed"]]
         await write_audit_event(
