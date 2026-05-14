@@ -1112,6 +1112,83 @@ Many phases require specific software installed on the target EC2. The smoke tes
 
 ---
 
+### Phase: WIN_HARDENING_PIPELINE
+
+**Purpose:** Verify the learn → baseline → enforce pipeline for Windows-native controls: AppLocker (audit→enforce), Windows Firewall (log→block), Windows Audit Policy (baseline→full). Tests existing Go agent capabilities after executor wire-up.
+
+**Setup:**
+- EC2: Windows Server 2022, Nexplane agent installed, SSM enabled
+- Install IIS (Windows feature) and a small .NET app on port 8080
+- Install a test executable `C:\TestApps\safe.exe` (notepad copy) and `C:\TestApps\blocked.exe` (second notepad copy, should be blocked)
+
+**AppLocker pipeline:**
+1. `deploy_applocker_policy` CR with `mode: "audit"`, rules: allow `C:\TestApps\safe.exe` by hash, block `blocked.exe`
+2. SSM: run `C:\TestApps\blocked.exe` → should launch (audit mode, not blocked) and generate Event ID 8003
+3. SSM: `Get-WinEvent -LogName "Microsoft-Windows-AppLocker/EXE and DLL" | Where-Object Id -eq 8003` → entry exists
+4. Call AI generate with audit events → receive enforce-mode policy
+5. `deploy_applocker_policy` CR with `mode: "enforce"`, generated policy
+6. SSM: run `C:\TestApps\safe.exe` → exits successfully (allowed)
+7. SSM: run `C:\TestApps\blocked.exe` → returns non-zero exit code (blocked, Event ID 8004)
+
+**Windows Firewall log-baseline → block pipeline:**
+1. `configure_windows_firewall` CR with `action: "log_baseline"`, `duration_seconds: 60`, `log_file: "C:\\Windows\\System32\\LogFiles\\Firewall\\pfirewall.log"`
+2. SSM: during 60s window, make outbound connections on port 80 (IIS fetch) and port 9999 (nothing — unexpected)
+3. Verify CR result contains observed connections (port 80 to external IPs)
+4. `configure_windows_firewall` CR with `action: "add_rule"`, block outbound port 9999
+5. SSM: attempt `Test-NetConnection -Port 9999 -ComputerName 8.8.8.8` → `TcpTestSucceeded: False`
+6. Verify allowed port 80 still works
+
+**Windows Audit Policy baseline:**
+1. `configure_windows_audit_policy` CR with `action: "baseline"`, `duration_seconds: 60` — captures which event types actually fire under normal load
+2. SSM: during window, perform login/logout, file access, process create
+3. Verify result contains event categories with fire counts
+4. `configure_windows_audit_policy` CR with `action: "apply"`, `profile: "cis_level1"` — full audit policy
+5. SSM: `auditpol /get /category:*` → multiple subcategories show `Success and Failure`
+6. Verify no log flooding from unexpected sources
+
+**Assertions:**
+- AppLocker: Event 8003 in audit mode, Event 8004 (blocked) in enforce mode
+- Windows Firewall: outbound port 9999 blocked after rule applied; port 80 still open
+- Audit Policy: CIS L1 categories enabled, confirmed via `auditpol`
+
+---
+
+### Phase: WIN_POLICY_PIPELINE
+
+**Purpose:** Verify WDAC, ASR, and Sysmon pipelines. *Requires new Go agent commands (wdac_audit, asr_audit, sysmon_deploy) — run after Phase 0 Go command implementation.*
+
+**Setup:** EC2: Windows Server 2022, Nexplane agent v0.4+ (with new commands), SSM enabled.
+
+**WDAC audit → enforce:**
+1. `wdac_audit` CR: deploy WDAC policy in audit mode covering `C:\TestApps\`, `duration_seconds: 60`
+2. SSM: run allowed executable, run unsigned test binary → both execute (audit mode)
+3. SSM: `Get-WinEvent -LogName "Microsoft-Windows-CodeIntegrity/Operational" -FilterXPath "*[System[EventID=3076]]"` → entries present for unsigned binary
+4. Call AI generate with audit events → receive minimal WDAC policy (sign+path allowlist)
+5. `wdac_enforce` CR: deploy enforce mode policy
+6. SSM: allowed signed binary → runs; unsigned binary → blocked (Event 3077)
+
+**ASR audit → block:**
+1. `asr_audit` CR: enable 3 ASR rules in audit mode (block Office child processes, block credential stealing, block untrusted executables from email)
+2. SSM: trigger each rule's pattern in audit mode (e.g., run PowerShell from a simulated Office process)
+3. SSM: `Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" | Where-Object Id -eq 1122` → audit events present
+4. `asr_enforce` CR: switch same rules to block mode
+5. Repeat trigger → SSM: Event 1121 (blocked) present
+
+**Sysmon FIM:**
+1. `sysmon_deploy` CR: install Sysmon64 with Nexplane config template; configure FileCreate monitoring on `C:\Monitored\`
+2. SSM: `Get-Service sysmon64` → Running
+3. SSM: create `C:\Monitored\test.txt`
+4. `sysmon_fim` CR: query Sysmon Event ID 11 for `C:\Monitored\` since deploy time
+5. Verify `test.txt` appears in file event list
+6. Delete `C:\Monitored\test.txt`; run `sysmon_fim` again → Event ID 23 (file delete) present
+
+**Assertions:**
+- WDAC: unsigned binary blocked in enforce mode (Event 3077), allowed in audit (Event 3076)
+- ASR: rule triggers Event 1121 (block) vs 1122 (audit) correctly
+- Sysmon: FileCreate and FileDelete events captured for monitored path
+
+---
+
 ### Phase: HARDENING_PIPELINE
 
 **Purpose:** Verify the generalized learn → baseline → AI-generate → enforce → drift pipeline for AppArmor, iptables, and FIM. (Seccomp covered by SECCOMP_PIPELINE.)
@@ -1386,6 +1463,8 @@ The following Windows hardening controls are not yet implemented in the Go agent
 |----------|-------------|------|------|------|------|------|------|
 | Linux OS hardening executor wire-up | **OSSEC_WIRE** | 0.1–0.3, 0.5 | — | — | — | — | — |
 | Windows OS hardening executor wire-up | **WIN_OSSEC_WIRE** | 0.3–0.5 | — | — | — | — | — |
+| Windows AppLocker + Firewall + Audit pipeline | **WIN_HARDENING_PIPELINE** | 0.3 | 1.4, 1.7 | 2.9 | — | 4.2 | — |
+| Windows WDAC + ASR + Sysmon pipeline | **WIN_POLICY_PIPELINE** | 0.3 | 1.4, 1.7 | — | — | 4.2, 4.4 | — |
 | Connector onboarding | Existing A | — | 1.1 | — | — | — | — |
 | CVE-driven patching | FINDING_LIFECYCLE | — | 1.2–1.5 | 2.1–2.3, 2.7 | — | — | — |
 | Routine patch cycle | BULK_PATCH | — | 1.3, 1.4, 1.7 | 2.1, 2.2 | — | — | — |
