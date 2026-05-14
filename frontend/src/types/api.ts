@@ -194,6 +194,7 @@ export type ConnectorType =
   | "runzero"
   | "wiz"
   | "entra_id"
+  | "azure_ad"
   | "sentinelone"
   | "defender_endpoint"
   | "hashicorp_vault"
@@ -481,6 +482,8 @@ export interface ChangeRequestCreate {
   change_type: ChangeType;
   target_asset_ids: string[];
   desired_outcome: Record<string, unknown>;
+  priority?: "normal" | "emergency";
+  emergency_reason?: string;
 }
 
 export interface ChangePlanStep {

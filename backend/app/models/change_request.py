@@ -263,9 +263,17 @@ class ChangeType(str, enum.Enum):
     agent_os_upgrade = "agent_os_upgrade"
     # Identity Security — Phase 3
     emergency_user_lockout = "emergency_user_lockout"
+    # Azure AD / Entra ID identity — Phase 5
+    azure_ad_disable_user = "azure_ad_disable_user"
+    azure_ad_create_user = "azure_ad_create_user"
     user_suspension = "user_suspension"
     user_scope_reduction = "user_scope_reduction"
     enforce_mfa = "enforce_mfa"
+    # Seccomp pipeline — Phase SECCOMP_PIPELINE
+    seccomp_learn = "seccomp_learn"
+    configure_seccomp = "configure_seccomp"
+    # OS security posture audit — Phase BULK_PATCH
+    audit_os_security_posture = "audit_os_security_posture"
 
 
 class RiskLevel(str, enum.Enum):

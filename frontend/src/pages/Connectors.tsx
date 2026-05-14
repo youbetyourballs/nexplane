@@ -25,6 +25,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   runzero: "RunZero",
   wiz: "Wiz",
   entra_id: "Microsoft Entra ID",
+  azure_ad: "Azure AD (Graph API)",
   // 6c
   sentinelone: "SentinelOne",
   defender_endpoint: "Microsoft Defender for Endpoint",
@@ -72,6 +73,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   runzero: "🌐",
   wiz: "🛡️",
   entra_id: "👥",
+  azure_ad: "👥",
   // 6c
   sentinelone: "🛡️",
   defender_endpoint: "🛡️",
