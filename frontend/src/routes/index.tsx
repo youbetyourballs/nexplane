@@ -22,6 +22,7 @@ import { Compliance } from "../pages/Compliance";
 import BackupRecovery from "../pages/BackupRecovery";
 import { MaintenanceWindows } from "../pages/MaintenanceWindows";
 import ScheduledOperations from "../pages/ScheduledOperations";
+import { Notifications } from "../pages/Notifications";
 import { useAuth } from "../hooks/useAuth";
 
 export function AppRoutes() {
@@ -57,6 +58,7 @@ export function AppRoutes() {
         <Route path="/maintenance-windows" element={<MaintenanceWindows />} />
         <Route path="/scheduled-operations" element={<ScheduledOperations />} />
         <Route path="/smoke-tests" element={<SmokeTests />} />
+        <Route path="/notifications" element={<Notifications />} />
       </Route>
     </Routes>
   );
