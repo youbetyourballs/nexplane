@@ -1992,10 +1992,42 @@
       "applicable_asset_types": [
         "cloud_account"
       ], 
-      "action_type": "change", 
-      "executor": "aws.ecr_repository_delete", 
-      "generic_action": "ecr_delete_repository", 
+      "action_type": "change",
+      "executor": "aws.ecr_repository_delete",
+      "generic_action": "ecr_delete_repository",
       "action_id": "ecr_delete_repository"
+    },
+    {
+      "display_name": "Emergency User Lockout",
+      "description": "Attach a deny-all IAM inline policy to immediately lock out a user.",
+      "parameters": [
+        {"required": true, "type": "string", "name": "user_identifier"},
+        {"required": false, "type": "array", "name": "systems"}
+      ],
+      "execution_tier": 2,
+      "rollback_action": "emergency_user_lockout",
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["cloud_account"],
+      "action_type": "change",
+      "executor": "nexplane_agent.emergency_user_lockout",
+      "generic_action": "emergency_user_lockout",
+      "action_id": "emergency_user_lockout"
+    },
+    {
+      "display_name": "User Scope Reduction",
+      "description": "Demote an IAM user to read-only or apply MFA/IP restrictions.",
+      "parameters": [
+        {"required": true, "type": "string", "name": "user_identifier"},
+        {"required": false, "type": "string", "name": "mode"}
+      ],
+      "execution_tier": 2,
+      "rollback_action": "user_scope_reduction",
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["cloud_account"],
+      "action_type": "change",
+      "executor": "aws.scope_reduction_iam",
+      "generic_action": "user_scope_reduction",
+      "action_id": "user_scope_reduction"
     }
   ]
 }

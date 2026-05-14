@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Plus, X, ChevronUp, ChevronDown, Search, Sparkles,
@@ -47,10 +47,11 @@ export function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const isNew = id === "new";
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const qc = useQueryClient();
 
-  const [name, setName] = useState("");
-  const [goal, setGoal] = useState("");
+  const [name, setName] = useState(() => isNew ? (searchParams.get("name") ?? "") : "");
+  const [goal, setGoal] = useState(() => isNew ? (searchParams.get("goal") ?? "") : "");
   const [status, setStatus] = useState<ProjectStatus>("draft");
   const [headerDirty, setHeaderDirty] = useState(false);
 

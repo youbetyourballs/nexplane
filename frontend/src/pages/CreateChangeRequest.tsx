@@ -559,6 +559,26 @@ const CHANGE_TYPE_META: Partial<Record<ChangeType, { label: string; description:
     description: "Suppress a scanner finding with a justification.",
     outcomeTemplate: JSON.stringify({ finding_id: null, reason: "", expiry_days: 90, rollback_strategy: "unsuppress_finding" }, null, 2),
   },
+  ip_campaign: {
+    label: "IP Patch Campaign",
+    description: "Rolling patch campaign for in-place (IP) updates — applies OS-level patches without replacing instances.",
+    outcomeTemplate: JSON.stringify({ cve_id: null, packages: [], batch_size_pct: 10, abort_threshold_pct: 25, dry_run: false, rollback_strategy: "uninstall_patches" }, null, 2),
+  },
+  agent_appdiscovery: {
+    label: "Discover Applications",
+    description: "Scan a host for running services and register them as application assets in the inventory.",
+    outcomeTemplate: JSON.stringify({ rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  agent_containerize_build: {
+    label: "Build Container Image",
+    description: "Build a Docker image from a discovered application workload and push to a registry.",
+    outcomeTemplate: JSON.stringify({ registry: "", namespace: "nexplane-migrations", dry_run: false, rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  agent_containerize_retire: {
+    label: "Retire Legacy Service",
+    description: "Stop and remove the original legacy service after a successful container migration soak window.",
+    outcomeTemplate: JSON.stringify({ rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
   agent_containerize_auto: {
     label: "Autonomous Containerization ✨ AI",
     description: "AI-directed migration from legacy services to Kubernetes. Discovers workloads, maps dependencies (including brownfield containers), builds and deploys containers, verifies with a configurable soak window. Retirement requires human approval. Requires AI provider configured.",
@@ -1393,6 +1413,12 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   oci_alarm_create: "cloud_account" as AssetType,
   oci_alarm_delete: "cloud_account" as AssetType,
   oci_logging_enable: "cloud_account" as AssetType,
+  // Patching
+  ip_campaign: "server",
+  // Containerization discovery
+  agent_appdiscovery: "server",
+  agent_containerize_build: "server",
+  agent_containerize_retire: "server",
   // Database actions
   rotate_db_credentials: "database",
   promote_db_replica: "database",
