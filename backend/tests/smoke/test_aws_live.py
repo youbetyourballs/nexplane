@@ -5140,6 +5140,89 @@ def run_phase_bulk_patch(client: NexplaneClient, phase_a_result: Optional[dict] 
     print("Phase BULK_PATCH complete")
 
 
+# ---------------------------------------------------------------------------
+# Phase USER_ISOLATE — IAM user emergency lockout + scope reduction
+# ---------------------------------------------------------------------------
+
+def run_phase_user_isolate(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase USER_ISOLATE: create a test IAM user, run emergency_user_lockout CR,
+    verify deny-all policy, rollback, run user_scope_reduction, verify, rollback."""
+    print("\n[Phase USER_ISOLATE] IAM emergency lockout + scope reduction")
+
+    import time as _time
+    username = f"nexplane-smoke-isolate-{int(_time.time())}"
+    iam_client = _get_aws_boto3_client("iam")
+    if not iam_client:
+        fail("Phase USER_ISOLATE requires AWS credentials (iam)")
+
+    try:
+        # 1. Create test IAM user directly via boto3
+        iam_client.create_user(UserName=username)
+        log(f"Created test IAM user: {username}")
+
+        # 2. Run emergency_user_lockout CR against the cloud account asset
+        lockout_cr = client.run_cr(
+            "[USER_ISOLATE] emergency_user_lockout", "emergency_user_lockout", cloud_account_id,
+            {"user_identifier": username, "systems": ["aws_iam"]},
+        )
+        log(f"emergency_user_lockout CR completed: {lockout_cr['id']}")
+
+        # 3. Verify deny-all policy was attached via boto3
+        policies = iam_client.list_user_policies(UserName=username).get("PolicyNames", [])
+        if "nexplane-emergency-lockout" not in policies:
+            fail(f"Expected 'nexplane-emergency-lockout' inline policy not found on {username}. Policies: {policies}")
+        log("Deny-all policy attached: nexplane-emergency-lockout")
+
+        # 4. Rollback the lockout CR via Nexplane
+        client.rollback_cr(lockout_cr["id"], "[USER_ISOLATE] rollback emergency_user_lockout")
+        log("Rollback of emergency_user_lockout CR completed")
+
+        # 5. Verify policy was removed
+        policies_after = iam_client.list_user_policies(UserName=username).get("PolicyNames", [])
+        if "nexplane-emergency-lockout" in policies_after:
+            fail(f"Deny-all policy still present after rollback on {username}")
+        log("Deny-all policy removed after rollback")
+
+        # 6. Run user_scope_reduction CR (demote_to_readonly)
+        scope_cr = client.run_cr(
+            "[USER_ISOLATE] user_scope_reduction", "user_scope_reduction", cloud_account_id,
+            {"user_identifier": username, "mode": "demote_to_readonly"},
+        )
+        log(f"user_scope_reduction CR completed: {scope_cr['id']}")
+
+        # 7. Verify deny-write policy was attached
+        policies2 = iam_client.list_user_policies(UserName=username).get("PolicyNames", [])
+        if "nexplane-scope-reduction-deny-write" not in policies2:
+            fail(f"Expected 'nexplane-scope-reduction-deny-write' not found on {username}. Policies: {policies2}")
+        log("Deny-write policy attached: nexplane-scope-reduction-deny-write")
+
+        # 8. Rollback scope reduction
+        client.rollback_cr(scope_cr["id"], "[USER_ISOLATE] rollback user_scope_reduction")
+        log("Rollback of user_scope_reduction CR completed")
+
+        # 9. Verify policy removed
+        policies3 = iam_client.list_user_policies(UserName=username).get("PolicyNames", [])
+        if "nexplane-scope-reduction-deny-write" in policies3:
+            fail(f"Deny-write policy still present after rollback on {username}")
+        log("Deny-write policy removed after rollback")
+
+        print("Phase USER_ISOLATE PASSED")
+
+    finally:
+        # Delete the test IAM user (detach any remaining inline policies first)
+        try:
+            remaining = iam_client.list_user_policies(UserName=username).get("PolicyNames", [])
+            for pname in remaining:
+                try:
+                    iam_client.delete_user_policy(UserName=username, PolicyName=pname)
+                except Exception:
+                    pass
+            iam_client.delete_user(UserName=username)
+            log(f"Deleted test IAM user: {username}")
+        except Exception as e:
+            print(f"  Warning: could not delete test IAM user {username}: {e}")
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -5383,6 +5466,8 @@ def main():
             run_phase_eks_tf(client, cloud_account_id)
         if "ECR" in phases:
             run_phase_ecr(client, cloud_account_id)
+        if "USER_ISOLATE" in phases:
+            run_phase_user_isolate(client, cloud_account_id)
 
         # SP3 DEMO phases
         demo_result: dict = {}
