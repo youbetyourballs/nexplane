@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Clock, Play, XCircle, Activity } from "lucide-react";
 import { changeRequestsApi } from "../api/endpoints";
+import { apiClient } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import { RiskBadge } from "../components/RiskBadge";
 import { PageLoading } from "../components/LoadingSpinner";
@@ -43,6 +44,15 @@ export function Dashboard() {
     queryFn: () => changeRequestsApi.list(),
   });
 
+  const { data: checklist } = useQuery({
+    queryKey: ["onboarding-checklist"],
+    queryFn: () => apiClient.get("/onboarding/checklist").then((r) => r.data as {
+      steps: { id: string; label: string; complete: boolean; detail: string }[];
+      connector_count: number;
+      asset_count: number;
+    }),
+  });
+
   if (isLoading) return <PageLoading />;
 
   const crs = all ?? [];
@@ -59,6 +69,8 @@ export function Dashboard() {
   );
   const recent = [...crs].slice(0, 8);
 
+  const allChecklistDone = checklist?.steps?.every((s) => s.complete) ?? true;
+
   return (
     <div className="p-8">
       <div className="mb-8">
@@ -67,6 +79,33 @@ export function Dashboard() {
           Governed infrastructure change — real-time status
         </p>
       </div>
+
+      {/* Onboarding checklist — shown until all steps complete */}
+      {!allChecklistDone && checklist && (
+        <div className="mb-6 p-4 rounded-xl border border-indigo-200 bg-indigo-50">
+          <h3 className="text-sm font-semibold text-indigo-900 mb-3">Get started with Nexplane</h3>
+          <div className="space-y-2">
+            {checklist.steps.map((step) => (
+              <div key={step.id} className="flex items-start gap-2 text-sm">
+                <span className={step.complete ? "text-green-600 mt-0.5" : "text-slate-400 mt-0.5"}>
+                  {step.complete ? <CheckCircle2 size={14} /> : <Clock size={14} />}
+                </span>
+                <div>
+                  <span className={step.complete ? "line-through text-slate-400" : "text-slate-700 font-medium"}>
+                    {step.label}
+                  </span>
+                  <p className="text-xs text-slate-500">{step.detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 pt-3 border-t border-indigo-100">
+            <Link to="/connectors" className="text-xs font-medium text-indigo-700 hover:text-indigo-900">
+              Configure connectors →
+            </Link>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
         <StatCard

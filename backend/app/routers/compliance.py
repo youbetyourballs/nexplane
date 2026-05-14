@@ -458,6 +458,11 @@ async def get_cis_summary(
     db: AsyncSession = Depends(get_db),
 ):
     """Return the 18-control CIS Controls v8 compliance summary for the org."""
+    from sqlalchemy import func as sqlfunc
+    from app.models.policy_baseline import PolicyBaseline
+    from app.models.vulnerability import VulnerabilityFinding
+    from app.models.connector import Connector, ConnectorType
+
     result = await db.execute(
         select(Asset).where(
             Asset.organization_id == user.organization_id,
@@ -476,5 +481,47 @@ async def get_cis_summary(
         for a in assets
     ]
 
-    summary = compute_cis_summary(asset_dicts)
+    # Control 4: PolicyBaseline coverage
+    total_servers = len(assets)
+    hardened_count = await db.scalar(
+        select(sqlfunc.count(sqlfunc.distinct(PolicyBaseline.asset_id))).where(
+            PolicyBaseline.organization_id == user.organization_id
+        )
+    ) or 0
+    policy_baseline_counts = {"total_servers": total_servers, "hardened_count": hardened_count}
+
+    # Control 7: vulnerability findings within SLA
+    total_vulns = await db.scalar(
+        select(sqlfunc.count(VulnerabilityFinding.id)).where(
+            VulnerabilityFinding.organization_id == user.organization_id,
+        )
+    ) or 0
+    within_sla = await db.scalar(
+        select(sqlfunc.count(VulnerabilityFinding.id)).where(
+            VulnerabilityFinding.organization_id == user.organization_id,
+            VulnerabilityFinding.status.in_(["remediated", "mitigated"]),
+        )
+    ) or 0
+    vuln_sla_data = {"total": total_vulns, "within_sla": within_sla}
+
+    # Control 10: assets linked via EDR connectors (CrowdStrike, Defender, SentinelOne)
+    edr_types = [ConnectorType.crowdstrike, ConnectorType.defender_endpoint, ConnectorType.sentinelone]
+    edr_connectors_result = await db.execute(
+        select(Connector.id).where(
+            Connector.organization_id == user.organization_id,
+            Connector.connector_type.in_(edr_types),
+        )
+    )
+    edr_connector_ids = {str(row[0]) for row in edr_connectors_result.fetchall()}
+    edr_asset_ids: set[str] = {
+        a["id"] for a in asset_dicts
+        if a.get("connector_id") and a["connector_id"] in edr_connector_ids
+    }
+
+    summary = compute_cis_summary(
+        asset_dicts,
+        policy_baseline_counts=policy_baseline_counts,
+        vuln_sla_data=vuln_sla_data,
+        edr_asset_ids=edr_asset_ids if edr_connector_ids else None,
+    )
     return CisSummaryResponse(**summary)
