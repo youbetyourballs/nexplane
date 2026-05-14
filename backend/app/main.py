@@ -23,21 +23,31 @@ from app.routers import current_user
 from app.routers.audit import list_cr_audit_events
 from app.routers.asset_timeline import router as asset_timeline_router
 from app.services import scheduler_service
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from app.workers.escalation_worker import check_emergency_escalations
+
+_escalation_scheduler: AsyncIOScheduler | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _escalation_scheduler
     from app.connectors.catalog_service import init_catalog_service
     import pathlib
     init_catalog_service(pathlib.Path(__file__).parent / "connectors" / "catalog")
     scheduler_service.init_scheduler(lambda: AsyncSessionLocal())
     await scheduler_service.start()
+    _escalation_scheduler = AsyncIOScheduler()
+    _escalation_scheduler.add_job(check_emergency_escalations, "interval", minutes=5)
+    _escalation_scheduler.start()
     # Scrub orphaned CRs — any CR still in-flight when the backend
     # restarted will never complete; mark them failed now so the
     # dashboard doesn't show phantom "executing" entries.
     await _scrub_orphaned_crs()
     yield
     scheduler_service.stop()
+    if _escalation_scheduler and _escalation_scheduler.running:
+        _escalation_scheduler.shutdown(wait=False)
 
 
 async def _scrub_orphaned_crs() -> None:
