@@ -87,3 +87,37 @@ async def test_patch_executor_dispatches_to_agent(module_name, expected_command)
         result = await mod.execute({"packages": ["openssl"]}, ["asset-uuid-1"], None)
 
     mock_dispatch.assert_called_once()
+
+
+WINDOWS_HARDENING_EXECUTORS = [
+    ("configure_laps", "configure_laps"),
+    ("enable_credential_guard", "enable_credential_guard"),
+    ("enforce_powershell_clm", "enforce_powershell_clm"),
+    ("deploy_applocker_policy", "deploy_applocker_policy"),
+    ("harden_smb", "harden_smb"),
+    ("enable_bitlocker", "enable_bitlocker"),
+    ("configure_windows_firewall", "configure_windows_firewall"),
+    ("harden_tls_protocols", "harden_tls_protocols"),
+    ("harden_rdp", "harden_rdp"),
+    ("configure_windows_audit_policy", "configure_windows_audit_policy"),
+    ("harden_registry", "harden_registry"),
+    ("apply_windows_patches", "apply_windows_patches"),
+]
+
+
+@pytest.mark.parametrize("module_name,expected_command", WINDOWS_HARDENING_EXECUTORS)
+@pytest.mark.asyncio
+async def test_windows_executor_dispatches_to_agent(module_name, expected_command):
+    import importlib
+    mod = importlib.import_module(
+        f"app.connectors.executors.nexplane_agent.{module_name}"
+    )
+    mock_dispatch = AsyncMock(return_value={"status": "ok", "snapshot_id": "snap-win-1"})
+    with patch(
+        "app.connectors.executors.nexplane_agent._dispatch.dispatch_agent_job",
+        mock_dispatch,
+    ):
+        result = await mod.execute({"profile": "cis_level1"}, ["win-asset-uuid-1"], None)
+
+    mock_dispatch.assert_called_once()
+    assert result.get("_asset_ids") == ["win-asset-uuid-1"]

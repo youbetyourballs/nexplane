@@ -1,14 +1,12 @@
-from datetime import datetime, timezone
+from app.connectors.executors.nexplane_agent import _dispatch
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
-    return {
-        "action": "audit_windows_patch_status",
-        "security_updates_available": 0,
-        "last_update_check": datetime.now(timezone.utc).isoformat(),
-        "status": "up_to_date",
-    }
-
-
-async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": False, "reason": "audit_windows_patch_status is read-only"}
+    result = await _dispatch.dispatch_agent_job(
+        command="audit_windows_patch_status",
+        parameters=parameters,
+        asset_ids=list(asset_ids),
+        timeout_seconds=120,
+    )
+    result["_asset_ids"] = [str(a) for a in asset_ids]
+    return result
