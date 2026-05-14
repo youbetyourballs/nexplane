@@ -16,7 +16,10 @@ import {
   Clock,
   CalendarClock,
   FlaskConical,
+  Bell,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { apiClient } from "../api/client";
 import { useAuth } from "../hooks/useAuth";
 
 const navItems = [
@@ -34,11 +37,20 @@ const navItems = [
   { to: "/maintenance-windows", label: "Maintenance Windows", icon: Clock },
   { to: "/scheduled-operations", label: "Scheduled Ops", icon: CalendarClock },
   { to: "/smoke-tests", label: "Smoke Tests", icon: FlaskConical },
+  { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export function Sidebar() {
   const { user, logout } = useAuth();
+
+  const { data: unreadNotifications = [] } = useQuery<{ id: string; read: boolean }[]>({
+    queryKey: ["notifications", "unread"],
+    queryFn: () => apiClient.get("/notifications?unread_only=true&limit=50").then(r => r.data),
+    refetchInterval: 30_000,
+    enabled: !!user,
+  });
+  const unreadCount = unreadNotifications.length;
 
   return (
     <aside className="fixed inset-y-0 left-0 w-60 bg-navy flex flex-col z-10">
@@ -61,7 +73,14 @@ export function Sidebar() {
               )
             }
           >
-            <Icon className="w-4 h-4 flex-shrink-0" />
+            <div className="relative flex-shrink-0">
+              <Icon className="w-4 h-4" />
+              {to === "/notifications" && unreadCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5 leading-none">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+            </div>
             {label}
           </NavLink>
         ))}
