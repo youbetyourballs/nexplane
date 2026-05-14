@@ -215,6 +215,19 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
             change_request_id=cr_id,
         )
         await activity_post_completion_discovery(cr_id)
+        # Run post-change verification checks (advisory — failures are logged, not blocking)
+        _vc_list = data.get("verification_checks") or []
+        if _vc_list:
+            try:
+                from app.services.verification_check_service import run_verification_checks as _run_vc
+                _vc_results = await _run_vc(_vc_list, data.get("target_asset_ids") or [])
+                _all_passed = all(r.get("passed") for r in _vc_results)
+                if not _all_passed:
+                    _failed = [r for r in _vc_results if not r.get("passed")]
+                    logger.warning(f"Verification checks failed for CR {cr_id}: {_failed}")
+                    # Advisory only — CR stays completed
+            except Exception as _ve:
+                logger.warning(f"Verification checks error: {_ve}")
         # Auto-close linked findings
         try:
             from app.services.finding_service import close_linked_findings as _clf

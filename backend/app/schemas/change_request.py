@@ -14,6 +14,7 @@ class ChangeRequestCreate(BaseModel):
     desired_outcome: dict
     finding_ids: list[str] = []
     snapshot_before: bool = False
+    verification_checks: list[dict] = []
 
 
 class ChangeRequestSummary(BaseModel):
@@ -42,6 +43,7 @@ class ChangeRequestRead(BaseModel):
     desired_outcome: dict
     finding_ids: list[str] = []
     snapshot_before: bool = False
+    verification_checks: list[dict] = []
     risk_level: RiskLevel
     status: ChangeRequestStatus
     created_at: datetime
