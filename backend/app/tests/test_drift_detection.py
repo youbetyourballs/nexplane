@@ -88,3 +88,19 @@ def test_write_cis_score_caps_history_at_30():
     audit_result = {"score": 0.9, "level": 1, "collected_at": "t", "controls": []}
     updated = _build_updated_metadata(existing, audit_result)
     assert len(updated["cis_compliance"]["history"]) == 30
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: PolicyBaseline / DriftAlert model tests
+# ---------------------------------------------------------------------------
+
+def test_drift_alert_model_exists():
+    from app.models.policy_baseline import DriftAlert
+    assert hasattr(DriftAlert, 'new_behaviors')
+    assert hasattr(DriftAlert, 'status')
+    assert hasattr(DriftAlert, 'detected_at')
+
+
+def test_drift_check_worker_importable():
+    from app.workers.drift_check_worker import check_policy_drift
+    assert callable(check_policy_drift)
