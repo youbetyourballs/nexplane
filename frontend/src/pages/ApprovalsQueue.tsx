@@ -80,6 +80,15 @@ export function ApprovalsQueue() {
                       {cr.change_type.replace(/_/g, " ")}
                     </span>
                   </div>
+                  {cr.finding_ids?.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {cr.finding_ids.map((fid: string) => (
+                        <span key={fid} className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
+                          Finding {fid.slice(0, 8)}…
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="text-right flex-shrink-0">
                   <div className="text-xs text-slate-500">{cr.requester.name}</div>

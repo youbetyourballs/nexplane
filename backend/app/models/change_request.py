@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Text
+from sqlalchemy import ARRAY, String as _String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 import enum
@@ -311,6 +312,9 @@ class ChangeRequest(Base):
     )
     # Vulnerability remediation fields
     finding_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    finding_ids: Mapped[list[str]] = mapped_column(
+        ARRAY(_String), default=list, nullable=False, server_default="{}"
+    )
     source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     stateful_approved_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None

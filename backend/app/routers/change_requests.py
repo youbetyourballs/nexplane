@@ -90,6 +90,7 @@ async def create_change_request(
         change_type=body.change_type,
         target_asset_ids=[str(aid) for aid in body.target_asset_ids],
         desired_outcome=body.desired_outcome,
+        finding_ids=body.finding_ids or [],
         status=ChangeRequestStatus.draft,
     )
     db.add(cr)
@@ -437,6 +438,20 @@ async def execute_change_request(
                 status_code=400,
                 detail="Critical risk changes require manual execution authorization. Contact your security administrator."
             )
+
+    # Check hard-enforcement maintenance windows for non-emergency CRs
+    _priority = getattr(cr, "priority", None)
+    if _priority != "emergency":
+        from app.services.maintenance_window_service import is_in_maintenance_window
+        for _asset_id in (cr.target_asset_ids or []):
+            _asset = await db.get(Asset, uuid.UUID(str(_asset_id)))
+            _tags = (_asset.tags or []) if _asset else []
+            _blocking = await is_in_maintenance_window(db, _tags, enforcement="hard")
+            if _blocking:
+                raise HTTPException(
+                    status_code=423,
+                    detail=f"maintenance_window: execution blocked by hard-enforcement window '{_blocking.name}'"
+                )
 
     attempt = len(cr.execution_runs) + 1
     workflow_id = f"wf-cr-{cr.id}-{attempt}"
