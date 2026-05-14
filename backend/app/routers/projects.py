@@ -44,6 +44,38 @@ class AIChatResponse(BaseModel):
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
+
+class ProjectFromTemplateRequest(BaseModel):
+    template: str
+    name: str
+    target_asset_ids: list[str] = []
+
+
+@router.post("/from-template", status_code=201)
+async def create_from_template(
+    body: ProjectFromTemplateRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.project_template_service import create_project_from_template
+    try:
+        return await create_project_from_template(
+            template_name=body.template,
+            project_name=body.name,
+            target_asset_ids=body.target_asset_ids,
+            user_id=str(user.id),
+            organization_id=str(user.organization_id),
+            db=db,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/templates")
+async def list_templates(user: User = Depends(current_user)):
+    from app.services.project_template_service import TEMPLATES
+    return [{"name": k, "description": v["description"], "phases": len(v["phases"])} for k, v in TEMPLATES.items()]
+
 _MEMBER_OPTIONS = [
     selectinload(ProjectChangeRequest.change_request).selectinload(
         ChangeRequest.requester
