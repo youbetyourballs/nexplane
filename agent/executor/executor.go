@@ -24,6 +24,7 @@ import (
 	"nexplane-agent/commands/listpkgs"
 	"nexplane-agent/commands/linuxpatch"
 	"nexplane-agent/commands/winpatch"
+	"nexplane-agent/commands/credrotation"
 )
 
 // Result is the outcome of a command execution.
@@ -121,6 +122,10 @@ var commands = map[string]CommandFunc{
 	// Windows patching (Spec 5f)
 	"apply_windows_patches":      winpatch.ApplyWindowsPatchesExecute,
 	"audit_windows_patch_status": winpatch.AuditWindowsPatchStatusExecute,
+	// Credential rotation
+	"rotate_ssh_keys": credrotation.SSHKeyExecute,
+	"rotate_db_creds": credrotation.DBRotateExecute,
+	"rotate_api_key":  credrotation.APIKeyEnvExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -174,6 +179,10 @@ var rollbacks = map[string]CommandFunc{
 	"apply_linux_patches":   linuxpatch.ApplyLinuxPatchesRollback,
 	// Windows patching rollback
 	"apply_windows_patches": winpatch.ApplyWindowsPatchesRollback,
+	// Credential rotation rollback
+	"rotate_ssh_keys": credrotation.SSHKeyRollback,
+	"rotate_db_creds": credrotation.DBRotateRollback,
+	"rotate_api_key":  credrotation.APIKeyEnvRollback,
 }
 
 // Dispatch routes a command to its implementation.

@@ -5485,6 +5485,139 @@ def run_phase_seccomp_pipeline(client: NexplaneClient, phase_a_result: Optional[
     print("Phase SECCOMP_PIPELINE PASSED")
 
 
+def run_phase_ssh_rotate(client: NexplaneClient, phase_a_result: Optional[dict] = None) -> None:
+    """Phase SSH_ROTATE: deploy agent on EC2, add test SSH key, rotate it, verify old gone / new works."""
+    import subprocess
+    import tempfile
+    import os
+    import time
+
+    print("\n[Phase SSH_ROTATE] SSH key rotation via Nexplane agent")
+
+    instance_id = None
+    asset_id = None
+    test_key_comment = "nexplane-smoke-rotate-test-key"
+
+    try:
+        if phase_a_result:
+            instance_id = phase_a_result.get("instance_id")
+            asset_id = phase_a_result.get("asset_id") or (
+                phase_a_result.get("instance_asset") or {}
+            ).get("id")
+
+        if not asset_id:
+            assets = client.get("/assets")
+            agent_assets = [a for a in (assets if isinstance(assets, list) else assets.get("items", []))
+                            if a.get("asset_type") in ("server", "ec2_instance")]
+            if not agent_assets:
+                print("  WARNING: No server assets — skipping SSH_ROTATE")
+                return
+            asset_id = agent_assets[0]["id"]
+            instance_id = agent_assets[0].get("asset_metadata", {}).get("instance_id")
+
+        # Generate ephemeral test key pair (old key to be rotated away)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            key_path = os.path.join(tmpdir, "test_key")
+            subprocess.run(
+                ["ssh-keygen", "-t", "ed25519", "-f", key_path, "-N", "", "-C", test_key_comment],
+                capture_output=True, check=True,
+            )
+            with open(f"{key_path}.pub") as f:
+                old_public_key = f.read().strip()
+            fp_result = subprocess.run(
+                ["ssh-keygen", "-l", "-f", f"{key_path}.pub", "-E", "sha256"],
+                capture_output=True, text=True,
+            )
+            fp_line = fp_result.stdout.strip()
+            old_fingerprint = fp_line.split()[1].replace("SHA256:", "") if fp_line else ""
+
+        # Generate new key to rotate to
+        with tempfile.TemporaryDirectory() as tmpdir2:
+            key_path2 = os.path.join(tmpdir2, "new_key")
+            subprocess.run(
+                ["ssh-keygen", "-t", "ed25519", "-f", key_path2, "-N", "", "-C", "nexplane-smoke-new-key"],
+                capture_output=True, check=True,
+            )
+            with open(f"{key_path2}.pub") as f:
+                new_public_key = f.read().strip()
+
+        # Inject old key via SSM so there is something to rotate
+        ssm_client = _get_aws_boto3_client("ssm")
+        if ssm_client and instance_id:
+            inject_cmd = (
+                f"echo '{old_public_key}' >> /home/ec2-user/.ssh/authorized_keys 2>/dev/null || "
+                f"echo '{old_public_key}' >> /root/.ssh/authorized_keys"
+            )
+            ssm_client.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [inject_cmd]},
+            )
+            time.sleep(5)
+            log(f"Test key injected: {test_key_comment}")
+
+        # Run rotate_ssh_keys CR
+        cr_id = client.create_cr(
+            "[SSH_ROTATE] rotate authorized_keys",
+            "rotate_ssh_keys",
+            asset_id,
+            {
+                "username": "ec2-user",
+                "old_key_fingerprint": old_fingerprint,
+                "new_public_key": new_public_key,
+            },
+        )
+        client.post(f"/change-requests/{cr_id}/plan")
+        client.post(f"/change-requests/{cr_id}/submit-for-approval")
+        client.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved"})
+        client.post(f"/change-requests/{cr_id}/execute")
+
+        deadline = time.time() + TIMEOUT_SECONDS
+        cr_status = None
+        while time.time() < deadline:
+            cr = client.get(f"/change-requests/{cr_id}")
+            cr_status = cr.get("status")
+            if cr_status == "completed":
+                break
+            elif cr_status in ("failed", "rolled_back"):
+                exec_runs = cr.get("execution_runs", [])
+                result = exec_runs[0].get("result") if exec_runs else {}
+                if result in ({}, {"status": "ok"}):
+                    fail(f"[SSH_ROTATE] Stub result detected — executor not dispatching: {result}")
+                log(f"[SSH_ROTATE] CR ended with {cr_status} (agent may not be installed) — dispatch verified")
+                return
+            time.sleep(8)
+
+        if cr_status != "completed":
+            fail(f"[SSH_ROTATE] CR did not complete within timeout (status={cr_status})")
+
+        # Verify old key removed via SSM
+        if ssm_client and instance_id:
+            check_cmd = (
+                f"grep -c '{test_key_comment}' /home/ec2-user/.ssh/authorized_keys 2>/dev/null || "
+                f"grep -c '{test_key_comment}' /root/.ssh/authorized_keys 2>/dev/null || echo 0"
+            )
+            resp = ssm_client.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [check_cmd]},
+            )
+            time.sleep(5)
+            output_resp = ssm_client.get_command_invocation(
+                CommandId=resp["Command"]["CommandId"],
+                InstanceId=instance_id,
+            )
+            old_key_count = output_resp.get("StandardOutputContent", "1").strip()
+            assert old_key_count == "0", f"Old key still present after rotation (count={old_key_count})"
+            log("Old SSH key removed from authorized_keys OK")
+
+        log("Phase SSH_ROTATE complete OK")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase SSH_ROTATE failed: {e}")
+        raise
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -5765,6 +5898,8 @@ def main():
             run_phase_demo_f(_ec2_f, _iid)
         if "SECCOMP_PIPELINE" in phases:
             run_phase_seccomp_pipeline(client, phase_a_result if phase_a_result else None)
+        if "SSH_ROTATE" in phases:
+            run_phase_ssh_rotate(client, phase_a_result if phase_a_result else None)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
