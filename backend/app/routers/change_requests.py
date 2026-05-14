@@ -162,7 +162,9 @@ async def bulk_approve(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if str(getattr(user, "role", "")) not in ("approver", "admin"):
+    _role = getattr(user, "role", None)
+    _role_val = _role.value if hasattr(_role, "value") else str(_role)
+    if _role_val not in ("approver", "admin"):
         raise HTTPException(status_code=403, detail="Approver role required")
     approved_ids = []
     for cr_id in body.cr_ids:
