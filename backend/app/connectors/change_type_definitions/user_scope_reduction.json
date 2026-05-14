@@ -1,0 +1,11 @@
+{
+  "change_type": "user_scope_reduction",
+  "display_name": "User Scope Reduction",
+  "steps": [
+    {"generic_action": "user_scope_reduction", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "user_scope_reduction",
+  "rollback_connector_type": "aws"
+}

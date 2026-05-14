@@ -85,15 +85,17 @@ def get_ssm_instance_profile(iam) -> str | None:
 
 
 def make_test_tarball() -> bytes:
-    """Package tests/smoke/ and backend/app/ into a tarball for transfer."""
+    """Package tests/smoke/ into a tarball for transfer.
+
+    The app/ directory is intentionally excluded: on the EC2 runner, AWS credentials
+    come from environment variables (set by run_on_ec2.py), so the credential decryption
+    helpers in app/ are not needed. Excluding app/ keeps the tarball small enough to
+    transfer reliably via SSM (which has document size limits per chunk).
+    """
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        # Add smoke test files
+        # Add smoke test files only
         tar.add(SMOKE_DIR, arcname="smoke")
-        # Add app package (needed for credential decryption helpers)
-        app_dir = BACKEND_DIR / "app"
-        if app_dir.exists():
-            tar.add(app_dir, arcname="app")
     return buf.getvalue()
 
 
@@ -214,6 +216,14 @@ def setup_backend_tailscale(auth_key: str) -> str:
     installed. Joining here makes the backend reachable from the runner EC2.
     """
     import subprocess
+    print("  Starting tailscaled daemon (userspace networking)...")
+    # Start tailscaled if not already running; ignore errors if already up
+    subprocess.Popen(
+        ["tailscaled", "--tun=userspace-networking"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    time.sleep(5)  # give tailscaled time to come up
+
     print("  Joining backend to Tailscale...")
     subprocess.run(
         ["tailscale", "up",
@@ -324,17 +334,16 @@ Examples:
         for ex in extra:
             test_cmd_parts[-1] += f" {ex}"
 
-        # Install Tailscale on runner if Phase A is requested (backend needs Tailscale connectivity)
-        phases = [p.strip() for p in args.phases.split(",")]
-        if "A" in phases or any(p.startswith("IP") for p in phases) or "AUTO" in phases or "AUTO_AI" in phases:
-            if args.tailscale_auth_key:
-                print("  Installing Tailscale on runner...")
-                ssm_run(ssm, runner_id,
-                        # install.sh may return non-zero on some AL2023 versions — ignore it
-                        "curl -fsSL https://tailscale.com/install.sh | sh || true && "
-                        "systemctl enable --now tailscaled 2>/dev/null || true && sleep 3 && "
-                        f"tailscale up --authkey={args.tailscale_auth_key} "
-                        "--hostname=nexplane-smoke-runner --accept-routes --accept-dns=false")
+        # Always install Tailscale on runner when a tailscale auth key is provided,
+        # since the backend is always reachable only via Tailscale.
+        if args.tailscale_auth_key:
+            print("  Installing Tailscale on runner...")
+            ssm_run(ssm, runner_id,
+                    # install.sh may return non-zero on some AL2023 versions — ignore it
+                    "curl -fsSL https://tailscale.com/install.sh | sh || true && "
+                    "systemctl enable --now tailscaled 2>/dev/null || true && sleep 3 && "
+                    f"tailscale up --authkey={args.tailscale_auth_key} "
+                    "--hostname=nexplane-smoke-runner --accept-routes --accept-dns=false")
 
         test_script = " && ".join(test_cmd_parts)
         print(f"\n{'='*60}")

@@ -1,0 +1,10 @@
+{
+  "change_type": "audit_os_security_posture",
+  "display_name": "Audit OS Security Posture",
+  "steps": [
+    {"generic_action": "audit_os_security_posture", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "rollback_action": null
+}

@@ -518,6 +518,32 @@
                         "action_id":  "configure_seccomp"
                     },
                     {
+                        "display_name":  "Seccomp Learn",
+                        "description":  "Observe syscalls made by a process or service for a defined duration and return the set of observed syscalls for use in a seccomp profile.",
+                        "parameters":  [
+                                           {
+                                               "required":  false,
+                                               "type":  "integer",
+                                               "name":  "duration_seconds"
+                                           },
+                                           {
+                                               "required":  false,
+                                               "type":  "string",
+                                               "name":  "rollback_strategy"
+                                           }
+                                       ],
+                        "execution_tier":  3,
+                        "rollback_action":  "seccomp_learn",
+                        "estimated_duration_seconds":  90,
+                        "applicable_asset_types":  [
+                                                       "server"
+                                                   ],
+                        "action_type":  "change",
+                        "executor":  "nexplane_agent.seccomp_learn",
+                        "generic_action":  "seccomp_learn",
+                        "action_id":  "seccomp_learn"
+                    },
+                    {
                         "display_name":  "Apply Sysctl Hardening",
                         "description":  "Apply CIS-level sysctl parameters: disable IP forwarding, enable SYN cookies, disable ICMP redirects, enable source route validation. Writes /etc/sysctl.d/99-nexplane-hardening.conf.",
                         "parameters":  [

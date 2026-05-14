@@ -1,0 +1,11 @@
+{
+  "change_type": "configure_seccomp",
+  "display_name": "Configure Seccomp Filter",
+  "steps": [
+    {"generic_action": "configure_seccomp", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "configure_seccomp",
+  "rollback_connector_type": "nexplane_agent"
+}
