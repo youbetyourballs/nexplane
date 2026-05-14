@@ -12,6 +12,7 @@ import (
 	"nexplane-agent/commands/uploadimage"
 	"nexplane-agent/commands/virtualize"
 	"nexplane-agent/commands/winharden"
+	"nexplane-agent/commands/linuxharden"
 	"nexplane-agent/commands/crossplatform"
 	"nexplane-agent/commands/linuxupgrade"
 	"nexplane-agent/commands/fleet"
@@ -79,6 +80,10 @@ var commands = map[string]CommandFunc{
 	"wdac_enforce":                   winharden.WDACenforceExecute,
 	"asr_audit":                      winharden.ASRauditExecute,
 	"asr_enforce":                    winharden.ASRenforceExecute,
+	"sysmon_deploy":                  winharden.SysmonDeployExecute,
+	"sysmon_fim":                     winharden.SysmonFIMExecute,
+	"seccomp_learn":                  linuxharden.SeccompLearnExecute,
+	"iptables_log_baseline":          linuxharden.IptablesLogBaselineExecute,
 	// Cross-platform (Spec 5d)
 	"manage_tls_certificates":  crossplatform.ManageTLSCertificatesExecute,
 	"configure_dns_resolver":   crossplatform.ConfigureDNSResolverExecute,
@@ -156,6 +161,10 @@ var rollbacks = map[string]CommandFunc{
 	"wdac_enforce":                   winharden.WDACrollback,
 	"asr_audit":                      winharden.ASRrollback,
 	"asr_enforce":                    winharden.ASRrollback,
+	"sysmon_deploy":                  winharden.SysmonRollback,
+	"sysmon_fim":                     winharden.SysmonRollback,
+	"seccomp_learn":                  linuxharden.SeccompLearnRollback,
+	"iptables_log_baseline":          linuxharden.IptablesLogBaselineRollback,
 	"manage_tls_certificates": crossplatform.ManageTLSCertificatesRollback,
 	"configure_dns_resolver":  crossplatform.ConfigureDNSResolverRollback,
 	"upgrade_linux_instance":  linuxupgrade.UpgradeLinuxInstanceRollback,
