@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle, XCircle, AlertTriangle, ShieldAlert, Download, ArrowLeft, Play } from "lucide-react";
 import { reviewCampaignsApi, type ReviewEntryOut } from "../api/reviewCampaigns";
+import { apiClient } from "../api/client";
 import { PageLoading } from "../components/LoadingSpinner";
 
 function RiskBadges({ entry }: { entry: ReviewEntryOut }) {
@@ -27,6 +28,7 @@ function RiskBadges({ entry }: { entry: ReviewEntryOut }) {
 
 export function AccessReviewDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const [decisionFilter, setDecisionFilter] = useState<"all" | "pending" | "keep" | "revoke">("all");
   const [noteEntry, setNoteEntry] = useState<string | null>(null);
@@ -66,6 +68,17 @@ export function AccessReviewDetail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["review-campaign", id] });
       qc.invalidateQueries({ queryKey: ["review-entries", id] });
+    },
+  });
+
+  const createRemediationCrMutation = useMutation({
+    mutationFn: (entryId: string) =>
+      apiClient.post(`/review-campaigns/${id}/entries/${entryId}/create-remediation`).then((r) => r.data),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["review-entries", id] });
+      if (data?.cr_id) {
+        navigate(`/change-requests/${data.cr_id}`);
+      }
     },
   });
 
@@ -240,11 +253,31 @@ export function AccessReviewDetail() {
                           )}
                         </div>
                       ) : (
-                        <span className={`flex items-center gap-1 text-xs font-medium ${entry.decision === "keep" ? "text-green-600" : entry.decision === "revoke" ? "text-red-600" : "text-slate-400"}`}>
-                          {entry.decision === "keep" && <CheckCircle className="w-3 h-3" />}
-                          {entry.decision === "revoke" && <XCircle className="w-3 h-3" />}
-                          {entry.decision ?? "Pending"}
-                        </span>
+                        <div className="space-y-1">
+                          <span className={`flex items-center gap-1 text-xs font-medium ${entry.decision === "keep" ? "text-green-600" : entry.decision === "revoke" ? "text-red-600" : "text-slate-400"}`}>
+                            {entry.decision === "keep" && <CheckCircle className="w-3 h-3" />}
+                            {entry.decision === "revoke" && <XCircle className="w-3 h-3" />}
+                            {entry.decision ?? "Pending"}
+                          </span>
+                          {entry.decision === "revoke" && (
+                            (entry as unknown as { remediation_cr_id?: string }).remediation_cr_id ? (
+                              <Link
+                                to={`/change-requests/${(entry as unknown as { remediation_cr_id: string }).remediation_cr_id}`}
+                                className="text-xs text-brand-600 hover:underline"
+                              >
+                                View CR
+                              </Link>
+                            ) : (
+                              <button
+                                onClick={() => createRemediationCrMutation.mutate(entry.id)}
+                                disabled={createRemediationCrMutation.isPending}
+                                className="text-xs text-slate-500 hover:text-brand-600 underline disabled:opacity-50"
+                              >
+                                {createRemediationCrMutation.isPending ? "Creating..." : "Create Remediation CR"}
+                              </button>
+                            )
+                          )}
+                        </div>
                       )}
                     </td>
                   </tr>
