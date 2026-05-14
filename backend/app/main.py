@@ -24,12 +24,14 @@ from app.routers import notifications as notifications_router
 from app.routers import current_user
 from app.routers.audit import list_cr_audit_events
 from app.routers.asset_timeline import router as asset_timeline_router
+from app.routers.onboarding import router as onboarding_router
 from app.services import scheduler_service
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.workers.escalation_worker import check_emergency_escalations
 from app.workers.soak_timer_worker import check_soak_timers
 from app.workers.scheduled_cr_worker import execute_scheduled_crs
 from app.workers.drift_check_worker import check_policy_drift
+from app.workers.credential_expiry_worker import check_credential_expiry
 
 _escalation_scheduler: AsyncIOScheduler | None = None
 
@@ -47,6 +49,7 @@ async def lifespan(app: FastAPI):
     _escalation_scheduler.add_job(check_soak_timers, "interval", minutes=30)
     _escalation_scheduler.add_job(execute_scheduled_crs, "interval", minutes=1)
     _escalation_scheduler.add_job(check_policy_drift, "interval", hours=24)
+    _escalation_scheduler.add_job(check_credential_expiry, "cron", hour=6, minute=0)
     _escalation_scheduler.start()
     # Scrub orphaned CRs — any CR still in-flight when the backend
     # restarted will never complete; mark them failed now so the
@@ -140,6 +143,7 @@ app.include_router(notifications_router.router)
 app.include_router(asset_timeline_router)
 app.include_router(policy_generate_router)
 app.include_router(drift_alerts_router)
+app.include_router(onboarding_router)
 
 
 @app.get("/change-requests/{cr_id}/audit-events", tags=["Audit"])
