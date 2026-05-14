@@ -613,12 +613,42 @@ async def manual_rollback(
     plan = cr.change_plan
     execution_result = latest_run.result or {}
 
+    # Check if any plan step has a rollback_action defined
+    _steps = (plan.generated_steps if plan else []) or []
+    _has_rollback_steps = any(s.get("rollback_action") for s in _steps)
+
     async def _do_rollback():
         from app.database import AsyncSessionLocal
         try:
-            rollback_result = await activity_execute_rollback(
-                str(cr.id), plan.generated_steps if plan else [], execution_result
-            )
+            # If no plan rollback steps are defined, fall back to calling the
+            # executor's own rollback() function directly.  This covers simple
+            # identity / single-step executors (emergency_user_lockout, etc.)
+            # whose plan steps never get rollback_action populated.
+            if not _has_rollback_steps:
+                try:
+                    from app.connectors.catalog_service import get_catalog_service
+                    _ct = cr.change_type.value if hasattr(cr.change_type, "value") else str(cr.change_type)
+                    _catalog = get_catalog_service()
+                    # Try nexplane_agent connector first, then fall through connectors
+                    _mod = None
+                    for _conn_type in ("nexplane_agent", "aws", "azure_ad", "okta"):
+                        try:
+                            _mod = _catalog.get_executor(_conn_type, _ct)
+                            break
+                        except Exception:
+                            continue
+                    if _mod and hasattr(_mod, "rollback"):
+                        rollback_result = await _mod.rollback(
+                            cr.desired_outcome or {}, execution_result, None
+                        )
+                    else:
+                        rollback_result = {"rolled_back": False, "reason": "no_rollback_function_found"}
+                except Exception as _exc:
+                    rollback_result = {"rolled_back": False, "reason": str(_exc)}
+            else:
+                rollback_result = await activity_execute_rollback(
+                    str(cr.id), _steps, execution_result
+                )
             async with AsyncSessionLocal() as s:
                 run = await s.get(ExecutionRun, rollback_run_id)
                 cr2 = await s.get(ChangeRequest, cr.id)
