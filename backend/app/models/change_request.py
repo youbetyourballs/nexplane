@@ -322,6 +322,7 @@ class ChangeRequest(Base):
     )
     snapshot_before: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     verification_checks: Mapped[list] = mapped_column(_JSONB, default=list, nullable=False, server_default="[]")
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="change_requests")
     requester: Mapped["User"] = relationship("User", back_populates="change_requests")
