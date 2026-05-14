@@ -5054,6 +5054,92 @@ def run_phase_ossec_wire(client: NexplaneClient, phase_a_result: Optional[dict] 
     log("Phase OSSEC_WIRE complete — executor dispatch path verified")
 
 
+def run_phase_bulk_patch(client: NexplaneClient, phase_a_result: Optional[dict] = None) -> None:
+    """Phase BULK_PATCH: bulk CR create + bulk approve + execute."""
+    print("\n[Phase BULK_PATCH] Testing bulk CR create and bulk approval")
+
+    # Find some server/ec2 assets to target
+    assets_resp = client.get("/assets")
+    all_assets = assets_resp if isinstance(assets_resp, list) else assets_resp.get("items", [])
+    server_assets = [
+        a for a in all_assets
+        if a.get("asset_type") in ("server", "ec2_instance")
+    ][:3]
+
+    # Fall back to phase A instance if available
+    if not server_assets and phase_a_result:
+        instance_asset = phase_a_result.get("instance_asset") or {}
+        if instance_asset.get("id"):
+            server_assets = [instance_asset]
+
+    if not server_assets:
+        print("  [Phase BULK_PATCH] No server assets found — skipping BULK_PATCH")
+        return
+
+    asset_ids = [a["id"] for a in server_assets]
+    n = min(3, len(asset_ids))
+
+    # Batch create CRs
+    batch_resp = client.post("/change-requests/batch", json={
+        "items": [
+            {
+                "title": f"[BULK_PATCH] smoke audit {i + 1}",
+                "change_type": "audit_os_security_posture",
+                "target_asset_ids": [asset_ids[i % len(asset_ids)]],
+                "desired_outcome": {},
+            }
+            for i in range(n)
+        ]
+    })
+
+    batch_id = batch_resp.get("batch_id")
+    cr_ids = batch_resp.get("cr_ids", [])
+    if not cr_ids:
+        fail("[BULK_PATCH] batch create returned no CR IDs")
+
+    print(f"  Created batch {batch_id} with {len(cr_ids)} CRs")
+
+    # Submit all for approval
+    for cr_id in cr_ids:
+        try:
+            client.post(f"/change-requests/{cr_id}/plan")
+            client.post(f"/change-requests/{cr_id}/submit-for-approval")
+        except Exception:
+            pass
+
+    # Bulk approve
+    bulk_resp = client.post("/change-requests/bulk-approve", json={
+        "cr_ids": cr_ids, "decision": "approved"
+    })
+    print(f"  Bulk approved: {bulk_resp.get('approved_count')} CRs")
+
+    # Execute all
+    for cr_id in cr_ids:
+        try:
+            client.post(f"/change-requests/{cr_id}/execute")
+        except Exception:
+            pass
+
+    # Wait for all to reach terminal state
+    deadline = time.time() + 120
+    completed = set()
+    while time.time() < deadline and len(completed) < len(cr_ids):
+        for cr_id in cr_ids:
+            if cr_id in completed:
+                continue
+            try:
+                cr = client.get(f"/change-requests/{cr_id}")
+                if cr.get("status") in ("completed", "failed", "rolled_back"):
+                    completed.add(cr_id)
+            except Exception:
+                pass
+        if len(completed) < len(cr_ids):
+            time.sleep(5)
+
+    print(f"  {len(completed)}/{len(cr_ids)} CRs reached terminal state")
+    print("Phase BULK_PATCH complete")
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -5071,7 +5157,8 @@ def main():
             "DEMO_A=launch-payments-ec2, DEMO_B=discover-apps, DEMO_C=build-images, "
             "DEMO_D=deploy-eks, DEMO_E=retire-legacy, DEMO_F=teardown-ec2. "
             "RDS_RESTORE=restore-rds-snapshot (requires J), RDS_VERIFY=verify-rds-backup (requires J). "
-            "OSSEC_WIRE=executor-dispatch-verify (configure_seccomp, no agent needed)."
+            "OSSEC_WIRE=executor-dispatch-verify (configure_seccomp, no agent needed). "
+            "BULK_PATCH=batch-CR-create+bulk-approve+execute (no EC2 needed, uses existing assets)."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -5286,6 +5373,8 @@ def main():
             run_phase_proj_ai(client)
         if "OSSEC_WIRE" in phases:
             run_phase_ossec_wire(client, phase_a_result)
+        if "BULK_PATCH" in phases:
+            run_phase_bulk_patch(client, phase_a_result)
         if "EKS_SDK" in phases:
             run_phase_eks_sdk(client, cloud_account_id)
         if "EKS_CFN" in phases:
