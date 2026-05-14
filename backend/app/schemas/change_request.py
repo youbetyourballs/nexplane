@@ -12,6 +12,7 @@ class ChangeRequestCreate(BaseModel):
     change_type: ChangeType
     target_asset_ids: list[uuid.UUID]
     desired_outcome: dict
+    finding_ids: list[str] = []
 
 
 class ChangeRequestSummary(BaseModel):
@@ -38,6 +39,7 @@ class ChangeRequestRead(BaseModel):
     change_type: ChangeType
     target_asset_ids: list
     desired_outcome: dict
+    finding_ids: list[str] = []
     risk_level: RiskLevel
     status: ChangeRequestStatus
     created_at: datetime
