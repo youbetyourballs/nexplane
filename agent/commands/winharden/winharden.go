@@ -148,3 +148,7 @@ func WDACrollback(params map[string]any) (map[string]any, error) {
 func ASRauditExecute(params map[string]any) (map[string]any, error)   { return asrAuditExecuteOS(params) }
 func ASRenforceExecute(params map[string]any) (map[string]any, error) { return asrEnforceExecuteOS(params) }
 func ASRrollback(params map[string]any) (map[string]any, error)       { return asrRollbackOS(params) }
+
+func SysmonDeployExecute(params map[string]any) (map[string]any, error) { return sysmonDeployExecuteOS(params) }
+func SysmonFIMExecute(params map[string]any) (map[string]any, error)    { return sysmonFIMExecuteOS(params) }
+func SysmonRollback(params map[string]any) (map[string]any, error)      { return sysmonRollbackOS(params) }
