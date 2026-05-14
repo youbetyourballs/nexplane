@@ -8,6 +8,8 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import get_db, AsyncSessionLocal
 from app.routers import auth, assets, connectors, change_requests, audit, projects
+from app.routers.policy_generate import router as policy_generate_router
+from app.routers.drift_alerts import router as drift_alerts_router
 from app.routers import settings as settings_router
 from app.routers import agent as agent_router
 from app.routers import vulnerability as vulnerability_router
@@ -27,6 +29,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.workers.escalation_worker import check_emergency_escalations
 from app.workers.soak_timer_worker import check_soak_timers
 from app.workers.scheduled_cr_worker import execute_scheduled_crs
+from app.workers.drift_check_worker import check_policy_drift
 
 _escalation_scheduler: AsyncIOScheduler | None = None
 
@@ -43,6 +46,7 @@ async def lifespan(app: FastAPI):
     _escalation_scheduler.add_job(check_emergency_escalations, "interval", minutes=5)
     _escalation_scheduler.add_job(check_soak_timers, "interval", minutes=30)
     _escalation_scheduler.add_job(execute_scheduled_crs, "interval", minutes=1)
+    _escalation_scheduler.add_job(check_policy_drift, "interval", hours=24)
     _escalation_scheduler.start()
     # Scrub orphaned CRs — any CR still in-flight when the backend
     # restarted will never complete; mark them failed now so the
@@ -134,6 +138,8 @@ app.include_router(smoke_tests_router.router)
 app.include_router(access_reviews_router.router)
 app.include_router(notifications_router.router)
 app.include_router(asset_timeline_router)
+app.include_router(policy_generate_router)
+app.include_router(drift_alerts_router)
 
 
 @app.get("/change-requests/{cr_id}/audit-events", tags=["Audit"])
