@@ -1,6 +1,24 @@
 import boto3
 import json
+import os
 from datetime import datetime, timezone
+
+
+def _iam_client(connector, execution_result: dict | None = None):
+    creds = (connector.credentials if connector else None) or {}
+    if not creds.get("access_key_id") and execution_result:
+        creds = execution_result.get("_aws_creds") or creds
+    if not creds.get("access_key_id"):
+        key = os.environ.get("AWS_ACCESS_KEY_ID")
+        secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        if key and secret:
+            creds = {"access_key_id": key, "secret_access_key": secret,
+                     "region": os.environ.get("AWS_DEFAULT_REGION", "us-east-1")}
+    return boto3.Session(
+        aws_access_key_id=creds.get("access_key_id") or None,
+        aws_secret_access_key=creds.get("secret_access_key") or None,
+        region_name=creds.get("region", "us-east-1"),
+    ).client("iam")
 
 DENY_WRITE_POLICY = json.dumps({
     "Version": "2012-10-17",
@@ -24,12 +42,14 @@ MFA_REQUIRED_POLICY = json.dumps({
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     user = parameters.get("user_name") or parameters.get("user_identifier", "")
     mode = parameters.get("mode", "demote_to_readonly")
+    iam = _iam_client(connector)
     creds = (connector.credentials if connector else None) or {}
-    iam = boto3.Session(
-        aws_access_key_id=creds.get("access_key_id"),
-        aws_secret_access_key=creds.get("secret_access_key"),
-        region_name=creds.get("region", "us-east-1"),
-    ).client("iam")
+    if not creds.get("access_key_id"):
+        key = os.environ.get("AWS_ACCESS_KEY_ID")
+        secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        if key and secret:
+            creds = {"access_key_id": key, "secret_access_key": secret,
+                     "region": os.environ.get("AWS_DEFAULT_REGION", "us-east-1")}
 
     if mode == "demote_to_readonly":
         policy_name = "nexplane-scope-reduction-deny-write"
@@ -53,18 +73,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "policy_name": policy_name,
         "applied_at": datetime.now(timezone.utc).isoformat(),
         "_asset_ids": [str(a) for a in asset_ids],
+        "_aws_creds": creds,  # persisted for rollback
     }
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     user = execution_result.get("user") or parameters.get("user_identifier", "")
     policy_name = execution_result.get("policy_name", "nexplane-scope-reduction-deny-write")
-    creds = (connector.credentials if connector else None) or {}
-    iam = boto3.Session(
-        aws_access_key_id=creds.get("access_key_id"),
-        aws_secret_access_key=creds.get("secret_access_key"),
-        region_name=creds.get("region", "us-east-1"),
-    ).client("iam")
+    iam = _iam_client(connector, execution_result)
     try:
         iam.delete_user_policy(UserName=user, PolicyName=policy_name)
     except Exception as e:
