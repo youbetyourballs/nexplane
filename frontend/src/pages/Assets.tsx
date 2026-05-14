@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Plus, Search, Tag, X, ChevronRight, Trash2, LayoutGrid, List, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import { assetsApi, connectorsApi } from "../api/endpoints";
+import { apiClient } from "../api/client";
 import { RiskBadge } from "../components/RiskBadge";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
@@ -84,6 +85,8 @@ export function Assets() {
   const [showBulkAdd, setShowBulkAdd] = useState(false);
   const [showBulkRemove, setShowBulkRemove] = useState(false);
   const [bulkTagInput, setBulkTagInput] = useState("");
+  const [showBulkCR, setShowBulkCR] = useState(false);
+  const [bulkCRType, setBulkCRType] = useState("agent_linux_patch");
 
   // Local input state — decoupled from URL so keystrokes don't re-mount the DOM
   const [inputValue, setInputValue] = useState(() => searchParams.get("search") ?? "");
@@ -148,6 +151,22 @@ export function Assets() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["assets"] });
       qc.invalidateQueries({ queryKey: ["asset-tags"] });
+    },
+  });
+
+  const bulkCRMutation = useMutation({
+    mutationFn: ({ assetIds, changeType }: { assetIds: string[]; changeType: string }) =>
+      apiClient.post("/api/v1/change-requests/batch", {
+        items: assetIds.map((id) => ({
+          title: `Bulk CR for ${id}`,
+          change_type: changeType,
+          target_asset_ids: [id],
+          desired_outcome: {},
+        })),
+      }),
+    onSuccess: () => {
+      setSelected(new Set());
+      setShowBulkCR(false);
     },
   });
 
@@ -430,6 +449,33 @@ export function Assets() {
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+            </div>
+            <div className="relative">
+              <button onClick={() => { setShowBulkCR(!showBulkCR); setShowBulkAdd(false); setShowBulkRemove(false); }}
+                className="px-3 py-1 text-sm bg-blue-600 text-white border border-blue-600 rounded hover:bg-blue-700">
+                Create bulk CR
+              </button>
+              {showBulkCR && (
+                <div className="absolute top-8 left-0 z-10 bg-white border border-slate-200 rounded-lg shadow-lg p-3 w-56">
+                  <label className="block text-xs text-slate-500 mb-1">Change type</label>
+                  <select
+                    value={bulkCRType}
+                    onChange={(e) => setBulkCRType(e.target.value)}
+                    className="w-full text-sm border border-slate-200 rounded px-2 py-1 mb-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    {["agent_linux_patch", "security_group_update", "key_rotation", "remote_command"].map((t) => (
+                      <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
+                    ))}
+                  </select>
+                  <button
+                    disabled={bulkCRMutation.isPending}
+                    onClick={() => bulkCRMutation.mutate({ assetIds: Array.from(selected), changeType: bulkCRType })}
+                    className="w-full px-2 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {bulkCRMutation.isPending ? "Creating…" : `Create ${selected.size} CR${selected.size > 1 ? "s" : ""}`}
+                  </button>
                 </div>
               )}
             </div>

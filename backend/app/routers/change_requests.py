@@ -15,7 +15,10 @@ from app.models.user import User, UserRole
 from app.routers import current_user, require_roles
 from app.schemas.approval import ApprovalCreate, ApprovalRead
 from app.schemas.change_plan import ChangePlanRead
-from app.schemas.change_request import ChangeRequestCreate, ChangeRequestRead, ChangeRequestSummary
+from app.schemas.change_request import (
+    ChangeRequestCreate, ChangeRequestRead, ChangeRequestSummary,
+    BatchCreateRequest, BatchCreateResponse, BulkApproveRequest,
+)
 from app.schemas.execution_run import ExecutionRunRead
 from app.services.audit_service import record_event
 from app.services.planning_engine import generate_plan
@@ -104,6 +107,59 @@ async def create_change_request(
         select(ChangeRequest).where(ChangeRequest.id == cr.id).options(*_CR_OPTIONS)
     )
     return result.scalar_one()
+
+
+@router.post("/batch", response_model=BatchCreateResponse, status_code=201)
+async def batch_create_change_requests(
+    body: BatchCreateRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    batch_id = uuid.uuid4()
+    cr_ids = []
+    for item in body.items:
+        cr = ChangeRequest(
+            id=uuid.uuid4(),
+            organization_id=user.organization_id,
+            requester_id=user.id,
+            title=item.title,
+            change_type=item.change_type,
+            target_asset_ids=item.target_asset_ids,
+            desired_outcome=item.desired_outcome,
+            finding_ids=item.finding_ids or [],
+            snapshot_before=item.snapshot_before,
+            verification_checks=item.verification_checks,
+            batch_id=batch_id,
+            status=ChangeRequestStatus.draft,
+        )
+        db.add(cr)
+        cr_ids.append(cr.id)
+    await db.commit()
+    return BatchCreateResponse(batch_id=batch_id, cr_ids=cr_ids)
+
+
+@router.post("/bulk-approve", status_code=200)
+async def bulk_approve(
+    body: BulkApproveRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if str(getattr(user, "role", "")) not in ("approver", "admin"):
+        raise HTTPException(status_code=403, detail="Approver role required")
+    approved_ids = []
+    for cr_id in body.cr_ids:
+        cr = await db.get(ChangeRequest, cr_id)
+        if cr and cr.organization_id == user.organization_id and cr.status == ChangeRequestStatus.awaiting_approval:
+            risk = getattr(cr, "risk_level", None)
+            if risk == RiskLevel.critical and body.decision == "approved":
+                continue  # Cannot bulk-approve critical risk
+            if body.decision == "approved":
+                cr.status = ChangeRequestStatus.approved
+            else:
+                cr.status = ChangeRequestStatus.rejected
+            approved_ids.append(str(cr_id))
+    await db.commit()
+    return {"approved_count": len(approved_ids), "cr_ids": approved_ids}
 
 
 @router.post("/cleanup-stuck", dependencies=[Depends(require_roles(UserRole.admin))])
