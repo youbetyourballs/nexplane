@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Text, Boolean
+from sqlalchemy.dialects.postgresql import JSONB as _JSONB
 from sqlalchemy import ARRAY, String as _String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
@@ -320,6 +321,7 @@ class ChangeRequest(Base):
         DateTime(timezone=True), nullable=True, default=None
     )
     snapshot_before: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    verification_checks: Mapped[list] = mapped_column(_JSONB, default=list, nullable=False, server_default="[]")
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="change_requests")
     requester: Mapped["User"] = relationship("User", back_populates="change_requests")
