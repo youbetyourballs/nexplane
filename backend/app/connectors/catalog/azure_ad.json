@@ -1,0 +1,13 @@
+{
+  "connector_type": "azure_ad",
+  "display_name": "Azure AD (Graph API)",
+  "credential_fields": [
+    {"name": "tenant_id", "label": "Tenant ID", "type": "string", "required": true},
+    {"name": "client_id", "label": "Client ID", "type": "string", "required": true},
+    {"name": "client_secret", "label": "Client Secret", "type": "password", "required": true}
+  ],
+  "actions": [
+    {"action_id": "disable_user", "generic_action": "disable_user", "action_type": "change", "execution_tier": 2, "display_name": "Disable User", "description": "Set accountEnabled=false and revoke all active sessions.", "applicable_asset_types": ["identity"], "parameters": [{"name": "user_identifier", "type": "string", "required": true, "description": "UPN or object ID"}], "executor": "azure_ad.disable_user", "estimated_duration_seconds": 5},
+    {"action_id": "create_user", "generic_action": "create_user", "action_type": "change", "execution_tier": 2, "display_name": "Create User", "description": "Provision a new Azure AD user via Microsoft Graph.", "applicable_asset_types": ["identity"], "parameters": [{"name": "user_principal_name", "type": "string", "required": true}, {"name": "display_name", "type": "string", "required": false}, {"name": "initial_password", "type": "string", "required": false}], "executor": "azure_ad.create_user", "estimated_duration_seconds": 10}
+  ]
+}
