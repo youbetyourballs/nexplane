@@ -69,12 +69,21 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     user = parameters.get("user_identifier", "")
     rollback_results = {}
-    if execution_result.get("lockout_status", {}).get("aws_iam") == "locked":
+
+    # Always attempt unconditionally — delete_user_policy is idempotent,
+    # and execution_result structure varies depending on how the workflow wraps it.
+    try:
         from app.connectors.executors.aws.lock_iam_user import rollback as iam_unlock
         r = await iam_unlock({"user_identifier": user}, execution_result, connector)
         rollback_results["aws_iam"] = "unlocked" if r.get("rolled_back") else "failed"
-    if execution_result.get("lockout_status", {}).get("azure_ad") == "locked":
+    except Exception as e:
+        rollback_results["aws_iam"] = f"error: {e}"
+
+    try:
         from app.connectors.executors.azure_ad.disable_user import rollback as aad_restore
         r = await aad_restore({"user_identifier": user}, execution_result, connector)
-        rollback_results["azure_ad"] = "unlocked" if r.get("rolled_back") else "failed"
+        rollback_results["azure_ad"] = "unlocked" if r.get("rolled_back") else "skipped"
+    except Exception as e:
+        rollback_results["azure_ad"] = f"error: {e}"
+
     return {"rolled_back": True, "systems": rollback_results}
