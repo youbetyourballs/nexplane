@@ -103,6 +103,24 @@ async def create_change_request(
                        actor_id=user.id, change_request_id=cr.id)
     await db.commit()
 
+    if getattr(body, 'access_expiry_hours', None) and body.access_expiry_hours > 0:
+        try:
+            import logging as _logging
+            _logger = _logging.getLogger(__name__)
+            from app.services.scheduled_cr_service import schedule_reversal_cr
+            rollback_cr_id = await schedule_reversal_cr(
+                original_parameters=body.desired_outcome or {},
+                original_asset_ids=[str(a) for a in (body.target_asset_ids or [])],
+                execute_after_hours=body.access_expiry_hours,
+                change_type=body.change_type.value + "_rollback",
+                organization_id=str(cr.organization_id),
+            )
+            cr.scheduled_rollback_cr_id = uuid.UUID(rollback_cr_id)
+            await db.commit()
+        except Exception as _e:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(f"Failed to schedule rollback CR: {_e}")
+
     result = await db.execute(
         select(ChangeRequest).where(ChangeRequest.id == cr.id).options(*_CR_OPTIONS)
     )
