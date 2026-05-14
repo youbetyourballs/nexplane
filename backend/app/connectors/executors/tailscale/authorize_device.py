@@ -1,0 +1,52 @@
+from datetime import datetime, timezone
+
+import httpx
+
+TAILSCALE_API_BASE = "https://api.tailscale.com/api/v2"
+
+
+def _tailscale_auth(creds: dict) -> dict | None:
+    """Return headers dict or None if no credentials."""
+    api_key = creds.get("api_key") or creds.get("token")
+    if not api_key:
+        return None
+    import base64
+    token = base64.b64encode(f"{api_key}:".encode()).decode()
+    return {"Authorization": f"Basic {token}", "Content-Type": "application/json"}
+
+
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    creds = getattr(connector, "credentials", None) or {}
+    device_id = parameters.get("device_id") or parameters.get("deviceId", "")
+    authorized = parameters.get("authorized", True)
+    headers = _tailscale_auth(creds)
+    if not headers:
+        return {
+            "action": "authorize_device",
+            "device_id": device_id,
+            "authorized": authorized,
+            "status": "skipped",
+            "reason": "no_tailscale_credentials",
+            "mock": True,
+        }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{TAILSCALE_API_BASE}/devices/{device_id}/authorized",
+            headers=headers,
+            json={"authorized": authorized},
+        )
+        resp.raise_for_status()
+
+    return {
+        "action": "authorize_device",
+        "device_id": device_id,
+        "authorized": authorized,
+        "status": "done",
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+        "_asset_ids": [str(a) for a in asset_ids],
+    }
+
+
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    return {"rolled_back": False, "reason": "rerun with authorized=false to deauthorize"}
