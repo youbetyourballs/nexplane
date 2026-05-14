@@ -23,6 +23,7 @@ class ConnectorType(str, enum.Enum):
     runzero = "runzero"
     wiz = "wiz"
     entra_id = "entra_id"
+    azure_ad = "azure_ad"
     # 6c: security tools
     sentinelone = "sentinelone"
     defender_endpoint = "defender_endpoint"

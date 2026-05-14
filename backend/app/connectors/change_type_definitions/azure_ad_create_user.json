@@ -1,0 +1,12 @@
+{
+  "name": "azure_ad_create_user",
+  "display_name": "Create Azure AD User",
+  "description": "Creates a new Azure AD / Entra ID user via Microsoft Graph API.",
+  "category": "identity",
+  "agent_required": false,
+  "parameters": {
+    "user_principal_name": {"type": "string", "description": "UPN e.g. user@domain.com", "required": true},
+    "display_name": {"type": "string", "description": "Display name", "required": false},
+    "initial_password": {"type": "string", "description": "Initial password (auto-generated if omitted)", "required": false}
+  }
+}
