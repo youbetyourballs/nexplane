@@ -196,6 +196,39 @@ async def approve_campaign(
     return CampaignApproveOut(campaign_id=campaign.id, status="completed", revocations_created=count)
 
 
+@router.post("/{campaign_id}/entries/{entry_id}/create-remediation", status_code=201)
+async def create_remediation_cr(
+    campaign_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a remediation change request for a revoke-decision access review entry."""
+    campaign = await db.get(ReviewCampaign, campaign_id)
+    _assert_campaign(campaign, user.organization_id)
+    entry = await db.get(ReviewEntry, entry_id)
+    if not entry or entry.campaign_id != campaign_id:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if entry.decision != "revoke":
+        raise HTTPException(status_code=400, detail="Entry must have decision=revoke to create remediation CR")
+    from app.models.change_request import ChangeRequest, ChangeType, ChangeRequestStatus
+    cr = ChangeRequest(
+        id=uuid.uuid4(),
+        organization_id=user.organization_id,
+        requester_id=user.id,
+        title=f"Offboard {entry.user_email} (access review {str(campaign_id)[:8]})",
+        change_type=ChangeType.disable_iam_user,
+        target_asset_ids=[],
+        desired_outcome={"user_email": entry.user_email, "resource_name": entry.resource_name},
+        status=ChangeRequestStatus.draft,
+        source="access_review",
+    )
+    db.add(cr)
+    entry.remediation_cr_id = cr.id
+    await db.commit()
+    return {"cr_id": str(cr.id), "entry_id": str(entry.id)}
+
+
 @router.get("/{campaign_id}/evidence-export", response_model=EvidenceExport)
 async def export_evidence(
     campaign_id: uuid.UUID,

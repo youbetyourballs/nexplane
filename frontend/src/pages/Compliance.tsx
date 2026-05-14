@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight, ChevronDown, Play, Loader2,
-  CheckCircle2, AlertTriangle, XCircle, Minus,
+  CheckCircle2, AlertTriangle, XCircle, Minus, ShieldCheck,
 } from "lucide-react";
 import { apiClient } from "../api/client";
 import { complianceApi, CisControlRow, CisCheckRow } from "../api/endpoints";
@@ -117,10 +117,76 @@ function CheckRow({ check }: { check: CisCheckRow }) {
   );
 }
 
+// ── Attest modal ──────────────────────────────────────────────────────────────
+
+function AttestModal({ controlId, onClose }: { controlId: string; onClose: () => void }) {
+  const [evidence, setEvidence] = useState("");
+  const [expiryDays, setExpiryDays] = useState(365);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async () => {
+    if (!evidence.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await apiClient.post(`/compliance/controls/${controlId}/attest`, {
+        evidence_description: evidence,
+        expiry_days: expiryDays,
+      });
+      onClose();
+    } catch {
+      setError("Failed to submit attestation.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+        <h2 className="text-base font-semibold text-slate-900">Attest Control {controlId}</h2>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Evidence Description</label>
+          <textarea
+            value={evidence}
+            onChange={(e) => setEvidence(e.target.value)}
+            rows={3}
+            className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            placeholder="Describe the evidence or compensating control..."
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Expires in (days)</label>
+          <input
+            type="number"
+            value={expiryDays}
+            onChange={(e) => setExpiryDays(parseInt(e.target.value, 10) || 365)}
+            className="w-32 border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            min={1}
+          />
+        </div>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-md">Cancel</button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !evidence.trim()}
+            className="px-4 py-2 text-sm bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50"
+          >
+            {submitting ? "Submitting..." : "Submit Attestation"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Control row (expandable) ──────────────────────────────────────────────────
 
 function ControlRow({ ctrl }: { ctrl: CisControlRow }) {
   const [expanded, setExpanded] = useState(false);
+  const [showAttest, setShowAttest] = useState(false);
   const isTracked = ctrl.method !== "not_tracked";
   const hasData = ctrl.score !== null;
 
@@ -154,7 +220,17 @@ function ControlRow({ ctrl }: { ctrl: CisControlRow }) {
         <div className="w-28 text-right">
           <StatusBadge score={ctrl.score} method={ctrl.method} />
         </div>
+        {isTracked && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowAttest(true); }}
+            title="Attest this control"
+            className="ml-2 p-1 text-slate-400 hover:text-brand-600 rounded transition-colors"
+          >
+            <ShieldCheck size={14} />
+          </button>
+        )}
       </div>
+      {showAttest && <AttestModal controlId={ctrl.id} onClose={() => setShowAttest(false)} />}
 
       {/* Expanded: checks sub-table */}
       {expanded && ctrl.checks.length > 0 && (

@@ -7,6 +7,20 @@ from app.models.vulnerability import VulnerabilityFinding
 from app.models.change_request import ChangeRequest
 
 
+async def mitigate_finding(db: AsyncSession, finding_id: str, cr_id: str | None = None) -> VulnerabilityFinding:
+    """Mark a finding as mitigated (SLA paused)."""
+    result = await db.execute(select(VulnerabilityFinding).where(VulnerabilityFinding.id == uuid.UUID(finding_id)))
+    finding = result.scalar_one_or_none()
+    if not finding:
+        raise ValueError(f"Finding {finding_id} not found")
+    finding.status = "mitigated"
+    finding.mitigated_at = datetime.now(timezone.utc)
+    if cr_id:
+        finding.mitigated_by_cr_id = uuid.UUID(cr_id)
+    await db.commit()
+    return finding
+
+
 async def close_linked_findings(db: AsyncSession, cr_id: str) -> int:
     """Mark findings linked to this CR as remediated. Returns count closed."""
     cr_uuid = uuid.UUID(cr_id)
