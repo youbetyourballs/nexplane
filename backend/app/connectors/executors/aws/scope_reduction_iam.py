@@ -24,8 +24,16 @@ DENY_WRITE_POLICY = json.dumps({
     "Version": "2012-10-17",
     "Statement": [{
         "Effect": "Deny",
-        "Action": ["*:Put*", "*:Create*", "*:Delete*", "*:Update*", "*:Modify*",
-                   "*:Attach*", "*:Detach*", "*:Start*", "*:Stop*", "*:Terminate*"],
+        "Action": [
+            "ec2:RunInstances", "ec2:TerminateInstances", "ec2:StopInstances",
+            "ec2:StartInstances", "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup",
+            "ec2:AuthorizeSecurityGroupIngress", "ec2:RevokeSecurityGroupIngress",
+            "s3:PutObject", "s3:DeleteObject", "s3:CreateBucket", "s3:DeleteBucket",
+            "iam:CreateUser", "iam:DeleteUser", "iam:AttachUserPolicy", "iam:DetachUserPolicy",
+            "iam:PutUserPolicy", "iam:DeleteUserPolicy",
+            "rds:CreateDBInstance", "rds:DeleteDBInstance", "rds:ModifyDBInstance",
+            "cloudformation:CreateStack", "cloudformation:DeleteStack", "cloudformation:UpdateStack"
+        ],
         "Resource": "*"
     }]
 })
