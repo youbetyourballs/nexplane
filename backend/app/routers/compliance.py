@@ -17,6 +17,8 @@ from app.models.change_request import ChangeRequest, ChangeRequestStatus
 from app.models.compliance import ComplianceBaseline, ChangeFreezeWindow
 from app.routers import current_user
 from app.models.user import User
+from pydantic import BaseModel as _PydanticBase
+from app.models.compliance_attestation import ComplianceAttestation
 from app.schemas.compliance import (
     ComplianceBaselineCreate,
     ComplianceBaselineRead,
@@ -26,6 +28,11 @@ from app.schemas.compliance import (
     CisSummaryResponse,
     EvidenceCollectionRequest,
 )
+
+
+class AttestRequest(_PydanticBase):
+    evidence_description: str
+    expiry_days: int | None = 365
 
 router = APIRouter(prefix="/compliance", tags=["Compliance"])
 
@@ -260,6 +267,124 @@ async def collect_evidence(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ---- Attestation ----
+
+@router.post("/controls/{control_id}/attest", status_code=201)
+async def attest_control(
+    control_id: str,
+    body: AttestRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record a manual attestation for a compliance control."""
+    from datetime import timedelta
+    expiry = None
+    if body.expiry_days:
+        expiry = datetime.now(timezone.utc) + timedelta(days=body.expiry_days)
+    att = ComplianceAttestation(
+        organization_id=user.organization_id,
+        control_id=control_id,
+        attested_by=user.id,
+        evidence_description=body.evidence_description,
+        expires_at=expiry,
+    )
+    db.add(att)
+    await db.commit()
+    return {
+        "id": str(att.id),
+        "control_id": control_id,
+        "expires_at": att.expires_at.isoformat() if att.expires_at else None,
+    }
+
+
+@router.get("/controls/{control_id}/attestations")
+async def list_attestations(
+    control_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all attestations for a compliance control."""
+    result = await db.execute(
+        select(ComplianceAttestation).where(
+            ComplianceAttestation.organization_id == user.organization_id,
+            ComplianceAttestation.control_id == control_id,
+        ).order_by(ComplianceAttestation.created_at.desc())
+    )
+    atts = result.scalars().all()
+    return [
+        {
+            "id": str(a.id),
+            "control_id": a.control_id,
+            "attested_by": str(a.attested_by),
+            "evidence_description": a.evidence_description,
+            "expires_at": a.expires_at.isoformat() if a.expires_at else None,
+            "created_at": a.created_at.isoformat(),
+        }
+        for a in atts
+    ]
+
+
+@router.post("/controls/{control_id}/remediate-all", status_code=201)
+async def remediate_all_for_control(
+    control_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a batch of CRs to remediate all failing assets for a compliance control."""
+    import uuid as _uuid
+    from app.models.change_request import ChangeRequest as _CR, ChangeType, ChangeRequestStatus
+
+    # Get failing assets from CIS summary
+    result = await db.execute(
+        select(Asset).where(
+            Asset.organization_id == user.organization_id,
+            Asset.asset_type == AssetType.server,
+        )
+    )
+    assets = result.scalars().all()
+    asset_dicts = [
+        {
+            "id": str(a.id),
+            "name": a.name,
+            "connector_id": str(a.connector_id) if a.connector_id else None,
+            "asset_metadata": a.asset_metadata or {},
+        }
+        for a in assets
+    ]
+    summary = compute_cis_summary(asset_dicts)
+    failing_asset_ids: list[str] = []
+    for ctrl in summary.get("controls", []):
+        if str(ctrl.get("id")) == control_id:
+            for chk in ctrl.get("checks", []):
+                failing_asset_ids.extend(a["id"] for a in chk.get("failing_assets", []))
+            break
+
+    failing_asset_ids = list(dict.fromkeys(failing_asset_ids))  # deduplicate, preserve order
+
+    if not failing_asset_ids:
+        return {"batch_id": None, "cr_ids": [], "message": "No failing assets found"}
+
+    batch_id = _uuid.uuid4()
+    cr_ids = []
+    for asset_id in failing_asset_ids[:50]:
+        cr = _CR(
+            id=_uuid.uuid4(),
+            organization_id=user.organization_id,
+            requester_id=user.id,
+            title=f"CIS Control {control_id} remediation on {asset_id[:8]}",
+            change_type=ChangeType.enforce_cis_benchmark,
+            target_asset_ids=[asset_id],
+            desired_outcome={"control_id": control_id, "profile": "cis_level1"},
+            batch_id=batch_id,
+            status=ChangeRequestStatus.draft,
+            source="compliance_fix_all",
+        )
+        db.add(cr)
+        cr_ids.append(str(cr.id))
+    await db.commit()
+    return {"batch_id": str(batch_id), "cr_ids": cr_ids}
 
 
 # ---- Freeze windows ----
