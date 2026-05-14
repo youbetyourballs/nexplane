@@ -32,6 +32,10 @@ class PatchCampaign(Base):
     rollout_strategy: Mapped[str] = mapped_column(String(50), nullable=False, default="rolling")
     status: Mapped[CampaignStatus] = mapped_column(sa.Enum(CampaignStatus, name="campaign_status"), nullable=False, default=CampaignStatus.draft)
     batches: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    failure_policy: Mapped[str] = mapped_column(String(16), default="continue", nullable=False)
+    # "continue" | "pause" | "rollback_all"
+    failed_cr_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    succeeded_cr_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
