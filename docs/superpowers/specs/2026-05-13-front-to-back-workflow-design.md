@@ -53,7 +53,29 @@ The Go agent in `agent/commands/ossecurity/` is fully functional for all 14 capa
 | `harden_ssh.py` | `ssh` | Writes `/etc/ssh/sshd_config.d/99-nexplane-hardening.conf`; `sshd -t`; reloads | 12 CIS defaults built into agent |
 | `configure_pam.py` | `pam` | Detects RHEL vs Debian PAM variant; pwquality/faillock; CIS L1/L2 profiles | min_length, max_failures, lockout_duration params |
 
-### 0.3 Pattern
+### 0.3 Windows Executors to Wire (all 13)
+
+The Windows problem is identical to Linux: `winharden_windows.go` and `winpatch_windows.go` are fully implemented with real registry modifications, PowerShell COM API calls, `auditpol`, `netsh`, and snapshot-based rollback. All 13 Python executors are stubs returning hardcoded mock data.
+
+| File | Agent command | Real action | Notes |
+|------|--------------|-------------|-------|
+| `configure_windows_audit_policy.py` | `winharden` | `auditpol` + registry for process command-line auditing | Returns hardcoded `categories_count: 9` today |
+| `configure_windows_firewall.py` | `winharden` | `netsh advfirewall` rule add/remove/default-policy | Real Go impl: add_rule/remove_rule/set_default actions |
+| `harden_rdp.py` | `winharden` | Registry: NLA enforcement, SecurityLayer=2, idle timeout, port | Returns echoed params today |
+| `harden_registry.py` | `winharden` | 7 baseline settings: autorun, LM hash, NTLMv1, WDigest, DLL search, UAC, print spooler | Extend to 50+ enterprise baseline keys |
+| `harden_smb.py` | `winharden` | Disable SMBv1, require signing (server+client), block guest | Returns mock SMB version today |
+| `harden_tls_protocols.py` | `winharden` | SCHANNEL registry: disable SSL 2.0/3.0, TLS 1.0/1.1 | Returns mock protocol list today |
+| `deploy_applocker_policy.py` | `winharden` | XML policy deployment; enforcement toggle; `AppIDSvc` auto-start | Returns mock policy today |
+| `enable_bitlocker.py` | `winharden` | Protector config (TPM/TPM+PIN/recovery key); encryption; recovery key export | Returns fake recovery key today |
+| `enable_credential_guard.py` | `winharden` | Registry-based DeviceGuard (VBS, UEFI lock, HECI) | Returns mock response today |
+| `configure_laps.py` | `winharden` | Enable LAPS; password age/length config via registry | Returns mock response today |
+| `enforce_powershell_clm.py` | `winharden` | Registry `__PSLockdownPolicy` enforcement + snapshot | Returns mock response today |
+| `apply_windows_patches.py` | `winpatch` | Windows Update COM API; filter by KB/CVE/security-only; install; schedule reboot | Returns `packages_updated: 0` today |
+| `audit_windows_patch_status.py` | `winpatch` | `Get-HotFix` inventory; pending updates search; reboot-pending state | Returns `0 updates available` today |
+
+**Note on `audit_scheduled_tasks.py`:** This is also a stub for both Linux and Windows (the Go agent's `winharden` `scheduled_tasks` command is real on Windows; Linux uses `appdiscovery` cron enumeration). Add to Phase 0 wire-up for both platforms.
+
+### 0.4 Pattern
 
 Every executor follows the same structure as `change_ip.py`:
 
@@ -70,7 +92,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 Each executor also needs a `rollback()` function that dispatches the agent's rollback/restore command (most ossecurity commands already capture pre-change state and support restore).
 
-### 0.4 Add `dry_run` to All Hardening Executors
+### 0.5 Add `dry_run` to All Hardening Executors
 
 The Go agent's ossecurity commands accept a `dry_run` parameter (returns what would change without applying). Wire this through so operators can preview the effect of any hardening change before committing. The CR creation form shows a "Preview changes" button when `dry_run` is available.
 
@@ -630,7 +652,9 @@ The Go agent's ossecurity commands accept a `dry_run` parameter (returns what wo
 
 **The premise:** Every whitelist-based security policy requires understanding a known-good baseline before enforcement. Applying a seccomp profile, AppArmor policy, iptables ruleset, or auditd rule set without first observing normal behavior guarantees either false positives (blocking legitimate operations) or false negatives (policy too permissive to provide protection). The platform must make the observe-before-enforce pattern the default path, not an afterthought.
 
-This pipeline applies to six control types, each with the same structural stages but different mechanisms:
+This pipeline applies to all policy-based hardening controls on both Linux and Windows. The mechanism differs by platform but the stages are identical.
+
+**Linux controls:**
 
 | Control | Learn mechanism | Enforce mechanism | Drift signal |
 |---------|----------------|-------------------|--------------|
@@ -641,6 +665,37 @@ This pipeline applies to six control types, each with the same structural stages
 | **Auditd** | Short baseline run (collect what events fire under normal load) | Deploy full rule set; alert on rule violations | New event type not in baseline |
 | **FIM (AIDE)** | `aide --init` (build baseline database of file hashes) | `aide --check` (compare to baseline; any diff = alert) | File changed since last baseline |
 | **eBPF/Falco** | Falco in `output_only` mode (log rule matches without acting) | Falco in enforcement mode; Cilium network policy | New rule match not seen in learn period |
+
+**Windows controls (equivalent pipeline, different mechanisms):**
+
+| Linux control | Windows equivalent | Learn mechanism | Enforce mechanism | Drift signal | Go agent status |
+|---|---|---|---|---|---|
+| **AppArmor / SELinux** | **AppLocker** | Audit mode rules (event log 8003/8006 — would-have-blocked) | Enforce mode rules (event 8004 = blocked) | New audit event type not in baseline | ✅ Real (`winharden`) |
+| **AppArmor / SELinux (modern)** | **WDAC (Windows Defender Application Control)** | Audit mode policy (event 3076 — would-have-blocked) | Enforce mode policy (event 3077 = blocked) | New event 3076 not in baseline | ❌ Missing — needs new Go command |
+| **Seccomp** | **Attack Surface Reduction (ASR) rules** | Audit mode per rule (event 1122 — would-have-blocked) | Block mode per rule (event 1121 = blocked) | New audit event not in baseline | ❌ Missing — needs new Go command |
+| **Seccomp (kernel calls)** | **Win32k lockdown via Job Objects** | N/A (binary flag, no learn mode) | Enable `PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY` | Service crash indicates misconfiguration | ❌ Missing |
+| **iptables** | **Windows Firewall with Advanced Security** | Log enabled (logging dropped + successful connections) | Add blocking rules; existing log entries define allowlist | New logged connection not in allowlist | ✅ Real (`winharden`) |
+| **Kernel module blacklisting** | **WDAC Driver Blocklist** | Audit: check loaded drivers vs. recommended block list | WDAC kernel-mode policy blocking unsigned/vulnerable drivers | New driver loaded that should be blocked | ❌ Missing |
+| **Mount hardening** | **AppLocker path rules + NTFS ACLs** | AppLocker audit mode on execution paths | AppLocker enforce + `icacls` to restrict write-then-execute paths | New audit event from path that should be restricted | ✅ Partial (AppLocker real, ACL automation missing) |
+| **Auditd** | **Windows Security Audit Policy** | Run with minimal audit policy; capture events for baseline period | Full `auditpol` rule set derived from baseline + CIS profile | New event subcategory not in baseline | ✅ Real (`winharden`) |
+| **FIM (AIDE)** | **Sysmon file integrity + SACL auditing** | Deploy Sysmon with FileCreate/FileModify events; collect baseline | SACL on sensitive paths; alert on events not in baseline | New FileCreate/Modify event on monitored path | ❌ Missing — Sysmon deployment not implemented |
+| **eBPF / ETW** | **ETW + Sysmon process/network events** | Sysmon in log-only mode; collect process creation + network events | Sysmon rules; WFP for network enforcement | New event type/source not in baseline | ❌ Missing — Sysmon/ETW monitoring not implemented |
+| **SSH hardening** | **RDP hardening + OpenSSH (Windows)** | Audit current config via `netsh`, `reg query`, `auditpol` | Apply CIS RDP hardening; enforce NLA, TLS 1.2+, idle timeout | Config drift detected by weekly posture audit | ✅ Real (RDP: `winharden`, SSH: crossplatform) |
+| **PAM** | **Local Security Policy / FGPP** | Audit current `net accounts` / `secedit` export | Apply via `secedit /configure` or `net accounts` with CIS values | Config drift detected by weekly posture audit | ✅ Real (registry-based subset via `winharden`) |
+
+**Windows-specific hardening with no direct Linux equivalent:**
+
+| Control | What it does | Learn mode | Enforce | Go status |
+|---------|-------------|-----------|---------|-----------|
+| **LAPS** | Randomizes local admin password, stores in AD | N/A (enable/disable) | Enable + configure password age/length | ✅ Real |
+| **Credential Guard** | Protects NTLM hashes + Kerberos tickets via VBS | N/A (enable/disable) | Enable DeviceGuard + VBS + UEFI lock | ✅ Real |
+| **BitLocker** | Full-disk encryption | N/A (enable/disable) | Enable with TPM/PIN + export recovery key | ✅ Real |
+| **PowerShell CLM** | Restricts PowerShell to safe API surface | Audit mode: log CLM violations | Set `__PSLockdownPolicy = 4` | ✅ Real |
+| **SMB hardening** | Disable SMBv1, require signing | Audit: check SMB version via registry | Disable SMBv1 + require signing | ✅ Real |
+| **SCHANNEL/TLS** | Disable old TLS/SSL versions | Audit: query current SCHANNEL registry | Disable SSL 2.0/3.0, TLS 1.0/1.1 via registry | ✅ Real |
+| **Windows Defender ASR** | Block 16 attack surface patterns (macros, credential stealing, etc.) | Audit mode per rule | Block mode per rule | ❌ Missing |
+| **HVCI** | Hypervisor-protected code integrity; blocks unsigned kernel code | N/A (enable/disable, requires reboot) | Enable via registry + UEFI | ❌ Missing |
+| **Windows Defender settings** | AV config, exclusions, real-time protection, cloud protection | Audit current state | Configure via PowerShell `Set-MpPreference` | ❌ Missing |
 
 **Common pipeline stages (all control types):**
 
@@ -1024,6 +1079,39 @@ Many phases require specific software installed on the target EC2. The smoke tes
 
 ---
 
+### Phase: WIN_OSSEC_WIRE
+
+**Purpose:** Verify all 13 Windows hardening executors dispatch to the Go agent and produce real side effects on a live Windows EC2.
+
+**Setup:** EC2: Windows Server 2022 Base AMI, Nexplane agent installed (v0.3+), SSM enabled.
+
+**Test steps (one per executor, verified via PowerShell over SSM):**
+
+1. `configure_windows_audit_policy` → SSM: `auditpol /get /category:*` → at least one subcategory set to `Success and Failure`
+2. `harden_rdp` → SSM: `reg query HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp /v UserAuthentication` → value = `1` (NLA required)
+3. `harden_smb` → SSM: `Get-SmbServerConfiguration | Select EnableSMB1Protocol` → `False`
+4. `harden_tls_protocols` → SSM: `reg query "HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.0\Server" /v Enabled` → `0`
+5. `harden_registry` → SSM: `reg query HKLM\SYSTEM\CurrentControlSet\Control\Lsa /v NoLMHash` → `1`
+6. `configure_laps` → SSM: `reg query HKLM\SOFTWARE\Policies\Microsoft Services\AdmPwd /v AdmPwdEnabled` → `1`
+7. `deploy_applocker_policy` (audit mode) → SSM: `Get-AppLockerPolicy -Effective` → non-empty policy returned
+8. `configure_windows_firewall` (block port 9999 inbound) → SSM: `netsh advfirewall firewall show rule name=all | findstr 9999` → rule present
+9. `enforce_powershell_clm` → SSM: `$ExecutionContext.SessionState.LanguageMode` (in a new session) → `ConstrainedLanguage`
+10. `enable_credential_guard` → SSM: `reg query HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard /v EnableVirtualizationBasedSecurity` → `1`
+11. `audit_windows_patch_status` → assert result contains real `installed_patches` array (not hardcoded empty)
+12. `audit_scheduled_tasks` → assert result contains real task inventory (not hardcoded `[]`)
+13. `apply_windows_patches` (security_only, dry_run: true) → assert result shows available patches count (not always `0`)
+
+**Note on BitLocker (enable_bitlocker):** Requires TPM-enabled instance. Skip on EC2 base AMI (no TPM); test on a vTPM-enabled instance or verify the Go agent's error handling returns a clear "TPM not available" message rather than a false success.
+
+**New agent capability required:** None — all Windows Go commands exist in `winharden_windows.go` and `winpatch_windows.go`.
+
+**Assertions:**
+- All 12 CRs (excluding BitLocker) complete with `completed` status
+- PowerShell SSM verification confirms real registry/system state changed
+- Rollback CRs restore pre-change state via registry snapshots
+
+---
+
 ### Phase: HARDENING_PIPELINE
 
 **Purpose:** Verify the generalized learn → baseline → AI-generate → enforce → drift pipeline for AppArmor, iptables, and FIM. (Seccomp covered by SECCOMP_PIPELINE.)
@@ -1183,6 +1271,22 @@ Human accounts are one category of identity. The broader identity problem includ
 
 ## Feature Parity Gaps in Agent and Connectors
 
+### Agent (Go) — New Commands Needed for Phase 0 (Windows — missing capabilities)
+
+The following Windows hardening controls are not yet implemented in the Go agent. They have no Python executor stubs either — they are entirely absent.
+
+| Command | Package | Description |
+|---------|---------|-------------|
+| `wdac_audit` | `winharden` | Deploy WDAC policy in audit mode (event 3076); collect would-have-blocked events for duration; return application and DLL list |
+| `wdac_enforce` | `winharden` | Deploy WDAC policy in enforce mode (event 3077 = blocked); requires code-signing or allowlist |
+| `wdac_driver_block` | `winharden` | Apply Microsoft recommended driver block list; extend with custom vulnerable driver list |
+| `asr_audit` | `winharden` | Enable ASR rules in audit mode via PowerShell `Set-MpPreference -AttackSurfaceReductionRules_Ids ... -AttackSurfaceReductionRules_Actions AuditMode`; collect event 1122s |
+| `asr_enforce` | `winharden` | Enable ASR rules in block mode (event 1121 = blocked); supports per-rule granularity |
+| `sysmon_deploy` | `winharden` | Download Sysmon64.exe; install with Nexplane config template; start service; verify events flowing to Event Log |
+| `sysmon_fim` | `winharden` | Query Sysmon Event ID 11 (FileCreate) and 2 (FileCreateTime) for monitored paths; return change list |
+| `hvci_enable` | `winharden` | Enable HVCI (Hypervisor-Protected Code Integrity) via registry + UEFI; flags reboot required |
+| `defender_configure` | `winharden` | `Set-MpPreference`: real-time protection, cloud protection level, ASR, PUA protection, controlled folder access |
+
 ### Agent (Go) — New Commands Needed for Phase 4
 
 | Command | Package | Description |
@@ -1197,7 +1301,9 @@ Human accounts are one category of identity. The broader identity problem includ
 | `drift_check` | `ossecurity` | Short-duration `seccomp_learn`/`apparmor_complain` compared to stored baseline; returns new behaviors |
 | `emergency_user_lockout` (Linux) | `linuxauth` | `usermod -L`; `pkill -KILL -u <user>`; remove from sudo group |
 
-### Agent Executors (Python) — All 14 Stubs to Wire (Phase 0)
+### Agent Executors (Python) — All Stubs to Wire (Phase 0)
+
+**Linux (14 stubs):**
 
 | File | Agent command | Status |
 |------|--------------|--------|
@@ -1216,6 +1322,25 @@ Human accounts are one category of identity. The broader identity problem includ
 | `audit_ebpf_posture.py` | `ebpf` | Stub → bpftool prog list, unexpected programs |
 | `harden_ssh.py` | `ssh` | Stub → 12-point CIS baseline in agent |
 | `configure_pam.py` | `pam` | Stub → RHEL/Debian variant detection in agent |
+| `audit_scheduled_tasks.py` | `winharden`/`appdiscovery` | Stub → both Linux and Windows; hardcodes empty findings |
+
+**Windows (13 stubs — all map to real Go `winharden` commands):**
+
+| File | Agent command | Status |
+|------|--------------|--------|
+| `configure_windows_audit_policy.py` | `winharden` | Stub → hardcodes `categories_count: 9` |
+| `configure_windows_firewall.py` | `winharden` | Stub → ignores all rule params |
+| `harden_rdp.py` | `winharden` | Stub → echoes NLA param without applying |
+| `harden_registry.py` | `winharden` | Stub → hardcodes 7 setting names, applies none |
+| `harden_smb.py` | `winharden` | Stub → returns mock SMB version |
+| `harden_tls_protocols.py` | `winharden` | Stub → returns mock protocol list |
+| `deploy_applocker_policy.py` | `winharden` | Stub → returns mock policy; no AppIDSvc start |
+| `enable_bitlocker.py` | `winharden` | Stub → returns fake recovery key |
+| `enable_credential_guard.py` | `winharden` | Stub → returns mock response |
+| `configure_laps.py` | `winharden` | Stub → returns mock response |
+| `enforce_powershell_clm.py` | `winharden` | Stub → returns mock response |
+| `apply_windows_patches.py` | `winpatch` | Stub → always returns `packages_updated: 0` |
+| `audit_windows_patch_status.py` | `winpatch` | Stub → always returns `0 updates available` |
 
 ### Connector — New CR Types Needed (Phase 3 + Phase 5)
 
@@ -1259,7 +1384,8 @@ Human accounts are one category of identity. The broader identity problem includ
 
 | Scenario | Smoke Phase | Ph 0 | Ph 1 | Ph 2 | Ph 3 | Ph 4 | Ph 5 |
 |----------|-------------|------|------|------|------|------|------|
-| OS hardening executor wire-up | **OSSEC_WIRE** | 0.1–0.4 | — | — | — | — | — |
+| Linux OS hardening executor wire-up | **OSSEC_WIRE** | 0.1–0.3, 0.5 | — | — | — | — | — |
+| Windows OS hardening executor wire-up | **WIN_OSSEC_WIRE** | 0.3–0.5 | — | — | — | — | — |
 | Connector onboarding | Existing A | — | 1.1 | — | — | — | — |
 | CVE-driven patching | FINDING_LIFECYCLE | — | 1.2–1.5 | 2.1–2.3, 2.7 | — | — | — |
 | Routine patch cycle | BULK_PATCH | — | 1.3, 1.4, 1.7 | 2.1, 2.2 | — | — | — |
