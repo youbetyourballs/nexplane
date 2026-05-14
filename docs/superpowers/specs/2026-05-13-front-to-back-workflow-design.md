@@ -4,7 +4,7 @@
 
 **Goal:** Eliminate the friction that makes simple security and infrastructure operations complex in practice — from the first signal to final verification — while maintaining safety guardrails for both security operators who lack infrastructure expertise and infrastructure operators who need efficiency tools.
 
-**Architecture:** Six themed improvement phases (Foundation → Scale → Identity → Hardening) built on top of the existing CR workflow engine, agent command library, and connector framework. Each phase ships independently and each feature includes a smoke test phase that exercises it end-to-end against real infrastructure.
+**Architecture:** Phase 0 (executor wire-up) plus four themed improvement phases (Foundation → Scale → Identity → Hardening) and a Future phase for identity connectors, built on top of the existing CR workflow engine, agent command library, and connector framework. Each phase ships independently and each feature includes a smoke test phase that exercises it end-to-end against real infrastructure.
 
 **Tech Stack:** FastAPI backend, React/React Query frontend, Nexplane Go agent (30+ commands), AWS/GCP/Azure/OCI connectors, PostgreSQL, Tailscale mesh networking.
 
@@ -20,6 +20,89 @@ Arrives from a *change cycle* — patch Tuesday, planned upgrade, capacity event
 
 ### The Handoff
 Security creates urgency, infrastructure owns expertise. The platform must make the transfer of context between them seamless — the approver needs to understand *why* a change is needed, and the requester needs confidence that the change will be executed safely.
+
+---
+
+## Phase 0 — Executor Wire-Up
+
+*Prerequisite sprint. The Go agent fully implements every advertised OS hardening capability, but all 14 Python backend executors are stubs returning hardcoded mock data. CRs appear to succeed while nothing happens on the host. This must be fixed before any operator-facing phase has meaning.*
+
+### 0.1 Background
+
+An audit of `backend/app/connectors/executors/nexplane_agent/` revealed a systematic pattern: every OS hardening executor was created as a UI/API placeholder but was never updated to call `dispatch_agent_job()`. The correct pattern exists in `change_ip.py` and `isolate_host.py` — these stubs need to follow it.
+
+The Go agent in `agent/commands/ossecurity/` is fully functional for all 14 capabilities, tested via `test_agent_live.py`. The fix is purely mechanical — update each Python file to dispatch to the agent with the correct command name and parameters.
+
+### 0.2 Executors to Wire (all 14)
+
+| File | Agent command | Real action | Notes |
+|------|--------------|-------------|-------|
+| `configure_seccomp.py` | `seccomp` | Writes systemd drop-in with seccomp profile; reloads service | Add `mode: "learn"\|"enforce"` parameter |
+| `configure_apparmor.py` | `apparmor` | `aa-enforce`/`aa-complain`/`aa-disable`; writes profile to `/etc/apparmor.d/` | Mode parameter maps to aa- command |
+| `configure_selinux.py` | `selinux` | `setenforce`; updates `/etc/selinux/config`; `semodule` for custom policies | Already has `selinux_setmode` in ossecurity |
+| `apply_sysctl_hardening.py` | `sysctl` | Writes `/etc/sysctl.d/99-nexplane-hardening.conf`; runs `sysctl --system` | 13-point CIS baseline built into agent |
+| `configure_host_firewall.py` | `firewall` | Detects iptables/nftables/firewalld; captures snapshot; applies rules | add_rule/remove_rule/flush actions |
+| `blacklist_kernel_modules.py` | `modules` | Writes `/etc/modprobe.d/nexplane-blacklist.conf`; `update-initramfs` | Requires reboot to fully take effect |
+| `harden_mount_options.py` | `mount` | Parses `/etc/fstab`; adds noexec/nosuid/nodev; remounts | Targets /tmp, /dev/shm, /var/tmp |
+| `deploy_auditd_rules.py` | `auditd` | CIS L1/L2 profiles or custom rules; writes to `/etc/audit/rules.d/`; `augenrules` | Profile parameter: `cis_level1`, `cis_level2`, `custom` |
+| `setup_file_integrity_monitoring.py` | `fim` | AIDE init (build baseline) or check (compare to baseline); Tripwire fallback | Action parameter: `init`, `check` |
+| `audit_os_security_posture.py` | `posture` | Queries sestatus, aa-status, auditctl -s, ausearch for denials | Read-only — returns real state |
+| `deploy_ebpf_policy.py` | `ebpf` | `bpftool` to load eBPF program; pins to `/sys/fs/bpf/`; attaches to target | Requires kernel ≥ 5.7 |
+| `configure_ebpf_security_policy.py` | `ebpf` | Writes Falco/Cilium policy YAML; validates; reloads framework | Framework parameter: `falco`, `cilium` |
+| `audit_ebpf_posture.py` | `ebpf` | `bpftool prog list`; checks for unexpected programs in `/sys/fs/bpf` | Read-only |
+| `harden_ssh.py` | `ssh` | Writes `/etc/ssh/sshd_config.d/99-nexplane-hardening.conf`; `sshd -t`; reloads | 12 CIS defaults built into agent |
+| `configure_pam.py` | `pam` | Detects RHEL vs Debian PAM variant; pwquality/faillock; CIS L1/L2 profiles | min_length, max_failures, lockout_duration params |
+
+### 0.3 Pattern
+
+Every executor follows the same structure as `change_ip.py`:
+
+```python
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
+    return await dispatch_agent_job(
+        command="<agent_command_name>",
+        parameters=parameters,
+        asset_ids=list(asset_ids),
+        timeout_seconds=120,
+    )
+```
+
+Each executor also needs a `rollback()` function that dispatches the agent's rollback/restore command (most ossecurity commands already capture pre-change state and support restore).
+
+### 0.4 Add `dry_run` to All Hardening Executors
+
+The Go agent's ossecurity commands accept a `dry_run` parameter (returns what would change without applying). Wire this through so operators can preview the effect of any hardening change before committing. The CR creation form shows a "Preview changes" button when `dry_run` is available.
+
+### Smoke Test Phase: OSSEC_WIRE
+
+**Purpose:** Verify all 14 hardening executors actually dispatch to the agent and produce real side effects.
+
+**Setup:** EC2 with Amazon Linux 2 (default state — no hardening applied).
+
+**Test steps (one per executor, executed in sequence with verification):**
+
+1. `apply_sysctl_hardening` → SSM: `sysctl net.ipv4.tcp_syncookies` → expect `1`
+2. `harden_ssh` → SSM: `grep PermitRootLogin /etc/ssh/sshd_config.d/99-*` → expect `no`
+3. `configure_pam` (cis_level1) → SSM: `grep minlen /etc/security/pwquality.conf` → expect `14`
+4. `deploy_auditd_rules` (cis_level1) → SSM: `auditctl -l | wc -l` → expect > 0
+5. `harden_mount_options` → SSM: `mount | grep /tmp` → expect `noexec`
+6. `blacklist_kernel_modules` (modules: `["usb-storage","cramfs"]`) → SSM: `cat /etc/modprobe.d/nexplane-blacklist.conf` → contains both
+7. `configure_host_firewall` (add rule blocking port 9999) → SSM: `iptables -L | grep 9999` → present
+8. `configure_apparmor` (mode: complain, service: nginx) → SSM: `aa-status | grep nginx` → complain mode
+9. `configure_seccomp` (mode: enforce, service: nginx, profile: minimal) → SSM: `systemctl cat nginx | grep Seccomp` → profile loaded
+10. `setup_file_integrity_monitoring` (action: init) → SSM: `ls /var/lib/aide/aide.db*` → exists
+11. `audit_os_security_posture` → assert result contains real `selinux_status`, `auditd_enabled` fields (not hardcoded)
+12. `audit_ebpf_posture` → assert result contains `loaded_programs` array (may be empty, but not hardcoded)
+
+**All CRs must use `dry_run: false`. Rollback each after verification.**
+
+**New agent capability required:** None — all Go commands exist. The wire-up is purely Python.
+
+**Assertions:**
+- All 12 CRs complete with status `completed` (not mock-completed)
+- SSM verification commands confirm real host state changed
+- Rollback CRs restore pre-change state
 
 ---
 
@@ -543,21 +626,51 @@ Security creates urgency, infrastructure owns expertise. The platform must make 
 
 ---
 
-### 4.2 Policy Learn Mode
+### 4.2 Generalized Learn → Audit → Enforce Pipeline
 
-**What it does:** Apply security policies in audit/log mode to understand impact before enforcing.
+**The premise:** Every whitelist-based security policy requires understanding a known-good baseline before enforcement. Applying a seccomp profile, AppArmor policy, iptables ruleset, or auditd rule set without first observing normal behavior guarantees either false positives (blocking legitimate operations) or false negatives (policy too permissive to provide protection). The platform must make the observe-before-enforce pattern the default path, not an afterthought.
 
-**New agent command:** `seccomp_learn` — Enables `SCMP_ACT_LOG` on a target process/service via a temporary seccomp profile that logs all syscalls without blocking. Runs for `duration_seconds`. Returns the list of observed syscalls.
+This pipeline applies to six control types, each with the same structural stages but different mechanisms:
 
-**New agent command:** `apparmor_complain` — Puts AppArmor profile in `complain` mode for a service. Runs for `duration_seconds`. Returns observed denials (what would have been blocked in enforce mode).
+| Control | Learn mechanism | Enforce mechanism | Drift signal |
+|---------|----------------|-------------------|--------------|
+| **Seccomp** | `SCMP_ACT_LOG` profile (kernel logs syscalls, doesn't block) | `SCMP_ACT_ERRNO` profile loaded into systemd unit | New syscall not in baseline |
+| **AppArmor** | `aa-complain` mode (logs denials without blocking) | `aa-enforce` mode | New denial in kern.log |
+| **SELinux** | Permissive mode + `audit2allow` (generates policy from audit log) | `setenforce 1` + loaded module | New AVC denial |
+| **iptables** | `--log` target (logs matching traffic without dropping) | `--drop` target on same rules | New logged connection that would be dropped |
+| **Auditd** | Short baseline run (collect what events fire under normal load) | Deploy full rule set; alert on rule violations | New event type not in baseline |
+| **FIM (AIDE)** | `aide --init` (build baseline database of file hashes) | `aide --check` (compare to baseline; any diff = alert) | File changed since last baseline |
+| **eBPF/Falco** | Falco in `output_only` mode (log rule matches without acting) | Falco in enforcement mode; Cilium network policy | New rule match not seen in learn period |
 
-**Execution flow:**
-1. CR type `configure_seccomp_learn` dispatches `seccomp_learn` with target service and duration.
-2. Result contains observed syscall list.
-3. Result is stored in CR execution result and displayed in CR detail as "Observed syscalls: 47 unique calls over 300 seconds."
-4. "Generate enforce profile" button (in CR detail) creates a `configure_seccomp` CR pre-populated with only the observed syscalls.
+**Common pipeline stages (all control types):**
 
-**Smoke test phase:** Part of `SECCOMP_PIPELINE`.
+**Stage 1 — Observe:** CR type `<control>_learn` applies the audit/log mode for `duration_seconds` (default 300). During this window, the operator should exercise all normal application workflows — startup, steady state, routine maintenance operations. The CR result contains the raw observation: syscall list, AppArmor denials, auditd events, network connections, file change log.
+
+**Stage 2 — Baseline store:** The observation is persisted as a `PolicyBaseline` record. The CR detail displays the observation in human-readable form: "47 unique syscalls observed", "3 network connections to external hosts", "12 files modified in /var/log/ during baseline period".
+
+**Stage 3 — AI-assisted policy generation:** "Generate enforce policy" button in the CR detail sends the baseline to the AI analysis endpoint. AI generates a minimal policy allowing only what was observed, annotated with reasoning per decision. For seccomp: JSON syscall allowlist. For AppArmor: `/etc/apparmor.d/` profile. For iptables: allow rules. For AIDE: baseline database is the policy itself.
+
+**Stage 4 — Human review:** The generated policy is displayed in a diff view. Operator can accept as-is, edit individual rules, or reject and re-run the learn phase with a longer window. The review is recorded with reviewer identity and timestamp.
+
+**Stage 5 — Staged enforce:** CR `<control>_enforce` applies the policy to staging first (if staged rollout project), then production. Application-aware verification checks run immediately after. If any check fails, the policy is automatically rolled back and the failure is annotated on the PolicyBaseline ("enforcement failed: nginx returned 502 after seccomp apply").
+
+**Stage 6 — Drift detection:** Weekly scheduled `<control>_drift_check` compares a fresh short-duration observation against the stored baseline. New behaviors that would be blocked by the current policy surface as drift alerts: "nginx now uses syscall `mprotect` which is not in the applied seccomp profile." Drift is not automatically remediated — it surfaces for human judgment (application legitimately changed? or compromise?).
+
+**New agent commands required (extending Phase 4.1 scope):**
+
+| Command | Package | Description |
+|---------|---------|-------------|
+| `seccomp_learn` | `ossecurity` | `SCMP_ACT_LOG` profile on target service; collect syscalls for `duration_seconds` |
+| `selinux_permissive_baseline` | `ossecurity` | Switch to permissive, run `ausearch -m avc` for duration, return AVC denials; `audit2allow` output included |
+| `iptables_log_baseline` | `ossecurity` | Add `--log` rules mirroring the intended drop rules; collect logged connections for duration |
+| `auditd_baseline` | `ossecurity` | Run without alerting rules for duration; collect all event types and frequencies |
+| `fim_init` | `ossecurity` | `aide --init`; stores baseline DB; returns file count and hash algorithm |
+| `fim_check` | `ossecurity` | `aide --check`; returns diff from baseline (modified, added, removed files) |
+| `falco_output_only` | `ebpf` | Start Falco with rules in `output` mode (log, don't act); collect rule matches for duration |
+
+**Note:** `apparmor_complain` is already supported by the existing `apparmor_linux.go` implementation (complain mode exists). `fim_init` and `fim_check` map to the existing `fim_linux.go` `init`/`check` actions. The new commands above fill the gaps for the other control types.
+
+**Smoke test phase:** `SECCOMP_PIPELINE` covers seccomp end-to-end. Individual learn phases for AppArmor, iptables, and FIM are tested as part of the `OSSEC_WIRE` phase (which verifies the executors dispatch correctly). Full pipeline tests (learn → generate → enforce → drift) for each control type are in the `HARDENING_PIPELINE` smoke phase below.
 
 ---
 
@@ -911,6 +1024,47 @@ Many phases require specific software installed on the target EC2. The smoke tes
 
 ---
 
+### Phase: HARDENING_PIPELINE
+
+**Purpose:** Verify the generalized learn → baseline → AI-generate → enforce → drift pipeline for AppArmor, iptables, and FIM. (Seccomp covered by SECCOMP_PIPELINE.)
+
+**Setup:**
+- EC2 A (AppArmor): Ubuntu 22.04 (AppArmor enabled by default), nginx installed and serving
+- EC2 B (iptables): Amazon Linux 2, Flask app installed, making outbound connection to EC2 C on port 5432
+- EC2 C (FIM): Amazon Linux 2, static web content in `/var/www/html/`
+
+**AppArmor pipeline (EC2 A):**
+1. `configure_apparmor` CR with `mode: "complain"`, `service: "nginx"`, `duration_seconds: 60`
+2. SSM: send 10 HTTP requests to nginx during the 60s window to generate access patterns
+3. Verify CR result contains observed file accesses and capabilities
+4. Call AI generate endpoint with the result → receive AppArmor enforce profile
+5. `configure_apparmor` CR with `mode: "enforce"`, `profile_content: <generated>`, verify checks: `http` (localhost:80 → 200)
+6. Verify nginx still serves; verify a blocked file access attempt is denied
+
+**iptables pipeline (EC2 B):**
+1. `configure_host_firewall` CR with `action: "log_baseline"`, `duration_seconds: 60` on Flask app
+2. SSM: trigger several outbound requests during window (Flask → postgres, Flask → external)
+3. Verify CR result contains observed outbound connections
+4. Call AI generate → receive iptables allow rules (flask → postgres, block all else outbound)
+5. `configure_host_firewall` CR with `action: "apply_rules"`, generated rules
+6. Verify flask → postgres still works; verify flask → unexpected external is blocked
+
+**FIM pipeline (EC2 C):**
+1. `setup_file_integrity_monitoring` CR with `action: "init"` — builds AIDE baseline
+2. Verify baseline DB exists (SSM: `ls /var/lib/aide/aide.db`)
+3. SSM: add a file to `/var/www/html/unexpected.php` (simulates web shell)
+4. `setup_file_integrity_monitoring` CR with `action: "check"` — compare to baseline
+5. Verify CR result contains the added file as a violation
+6. Verify drift alert is created in the platform
+7. Cleanup: remove unexpected.php, re-init baseline
+
+**Assertions:**
+- AppArmor: enforce mode applied, nginx still serves, profile loaded
+- iptables: Flask → postgres allowed, Flask → external blocked
+- FIM: unexpected file detected and surfaced as drift alert
+
+---
+
 ### Phase: POLICY_DRIFT
 
 **Purpose:** Verify drift detection catches when application behavior changes would be blocked by an applied seccomp policy.
@@ -935,44 +1089,156 @@ Many phases require specific software installed on the target EC2. The smoke tes
 
 ---
 
+## Phase 5 — Identity Connectors and Non-User Credential Lifecycle
+
+*Future work — requires dedicated brainstorming session before implementation planning. Captured here to establish scope and smoke test requirements.*
+
+### 5.1 Identity Connector Buildout
+
+Phase 3 (Identity Security) implements user isolation, suspension, and time-bound access, but only against currently-connected identity systems. Most production environments have multiple identity planes that Nexplane doesn't yet manage:
+
+**Connectors needed:**
+
+| Connector | Capabilities needed |
+|-----------|-------------------|
+| **Active Directory (on-prem)** | User lifecycle (create/disable/delete), group management, GPO application, password policy, account lockout, Kerberos ticket invalidation |
+| **Azure AD / Entra ID** | Cloud user lifecycle, conditional access policy, MFA state management, app role assignments, privileged identity management (PIM) |
+| **Okta (extended)** | Current connector needs: factor enrollment enforcement, session policy management, lifecycle state machine (staged/active/suspended/deprovisioned), group push |
+| **LDAP (generic)** | Read users/groups, modify attributes, bind for authentication testing |
+| **GitHub / GitLab** | Organization member management, repo permission management, deploy key rotation |
+| **Kubernetes RBAC** | RoleBinding/ClusterRoleBinding lifecycle, ServiceAccount management |
+
+**Phase 3 CR types must be extended to cover these connectors.** `emergency_user_lockout` today only covers AWS IAM; it must fan out to AD, Azure AD, Okta, and GitHub in parallel, tolerating partial failures (if AD is unreachable, lock IAM and Okta and report AD as failed, don't abort).
+
+### 5.2 Non-User Credential Lifecycle
+
+Human accounts are one category of identity. The broader identity problem includes non-human credentials that have their own lifecycle, expiry, and rotation needs:
+
+| Credential type | Lifecycle events | Current support |
+|----------------|-----------------|-----------------|
+| **API keys** (AWS IAM, GCP service accounts, Azure service principals) | Creation, rotation, expiry detection, revocation | `rotate_iam_key` exists for AWS; others missing |
+| **JWT tokens** | Signing key rotation, expiry, algorithm migration | None |
+| **SSH keys** | Authorized key management, key age enforcement, orphaned key detection, rotation | `credrotation` Go command exists; Python executor stub |
+| **SSL/TLS certificates** | Expiry detection (30/14/7 day warnings), renewal (ACME/internal CA), deployment to services, pinning update | `manage_tls_certificates.py` exists but is a stub |
+| **Database credentials** | Password rotation, connection string update in application config, session invalidation | `credrotation` Go command exists; Python executor stub |
+| **Service account tokens** | Kubernetes service account token rotation, expiry enforcement | None |
+| **Secrets in vaults** | HashiCorp Vault lease renewal, secret version rotation | None |
+
+**Detection before rotation:** Before rotating any credential, the platform must know what systems consume it. Rotating an API key used by 12 microservices without updating them all breaks production. The credential lifecycle workflow:
+
+1. **Discover:** Which services use this credential? (from `deep_discover` env var names, `agent_appdiscovery` config files, CloudTrail API call analysis)
+2. **Plan:** Generate a rotation CR that updates the credential AND updates all consuming services' configs
+3. **Stage:** Apply to one consuming service, verify it works
+4. **Rollout:** Update remaining consumers in batches
+5. **Revoke:** Revoke the old credential only after all consumers are confirmed updated
+
+### 5.3 Expiry Monitoring
+
+**New service:** Certificate and credential expiry monitor. Runs daily, checks:
+- All TLS certificates on all known assets (from `manage_tls_certificates` records + direct TLS probes on known ports)
+- All IAM access keys with `LastRotatedDate` > 90 days
+- All SSH keys in `authorized_keys` with creation date > policy threshold
+- All Kubernetes service account tokens approaching expiry
+- All secrets in connected Vault instances approaching lease expiry
+
+**Output:** Findings in the vulnerability/findings queue, same lifecycle as CVE findings. SLA clock starts at 30-day warning. Escalates at 14 days. Emergency-priority auto-generated CR at 7 days.
+
+### Smoke Test Phase: IDENTITY_LIFECYCLE
+
+**Purpose:** Exercise the full identity lifecycle for human users and non-user credentials against real Azure AD infrastructure.
+
+**Prerequisites:** Azure AD tenant with Nexplane service principal, AD connector configured, test user group created.
+
+**Setup (provisioned at test start, torn down after):**
+- Azure AD test users: `smoke-user-1@domain`, `smoke-user-2@domain`, both in `nexplane-smoke-test` group
+- Test IAM access key: `nexplane-smoke-api-key` with read-only S3 access
+- Test SSH key: `nexplane-smoke-ssh-key` added to EC2 `authorized_keys`  
+- Test TLS certificate: self-signed cert expiring in 5 days (for expiry detection test)
+- Test database: PostgreSQL on EC2 with `smokeuser` credentials in app config file
+
+**Human user lifecycle:**
+
+1. **Onboard:** Create `smoke-user-3@domain` via Azure AD connector CR. Verify user exists in Azure AD. Assign to `nexplane-smoke-test` group.
+2. **Access review:** Run access review campaign scoped to the smoke group. Mark `smoke-user-2` for revocation. Verify remediation CR is auto-created.
+3. **Revoke:** Execute the revocation CR. Verify `smoke-user-2` is disabled in Azure AD. Verify the user cannot authenticate (attempt token acquisition).
+4. **Emergency lockout:** Fire `emergency_user_lockout` for `smoke-user-1` (cross-system: Azure AD + AWS IAM if a test IAM user exists). Verify both are locked simultaneously. Verify reversal CR restores access.
+5. **Time-bound re-access:** Grant `smoke-user-1` temporary access with `access_expiry_hours: 0.02` (~1 min). Verify auto-revoke fires.
+6. **Full offboard:** Offboard `smoke-user-3`. Verify account deleted, group membership removed.
+
+**Non-user credential lifecycle:**
+
+7. **API key rotation:** Fire `rotate_iam_key` against `nexplane-smoke-api-key`. Verify old key is inactive. Verify new key is functional (S3 list call succeeds).
+8. **SSH key rotation:** Fire `credrotation` targeting the EC2's `authorized_keys`. Verify old key cannot SSH in. Verify new key (returned in CR result) can SSH in.
+9. **TLS certificate expiry detection:** Expiry monitor finds the 5-day cert. Verify a finding is created with urgency=`emergency` (≤7 days). Verify auto-generated renewal CR is created.
+10. **Database credential rotation:** Fire `credrotation` for `smokeuser` on the PostgreSQL instance. Verify old password fails. Verify new password (from CR result) connects successfully.
+
+**Assertions:**
+- Azure AD operations reflect in the tenant within 30 seconds (account state queries)
+- Cross-system lockout completes within 60 seconds for all systems
+- Expiry monitor detects the 5-day cert
+- All credential rotations: old credential denied, new credential works
+- All lifecycle events appear in the asset timeline
+
+---
+
 ## Feature Parity Gaps in Agent and Connectors
 
-The following capabilities are required by Phase 3 and 4 but do not yet exist:
-
-### Agent (Go) — New Commands/Modes Needed
+### Agent (Go) — New Commands Needed for Phase 4
 
 | Command | Package | Description |
 |---------|---------|-------------|
-| `seccomp_learn` | `ossecurity` | Attach `SCMP_ACT_LOG` profile to a running process; collect unique syscalls over `duration_seconds`; return list. Requires kernel ≥ 4.14 with seccomp logging support. |
-| `seccomp_apply` (enforce) | `ossecurity` | Write a seccomp profile JSON to `/etc/nexplane/seccomp/<service>.json`; configure systemd unit to load via `SystemCallFilter=` or seccomp loader; reload service |
-| `apparmor_complain` | `ossecurity` | Set named AppArmor profile to complain mode; collect denial events from `/var/log/kern.log` or audit log over `duration_seconds`; return observed denials |
-| `apparmor_enforce` | `ossecurity` | Write AppArmor profile to `/etc/apparmor.d/`; run `aa-enforce`; verify service still runs |
-| `drift_check` | `ossecurity` | Compare short-duration `seccomp_learn` result against stored baseline; return new syscalls not in baseline |
-| `emergency_user_lockout` (Linux) | `linuxauth` | Lock local Linux user account: `usermod -L`, terminate active sessions (`pkill -KILL -u <user>`), remove from sudo group |
+| `seccomp_learn` | `ossecurity` | `SCMP_ACT_LOG` profile on target service; collect unique syscalls over `duration_seconds`; requires kernel ≥ 4.14 |
+| `selinux_permissive_baseline` | `ossecurity` | Switch to permissive, run `ausearch -m avc` for duration, return AVC denials + `audit2allow` output |
+| `iptables_log_baseline` | `ossecurity` | Add `--log` rules mirroring intended drop rules; collect logged connections for duration |
+| `auditd_baseline` | `ossecurity` | Run without alerting rules for duration; collect all event types and frequencies |
+| `fim_init` | `ossecurity` | `aide --init`; stores baseline DB; returns file count (maps to existing fim `init` action) |
+| `fim_check` | `ossecurity` | `aide --check`; returns diff from baseline (maps to existing fim `check` action) |
+| `falco_output_only` | `ebpf` | Start Falco with rules in `output` mode (log only); collect rule matches for duration |
+| `drift_check` | `ossecurity` | Short-duration `seccomp_learn`/`apparmor_complain` compared to stored baseline; returns new behaviors |
+| `emergency_user_lockout` (Linux) | `linuxauth` | `usermod -L`; `pkill -KILL -u <user>`; remove from sudo group |
 
-### Agent Executors (Python) — Stubs to Implement
+### Agent Executors (Python) — All 14 Stubs to Wire (Phase 0)
 
-The following Python executor files exist as stubs and need real implementations:
+| File | Agent command | Status |
+|------|--------------|--------|
+| `configure_seccomp.py` | `seccomp` | Stub → add `mode: learn\|enforce` parameter |
+| `configure_apparmor.py` | `apparmor` | Stub → mode maps to aa-complain/enforce/disable |
+| `configure_selinux.py` | `selinux` | Stub → selinux_setmode exists in ossecurity |
+| `apply_sysctl_hardening.py` | `sysctl` | Stub → 13-point CIS baseline in agent |
+| `configure_host_firewall.py` | `firewall` | Stub → add_rule/remove_rule/log_baseline actions |
+| `blacklist_kernel_modules.py` | `modules` | Stub → modules list param |
+| `harden_mount_options.py` | `mount` | Stub → targets /tmp, /dev/shm, /var/tmp |
+| `deploy_auditd_rules.py` | `auditd` | Stub → profile: cis_level1, cis_level2, custom |
+| `setup_file_integrity_monitoring.py` | `fim` | Stub → action: init, check |
+| `audit_os_security_posture.py` | `posture` | Stub → read-only, returns real system state |
+| `deploy_ebpf_policy.py` | `ebpf` | Stub → bpftool program load |
+| `configure_ebpf_security_policy.py` | `ebpf` | Stub → Falco/Cilium policy apply |
+| `audit_ebpf_posture.py` | `ebpf` | Stub → bpftool prog list, unexpected programs |
+| `harden_ssh.py` | `ssh` | Stub → 12-point CIS baseline in agent |
+| `configure_pam.py` | `pam` | Stub → RHEL/Debian variant detection in agent |
 
-| File | What to implement |
-|------|------------------|
-| `configure_seccomp.py` | Dispatch `seccomp_learn` (learn mode) or `seccomp_apply` (enforce mode) based on parameters |
-| `configure_apparmor.py` | Dispatch `apparmor_complain` or `apparmor_enforce` based on mode parameter |
-| `configure_selinux.py` | Dispatch `selinux_setmode` (existing in ossecurity package) |
-| `configure_host_firewall.py` | Dispatch iptables/nftables rule application |
-| `audit_software_inventory.py` | Dispatch `listpkgs` (command exists) |
-| `deploy_auditd_rules.py` | Dispatch auditd rule deployment |
-
-### Connector — New CR Types Needed
+### Connector — New CR Types Needed (Phase 3 + Phase 5)
 
 | CR Type | Connector | Action |
 |---------|-----------|--------|
-| `emergency_user_lockout` | Active Directory, AWS IAM, Okta | Disable account + deny-all policy + session revocation across all connected identity systems |
-| `user_suspension` | Active Directory, AWS IAM, Okta | Temporary disable with scheduled reversal |
-| `terminate_user_sessions` | Okta, AWS STS | Revoke all active sessions |
-| `user_scope_reduction` | AWS IAM | Attach deny policy (demote), add IP condition, require MFA condition |
-| `enforce_mfa` | AWS IAM, Okta | Attach MFA-required IAM condition policy; set Okta MFA required on user |
-| `time_bound_access_grant` | AWS IAM | Schedule rollback CR at expiry time |
+| `emergency_user_lockout` | AD, Azure AD, Okta, AWS IAM | Fan-out disable across all connected identity systems; tolerates partial failure |
+| `user_suspension` | AD, Azure AD, Okta, AWS IAM | Temporary disable with scheduled reversal |
+| `terminate_user_sessions` | Azure AD, Okta, AWS STS | Revoke all active sessions via IdP API |
+| `user_scope_reduction` | AWS IAM, Azure AD | Attach deny/restrict policy; demote to read-only |
+| `enforce_mfa` | AWS IAM, Okta, Azure AD | MFA-required condition policy or factor enrollment enforcement |
+| `time_bound_access_grant` | AWS IAM, Azure AD | Auto-scheduled revocation CR at expiry |
+| `ad_user_create` | Active Directory | Create AD user, set attributes, add to groups |
+| `ad_user_disable` | Active Directory | Disable AD account, invalidate Kerberos tickets |
+| `ad_user_delete` | Active Directory | Delete AD account, remove from all groups |
+| `ad_group_manage` | Active Directory | Add/remove group members |
+| `azure_ad_user_create` | Azure AD / Entra ID | Create Entra ID user via Graph API |
+| `azure_ad_user_disable` | Azure AD / Entra ID | Disable Entra ID account |
+| `azure_ad_conditional_access` | Azure AD / Entra ID | Apply/modify conditional access policy |
+| `rotate_ssl_certificate` | Agent (all OS) + cloud connectors | ACME renewal or internal CA issuance; deploy to service; reload |
+| `rotate_ssh_keys` | Agent (linuxauth) | Remove old authorized key, add new; verify login with new key |
+| `rotate_database_credentials` | Agent (credrotation) | New password in DB + update app config files; verify connectivity |
+| `rotate_api_key` | AWS IAM, GCP, Azure | Deactivate old key; create new; update consumers; verify |
+| `rotate_jwt_signing_key` | Agent (credrotation) | Generate new signing key pair; update application config; invalidate old tokens |
 
 ### Backend Services Needed
 
@@ -981,29 +1247,38 @@ The following Python executor files exist as stubs and need real implementations
 | Notification service | Event emission → channel routing → delivery (Slack, email, PagerDuty) |
 | Escalation job | Background check for emergency CRs exceeding approval timeout |
 | Soak timer job | Check `ProjectPhase.soak_completed_at`, unlock production CRs |
-| Drift check scheduler | Weekly per-asset job to compare seccomp/AppArmor behavior to baseline |
+| Drift check scheduler | Weekly per-asset job; compare current behavior to stored PolicyBaseline |
 | Scanner rescan integration | Post-CR hook to call scanner API for targeted rescan |
 | External ticket closure | Post-CR hook to close Jira/PagerDuty/ServiceNow tickets |
+| Credential expiry monitor | Daily job; probe TLS certs, check IAM key age, SSH key age, token expiry; create findings |
+| Policy baseline store | Stores learn-mode observations per asset per control type; used by drift scheduler |
 
 ---
 
 ## Smoke Test Coverage Matrix
 
-| Scenario | Smoke Phase | Phase 1 | Phase 2 | Phase 3 | Phase 4 |
-|----------|-------------|---------|---------|---------|---------|
-| Connector onboarding | Existing A | 1.1 (discovery notification) | — | — | — |
-| CVE-driven patching | FINDING_LIFECYCLE | 1.2, 1.3, 1.4, 1.5 | 2.1, 2.2, 2.3, 2.7 | — | — |
-| Routine patch cycle | BULK_PATCH | 1.3, 1.4, 1.7 | 2.1, 2.2 | — | — |
-| OS upgrade | OS_UPGRADE | 1.4, 1.7, 1.8 | 2.9 | — | — |
-| Emergency zero-day | EMERGENCY_CR | 1.3, 1.8 | 2.4 | — | — |
-| Vuln with no patch | FINDING_MITIGATED | 1.5 | 2.5 | — | — |
-| Containerization | Existing AUTO_AI | 1.4, 1.7 | 2.9 | — | 4.3 |
-| Compliance remediation | COMPLIANCE_FIX | 1.6 | 2.8 | — | — |
-| Access review | ACCESS_REVOKE | 1.5 | 2.6 | 3.6 | — |
-| Incident response (host) | Existing phases | 1.1, 1.6 | 2.4 | — | — |
-| Incident response (user) | USER_ISOLATE | 1.6 | — | 3.1, 3.2, 3.3 | — |
-| Proactive hardening | SECCOMP_PIPELINE, MICROSEG | 1.4, 1.7 | 2.9 | — | 4.1–4.5 |
-| Maintenance windows | MAINT_WINDOW | 1.3, 1.8 | 2.4 | — | — |
-| Kernel patching | KERN_PATCH | 1.4, 1.7 | — | — | — |
-| Policy drift | POLICY_DRIFT | — | — | — | 4.4 |
-| Time-bound access | TIME_BOUND_ACCESS | — | — | 3.5 | — |
+| Scenario | Smoke Phase | Ph 0 | Ph 1 | Ph 2 | Ph 3 | Ph 4 | Ph 5 |
+|----------|-------------|------|------|------|------|------|------|
+| OS hardening executor wire-up | **OSSEC_WIRE** | 0.1–0.4 | — | — | — | — | — |
+| Connector onboarding | Existing A | — | 1.1 | — | — | — | — |
+| CVE-driven patching | FINDING_LIFECYCLE | — | 1.2–1.5 | 2.1–2.3, 2.7 | — | — | — |
+| Routine patch cycle | BULK_PATCH | — | 1.3, 1.4, 1.7 | 2.1, 2.2 | — | — | — |
+| OS upgrade | OS_UPGRADE | — | 1.4, 1.7, 1.8 | 2.9 | — | — | — |
+| Emergency zero-day | EMERGENCY_CR | — | 1.3, 1.8 | 2.4 | — | — | — |
+| Vuln with no patch | FINDING_MITIGATED | — | 1.5 | 2.5 | — | — | — |
+| Containerization | Existing AUTO_AI | — | 1.4, 1.7 | 2.9 | — | 4.3 | — |
+| Compliance remediation | COMPLIANCE_FIX | — | 1.6 | 2.8 | — | — | — |
+| Access review | ACCESS_REVOKE | — | 1.5 | 2.6 | 3.6 | — | — |
+| Incident response (host) | Existing phases | — | 1.1, 1.6 | 2.4 | — | — | — |
+| Incident response (user) | USER_ISOLATE | — | 1.6 | — | 3.1–3.3 | — | — |
+| Proactive hardening (seccomp) | SECCOMP_PIPELINE | 0.1 | 1.4, 1.7 | 2.9 | — | 4.1–4.5 | — |
+| Proactive hardening (AppArmor, iptables, FIM) | **HARDENING_PIPELINE** | 0.1 | 1.4, 1.7 | 2.9 | — | 4.2 | — |
+| Microsegmentation | MICROSEG | — | 1.4, 1.7 | 2.9 | — | 4.1 | — |
+| Maintenance windows | MAINT_WINDOW | — | 1.3, 1.8 | 2.4 | — | — | — |
+| Kernel patching | KERN_PATCH | — | 1.4, 1.7 | — | — | — | — |
+| Policy drift (seccomp) | POLICY_DRIFT | — | — | — | — | 4.4 | — |
+| Policy drift (AppArmor, iptables, FIM) | HARDENING_PIPELINE | — | — | — | — | 4.4 | — |
+| Time-bound access | TIME_BOUND_ACCESS | — | — | — | 3.5 | — | — |
+| Human identity lifecycle (Azure AD) | **IDENTITY_LIFECYCLE** | — | — | — | 3.1–3.5 | — | 5.1 |
+| Non-user credential rotation | **IDENTITY_LIFECYCLE** | — | — | — | — | — | 5.2, 5.3 |
+| Credential expiry detection | **IDENTITY_LIFECYCLE** | — | — | — | — | — | 5.3 |
