@@ -178,12 +178,14 @@ class NexplaneClient:
         return ""
 
     def create_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> str:
+        # Always include rollback_strategy so the safety engine passes on production-tagged assets
+        outcome = {"rollback_strategy": "snapshot_restore", "_smoke_test": True, **desired_outcome}
         return self.post("/change-requests", json={
             "title": title,
             "description": f"Smoke test: {title}",
             "change_type": change_type,
             "target_asset_ids": [asset_id],
-            "desired_outcome": desired_outcome,
+            "desired_outcome": outcome,
         })["id"]
 
     def run_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> dict:
