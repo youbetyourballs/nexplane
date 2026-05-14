@@ -64,3 +64,26 @@ async def test_readonly_executor_dispatches_to_agent(module_name):
         result = await mod.execute({}, ["asset-uuid-1"], None)
 
     mock_dispatch.assert_called_once()
+
+
+PATCH_EXECUTORS = [
+    ("apply_linux_patches", "apply_linux_patches"),
+    ("audit_linux_patch_status", "audit_linux_patch_status"),
+]
+
+
+@pytest.mark.parametrize("module_name,expected_command", PATCH_EXECUTORS)
+@pytest.mark.asyncio
+async def test_patch_executor_dispatches_to_agent(module_name, expected_command):
+    import importlib
+    mod = importlib.import_module(
+        f"app.connectors.executors.nexplane_agent.{module_name}"
+    )
+    mock_dispatch = AsyncMock(return_value={"status": "ok", "snapshot_id": "snap-patch"})
+    with patch(
+        "app.connectors.executors.nexplane_agent._dispatch.dispatch_agent_job",
+        mock_dispatch,
+    ):
+        result = await mod.execute({"packages": ["openssl"]}, ["asset-uuid-1"], None)
+
+    mock_dispatch.assert_called_once()

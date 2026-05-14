@@ -21,6 +21,8 @@ import (
 	"nexplane-agent/commands/containerizeretire"
 	"nexplane-agent/commands/deepdiscover"
 	"nexplane-agent/commands/listpkgs"
+	"nexplane-agent/commands/linuxpatch"
+	"nexplane-agent/commands/winpatch"
 )
 
 // Result is the outcome of a command execution.
@@ -104,6 +106,12 @@ var commands = map[string]CommandFunc{
 	"db_connection_config": dbadmin.ExecuteCommand,
 	// Software inventory (CIS Control 2)
 	"list_installed_packages": listpkgs.Execute,
+	// Linux patching (Spec 5f)
+	"apply_linux_patches":      linuxpatch.ApplyLinuxPatchesExecute,
+	"audit_linux_patch_status": linuxpatch.AuditLinuxPatchStatusExecute,
+	// Windows patching (Spec 5f)
+	"apply_windows_patches":      winpatch.ApplyWindowsPatchesExecute,
+	"audit_windows_patch_status": winpatch.AuditWindowsPatchStatusExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -145,6 +153,10 @@ var rollbacks = map[string]CommandFunc{
 	"upgrade_linux_instance":  linuxupgrade.UpgradeLinuxInstanceRollback,
 	"execute_os_upgrade":      linuxupgrade.UpgradeLinuxInstanceRollback,
 	"containerize_retire":     containerizeretire.ContainerizeRetireRollback,
+	// Linux patching rollback
+	"apply_linux_patches":   linuxpatch.ApplyLinuxPatchesRollback,
+	// Windows patching rollback
+	"apply_windows_patches": winpatch.ApplyWindowsPatchesRollback,
 }
 
 // Dispatch routes a command to its implementation.
