@@ -13,6 +13,9 @@ interface Campaign {
   pending_count: number;
   created_at: string;
   batches: any[];
+  failure_policy: string;
+  failed_cr_count: number;
+  succeeded_cr_count: number;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -85,6 +88,11 @@ export default function PatchCampaignList({ onCreateNew }: { onCreateNew: () => 
                       {c.passed_count > 0 && <span className="text-green-700">✓ {c.passed_count}</span>}
                       {c.pending_count > 0 && <span className="text-slate-500">{c.pending_count} pending</span>}
                       {c.failed_count > 0 && <span className="text-red-600">✗ {c.failed_count} failed</span>}
+                      {c.succeeded_cr_count > 0 && <span className="text-green-600">{c.succeeded_cr_count} CR succeeded</span>}
+                      {c.failed_cr_count > 0 && <span className="text-red-600">{c.failed_cr_count} CR failed</span>}
+                      {c.failure_policy && c.failure_policy !== "continue" && (
+                        <span className="text-amber-600 font-medium">policy: {c.failure_policy.replace(/_/g, " ")}</span>
+                      )}
                     </div>
                     {c.status === "running" && c.total_assets > 0 && (
                       <div className="mt-2 bg-slate-200 rounded-full h-1.5">
