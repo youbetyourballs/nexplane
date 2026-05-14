@@ -5,13 +5,13 @@ CIS_V8_CONTROLS: list[dict] = [
     {"id": 1,  "name": "Inventory and Control of Enterprise Assets",        "method": "asset_coverage", "benchmark_sections": []},
     {"id": 2,  "name": "Inventory and Control of Software Assets",          "method": "not_tracked",    "benchmark_sections": []},
     {"id": 3,  "name": "Data Protection",                                   "method": "not_tracked",    "benchmark_sections": []},
-    {"id": 4,  "name": "Secure Configuration of Enterprise Assets and Software", "method": "agent_audit", "benchmark_sections": ["1.", "3."]},
+    {"id": 4,  "name": "Secure Configuration of Enterprise Assets and Software", "method": "policy_baseline", "benchmark_sections": ["1.", "3."]},
     {"id": 5,  "name": "Account Management",                                "method": "agent_audit",    "benchmark_sections": ["5.1", "5.2"]},
     {"id": 6,  "name": "Access Control Management",                         "method": "agent_audit",    "benchmark_sections": ["5.3", "5.4"]},
-    {"id": 7,  "name": "Continuous Vulnerability Management",               "method": "agent_audit",    "benchmark_sections": ["2."]},
+    {"id": 7,  "name": "Continuous Vulnerability Management",               "method": "vuln_sla",       "benchmark_sections": ["2."]},
     {"id": 8,  "name": "Audit Log Management",                              "method": "agent_audit",    "benchmark_sections": ["4."]},
     {"id": 9,  "name": "Email and Web Browser Protections",                 "method": "not_tracked",    "benchmark_sections": []},
-    {"id": 10, "name": "Malware Defenses",                                  "method": "not_tracked",    "benchmark_sections": []},
+    {"id": 10, "name": "Malware Defenses",                                  "method": "edr_coverage",   "benchmark_sections": []},
     {"id": 11, "name": "Data Recovery",                                     "method": "not_tracked",    "benchmark_sections": []},
     {"id": 12, "name": "Network Infrastructure Management",                 "method": "not_tracked",    "benchmark_sections": []},
     {"id": 13, "name": "Network Monitoring and Defense",                    "method": "not_tracked",    "benchmark_sections": []},
@@ -34,7 +34,20 @@ def _section_matches(section: str, prefixes: list[str]) -> bool:
     return False
 
 
-def compute_cis_summary(assets: list[dict[str, Any]]) -> dict[str, Any]:
+def compute_cis_summary(
+    assets: list[dict[str, Any]],
+    policy_baseline_counts: dict[str, int] | None = None,
+    vuln_sla_data: dict[str, int] | None = None,
+    edr_asset_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Compute CIS Controls v8 summary.
+
+    Extra data params (provided by the compliance router to avoid circular imports):
+    - policy_baseline_counts: {"total_servers": N, "hardened_count": N} for Control 4
+    - vuln_sla_data: {"total": N, "within_sla": N} for Control 7
+    - edr_asset_ids: set of asset IDs covered by an EDR connector for Control 10
+    """
     last_updated: str | None = None
     for asset in assets:
         ts = (
@@ -64,6 +77,92 @@ def compute_cis_summary(assets: list[dict[str, Any]]) -> dict[str, Any]:
                 "score": None, "assets_passing": None, "assets_total": None,
                 "checks": [],
             })
+            continue
+
+        if method == "policy_baseline":
+            # Control 4: score from PolicyBaseline records vs server assets
+            if policy_baseline_counts is None:
+                controls_out.append({
+                    "id": cid, "name": name, "method": method,
+                    "score": None, "assets_passing": None, "assets_total": None,
+                    "checks": [],
+                })
+            else:
+                total = policy_baseline_counts.get("total_servers", 0)
+                hardened = policy_baseline_counts.get("hardened_count", 0)
+                score = (hardened / total) if total > 0 else None
+                if score is not None:
+                    scored_values.append(score)
+                controls_out.append({
+                    "id": cid, "name": name, "method": method,
+                    "score": score,
+                    "assets_passing": hardened,
+                    "assets_total": total,
+                    "checks": [{
+                        "id": "4.1",
+                        "title": "Server assets with a PolicyBaseline record",
+                        "pass_count": hardened,
+                        "fail_count": max(0, total - hardened),
+                        "failing_assets": [],
+                    }],
+                })
+            continue
+
+        if method == "vuln_sla":
+            # Control 7: score from vulnerability findings within SLA
+            if vuln_sla_data is None:
+                controls_out.append({
+                    "id": cid, "name": name, "method": method,
+                    "score": None, "assets_passing": None, "assets_total": None,
+                    "checks": [],
+                })
+            else:
+                total_vulns = vuln_sla_data.get("total", 0)
+                within_sla = vuln_sla_data.get("within_sla", 0)
+                score = (within_sla / total_vulns) if total_vulns > 0 else None
+                if score is not None:
+                    scored_values.append(score)
+                controls_out.append({
+                    "id": cid, "name": name, "method": method,
+                    "score": score,
+                    "assets_passing": within_sla,
+                    "assets_total": total_vulns,
+                    "checks": [{
+                        "id": "7.1",
+                        "title": "Vulnerability findings remediated within SLA",
+                        "pass_count": within_sla,
+                        "fail_count": max(0, total_vulns - within_sla),
+                        "failing_assets": [],
+                    }],
+                })
+            continue
+
+        if method == "edr_coverage":
+            # Control 10: score from assets covered by EDR (CrowdStrike/Defender)
+            total = len(assets)
+            if edr_asset_ids is None or total == 0:
+                controls_out.append({
+                    "id": cid, "name": name, "method": method,
+                    "score": None, "assets_passing": None, "assets_total": None,
+                    "checks": [],
+                })
+            else:
+                covered = len([a for a in assets if a.get("id") in edr_asset_ids])
+                score = covered / total
+                scored_values.append(score)
+                controls_out.append({
+                    "id": cid, "name": name, "method": method,
+                    "score": score,
+                    "assets_passing": covered,
+                    "assets_total": total,
+                    "checks": [{
+                        "id": "10.1",
+                        "title": "Assets covered by EDR agent (CrowdStrike/Defender)",
+                        "pass_count": covered,
+                        "fail_count": total - covered,
+                        "failing_assets": [],
+                    }],
+                })
             continue
 
         if method == "asset_coverage":

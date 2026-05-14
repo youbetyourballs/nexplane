@@ -1,8 +1,10 @@
 import { useState } from "react";
+import type React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import {
   ChevronRight, ChevronDown, Play, Loader2,
-  CheckCircle2, AlertTriangle, XCircle, Minus, ShieldCheck,
+  CheckCircle2, AlertTriangle, XCircle, Minus, ShieldCheck, Wrench,
 } from "lucide-react";
 import { apiClient } from "../api/client";
 import { complianceApi, CisControlRow, CisCheckRow } from "../api/endpoints";
@@ -77,7 +79,9 @@ function FailingAssetList({ check }: { check: CisCheckRow }) {
         <tbody>
           {check.failing_assets.map((a) => (
             <tr key={a.id} className="border-b border-red-50 last:border-0">
-              <td className="px-3 py-1.5 font-medium text-slate-800 w-40">{a.name}</td>
+              <td className="px-3 py-1.5 font-medium text-slate-800 w-40">
+                <Link to={`/assets/${a.id}`} className="hover:text-brand-600 hover:underline">{a.name}</Link>
+              </td>
               <td className="px-3 py-1.5 text-slate-500 font-mono">{a.detail}</td>
             </tr>
           ))}
@@ -187,8 +191,35 @@ function AttestModal({ controlId, onClose }: { controlId: string; onClose: () =>
 function ControlRow({ ctrl }: { ctrl: CisControlRow }) {
   const [expanded, setExpanded] = useState(false);
   const [showAttest, setShowAttest] = useState(false);
+  const [fixAllPending, setFixAllPending] = useState(false);
+  const [fixAllDone, setFixAllDone] = useState(false);
   const isTracked = ctrl.method !== "not_tracked";
   const hasData = ctrl.score !== null;
+
+  // Collect unique failing asset IDs across all checks in this control
+  const failingAssetIds = Array.from(
+    new Set(ctrl.checks.flatMap((ch) => ch.failing_assets.map((a) => a.id)))
+  );
+  const hasFailing = failingAssetIds.length > 0;
+
+  async function handleFixAll(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!hasFailing || fixAllPending) return;
+    setFixAllPending(true);
+    try {
+      await apiClient.post("/change-requests", {
+        title: `Fix CIS Control ${ctrl.id}: ${ctrl.name}`,
+        description: `Remediate all failing assets for CIS Control ${ctrl.id} — ${ctrl.name}`,
+        change_type: "enforce_cis_benchmark",
+        target_asset_ids: failingAssetIds,
+        desired_outcome: { level: 1, os_family: "debian", dry_run: false, rollback_strategy: "restore_previous_config" },
+      });
+      setFixAllDone(true);
+      setTimeout(() => setFixAllDone(false), 3000);
+    } finally {
+      setFixAllPending(false);
+    }
+  }
 
   return (
     <div className={`border-b border-slate-100 ${!isTracked ? "opacity-50" : ""}`}>
@@ -220,11 +251,22 @@ function ControlRow({ ctrl }: { ctrl: CisControlRow }) {
         <div className="w-28 text-right">
           <StatusBadge score={ctrl.score} method={ctrl.method} />
         </div>
+        {isTracked && hasFailing && (
+          <button
+            onClick={handleFixAll}
+            disabled={fixAllPending}
+            title={`Fix all ${failingAssetIds.length} failing asset${failingAssetIds.length !== 1 ? "s" : ""}`}
+            className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border border-orange-300 text-orange-700 hover:bg-orange-50 disabled:opacity-50 transition-colors"
+          >
+            <Wrench size={11} />
+            {fixAllDone ? "Created!" : fixAllPending ? "…" : "Fix all"}
+          </button>
+        )}
         {isTracked && (
           <button
             onClick={(e) => { e.stopPropagation(); setShowAttest(true); }}
             title="Attest this control"
-            className="ml-2 p-1 text-slate-400 hover:text-brand-600 rounded transition-colors"
+            className="ml-1 p-1 text-slate-400 hover:text-brand-600 rounded transition-colors"
           >
             <ShieldCheck size={14} />
           </button>
@@ -263,6 +305,13 @@ export function Compliance() {
     queryFn: complianceApi.getSummary,
     refetchInterval: 30_000,
   });
+
+  const { data: driftAlerts } = useQuery({
+    queryKey: ["drift-alerts"],
+    queryFn: () => apiClient.get("/compliance/drift-alerts").then((r) => r.data as any[]),
+    refetchInterval: 60_000,
+  });
+  const openDriftCount = driftAlerts?.length ?? 0;
 
   const runAuditMutation = useMutation({
     mutationFn: async () => {
@@ -357,6 +406,22 @@ export function Compliance() {
           <p className="text-xs text-red-600 mt-1">Audit failed — check backend logs</p>
         )}
       </div>
+
+      {/* Drift alerts banner */}
+      {openDriftCount > 0 && (
+        <div className="flex items-center gap-3 mb-4 p-3 rounded-lg border border-amber-200 bg-amber-50">
+          <Bell size={15} className="text-amber-600 shrink-0" />
+          <span className="text-sm text-amber-800 flex-1">
+            <span className="font-semibold">{openDriftCount}</span> open drift alert{openDriftCount !== 1 ? "s" : ""} — assets have drifted from their compliance baselines.
+          </span>
+          <Link
+            to="/change-requests?change_type=enforce_cis_benchmark&status=draft"
+            className="text-xs font-medium text-amber-700 hover:text-amber-900 underline underline-offset-2"
+          >
+            Review alerts
+          </Link>
+        </div>
+      )}
 
       {/* Overall score bar */}
       {summary && (
