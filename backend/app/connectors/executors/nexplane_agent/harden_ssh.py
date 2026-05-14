@@ -1,18 +1,22 @@
-from datetime import datetime, timezone
+from app.connectors.executors.nexplane_agent import _dispatch
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
-    return {
-        "action": "harden_ssh",
-        "settings_applied": {
-            "PermitRootLogin": "no",
-            "PasswordAuthentication": "no",
-            "PubkeyAuthentication": "yes",
-            "MaxAuthTries": "4",
-        },
-        "drop_in_path": "/etc/ssh/sshd_config.d/99-nexplane-hardening.conf",
-        "sshd_config_snapshot": {"/etc/ssh/sshd_config": "# previous sshd_config"},
-        "applied_at": datetime.now(timezone.utc).isoformat(),
-    }
+    result = await _dispatch.dispatch_agent_job(
+        command="harden_ssh",
+        parameters=parameters,
+        asset_ids=list(asset_ids),
+        timeout_seconds=60,
+    )
+    result["_asset_ids"] = [str(a) for a in asset_ids]
+    return result
+
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": True, "action": "harden_ssh"}
+    asset_ids = execution_result.get("_asset_ids") or []
+    return await _dispatch.dispatch_agent_job(
+        command="harden_ssh",
+        parameters={"action": "restore", "snapshot_id": execution_result.get("snapshot_id", "")},
+        asset_ids=asset_ids,
+        timeout_seconds=60,
+    )

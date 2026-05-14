@@ -1,5 +1,22 @@
-from datetime import datetime, timezone
-async def execute(parameters, asset_ids, connector):
-    return {"action": "setup_file_integrity_monitoring", "tool": "aide", "action": parameters.get("action", "init"), "database_path": "/var/lib/aide/aide.db.gz", "violations": False, "applied_at": datetime.now(timezone.utc).isoformat()}
-async def rollback(parameters, execution_result, connector):
-    return {"rolled_back": True, "action": "setup_file_integrity_monitoring", "tool": "aide"}
+from app.connectors.executors.nexplane_agent import _dispatch
+
+
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    result = await _dispatch.dispatch_agent_job(
+        command="setup_file_integrity_monitoring",
+        parameters=parameters,
+        asset_ids=list(asset_ids),
+        timeout_seconds=120,
+    )
+    result["_asset_ids"] = [str(a) for a in asset_ids]
+    return result
+
+
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    asset_ids = execution_result.get("_asset_ids") or []
+    return await _dispatch.dispatch_agent_job(
+        command="setup_file_integrity_monitoring",
+        parameters={"action": "restore", "snapshot_id": execution_result.get("snapshot_id", "")},
+        asset_ids=asset_ids,
+        timeout_seconds=120,
+    )
