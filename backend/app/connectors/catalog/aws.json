@@ -1,6 +1,4 @@
 {
-  "display_name": "Amazon Web Services", 
-  "connector_type": "aws", 
   "credential_fields": [
     {
       "required": true, 
@@ -28,6 +26,8 @@
       "label": "Session Token (optional)"
     }
   ], 
+  "connector_type": "aws", 
+  "display_name": "Amazon Web Services", 
   "actions": [
     {
       "display_name": "Create EC2 Key Pair", 
@@ -40,6 +40,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Create a named EC2 key pair and store fingerprint as an asset.", 
       "rollback_action": "delete_key_pair", 
       "applicable_asset_types": [
         "cloud_account"
@@ -48,8 +49,7 @@
       "action_type": "change", 
       "executor": "aws.create_key_pair", 
       "generic_action": "create_key_pair", 
-      "action_id": "create_key_pair", 
-      "description": "Create a named EC2 key pair and store fingerprint as an asset."
+      "action_id": "create_key_pair"
     }, 
     {
       "display_name": "Delete EC2 Key Pair", 
@@ -62,6 +62,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Delete a named EC2 key pair.", 
       "applicable_asset_types": [
         "cloud_account", 
         "key_pair"
@@ -69,8 +70,7 @@
       "action_type": "change", 
       "executor": "aws.delete_key_pair", 
       "generic_action": "delete_key_pair", 
-      "action_id": "delete_key_pair", 
-      "description": "Delete a named EC2 key pair."
+      "action_id": "delete_key_pair"
     }, 
     {
       "display_name": "Join Tailscale Network", 
@@ -93,6 +93,7 @@
         }
       ], 
       "execution_tier": 2, 
+      "description": "Installs Tailscale on an EC2 instance via SSM and enrolls it in the Tailscale network.", 
       "rollback_action": "tailscale_remove", 
       "applicable_asset_types": [
         "server"
@@ -101,8 +102,7 @@
       "action_type": "change", 
       "executor": "aws.tailscale_join", 
       "generic_action": "tailscale_join", 
-      "action_id": "tailscale_join", 
-      "description": "Installs Tailscale on an EC2 instance via SSM and enrolls it in the Tailscale network."
+      "action_id": "tailscale_join"
     }, 
     {
       "display_name": "Remove from Tailscale Network", 
@@ -115,14 +115,14 @@
         }
       ], 
       "execution_tier": 2, 
+      "description": "Removes Tailscale from an EC2 instance and deregisters it from the network.", 
       "applicable_asset_types": [
         "server"
       ], 
       "action_type": "change", 
       "executor": "aws.tailscale_remove", 
       "generic_action": "tailscale_remove", 
-      "action_id": "tailscale_remove", 
-      "description": "Removes Tailscale from an EC2 instance and deregisters it from the network."
+      "action_id": "tailscale_remove"
     }, 
     {
       "display_name": "Deploy Nexplane Agent", 
@@ -145,6 +145,7 @@
         }
       ], 
       "execution_tier": 2, 
+      "description": "Downloads and installs the Nexplane agent on an EC2 instance via SSM.", 
       "rollback_action": "remove_nexplane_agent", 
       "applicable_asset_types": [
         "server"
@@ -153,8 +154,7 @@
       "action_type": "change", 
       "executor": "aws.deploy_nexplane_agent", 
       "generic_action": "deploy_nexplane_agent", 
-      "action_id": "deploy_nexplane_agent", 
-      "description": "Downloads and installs the Nexplane agent on an EC2 instance via SSM."
+      "action_id": "deploy_nexplane_agent"
     }, 
     {
       "display_name": "Remove Nexplane Agent", 
@@ -167,14 +167,14 @@
         }
       ], 
       "execution_tier": 2, 
+      "description": "Stops and removes the Nexplane agent from an EC2 instance via SSM.", 
       "applicable_asset_types": [
         "server"
       ], 
       "action_type": "change", 
       "executor": "aws.remove_nexplane_agent", 
       "generic_action": "remove_nexplane_agent", 
-      "action_id": "remove_nexplane_agent", 
-      "description": "Stops and removes the Nexplane agent from an EC2 instance via SSM."
+      "action_id": "remove_nexplane_agent"
     }, 
     {
       "display_name": "Create EBS Snapshot", 
@@ -194,6 +194,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Creates an EBS snapshot of an instance's root volume. volume_id is resolved automatically from capture_instance_state.", 
       "rollback_action": "delete_snapshot", 
       "applicable_asset_types": [
         "server", 
@@ -202,14 +203,14 @@
       "action_type": "change", 
       "executor": "aws.create_ebs_snapshot", 
       "generic_action": "create_ebs_snapshot", 
-      "action_id": "create_ebs_snapshot", 
-      "description": "Creates an EBS snapshot of an instance's root volume. volume_id is resolved automatically from capture_instance_state."
+      "action_id": "create_ebs_snapshot"
     }, 
     {
       "display_name": "Asset Health Check", 
       "estimated_duration_seconds": 5, 
       "parameters": [], 
       "execution_tier": 1, 
+      "description": "Verifies asset health before making changes", 
       "applicable_asset_types": [
         "server", 
         "cloud_account"
@@ -217,8 +218,7 @@
       "action_type": "change", 
       "executor": "aws.health_check", 
       "generic_action": "health_check", 
-      "action_id": "health_check", 
-      "description": "Verifies asset health before making changes"
+      "action_id": "health_check"
     }, 
     {
       "display_name": "Create Asset Snapshot", 
@@ -242,6 +242,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Creates a point-in-time snapshot of an asset", 
       "blast_radius_hint": "snapshot_io_impact", 
       "applicable_asset_types": [
         "server", 
@@ -250,14 +251,14 @@
       "action_type": "change", 
       "executor": "aws.create_snapshot", 
       "generic_action": "create_snapshot", 
-      "action_id": "create_snapshot", 
-      "description": "Creates a point-in-time snapshot of an asset"
+      "action_id": "create_snapshot"
     }, 
     {
       "display_name": "Verify Snapshot Integrity", 
       "estimated_duration_seconds": 15, 
       "parameters": [], 
       "execution_tier": 1, 
+      "description": "Verifies that a snapshot was created successfully and is complete", 
       "applicable_asset_types": [
         "server", 
         "cloud_account"
@@ -265,8 +266,7 @@
       "action_type": "change", 
       "executor": "aws.verify_snapshot", 
       "generic_action": "verify_snapshot", 
-      "action_id": "verify_snapshot", 
-      "description": "Verifies that a snapshot was created successfully and is complete"
+      "action_id": "verify_snapshot"
     }, 
     {
       "display_name": "Export Security Group Rules", 
@@ -279,6 +279,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Exports current security group rules for rollback purposes", 
       "applicable_asset_types": [
         "cloud_account", 
         "firewall"
@@ -286,8 +287,7 @@
       "action_type": "change", 
       "executor": "aws.export_security_group", 
       "generic_action": "export_security_group", 
-      "action_id": "export_security_group", 
-      "description": "Exports current security group rules for rollback purposes"
+      "action_id": "export_security_group"
     }, 
     {
       "display_name": "Validate Security Group Rules", 
@@ -300,6 +300,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Validates proposed security group rule syntax before applying", 
       "applicable_asset_types": [
         "cloud_account", 
         "firewall"
@@ -307,8 +308,7 @@
       "action_type": "change", 
       "executor": "aws.validate_security_rules", 
       "generic_action": "validate_security_rules", 
-      "action_id": "validate_security_rules", 
-      "description": "Validates proposed security group rule syntax before applying"
+      "action_id": "validate_security_rules"
     }, 
     {
       "display_name": "Update Security Group", 
@@ -326,6 +326,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Applies security group rule changes via the AWS API", 
       "rollback_action": "restore_security_group", 
       "blast_radius_hint": "network_access_change", 
       "applicable_asset_types": [
@@ -338,8 +339,7 @@
         "Verify rules do not block critical management traffic"
       ], 
       "generic_action": "update_security_group", 
-      "action_id": "update_security_group", 
-      "description": "Applies security group rule changes via the AWS API"
+      "action_id": "update_security_group"
     }, 
     {
       "display_name": "Restore Security Group", 
@@ -352,6 +352,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Restores security group rules from a previously captured snapshot", 
       "applicable_asset_types": [
         "cloud_account", 
         "firewall"
@@ -359,8 +360,7 @@
       "action_type": "change", 
       "executor": "aws.restore_security_group", 
       "generic_action": "restore_security_group", 
-      "action_id": "restore_security_group", 
-      "description": "Restores security group rules from a previously captured snapshot"
+      "action_id": "restore_security_group"
     }, 
     {
       "display_name": "Discover EC2 Instances", 
@@ -368,12 +368,12 @@
       "produces_asset_types": [
         "server"
       ], 
+      "estimated_duration_seconds": 20, 
       "applicable_asset_types": [], 
       "action_type": "ingest", 
       "executor": "aws.discover_ec2_instances", 
       "generic_action": "discover_ec2_instances", 
-      "action_id": "discover_ec2_instances", 
-      "estimated_duration_seconds": 20
+      "action_id": "discover_ec2_instances"
     }, 
     {
       "display_name": "Discover IAM Users", 
@@ -381,12 +381,12 @@
       "produces_asset_types": [
         "identity"
       ], 
+      "estimated_duration_seconds": 20, 
       "applicable_asset_types": [], 
       "action_type": "ingest", 
       "executor": "aws.discover_iam_users", 
       "generic_action": "discover_iam_users", 
-      "action_id": "discover_iam_users", 
-      "estimated_duration_seconds": 20
+      "action_id": "discover_iam_users"
     }, 
     {
       "display_name": "Discover S3 Buckets", 
@@ -394,12 +394,12 @@
       "produces_asset_types": [
         "cloud_account"
       ], 
+      "estimated_duration_seconds": 20, 
       "applicable_asset_types": [], 
       "action_type": "ingest", 
       "executor": "aws.discover_s3_buckets", 
       "generic_action": "discover_s3_buckets", 
-      "action_id": "discover_s3_buckets", 
-      "estimated_duration_seconds": 20
+      "action_id": "discover_s3_buckets"
     }, 
     {
       "display_name": "Discover RDS Instances", 
@@ -407,12 +407,12 @@
       "produces_asset_types": [
         "server"
       ], 
+      "estimated_duration_seconds": 20, 
       "applicable_asset_types": [], 
       "action_type": "ingest", 
       "executor": "aws.discover_rds_instances", 
       "generic_action": "discover_rds_instances", 
-      "action_id": "discover_rds_instances", 
-      "estimated_duration_seconds": 20
+      "action_id": "discover_rds_instances"
     }, 
     {
       "display_name": "Discover Load Balancers", 
@@ -420,12 +420,12 @@
       "produces_asset_types": [
         "server"
       ], 
+      "estimated_duration_seconds": 20, 
       "applicable_asset_types": [], 
       "action_type": "ingest", 
       "executor": "aws.discover_elbs", 
       "generic_action": "discover_elbs", 
-      "action_id": "discover_elbs", 
-      "estimated_duration_seconds": 20
+      "action_id": "discover_elbs"
     }, 
     {
       "display_name": "Attach IAM Policy", 
@@ -448,6 +448,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Attaches a managed IAM policy to a user, group, or role", 
       "rollback_action": "detach_iam_policy", 
       "blast_radius_hint": "permission_change", 
       "applicable_asset_types": [
@@ -460,8 +461,7 @@
         "Verify policy ARN is correct before attaching"
       ], 
       "generic_action": "attach_iam_policy", 
-      "action_id": "attach_iam_policy", 
-      "description": "Attaches a managed IAM policy to a user, group, or role"
+      "action_id": "attach_iam_policy"
     }, 
     {
       "display_name": "Detach IAM Policy", 
@@ -484,6 +484,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Detaches a managed IAM policy from a user, group, or role", 
       "applicable_asset_types": [
         "identity", 
         "cloud_account"
@@ -491,8 +492,7 @@
       "action_type": "change", 
       "executor": "aws.detach_iam_policy", 
       "generic_action": "detach_iam_policy", 
-      "action_id": "detach_iam_policy", 
-      "description": "Detaches a managed IAM policy from a user, group, or role"
+      "action_id": "detach_iam_policy"
     }, 
     {
       "display_name": "Disable IAM User", 
@@ -505,6 +505,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Disables an IAM user by removing all login profiles and deactivating access keys", 
       "rollback_action": "enable_iam_user", 
       "blast_radius_hint": "account_access_loss", 
       "applicable_asset_types": [
@@ -516,8 +517,7 @@
         "Verify no critical services use this IAM user before disabling"
       ], 
       "generic_action": "disable_iam_user", 
-      "action_id": "disable_iam_user", 
-      "description": "Disables an IAM user by removing all login profiles and deactivating access keys"
+      "action_id": "disable_iam_user"
     }, 
     {
       "display_name": "Enable IAM User", 
@@ -530,14 +530,14 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Re-enables a disabled IAM user by restoring login profile and activating access keys", 
       "applicable_asset_types": [
         "identity"
       ], 
       "action_type": "change", 
       "executor": "aws.enable_iam_user", 
       "generic_action": "enable_iam_user", 
-      "action_id": "enable_iam_user", 
-      "description": "Re-enables a disabled IAM user by restoring login profile and activating access keys"
+      "action_id": "enable_iam_user"
     }, 
     {
       "display_name": "Rotate IAM Access Key", 
@@ -555,6 +555,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Creates a new IAM access key and deactivates the old one", 
       "applicable_asset_types": [
         "identity"
       ], 
@@ -564,8 +565,7 @@
         "Distribute the new key to consumers before deactivating the old key"
       ], 
       "generic_action": "rotate_iam_key", 
-      "action_id": "rotate_iam_key", 
-      "description": "Creates a new IAM access key and deactivates the old one"
+      "action_id": "rotate_iam_key"
     }, 
     {
       "display_name": "Block S3 Public Access", 
@@ -578,6 +578,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Enables all S3 block public access settings on a bucket", 
       "rollback_action": "restore_s3_public_access", 
       "blast_radius_hint": "public_access_loss", 
       "applicable_asset_types": [
@@ -586,8 +587,7 @@
       "action_type": "change", 
       "executor": "aws.block_s3_public_access", 
       "generic_action": "block_s3_public_access", 
-      "action_id": "block_s3_public_access", 
-      "description": "Enables all S3 block public access settings on a bucket"
+      "action_id": "block_s3_public_access"
     }, 
     {
       "display_name": "Restore S3 Public Access", 
@@ -605,14 +605,14 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Restores S3 public access settings to a previously captured state", 
       "applicable_asset_types": [
         "cloud_account"
       ], 
       "action_type": "change", 
       "executor": "aws.restore_s3_public_access", 
       "generic_action": "restore_s3_public_access", 
-      "action_id": "restore_s3_public_access", 
-      "description": "Restores S3 public access settings to a previously captured state"
+      "action_id": "restore_s3_public_access"
     }, 
     {
       "display_name": "Put S3 Bucket Policy", 
@@ -630,6 +630,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Applies a JSON bucket policy to an S3 bucket", 
       "blast_radius_hint": "permission_change", 
       "applicable_asset_types": [
         "cloud_account"
@@ -640,8 +641,7 @@
         "Verify policy does not inadvertently deny all access"
       ], 
       "generic_action": "put_bucket_policy", 
-      "action_id": "put_bucket_policy", 
-      "description": "Applies a JSON bucket policy to an S3 bucket"
+      "action_id": "put_bucket_policy"
     }, 
     {
       "display_name": "Tag AWS Resource", 
@@ -659,6 +659,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Adds or updates tags on an AWS resource", 
       "applicable_asset_types": [
         "server", 
         "cloud_account", 
@@ -667,8 +668,7 @@
       "action_type": "change", 
       "executor": "aws.tag_resource", 
       "generic_action": "tag_resource", 
-      "action_id": "tag_resource", 
-      "description": "Adds or updates tags on an AWS resource"
+      "action_id": "tag_resource"
     }, 
     {
       "display_name": "Run SSM Command", 
@@ -691,6 +691,7 @@
         }
       ], 
       "execution_tier": 3, 
+      "description": "Runs an approved SSM document on a target EC2 instance via AWS Systems Manager", 
       "blast_radius_hint": "host_service_interruption", 
       "applicable_asset_types": [
         "server"
@@ -701,8 +702,7 @@
         "Only approved SSM documents may be executed"
       ], 
       "generic_action": "run_ssm_command", 
-      "action_id": "run_ssm_command", 
-      "description": "Runs an approved SSM document on a target EC2 instance via AWS Systems Manager"
+      "action_id": "run_ssm_command"
     }, 
     {
       "display_name": "Capture Instance State", 
@@ -716,6 +716,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Record current EC2 instance state, IPs, and config for rollback reference", 
       "applicable_asset_types": [
         "server", 
         "cloud_account"
@@ -723,8 +724,7 @@
       "action_type": "change", 
       "executor": "aws.capture_instance_state", 
       "generic_action": "capture_instance_state", 
-      "action_id": "capture_instance_state", 
-      "description": "Record current EC2 instance state, IPs, and config for rollback reference"
+      "action_id": "capture_instance_state"
     }, 
     {
       "display_name": "Stop EC2 Instance", 
@@ -738,6 +738,7 @@
         }
       ], 
       "execution_tier": 2, 
+      "description": "Gracefully stop a running EC2 instance. Rollback: start the instance.", 
       "rollback_action": "start_instance", 
       "applicable_asset_types": [
         "server", 
@@ -746,8 +747,7 @@
       "action_type": "change", 
       "executor": "aws.stop_instance", 
       "generic_action": "stop_instance", 
-      "action_id": "stop_instance", 
-      "description": "Gracefully stop a running EC2 instance. Rollback: start the instance."
+      "action_id": "stop_instance"
     }, 
     {
       "display_name": "Start EC2 Instance", 
@@ -761,6 +761,7 @@
         }
       ], 
       "execution_tier": 2, 
+      "description": "Start a stopped EC2 instance. Rollback: stop the instance.", 
       "rollback_action": "stop_instance", 
       "applicable_asset_types": [
         "server", 
@@ -769,8 +770,7 @@
       "action_type": "change", 
       "executor": "aws.start_instance", 
       "generic_action": "start_instance", 
-      "action_id": "start_instance", 
-      "description": "Start a stopped EC2 instance. Rollback: stop the instance."
+      "action_id": "start_instance"
     }, 
     {
       "display_name": "Reboot EC2 Instance", 
@@ -784,6 +784,7 @@
         }
       ], 
       "execution_tier": 2, 
+      "description": "Soft reboot. Instance stays on the same host and keeps its IP.", 
       "applicable_asset_types": [
         "server", 
         "cloud_account"
@@ -791,8 +792,7 @@
       "action_type": "change", 
       "executor": "aws.reboot_instance", 
       "generic_action": "reboot_instance", 
-      "action_id": "reboot_instance", 
-      "description": "Soft reboot. Instance stays on the same host and keeps its IP."
+      "action_id": "reboot_instance"
     }, 
     {
       "display_name": "Wait for Instance State", 
@@ -811,6 +811,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Poll until EC2 instance reaches the target state (running or stopped).", 
       "applicable_asset_types": [
         "server", 
         "cloud_account"
@@ -818,8 +819,7 @@
       "action_type": "change", 
       "executor": "aws.wait_instance_state", 
       "generic_action": "wait_instance_state", 
-      "action_id": "wait_instance_state", 
-      "description": "Poll until EC2 instance reaches the target state (running or stopped)."
+      "action_id": "wait_instance_state"
     }, 
     {
       "display_name": "Resolve Launch Configuration", 
@@ -870,14 +870,14 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Build EC2 launch parameters from mode: quick (free-tier defaults), clone (copy source instance), or spec (operator-provided).", 
       "applicable_asset_types": [
         "cloud_account"
       ], 
       "action_type": "change", 
       "executor": "aws.resolve_launch_config", 
       "generic_action": "resolve_launch_config", 
-      "action_id": "resolve_launch_config", 
-      "description": "Build EC2 launch parameters from mode: quick (free-tier defaults), clone (copy source instance), or spec (operator-provided)."
+      "action_id": "resolve_launch_config"
     }, 
     {
       "display_name": "Launch EC2 Instance", 
@@ -910,6 +910,7 @@
         }
       ], 
       "execution_tier": 2, 
+      "description": "Launch a new EC2 instance using resolved config. Rollback: terminate the launched instance.", 
       "rollback_action": "terminate_instance", 
       "blast_radius_hint": "new_resource", 
       "applicable_asset_types": [
@@ -918,8 +919,7 @@
       "action_type": "change", 
       "executor": "aws.launch_instance", 
       "generic_action": "launch_instance", 
-      "action_id": "launch_instance", 
-      "description": "Launch a new EC2 instance using resolved config. Rollback: terminate the launched instance."
+      "action_id": "launch_instance"
     }, 
     {
       "display_name": "Terminate EC2 Instance", 
@@ -937,6 +937,7 @@
         }
       ], 
       "execution_tier": 3, 
+      "description": "Permanently terminate an EC2 instance. Requires confirm_terminate=true. Irreversible.", 
       "blast_radius_hint": "destructive", 
       "applicable_asset_types": [
         "server", 
@@ -945,8 +946,7 @@
       "action_type": "change", 
       "executor": "aws.terminate_instance", 
       "generic_action": "terminate_instance", 
-      "action_id": "terminate_instance", 
-      "description": "Permanently terminate an EC2 instance. Requires confirm_terminate=true. Irreversible."
+      "action_id": "terminate_instance"
     }, 
     {
       "display_name": "Create IAM User", 
@@ -959,6 +959,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Create an IAM user with programmatic access.", 
       "rollback_action": "delete_iam_user", 
       "applicable_asset_types": [
         "cloud_account"
@@ -967,8 +968,7 @@
       "action_type": "change", 
       "executor": "aws.create_iam_user", 
       "generic_action": "create_iam_user", 
-      "action_id": "create_iam_user", 
-      "description": "Create an IAM user with programmatic access."
+      "action_id": "create_iam_user"
     }, 
     {
       "display_name": "Delete IAM User", 
@@ -981,6 +981,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Delete an IAM user and all associated access keys and policies.", 
       "rollback_action": null, 
       "applicable_asset_types": [
         "identity"
@@ -988,8 +989,7 @@
       "action_type": "change", 
       "executor": "aws.delete_iam_user", 
       "generic_action": "delete_iam_user", 
-      "action_id": "delete_iam_user", 
-      "description": "Delete an IAM user and all associated access keys and policies."
+      "action_id": "delete_iam_user"
     }, 
     {
       "display_name": "Create S3 Bucket", 
@@ -1002,6 +1002,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Create a tagged S3 bucket.", 
       "rollback_action": "delete_s3_bucket", 
       "applicable_asset_types": [
         "cloud_account"
@@ -1010,8 +1011,7 @@
       "action_type": "change", 
       "executor": "aws.create_s3_bucket", 
       "generic_action": "create_s3_bucket", 
-      "action_id": "create_s3_bucket", 
-      "description": "Create a tagged S3 bucket."
+      "action_id": "create_s3_bucket"
     }, 
     {
       "display_name": "Delete S3 Bucket", 
@@ -1024,6 +1024,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Empty and delete an S3 bucket.", 
       "rollback_action": null, 
       "applicable_asset_types": [
         "storage_bucket"
@@ -1031,8 +1032,7 @@
       "action_type": "change", 
       "executor": "aws.delete_s3_bucket", 
       "generic_action": "delete_s3_bucket", 
-      "action_id": "delete_s3_bucket", 
-      "description": "Empty and delete an S3 bucket."
+      "action_id": "delete_s3_bucket"
     }, 
     {
       "display_name": "Set S3 Lifecycle Policy", 
@@ -1050,6 +1050,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Configure lifecycle expiration/transition rules on an S3 bucket.", 
       "rollback_action": "set_s3_lifecycle", 
       "applicable_asset_types": [
         "storage_bucket"
@@ -1058,8 +1059,7 @@
       "action_type": "change", 
       "executor": "aws.set_s3_lifecycle", 
       "generic_action": "set_s3_lifecycle", 
-      "action_id": "set_s3_lifecycle", 
-      "description": "Configure lifecycle expiration/transition rules on an S3 bucket."
+      "action_id": "set_s3_lifecycle"
     }, 
     {
       "display_name": "Create Route53 Hosted Zone", 
@@ -1077,6 +1077,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Create a private or public Route53 hosted zone.", 
       "rollback_action": "delete_route53_zone", 
       "applicable_asset_types": [
         "cloud_account"
@@ -1085,8 +1086,7 @@
       "action_type": "change", 
       "executor": "aws.create_route53_zone", 
       "generic_action": "create_route53_zone", 
-      "action_id": "create_route53_zone", 
-      "description": "Create a private or public Route53 hosted zone."
+      "action_id": "create_route53_zone"
     }, 
     {
       "display_name": "Delete Route53 Hosted Zone", 
@@ -1099,6 +1099,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Delete all records and the hosted zone.", 
       "rollback_action": null, 
       "applicable_asset_types": [
         "dns_zone"
@@ -1106,8 +1107,7 @@
       "action_type": "change", 
       "executor": "aws.delete_route53_zone", 
       "generic_action": "delete_route53_zone", 
-      "action_id": "delete_route53_zone", 
-      "description": "Delete all records and the hosted zone."
+      "action_id": "delete_route53_zone"
     }, 
     {
       "display_name": "Create / Update DNS Record", 
@@ -1150,6 +1150,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Upsert an A, CNAME, or weighted record in a Route53 hosted zone.", 
       "rollback_action": "delete_route53_record", 
       "applicable_asset_types": [
         "dns_zone"
@@ -1158,8 +1159,7 @@
       "action_type": "change", 
       "executor": "aws.upsert_route53_record", 
       "generic_action": "upsert_route53_record", 
-      "action_id": "upsert_route53_record", 
-      "description": "Upsert an A, CNAME, or weighted record in a Route53 hosted zone."
+      "action_id": "upsert_route53_record"
     }, 
     {
       "display_name": "Delete DNS Record", 
@@ -1192,6 +1192,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Delete a specific record set from a Route53 hosted zone.", 
       "rollback_action": "upsert_route53_record", 
       "applicable_asset_types": [
         "dns_zone"
@@ -1200,8 +1201,7 @@
       "action_type": "change", 
       "executor": "aws.delete_route53_record", 
       "generic_action": "delete_route53_record", 
-      "action_id": "delete_route53_record", 
-      "description": "Delete a specific record set from a Route53 hosted zone."
+      "action_id": "delete_route53_record"
     }, 
     {
       "display_name": "Create RDS Instance", 
@@ -1239,6 +1239,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Launch a new RDS database instance and wait for it to become available.", 
       "rollback_action": "delete_rds_instance", 
       "applicable_asset_types": [
         "cloud_account"
@@ -1247,8 +1248,7 @@
       "action_type": "change", 
       "executor": "aws.create_rds_instance", 
       "generic_action": "create_rds_instance", 
-      "action_id": "create_rds_instance", 
-      "description": "Launch a new RDS database instance and wait for it to become available."
+      "action_id": "create_rds_instance"
     }, 
     {
       "display_name": "Delete RDS Instance", 
@@ -1261,6 +1261,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Delete an RDS instance. Skips final snapshot. Irreversible.", 
       "rollback_action": null, 
       "applicable_asset_types": [
         "database"
@@ -1268,8 +1269,7 @@
       "action_type": "change", 
       "executor": "aws.delete_rds_instance", 
       "generic_action": "delete_rds_instance", 
-      "action_id": "delete_rds_instance", 
-      "description": "Delete an RDS instance. Skips final snapshot. Irreversible."
+      "action_id": "delete_rds_instance"
     }, 
     {
       "display_name": "Delete RDS Snapshot", 
@@ -1282,6 +1282,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Delete a manual RDS snapshot.", 
       "rollback_action": null, 
       "applicable_asset_types": [
         "database", 
@@ -1290,8 +1291,7 @@
       "action_type": "change", 
       "executor": "aws.delete_rds_snapshot", 
       "generic_action": "delete_rds_snapshot", 
-      "action_id": "delete_rds_snapshot", 
-      "description": "Delete a manual RDS snapshot."
+      "action_id": "delete_rds_snapshot"
     }, 
     {
       "display_name": "Create RDS Snapshot", 
@@ -1314,77 +1314,77 @@
         }
       ], 
       "execution_tier": 2, 
+      "description": "Create a manual snapshot of an RDS DB instance.", 
       "rollback_action": "delete_rds_snapshot", 
       "applicable_asset_types": [
         "database", 
         "cloud_account"
       ], 
       "action_type": "change", 
-      "executor": "aws.create_rds_snapshot",
-      "generic_action": "create_rds_snapshot",
-      "action_id": "create_rds_snapshot",
-      "description": "Create a manual snapshot of an RDS DB instance."
-    },
+      "executor": "aws.create_rds_snapshot", 
+      "generic_action": "create_rds_snapshot", 
+      "action_id": "create_rds_snapshot"
+    }, 
     {
-      "display_name": "Restore RDS Snapshot",
-      "estimated_duration_seconds": 900,
+      "display_name": "Restore RDS Snapshot", 
+      "estimated_duration_seconds": 900, 
       "parameters": [
         {
-          "required": true,
-          "type": "string",
+          "required": true, 
+          "type": "string", 
           "name": "snapshot_identifier"
-        },
+        }, 
         {
-          "required": true,
-          "type": "string",
+          "required": true, 
+          "type": "string", 
           "name": "db_instance_identifier"
-        },
+        }, 
         {
-          "required": false,
-          "type": "string",
+          "required": false, 
+          "type": "string", 
           "name": "db_instance_class"
         }
-      ],
-      "execution_tier": 2,
-      "rollback_action": "delete_rds_instance",
-      "rollback_connector_type": "aws",
+      ], 
+      "execution_tier": 2, 
+      "description": "Restore an RDS DB instance from a manual snapshot.", 
+      "rollback_action": "delete_rds_instance", 
       "applicable_asset_types": [
-        "database",
+        "database", 
         "cloud_account"
-      ],
-      "action_type": "change",
-      "executor": "aws.restore_rds_snapshot",
-      "generic_action": "restore_rds_snapshot",
-      "action_id": "restore_rds_snapshot",
-      "description": "Restore an RDS DB instance from a manual snapshot."
-    },
+      ], 
+      "rollback_connector_type": "aws", 
+      "action_type": "change", 
+      "executor": "aws.restore_rds_snapshot", 
+      "generic_action": "restore_rds_snapshot", 
+      "action_id": "restore_rds_snapshot"
+    }, 
     {
-      "display_name": "Verify RDS Backup",
-      "estimated_duration_seconds": 1800,
+      "display_name": "Verify RDS Backup", 
+      "estimated_duration_seconds": 1800, 
       "parameters": [
         {
-          "required": true,
-          "type": "string",
+          "required": true, 
+          "type": "string", 
           "name": "snapshot_identifier"
-        },
+        }, 
         {
-          "required": false,
-          "type": "boolean",
+          "required": false, 
+          "type": "boolean", 
           "name": "terminate_after_verify"
         }
-      ],
-      "execution_tier": 2,
-      "rollback_action": null,
+      ], 
+      "execution_tier": 2, 
+      "description": "Verify an RDS backup by restoring a temporary instance from a snapshot and checking availability.", 
+      "rollback_action": null, 
       "applicable_asset_types": [
-        "database",
+        "database", 
         "cloud_account"
-      ],
-      "action_type": "change",
-      "executor": "aws.verify_rds_backup",
-      "generic_action": "verify_rds_backup",
-      "action_id": "verify_rds_backup",
-      "description": "Verify an RDS backup by restoring a temporary instance from a snapshot and checking availability."
-    },
+      ], 
+      "action_type": "change", 
+      "executor": "aws.verify_rds_backup", 
+      "generic_action": "verify_rds_backup", 
+      "action_id": "verify_rds_backup"
+    }, 
     {
       "display_name": "Create CloudWatch Alarm", 
       "estimated_duration_seconds": 5, 
@@ -1426,6 +1426,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Create a metric alarm in CloudWatch.", 
       "rollback_action": "delete_cloudwatch_alarm", 
       "applicable_asset_types": [
         "server", 
@@ -1436,8 +1437,7 @@
       "action_type": "change", 
       "executor": "aws.create_cloudwatch_alarm", 
       "generic_action": "create_cloudwatch_alarm", 
-      "action_id": "create_cloudwatch_alarm", 
-      "description": "Create a metric alarm in CloudWatch."
+      "action_id": "create_cloudwatch_alarm"
     }, 
     {
       "display_name": "Delete CloudWatch Alarm", 
@@ -1455,6 +1455,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Delete one or more CloudWatch alarms.", 
       "rollback_action": "create_cloudwatch_alarm", 
       "applicable_asset_types": [
         "server", 
@@ -1465,8 +1466,7 @@
       "action_type": "change", 
       "executor": "aws.delete_cloudwatch_alarm", 
       "generic_action": "delete_cloudwatch_alarm", 
-      "action_id": "delete_cloudwatch_alarm", 
-      "description": "Delete one or more CloudWatch alarms."
+      "action_id": "delete_cloudwatch_alarm"
     }, 
     {
       "display_name": "Delete EBS Snapshot", 
@@ -1479,6 +1479,7 @@
         }
       ], 
       "execution_tier": 1, 
+      "description": "Delete an EBS snapshot.", 
       "rollback_action": null, 
       "applicable_asset_types": [
         "server", 
@@ -1487,14 +1488,14 @@
       "action_type": "change", 
       "executor": "aws.delete_ebs_snapshot", 
       "generic_action": "delete_ebs_snapshot", 
-      "action_id": "delete_ebs_snapshot", 
-      "description": "Delete an EBS snapshot."
+      "action_id": "delete_ebs_snapshot"
     }, 
     {
       "display_name": "Discover Route53 Hosted Zones", 
       "estimated_duration_seconds": 10, 
       "parameters": [], 
       "execution_tier": 1, 
+      "description": "List all Route53 hosted zones and create dns_zone assets.", 
       "rollback_action": null, 
       "applicable_asset_types": [
         "cloud_account"
@@ -1502,12 +1503,11 @@
       "action_type": "discover", 
       "executor": "aws.discover_route53_zones", 
       "generic_action": "discover_route53_zones", 
-      "action_id": "discover_route53_zones", 
-      "description": "List all Route53 hosted zones and create dns_zone assets."
+      "action_id": "discover_route53_zones"
     }, 
     {
       "display_name": "Create RDS Read Replica", 
-      "estimated_duration_seconds": 1800, 
+      "description": "Create a read replica of an existing RDS instance and wait for it to become available.", 
       "parameters": [
         {
           "required": true, 
@@ -1526,7 +1526,6 @@
         }
       ], 
       "execution_tier": 1, 
-      "description": "Create a read replica of an existing RDS instance and wait for it to become available.", 
       "rollback_action": "delete_rds_instance", 
       "applicable_asset_types": [
         "cloud_account", 
@@ -1536,11 +1535,12 @@
       "action_type": "change", 
       "executor": "aws.create_rds_replica", 
       "generic_action": "create_rds_replica", 
-      "action_id": "create_rds_replica"
+      "action_id": "create_rds_replica", 
+      "estimated_duration_seconds": 1800
     }, 
     {
       "display_name": "DR DNS Failover (Route53)", 
-      "estimated_duration_seconds": 10, 
+      "description": "Update a Route53 DNS record to point to the DR endpoint during a failover event.", 
       "parameters": [
         {
           "required": true, 
@@ -1564,7 +1564,6 @@
         }
       ], 
       "execution_tier": 1, 
-      "description": "Update a Route53 DNS record to point to the DR endpoint during a failover event.", 
       "rollback_action": null, 
       "applicable_asset_types": [
         "cloud_account"
@@ -1572,7 +1571,8 @@
       "action_type": "change", 
       "executor": "aws.dr_dns_failover_route53", 
       "generic_action": "dr_dns_failover_route53", 
-      "action_id": "dr_dns_failover_route53"
+      "action_id": "dr_dns_failover_route53", 
+      "estimated_duration_seconds": 10
     }, 
     {
       "display_name": "Create Application Load Balancer", 
@@ -1606,6 +1606,7 @@
       ], 
       "execution_tier": 1, 
       "rollback_action": "delete_alb", 
+      "estimated_duration_seconds": 120, 
       "applicable_asset_types": [
         "cloud_account"
       ], 
@@ -1613,8 +1614,7 @@
       "action_type": "change", 
       "executor": "aws.create_alb", 
       "generic_action": "create_alb", 
-      "action_id": "create_alb", 
-      "estimated_duration_seconds": 120
+      "action_id": "create_alb"
     }, 
     {
       "display_name": "Delete Application Load Balancer", 
@@ -1628,6 +1628,7 @@
       ], 
       "execution_tier": 1, 
       "rollback_action": null, 
+      "estimated_duration_seconds": 60, 
       "applicable_asset_types": [
         "load_balancer", 
         "cloud_account"
@@ -1635,8 +1636,7 @@
       "action_type": "change", 
       "executor": "aws.delete_alb", 
       "generic_action": "delete_alb", 
-      "action_id": "delete_alb", 
-      "estimated_duration_seconds": 60
+      "action_id": "delete_alb"
     }, 
     {
       "display_name": "Create Target Group", 
@@ -1670,6 +1670,7 @@
       ], 
       "execution_tier": 1, 
       "rollback_action": "delete_target_group", 
+      "estimated_duration_seconds": 10, 
       "applicable_asset_types": [
         "cloud_account"
       ], 
@@ -1677,8 +1678,7 @@
       "action_type": "change", 
       "executor": "aws.create_target_group", 
       "generic_action": "create_target_group", 
-      "action_id": "create_target_group", 
-      "estimated_duration_seconds": 10
+      "action_id": "create_target_group"
     }, 
     {
       "display_name": "Delete Target Group", 
@@ -1692,14 +1692,14 @@
       ], 
       "execution_tier": 1, 
       "rollback_action": null, 
+      "estimated_duration_seconds": 10, 
       "applicable_asset_types": [
         "cloud_account"
       ], 
       "action_type": "change", 
       "executor": "aws.delete_target_group", 
       "generic_action": "delete_target_group", 
-      "action_id": "delete_target_group", 
-      "estimated_duration_seconds": 10
+      "action_id": "delete_target_group"
     }, 
     {
       "display_name": "Register Targets", 
@@ -1718,6 +1718,7 @@
       ], 
       "execution_tier": 1, 
       "rollback_action": "deregister_targets", 
+      "estimated_duration_seconds": 30, 
       "applicable_asset_types": [
         "cloud_account", 
         "load_balancer"
@@ -1726,8 +1727,7 @@
       "action_type": "change", 
       "executor": "aws.register_targets", 
       "generic_action": "register_targets", 
-      "action_id": "register_targets", 
-      "estimated_duration_seconds": 30
+      "action_id": "register_targets"
     }, 
     {
       "display_name": "Deregister Targets", 
@@ -1746,6 +1746,7 @@
       ], 
       "execution_tier": 1, 
       "rollback_action": "register_targets", 
+      "estimated_duration_seconds": 30, 
       "applicable_asset_types": [
         "cloud_account", 
         "load_balancer"
@@ -1754,8 +1755,7 @@
       "action_type": "change", 
       "executor": "aws.deregister_targets", 
       "generic_action": "deregister_targets", 
-      "action_id": "deregister_targets", 
-      "estimated_duration_seconds": 30
+      "action_id": "deregister_targets"
     }, 
     {
       "display_name": "Create ALB Listener", 
@@ -1784,6 +1784,7 @@
       ], 
       "execution_tier": 1, 
       "rollback_action": null, 
+      "estimated_duration_seconds": 15, 
       "applicable_asset_types": [
         "cloud_account", 
         "load_balancer"
@@ -1791,8 +1792,7 @@
       "action_type": "change", 
       "executor": "aws.create_listener", 
       "generic_action": "create_listener", 
-      "action_id": "create_listener", 
-      "estimated_duration_seconds": 15
+      "action_id": "create_listener"
     }, 
     {
       "display_name": "Modify ALB Listener", 
@@ -1821,6 +1821,7 @@
       ], 
       "execution_tier": 1, 
       "rollback_action": null, 
+      "estimated_duration_seconds": 10, 
       "applicable_asset_types": [
         "cloud_account", 
         "load_balancer"
@@ -1828,14 +1829,11 @@
       "action_type": "change", 
       "executor": "aws.modify_listener", 
       "generic_action": "modify_listener", 
-      "action_id": "modify_listener", 
-      "estimated_duration_seconds": 10
+      "action_id": "modify_listener"
     }, 
     {
-      "description": "Create an EKS cluster and managed node group via boto3.", 
-      "execution_tier": 3, 
       "display_name": "Create EKS Cluster (SDK)", 
-      "estimated_duration_seconds": 1200, 
+      "description": "Create an EKS cluster and managed node group via boto3.", 
       "parameters": [
         {
           "required": true, 
@@ -1863,6 +1861,7 @@
           "name": "node_count"
         }
       ], 
+      "execution_tier": 3, 
       "rollback_action": null, 
       "applicable_asset_types": [
         "cloud_account"
@@ -1870,13 +1869,12 @@
       "action_type": "change", 
       "executor": "aws.eks_cluster_create_sdk", 
       "generic_action": "eks_create_cluster_sdk", 
-      "action_id": "eks_create_cluster_sdk"
+      "action_id": "eks_create_cluster_sdk", 
+      "estimated_duration_seconds": 1200
     }, 
     {
-      "description": "Create an EKS cluster via CloudFormation.", 
-      "execution_tier": 3, 
       "display_name": "Create EKS Cluster (CloudFormation)", 
-      "estimated_duration_seconds": 1500, 
+      "description": "Create an EKS cluster via CloudFormation.", 
       "parameters": [
         {
           "required": true, 
@@ -1899,6 +1897,7 @@
           "name": "node_count"
         }
       ], 
+      "execution_tier": 3, 
       "rollback_action": null, 
       "applicable_asset_types": [
         "cloud_account"
@@ -1906,13 +1905,12 @@
       "action_type": "change", 
       "executor": "aws.eks_cluster_create_cfn", 
       "generic_action": "eks_create_cluster_cfn", 
-      "action_id": "eks_create_cluster_cfn"
+      "action_id": "eks_create_cluster_cfn", 
+      "estimated_duration_seconds": 1500
     }, 
     {
-      "description": "Create an EKS cluster via Terraform.", 
-      "execution_tier": 3, 
       "display_name": "Create EKS Cluster (Terraform)", 
-      "estimated_duration_seconds": 1500, 
+      "description": "Create an EKS cluster via Terraform.", 
       "parameters": [
         {
           "required": true, 
@@ -1935,6 +1933,7 @@
           "name": "node_count"
         }
       ], 
+      "execution_tier": 3, 
       "rollback_action": null, 
       "applicable_asset_types": [
         "cloud_account"
@@ -1942,14 +1941,12 @@
       "action_type": "change", 
       "executor": "aws.eks_cluster_create_terraform", 
       "generic_action": "eks_create_cluster_terraform", 
-      "action_id": "eks_create_cluster_terraform"
+      "action_id": "eks_create_cluster_terraform", 
+      "estimated_duration_seconds": 1500
     }, 
     {
-      "description": "Create an ECR repository and return its URI.", 
-      "execution_tier": 1, 
-      "rollback_connector_type": "aws", 
       "display_name": "Create ECR Repository", 
-      "estimated_duration_seconds": 10, 
+      "description": "Create an ECR repository and return its URI.", 
       "parameters": [
         {
           "required": true, 
@@ -1962,20 +1959,21 @@
           "name": "region"
         }
       ], 
+      "execution_tier": 1, 
       "rollback_action": "ecr_delete_repository", 
       "applicable_asset_types": [
         "cloud_account"
       ], 
+      "rollback_connector_type": "aws", 
       "action_type": "change", 
       "executor": "aws.ecr_repository_create", 
       "generic_action": "ecr_create_repository", 
-      "action_id": "ecr_create_repository"
+      "action_id": "ecr_create_repository", 
+      "estimated_duration_seconds": 10
     }, 
     {
-      "description": "Delete an ECR repository (including all images).", 
-      "execution_tier": 1, 
       "display_name": "Delete ECR Repository", 
-      "estimated_duration_seconds": 10, 
+      "description": "Delete an ECR repository (including all images).", 
       "parameters": [
         {
           "required": true, 
@@ -1988,46 +1986,88 @@
           "name": "region"
         }
       ], 
+      "execution_tier": 1, 
       "rollback_action": null, 
       "applicable_asset_types": [
         "cloud_account"
       ], 
-      "action_type": "change",
-      "executor": "aws.ecr_repository_delete",
-      "generic_action": "ecr_delete_repository",
-      "action_id": "ecr_delete_repository"
-    },
+      "action_type": "change", 
+      "executor": "aws.ecr_repository_delete", 
+      "generic_action": "ecr_delete_repository", 
+      "action_id": "ecr_delete_repository", 
+      "estimated_duration_seconds": 10
+    }, 
     {
-      "display_name": "Emergency User Lockout",
-      "description": "Attach a deny-all IAM inline policy to immediately lock out a user.",
+      "display_name": "Emergency User Lockout", 
+      "estimated_duration_seconds": 10, 
       "parameters": [
-        {"required": true, "type": "string", "name": "user_identifier"},
-        {"required": false, "type": "array", "name": "systems"}
-      ],
-      "execution_tier": 2,
-      "rollback_action": "emergency_user_lockout",
-      "estimated_duration_seconds": 10,
-      "applicable_asset_types": ["cloud_account"],
-      "action_type": "change",
-      "executor": "nexplane_agent.emergency_user_lockout",
-      "generic_action": "emergency_user_lockout",
-      "action_id": "emergency_user_lockout"
-    },
+        {
+          "required": true, 
+          "type": "string", 
+          "name": "user_identifier"
+        }, 
+        {
+          "required": false, 
+          "type": "array", 
+          "name": "systems"
+        }
+      ], 
+      "execution_tier": 2, 
+      "rollback_action": "remove_emergency_lockout", 
+      "applicable_asset_types": [
+        "cloud_account"
+      ], 
+      "action_type": "change", 
+      "executor": "nexplane_agent.emergency_user_lockout", 
+      "generic_action": "emergency_user_lockout", 
+      "action_id": "emergency_user_lockout", 
+      "description": "Attach a deny-all IAM inline policy to immediately lock out a user."
+    }, 
     {
-      "display_name": "User Scope Reduction",
-      "description": "Demote an IAM user to read-only or apply MFA/IP restrictions.",
+      "display_name": "User Scope Reduction", 
+      "estimated_duration_seconds": 10, 
       "parameters": [
-        {"required": true, "type": "string", "name": "user_identifier"},
-        {"required": false, "type": "string", "name": "mode"}
-      ],
-      "execution_tier": 2,
-      "rollback_action": "user_scope_reduction",
-      "estimated_duration_seconds": 10,
-      "applicable_asset_types": ["cloud_account"],
-      "action_type": "change",
-      "executor": "aws.scope_reduction_iam",
-      "generic_action": "user_scope_reduction",
-      "action_id": "user_scope_reduction"
+        {
+          "required": true, 
+          "type": "string", 
+          "name": "user_identifier"
+        }, 
+        {
+          "required": false, 
+          "type": "string", 
+          "name": "mode"
+        }
+      ], 
+      "execution_tier": 2, 
+      "rollback_action": "user_scope_reduction", 
+      "applicable_asset_types": [
+        "cloud_account"
+      ], 
+      "action_type": "change", 
+      "executor": "aws.scope_reduction_iam", 
+      "generic_action": "user_scope_reduction", 
+      "action_id": "user_scope_reduction", 
+      "description": "Demote an IAM user to read-only or apply MFA/IP restrictions."
+    }, 
+    {
+      "parameters": [
+        {
+          "required": true, 
+          "type": "string", 
+          "name": "user_identifier"
+        }
+      ], 
+      "applicable_asset_types": [
+        "cloud_account", 
+        "server"
+      ], 
+      "display_name": "Remove Emergency Lockout", 
+      "description": "Removes the nexplane-emergency-lockout deny-all inline IAM policy from a user.", 
+      "action_type": "change", 
+      "executor": "aws.remove_emergency_lockout", 
+      "estimated_duration_seconds": 10, 
+      "execution_tier": 3, 
+      "action_id": "remove_emergency_lockout"
     }
   ]
 }
