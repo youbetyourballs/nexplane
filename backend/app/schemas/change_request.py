@@ -44,6 +44,7 @@ class ChangeRequestRead(BaseModel):
     finding_ids: list[str] = []
     snapshot_before: bool = False
     verification_checks: list[dict] = []
+    batch_id: uuid.UUID | None = None
     risk_level: RiskLevel
     status: ChangeRequestStatus
     created_at: datetime
@@ -52,6 +53,31 @@ class ChangeRequestRead(BaseModel):
     change_plan: "ChangePlanRead | None" = None
     approvals: "list[ApprovalRead]" = []
     execution_runs: "list[ExecutionRunRead]" = []
+
+
+class BatchCreateItem(BaseModel):
+    title: str
+    change_type: str
+    target_asset_ids: list[str]
+    desired_outcome: dict = {}
+    finding_ids: list[str] = []
+    snapshot_before: bool = False
+    verification_checks: list[dict] = []
+
+
+class BatchCreateRequest(BaseModel):
+    items: list[BatchCreateItem]
+
+
+class BatchCreateResponse(BaseModel):
+    batch_id: uuid.UUID
+    cr_ids: list[uuid.UUID]
+
+
+class BulkApproveRequest(BaseModel):
+    cr_ids: list[uuid.UUID]
+    decision: str  # "approved" | "rejected"
+    comment: str = ""
 
 
 class OffboardUserPayload(BaseModel):
