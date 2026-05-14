@@ -638,8 +638,26 @@ async def manual_rollback(
                         except Exception:
                             continue
                     if _mod and hasattr(_mod, "rollback"):
+                        # Resolve connector from the CR's target assets so the rollback
+                        # executor has real credentials (backend container has no AWS env vars)
+                        _connector = None
+                        try:
+                            from app.models.asset import Asset as _Asset
+                            from app.models.connector import Connector as _Connector
+                            from sqlalchemy import select as _sel
+                            async with AsyncSessionLocal() as _rdb:
+                                for _aid in (cr.target_asset_ids or [])[:1]:
+                                    try:
+                                        _asset = await _rdb.get(_Asset, uuid.UUID(str(_aid)))
+                                        if _asset and _asset.connector_id:
+                                            _connector = await _rdb.get(_Connector, _asset.connector_id)
+                                            break
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
                         rollback_result = await _mod.rollback(
-                            cr.desired_outcome or {}, execution_result, None
+                            cr.desired_outcome or {}, execution_result, _connector
                         )
                     else:
                         rollback_result = {"rolled_back": False, "reason": "no_rollback_function_found"}
