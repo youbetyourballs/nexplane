@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Text
+from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Text, Boolean
 from sqlalchemy import ARRAY, String as _String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
@@ -319,6 +319,7 @@ class ChangeRequest(Base):
     stateful_approved_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    snapshot_before: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="change_requests")
     requester: Mapped["User"] = relationship("User", back_populates="change_requests")
