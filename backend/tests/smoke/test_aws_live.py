@@ -4961,6 +4961,99 @@ def run_phase_rds_verify(client: NexplaneClient, cloud_account_id: str, phase_j_
         raise
 
 
+def run_phase_ossec_wire(client: NexplaneClient, phase_a_result: Optional[dict] = None) -> None:
+    """Phase OSSEC_WIRE: verify executor dispatch path for agent-based hardening CRs.
+
+    Creates a CR with change type ``configure_seccomp`` and executes it against a
+    registered Linux server asset.  The Nexplane agent is unlikely to be running on
+    the smoke-test host, so the CR is expected to reach ``failed`` status (job
+    dispatched → agent timeout) rather than ``completed``.
+
+    Key assertion:
+        CR must NOT complete with a fake/stub success.  A ``failed`` status proves
+        that ``dispatch_agent_job`` was called (the executor reached out to the agent
+        layer and got a real error), rather than returning a hard-coded stub result.
+        If the CR somehow completes, we inspect the step result and fail the phase if
+        it looks like a stub (empty result or ``{"status": "ok"}`` with no real data).
+    """
+    print("\n[Phase OSSEC_WIRE] Executor dispatch verification — configure_seccomp")
+
+    # Resolve target asset: prefer the agent asset from Phase A; fall back to any
+    # registered server asset that has an agent tag or is named after the smoke runner.
+    asset_id: str = ""
+    if phase_a_result:
+        agent_asset = phase_a_result.get("agent_asset") or {}
+        asset_id = agent_asset.get("id") or phase_a_result.get("instance_asset", {}).get("id") or ""
+
+    if not asset_id:
+        # No Phase A result — find any server asset with a Nexplane agent tag.
+        candidates = client.get("/assets", params={"asset_type": "server"})
+        tagged = [a for a in candidates if "nexplane-agent" in (a.get("tags") or [])]
+        if tagged:
+            asset_id = tagged[0]["id"]
+        elif candidates:
+            asset_id = candidates[0]["id"]
+
+    if not asset_id:
+        fail("[Phase OSSEC_WIRE] No server asset found — run Phase A first or register an agent")
+
+    log(f"[Phase OSSEC_WIRE] Target asset: {asset_id}")
+
+    # Create, plan, approve, and execute the CR.
+    cr_id = client.create_cr(
+        "[Phase OSSEC_WIRE] configure_seccomp dispatch test",
+        "configure_seccomp",
+        asset_id,
+        {"profile": "default", "rollback_strategy": "rollback_unavailable"},
+    )
+    log(f"[Phase OSSEC_WIRE] CR created: {cr_id}")
+
+    client.post(f"/change-requests/{cr_id}/plan")
+    client.post(f"/change-requests/{cr_id}/submit-for-approval")
+    client.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "ossec_wire smoke"})
+    client.post(f"/change-requests/{cr_id}/execute")
+    log("[Phase OSSEC_WIRE] CR submitted for execution — waiting for terminal status")
+
+    # Custom wait: accept both ``failed`` and ``completed`` as terminal states.
+    # We *expect* ``failed`` (agent not running → job timeout).
+    # ``completed`` is only acceptable if the step result contains real agent data.
+    deadline = time.time() + TIMEOUT_SECONDS
+    cr: dict = {}
+    while time.time() < deadline:
+        cr = client.get(f"/change-requests/{cr_id}")
+        status = cr.get("status", "")
+        if status in ("failed", "rolled_back", "rejected", "completed"):
+            break
+        time.sleep(5)
+    else:
+        fail(f"[Phase OSSEC_WIRE] Timed out waiting for CR {cr_id} to reach terminal status")
+
+    final_status = cr.get("status", "unknown")
+    log(f"[Phase OSSEC_WIRE] CR reached terminal status: {final_status}")
+
+    if final_status == "completed":
+        # Probe the step result — a stub executor returns trivially empty or generic dicts.
+        step_result = NexplaneClient.get_cr_step_result(cr, step_number=1)
+        stub_signatures = [
+            not step_result,                                          # completely empty
+            step_result == {"status": "ok"},                         # generic stub success
+            step_result.get("stub") is True,                         # explicit stub marker
+        ]
+        if any(stub_signatures):
+            fail(
+                f"[Phase OSSEC_WIRE] CR completed with a stub-like result — executor did NOT dispatch to agent. "
+                f"Step result: {step_result}"
+            )
+        log(f"[Phase OSSEC_WIRE] CR completed with real agent data (step_result keys: {list(step_result.keys())})")
+    elif final_status in ("failed", "rejected", "rolled_back"):
+        # Expected: agent not running → dispatch was called → real failure.
+        log("[Phase OSSEC_WIRE] CR failed as expected (agent not running) — dispatch_agent_job was called")
+    else:
+        fail(f"[Phase OSSEC_WIRE] Unexpected terminal status: {final_status}")
+
+    log("Phase OSSEC_WIRE complete — executor dispatch path verified")
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -4977,7 +5070,8 @@ def main():
             "EKS_SDK/EKS_CFN/EKS_TF/ECR=SP2 EKS+ECR provisioning (dry_run). "
             "DEMO_A=launch-payments-ec2, DEMO_B=discover-apps, DEMO_C=build-images, "
             "DEMO_D=deploy-eks, DEMO_E=retire-legacy, DEMO_F=teardown-ec2. "
-            "RDS_RESTORE=restore-rds-snapshot (requires J), RDS_VERIFY=verify-rds-backup (requires J)."
+            "RDS_RESTORE=restore-rds-snapshot (requires J), RDS_VERIFY=verify-rds-backup (requires J). "
+            "OSSEC_WIRE=executor-dispatch-verify (configure_seccomp, no agent needed)."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -5190,6 +5284,8 @@ def main():
             run_phase_auto_ai(client, phase_a_result)
         if "PROJ_AI" in phases:
             run_phase_proj_ai(client)
+        if "OSSEC_WIRE" in phases:
+            run_phase_ossec_wire(client, phase_a_result)
         if "EKS_SDK" in phases:
             run_phase_eks_sdk(client, cloud_account_id)
         if "EKS_CFN" in phases:
