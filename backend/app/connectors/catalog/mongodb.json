@@ -1,0 +1,22 @@
+{
+  "connector_type": "mongodb",
+  "display_name": "MongoDB",
+  "actions": [
+    {
+      "action_id": "rotate_mongodb_password",
+      "generic_action": "rotate_mongodb_password",
+      "display_name": "Rotate MongoDB User Password",
+      "description": "Rotates a MongoDB user's password via the updateUser command on the specified database.",
+      "executor": "mongodb.rotate_user_password",
+      "action_type": "change",
+      "execution_tier": 2,
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["server", "database"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true, "description": "MongoDB user whose password will be rotated"},
+        {"name": "db_name", "type": "string", "required": false, "description": "Database the user belongs to (default: admin)"},
+        {"name": "old_password", "type": "string", "required": false, "description": "Previous password (used for rollback only)"}
+      ]
+    }
+  ]
+}
