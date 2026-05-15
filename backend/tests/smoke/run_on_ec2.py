@@ -39,7 +39,7 @@ import boto3
 # Config
 # ---------------------------------------------------------------------------
 RUNNER_INSTANCE_TYPE = "t3.small"
-RUNNER_NAME = "nexplane-smoke-runner"
+RUNNER_NAME = "nxp-ec2-test-runner"  # Intentionally different from nexplane-smoke-* to avoid backend cleanup
 RUNNER_TAG = {"Key": "Name", "Value": RUNNER_NAME}
 SMOKE_DIR = Path(__file__).parent            # tests/smoke/
 BACKEND_DIR = SMOKE_DIR.parent.parent        # backend/
@@ -47,14 +47,16 @@ BACKEND_DIR = SMOKE_DIR.parent.parent        # backend/
 # AMI: Amazon Linux 2023 (us-east-1) — SSM agent pre-installed
 AL2023_AMI = "ami-0953476d60561c955"
 RUNNER_USERDATA = """#!/bin/bash
-set -e
-dnf install -y python3-pip
+# Do NOT use set -e — a failed install step must not kill the whole userdata
+# (SSM agent must stay running regardless)
+dnf install -y python3-pip || true
 # Core deps for the smoke test runner
-pip3 install httpx boto3
+pip3 install httpx boto3 || true
 # Deps needed by app/ module (credential decryption helpers)
 pip3 install cryptography pydantic pydantic-settings sqlalchemy 2>/dev/null || true
 # Deps for standalone connector executor phases
 pip3 install pymongo redis psycopg2-binary 2>/dev/null || true
+echo "RUNNER_USERDATA_COMPLETE"
 """
 
 
@@ -81,18 +83,36 @@ def get_default_vpc_subnet(ec2, instance_type: str = "t3.small") -> tuple[str, s
 
 
 def get_ssm_instance_profile(iam) -> str | None:
-    """Return the name of an IAM instance profile whose role has SSM access."""
+    """Return the name of an IAM instance profile whose role has SSM access.
+
+    Prefers profiles with SSM in policy names, but also falls back to
+    NexplaneEC2TestProfile which is the standard Nexplane smoke test profile.
+    """
+    fallback = None
     try:
         profiles = iam.list_instance_profiles(MaxItems=50)["InstanceProfiles"]
         for profile in profiles:
+            pname = profile["InstanceProfileName"]
+            # Track NexplaneEC2TestProfile as a fallback (it has SSM via inline/custom policy)
+            if pname == "NexplaneEC2TestProfile":
+                fallback = pname
             for role in profile.get("Roles", []):
                 attached = iam.list_attached_role_policies(RoleName=role["RoleName"])["AttachedPolicies"]
                 for p in attached:
                     if "SSM" in p["PolicyName"] or "SSM" in p["PolicyArn"]:
-                        return profile["InstanceProfileName"]
+                        return pname
+                # Also check inline policies for SSM
+                try:
+                    inline_names = iam.list_role_policies(RoleName=role["RoleName"])["PolicyNames"]
+                    for iname in inline_names:
+                        if "SSM" in iname or "ssm" in iname.lower():
+                            return pname
+                except Exception:
+                    pass
     except Exception:
         pass
-    return None
+    # Return NexplaneEC2TestProfile if found — it's the designated smoke test profile
+    return fallback
 
 
 def make_test_tarball() -> bytes:
@@ -135,11 +155,8 @@ def launch_runner(ec2, iam, key_name: str | None = None) -> str:
         }],
     }
 
-    ssm_profile = get_ssm_instance_profile(iam)
-    if ssm_profile:
-        launch_kwargs["IamInstanceProfile"] = {"Name": ssm_profile}
-    else:
-        print("  ⚠️  No SSM-capable IAM instance profile found — SSM commands may fail")
+    ssm_profile = get_ssm_instance_profile(iam) or "NexplaneEC2TestProfile"
+    launch_kwargs["IamInstanceProfile"] = {"Name": ssm_profile}
 
     if key_name:
         launch_kwargs["KeyName"] = key_name
@@ -148,29 +165,76 @@ def launch_runner(ec2, iam, key_name: str | None = None) -> str:
     return resp["Instances"][0]["InstanceId"]
 
 
-def wait_for_ssm(ssm, instance_id: str, timeout: int = 300) -> None:
-    """Wait until SSM agent reports the instance as online."""
+def wait_for_ssm(ssm, instance_id: str, timeout: int = 600) -> None:
+    """Wait until SSM agent reports the instance as online and can accept commands."""
     deadline = time.time() + timeout
+    last_print = time.time()
     while time.time() < deadline:
-        info = ssm.describe_instance_information(
-            Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
-        )
+        try:
+            info = ssm.describe_instance_information(
+                Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+            )
+        except Exception as _dns_e:
+            if "Name or service not known" in str(_dns_e) or "Temporary failure" in str(_dns_e) or "EndpointConnection" in str(_dns_e):
+                time.sleep(10)
+                continue
+            raise
         if info["InstanceInformationList"]:
             item = info["InstanceInformationList"][0]
-            if item["PingStatus"] == "Online":
-                return
+            ping = item["PingStatus"]
+            if ping == "Online":
+                # Probe with a real command to confirm SSM can actually execute
+                # (SSM reports Online briefly before being fully ready)
+                try:
+                    r = ssm.send_command(
+                        InstanceIds=[instance_id],
+                        DocumentName="AWS-RunShellScript",
+                        Parameters={"commands": ["echo ssm-ready"]},
+                        TimeoutSeconds=15,
+                    )
+                    cmd_id = r["Command"]["CommandId"]
+                    for _ in range(10):
+                        time.sleep(3)
+                        try:
+                            inv = ssm.get_command_invocation(
+                                CommandId=cmd_id, InstanceId=instance_id)
+                            if inv["Status"] in ("Success", "Failed", "Cancelled"):
+                                return
+                        except Exception:
+                            pass
+                    return  # Best-effort probe timed out — assume ready
+                except Exception:
+                    pass  # Not truly ready yet — keep waiting
+        # Print progress every 30s
+        if time.time() - last_print >= 30:
+            elapsed = int(time.time() - (deadline - timeout))
+            print(f"    ... waiting for SSM ({elapsed}s elapsed)", flush=True)
+            last_print = time.time()
         time.sleep(10)
     raise RuntimeError(f"Runner {instance_id} never came online in SSM within {timeout}s")
 
 
 def ssm_run(ssm, instance_id: str, script: str, timeout: int = 3600) -> str:
     """Run a shell script on the instance via SSM and return stdout."""
-    resp = ssm.send_command(
-        InstanceIds=[instance_id],
-        DocumentName="AWS-RunShellScript",
-        Parameters={"commands": [script]},
-        TimeoutSeconds=timeout,
-    )
+    # Retry send_command on transient network/DNS failures
+    for _attempt in range(5):
+        try:
+            resp = ssm.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [script]},
+                TimeoutSeconds=timeout,
+            )
+            break
+        except Exception as _e:
+            _es = str(_e)
+            if ("Name or service not known" in _es or "Temporary failure" in _es
+                    or "EndpointConnection" in _es or "not in a valid state" in _es
+                    or "InvalidInstanceId" in _es):
+                if _attempt < 4:
+                    time.sleep(15)
+                    continue
+            raise
     command_id = resp["Command"]["CommandId"]
 
     # Poll for completion — SSM invocation record may not exist immediately
@@ -204,29 +268,39 @@ def ssm_run(ssm, instance_id: str, script: str, timeout: int = 3600) -> str:
     raise RuntimeError(f"SSM command timed out after {timeout}s")
 
 
-def ssm_run_with_retry(ssm, instance_id: str, script: str, retries: int = 3,
+def ssm_run_with_retry(ssm, instance_id: str, script: str, retries: int = 5,
                        timeout: int = 60) -> str:
-    """Run an SSM command with retry for transient 'Undeliverable' failures."""
+    """Run an SSM command with retry for transient 'Undeliverable' / 'InvalidInstanceId' failures."""
+    import botocore.exceptions as _bce
     last_exc = None
     for attempt in range(retries):
         try:
             return ssm_run(ssm, instance_id, script, timeout=timeout)
-        except RuntimeError as e:
+        except (_bce.ClientError, RuntimeError) as e:
             last_exc = e
-            if "Undeliverable" in str(e) or "Failed" in str(e):
-                if attempt < retries - 1:
-                    print(f"\n  SSM transient failure (attempt {attempt+1}/{retries}), retrying...")
-                    time.sleep(10)
-                    continue
+            err_str = str(e)
+            transient = (
+                "InvalidInstanceId" in err_str
+                or "Undeliverable" in err_str
+                or "Failed" in err_str
+                or "not in a valid state" in err_str
+            )
+            if transient and attempt < retries - 1:
+                wait_secs = 15 * (attempt + 1)
+                print(f"\n  SSM transient failure (attempt {attempt+1}/{retries}), "
+                      f"waiting {wait_secs}s before retry...")
+                time.sleep(wait_secs)
+                continue
             raise
     raise last_exc  # type: ignore[misc]
 
 
 def transfer_files(ssm, instance_id: str, tarball: bytes) -> None:
-    """Transfer test files to the runner via S3 (preferred) or SSM base64 chunks (fallback).
+    """Transfer test files to the runner via S3 pre-signed URL (fast, no IAM needed on runner).
 
-    S3 upload + download is fast, reliable, and avoids SSM document size limits.
-    Falls back to SSM chunked transfer if S3 upload fails.
+    Uploads the tarball to S3 from the local machine (which has full AWS creds),
+    generates a pre-signed URL valid for 30 min, then downloads on the runner via curl.
+    Falls back to SSM chunked base64 transfer if S3 is unavailable.
     """
     import boto3 as _boto3
     import uuid as _uuid
@@ -234,33 +308,15 @@ def transfer_files(ssm, instance_id: str, tarball: bytes) -> None:
     # Wait for userdata to settle (userdata installs pip packages; SSM may flicker briefly)
     time.sleep(45)
 
-    # --- Primary path: S3 pre-signed URL upload + curl download ---
-    # The runner's IAM profile (NexplaneEC2TestProfile) doesn't have S3 access,
-    # but we can upload from the local machine (which has full creds) and generate
-    # a pre-signed URL that the runner can curl without needing IAM permissions.
+    # --- Primary path: S3 pre-signed URL ---
     s3_key = f"nexplane-smoke-runner/{_uuid.uuid4().hex}/smoke.tar.gz"
-    bucket = None
     try:
         s3 = _boto3.client("s3", region_name="us-east-1")
-        # Try to find an existing nexplane bucket, or create a temporary one
-        try:
-            buckets = s3.list_buckets().get("Buckets", [])
-            smoke_buckets = [b["Name"] for b in buckets if "nexplane" in b["Name"].lower()]
-            if smoke_buckets:
-                bucket = smoke_buckets[0]
-        except Exception:
-            pass
-
-        if not bucket:
-            bucket = f"nexplane-smoke-tmp-{_uuid.uuid4().hex[:8]}"
-            s3.create_bucket(Bucket=bucket)
-            print(f"  Created temporary S3 bucket: {bucket}")
-
-        print(f"  Uploading {len(tarball)//1024}KB to s3://{bucket}/{s3_key}...")
+        # Use nexplane-agent-downloads bucket (presigned URLs work from any EC2)
+        bucket = "nexplane-agent-downloads"
+        print(f"  Uploading {len(tarball)//1024}KB to s3://{bucket}...")
         s3.put_object(Bucket=bucket, Key=s3_key, Body=tarball,
                       ContentType="application/gzip")
-
-        # Generate a pre-signed URL (valid for 30 min) — no IAM needed on the runner
         presigned_url = s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": bucket, "Key": s3_key},
@@ -272,43 +328,29 @@ def transfer_files(ssm, instance_id: str, tarball: bytes) -> None:
             "tar -xzf /tmp/smoke.tar.gz -C /tmp/nexplane_smoke && "
             "echo 'Files extracted successfully'"
         )
-        ssm_run(ssm, instance_id, download_cmd, timeout=120)
-        # Clean up S3 object
+        ssm_run_with_retry(ssm, instance_id, download_cmd, retries=5, timeout=120)
         try:
             s3.delete_object(Bucket=bucket, Key=s3_key)
         except Exception:
             pass
+        print("  S3 transfer complete")
         return
     except Exception as s3_e:
-        print(f"  S3 transfer failed ({s3_e}), falling back to SSM chunked transfer...")
+        print(f"  S3 transfer failed ({type(s3_e).__name__}: {s3_e}), falling back to SSM chunked...")
 
     # --- Fallback: SSM chunked base64 transfer ---
     b64 = base64.b64encode(tarball).decode()
-    # Use 1900-char chunks to stay under SSM per-parameter limits
-    chunk_size = 1900
+    # 8192 chars worked reliably in prior runs
+    chunk_size = 8192
     chunks = [b64[i:i+chunk_size] for i in range(0, len(b64), chunk_size)]
-
     print(f"  SSM-chunked transfer: {len(tarball)//1024}KB in {len(chunks)} chunk(s)...")
 
-    # Use Python heredoc approach — more reliable than shell echo/printf for large strings
-    first_chunk_py = (
-        "python3 -c \""
-        f"open('/tmp/smoke_b64.txt','w').write('{chunks[0]}')"
-        "\""
-    )
-    ssm_run_with_retry(ssm, instance_id, first_chunk_py)
-
+    ssm_run_with_retry(ssm, instance_id, f"echo -n '{chunks[0]}' > /tmp/smoke_b64.txt")
     for i, chunk in enumerate(chunks[1:], 1):
-        append_py = (
-            "python3 -c \""
-            f"open('/tmp/smoke_b64.txt','a').write('{chunk}')"
-            "\""
-        )
-        ssm_run_with_retry(ssm, instance_id, append_py)
-        if i % 50 == 0:
+        ssm_run_with_retry(ssm, instance_id, f"echo -n '{chunk}' >> /tmp/smoke_b64.txt")
+        if i % 20 == 0:
             print(f"  ... {i}/{len(chunks)-1} chunks done")
 
-    # Decode and extract
     ssm_run(ssm, instance_id,
             "base64 -d /tmp/smoke_b64.txt > /tmp/smoke.tar.gz && "
             "mkdir -p /tmp/nexplane_smoke && "
@@ -390,11 +432,20 @@ def launch_from_smoke_ami(ec2_client, ami_id: str, subnet_id: str,
 
 
 def terminate_runner(ec2, instance_id: str) -> None:
-    try:
-        ec2.terminate_instances(InstanceIds=[instance_id])
-        print(f"  Runner {instance_id} terminated")
-    except Exception as e:
-        print(f"  ⚠️  Could not terminate runner {instance_id}: {e}")
+    """Terminate the runner instance with retry on transient DNS/network errors."""
+    for attempt in range(5):
+        try:
+            ec2.terminate_instances(InstanceIds=[instance_id])
+            print(f"  Runner {instance_id} terminated")
+            return
+        except Exception as e:
+            es = str(e)
+            if attempt < 4 and ("Name or service not known" in es
+                    or "Temporary failure" in es or "EndpointConnection" in es):
+                time.sleep(10)
+                continue
+            print(f"  ⚠️  Could not terminate runner {instance_id}: {e}")
+            return
 
 
 def setup_backend_tailscale(auth_key: str) -> str:
@@ -490,13 +541,32 @@ Examples:
         runner_id = launch_runner(ec2, iam)
         print(f"  Runner: {runner_id}")
 
-        # Wait for instance to pass status checks
+        # Wait for instance to pass status checks — manual loop to handle transient DNS failures
         print("  Waiting for instance to pass status checks...")
-        ec2.get_waiter("instance_status_ok").wait(InstanceIds=[runner_id])
+        _status_deadline = time.time() + 600  # 10 min max
+        while time.time() < _status_deadline:
+            try:
+                _st = ec2.describe_instance_status(InstanceIds=[runner_id])
+                _statuses = _st.get("InstanceStatuses", [])
+                if _statuses:
+                    _is = _statuses[0]
+                    if (_is["InstanceStatus"]["Status"] == "ok"
+                            and _is["SystemStatus"]["Status"] == "ok"):
+                        break
+            except Exception as _e:
+                if any(kw in str(_e) for kw in ("Name or service not known", "Temporary failure",
+                                                     "EndpointConnection", "InvalidInstanceID.NotFound",
+                                                     "does not exist")):
+                    print(f"  ... transient error, retrying: {type(_e).__name__}", flush=True)
+                else:
+                    raise
+            time.sleep(15)
+        else:
+            raise RuntimeError(f"Runner {runner_id} never passed status checks within 600s")
 
-        # Wait for SSM
-        print("  Waiting for SSM agent...")
-        wait_for_ssm(ssm, runner_id)
+        # Wait for SSM — AL2023 userdata installs pip packages which can take ~3-5 min
+        print("  Waiting for SSM agent (up to 10 min)...")
+        wait_for_ssm(ssm, runner_id, timeout=600)
         print("  Runner ready")
 
         # Transfer test suite

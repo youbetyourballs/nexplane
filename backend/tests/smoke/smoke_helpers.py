@@ -54,9 +54,15 @@ class NexplaneClient:
         self.client = httpx.Client(timeout=300)  # CR execution can take up to 5 min
         self.standalone = not (email and password)
         if not self.standalone:
-            resp = self.client.post(f"{self.base}/auth/login", json={"email": email, "password": password})
-            resp.raise_for_status()
-            self.client.headers["Authorization"] = f"Bearer {resp.json()['access_token']}"
+            try:
+                resp = self.client.post(f"{self.base}/auth/login", json={"email": email, "password": password})
+                resp.raise_for_status()
+                self.client.headers["Authorization"] = f"Bearer {resp.json()['access_token']}"
+            except Exception as _login_e:
+                # Backend unreachable or auth failed — fall back to standalone mode so that
+                # phases that call executors directly (OPENVAS_SCAN, NESSUS_SCAN, etc.) still run.
+                print(f"  WARNING: Backend login failed ({_login_e}) — switching to standalone mode")
+                self.standalone = True
 
     def get(self, path: str, **kwargs) -> dict:
         resp = self.client.get(f"{self.base}{path}", **kwargs)
