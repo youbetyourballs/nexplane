@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 from __future__ import annotations  # Python 3.9 compat: defer annotation evaluation
 """
 Nexplane AWS Live Smoke Test — Phases A–K (and new P–T).
@@ -9986,7 +9986,10 @@ def main():
             "TELEPORT_LOCK=Teleport CE user lock/unlock via tctl (AL2023 t3.small, AMI cached). "
             "WAZUH_AGENT=Wazuh manager on EC2, register smoke agent via CR (AMI cached). "
             "FALCO_POLICY=Falco local rule write+rollback via SSM on EC2 (AMI cached). "
-            "INFISICAL_ROTATE=Infisical self-hosted (Docker on EC2), rotate+rollback secret (AMI cached)."
+            "INFISICAL_ROTATE=Infisical self-hosted (Docker on EC2), rotate+rollback secret (AMI cached). "
+            "POSTGRES_ROTATE=PostgreSQL user password rotation (EC2, AMI cached). "
+            "REDIS_ROTATE=Redis requirepass rotation (EC2, AMI cached). "
+            "MONGODB_ROTATE=MongoDB user password rotation (EC2, AMI cached)."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -10306,6 +10309,12 @@ def main():
             run_phase_falco_policy(client, cloud_account_id)
         if "INFISICAL_ROTATE" in phases:
             run_phase_infisical_rotate(client, cloud_account_id)
+        if "POSTGRES_ROTATE" in phases:
+            run_phase_postgres_rotate(client, cloud_account_id)
+        if "REDIS_ROTATE" in phases:
+            run_phase_redis_rotate(client, cloud_account_id)
+        if "MONGODB_ROTATE" in phases:
+            run_phase_mongodb_rotate(client, cloud_account_id)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
