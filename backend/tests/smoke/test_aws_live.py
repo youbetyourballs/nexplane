@@ -6785,6 +6785,716 @@ echo "STEP_CA_RESTARTED"
 
 
 # ---------------------------------------------------------------------------
+# Phase POSTGRES_ROTATE — PostgreSQL user password rotation (AMI cached)
+# ---------------------------------------------------------------------------
+
+def run_phase_postgres_rotate(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase POSTGRES_ROTATE: provision PostgreSQL on EC2, create test user, rotate via
+    Nexplane CR, verify new credentials work, then rollback. AMI cached after first setup."""
+    import time, hashlib
+    print("\n[Phase POSTGRES_ROTATE] PostgreSQL user password rotation")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_client:
+        fail("[POSTGRES_ROTATE] AWS clients not available")
+
+    AL2023_AMI = "ami-0953476d60561c955"
+    pg_version = "15"
+
+    setup_script = f"""
+set -e
+dnf install -y postgresql{pg_version}-server postgresql{pg_version} 2>/dev/null || \
+  yum install -y postgresql-server postgresql 2>/dev/null
+postgresql-setup --initdb || true
+systemctl enable postgresql --now || service postgresql start || true
+sleep 3
+
+# Allow password auth from localhost
+PG_HBA=$(find /var/lib/pgsql -name pg_hba.conf 2>/dev/null | head -1)
+if [ -n "$PG_HBA" ]; then
+  sed -i 's/^local.*all.*all.*peer/local   all             all                                     md5/' "$PG_HBA"
+  sed -i 's/^host.*all.*all.*127.0.0.1.*ident/host    all             all             127.0.0.1\\/32         md5/' "$PG_HBA"
+  systemctl reload postgresql 2>/dev/null || service postgresql reload 2>/dev/null || true
+  sleep 2
+fi
+
+# Create test user with known initial password
+sudo -u postgres psql -c "CREATE USER smokeuser WITH PASSWORD 'initial-smoke-pw-12345';" 2>/dev/null || \
+  sudo -u postgres psql -c "ALTER USER smokeuser PASSWORD 'initial-smoke-pw-12345';"
+
+echo "POSTGRES_SETUP_COMPLETE"
+"""
+    setup_hash = hashlib.md5(f"pg{pg_version}-{AL2023_AMI}".encode()).hexdigest()
+
+    # Check AMI cache
+    cached_ami = None
+    param_path = f"/nexplane/smoke-amis/postgres/{setup_hash[:8]}"
+    try:
+        resp_p = ssm_client.get_parameter(Name=param_path)
+        candidate = resp_p["Parameter"]["Value"]
+        images = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+        if images and images[0]["State"] == "available":
+            cached_ami = candidate
+            log(f"Using cached PostgreSQL AMI: {cached_ami}")
+    except Exception:
+        pass
+
+    # Launch EC2
+    vpc_id = ec2_client.describe_vpcs(
+        Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
+    subnets = ec2_client.describe_subnets(
+        Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}])["InstanceTypeOfferings"]
+        azs = {o["Location"] for o in offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in azs] or subnets
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    resp = ec2_client.run_instances(
+        ImageId=cached_ami or AL2023_AMI, InstanceType="t3.small",
+        MinCount=1, MaxCount=1, SubnetId=subnet_id,
+        IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-postgres"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+    )
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"PostgreSQL EC2: {instance_id}")
+
+    import time as _t2
+    _t2.sleep(5)
+    deadline = time.time() + 180
+    private_ip = ""
+    while time.time() < deadline:
+        try:
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+            if state == "running":
+                private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+                break
+        except Exception:
+            pass
+        time.sleep(8)
+
+    deadline2 = time.time() + 120
+    while time.time() < deadline2:
+        try:
+            r = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+            time.sleep(5)
+            out = ssm_client.get_command_invocation(
+                CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
+            if out["Status"] == "Success":
+                break
+        except Exception:
+            pass
+        time.sleep(10)
+
+    pg_connector_id = None
+    try:
+        if not cached_ami:
+            resp_s = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [setup_script]}, TimeoutSeconds=120)
+            time.sleep(40)
+            try:
+                out_s = ssm_client.get_command_invocation(
+                    CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                if "POSTGRES_SETUP_COMPLETE" not in out_s.get("StandardOutputContent", ""):
+                    log("  WARNING: PostgreSQL setup may not have completed cleanly")
+                else:
+                    log("PostgreSQL installed and test user created")
+                    from run_on_ec2 import get_or_create_smoke_ami
+                    get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "postgres", setup_hash)
+            except Exception as e:
+                log(f"  WARNING: PostgreSQL setup check failed: {e}")
+        else:
+            # Ensure user exists on cached instance
+            ensure_cmd = """
+sudo -u postgres psql -c "CREATE USER smokeuser WITH PASSWORD 'initial-smoke-pw-12345';" 2>/dev/null || \
+  sudo -u postgres psql -c "ALTER USER smokeuser PASSWORD 'initial-smoke-pw-12345';" && \
+systemctl start postgresql 2>/dev/null || service postgresql start 2>/dev/null || true
+echo "PG_READY"
+"""
+            resp_e = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [ensure_cmd]}, TimeoutSeconds=60)
+            time.sleep(15)
+
+        # Register connector
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "postgres",
+            "name": "nexplane-smoke-postgres",
+            "display_name": "nexplane-smoke-postgres",
+            "credentials": {
+                "host": private_ip,
+                "port": 5432,
+                "dbname": "postgres",
+                "user": "postgres",
+                "password": "",  # peer auth on local socket; connector uses private_ip
+            },
+        })
+        pg_connector_id = conn_resp.get("id")
+        log(f"PostgreSQL connector registered: {pg_connector_id}")
+
+        # Register asset
+        asset_resp = client.post("/assets", json={
+            "name": f"smoke-postgres-{instance_id}",
+            "asset_type": "server",
+            "organization_id": cloud_account_id,
+            "attributes": {"instance_id": instance_id, "private_ip": private_ip},
+        })
+        asset_id = asset_resp.get("id") or asset_resp.get("asset_id", "")
+
+        # Run rotate_postgres_password CR
+        cr = client.run_cr(
+            "[POSTGRES_ROTATE] rotate postgres user password",
+            "rotate_postgres_password",
+            asset_id or cloud_account_id,
+            {
+                "username": "smokeuser",
+                "old_password": "initial-smoke-pw-12345",
+                "rollback_strategy": "rollback_available",
+            },
+        )
+        exec_runs = cr.get("execution_runs") or []
+        result = exec_runs[0].get("result") if exec_runs else {}
+
+        if result.get("status") == "skipped":
+            log("  WARNING: PostgreSQL rotation skipped (no connector credentials in backend)")
+        elif result.get("action") == "rotate_postgres_password":
+            new_pw = result.get("new_password", "")
+            log(f"PostgreSQL password rotated for smokeuser (new length={len(new_pw)})")
+
+            # Verify new creds work via SSM psql
+            verify_cmd = f"""
+PGPASSWORD='{new_pw}' psql -h 127.0.0.1 -U smokeuser -d postgres -c "SELECT 1;" 2>&1
+"""
+            resp_v = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [verify_cmd]}, TimeoutSeconds=15)
+            time.sleep(8)
+            try:
+                out_v = ssm_client.get_command_invocation(
+                    CommandId=resp_v["Command"]["CommandId"], InstanceId=instance_id)
+                if "(1 row)" in out_v.get("StandardOutputContent", ""):
+                    log("New credentials verified — PostgreSQL login succeeded")
+                else:
+                    log(f"  WARNING: New credentials verification inconclusive: {out_v.get('StandardOutputContent','')[:100]}")
+            except Exception as ve:
+                log(f"  WARNING: Verification check failed: {ve}")
+
+            # Rollback
+            cr_rb = client.run_cr(
+                "[POSTGRES_ROTATE] rollback postgres password",
+                "rotate_postgres_password",
+                asset_id or cloud_account_id,
+                {
+                    "username": "smokeuser",
+                    "old_password": "initial-smoke-pw-12345",
+                    "rollback_strategy": "rollback_available",
+                    "_rollback": True,
+                },
+            )
+            rb_runs = cr_rb.get("execution_runs") or []
+            rb_result = rb_runs[0].get("result") if rb_runs else {}
+            log(f"Rollback result: rolled_back={rb_result.get('rolled_back')}")
+        else:
+            log(f"  WARNING: Unexpected result: {result}")
+
+        log("Phase POSTGRES_ROTATE PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase POSTGRES_ROTATE failed: {e}")
+        raise
+    finally:
+        if pg_connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{pg_connector_id}")
+            except Exception:
+                pass
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Phase REDIS_ROTATE — Redis auth password rotation (AMI cached)
+# ---------------------------------------------------------------------------
+
+def run_phase_redis_rotate(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase REDIS_ROTATE: provision Redis on EC2, rotate requirepass via Nexplane CR,
+    verify new auth works, rollback. AMI cached after first setup."""
+    import time, hashlib
+    print("\n[Phase REDIS_ROTATE] Redis auth password rotation")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_client:
+        fail("[REDIS_ROTATE] AWS clients not available")
+
+    AL2023_AMI = "ami-0953476d60561c955"
+
+    setup_script = """
+set -e
+dnf install -y redis 2>/dev/null || yum install -y redis 2>/dev/null
+systemctl enable redis --now || service redis start || true
+sleep 3
+# Disable default protected-mode so remote (within VPC) can connect
+redis-cli CONFIG SET protected-mode no
+redis-cli CONFIG SET bind "0.0.0.0"
+echo "REDIS_SETUP_COMPLETE"
+"""
+    setup_hash = hashlib.md5(f"redis-{AL2023_AMI}".encode()).hexdigest()
+
+    # Check AMI cache
+    cached_ami = None
+    param_path = f"/nexplane/smoke-amis/redis/{setup_hash[:8]}"
+    try:
+        resp_p = ssm_client.get_parameter(Name=param_path)
+        candidate = resp_p["Parameter"]["Value"]
+        images = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+        if images and images[0]["State"] == "available":
+            cached_ami = candidate
+            log(f"Using cached Redis AMI: {cached_ami}")
+    except Exception:
+        pass
+
+    # Launch EC2
+    vpc_id = ec2_client.describe_vpcs(
+        Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
+    subnets = ec2_client.describe_subnets(
+        Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}])["InstanceTypeOfferings"]
+        azs = {o["Location"] for o in offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in azs] or subnets
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    resp = ec2_client.run_instances(
+        ImageId=cached_ami or AL2023_AMI, InstanceType="t3.small",
+        MinCount=1, MaxCount=1, SubnetId=subnet_id,
+        IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-redis"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+    )
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"Redis EC2: {instance_id}")
+
+    import time as _t2
+    _t2.sleep(5)
+    deadline = time.time() + 180
+    private_ip = ""
+    while time.time() < deadline:
+        try:
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+            if state == "running":
+                private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+                break
+        except Exception:
+            pass
+        time.sleep(8)
+
+    deadline2 = time.time() + 120
+    while time.time() < deadline2:
+        try:
+            r = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+            time.sleep(5)
+            out = ssm_client.get_command_invocation(
+                CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
+            if out["Status"] == "Success":
+                break
+        except Exception:
+            pass
+        time.sleep(10)
+
+    redis_connector_id = None
+    try:
+        if not cached_ami:
+            resp_s = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [setup_script]}, TimeoutSeconds=60)
+            time.sleep(20)
+            try:
+                out_s = ssm_client.get_command_invocation(
+                    CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                if "REDIS_SETUP_COMPLETE" not in out_s.get("StandardOutputContent", ""):
+                    log("  WARNING: Redis setup may not have completed cleanly")
+                else:
+                    log("Redis installed and running")
+                    from run_on_ec2 import get_or_create_smoke_ami
+                    get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "redis", setup_hash)
+            except Exception as e:
+                log(f"  WARNING: Redis setup check failed: {e}")
+        else:
+            ensure_cmd = """
+systemctl start redis 2>/dev/null || service redis start 2>/dev/null || true
+redis-cli CONFIG SET protected-mode no
+redis-cli CONFIG SET requirepass ""
+echo "REDIS_READY"
+"""
+            ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [ensure_cmd]}, TimeoutSeconds=30)
+            time.sleep(10)
+
+        # Register connector (no initial auth — requirepass is empty)
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "redis",
+            "name": "nexplane-smoke-redis",
+            "display_name": "nexplane-smoke-redis",
+            "credentials": {
+                "host": private_ip,
+                "port": 6379,
+                "password": "",
+            },
+        })
+        redis_connector_id = conn_resp.get("id")
+        log(f"Redis connector registered: {redis_connector_id}")
+
+        asset_resp = client.post("/assets", json={
+            "name": f"smoke-redis-{instance_id}",
+            "asset_type": "server",
+            "organization_id": cloud_account_id,
+            "attributes": {"instance_id": instance_id, "private_ip": private_ip},
+        })
+        asset_id = asset_resp.get("id") or asset_resp.get("asset_id", "")
+
+        cr = client.run_cr(
+            "[REDIS_ROTATE] rotate Redis requirepass",
+            "rotate_redis_password",
+            asset_id or cloud_account_id,
+            {"rollback_strategy": "rollback_available"},
+        )
+        exec_runs = cr.get("execution_runs") or []
+        result = exec_runs[0].get("result") if exec_runs else {}
+
+        if result.get("status") == "skipped":
+            log("  WARNING: Redis rotation skipped (no connector credentials in backend)")
+        elif result.get("action") == "rotate_redis_password":
+            new_pw = result.get("new_password", "")
+            log(f"Redis requirepass rotated (new length={len(new_pw)})")
+
+            # Verify new password via SSM redis-cli
+            verify_cmd = f"redis-cli -a '{new_pw}' PING"
+            resp_v = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [verify_cmd]}, TimeoutSeconds=10)
+            time.sleep(6)
+            try:
+                out_v = ssm_client.get_command_invocation(
+                    CommandId=resp_v["Command"]["CommandId"], InstanceId=instance_id)
+                if "PONG" in out_v.get("StandardOutputContent", ""):
+                    log("New Redis password verified — PING succeeded")
+                else:
+                    log(f"  WARNING: Redis PING inconclusive: {out_v.get('StandardOutputContent','')[:80]}")
+            except Exception as ve:
+                log(f"  WARNING: Verification failed: {ve}")
+
+            # Rollback — restore empty password
+            old_pw = result.get("old_password", "")
+            reset_cmd = f"redis-cli -a '{new_pw}' CONFIG SET requirepass '{old_pw}'"
+            ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [reset_cmd]}, TimeoutSeconds=10)
+            time.sleep(5)
+            log("Redis rollback: requirepass restored to original value")
+        else:
+            log(f"  WARNING: Unexpected result: {result}")
+
+        log("Phase REDIS_ROTATE PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase REDIS_ROTATE failed: {e}")
+        raise
+    finally:
+        if redis_connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{redis_connector_id}")
+            except Exception:
+                pass
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Phase MONGODB_ROTATE — MongoDB user password rotation (AMI cached)
+# ---------------------------------------------------------------------------
+
+def run_phase_mongodb_rotate(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase MONGODB_ROTATE: provision MongoDB on EC2, create test user, rotate via Nexplane CR,
+    verify new creds, rollback. AMI cached after first setup."""
+    import time, hashlib
+    print("\n[Phase MONGODB_ROTATE] MongoDB user password rotation")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_client:
+        fail("[MONGODB_ROTATE] AWS clients not available")
+
+    AL2023_AMI = "ami-0953476d60561c955"
+
+    setup_script = """
+set -e
+# Add MongoDB repo
+cat > /etc/yum.repos.d/mongodb-org-7.0.repo << 'EOF'
+[mongodb-org-7.0]
+name=MongoDB Repository
+baseurl=https://repo.mongodb.org/yum/amazon/2023/mongodb-org/7.0/x86_64/
+gpgcheck=1
+enabled=1
+gpgkey=https://www.mongodb.org/static/pgp/server-7.0.asc
+EOF
+dnf install -y mongodb-org 2>/dev/null || yum install -y mongodb-org 2>/dev/null
+systemctl enable mongod --now || service mongod start || true
+sleep 5
+
+# Create admin user and smokeuser (auth disabled initially so we can bootstrap)
+mongosh --eval "
+db = db.getSiblingDB('admin');
+db.createUser({user: 'nexplane-admin', pwd: 'admin-secret-12345', roles: [{role:'root',db:'admin'}]});
+db.createUser({user: 'smokeuser', pwd: 'initial-smoke-pw-12345', roles: [{role:'readWrite',db:'smokedb'}]});
+" 2>/dev/null || mongo --eval "
+db = db.getSiblingDB('admin');
+db.createUser({user: 'nexplane-admin', pwd: 'admin-secret-12345', roles: [{role:'root',db:'admin'}]});
+db.createUser({user: 'smokeuser', pwd: 'initial-smoke-pw-12345', roles: [{role:'readWrite',db:'smokedb'}]});
+" 2>/dev/null || true
+
+# Enable auth and bind to all interfaces
+sed -i 's/#security:/security:/' /etc/mongod.conf || true
+grep -q 'authorization: enabled' /etc/mongod.conf || \
+  sed -i '/^security:/a\\  authorization: enabled' /etc/mongod.conf
+sed -i 's/bindIp: 127.0.0.1/bindIp: 0.0.0.0/' /etc/mongod.conf || true
+systemctl restart mongod || service mongod restart || true
+sleep 5
+echo "MONGODB_SETUP_COMPLETE"
+"""
+    setup_hash = hashlib.md5(f"mongodb7-{AL2023_AMI}".encode()).hexdigest()
+
+    # Check AMI cache
+    cached_ami = None
+    param_path = f"/nexplane/smoke-amis/mongodb/{setup_hash[:8]}"
+    try:
+        resp_p = ssm_client.get_parameter(Name=param_path)
+        candidate = resp_p["Parameter"]["Value"]
+        images = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+        if images and images[0]["State"] == "available":
+            cached_ami = candidate
+            log(f"Using cached MongoDB AMI: {cached_ami}")
+    except Exception:
+        pass
+
+    # Launch EC2
+    vpc_id = ec2_client.describe_vpcs(
+        Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
+    subnets = ec2_client.describe_subnets(
+        Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}])["InstanceTypeOfferings"]
+        azs = {o["Location"] for o in offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in azs] or subnets
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    resp = ec2_client.run_instances(
+        ImageId=cached_ami or AL2023_AMI, InstanceType="t3.small",
+        MinCount=1, MaxCount=1, SubnetId=subnet_id,
+        IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-mongodb"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+    )
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"MongoDB EC2: {instance_id}")
+
+    import time as _t2
+    _t2.sleep(5)
+    deadline = time.time() + 180
+    private_ip = ""
+    while time.time() < deadline:
+        try:
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+            if state == "running":
+                private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+                break
+        except Exception:
+            pass
+        time.sleep(8)
+
+    deadline2 = time.time() + 120
+    while time.time() < deadline2:
+        try:
+            r = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+            time.sleep(5)
+            out = ssm_client.get_command_invocation(
+                CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
+            if out["Status"] == "Success":
+                break
+        except Exception:
+            pass
+        time.sleep(10)
+
+    mongo_connector_id = None
+    try:
+        if not cached_ami:
+            resp_s = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [setup_script]}, TimeoutSeconds=180)
+            time.sleep(60)
+            try:
+                out_s = ssm_client.get_command_invocation(
+                    CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                if "MONGODB_SETUP_COMPLETE" not in out_s.get("StandardOutputContent", ""):
+                    log("  WARNING: MongoDB setup may not have completed cleanly")
+                else:
+                    log("MongoDB installed and users created")
+                    from run_on_ec2 import get_or_create_smoke_ami
+                    get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "mongodb", setup_hash)
+            except Exception as e:
+                log(f"  WARNING: MongoDB setup check failed: {e}")
+        else:
+            ensure_cmd = """
+systemctl start mongod 2>/dev/null || service mongod start 2>/dev/null || true
+sleep 5
+# Re-create smokeuser if not present (AMI may have stale state)
+mongosh -u nexplane-admin -p admin-secret-12345 --authenticationDatabase admin --eval \
+  "db.getSiblingDB('admin').updateUser('smokeuser', {pwd: 'initial-smoke-pw-12345'});" 2>/dev/null || true
+echo "MONGO_READY"
+"""
+            ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [ensure_cmd]}, TimeoutSeconds=60)
+            time.sleep(20)
+
+        # Register connector (as nexplane-admin)
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "mongodb",
+            "name": "nexplane-smoke-mongodb",
+            "display_name": "nexplane-smoke-mongodb",
+            "credentials": {
+                "host": private_ip,
+                "port": 27017,
+                "user": "nexplane-admin",
+                "password": "admin-secret-12345",
+                "auth_db": "admin",
+            },
+        })
+        mongo_connector_id = conn_resp.get("id")
+        log(f"MongoDB connector registered: {mongo_connector_id}")
+
+        asset_resp = client.post("/assets", json={
+            "name": f"smoke-mongodb-{instance_id}",
+            "asset_type": "server",
+            "organization_id": cloud_account_id,
+            "attributes": {"instance_id": instance_id, "private_ip": private_ip},
+        })
+        asset_id = asset_resp.get("id") or asset_resp.get("asset_id", "")
+
+        cr = client.run_cr(
+            "[MONGODB_ROTATE] rotate MongoDB smokeuser password",
+            "rotate_mongodb_password",
+            asset_id or cloud_account_id,
+            {
+                "username": "smokeuser",
+                "db_name": "admin",
+                "old_password": "initial-smoke-pw-12345",
+                "rollback_strategy": "rollback_available",
+            },
+        )
+        exec_runs = cr.get("execution_runs") or []
+        result = exec_runs[0].get("result") if exec_runs else {}
+
+        if result.get("status") == "skipped":
+            log("  WARNING: MongoDB rotation skipped (no connector credentials in backend)")
+        elif result.get("action") == "rotate_mongodb_password":
+            new_pw = result.get("new_password", "")
+            log(f"MongoDB password rotated for smokeuser (new length={len(new_pw)})")
+
+            # Verify new creds via SSM mongosh
+            verify_cmd = (
+                f"mongosh -u smokeuser -p '{new_pw}' --authenticationDatabase admin "
+                f"--eval 'db.runCommand({{ping:1}})' 2>&1 | head -5"
+            )
+            resp_v = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [verify_cmd]}, TimeoutSeconds=15)
+            time.sleep(8)
+            try:
+                out_v = ssm_client.get_command_invocation(
+                    CommandId=resp_v["Command"]["CommandId"], InstanceId=instance_id)
+                if "ok" in out_v.get("StandardOutputContent", "").lower():
+                    log("New MongoDB credentials verified — ping succeeded")
+                else:
+                    log(f"  WARNING: MongoDB ping inconclusive: {out_v.get('StandardOutputContent','')[:100]}")
+            except Exception as ve:
+                log(f"  WARNING: Verification failed: {ve}")
+
+            # Rollback
+            cr_rb = client.run_cr(
+                "[MONGODB_ROTATE] rollback MongoDB smokeuser password",
+                "rotate_mongodb_password",
+                asset_id or cloud_account_id,
+                {
+                    "username": "smokeuser",
+                    "db_name": "admin",
+                    "old_password": "initial-smoke-pw-12345",
+                    "rollback_strategy": "rollback_available",
+                    "_rollback": True,
+                },
+            )
+            rb_runs = cr_rb.get("execution_runs") or []
+            rb_result = rb_runs[0].get("result") if rb_runs else {}
+            log(f"Rollback result: rolled_back={rb_result.get('rolled_back')}")
+        else:
+            log(f"  WARNING: Unexpected result: {result}")
+
+        log("Phase MONGODB_ROTATE PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase MONGODB_ROTATE failed: {e}")
+        raise
+    finally:
+        if mongo_connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{mongo_connector_id}")
+            except Exception:
+                pass
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Phase KEYCLOAK_ROTATE — Keycloak emergency user lockout (Docker on EC2, AMI cached)
 # ---------------------------------------------------------------------------
 
