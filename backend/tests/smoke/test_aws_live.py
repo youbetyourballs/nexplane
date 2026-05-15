@@ -6083,14 +6083,20 @@ echo "VAULT_SETUP_COMPLETE"
     instance_id = resp["Instances"][0]["InstanceId"]
     log(f"Vault EC2: {instance_id}")
 
-    # Wait for running + SSM
+    # Wait for running + SSM — retry describe on propagation delay
+    import time as _t2
+    _t2.sleep(5)  # brief pause for EC2 record propagation
     deadline = time.time() + 180
+    private_ip = ""
     while time.time() < deadline:
-        desc = ec2_client.describe_instances(InstanceIds=[instance_id])
-        state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
-        if state == "running":
-            private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
-            break
+        try:
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+            if state == "running":
+                private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+                break
+        except Exception:
+            pass  # InvalidInstanceID.NotFound — propagation not complete yet
         time.sleep(8)
 
     deadline2 = time.time() + 120
@@ -6440,11 +6446,16 @@ def _launch_windows_ec2(ec2_client, ami_id: str, cloud_account_id: str) -> tuple
     )
     instance_id = resp["Instances"][0]["InstanceId"]
     log(f"Windows EC2 launched: {instance_id}")
+    _t.sleep(5)  # brief pause for EC2 record propagation
 
     deadline = _t.time() + 300
     while _t.time() < deadline:
-        desc = ec2_client.describe_instances(InstanceIds=[instance_id])
-        state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+        try:
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+        except Exception:
+            _t.sleep(8)
+            continue
         if state == "running":
             private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
             return instance_id, private_ip
