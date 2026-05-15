@@ -1775,6 +1775,96 @@
                         "executor": "nexplane_agent.rotate_vault_secret",
                         "estimated_duration_seconds": 10,
                         "execution_tier": 2
+                    },
+                    {
+                        "action_id": "trivy_scan",
+                        "generic_action": "trivy_scan",
+                        "display_name": "Trivy Vulnerability Scan",
+                        "description": "Scans the filesystem or container images for known CVEs using Trivy. Auto-installs Trivy if not present.",
+                        "applicable_asset_types": ["server", "ec2_instance"],
+                        "parameters": [
+                            {"name": "scan_type", "type": "string", "required": false},
+                            {"name": "target", "type": "string", "required": false},
+                            {"name": "severity", "type": "string", "required": false}
+                        ],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.trivy_scan",
+                        "estimated_duration_seconds": 300,
+                        "execution_tier": 2
+                    },
+                    {
+                        "action_id": "lynis_audit",
+                        "generic_action": "lynis_audit",
+                        "display_name": "Lynis Security Audit",
+                        "description": "Runs a full Lynis system security audit and returns hardening score, warnings, and suggestions.",
+                        "applicable_asset_types": ["server", "ec2_instance"],
+                        "parameters": [],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.lynis_audit",
+                        "estimated_duration_seconds": 180,
+                        "execution_tier": 2
+                    },
+                    {
+                        "action_id": "openscap_scan",
+                        "generic_action": "openscap_scan",
+                        "display_name": "OpenSCAP Compliance Scan",
+                        "description": "Evaluates the host against a SCAP/CIS profile using OpenSCAP. Requires scap-security-guide to be installed.",
+                        "applicable_asset_types": ["server", "ec2_instance"],
+                        "parameters": [
+                            {"name": "profile", "type": "string", "required": false}
+                        ],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.openscap_scan",
+                        "estimated_duration_seconds": 300,
+                        "execution_tier": 2
+                    },
+                    {
+                        "action_id": "authorized_keys_audit",
+                        "generic_action": "authorized_keys_audit",
+                        "display_name": "Authorized Keys Audit",
+                        "description": "Lists all SSH authorized_keys entries for every user on the host.",
+                        "applicable_asset_types": ["server", "ec2_instance"],
+                        "parameters": [],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.authorized_keys_audit",
+                        "estimated_duration_seconds": 60,
+                        "execution_tier": 2
+                    },
+                    {
+                        "action_id": "sudoers_audit",
+                        "generic_action": "sudoers_audit",
+                        "display_name": "Sudoers Configuration Audit",
+                        "description": "Scans /etc/sudoers and /etc/sudoers.d for NOPASSWD and ALL=(ALL) grants.",
+                        "applicable_asset_types": ["server", "ec2_instance"],
+                        "parameters": [],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.sudoers_audit",
+                        "estimated_duration_seconds": 60,
+                        "execution_tier": 2
+                    },
+                    {
+                        "action_id": "suid_scan",
+                        "generic_action": "suid_scan",
+                        "display_name": "SUID/SGID File Scan",
+                        "description": "Finds all SUID and SGID binaries on the filesystem, excluding /proc and /sys.",
+                        "applicable_asset_types": ["server", "ec2_instance"],
+                        "parameters": [],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.suid_scan",
+                        "estimated_duration_seconds": 60,
+                        "execution_tier": 2
+                    },
+                    {
+                        "action_id": "ssl_cert_inspect",
+                        "generic_action": "ssl_cert_inspect",
+                        "display_name": "TLS Certificate Inspection",
+                        "description": "Probes all listening TCP ports for TLS and reports certificate expiry, issuer, and days remaining.",
+                        "applicable_asset_types": ["server", "ec2_instance"],
+                        "parameters": [],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.ssl_cert_inspect",
+                        "estimated_duration_seconds": 60,
+                        "execution_tier": 2
                     }
                 ]
 }

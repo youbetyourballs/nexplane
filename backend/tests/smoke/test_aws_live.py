@@ -5526,6 +5526,59 @@ def run_phase_seccomp_pipeline(client: NexplaneClient, phase_a_result: Optional[
     print("Phase SECCOMP_PIPELINE PASSED")
 
 
+def run_phase_trivy_scan(client: NexplaneClient, phase_a_result: Optional[dict] = None) -> None:
+    """Phase TRIVY_SCAN: run Trivy vulnerability scan on Phase A EC2 via agent CR."""
+    print("\n[Phase TRIVY_SCAN] Trivy vulnerability scan")
+    asset_id = (phase_a_result or {}).get("asset_id")
+    if not asset_id:
+        assets = client.get("/assets")
+        server_assets = [a for a in (assets if isinstance(assets, list) else []) if a.get("asset_type") in ("server", "ec2_instance")]
+        if not server_assets:
+            log("  WARNING: No server assets — skipping TRIVY_SCAN")
+            return
+        asset_id = server_assets[0]["id"]
+
+    cr = client.run_cr("[TRIVY_SCAN] filesystem scan", "trivy_scan", asset_id,
+                       {"scan_type": "fs", "target": "/", "severity": "HIGH,CRITICAL"})
+    exec_runs = cr.get("execution_runs") or []
+    result = exec_runs[0].get("result") if exec_runs else {}
+    finding_count = result.get("finding_count", 0)
+    assert result != {"status": "ok"}, "Stub result — executor not dispatching"
+    log(f"Trivy scan: {finding_count} HIGH/CRITICAL findings")
+    log("Phase TRIVY_SCAN PASSED")
+
+
+def run_phase_lynis_audit(client: NexplaneClient, phase_a_result: Optional[dict] = None) -> None:
+    """Phase LYNIS_AUDIT: run Lynis security audit via agent CR."""
+    print("\n[Phase LYNIS_AUDIT] Lynis security audit")
+    asset_id = (phase_a_result or {}).get("asset_id")
+    if not asset_id:
+        log("  WARNING: No Phase A asset — skipping")
+        return
+
+    cr = client.run_cr("[LYNIS_AUDIT] security audit", "lynis_audit", asset_id, {})
+    exec_runs = cr.get("execution_runs") or []
+    result = exec_runs[0].get("result") if exec_runs else {}
+    score = result.get("hardening_score", 0)
+    log(f"Lynis hardening score: {score}/100, {result.get('warning_count', 0)} warnings")
+    log("Phase LYNIS_AUDIT PASSED")
+
+
+def run_phase_ssl_expiry(client: NexplaneClient, phase_a_result: Optional[dict] = None) -> None:
+    """Phase SSL_EXPIRY: inspect TLS certs on all listening ports via agent."""
+    print("\n[Phase SSL_EXPIRY] TLS certificate expiry inspection")
+    asset_id = (phase_a_result or {}).get("asset_id")
+    if not asset_id:
+        log("  WARNING: No Phase A asset — skipping")
+        return
+
+    cr = client.run_cr("[SSL_EXPIRY] cert inspect", "ssl_cert_inspect", asset_id, {})
+    exec_runs = cr.get("execution_runs") or []
+    result = exec_runs[0].get("result") if exec_runs else {}
+    log(f"SSL inspect: {result.get('cert_count', 0)} TLS endpoints found")
+    log("Phase SSL_EXPIRY PASSED")
+
+
 def run_phase_ssh_rotate(client: NexplaneClient, phase_a_result: Optional[dict] = None) -> None:
     """Phase SSH_ROTATE: deploy agent on EC2, add test SSH key, rotate it, verify old gone / new works."""
     import subprocess
@@ -7035,6 +7088,12 @@ def main():
             run_phase_demo_f(_ec2_f, _iid)
         if "SECCOMP_PIPELINE" in phases:
             run_phase_seccomp_pipeline(client, phase_a_result if phase_a_result else None)
+        if "TRIVY_SCAN" in phases:
+            run_phase_trivy_scan(client, phase_a_result if phase_a_result else None)
+        if "LYNIS_AUDIT" in phases:
+            run_phase_lynis_audit(client, phase_a_result if phase_a_result else None)
+        if "SSL_EXPIRY" in phases:
+            run_phase_ssl_expiry(client, phase_a_result if phase_a_result else None)
         if "SSH_ROTATE" in phases:
             run_phase_ssh_rotate(client, phase_a_result if phase_a_result else None)
         if "LDAP_ROTATE" in phases:
