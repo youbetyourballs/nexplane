@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations  # Python 3.9 compat: defer annotation evaluation
 """
 Nexplane AWS Live Smoke Test — Phases A–K (and new P–T).
 

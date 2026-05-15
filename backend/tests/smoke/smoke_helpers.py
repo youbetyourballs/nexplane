@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations  # Python 3.9 compat
 """
 Shared infrastructure for Nexplane multi-cloud smoke tests.
 
