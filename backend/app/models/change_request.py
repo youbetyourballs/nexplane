@@ -290,6 +290,8 @@ class ChangeType(str, enum.Enum):
     sysmon_fim = "sysmon_fim"
     # Cloud credential rotation
     rotate_azure_service_principal_secret = "rotate_azure_service_principal_secret"
+    # HashiCorp Vault secret rotation
+    rotate_vault_secret = "rotate_vault_secret"
 
 
 class RiskLevel(str, enum.Enum):
