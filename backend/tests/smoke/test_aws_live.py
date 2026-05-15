@@ -6115,7 +6115,7 @@ def run_phase_discover_rotate(client: NexplaneClient, cloud_account_id: str) -> 
             "[DISCOVER_ROTATE] rotate IAM access key",
             "rotate_iam_key",
             cloud_account_id,
-            {"user_name": test_username},
+            {"username": test_username},
         )
         log(f"IAM key rotation CR completed: {cr['id']}")
 
