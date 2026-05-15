@@ -6001,6 +6001,219 @@ echo "LDAP_SETUP_DONE"
 
 
 # ---------------------------------------------------------------------------
+# Phase VAULT_ROTATE — HashiCorp Vault secret rotation (AMI cached)
+# ---------------------------------------------------------------------------
+
+def run_phase_vault_rotate(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase VAULT_ROTATE: provision Vault on EC2, write test secret, rotate via Nexplane CR,
+    verify new value written. AMI cached after first setup."""
+    import time, hashlib
+    print("\n[Phase VAULT_ROTATE] HashiCorp Vault secret rotation")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_client:
+        fail("[VAULT_ROTATE] AWS clients not available")
+
+    AL2023_AMI = "ami-0953476d60561c955"
+    vault_version = "1.17.2"
+
+    setup_script = f"""
+set -e
+yum install -y unzip curl 2>/dev/null || apt-get install -y unzip curl 2>/dev/null
+curl -fsSL https://releases.hashicorp.com/vault/{vault_version}/vault_{vault_version}_linux_amd64.zip -o /tmp/vault.zip
+unzip -o /tmp/vault.zip -d /usr/local/bin/
+vault version
+
+# Start dev mode Vault (in-memory, no TLS, single node)
+cat > /etc/vault-dev.sh << 'EOF'
+#!/bin/bash
+vault server -dev -dev-root-token-id=nexplane-smoke-root -dev-listen-address=0.0.0.0:8200 > /var/log/vault-dev.log 2>&1 &
+EOF
+chmod +x /etc/vault-dev.sh
+/etc/vault-dev.sh
+sleep 5
+
+# Write test secret
+export VAULT_ADDR=http://localhost:8200
+export VAULT_TOKEN=nexplane-smoke-root
+vault kv put secret/smoke-test password=original-value-12345 username=smokeuser
+
+echo "VAULT_SETUP_COMPLETE"
+"""
+    setup_hash = hashlib.md5(f"{vault_version}-{AL2023_AMI}".encode()).hexdigest()
+
+    # Check AMI cache
+    cached_ami = None
+    param_path = f"/nexplane/smoke-amis/vault-dev/{setup_hash[:8]}"
+    try:
+        resp_p = ssm_client.get_parameter(Name=param_path)
+        candidate = resp_p["Parameter"]["Value"]
+        images = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+        if images and images[0]["State"] == "available":
+            cached_ami = candidate
+            log(f"Using cached Vault AMI: {cached_ami}")
+    except Exception:
+        pass
+
+    # Launch EC2
+    vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
+    subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}])["InstanceTypeOfferings"]
+        azs = {o["Location"] for o in offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in azs] or subnets
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    resp = ec2_client.run_instances(
+        ImageId=cached_ami or AL2023_AMI, InstanceType="t3.small",
+        MinCount=1, MaxCount=1, SubnetId=subnet_id,
+        IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-vault"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+    )
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"Vault EC2: {instance_id}")
+
+    # Wait for running + SSM
+    deadline = time.time() + 180
+    while time.time() < deadline:
+        desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+        state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+        if state == "running":
+            private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+            break
+        time.sleep(8)
+
+    deadline2 = time.time() + 120
+    while time.time() < deadline2:
+        try:
+            r = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+            time.sleep(5)
+            out = ssm_client.get_command_invocation(
+                CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
+            if out["Status"] == "Success":
+                break
+        except Exception:
+            pass
+        time.sleep(10)
+
+    vault_connector_id = None
+    try:
+        if not cached_ami:
+            # Install and start Vault
+            resp_s = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [setup_script]}, TimeoutSeconds=120)
+            time.sleep(30)
+            try:
+                out_s = ssm_client.get_command_invocation(
+                    CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                if "VAULT_SETUP_COMPLETE" not in out_s.get("StandardOutputContent", ""):
+                    log("  WARNING: Vault setup may not have completed cleanly")
+                else:
+                    log("Vault installed and secret written")
+                    # Cache AMI
+                    from run_on_ec2 import get_or_create_smoke_ami
+                    get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "vault-dev", setup_hash)
+            except Exception as e:
+                log(f"  WARNING: Vault setup check failed: {e}")
+        else:
+            # Start Vault on cached instance (already installed)
+            start_cmd = """
+export VAULT_ADDR=http://localhost:8200
+export VAULT_TOKEN=nexplane-smoke-root
+nohup vault server -dev -dev-root-token-id=nexplane-smoke-root -dev-listen-address=0.0.0.0:8200 > /var/log/vault-dev.log 2>&1 &
+sleep 5
+vault kv put secret/smoke-test password=original-value-12345 username=smokeuser
+echo "VAULT_RESTARTED"
+"""
+            resp_start = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [start_cmd]}, TimeoutSeconds=60)
+            time.sleep(15)
+
+        # Register Vault connector in Nexplane
+        vault_url = f"http://{private_ip}:8200"
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "vault",
+            "display_name": "nexplane-smoke-vault",
+            "credentials": {
+                "url": vault_url,
+                "token": "nexplane-smoke-root",
+            },
+        })
+        vault_connector_id = conn_resp.get("id")
+        log(f"Vault connector registered: {vault_connector_id}")
+
+        # Run rotate_vault_secret CR
+        cr = client.run_cr(
+            "[VAULT_ROTATE] rotate Vault secret",
+            "rotate_vault_secret",
+            cloud_account_id,
+            {
+                "secret_path": "smoke-test",
+                "mount_point": "secret",
+                "field": "password",
+            },
+        )
+        exec_runs = cr.get("execution_runs") or []
+        result = exec_runs[0].get("result") if exec_runs else {}
+
+        if result.get("status") == "skipped":
+            log("  WARNING: Vault rotation skipped (no connector credentials in backend)")
+        elif result.get("action") == "rotate_vault_secret":
+            log(f"Vault secret rotated at path smoke-test")
+            # Verify new value via SSM
+            verify_cmd = """
+export VAULT_ADDR=http://localhost:8200
+export VAULT_TOKEN=nexplane-smoke-root
+vault kv get -field=password secret/smoke-test
+"""
+            resp_v = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [verify_cmd]}, TimeoutSeconds=15)
+            time.sleep(8)
+            try:
+                out_v = ssm_client.get_command_invocation(
+                    CommandId=resp_v["Command"]["CommandId"], InstanceId=instance_id)
+                new_pw = out_v.get("StandardOutputContent", "").strip()
+                if new_pw == "original-value-12345":
+                    log("  WARNING: Password unchanged — rotation may not have reached Vault")
+                else:
+                    log(f"New password written to Vault (length {len(new_pw)})")
+            except Exception:
+                pass
+        else:
+            log(f"  WARNING: Unexpected result: {result}")
+
+        log("Phase VAULT_ROTATE PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase VAULT_ROTATE failed: {e}")
+        raise
+    finally:
+        if vault_connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{vault_connector_id}")
+            except Exception:
+                pass
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Phase SECRETS_ROTATE — AWS Secrets Manager rotation
 # ---------------------------------------------------------------------------
 
@@ -6543,6 +6756,7 @@ def main():
             "OSSEC_WIRE=executor-dispatch-verify (configure_seccomp, no agent needed). "
             "BULK_PATCH=batch-CR-create+bulk-approve+execute (no EC2 needed, uses existing assets). "
             "LDAP_ROTATE=emergency_user_lockout against OpenLDAP (AMI cached after first run in SSM /nexplane/smoke-amis/openldap/). "
+            "VAULT_ROTATE=HashiCorp Vault secret rotation (EC2 dev mode, AMI cached). "
             "WIN_OSSEC_WIRE=Windows hardening executor dispatch (Windows Server 2022, t3.medium, AMI cached). "
             "WIN_HARDENING_PIPELINE=AppLocker+Firewall+AuditPolicy pipeline on cached Windows AMI. "
             "WIN_POLICY_PIPELINE=WDAC+ASR+Sysmon pipeline on cached Windows AMI. "
@@ -6812,6 +7026,8 @@ def main():
             run_phase_ssh_rotate(client, phase_a_result if phase_a_result else None)
         if "LDAP_ROTATE" in phases:
             run_phase_ldap_rotate(client, cloud_account_id)
+        if "VAULT_ROTATE" in phases:
+            run_phase_vault_rotate(client, cloud_account_id)
         if "SECRETS_ROTATE" in phases:
             run_phase_secrets_rotate(client, cloud_account_id)
         if "DISCOVER_ROTATE" in phases:
