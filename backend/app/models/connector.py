@@ -56,6 +56,8 @@ class ConnectorType(str, enum.Enum):
     oci = "oci"
     ldap = "ldap"
     vault = "vault"
+    keycloak = "keycloak"
+    gitea = "gitea"
 
 
 class ConnectorStatus(str, enum.Enum):

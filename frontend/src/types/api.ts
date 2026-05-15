@@ -223,7 +223,9 @@ export type ConnectorType =
   | "ansible_local"
   | "oci"
   | "ldap"
-  | "vault";
+  | "vault"
+  | "keycloak"
+  | "gitea";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 

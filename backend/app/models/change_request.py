@@ -302,6 +302,12 @@ class ChangeType(str, enum.Enum):
     ssl_cert_inspect = "ssl_cert_inspect"
     # Keycloak identity
     keycloak_disable_user = "keycloak_disable_user"
+    # Kubernetes RBAC management
+    k8s_revoke_rolebinding = "k8s_revoke_rolebinding"
+    k8s_rotate_sa_token = "k8s_rotate_sa_token"
+    k8s_audit_rbac = "k8s_audit_rbac"
+    # Gitea identity
+    gitea_suspend_user = "gitea_suspend_user"
 
 
 class RiskLevel(str, enum.Enum):
