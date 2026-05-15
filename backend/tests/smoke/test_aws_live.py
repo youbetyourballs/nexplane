@@ -6153,6 +6153,7 @@ echo "VAULT_RESTARTED"
         vault_url = f"http://{private_ip}:8200"
         conn_resp = client.post("/connectors", json={
             "connector_type": "vault",
+            "name": "nexplane-smoke-vault",
             "display_name": "nexplane-smoke-vault",
             "credentials": {
                 "url": vault_url,
