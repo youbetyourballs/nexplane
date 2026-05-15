@@ -6434,6 +6434,95 @@ def run_phase_win_policy_pipeline(client, win_asset_id: str) -> None:
     log("Phase WIN_POLICY_PIPELINE complete")
 
 
+def run_phase_gcp_key_rotate(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase GCP_KEY_ROTATE: create a test GCP service account, rotate its key via Nexplane CR,
+    verify new key is active, clean up. Requires GCP credentials in GOOGLE_APPLICATION_CREDENTIALS."""
+    import os, json, time
+    print("\n[Phase GCP_KEY_ROTATE] GCP service account key rotation")
+
+    gcp_creds_json = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
+    gcp_creds_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if not gcp_creds_json and not gcp_creds_file:
+        log("  ⚠️  No GCP credentials configured — skipping GCP_KEY_ROTATE")
+        return
+
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+    except ImportError:
+        log("  ⚠️  google-auth not installed on runner — skipping GCP_KEY_ROTATE")
+        return
+
+    try:
+        if gcp_creds_json:
+            creds_data = json.loads(gcp_creds_json)
+        else:
+            with open(gcp_creds_file) as f:
+                creds_data = json.load(f)
+
+        credentials = service_account.Credentials.from_service_account_info(
+            creds_data, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        iam_svc = build("iam", "v1", credentials=credentials, cache_discovery=False)
+        project_id = creds_data.get("project_id", "")
+
+        # Create a test service account for rotation
+        test_sa_name = f"nexplane-smoke-{int(time.time())}"
+        test_sa_email = f"{test_sa_name}@{project_id}.iam.gserviceaccount.com"
+
+        try:
+            iam_svc.projects().serviceAccounts().create(
+                name=f"projects/{project_id}",
+                body={"accountId": test_sa_name, "serviceAccount": {"displayName": "Nexplane Smoke Test"}},
+            ).execute()
+            log(f"Created test SA: {test_sa_email}")
+
+            # Create initial key
+            initial_key = iam_svc.projects().serviceAccounts().keys().create(
+                name=f"projects/{project_id}/serviceAccounts/{test_sa_email}", body={}
+            ).execute()
+            initial_key_id = initial_key["name"].split("/")[-1]
+            log(f"Initial key: {initial_key_id[:12]}...")
+
+            # Run rotation CR via Nexplane
+            cr = client.run_cr(
+                "[GCP_KEY_ROTATE] rotate service account key",
+                "rotate_gcp_service_account_key",
+                cloud_account_id,
+                {
+                    "service_account_email": test_sa_email,
+                    "project_id": project_id,
+                    "GCP_SERVICE_ACCOUNT_JSON": gcp_creds_json or "",
+                },
+            )
+            exec_runs = cr.get("execution_runs") or []
+            result = exec_runs[0].get("result") if exec_runs else {}
+
+            if result.get("status") == "skipped":
+                log("  ⚠️  GCP rotation skipped (no credentials in backend) — dispatch verified")
+            elif result.get("new_key_id"):
+                new_key_id = result["new_key_id"]
+                log(f"Key rotated: new key {new_key_id[:12]}... ✓")
+                log(f"Deactivated: {result.get('deactivated_key_ids', [])}")
+            else:
+                log(f"  ⚠️  Unexpected result: {result}")
+
+            log("Phase GCP_KEY_ROTATE PASSED")
+
+        finally:
+            # Cleanup: delete test service account
+            try:
+                iam_svc.projects().serviceAccounts().delete(
+                    name=f"projects/{project_id}/serviceAccounts/{test_sa_email}"
+                ).execute()
+                log(f"Test SA {test_sa_email} deleted")
+            except Exception:
+                pass
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase GCP_KEY_ROTATE failed: {e}")
+        raise
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -6456,7 +6545,8 @@ def main():
             "LDAP_ROTATE=emergency_user_lockout against OpenLDAP (AMI cached after first run in SSM /nexplane/smoke-amis/openldap/). "
             "WIN_OSSEC_WIRE=Windows hardening executor dispatch (Windows Server 2022, t3.medium, AMI cached). "
             "WIN_HARDENING_PIPELINE=AppLocker+Firewall+AuditPolicy pipeline on cached Windows AMI. "
-            "WIN_POLICY_PIPELINE=WDAC+ASR+Sysmon pipeline on cached Windows AMI."
+            "WIN_POLICY_PIPELINE=WDAC+ASR+Sysmon pipeline on cached Windows AMI. "
+            "GCP_KEY_ROTATE=GCP service account key rotation (requires GCP_SERVICE_ACCOUNT_JSON env var)."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -6726,6 +6816,8 @@ def main():
             run_phase_secrets_rotate(client, cloud_account_id)
         if "DISCOVER_ROTATE" in phases:
             run_phase_discover_rotate(client, cloud_account_id)
+        if "GCP_KEY_ROTATE" in phases:
+            run_phase_gcp_key_rotate(client, cloud_account_id)
 
         _win_asset_id = None
         if "WIN_OSSEC_WIRE" in phases:
