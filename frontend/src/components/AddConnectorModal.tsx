@@ -46,6 +46,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   terraform_local: "Terraform (Local CLI)",
   ansible_local: "Ansible (Local CLI)",
   oci: "Oracle Cloud Infrastructure",
+  ldap: "LDAP / Active Directory",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -91,6 +92,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   terraform_local: "🏗️",
   ansible_local: "⚙️",
   oci: "🔶",
+  ldap: "🏢",
 };
 
 const ALL_TYPES = (Object.keys(CONNECTOR_LABELS) as ConnectorType[]).filter(

@@ -1117,6 +1117,145 @@ const CHANGE_TYPE_META: Partial<Record<ChangeType, { label: string; description:
       rollback_strategy: "disable_logging",
     }, null, 2),
   },
+  // Identity — extended
+  emergency_user_lockout: {
+    label: "Emergency User Lockout",
+    description: "Immediately lock a user account across all connected identity systems (emergency response).",
+    outcomeTemplate: JSON.stringify({ user_email: "user@example.com", rollback_strategy: "re_enable_account" }, null, 2),
+  },
+  user_suspension: {
+    label: "Suspend User",
+    description: "Suspend a user account (reversible) across identity providers.",
+    outcomeTemplate: JSON.stringify({ user_email: "user@example.com", rollback_strategy: "re_enable_account" }, null, 2),
+  },
+  user_scope_reduction: {
+    label: "Reduce User Scope",
+    description: "Remove excess permissions or group memberships from a user account.",
+    outcomeTemplate: JSON.stringify({ user_email: "user@example.com", groups_to_remove: [], rollback_strategy: "restore_previous_scope" }, null, 2),
+  },
+  enforce_mfa: {
+    label: "Enforce MFA",
+    description: "Force MFA enrollment for a user or group across connected identity providers.",
+    outcomeTemplate: JSON.stringify({ target: "user", identifier: "user@example.com", rollback_strategy: "remove_mfa_requirement" }, null, 2),
+  },
+  azure_ad_disable_user: {
+    label: "Azure AD — Disable User",
+    description: "Set accountEnabled=false and revoke all active sessions for an Azure AD / Entra ID user.",
+    outcomeTemplate: JSON.stringify({ user_identifier: "user@example.com", rollback_strategy: "re_enable_account" }, null, 2),
+  },
+  azure_ad_create_user: {
+    label: "Azure AD — Create User",
+    description: "Provision a new user in Azure AD / Entra ID via Microsoft Graph.",
+    outcomeTemplate: JSON.stringify({ user_principal_name: "newuser@example.com", display_name: "New User", initial_password: "", rollback_strategy: "deprovision_account" }, null, 2),
+  },
+  // Credential rotation — extended
+  rotate_secrets_manager_secret: {
+    label: "Rotate Secrets Manager Secret",
+    description: "Rotate an AWS Secrets Manager secret and propagate the new value to consumers.",
+    outcomeTemplate: JSON.stringify({ secret_id: "", rotation_lambda_arn: "", rollback_strategy: "restore_previous_secret" }, null, 2),
+  },
+  rotate_jwt_signing_key: {
+    label: "Rotate JWT Signing Key",
+    description: "Generate a new JWT signing key and update the signing service.",
+    outcomeTemplate: JSON.stringify({ service_name: "", key_algorithm: "RS256", rollback_strategy: "restore_previous_key" }, null, 2),
+  },
+  // OS hardening — Linux
+  configure_seccomp: {
+    label: "Configure Seccomp",
+    description: "Apply a seccomp syscall filter profile to restrict kernel attack surface.",
+    outcomeTemplate: JSON.stringify({ profile_path: "/etc/seccomp/nexplane.json", service_name: "", rollback_strategy: "remove_seccomp_profile" }, null, 2),
+  },
+  configure_apparmor: {
+    label: "Configure AppArmor",
+    description: "Load and enforce an AppArmor profile on a target service.",
+    outcomeTemplate: JSON.stringify({ profile_path: "/etc/apparmor.d/nexplane", service_name: "", mode: "enforce", rollback_strategy: "disable_apparmor_profile" }, null, 2),
+  },
+  configure_selinux: {
+    label: "Configure SELinux",
+    description: "Set SELinux mode (enforcing/permissive) and apply a policy module.",
+    outcomeTemplate: JSON.stringify({ mode: "enforcing", policy_module: "", rollback_strategy: "restore_selinux_mode" }, null, 2),
+  },
+  apply_sysctl_hardening: {
+    label: "Apply Sysctl Hardening",
+    description: "Apply kernel parameter hardening via sysctl (network stack, memory protections).",
+    outcomeTemplate: JSON.stringify({ params: { "net.ipv4.tcp_syncookies": 1, "kernel.randomize_va_space": 2 }, rollback_strategy: "restore_previous_sysctl" }, null, 2),
+  },
+  configure_host_firewall: {
+    label: "Configure Host Firewall",
+    description: "Apply iptables / nftables / ufw rules to restrict inbound and outbound traffic.",
+    outcomeTemplate: JSON.stringify({ rules: [], default_policy: "deny", rollback_strategy: "restore_firewall_rules" }, null, 2),
+  },
+  blacklist_kernel_modules: {
+    label: "Blacklist Kernel Modules",
+    description: "Add kernel modules to modprobe blacklist to prevent loading.",
+    outcomeTemplate: JSON.stringify({ modules: ["usb-storage", "firewire-core"], rollback_strategy: "remove_module_blacklist" }, null, 2),
+  },
+  harden_mount_options: {
+    label: "Harden Mount Options",
+    description: "Add nodev, nosuid, noexec mount options to /tmp, /var/tmp, and removable media.",
+    outcomeTemplate: JSON.stringify({ paths: ["/tmp", "/var/tmp"], options: ["nodev", "nosuid", "noexec"], rollback_strategy: "restore_fstab" }, null, 2),
+  },
+  deploy_auditd_rules: {
+    label: "Deploy Auditd Rules",
+    description: "Deploy Linux audit daemon rules for file access, privilege escalation, and syscall auditing.",
+    outcomeTemplate: JSON.stringify({ rules_file: "", rollback_strategy: "remove_auditd_rules" }, null, 2),
+  },
+  setup_file_integrity_monitoring: {
+    label: "Setup File Integrity Monitoring",
+    description: "Install and configure AIDE or similar FIM tool to detect unauthorized file changes.",
+    outcomeTemplate: JSON.stringify({ monitored_paths: ["/etc", "/bin", "/usr/bin"], rollback_strategy: "uninstall_fim" }, null, 2),
+  },
+  deploy_ebpf_policy: {
+    label: "Deploy eBPF Policy",
+    description: "Load an eBPF-based security policy (Cilium, Tetragon, Falco) for runtime enforcement.",
+    outcomeTemplate: JSON.stringify({ policy_file: "", tool: "falco", rollback_strategy: "unload_ebpf_policy" }, null, 2),
+  },
+  harden_ssh: {
+    label: "Harden SSH",
+    description: "Apply SSH server hardening: disable root login, restrict ciphers, enforce key-only auth.",
+    outcomeTemplate: JSON.stringify({ disable_root_login: true, allow_password_auth: false, ciphers: [], rollback_strategy: "restore_sshd_config" }, null, 2),
+  },
+  configure_pam: {
+    label: "Configure PAM",
+    description: "Apply PAM configuration for password quality, account lockout, and MFA.",
+    outcomeTemplate: JSON.stringify({ lockout_attempts: 5, password_min_length: 14, rollback_strategy: "restore_pam_config" }, null, 2),
+  },
+  seccomp_learn: {
+    label: "Seccomp Learning Mode",
+    description: "Run a service in seccomp learning mode to generate a least-privilege syscall profile.",
+    outcomeTemplate: JSON.stringify({ service_name: "", duration_seconds: 300, output_path: "/etc/seccomp/generated.json", rollback_strategy: "rollback_unavailable" }, null, 2),
+  },
+  // OS hardening — Windows
+  wdac_audit: {
+    label: "WDAC Audit Mode",
+    description: "Apply Windows Defender Application Control policy in audit mode.",
+    outcomeTemplate: JSON.stringify({ policy_xml_path: "", rollback_strategy: "remove_wdac_policy" }, null, 2),
+  },
+  wdac_enforce: {
+    label: "WDAC Enforce Mode",
+    description: "Switch a WDAC policy from audit to enforce mode.",
+    outcomeTemplate: JSON.stringify({ policy_id: "", rollback_strategy: "wdac_audit_mode" }, null, 2),
+  },
+  asr_audit: {
+    label: "ASR Rules — Audit Mode",
+    description: "Enable Attack Surface Reduction rules in audit mode via Microsoft Defender.",
+    outcomeTemplate: JSON.stringify({ rule_ids: [], mode: "AuditMode", rollback_strategy: "disable_asr_rules" }, null, 2),
+  },
+  asr_enforce: {
+    label: "ASR Rules — Enforce Mode",
+    description: "Switch Attack Surface Reduction rules to block mode.",
+    outcomeTemplate: JSON.stringify({ rule_ids: [], mode: "Enabled", rollback_strategy: "asr_audit_mode" }, null, 2),
+  },
+  sysmon_deploy: {
+    label: "Deploy Sysmon",
+    description: "Install and configure Sysmon for Windows event logging.",
+    outcomeTemplate: JSON.stringify({ config_xml_url: "", rollback_strategy: "uninstall_sysmon" }, null, 2),
+  },
+  sysmon_fim: {
+    label: "Sysmon File Integrity Monitoring",
+    description: "Configure Sysmon to monitor specific directories for file changes.",
+    outcomeTemplate: JSON.stringify({ monitored_paths: ["C:\\Windows\\System32", "C:\\Program Files"], rollback_strategy: "restore_sysmon_config" }, null, 2),
+  },
 };
 
 const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
@@ -1134,11 +1273,11 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   },
   {
     label: "Identity",
-    types: ["offboard_user", "onboard_user"],
+    types: ["offboard_user", "onboard_user", "emergency_user_lockout", "user_suspension", "user_scope_reduction", "enforce_mfa", "azure_ad_disable_user", "azure_ad_create_user"],
   },
   {
     label: "Credential Rotation",
-    types: ["rotate_db_credentials", "rotate_ssh_keys", "rotate_api_key", "rotate_service_account", "key_rotation"],
+    types: ["rotate_db_credentials", "rotate_ssh_keys", "rotate_api_key", "rotate_service_account", "key_rotation", "rotate_secrets_manager_secret", "rotate_jwt_signing_key"],
   },
   {
     label: "Fleet",
@@ -1196,6 +1335,18 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
   {
     label: "Compliance",
     types: ["enforce_cis_benchmark", "collect_evidence"],
+  },
+  {
+    label: "OS Hardening — Linux",
+    types: [
+      "configure_seccomp", "configure_apparmor", "configure_selinux", "apply_sysctl_hardening",
+      "configure_host_firewall", "blacklist_kernel_modules", "harden_mount_options", "deploy_auditd_rules",
+      "setup_file_integrity_monitoring", "deploy_ebpf_policy", "harden_ssh", "configure_pam", "seccomp_learn",
+    ],
+  },
+  {
+    label: "OS Hardening — Windows",
+    types: ["wdac_audit", "wdac_enforce", "asr_audit", "asr_enforce", "sysmon_deploy", "sysmon_fim"],
   },
   {
     label: "Containerization",

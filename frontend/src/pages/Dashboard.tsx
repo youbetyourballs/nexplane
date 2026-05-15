@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { AlertTriangle, CheckCircle2, Clock, Play, XCircle, Activity } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Play, XCircle, Activity, Plug } from "lucide-react";
 import { changeRequestsApi } from "../api/endpoints";
 import { apiClient } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import { RiskBadge } from "../components/RiskBadge";
 import { PageLoading } from "../components/LoadingSpinner";
 import { formatDistanceToNow } from "date-fns";
-import type { ChangeRequestSummary } from "../types/api";
+import type { ChangeRequestSummary, ConnectorRead } from "../types/api";
 
 function StatCard({
   label,
@@ -38,10 +38,41 @@ function StatCard({
   return linkTo ? <Link to={linkTo}>{content}</Link> : content;
 }
 
+const ALL_CONNECTOR_TYPES = ["aws", "azure_ad", "ldap", "gcp", "azure", "okta", "tailscale", "crowdstrike", "tenable"] as const;
+
+const CONNECTOR_TYPE_LABELS: Record<string, string> = {
+  aws: "AWS",
+  azure_ad: "Azure AD",
+  ldap: "LDAP / AD",
+  gcp: "GCP",
+  azure: "Azure",
+  okta: "Okta",
+  tailscale: "Tailscale",
+  crowdstrike: "CrowdStrike",
+  tenable: "Tenable",
+};
+
+const CONNECTOR_TYPE_ICONS: Record<string, string> = {
+  aws: "☁️",
+  azure_ad: "👥",
+  ldap: "🏢",
+  gcp: "☁️",
+  azure: "🔷",
+  okta: "🔐",
+  tailscale: "🔒",
+  crowdstrike: "🦅",
+  tenable: "🔍",
+};
+
 export function Dashboard() {
   const { data: all, isLoading } = useQuery({
     queryKey: ["change-requests"],
     queryFn: () => changeRequestsApi.list(),
+  });
+
+  const { data: connectors } = useQuery<ConnectorRead[]>({
+    queryKey: ["connectors"],
+    queryFn: () => apiClient.get("/connectors").then((r) => r.data),
   });
 
   const { data: checklist } = useQuery({
@@ -146,6 +177,37 @@ export function Dashboard() {
           icon={AlertTriangle}
           color="bg-orange-100 text-orange-700"
         />
+      </div>
+
+      {/* Connector Status Widget */}
+      <div className="bg-white rounded-lg border border-slate-200 mb-6">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Plug className="w-4 h-4 text-slate-400" />
+            <h2 className="text-sm font-semibold text-slate-900">Connector Status</h2>
+          </div>
+          <Link to="/settings" className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+            Settings →
+          </Link>
+        </div>
+        <div className="px-5 py-3 grid grid-cols-3 sm:grid-cols-5 gap-3">
+          {ALL_CONNECTOR_TYPES.map((type) => {
+            const configured = (connectors ?? []).find((c) => c.connector_type === type);
+            return (
+              <div key={type} className={`flex flex-col items-center gap-1 p-2 rounded-lg border text-center ${
+                configured ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"
+              }`}>
+                <span className="text-lg">{CONNECTOR_TYPE_ICONS[type]}</span>
+                <span className="text-xs font-medium text-slate-700">{CONNECTOR_TYPE_LABELS[type]}</span>
+                {configured ? (
+                  <span className="text-xs text-emerald-600">● {configured.status}</span>
+                ) : (
+                  <Link to="/settings" className="text-xs text-indigo-500 hover:underline">+ Add</Link>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div className="bg-white rounded-lg border border-slate-200">

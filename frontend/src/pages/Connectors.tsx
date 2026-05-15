@@ -56,6 +56,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   terraform_local: "Terraform (Local CLI)",
   ansible_local: "Ansible (Local CLI)",
   oci: "Oracle Cloud Infrastructure",
+  ldap: "LDAP / Active Directory",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -104,6 +105,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   terraform_local: "🏗️",
   ansible_local: "⚙️",
   oci: "🔶",
+  ldap: "🏢",
 };
 
 // Primary ingest action per connector type — controls Run Discovery button and Schedule sync badge
