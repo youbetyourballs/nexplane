@@ -326,6 +326,12 @@ class ChangeType(str, enum.Enum):
     rotate_postgres_password = "rotate_postgres_password"
     rotate_redis_password = "rotate_redis_password"
     rotate_mongodb_password = "rotate_mongodb_password"
+    # OPNsense firewall
+    opnsense_update_rule = "opnsense_update_rule"
+    opnsense_block_host = "opnsense_block_host"
+    # step-ca certificate lifecycle
+    step_ca_rotate_cert = "step_ca_rotate_cert"
+    step_ca_check_expiry = "step_ca_check_expiry"
 
 
 class RiskLevel(str, enum.Enum):

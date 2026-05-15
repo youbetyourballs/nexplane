@@ -1,0 +1,53 @@
+{
+  "connector_type": "opnsense",
+  "display_name": "OPNsense",
+  "credential_fields": [
+    {"name": "base_url", "label": "OPNsense Base URL", "type": "string", "required": true, "placeholder": "https://opnsense.example.com"},
+    {"name": "api_key", "label": "API Key", "type": "string", "required": true},
+    {"name": "api_secret", "label": "API Secret", "type": "password", "required": true},
+    {"name": "verify_ssl", "label": "Verify SSL Certificate", "type": "boolean", "required": false, "default": false}
+  ],
+  "actions": [
+    {
+      "action_id": "update_firewall_rule",
+      "generic_action": "update_firewall_rule",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Update Firewall Rule",
+      "description": "Create or update a firewall filter rule in OPNsense and apply it. Rollback deletes the rule.",
+      "applicable_asset_types": ["firewall", "cloud_account"],
+      "parameters": [
+        {"name": "interface", "type": "string", "required": false, "default": "lan", "description": "OPNsense interface name (e.g. lan, wan, opt1)"},
+        {"name": "action", "type": "string", "required": false, "default": "pass", "description": "Rule action: pass or block"},
+        {"name": "protocol", "type": "string", "required": false, "default": "any"},
+        {"name": "source", "type": "string", "required": false, "default": "any", "description": "Source network or alias"},
+        {"name": "destination", "type": "string", "required": false, "default": "any", "description": "Destination network or alias"},
+        {"name": "destination_port", "type": "string", "required": false, "default": "any"},
+        {"name": "description", "type": "string", "required": false, "default": "nexplane-managed rule"}
+      ],
+      "executor": "opnsense.update_firewall_rule",
+      "rollback_action": "rollback",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "firewall_rule_change"
+    },
+    {
+      "action_id": "block_host",
+      "generic_action": "block_host",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Block Host",
+      "description": "Block an IP address by creating an alias and a block rule. Rollback removes both.",
+      "applicable_asset_types": ["firewall", "cloud_account"],
+      "parameters": [
+        {"name": "ip_address", "type": "string", "required": true, "description": "IP address to block"},
+        {"name": "interface", "type": "string", "required": false, "default": "lan"},
+        {"name": "alias_name", "type": "string", "required": false, "description": "Alias name override; auto-generated from IP if not provided"},
+        {"name": "description", "type": "string", "required": false, "description": "Description for the alias and rule"}
+      ],
+      "executor": "opnsense.block_host",
+      "rollback_action": "rollback",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "host_blocked"
+    }
+  ]
+}
