@@ -1,0 +1,18 @@
+{
+  "connector_type": "keycloak",
+  "display_name": "Keycloak",
+  "actions": [
+    {
+      "action_id": "keycloak_disable_user",
+      "generic_action": "keycloak_disable_user",
+      "display_name": "Disable Keycloak User",
+      "description": "Disables a Keycloak user and revokes all active sessions.",
+      "executor": "keycloak.disable_user",
+      "action_type": "change",
+      "execution_tier": 3,
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [{"name": "username", "type": "string", "required": true}]
+    }
+  ]
+}
