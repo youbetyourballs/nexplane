@@ -1,0 +1,21 @@
+{
+  "connector_type": "postgres",
+  "display_name": "PostgreSQL",
+  "actions": [
+    {
+      "action_id": "rotate_postgres_password",
+      "generic_action": "rotate_postgres_password",
+      "display_name": "Rotate PostgreSQL User Password",
+      "description": "Generates a secure random password and sets it on the specified PostgreSQL user via ALTER USER.",
+      "executor": "postgres.rotate_user_password",
+      "action_type": "change",
+      "execution_tier": 2,
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["server", "database"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true, "description": "PostgreSQL user whose password will be rotated"},
+        {"name": "old_password", "type": "string", "required": false, "description": "Previous password (used for rollback only)"}
+      ]
+    }
+  ]
+}
