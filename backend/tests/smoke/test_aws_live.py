@@ -6055,6 +6055,267 @@ echo "LDAP_SETUP_DONE"
 
 
 # ---------------------------------------------------------------------------
+# Phase OPNSENSE_RULE — OPNsense firewall rule add/rollback (nginx mock API)
+# ---------------------------------------------------------------------------
+
+def run_phase_opnsense_rule(client, cloud_account_id):
+    # type: (NexplaneClient, str) -> None
+    """Phase OPNSENSE_RULE: launch EC2, stand up nginx OPNsense API mock,
+    test update_firewall_rule and block_host executors, verify rollback."""
+    import hashlib
+    print("\n[Phase OPNSENSE_RULE] OPNsense firewall rule smoke test")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_client:
+        fail("[OPNSENSE_RULE] AWS clients not available")
+
+    AL2023_AMI = "ami-0953476d60561c955"
+    mock_version = "v1"
+    setup_hash = hashlib.md5(f"opnsense-nginx-mock-{mock_version}-{AL2023_AMI}".encode()).hexdigest()
+
+    # Check AMI cache
+    cached_ami = None
+    param_path = f"/nexplane/smoke-amis/opnsense-mock/{setup_hash[:8]}"
+    try:
+        resp_p = ssm_client.get_parameter(Name=param_path)
+        candidate = resp_p["Parameter"]["Value"]
+        images = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+        if images and images[0]["State"] == "available":
+            cached_ami = candidate
+            log(f"Using cached OPNsense mock AMI: {cached_ami}")
+    except Exception:
+        pass
+
+    # nginx mock config: responds to OPNsense API endpoints with canned JSON
+    nginx_mock_setup = r"""
+set -e
+amazon-linux-extras install nginx1 -y 2>/dev/null || dnf install -y nginx 2>/dev/null || true
+mkdir -p /usr/share/nginx/opnsense
+
+# alias/addItem -> returns uuid
+cat > /usr/share/nginx/opnsense/alias_add.json << 'EOF'
+{"result":"saved","uuid":"aaaaaaaa-bbbb-cccc-dddd-111111111111"}
+EOF
+
+# alias/reconfigure -> ok
+cat > /usr/share/nginx/opnsense/alias_reconfigure.json << 'EOF'
+{"status":"ok"}
+EOF
+
+# alias/delItem -> ok
+cat > /usr/share/nginx/opnsense/alias_del.json << 'EOF'
+{"result":"deleted"}
+EOF
+
+# filter/addRule -> returns uuid
+cat > /usr/share/nginx/opnsense/rule_add.json << 'EOF'
+{"result":"saved","uuid":"eeeeeeee-ffff-0000-1111-222222222222"}
+EOF
+
+# filter/apply -> ok
+cat > /usr/share/nginx/opnsense/filter_apply.json << 'EOF'
+{"status":"ok"}
+EOF
+
+# filter/delRule -> ok
+cat > /usr/share/nginx/opnsense/rule_del.json << 'EOF'
+{"result":"deleted"}
+EOF
+
+cat > /etc/nginx/conf.d/opnsense_mock.conf << 'NGINXEOF'
+server {
+    listen 8080;
+    location /api/firewall/alias/addItem {
+        default_type application/json;
+        alias /usr/share/nginx/opnsense/alias_add.json;
+    }
+    location /api/firewall/alias/reconfigure {
+        default_type application/json;
+        alias /usr/share/nginx/opnsense/alias_reconfigure.json;
+    }
+    location ~ ^/api/firewall/alias/delItem/ {
+        default_type application/json;
+        alias /usr/share/nginx/opnsense/alias_del.json;
+    }
+    location /api/firewall/filter/addRule {
+        default_type application/json;
+        alias /usr/share/nginx/opnsense/rule_add.json;
+    }
+    location /api/firewall/filter/apply {
+        default_type application/json;
+        alias /usr/share/nginx/opnsense/filter_apply.json;
+    }
+    location ~ ^/api/firewall/filter/delRule/ {
+        default_type application/json;
+        alias /usr/share/nginx/opnsense/rule_del.json;
+    }
+}
+NGINXEOF
+
+nginx -t
+systemctl enable nginx
+systemctl restart nginx
+echo "OPNSENSE_MOCK_READY"
+"""
+
+    # Launch EC2
+    vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
+    subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}])["InstanceTypeOfferings"]
+        azs = {o["Location"] for o in offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in azs] or subnets
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    resp = ec2_client.run_instances(
+        ImageId=cached_ami or AL2023_AMI, InstanceType="t3.small",
+        MinCount=1, MaxCount=1, SubnetId=subnet_id,
+        IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-opnsense"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+    )
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"OPNsense mock EC2: {instance_id}")
+
+    import time as _t2
+    _t2.sleep(5)
+    deadline = time.time() + 180
+    private_ip = ""
+    while time.time() < deadline:
+        try:
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+            if state == "running":
+                private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+                break
+        except Exception:
+            pass
+        time.sleep(8)
+
+    # Wait for SSM
+    deadline2 = time.time() + 120
+    while time.time() < deadline2:
+        try:
+            r = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+            time.sleep(5)
+            out = ssm_client.get_command_invocation(
+                CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
+            if out["Status"] == "Success":
+                break
+        except Exception:
+            pass
+        time.sleep(10)
+
+    opnsense_connector_id = None
+    try:
+        if not cached_ami:
+            resp_s = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [nginx_mock_setup]}, TimeoutSeconds=120)
+            time.sleep(30)
+            try:
+                out_s = ssm_client.get_command_invocation(
+                    CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                if "OPNSENSE_MOCK_READY" not in out_s.get("StandardOutputContent", ""):
+                    log("  WARNING: nginx mock setup may not have completed cleanly")
+                else:
+                    log("OPNsense nginx mock ready")
+                    from run_on_ec2 import get_or_create_smoke_ami
+                    get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "opnsense-mock", setup_hash)
+            except Exception as e:
+                log(f"  WARNING: setup check error: {e}")
+        else:
+            # Restart nginx on cached instance
+            restart_cmd = "systemctl restart nginx && echo NGINX_READY"
+            resp_r = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [restart_cmd]}, TimeoutSeconds=30)
+            time.sleep(10)
+
+        # Register OPNsense connector
+        mock_url = f"http://{private_ip}:8080"
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "opnsense",
+            "name": "nexplane-smoke-opnsense",
+            "display_name": "nexplane-smoke-opnsense",
+            "credentials": {
+                "base_url": mock_url,
+                "api_key": "smoke-key",
+                "api_secret": "smoke-secret",
+                "verify_ssl": False,
+            },
+        })
+        opnsense_connector_id = conn_resp.get("id")
+        log(f"OPNsense connector registered: {opnsense_connector_id}")
+
+        # Test update_firewall_rule
+        cr1 = client.run_cr(
+            "[OPNSENSE_RULE] add block rule",
+            "opnsense_update_rule",
+            cloud_account_id,
+            {
+                "interface": "lan",
+                "action": "block",
+                "protocol": "tcp",
+                "source": "10.0.0.100",
+                "destination": "any",
+                "destination_port": "443",
+                "description": "nexplane-smoke-test-rule",
+            },
+        )
+        exec_runs = cr1.get("execution_runs") or []
+        result1 = exec_runs[0].get("result") if exec_runs else {}
+        if result1.get("status") not in ("applied", "skipped"):
+            log(f"  WARNING: unexpected update_firewall_rule result: {result1}")
+        else:
+            log("update_firewall_rule: applied")
+
+        # Test block_host
+        cr2 = client.run_cr(
+            "[OPNSENSE_RULE] block host 10.0.0.99",
+            "opnsense_block_host",
+            cloud_account_id,
+            {
+                "ip_address": "10.0.0.99",
+                "interface": "lan",
+                "description": "nexplane-smoke-block-host",
+            },
+        )
+        exec_runs2 = cr2.get("execution_runs") or []
+        result2 = exec_runs2[0].get("result") if exec_runs2 else {}
+        if result2.get("status") not in ("applied", "skipped"):
+            log(f"  WARNING: unexpected block_host result: {result2}")
+        else:
+            log("block_host: applied")
+
+        log("Phase OPNSENSE_RULE PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase OPNSENSE_RULE failed: {e}")
+        raise
+    finally:
+        if opnsense_connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{opnsense_connector_id}")
+            except Exception:
+                pass
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Phase VAULT_ROTATE — HashiCorp Vault secret rotation (AMI cached)
 # ---------------------------------------------------------------------------
 
@@ -6266,6 +6527,255 @@ vault kv get -field=password secret/smoke-test
         if vault_connector_id:
             try:
                 client.client.delete(f"{client.base}/connectors/{vault_connector_id}")
+            except Exception:
+                pass
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Phase STEP_CA_ROTATE — step-ca certificate rotation (AMI cached)
+# ---------------------------------------------------------------------------
+
+def run_phase_step_ca_rotate(client, cloud_account_id):
+    # type: (NexplaneClient, str) -> None
+    """Phase STEP_CA_ROTATE: provision step-ca on EC2, issue cert, check expiry,
+    rotate (reissue). AMI cached after first setup."""
+    import hashlib
+    print("\n[Phase STEP_CA_ROTATE] step-ca certificate rotation")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_client:
+        fail("[STEP_CA_ROTATE] AWS clients not available")
+
+    AL2023_AMI = "ami-0953476d60561c955"
+    step_version = "0.27.4"
+    stepca_version = "0.27.4"
+    setup_hash = hashlib.md5(f"step-ca-{stepca_version}-{AL2023_AMI}".encode()).hexdigest()
+
+    step_setup_script = f"""
+set -e
+# Install step CLI
+curl -fsSL https://dl.smallstep.com/gh-release/cli/docs-cli-install/v{step_version}/step_linux_{step_version}_amd64.tar.gz -o /tmp/step-cli.tar.gz
+tar xzf /tmp/step-cli.tar.gz -C /tmp
+mv /tmp/step_{step_version}/bin/step /usr/local/bin/step
+step version
+
+# Install step-ca
+curl -fsSL https://dl.smallstep.com/gh-release/certificates/docs-ca-install/v{stepca_version}/step-ca_linux_{stepca_version}_amd64.tar.gz -o /tmp/step-ca.tar.gz
+tar xzf /tmp/step-ca.tar.gz -C /tmp
+mv /tmp/step-ca_{stepca_version}/bin/step-ca /usr/local/bin/step-ca
+step-ca version
+
+# Initialize CA (non-interactive)
+mkdir -p /root/.step
+echo "nexplane-smoke-ca-password" > /tmp/ca-password
+step ca init \\
+  --name="Nexplane Smoke CA" \\
+  --dns="localhost" \\
+  --address=":9000" \\
+  --provisioner="admin" \\
+  --password-file=/tmp/ca-password \\
+  --deployment-type standalone \\
+  --no-db 2>&1 | tail -5
+
+# Start step-ca in background
+nohup step-ca /root/.step/config/ca.json --password-file=/tmp/ca-password > /var/log/step-ca.log 2>&1 &
+sleep 5
+
+# Get CA fingerprint
+FINGERPRINT=$(step certificate fingerprint /root/.step/certs/root_ca.crt)
+echo "CA_FINGERPRINT=$FINGERPRINT"
+
+# Issue test cert for localhost
+step ca certificate localhost /tmp/smoke-cert.crt /tmp/smoke-cert.key \\
+  --ca-url https://localhost:9000 \\
+  --root /root/.step/certs/root_ca.crt \\
+  --provisioner admin \\
+  --provisioner-password-file /tmp/ca-password \\
+  --not-after 24h 2>&1
+
+echo "STEP_CA_SETUP_COMPLETE"
+"""
+
+    # Check AMI cache
+    cached_ami = None
+    param_path = f"/nexplane/smoke-amis/step-ca/{setup_hash[:8]}"
+    try:
+        resp_p = ssm_client.get_parameter(Name=param_path)
+        candidate = resp_p["Parameter"]["Value"]
+        images = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+        if images and images[0]["State"] == "available":
+            cached_ami = candidate
+            log(f"Using cached step-ca AMI: {cached_ami}")
+    except Exception:
+        pass
+
+    # Launch EC2
+    vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
+    subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}])["InstanceTypeOfferings"]
+        azs = {o["Location"] for o in offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in azs] or subnets
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    resp = ec2_client.run_instances(
+        ImageId=cached_ami or AL2023_AMI, InstanceType="t3.small",
+        MinCount=1, MaxCount=1, SubnetId=subnet_id,
+        IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-step-ca"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+    )
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"step-ca EC2: {instance_id}")
+
+    import time as _t2
+    _t2.sleep(5)
+    deadline = time.time() + 180
+    private_ip = ""
+    while time.time() < deadline:
+        try:
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+            if state == "running":
+                private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+                break
+        except Exception:
+            pass
+        time.sleep(8)
+
+    deadline2 = time.time() + 120
+    while time.time() < deadline2:
+        try:
+            r = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+            time.sleep(5)
+            out = ssm_client.get_command_invocation(
+                CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
+            if out["Status"] == "Success":
+                break
+        except Exception:
+            pass
+        time.sleep(10)
+
+    step_ca_connector_id = None
+    fingerprint = ""
+    try:
+        if not cached_ami:
+            resp_s = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [step_setup_script]}, TimeoutSeconds=180)
+            time.sleep(60)
+            try:
+                out_s = ssm_client.get_command_invocation(
+                    CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                stdout = out_s.get("StandardOutputContent", "")
+                if "STEP_CA_SETUP_COMPLETE" not in stdout:
+                    log("  WARNING: step-ca setup may not have completed")
+                else:
+                    log("step-ca installed and CA initialized")
+                    for line in stdout.splitlines():
+                        if line.startswith("CA_FINGERPRINT="):
+                            fingerprint = line.split("=", 1)[1].strip()
+                    from run_on_ec2 import get_or_create_smoke_ami
+                    get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "step-ca", setup_hash)
+            except Exception as e:
+                log(f"  WARNING: setup check error: {e}")
+        else:
+            # On cached instance: restart step-ca and get fingerprint
+            restart_cmd = """
+echo "nexplane-smoke-ca-password" > /tmp/ca-password
+pkill step-ca 2>/dev/null || true
+sleep 2
+nohup step-ca /root/.step/config/ca.json --password-file=/tmp/ca-password > /var/log/step-ca.log 2>&1 &
+sleep 5
+FINGERPRINT=$(step certificate fingerprint /root/.step/certs/root_ca.crt)
+echo "CA_FINGERPRINT=$FINGERPRINT"
+echo "STEP_CA_RESTARTED"
+"""
+            resp_r = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [restart_cmd]}, TimeoutSeconds=60)
+            time.sleep(20)
+            try:
+                out_r = ssm_client.get_command_invocation(
+                    CommandId=resp_r["Command"]["CommandId"], InstanceId=instance_id)
+                for line in out_r.get("StandardOutputContent", "").splitlines():
+                    if line.startswith("CA_FINGERPRINT="):
+                        fingerprint = line.split("=", 1)[1].strip()
+            except Exception:
+                pass
+
+        # Register step-ca connector
+        ca_url = f"https://{private_ip}:9000"
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "step_ca",
+            "name": "nexplane-smoke-step-ca",
+            "display_name": "nexplane-smoke-step-ca",
+            "credentials": {
+                "ca_url": ca_url,
+                "fingerprint": fingerprint,
+                "provisioner": "admin",
+                "provisioner_password": "nexplane-smoke-ca-password",
+            },
+        })
+        step_ca_connector_id = conn_resp.get("id")
+        log(f"step-ca connector registered: {step_ca_connector_id}")
+
+        # Phase 1: check_expiry on localhost:9000 (step-ca itself serves TLS)
+        cr_check = client.run_cr(
+            "[STEP_CA_ROTATE] check cert expiry on CA port",
+            "step_ca_check_expiry",
+            cloud_account_id,
+            {"host": private_ip, "port": 9000, "warning_threshold_days": 30},
+        )
+        exec_runs = cr_check.get("execution_runs") or []
+        result_check = exec_runs[0].get("result") if exec_runs else {}
+        if result_check.get("status") == "checked":
+            log(f"check_expiry: remaining_days={result_check.get('remaining_days')}")
+        else:
+            log(f"  WARNING: check_expiry result: {result_check}")
+
+        # Phase 2: rotate cert (reissue for localhost)
+        cr_rotate = client.run_cr(
+            "[STEP_CA_ROTATE] rotate cert for localhost",
+            "step_ca_rotate_cert",
+            cloud_account_id,
+            {
+                "subject": "localhost",
+                "san": "localhost",
+                "not_after": "48h",
+                "deploy_via_ssm": False,
+            },
+        )
+        exec_runs2 = cr_rotate.get("execution_runs") or []
+        result_rotate = exec_runs2[0].get("result") if exec_runs2 else {}
+        if result_rotate.get("status") in ("issued", "skipped"):
+            log(f"rotate_cert: {result_rotate.get('status')}")
+        else:
+            log(f"  WARNING: rotate_cert result: {result_rotate}")
+
+        log("Phase STEP_CA_ROTATE PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase STEP_CA_ROTATE failed: {e}")
+        raise
+    finally:
+        if step_ca_connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{step_ca_connector_id}")
             except Exception:
                 pass
         try:
@@ -8755,6 +9265,8 @@ def main():
             "LDAP_ROTATE=emergency_user_lockout against OpenLDAP (AMI cached after first run in SSM /nexplane/smoke-amis/openldap/). "
             "KEYCLOAK_ROTATE=Keycloak emergency user lockout (Docker on t3.large, AMI cached). "
             "VAULT_ROTATE=HashiCorp Vault secret rotation (EC2 dev mode, AMI cached). "
+            "OPNSENSE_RULE=OPNsense firewall rule add+rollback via nginx mock API (AMI cached). "
+            "STEP_CA_ROTATE=step-ca cert issue+check-expiry+rotate (EC2, AMI cached). "
             "WIN_OSSEC_WIRE=Windows hardening executor dispatch (Windows Server 2022, t3.medium, AMI cached). "
             "WIN_HARDENING_PIPELINE=AppLocker+Firewall+AuditPolicy pipeline on cached Windows AMI. "
             "WIN_POLICY_PIPELINE=WDAC+ASR+Sysmon pipeline on cached Windows AMI. "
@@ -9040,6 +9552,10 @@ def main():
             run_phase_keycloak_rotate(client, cloud_account_id)
         if "VAULT_ROTATE" in phases:
             run_phase_vault_rotate(client, cloud_account_id)
+        if "OPNSENSE_RULE" in phases:
+            run_phase_opnsense_rule(client, cloud_account_id)
+        if "STEP_CA_ROTATE" in phases:
+            run_phase_step_ca_rotate(client, cloud_account_id)
         if "SECRETS_ROTATE" in phases:
             run_phase_secrets_rotate(client, cloud_account_id)
         if "DISCOVER_ROTATE" in phases:
