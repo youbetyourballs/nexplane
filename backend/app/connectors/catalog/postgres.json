@@ -1,6 +1,13 @@
 {
   "connector_type": "postgres",
   "display_name": "PostgreSQL",
+  "credentials": [
+    {"name": "host", "label": "Host", "type": "text", "required": true},
+    {"name": "port", "label": "Port", "type": "text", "required": false, "default": "5432"},
+    {"name": "dbname", "label": "Database Name", "type": "text", "required": false, "default": "postgres"},
+    {"name": "user", "label": "Admin Username", "type": "text", "required": true},
+    {"name": "password", "label": "Admin Password", "type": "password", "required": true}
+  ],
   "actions": [
     {
       "action_id": "rotate_postgres_password",
