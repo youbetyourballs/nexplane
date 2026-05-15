@@ -9517,16 +9517,19 @@ def run_phase_freeipa_rotate(client, cloud_account_id):
     except Exception as _ami_e:
         log(f"  WARNING: CentOS9 AMI lookup failed ({_ami_e}), using fallback {CENTOS9_AMI}")
     freeipa_version = "4.11"  # tracks the package version, used for cache key
-    setup_script = """
+    setup_script = r"""
 set -ex
+# Get private IP for ipa-server-install
+PRIVATE_IP=$(hostname -I | awk '{print $1}')
 # Set hostname required by ipa-server-install
 hostnamectl set-hostname freeipa.smoke.test
-echo "127.0.0.1 freeipa.smoke.test freeipa" >> /etc/hosts
-# Disable firewalld (interferes with ipa)
+echo "${PRIVATE_IP} freeipa.smoke.test freeipa" >> /etc/hosts
+# Disable firewalld (interferes with ipa port binding)
 systemctl stop firewalld 2>/dev/null || true
 systemctl disable firewalld 2>/dev/null || true
-# Install FreeIPA server
+# Install FreeIPA server packages
 dnf install -y freeipa-server freeipa-server-dns 2>/dev/null
+# Run server install (unattended, ~15 min)
 ipa-server-install --unattended \
   --realm=SMOKE.TEST \
   --domain=smoke.test \
@@ -9534,7 +9537,7 @@ ipa-server-install --unattended \
   --admin-password=Admin1234 \
   --no-ntp \
   --hostname=freeipa.smoke.test \
-  --ip-address=127.0.0.1
+  --ip-address=${PRIVATE_IP}
 echo "FREEIPA_INSTALL_COMPLETE"
 # Create test user (ipa commands need kerberos)
 echo "Admin1234" | kinit admin@SMOKE.TEST
@@ -10507,10 +10510,13 @@ def run_phase_wazuh_agent(client: NexplaneClient, cloud_account_id: str) -> None
     if not ec2_client or not ssm_client:
         fail("[WAZUH_AGENT] AWS clients not available")
 
-    AL2023_AMI = "ami-0c101f26f147fa7fd"
+    # Latest AL2023 AMI (us-east-1) — SSM agent pre-installed
+    AL2023_AMI = "ami-08623034deb42fc21"
     wazuh_version = "4.x"
+    # Well-known smoke test password — reset during setup so we always know it
+    WAZUH_PASSWORD = "NexplaneSmoke1!"
 
-    setup_script = """
+    setup_script = f"""
 set -e
 # Import Wazuh GPG key and add repo
 rpm --import https://packages.wazuh.com/key/GPG-KEY-WAZUH 2>/dev/null || true
@@ -10527,13 +10533,40 @@ yum install -y wazuh-manager 2>/dev/null
 systemctl daemon-reload
 systemctl enable wazuh-manager
 systemctl start wazuh-manager
-# Wait for API to start (port 55000)
-for i in $(seq 1 30); do
-  curl -sk https://localhost:55000/ | grep -q "Wazuh API REST" && break || sleep 5
+# Wait for API to start (port 55000) — Wazuh 4.x can take 60–90s
+for i in $(seq 1 36); do
+  curl -sk https://localhost:55000/ | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if 'title' in d else 1)" 2>/dev/null && break || sleep 5
 done
+# Reset wazuh-wui password to a known value (Wazuh 4.x generates random passwords)
+/var/ossec/bin/wazuh-control stop 2>/dev/null || true
+sleep 3
+/var/ossec/bin/wazuh-control start 2>/dev/null || true
+sleep 10
+# Use the passwords tool to set a known password for wazuh-wui
+WAZUH_PASS="{WAZUH_PASSWORD}"
+# Try Wazuh 4.4+ password tool
+/usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p "$WAZUH_PASS" 2>/dev/null || true
+# Update password via API using default generated password (read from config)
+DEFAULT_PASS=$(grep -oP '(?<=password: ).*' /var/ossec/etc/api/configuration/api.yaml 2>/dev/null | head -1 || echo "")
+if [ -z "$DEFAULT_PASS" ]; then
+  DEFAULT_PASS="wazuh-wui"
+fi
+# Get JWT token using default credentials
+TOKEN=$(curl -sk -u "wazuh-wui:$DEFAULT_PASS" -X POST https://localhost:55000/security/user/authenticate \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{{}}).get('token',''))" 2>/dev/null || echo "")
+if [ -n "$TOKEN" ]; then
+  # Update password via API
+  USERID=$(curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:55000/security/users \
+    | python3 -c "import sys,json; users=json.load(sys.stdin)['data']['affected_items']; u=[x for x in users if x['username']=='wazuh-wui']; print(u[0]['id'] if u else '')" 2>/dev/null || echo "")
+  if [ -n "$USERID" ]; then
+    curl -sk -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+      -X PUT "https://localhost:55000/security/users/$USERID" \
+      -d '{{"password":"{WAZUH_PASSWORD}"}}' 2>/dev/null || true
+  fi
+fi
 echo "WAZUH_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(f"wazuh-4.x-{AL2023_AMI}".encode()).hexdigest()
+    setup_hash = hashlib.md5(f"wazuh-4.x-{AL2023_AMI}-v2".encode()).hexdigest()
 
     # AMI cache check
     cached_ami = None
@@ -10607,31 +10640,75 @@ echo "WAZUH_SETUP_COMPLETE"
     wazuh_connector_id = None
     try:
         if not cached_ami:
+            # Wazuh install takes ~5 min on a fresh instance
             resp_s = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": [setup_script]}, TimeoutSeconds=180)
-            time.sleep(60)
+                Parameters={"commands": [setup_script]}, TimeoutSeconds=600)
+            time.sleep(120)  # Wait for Wazuh install + API startup
             try:
-                out_s = ssm_client.get_command_invocation(
-                    CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
-                if "WAZUH_SETUP_COMPLETE" not in out_s.get("StandardOutputContent", ""):
-                    log("  WARNING: Wazuh setup may not have completed cleanly")
-                else:
-                    log("Wazuh manager installed and started")
-                    from run_on_ec2 import get_or_create_smoke_ami
-                    get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "wazuh", setup_hash)
+                _setup_done = False
+                for _attempt in range(18):  # Poll up to 3 more minutes
+                    try:
+                        out_s = ssm_client.get_command_invocation(
+                            CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                        if out_s["Status"] in ("Success", "Failed", "TimedOut", "Cancelled"):
+                            _setup_done = True
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(10)
+                if _setup_done:
+                    out_s = ssm_client.get_command_invocation(
+                        CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                    if "WAZUH_SETUP_COMPLETE" not in out_s.get("StandardOutputContent", ""):
+                        log(f"  WARNING: Wazuh setup output: {out_s.get('StandardOutputContent','')[:200]}")
+                        log(f"  WARNING: Wazuh setup stderr: {out_s.get('StandardErrorContent','')[:200]}")
+                    else:
+                        log("Wazuh manager installed and started")
+                        try:
+                            from smoke.run_on_ec2 import get_or_create_smoke_ami
+                        except ImportError:
+                            try:
+                                from run_on_ec2 import get_or_create_smoke_ami
+                            except ImportError:
+                                get_or_create_smoke_ami = None
+                        if get_or_create_smoke_ami:
+                            get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "wazuh", setup_hash)
             except Exception as e:
                 log(f"  WARNING: Wazuh setup check failed: {e}")
         else:
-            start_cmd = "systemctl start wazuh-manager; sleep 10"
+            start_cmd = "systemctl start wazuh-manager 2>/dev/null || true; sleep 15"
             ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": [start_cmd]}, TimeoutSeconds=30)
-            time.sleep(15)
+                Parameters={"commands": [start_cmd]}, TimeoutSeconds=60)
+            time.sleep(20)
 
         import time as _ts
         agent_name = f"smoke-agent-{int(_ts.time())}"
         wazuh_url = f"https://{private_ip}:55000"
+
+        # Verify we can authenticate to Wazuh API before registering connector
+        wazuh_password = WAZUH_PASSWORD
+        verify_auth_cmd = (
+            f"curl -sk -u 'wazuh-wui:{wazuh_password}' -X POST "
+            f"https://localhost:55000/security/user/authenticate | "
+            f"python3 -c \"import sys,json; d=json.load(sys.stdin); "
+            f"print('AUTH_OK' if d.get('data',{{}}).get('token') else 'AUTH_FAIL:'+str(d))\""
+        )
+        try:
+            resp_auth = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [verify_auth_cmd]}, TimeoutSeconds=20)
+            time.sleep(12)
+            out_auth = ssm_client.get_command_invocation(
+                CommandId=resp_auth["Command"]["CommandId"], InstanceId=instance_id)
+            auth_out = out_auth.get("StandardOutputContent", "")
+            if "AUTH_OK" in auth_out:
+                log("Wazuh API authentication verified")
+            else:
+                log(f"  WARNING: Wazuh auth check: {auth_out[:200]}")
+        except Exception as e:
+            log(f"  WARNING: Wazuh auth verify: {e}")
 
         conn_resp = client.post("/connectors", json={
             "connector_type": "wazuh",
@@ -10640,7 +10717,7 @@ echo "WAZUH_SETUP_COMPLETE"
             "credentials": {
                 "base_url": wazuh_url,
                 "username": "wazuh-wui",
-                "password": "MyS3cr37P450r.*-",
+                "password": wazuh_password,
                 "verify_ssl": False,
             },
         })
@@ -10661,13 +10738,19 @@ echo "WAZUH_SETUP_COMPLETE"
         elif result.get("action") == "wazuh_deploy_agent":
             agent_id = result.get("agent_id", "")
             log(f"Wazuh agent registered: {agent_name} (id={agent_id})")
-            # Verify via SSM
-            verify_cmd = f"curl -sk -u wazuh-wui:'MyS3cr37P450r.*-' -X POST https://localhost:55000/security/user/authenticate | python3 -c \"import sys,json; t=json.load(sys.stdin)['data']['token']; print(t)\" > /tmp/wt.txt && curl -sk -H \"Authorization: Bearer $(cat /tmp/wt.txt)\" https://localhost:55000/agents | python3 -c \"import sys,json; agents=json.load(sys.stdin)['data']['affected_items']; print([a['name'] for a in agents])\""
+            # Verify via SSM: get JWT token then list agents
+            verify_cmd = (
+                f"TOKEN=$(curl -sk -u 'wazuh-wui:{wazuh_password}' -X POST "
+                f"https://localhost:55000/security/user/authenticate | "
+                f"python3 -c \"import sys,json; print(json.load(sys.stdin)['data']['token'])\" 2>/dev/null) && "
+                f"curl -sk -H \"Authorization: Bearer $TOKEN\" https://localhost:55000/agents | "
+                f"python3 -c \"import sys,json; agents=json.load(sys.stdin)['data']['affected_items']; print([a['name'] for a in agents])\""
+            )
             try:
                 resp_v = ssm_client.send_command(
                     InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
                     Parameters={"commands": [verify_cmd]}, TimeoutSeconds=30)
-                time.sleep(12)
+                time.sleep(15)
                 out_v = ssm_client.get_command_invocation(
                     CommandId=resp_v["Command"]["CommandId"], InstanceId=instance_id)
                 output = out_v.get("StandardOutputContent", "")
@@ -10712,12 +10795,13 @@ def run_phase_falco_policy(client: NexplaneClient, cloud_account_id: str) -> Non
     if not ec2_client or not ssm_client:
         fail("[FALCO_POLICY] AWS clients not available")
 
-    AL2023_AMI = "ami-0c101f26f147fa7fd"
+    # Latest AL2023 AMI (us-east-1) — SSM agent pre-installed
+    AL2023_AMI = "ami-08623034deb42fc21"
 
     setup_script = """
 set -e
 # Import Falco GPG key
-curl -s https://falco.org/repo/falcosecurity-packages.asc | rpm --import - 2>/dev/null || true
+curl -fsSL https://falco.org/repo/falcosecurity-packages.asc | rpm --import - 2>/dev/null || true
 # Add Falco repo
 cat > /etc/yum.repos.d/falcosecurity.repo << 'REPO'
 [falcosecurity]
@@ -10727,13 +10811,21 @@ enabled=1
 gpgcheck=1
 gpgkey=https://falco.org/repo/falcosecurity-packages.asc
 REPO
+# Install falco package (rule file management only — we skip kernel driver on AL2023 6.x)
 yum install -y falco 2>/dev/null || true
-systemctl enable falco 2>/dev/null || true
-systemctl start falco 2>/dev/null || true
+# AL2023 kernel 6.x: the kernel module driver won't load; use eBPF driver if available,
+# but for rule file management tests the daemon doesn't need to run.
+# Configure falco to use modern ebpf driver so it can start (non-fatal if it can't)
+if [ -f /etc/falco/falco.yaml ]; then
+  sed -i 's/^engine:/engine:\n  kind: modern_ebpf/' /etc/falco/falco.yaml 2>/dev/null || true
+fi
+# Ensure local rules file exists (the CR executor writes to this)
+mkdir -p /etc/falco
 touch /etc/falco/falco_rules.local.yaml
+chmod 644 /etc/falco/falco_rules.local.yaml
 echo "FALCO_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(f"falco-al2023-{AL2023_AMI}".encode()).hexdigest()
+    setup_hash = hashlib.md5(f"falco-al2023-{AL2023_AMI}-v2".encode()).hexdigest()
 
     # AMI cache check
     cached_ami = None
@@ -10807,23 +10899,42 @@ echo "FALCO_SETUP_COMPLETE"
         if not cached_ami:
             resp_s = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": [setup_script]}, TimeoutSeconds=120)
-            time.sleep(60)
+                Parameters={"commands": [setup_script]}, TimeoutSeconds=300)
+            time.sleep(90)
             try:
-                out_s = ssm_client.get_command_invocation(
-                    CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
-                if "FALCO_SETUP_COMPLETE" not in out_s.get("StandardOutputContent", ""):
-                    log("  WARNING: Falco setup may not have completed cleanly")
-                else:
-                    log("Falco installed and started")
-                    from run_on_ec2 import get_or_create_smoke_ami
-                    get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "falco", setup_hash)
+                _setup_done = False
+                for _attempt in range(12):
+                    try:
+                        out_s = ssm_client.get_command_invocation(
+                            CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                        if out_s["Status"] in ("Success", "Failed", "TimedOut", "Cancelled"):
+                            _setup_done = True
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(10)
+                if _setup_done:
+                    out_s = ssm_client.get_command_invocation(
+                        CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                    if "FALCO_SETUP_COMPLETE" not in out_s.get("StandardOutputContent", ""):
+                        log(f"  WARNING: Falco setup output: {out_s.get('StandardOutputContent','')[:200]}")
+                    else:
+                        log("Falco installed")
+                        try:
+                            from smoke.run_on_ec2 import get_or_create_smoke_ami
+                        except ImportError:
+                            try:
+                                from run_on_ec2 import get_or_create_smoke_ami
+                            except ImportError:
+                                get_or_create_smoke_ami = None
+                        if get_or_create_smoke_ami:
+                            get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "falco", setup_hash)
             except Exception as e:
                 log(f"  WARNING: Falco setup check failed: {e}")
         else:
             ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["systemctl start falco 2>/dev/null || true; touch /etc/falco/falco_rules.local.yaml"]},
+                Parameters={"commands": ["mkdir -p /etc/falco; touch /etc/falco/falco_rules.local.yaml; chmod 644 /etc/falco/falco_rules.local.yaml; echo ready"]},
                 TimeoutSeconds=20)
             time.sleep(10)
 
@@ -10950,25 +11061,44 @@ def run_phase_infisical_rotate(client: NexplaneClient, cloud_account_id: str) ->
     if not ec2_client or not ssm_client:
         fail("[INFISICAL_ROTATE] AWS clients not available")
 
-    AL2023_AMI = "ami-0c101f26f147fa7fd"
+    # Latest AL2023 AMI (us-east-1) — SSM agent pre-installed
+    AL2023_AMI = "ami-08623034deb42fc21"
     encryption_key = "6c1fe4e407b8911c104518103505b218"  # 32-char hex for smoke
+    # Use a pinned Infisical image with stable v1 API endpoints
+    INFISICAL_IMAGE = "infisical/infisical:v0.46.4"
 
     setup_script = f"""
 set -e
 yum install -y docker 2>/dev/null || true
 systemctl enable docker && systemctl start docker
+# Pull and run Infisical with known-stable image version
+docker pull {INFISICAL_IMAGE} 2>/dev/null || docker pull infisical/infisical:latest 2>/dev/null || true
 docker run -d --name infisical \
   -p 80:8080 \
   -e ENCRYPTION_KEY={encryption_key} \
-  -e AUTH_SECRET=smoketest1234567890abc \
-  infisical/infisical:latest 2>/dev/null || true
-# Wait for API
-for i in $(seq 1 30); do
-  curl -sf http://localhost:80/api/status && break || sleep 5
+  -e AUTH_SECRET=smoketest1234567890abcdef1234567 \
+  -e MONGO_URL=mongodb://localhost:27017/infisical \
+  -e SITE_URL=http://localhost:80 \
+  -e JWT_AUTH_SECRET=smoketest1234567890abcdef1234567 \
+  -e JWT_SIGNUP_SECRET=smoketest1234567890abcdef1234567 \
+  -e JWT_REFRESH_SECRET=smoketest1234567890abcdef1234567 \
+  -e JWT_SERVICE_SECRET=smoketest1234567890abcdef1234567 \
+  -e JWT_MFA_LIFETIME=300 \
+  {INFISICAL_IMAGE} 2>/dev/null || \
+  docker run -d --name infisical \
+    -p 80:8080 \
+    -e ENCRYPTION_KEY={encryption_key} \
+    -e AUTH_SECRET=smoketest1234567890abcdef1234567 \
+    infisical/infisical:latest 2>/dev/null || true
+# Wait for API — Infisical can take 30-60s to start
+for i in $(seq 1 36); do
+  curl -sf http://localhost:80/api/status 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0)" 2>/dev/null && break
+  curl -sf http://localhost:80/api/healthcheck 2>/dev/null && break
+  sleep 5
 done
 echo "INFISICAL_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(f"infisical-docker-{AL2023_AMI}".encode()).hexdigest()
+    setup_hash = hashlib.md5(f"infisical-docker-{AL2023_AMI}-v3".encode()).hexdigest()
 
     # AMI cache check
     cached_ami = None
@@ -11042,50 +11172,94 @@ echo "INFISICAL_SETUP_COMPLETE"
     infisical_connector_id = None
     try:
         if not cached_ami:
+            # Infisical Docker pull + start takes 2–3 minutes
             resp_s = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": [setup_script]}, TimeoutSeconds=120)
-            time.sleep(60)
+                Parameters={"commands": [setup_script]}, TimeoutSeconds=600)
+            time.sleep(120)
             try:
-                out_s = ssm_client.get_command_invocation(
-                    CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
-                if "INFISICAL_SETUP_COMPLETE" not in out_s.get("StandardOutputContent", ""):
-                    log("  WARNING: Infisical setup may not have completed cleanly")
-                else:
-                    log("Infisical running in Docker")
-                    from run_on_ec2 import get_or_create_smoke_ami
-                    get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "infisical", setup_hash)
+                _setup_done = False
+                for _attempt in range(18):
+                    try:
+                        out_s = ssm_client.get_command_invocation(
+                            CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                        if out_s["Status"] in ("Success", "Failed", "TimedOut", "Cancelled"):
+                            _setup_done = True
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(10)
+                if _setup_done:
+                    out_s = ssm_client.get_command_invocation(
+                        CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                    if "INFISICAL_SETUP_COMPLETE" not in out_s.get("StandardOutputContent", ""):
+                        log(f"  WARNING: Infisical setup output: {out_s.get('StandardOutputContent','')[:300]}")
+                        log(f"  WARNING: Infisical setup stderr: {out_s.get('StandardErrorContent','')[:200]}")
+                    else:
+                        log("Infisical running in Docker")
+                        try:
+                            from smoke.run_on_ec2 import get_or_create_smoke_ami
+                        except ImportError:
+                            try:
+                                from run_on_ec2 import get_or_create_smoke_ami
+                            except ImportError:
+                                get_or_create_smoke_ami = None
+                        if get_or_create_smoke_ami:
+                            get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "infisical", setup_hash)
             except Exception as e:
                 log(f"  WARNING: Infisical setup check: {e}")
         else:
-            restart_cmd = f"docker start infisical 2>/dev/null || docker run -d --name infisical -p 80:8080 -e ENCRYPTION_KEY={encryption_key} -e AUTH_SECRET=smoketest1234567890abc infisical/infisical:latest; sleep 15"
+            restart_cmd = (
+                f"systemctl start docker 2>/dev/null || true; "
+                f"docker start infisical 2>/dev/null || "
+                f"docker run -d --name infisical -p 80:8080 "
+                f"-e ENCRYPTION_KEY={encryption_key} "
+                f"-e AUTH_SECRET=smoketest1234567890abcdef1234567 "
+                f"{INFISICAL_IMAGE} 2>/dev/null || true; "
+                f"sleep 20; echo restart_done"
+            )
             ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": [restart_cmd]}, TimeoutSeconds=40)
-            time.sleep(20)
+                Parameters={"commands": [restart_cmd]}, TimeoutSeconds=60)
+            time.sleep(25)
 
-        # Create workspace and secret via Infisical API on the instance
-        api_setup_cmd = """
-set -e
+        # Obtain API token via Infisical signup/login flow
+        # Supports both older v1 API and newer v1/auth endpoints
+        api_setup_cmd = r"""
 BASE=http://localhost:80
-# Sign up and get token
-TOKEN=$(curl -sf -X POST "$BASE/api/v1/auth/signup" \
+SMOKE_EMAIL="smoke@nexplane.test"
+SMOKE_PASS="Smoke1234!"
+
+# Try v1 signup (older Infisical)
+SIGNUP_RESP=$(curl -sf -X POST "$BASE/api/v1/signup" \
   -H 'Content-Type: application/json' \
-  -d '{"email":"smoke@nexplane.test","password":"Smoke1234!","firstName":"Smoke","lastName":"Test"}' | \
-  python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token',''))" 2>/dev/null) || true
-if [ -z "$TOKEN" ]; then
-  # Try login if signup returns empty (already registered)
-  TOKEN=$(curl -sf -X POST "$BASE/api/v1/auth/login" \
+  -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PASS\",\"firstName\":\"Smoke\",\"lastName\":\"Test\"}" 2>/dev/null || echo "")
+
+# Try v1/auth/signup if above fails
+if [ -z "$SIGNUP_RESP" ] || echo "$SIGNUP_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('token') or d.get('access_token') else 1)" 2>/dev/null; then
+  :
+else
+  SIGNUP_RESP=$(curl -sf -X POST "$BASE/api/v1/auth/signup" \
     -H 'Content-Type: application/json' \
-    -d '{"email":"smoke@nexplane.test","password":"Smoke1234!"}' | \
-    python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token',''))" 2>/dev/null) || true
+    -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PASS\",\"firstName\":\"Smoke\",\"lastName\":\"Test\"}" 2>/dev/null || echo "")
 fi
+
+TOKEN=$(echo "$SIGNUP_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token',d.get('access_token','')))" 2>/dev/null || echo "")
+
+# If signup failed (already registered or different API), try login
+if [ -z "$TOKEN" ]; then
+  LOGIN_RESP=$(curl -sf -X POST "$BASE/api/v1/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PASS\"}" 2>/dev/null || echo "")
+  TOKEN=$(echo "$LOGIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token',d.get('access_token','')))" 2>/dev/null || echo "")
+fi
+
 echo "INFISICAL_TOKEN=$TOKEN"
 """
         resp_api = ssm_client.send_command(
             InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-            Parameters={"commands": [api_setup_cmd]}, TimeoutSeconds=30)
-        time.sleep(15)
+            Parameters={"commands": [api_setup_cmd]}, TimeoutSeconds=45)
+        time.sleep(20)
         api_token = ""
         workspace_id = "smoke-workspace"
         try:
@@ -11094,6 +11268,8 @@ echo "INFISICAL_TOKEN=$TOKEN"
             for line in out_api.get("StandardOutputContent", "").splitlines():
                 if line.startswith("INFISICAL_TOKEN="):
                     api_token = line.split("=", 1)[1].strip()
+            if not api_token:
+                log(f"  WARNING: Infisical API output: {out_api.get('StandardOutputContent','')[:300]}")
         except Exception as e:
             log(f"  WARNING: Infisical token setup: {e}")
 
@@ -11495,6 +11671,13 @@ xpack.security.transport.ssl.enabled: false
 xpack.license.self_generated.type: basic
 ES_CFG
 
+# Cap JVM heap for t3.large (8GB RAM) — prevent OOM and memory_lock errors
+mkdir -p /etc/elasticsearch/jvm.options.d
+cat > /etc/elasticsearch/jvm.options.d/heap.options << 'JVM_CFG'
+-Xms1g
+-Xmx1g
+JVM_CFG
+
 # Configure Kibana
 cat > /etc/kibana/kibana.yml << 'KB_CFG'
 server.host: "0.0.0.0"
@@ -11650,28 +11833,12 @@ done
             Parameters={"commands": [wait_cmd]}, TimeoutSeconds=180)
         time.sleep(10)
 
-        # Register Elastic connector in Nexplane
-        conn_resp = client.post("/connectors", json={
-            "connector_type": "elastic",
-            "name": "nexplane-smoke-elastic",
-            "display_name": "nexplane-smoke-elastic",
-            "credentials": {
-                "base_url": elastic_url,
-                "username": "elastic",
-                "password": "smoke-no-auth",  # security disabled
-                "kibana_url": kibana_url,
-                "verify_ssl": False,
-            },
-        })
-        elastic_connector_id = conn_resp.get("id")
-        log(f"Elastic connector registered: {elastic_connector_id}")
-
         import time as _ts
         rule_id = f"nexplane-smoke-rule-{int(_ts.time())}"
 
-        # Initialize detection engine via SSM (Kibana API)
+        # Initialize detection engine via SSM (Kibana API) — wait for Kibana ready
         init_cmd = """
-for i in $(seq 1 12); do
+for i in $(seq 1 18); do
   STATUS=$(curl -sf http://localhost:5601/api/status | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',{}).get('overall',{}).get('level','unknown'))" 2>/dev/null || echo unknown)
   [ "$STATUS" = "available" ] && echo "KIBANA_READY" && break
   sleep 10
@@ -11682,44 +11849,116 @@ echo "ENGINE_INIT_DONE"
 """
         ssm_client.send_command(
             InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-            Parameters={"commands": [init_cmd]}, TimeoutSeconds=150)
+            Parameters={"commands": [init_cmd]}, TimeoutSeconds=200)
         time.sleep(20)
 
-        # Create detection rule via CR
-        cr_rule = client.run_cr(
-            f"[ELASTIC_ALERTS] create detection rule {rule_id}",
-            "elastic_create_rule",
-            cloud_account_id,
-            {
-                "rule_id": rule_id,
-                "name": "Nexplane Smoke Test Rule",
-                "description": "Detects smoke-test events",
-                "query": "tags: nexplane-smoke",
-                "index": ["smoke-test-*"],
-                "severity": "medium",
-                "risk_score": 47,
-                "interval": "1m",
-                "enabled": True,
-                "rollback_strategy": "rollback_available",
-            },
-        )
-        exec_runs = cr_rule.get("execution_runs") or []
-        rule_result = exec_runs[0].get("result") if exec_runs else {}
-        if rule_result.get("status") == "skipped":
-            log("  WARNING: Detection rule creation skipped (no credentials)")
-        else:
-            log(f"Detection rule created: {rule_id} (kibana_id={rule_result.get('kibana_id','?')})")
+        # Build a connector object for the executor (works in both standalone and backend mode)
+        class _ElasticConnector:
+            credentials = {
+                "base_url": elastic_url,
+                "username": "elastic",
+                "password": "smoke-no-auth",  # security disabled
+                "kibana_url": kibana_url,
+                "verify_ssl": False,
+            }
 
-        # Index a synthetic alert document directly into alerts index
+        if getattr(client, "standalone", False):
+            # Standalone mode: call executors directly — no Nexplane backend needed
+            import asyncio as _asyncio
+            try:
+                from smoke.elastic._client import ElasticClient as _EC, get_elastic_client as _gec
+                from smoke.elastic.create_detection_rule import execute as _elastic_create, rollback as _elastic_rb
+                from smoke.elastic.sync_alerts import execute as _elastic_sync
+            except ImportError:
+                import importlib.util as _ilu
+
+                def _load_mod(name, path):
+                    _spec = _ilu.spec_from_file_location(name, path)
+                    _m = _ilu.module_from_spec(_spec)
+                    _spec.loader.exec_module(_m)
+                    return _m
+
+                _elastic_client_mod = _load_mod("elastic_client", "/tmp/nexplane_smoke/smoke/elastic/_client.py")
+                _elastic_create_mod = _load_mod("elastic_create", "/tmp/nexplane_smoke/smoke/elastic/create_detection_rule.py")
+                _elastic_sync_mod = _load_mod("elastic_sync", "/tmp/nexplane_smoke/smoke/elastic/sync_alerts.py")
+                # Patch relative imports
+                _elastic_create_mod.get_elastic_client = _elastic_client_mod.get_elastic_client
+                _elastic_sync_mod.get_elastic_client = _elastic_client_mod.get_elastic_client
+                _elastic_create = _elastic_create_mod.execute
+                _elastic_rb = _elastic_create_mod.rollback
+                _elastic_sync = _elastic_sync_mod.execute
+
+            log(f"[ELASTIC_ALERTS] creating detection rule {rule_id} (standalone)")
+            rule_result = _asyncio.run(_elastic_create(
+                {
+                    "rule_id": rule_id,
+                    "name": "Nexplane Smoke Test Rule",
+                    "description": "Detects smoke-test events",
+                    "query": "tags: nexplane-smoke",
+                    "index": ["smoke-test-*"],
+                    "severity": "medium",
+                    "risk_score": 47,
+                    "interval": "1m",
+                    "enabled": True,
+                },
+                [],
+                _ElasticConnector(),
+            ))
+            if rule_result.get("status") == "skipped":
+                log("  WARNING: Detection rule creation skipped (no credentials)")
+            else:
+                log(f"Detection rule created: {rule_id} (kibana_id={rule_result.get('kibana_id','?')})")
+        else:
+            # Backend mode: register connector and run via Nexplane CRs
+            conn_resp = client.post("/connectors", json={
+                "connector_type": "elastic",
+                "name": "nexplane-smoke-elastic",
+                "display_name": "nexplane-smoke-elastic",
+                "credentials": {
+                    "base_url": elastic_url,
+                    "username": "elastic",
+                    "password": "smoke-no-auth",  # security disabled
+                    "kibana_url": kibana_url,
+                    "verify_ssl": False,
+                },
+            })
+            elastic_connector_id = conn_resp.get("id")
+            log(f"Elastic connector registered: {elastic_connector_id}")
+
+            cr_rule = client.run_cr(
+                f"[ELASTIC_ALERTS] create detection rule {rule_id}",
+                "elastic_create_rule",
+                cloud_account_id,
+                {
+                    "rule_id": rule_id,
+                    "name": "Nexplane Smoke Test Rule",
+                    "description": "Detects smoke-test events",
+                    "query": "tags: nexplane-smoke",
+                    "index": ["smoke-test-*"],
+                    "severity": "medium",
+                    "risk_score": 47,
+                    "interval": "1m",
+                    "enabled": True,
+                    "rollback_strategy": "rollback_available",
+                },
+            )
+            exec_runs = cr_rule.get("execution_runs") or []
+            rule_result = exec_runs[0].get("result") if exec_runs else {}
+            if rule_result.get("status") == "skipped":
+                log("  WARNING: Detection rule creation skipped (no credentials)")
+            else:
+                log(f"Detection rule created: {rule_id} (kibana_id={rule_result.get('kibana_id','?')})")
+
+        # Index a synthetic alert document directly into alerts index (via SSM)
         import time as _ts2
         alerts_index_cmd = f"""
-curl -sf -X PUT http://localhost:9200/.alerts-security.alerts-default \
+curl -sf -X PUT 'http://localhost:9200/.alerts-security.alerts-default' \
   -H 'Content-Type: application/json' \
   -d '{{"settings": {{"number_of_shards": 1, "number_of_replicas": 0}}}}' 2>/dev/null || true
-curl -sf -X POST http://localhost:9200/.alerts-security.alerts-default/_doc \
+curl -sf -X POST 'http://localhost:9200/.alerts-security.alerts-default/_doc' \
   -H 'Content-Type: application/json' \
   -d '{{"@timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "kibana.alert.rule.name": "Nexplane Smoke Test Rule", "kibana.alert.severity": "medium", "kibana.alert.workflow_status": "open", "kibana.alert.uuid": "smoke-alert-{int(_ts2.time())}"}}'
-curl -sf -X POST http://localhost:9200/.alerts-security.alerts-default/_refresh
+curl -sf -X POST 'http://localhost:9200/.alerts-security.alerts-default/_refresh'
 echo "ALERT_INDEXED"
 """
         resp_idx = ssm_client.send_command(
@@ -11736,42 +11975,66 @@ echo "ALERT_INDEXED"
         except Exception as e:
             log(f"  WARNING: Alert index check: {e}")
 
-        # Run sync_alerts CR
-        cr_sync = client.run_cr(
-            "[ELASTIC_ALERTS] sync_alerts",
-            "elastic_sync_alerts",
-            cloud_account_id,
-            {
-                "start_time": "now-1h",
-                "end_time": "now",
-                "rollback_strategy": "rollback_unavailable",
-            },
-        )
-        sync_runs = cr_sync.get("execution_runs") or []
-        sync_result = sync_runs[0].get("result") if sync_runs else {}
+        if getattr(client, "standalone", False):
+            # Standalone sync_alerts
+            log("[ELASTIC_ALERTS] sync_alerts (standalone)")
+            sync_result = _asyncio.run(_elastic_sync(
+                {"start_time": "now-1h", "end_time": "now"},
+                [],
+                _ElasticConnector(),
+            ))
+            if sync_result.get("status") == "skipped":
+                log("  WARNING: sync_alerts skipped (no credentials)")
+            else:
+                count = sync_result.get("count", 0)
+                log(f"sync_alerts returned {count} alert(s)")
+                if count > 0:
+                    log(f"First alert: {sync_result.get('alerts', [{}])[0].get('rule_name', '?')}")
 
-        if sync_result.get("status") == "skipped":
-            log("  WARNING: sync_alerts skipped (no credentials in backend)")
+            # Rollback: delete rule
+            log(f"[ELASTIC_ALERTS] rollback delete rule {rule_id} (standalone)")
+            rb_result = _asyncio.run(_elastic_rb(
+                {"rule_id": rule_id},
+                rule_result,
+                _ElasticConnector(),
+            ))
+            log(f"Rollback result: rolled_back={rb_result.get('rolled_back')}")
         else:
-            count = sync_result.get("count", 0)
-            log(f"sync_alerts returned {count} alert(s)")
-            if count > 0:
-                log(f"First alert: {sync_result.get('alerts', [{}])[0].get('rule_name', '?')}")
+            # Backend mode sync + rollback
+            cr_sync = client.run_cr(
+                "[ELASTIC_ALERTS] sync_alerts",
+                "elastic_sync_alerts",
+                cloud_account_id,
+                {
+                    "start_time": "now-1h",
+                    "end_time": "now",
+                    "rollback_strategy": "rollback_unavailable",
+                },
+            )
+            sync_runs = cr_sync.get("execution_runs") or []
+            sync_result = sync_runs[0].get("result") if sync_runs else {}
 
-        # Rollback: delete the detection rule
-        cr_rb = client.run_cr(
-            f"[ELASTIC_ALERTS] rollback delete rule {rule_id}",
-            "elastic_create_rule",
-            cloud_account_id,
-            {
-                "rule_id": rule_id,
-                "_rollback": True,
-                "rollback_strategy": "rollback_available",
-            },
-        )
-        rb_runs = cr_rb.get("execution_runs") or []
-        rb_result = rb_runs[0].get("result") if rb_runs else {}
-        log(f"Rollback result: rolled_back={rb_result.get('rolled_back')}")
+            if sync_result.get("status") == "skipped":
+                log("  WARNING: sync_alerts skipped (no credentials in backend)")
+            else:
+                count = sync_result.get("count", 0)
+                log(f"sync_alerts returned {count} alert(s)")
+                if count > 0:
+                    log(f"First alert: {sync_result.get('alerts', [{}])[0].get('rule_name', '?')}")
+
+            cr_rb = client.run_cr(
+                f"[ELASTIC_ALERTS] rollback delete rule {rule_id}",
+                "elastic_create_rule",
+                cloud_account_id,
+                {
+                    "rule_id": rule_id,
+                    "_rollback": True,
+                    "rollback_strategy": "rollback_available",
+                },
+            )
+            rb_runs = cr_rb.get("execution_runs") or []
+            rb_result = rb_runs[0].get("result") if rb_runs else {}
+            log(f"Rollback result: rolled_back={rb_result.get('rolled_back')}")
 
         log("Phase ELASTIC_ALERTS PASSED")
 
@@ -11816,12 +12079,12 @@ curl -L -o /tmp/splunk.rpm "{SPLUNK_RPM_URL}" --retry 3 --retry-delay 5
 
 rpm -ivh /tmp/splunk.rpm
 
-/opt/splunk/bin/splunk start --accept-license --answer-yes --no-prompt --seed-passwd admin123 2>/dev/null || true
+/opt/splunk/bin/splunk start --accept-license --answer-yes --no-prompt --seed-passwd Admin1234! 2>/dev/null || true
 
 /opt/splunk/bin/splunk enable boot-start -user splunk 2>/dev/null || true
 
 for i in $(seq 1 60); do
-  curl -sk https://localhost:8089/services/server/info -u admin:admin123 | grep -q "productType" && break
+  curl -sk https://localhost:8089/services/server/info -u "admin:Admin1234!" | grep -q "productType" && break
   sleep 5
 done
 
@@ -11928,7 +12191,7 @@ echo "SPLUNK_SETUP_COMPLETE"
                 from run_on_ec2 import get_or_create_smoke_ami
                 get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "splunk", setup_hash)
         else:
-            start_cmd = "/opt/splunk/bin/splunk start --accept-license --no-prompt 2>/dev/null || true; sleep 15"
+            start_cmd = "/opt/splunk/bin/splunk start --accept-license --answer-yes --no-prompt 2>/dev/null || true; sleep 15"
             ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
                 Parameters={"commands": [start_cmd]}, TimeoutSeconds=60)
@@ -11937,46 +12200,94 @@ echo "SPLUNK_SETUP_COMPLETE"
         splunk_url = f"https://{private_ip}:8089"
         log(f"Splunk at {splunk_url}")
 
-        # Register Splunk connector
-        conn_resp = client.post("/connectors", json={
-            "connector_type": "splunk",
-            "name": "nexplane-smoke-splunk",
-            "display_name": "nexplane-smoke-splunk",
-            "credentials": {
-                "base_url": splunk_url,
-                "username": "admin",
-                "password": "admin123",
-                "verify_ssl": False,
-            },
-        })
-        splunk_connector_id = conn_resp.get("id")
-        log(f"Splunk connector registered: {splunk_connector_id}")
-
         import time as _ts
         search_name = f"nexplane-smoke-search-{int(_ts.time())}"
 
-        # Create a saved search via CR
-        cr_search = client.run_cr(
-            f"[SPLUNK_ALERTS] create saved search {search_name}",
-            "splunk_create_alert",
-            cloud_account_id,
-            {
-                "name": search_name,
-                "search": "index=main sourcetype=nexplane_smoke | head 10",
-                "rollback_strategy": "rollback_available",
-            },
-        )
-        sa_runs = cr_search.get("execution_runs") or []
-        sa_result = sa_runs[0].get("result") if sa_runs else {}
-        if sa_result.get("status") == "skipped":
-            log("  WARNING: create_alert skipped (no credentials)")
-        else:
-            log(f"Saved search created: {search_name}")
+        # Build a connector object usable by executors directly
+        class _SplunkConnector:
+            credentials = {
+                "base_url": splunk_url,
+                "username": "admin",
+                "password": "Admin1234!",
+                "verify_ssl": False,
+            }
 
-        # Index a test event via SSM
+        if getattr(client, "standalone", False):
+            # Standalone mode: call executors directly — no Nexplane backend needed
+            import asyncio as _asyncio
+            try:
+                from smoke.splunk._client import get_splunk_client as _get_splunk
+                from smoke.splunk.create_alert import execute as _splunk_create, rollback as _splunk_rb
+                from smoke.splunk.sync_notables import execute as _splunk_sync
+            except ImportError:
+                import importlib.util as _ilu
+
+                def _load_mod(name, path):
+                    _spec = _ilu.spec_from_file_location(name, path)
+                    _m = _ilu.module_from_spec(_spec)
+                    _spec.loader.exec_module(_m)
+                    return _m
+
+                _splunk_client_mod = _load_mod("splunk_client", "/tmp/nexplane_smoke/smoke/splunk/_client.py")
+                _splunk_create_mod = _load_mod("splunk_create", "/tmp/nexplane_smoke/smoke/splunk/create_alert.py")
+                _splunk_sync_mod = _load_mod("splunk_sync", "/tmp/nexplane_smoke/smoke/splunk/sync_notables.py")
+                # Patch relative imports
+                _splunk_create_mod.get_splunk_client = _splunk_client_mod.get_splunk_client
+                _splunk_sync_mod.get_splunk_client = _splunk_client_mod.get_splunk_client
+                _splunk_create = _splunk_create_mod.execute
+                _splunk_rb = _splunk_create_mod.rollback
+                _splunk_sync = _splunk_sync_mod.execute
+
+            log(f"[SPLUNK_ALERTS] creating saved search {search_name} (standalone)")
+            sa_result = _asyncio.run(_splunk_create(
+                {
+                    "name": search_name,
+                    "search": "index=main sourcetype=nexplane_smoke | head 10",
+                },
+                [],
+                _SplunkConnector(),
+            ))
+            if sa_result.get("status") == "skipped":
+                log("  WARNING: create_alert skipped (no credentials)")
+            else:
+                log(f"Saved search created: {search_name}")
+        else:
+            # Backend mode: register connector and run via Nexplane CRs
+            conn_resp = client.post("/connectors", json={
+                "connector_type": "splunk",
+                "name": "nexplane-smoke-splunk",
+                "display_name": "nexplane-smoke-splunk",
+                "credentials": {
+                    "base_url": splunk_url,
+                    "username": "admin",
+                    "password": "Admin1234!",
+                    "verify_ssl": False,
+                },
+            })
+            splunk_connector_id = conn_resp.get("id")
+            log(f"Splunk connector registered: {splunk_connector_id}")
+
+            cr_search = client.run_cr(
+                f"[SPLUNK_ALERTS] create saved search {search_name}",
+                "splunk_create_alert",
+                cloud_account_id,
+                {
+                    "name": search_name,
+                    "search": "index=main sourcetype=nexplane_smoke | head 10",
+                    "rollback_strategy": "rollback_available",
+                },
+            )
+            sa_runs = cr_search.get("execution_runs") or []
+            sa_result = sa_runs[0].get("result") if sa_runs else {}
+            if sa_result.get("status") == "skipped":
+                log("  WARNING: create_alert skipped (no credentials)")
+            else:
+                log(f"Saved search created: {search_name}")
+
+        # Index a test event via SSM (works in both modes — SSM to the Splunk EC2)
         index_cmd = """
-curl -sk -u admin:admin123 \
-  https://localhost:8089/services/receivers/simple?sourcetype=nexplane_smoke \
+curl -sk -u "admin:Admin1234!" \
+  "https://localhost:8089/services/receivers/simple?sourcetype=nexplane_smoke" \
   -d "nexplane smoke test alert event $(date)" || true
 sleep 3
 echo "EVENT_INDEXED"
@@ -11993,40 +12304,62 @@ echo "EVENT_INDEXED"
         except Exception as e:
             log(f"  WARNING: Event index check: {e}")
 
-        # Run sync_notables CR
-        cr_sync = client.run_cr(
-            "[SPLUNK_ALERTS] sync_notables",
-            "splunk_sync_notables",
-            cloud_account_id,
-            {
-                "earliest": "-1h",
-                "latest": "now",
-                "rollback_strategy": "rollback_unavailable",
-            },
-        )
-        sync_runs = cr_sync.get("execution_runs") or []
-        sync_result = sync_runs[0].get("result") if sync_runs else {}
+        if getattr(client, "standalone", False):
+            # Standalone sync_notables
+            log("[SPLUNK_ALERTS] sync_notables (standalone)")
+            sync_result = _asyncio.run(_splunk_sync(
+                {"earliest": "-1h", "latest": "now"},
+                [],
+                _SplunkConnector(),
+            ))
+            if sync_result.get("status") == "skipped":
+                log("  WARNING: sync_notables skipped (no credentials)")
+            else:
+                count = sync_result.get("count", 0)
+                log(f"sync_notables returned {count} event(s)")
 
-        if sync_result.get("status") == "skipped":
-            log("  WARNING: sync_notables skipped (no credentials)")
+            # Rollback: delete saved search
+            log(f"[SPLUNK_ALERTS] rollback delete {search_name} (standalone)")
+            rb_result = _asyncio.run(_splunk_rb(
+                {"name": search_name},
+                sa_result,
+                _SplunkConnector(),
+            ))
+            log(f"Rollback result: rolled_back={rb_result.get('rolled_back')}")
         else:
-            count = sync_result.get("count", 0)
-            log(f"sync_notables returned {count} event(s)")
+            # Backend mode sync + rollback
+            cr_sync = client.run_cr(
+                "[SPLUNK_ALERTS] sync_notables",
+                "splunk_sync_notables",
+                cloud_account_id,
+                {
+                    "earliest": "-1h",
+                    "latest": "now",
+                    "rollback_strategy": "rollback_unavailable",
+                },
+            )
+            sync_runs = cr_sync.get("execution_runs") or []
+            sync_result = sync_runs[0].get("result") if sync_runs else {}
 
-        # Rollback: delete saved search
-        cr_rb = client.run_cr(
-            f"[SPLUNK_ALERTS] rollback delete {search_name}",
-            "splunk_create_alert",
-            cloud_account_id,
-            {
-                "name": search_name,
-                "_rollback": True,
-                "rollback_strategy": "rollback_available",
-            },
-        )
-        rb_runs = cr_rb.get("execution_runs") or []
-        rb_result = rb_runs[0].get("result") if rb_runs else {}
-        log(f"Rollback result: rolled_back={rb_result.get('rolled_back')}")
+            if sync_result.get("status") == "skipped":
+                log("  WARNING: sync_notables skipped (no credentials)")
+            else:
+                count = sync_result.get("count", 0)
+                log(f"sync_notables returned {count} event(s)")
+
+            cr_rb = client.run_cr(
+                f"[SPLUNK_ALERTS] rollback delete {search_name}",
+                "splunk_create_alert",
+                cloud_account_id,
+                {
+                    "name": search_name,
+                    "_rollback": True,
+                    "rollback_strategy": "rollback_available",
+                },
+            )
+            rb_runs = cr_rb.get("execution_runs") or []
+            rb_result = rb_runs[0].get("result") if rb_runs else {}
+            log(f"Rollback result: rolled_back={rb_result.get('rolled_back')}")
 
         log("Phase SPLUNK_ALERTS PASSED")
 

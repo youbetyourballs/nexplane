@@ -158,6 +158,50 @@
       "executor": "okta.deprovision_from_app",
       "estimated_duration_seconds": 10,
       "blast_radius_hint": "account_access_loss"
+    },
+    {
+      "action_id": "disable_user",
+      "generic_action": "disable_user",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Disable User",
+      "description": "Deactivates an Okta user (DEPROVISIONED state), storing prior status for rollback (reactivate).",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "user_id", "type": "string", "required": true}],
+      "executor": "okta.disable_user",
+      "rollback_action": "reactivate_user",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "account_access_loss",
+      "safety_notes": ["User will lose all access. Rollback reactivates the account."]
+    },
+    {
+      "action_id": "enforce_mfa",
+      "generic_action": "enforce_mfa",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Enforce MFA (Enroll TOTP)",
+      "description": "Enrolls a TOTP MFA factor for an Okta user. Rollback unenrolls the factor.",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "user_id", "type": "string", "required": true},
+        {"name": "factor_type", "type": "string", "required": false, "default": "token:software:totp"}
+      ],
+      "executor": "okta.enforce_mfa",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "sync_users",
+      "generic_action": "sync_users",
+      "action_type": "ingest",
+      "execution_tier": 1,
+      "display_name": "Sync Users",
+      "description": "Lists all Okta users and returns count + user list for discovery purposes.",
+      "applicable_asset_types": [],
+      "parameters": [
+        {"name": "filter", "type": "string", "required": false}
+      ],
+      "executor": "okta.sync_users",
+      "estimated_duration_seconds": 30
     }
   ]
 }
