@@ -6242,61 +6242,114 @@ echo "OPNSENSE_MOCK_READY"
                 Parameters={"commands": [restart_cmd]}, TimeoutSeconds=30)
             time.sleep(10)
 
-        # Register OPNsense connector
         mock_url = f"http://{private_ip}:8080"
-        conn_resp = client.post("/connectors", json={
-            "connector_type": "opnsense",
-            "name": "nexplane-smoke-opnsense",
-            "display_name": "nexplane-smoke-opnsense",
-            "credentials": {
-                "base_url": mock_url,
-                "api_key": "smoke-key",
-                "api_secret": "smoke-secret",
-                "verify_ssl": False,
-            },
-        })
-        opnsense_connector_id = conn_resp.get("id")
-        log(f"OPNsense connector registered: {opnsense_connector_id}")
+        opnsense_creds = {
+            "base_url": mock_url,
+            "api_key": "smoke-key",
+            "api_secret": "smoke-secret",
+            "verify_ssl": False,
+        }
 
-        # Test update_firewall_rule
-        cr1 = client.run_cr(
-            "[OPNSENSE_RULE] add block rule",
-            "opnsense_update_rule",
-            cloud_account_id,
-            {
-                "interface": "lan",
-                "action": "block",
-                "protocol": "tcp",
-                "source": "10.0.0.100",
-                "destination": "any",
-                "destination_port": "443",
-                "description": "nexplane-smoke-test-rule",
-            },
-        )
-        exec_runs = cr1.get("execution_runs") or []
-        result1 = exec_runs[0].get("result") if exec_runs else {}
-        if result1.get("status") not in ("applied", "skipped"):
-            log(f"  WARNING: unexpected update_firewall_rule result: {result1}")
-        else:
-            log("update_firewall_rule: applied")
+        if getattr(client, "standalone", False):
+            # Standalone mode: call OPNsense client directly — no Nexplane backend needed
+            import sys as _sys
+            try:
+                from smoke.opnsense._client import OPNsenseClient as _OPNsenseClient
+            except ImportError:
+                import importlib.util as _ilu
+                _spec = _ilu.spec_from_file_location(
+                    "opnsense_client",
+                    "/tmp/nexplane_smoke/smoke/opnsense/_client.py",
+                )
+                _mod = _ilu.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                _OPNsenseClient = _mod.OPNsenseClient
 
-        # Test block_host
-        cr2 = client.run_cr(
-            "[OPNSENSE_RULE] block host 10.0.0.99",
-            "opnsense_block_host",
-            cloud_account_id,
-            {
-                "ip_address": "10.0.0.99",
-                "interface": "lan",
-                "description": "nexplane-smoke-block-host",
-            },
-        )
-        exec_runs2 = cr2.get("execution_runs") or []
-        result2 = exec_runs2[0].get("result") if exec_runs2 else {}
-        if result2.get("status") not in ("applied", "skipped"):
-            log(f"  WARNING: unexpected block_host result: {result2}")
+            opn = _OPNsenseClient(mock_url, "smoke-key", "smoke-secret", verify_ssl=False)
+
+            log("[OPNSENSE_RULE] testing add_filter_rule (standalone)")
+            rule_result = opn.add_filter_rule(
+                interface="lan", action="block", protocol="tcp",
+                source="10.0.0.100", destination="any",
+                description="nexplane-smoke-test-rule", destination_port="443",
+            )
+            rule_uuid = rule_result.get("uuid")
+            if not rule_uuid:
+                raise RuntimeError(f"add_filter_rule returned no uuid: {rule_result}")
+            log(f"update_firewall_rule: applied (uuid={rule_uuid})")
+            try:
+                opn.delete_filter_rule(rule_uuid)
+                log("update_firewall_rule rollback: ok")
+            except Exception as _re:
+                log(f"  WARNING: rollback failed: {_re}")
+
+            log("[OPNSENSE_RULE] testing add_alias + add_filter_rule for block_host (standalone)")
+            alias_result = opn.add_alias(
+                name="nexplane_block_10_0_0_99",
+                description="nexplane-smoke-block-host",
+                addresses=["10.0.0.99"],
+            )
+            alias_uuid = alias_result.get("uuid")
+            block_rule_result = opn.add_filter_rule(
+                interface="lan", action="block", protocol="any",
+                source="nexplane_block_10_0_0_99", destination="any",
+                description="nexplane-smoke-block-host",
+            )
+            block_rule_uuid = block_rule_result.get("uuid")
+            if not (alias_uuid and block_rule_uuid):
+                raise RuntimeError(
+                    f"block_host missing uuids: alias={alias_uuid} rule={block_rule_uuid}"
+                )
+            log(f"block_host: applied (alias={alias_uuid} rule={block_rule_uuid})")
+
         else:
-            log("block_host: applied")
+            # Backend mode: register connector and run CRs through Nexplane
+            conn_resp = client.post("/connectors", json={
+                "connector_type": "opnsense",
+                "name": "nexplane-smoke-opnsense",
+                "display_name": "nexplane-smoke-opnsense",
+                "credentials": opnsense_creds,
+            })
+            opnsense_connector_id = conn_resp.get("id")
+            log(f"OPNsense connector registered: {opnsense_connector_id}")
+
+            cr1 = client.run_cr(
+                "[OPNSENSE_RULE] add block rule",
+                "opnsense_update_rule",
+                cloud_account_id,
+                {
+                    "interface": "lan",
+                    "action": "block",
+                    "protocol": "tcp",
+                    "source": "10.0.0.100",
+                    "destination": "any",
+                    "destination_port": "443",
+                    "description": "nexplane-smoke-test-rule",
+                },
+            )
+            exec_runs = cr1.get("execution_runs") or []
+            result1 = exec_runs[0].get("result") if exec_runs else {}
+            if result1.get("status") not in ("applied", "skipped"):
+                log(f"  WARNING: unexpected update_firewall_rule result: {result1}")
+            else:
+                log("update_firewall_rule: applied")
+
+            cr2 = client.run_cr(
+                "[OPNSENSE_RULE] block host 10.0.0.99",
+                "opnsense_block_host",
+                cloud_account_id,
+                {
+                    "ip_address": "10.0.0.99",
+                    "interface": "lan",
+                    "description": "nexplane-smoke-block-host",
+                },
+            )
+            exec_runs2 = cr2.get("execution_runs") or []
+            result2 = exec_runs2[0].get("result") if exec_runs2 else {}
+            if result2.get("status") not in ("applied", "skipped"):
+                log(f"  WARNING: unexpected block_host result: {result2}")
+            else:
+                log("block_host: applied")
 
         log("Phase OPNSENSE_RULE PASSED")
 
