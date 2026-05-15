@@ -222,7 +222,8 @@ export type ConnectorType =
   | "terraform_local"
   | "ansible_local"
   | "oci"
-  | "ldap";
+  | "ldap"
+  | "vault";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 

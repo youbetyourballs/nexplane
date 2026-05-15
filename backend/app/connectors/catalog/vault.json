@@ -1,0 +1,22 @@
+{
+  "connector_type": "vault",
+  "display_name": "HashiCorp Vault",
+  "actions": [
+    {
+      "action_id": "rotate_vault_secret",
+      "generic_action": "rotate_vault_secret",
+      "display_name": "Rotate Vault Secret",
+      "description": "Generates a new value for a Vault KV secret field.",
+      "executor": "vault.rotate_secret",
+      "action_type": "change",
+      "execution_tier": 2,
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "secret_path", "type": "string", "required": true},
+        {"name": "field", "type": "string", "required": false},
+        {"name": "mount_point", "type": "string", "required": false}
+      ]
+    }
+  ]
+}

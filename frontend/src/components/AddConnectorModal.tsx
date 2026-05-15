@@ -47,6 +47,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   ansible_local: "Ansible (Local CLI)",
   oci: "Oracle Cloud Infrastructure",
   ldap: "LDAP / Active Directory",
+  vault: "HashiCorp Vault (KV)",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -93,6 +94,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   ansible_local: "⚙️",
   oci: "🔶",
   ldap: "🏢",
+  vault: "🔑",
 };
 
 const ALL_TYPES = (Object.keys(CONNECTOR_LABELS) as ConnectorType[]).filter(
