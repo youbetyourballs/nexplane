@@ -11,15 +11,15 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not sa_name:
         raise ValueError("service_account is required")
 
-    k8s = get_k8s_client(connector)
-    if not k8s:
+    clients = get_k8s_client(connector, parameters)
+    if not clients:
         return {"action": "k8s_rotate_sa_token", "status": "skipped",
                 "reason": "no_k8s_credentials"}
 
     loop = asyncio.get_event_loop()
 
     def _rotate():
-        core = k8s.CoreV1Api()
+        core = clients["core"]
         # Find token secrets for this SA
         secrets = core.list_namespaced_secret(namespace=namespace)
         deleted = []

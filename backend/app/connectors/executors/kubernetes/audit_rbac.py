@@ -6,14 +6,14 @@ from ._client import get_k8s_client
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Audit RBAC — find overprivileged bindings (cluster-admin, wildcards)."""
-    k8s = get_k8s_client(connector)
-    if not k8s:
+    clients = get_k8s_client(connector, parameters)
+    if not clients:
         return {"action": "k8s_audit_rbac", "status": "skipped", "reason": "no_k8s_credentials"}
 
     loop = asyncio.get_event_loop()
 
     def _audit():
-        rbac = k8s.RbacAuthorizationV1Api()
+        rbac = clients["rbac"]
         findings = []
         # Check ClusterRoleBindings for cluster-admin
         crbs = rbac.list_cluster_role_binding()

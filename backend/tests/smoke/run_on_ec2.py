@@ -125,15 +125,43 @@ def make_test_tarball() -> bytes:
     """
     buf = io.BytesIO()
     executors_dir = BACKEND_DIR / "app" / "connectors" / "executors"
+
+    def _add_dir_safe(tar: tarfile.TarFile, src_path: Path, arcname: str) -> None:
+        """Recursively add a directory to the tarball, skipping phantom entries.
+
+        Docker Desktop bind mounts on Windows can expose phantom entries (NTFS
+        artifacts) that os.scandir finds but os.lstat then fails on. We catch
+        the resulting FileNotFoundError and skip those entries silently.
+        """
+        try:
+            tar.add(str(src_path), arcname=arcname, recursive=False)
+        except (FileNotFoundError, OSError) as e:
+            print(f"  WARNING: skipping inaccessible tarball entry {src_path}: {e}")
+            return
+
+        if src_path.is_dir():
+            try:
+                entries = list(src_path.iterdir())
+            except OSError:
+                return
+            for entry in sorted(entries):
+                entry_arc = f"{arcname}/{entry.name}"
+                try:
+                    entry.lstat()  # probe before adding
+                except OSError:
+                    print(f"  WARNING: skipping inaccessible entry: {entry}")
+                    continue
+                _add_dir_safe(tar, entry, entry_arc)
+
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         # Add smoke test files
-        tar.add(SMOKE_DIR, arcname="smoke")
+        _add_dir_safe(tar, SMOKE_DIR, "smoke")
         # Add connector executor packages needed for standalone phases
         for connector_pkg in ("opnsense", "step_ca", "postgres", "redis", "mongodb",
                               "elastic", "splunk", "openvas", "nessus", "snyk", "jfrog"):
             pkg_dir = executors_dir / connector_pkg
             if pkg_dir.exists():
-                tar.add(pkg_dir, arcname=f"smoke/{connector_pkg}")
+                _add_dir_safe(tar, pkg_dir, f"smoke/{connector_pkg}")
     return buf.getvalue()
 
 
@@ -190,7 +218,7 @@ def wait_for_ssm(ssm, instance_id: str, timeout: int = 600) -> None:
                         InstanceIds=[instance_id],
                         DocumentName="AWS-RunShellScript",
                         Parameters={"commands": ["echo ssm-ready"]},
-                        TimeoutSeconds=15,
+                        TimeoutSeconds=30,  # Minimum allowed value is 30
                     )
                     cmd_id = r["Command"]["CommandId"]
                     for _ in range(10):
@@ -542,17 +570,26 @@ Examples:
         print(f"  Runner: {runner_id}")
 
         # Wait for instance to pass status checks — manual loop to handle transient DNS failures
-        print("  Waiting for instance to pass status checks...")
-        _status_deadline = time.time() + 600  # 10 min max
+        print("  Waiting for instance to pass status checks (up to 20 min)...")
+        _status_deadline = time.time() + 1200  # 20 min max
+        _status_ok = False
         while time.time() < _status_deadline:
             try:
+                # Check instance state first — detect early termination
+                _desc = ec2.describe_instances(InstanceIds=[runner_id])
+                _state = _desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+                if _state in ("terminated", "stopped", "shutting-down"):
+                    raise RuntimeError(f"Runner {runner_id} entered unexpected state: {_state}")
                 _st = ec2.describe_instance_status(InstanceIds=[runner_id])
                 _statuses = _st.get("InstanceStatuses", [])
                 if _statuses:
                     _is = _statuses[0]
                     if (_is["InstanceStatus"]["Status"] == "ok"
                             and _is["SystemStatus"]["Status"] == "ok"):
+                        _status_ok = True
                         break
+            except RuntimeError:
+                raise
             except Exception as _e:
                 if any(kw in str(_e) for kw in ("Name or service not known", "Temporary failure",
                                                      "EndpointConnection", "InvalidInstanceID.NotFound",
@@ -560,9 +597,11 @@ Examples:
                     print(f"  ... transient error, retrying: {type(_e).__name__}", flush=True)
                 else:
                     raise
+            elapsed = int(time.time() - (_status_deadline - 1200))
+            print(f"  ... waiting for status checks ({elapsed}s elapsed)...", flush=True)
             time.sleep(15)
-        else:
-            raise RuntimeError(f"Runner {runner_id} never passed status checks within 600s")
+        if not _status_ok:
+            raise RuntimeError(f"Runner {runner_id} never passed status checks within 1200s")
 
         # Wait for SSM — AL2023 userdata installs pip packages which can take ~3-5 min
         print("  Waiting for SSM agent (up to 10 min)...")
@@ -617,8 +656,28 @@ Examples:
         print(f"Phases: {args.phases}")
         print(f"{'='*60}\n")
 
+        # Wrap test in a script that tees output to a file, so we can retrieve the
+        # full log via a second SSM command even if the first SSM truncates stdout.
+        logged_test_script = (
+            f"({test_script}) 2>&1 | tee /tmp/smoke_test.log; "
+            "echo SMOKE_EXIT_CODE:${PIPESTATUS[0]}"
+        )
         try:
-            ssm_run(ssm, runner_id, test_script, timeout=7200)
+            out = ssm_run(ssm, runner_id, logged_test_script, timeout=7200)
+            # Check if the test itself failed (exit code embedded in output)
+            if "SMOKE_EXIT_CODE:0" not in out:
+                # Retrieve full log if available
+                try:
+                    full_log = ssm_run(ssm, runner_id,
+                                       "tail -200 /tmp/smoke_test.log 2>/dev/null || true",
+                                       timeout=30)
+                    if full_log:
+                        print("\n--- Full test log (last 200 lines) ---")
+                        print(full_log)
+                        print("--- End test log ---")
+                except Exception:
+                    pass
+                raise RuntimeError("Smoke test exited with non-zero status")
             exit_code = 0
         except RuntimeError as e:
             print(f"\n❌ Smoke test failed on runner: {e}")

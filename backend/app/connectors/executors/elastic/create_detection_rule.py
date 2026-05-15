@@ -1,6 +1,11 @@
 from __future__ import annotations
 """Create a KQL detection rule in Kibana Security. Rollback deletes it."""
 
+try:
+    from ._client import get_elastic_client
+except ImportError:
+    get_elastic_client = None  # type: ignore[assignment]
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Create a KQL detection rule in Kibana Security.
@@ -23,9 +28,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         created: True
     """
     import uuid as _uuid
-    from ._client import get_elastic_client
-
-    client = get_elastic_client(connector)
+    _gec = get_elastic_client
+    if _gec is None:
+        from ._client import get_elastic_client as _gec  # type: ignore[assignment]
+    client = _gec(connector)
     if client is None:
         rule_id = parameters.get("rule_id", str(_uuid.uuid4()))
         return {
@@ -70,13 +76,15 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     """Delete the rule that was created."""
-    from ._client import get_elastic_client
+    _gec = get_elastic_client
+    if _gec is None:
+        from ._client import get_elastic_client as _gec  # type: ignore[assignment]
 
     rule_id = execution_result.get("rule_id") or parameters.get("rule_id", "")
     if not rule_id:
         return {"rolled_back": False, "reason": "no rule_id in execution_result"}
 
-    client = get_elastic_client(connector)
+    client = _gec(connector)
     if client is None:
         return {"rolled_back": False, "reason": "no credentials"}
 

@@ -13,15 +13,15 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not name:
         raise ValueError("rolebinding_name is required")
 
-    k8s = get_k8s_client(connector)
-    if not k8s:
+    clients = get_k8s_client(connector, parameters)
+    if not clients:
         return {"action": "k8s_revoke_rolebinding", "status": "skipped",
                 "reason": "no_k8s_credentials", "name": name}
 
     loop = asyncio.get_event_loop()
 
     def _delete():
-        rbac = k8s.RbacAuthorizationV1Api()
+        rbac = clients["rbac"]
         if binding_type == "ClusterRoleBinding":
             rbac.delete_cluster_role_binding(name=name)
         else:

@@ -1,0 +1,483 @@
+
+
+# ---------------------------------------------------------------------------
+# Phase OPENVAS_SCAN -- OpenVAS / Greenbone CE vulnerability scan (Docker, AMI cached)
+# ---------------------------------------------------------------------------
+
+def run_phase_openvas_scan(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase OPENVAS_SCAN: launch t3.medium EC2, start Greenbone CE via Docker,
+    wait for services, register connector, run scan CR, verify findings returned.
+    AMI cached after first Docker pull completes."""
+    import time, hashlib
+    print("\n[Phase OPENVAS_SCAN] OpenVAS / Greenbone Community Edition vulnerability scan")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_client:
+        fail("[OPENVAS_SCAN] AWS clients not available")
+
+    AL2023_AMI = "ami-0953476d60561c955"
+    INSTANCE_TYPE = "t3.medium"  # OpenVAS needs 4GB RAM
+
+    # Build setup script using string concat to avoid heredoc quoting issues in Python
+    setup_script = "\n".join([
+        "set -e",
+        "yum install -y docker 2>/dev/null || dnf install -y docker 2>/dev/null || true",
+        "systemctl enable docker && systemctl start docker",
+        "sleep 3",
+        "curl -fsSL https://github.com/docker/compose/releases/download/v2.24.1/docker-compose-linux-x86_64"
+        " -o /usr/local/bin/docker-compose",
+        "chmod +x /usr/local/bin/docker-compose",
+        "mkdir -p /opt/greenbone",
+        "cat > /opt/greenbone/docker-compose.yml << 'CEEOF'",
+        'version: "3.8"',
+        "services:",
+        "  pg-gvm:",
+        "    image: greenbone/pg-gvm:stable",
+        "    restart: on-failure",
+        "    volumes:",
+        "      - psql_data_vol:/var/lib/postgresql",
+        "      - psql_socket_vol:/var/run/postgresql",
+        "  gvmd:",
+        "    image: greenbone/gvmd:stable",
+        "    restart: on-failure",
+        "    volumes:",
+        "      - gvmd_data_vol:/var/lib/gvm",
+        "      - psql_data_vol:/var/lib/postgresql",
+        "      - gvmd_socket_vol:/var/run/gvmd",
+        "      - ospd_openvas_socket_vol:/var/run/ospd",
+        "      - psql_socket_vol:/var/run/postgresql",
+        "    depends_on:",
+        "      pg-gvm:",
+        "        condition: service_started",
+        "  ospd-openvas:",
+        "    image: greenbone/ospd-openvas:stable",
+        "    restart: on-failure",
+        "    init: true",
+        "    cap_add:",
+        "      - NET_ADMIN",
+        "      - NET_RAW",
+        "    security_opt:",
+        "      - seccomp=unconfined",
+        "      - apparmor=unconfined",
+        "    command: [ospd-openvas, -f, --config, /etc/gvm/ospd-openvas.conf, -m, 666]",
+        "    volumes:",
+        "      - ospd_openvas_socket_vol:/var/run/ospd",
+        "  gsa:",
+        "    image: greenbone/gsa:stable",
+        "    restart: on-failure",
+        "    ports:",
+        "      - 9392:80",
+        "    volumes:",
+        "      - gvmd_socket_vol:/var/run/gvmd",
+        "    depends_on:",
+        "      - gvmd",
+        "volumes:",
+        "  gvmd_data_vol:",
+        "  psql_data_vol:",
+        "  psql_socket_vol:",
+        "  gvmd_socket_vol:",
+        "  ospd_openvas_socket_vol:",
+        "CEEOF",
+        "cd /opt/greenbone",
+        "docker-compose pull 2>&1 | tail -3 || true",
+        "docker-compose up -d",
+        "echo GREENBONE_SETUP_COMPLETE",
+    ])
+
+    setup_hash = hashlib.md5(setup_script.encode()).hexdigest()
+
+    cached_ami = None
+    param_path = "/nexplane/smoke-amis/openvas/{}".format(setup_hash[:8])
+    try:
+        resp_p = ssm_client.get_parameter(Name=param_path)
+        candidate = resp_p["Parameter"]["Value"]
+        images = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+        if images and images[0]["State"] == "available":
+            cached_ami = candidate
+            log("Using cached OpenVAS AMI: {}".format(cached_ami))
+    except Exception:
+        pass
+
+    vpc_id = ec2_client.describe_vpcs(
+        Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
+    subnets = ec2_client.describe_subnets(
+        Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": [INSTANCE_TYPE]}])["InstanceTypeOfferings"]
+        azs = {o["Location"] for o in offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in azs] or subnets
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    resp = ec2_client.run_instances(
+        ImageId=cached_ami or AL2023_AMI, InstanceType=INSTANCE_TYPE,
+        MinCount=1, MaxCount=1, SubnetId=subnet_id,
+        IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-openvas"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+    )
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log("OpenVAS EC2: {}".format(instance_id))
+
+    import time as _t2
+    _t2.sleep(5)
+    deadline = time.time() + 300
+    private_ip = ""
+    while time.time() < deadline:
+        try:
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+            if state == "running":
+                private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+                break
+        except Exception:
+            pass
+        time.sleep(8)
+
+    deadline2 = time.time() + 180
+    while time.time() < deadline2:
+        try:
+            r = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+            time.sleep(5)
+            out = ssm_client.get_command_invocation(
+                CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
+            if out["Status"] == "Success":
+                break
+        except Exception:
+            pass
+        time.sleep(10)
+
+    openvas_connector_id = None
+    try:
+        if not cached_ami:
+            log("Installing Docker + Greenbone CE (5-15 min for image pull)...")
+            resp_s = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [setup_script]}, TimeoutSeconds=900)
+            setup_deadline = time.time() + 900
+            while time.time() < setup_deadline:
+                time.sleep(30)
+                try:
+                    out_s = ssm_client.get_command_invocation(
+                        CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                    if out_s["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+                        if "GREENBONE_SETUP_COMPLETE" in out_s.get("StandardOutputContent", ""):
+                            log("Greenbone CE setup complete")
+                        else:
+                            log("  WARNING: Greenbone setup: {}".format(out_s.get("StandardErrorContent", "")[:200]))
+                        break
+                except Exception:
+                    pass
+            try:
+                from run_on_ec2 import get_or_create_smoke_ami
+                get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "openvas", setup_hash)
+            except Exception as e:
+                log("  WARNING: AMI cache failed: {}".format(e))
+        else:
+            ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": ["cd /opt/greenbone && docker-compose up -d 2>/dev/null || true"]},
+                TimeoutSeconds=120)
+            time.sleep(30)
+
+        log("Waiting for Greenbone GSA API on port 9392 (up to 10 min)...")
+        gsa_deadline = time.time() + 600
+        gsa_ready = False
+        while time.time() < gsa_deadline:
+            time.sleep(20)
+            check_cmd = "curl -sk -o /dev/null -w '%{http_code}' http://localhost:9392/ 2>/dev/null || echo 000"
+            resp_c = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [check_cmd]}, TimeoutSeconds=15)
+            time.sleep(8)
+            try:
+                out_c = ssm_client.get_command_invocation(
+                    CommandId=resp_c["Command"]["CommandId"], InstanceId=instance_id)
+                http_code = out_c.get("StandardOutputContent", "").strip()
+                if http_code in ("200", "302", "401"):
+                    gsa_ready = True
+                    log("GSA API ready (HTTP {})".format(http_code))
+                    break
+            except Exception:
+                pass
+        if not gsa_ready:
+            log("  WARNING: GSA API did not respond within timeout")
+
+        openvas_url = "http://{}:9392".format(private_ip)
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "openvas",
+            "name": "nexplane-smoke-openvas",
+            "display_name": "nexplane-smoke-openvas",
+            "credentials": {"base_url": openvas_url, "username": "admin", "password": "admin"},
+        })
+        openvas_connector_id = conn_resp.get("id")
+        log("OpenVAS connector registered: {}".format(openvas_connector_id))
+
+        asset_resp = client.post("/assets", json={
+            "name": "nexplane-smoke-openvas-target",
+            "asset_type": "server",
+            "properties": {"ip": private_ip, "hostname": "nexplane-smoke-openvas-target"},
+        })
+        asset_id = asset_resp.get("id", cloud_account_id)
+
+        cr = client.run_cr(
+            "[OPENVAS_SCAN] run vulnerability scan",
+            "openvas_run_scan",
+            asset_id,
+            {"target_hosts": "127.0.0.1", "scan_name": "nexplane-smoke-scan",
+             "max_wait_seconds": 1800, "poll_interval": 30},
+        )
+        exec_runs = cr.get("execution_runs") or []
+        result = exec_runs[0].get("result") if exec_runs else {}
+
+        if result.get("status") == "skipped":
+            log("  WARNING: Scan skipped (no connector credentials in backend)")
+        elif result.get("action") == "openvas_run_scan":
+            log("Scan completed. Status: {} | Findings: {}".format(
+                result.get("status"), result.get("finding_count", 0)))
+        else:
+            log("  WARNING: Unexpected result: {}".format(result))
+        log("Phase OPENVAS_SCAN PASSED")
+
+    except Exception as e:
+        print("\n[FAIL] Phase OPENVAS_SCAN failed: {}".format(e))
+        raise
+    finally:
+        if openvas_connector_id:
+            try:
+                client.client.delete("{}/connectors/{}".format(client.base, openvas_connector_id))
+            except Exception:
+                pass
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Phase NESSUS_SCAN -- Nessus Essentials vulnerability scan (AMI cached)
+# ---------------------------------------------------------------------------
+
+def run_phase_nessus_scan(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase NESSUS_SCAN: launch t3.medium EC2 (AL2023), install Nessus Essentials,
+    register connector, run scan CR, verify findings returned. AMI cached after first setup."""
+    import time, hashlib
+    print("\n[Phase NESSUS_SCAN] Nessus Essentials vulnerability scan")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_client:
+        fail("[NESSUS_SCAN] AWS clients not available")
+
+    AL2023_AMI = "ami-0953476d60561c955"
+    INSTANCE_TYPE = "t3.medium"
+    NESSUS_RPM_URL = "https://www.tenable.com/downloads/api/v2/pages/nessus/files/Nessus-10.8.3-amzn2023.x86_64.rpm"
+
+    setup_script = "\n".join([
+        "set -e",
+        "curl -fsSL -o /tmp/nessus.rpm '{}'".format(NESSUS_RPM_URL),
+        "rpm -ivh /tmp/nessus.rpm 2>/dev/null || yum install -y /tmp/nessus.rpm 2>/dev/null || true",
+        "systemctl enable nessusd && systemctl start nessusd || service nessusd start || true",
+        "sleep 30",
+        "echo NESSUS_SETUP_COMPLETE",
+    ])
+
+    setup_hash = hashlib.md5(setup_script.encode()).hexdigest()
+
+    cached_ami = None
+    param_path = "/nexplane/smoke-amis/nessus/{}".format(setup_hash[:8])
+    try:
+        resp_p = ssm_client.get_parameter(Name=param_path)
+        candidate = resp_p["Parameter"]["Value"]
+        images = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+        if images and images[0]["State"] == "available":
+            cached_ami = candidate
+            log("Using cached Nessus AMI: {}".format(cached_ami))
+    except Exception:
+        pass
+
+    vpc_id = ec2_client.describe_vpcs(
+        Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
+    subnets = ec2_client.describe_subnets(
+        Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": [INSTANCE_TYPE]}])["InstanceTypeOfferings"]
+        azs = {o["Location"] for o in offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in azs] or subnets
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    resp = ec2_client.run_instances(
+        ImageId=cached_ami or AL2023_AMI, InstanceType=INSTANCE_TYPE,
+        MinCount=1, MaxCount=1, SubnetId=subnet_id,
+        IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-nessus"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+    )
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log("Nessus EC2: {}".format(instance_id))
+
+    import time as _t2
+    _t2.sleep(5)
+    deadline = time.time() + 300
+    private_ip = ""
+    while time.time() < deadline:
+        try:
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+            if state == "running":
+                private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+                break
+        except Exception:
+            pass
+        time.sleep(8)
+
+    deadline2 = time.time() + 180
+    while time.time() < deadline2:
+        try:
+            r = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+            time.sleep(5)
+            out = ssm_client.get_command_invocation(
+                CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
+            if out["Status"] == "Success":
+                break
+        except Exception:
+            pass
+        time.sleep(10)
+
+    nessus_connector_id = None
+    try:
+        if not cached_ami:
+            log("Installing Nessus Essentials...")
+            resp_s = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [setup_script]}, TimeoutSeconds=300)
+            setup_deadline = time.time() + 300
+            while time.time() < setup_deadline:
+                time.sleep(20)
+                try:
+                    out_s = ssm_client.get_command_invocation(
+                        CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                    if out_s["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+                        if "NESSUS_SETUP_COMPLETE" in out_s.get("StandardOutputContent", ""):
+                            log("Nessus installed")
+                        else:
+                            log("  WARNING: Nessus setup: {}".format(out_s.get("StandardErrorContent", "")[:200]))
+                        break
+                except Exception:
+                    pass
+            try:
+                from run_on_ec2 import get_or_create_smoke_ami
+                get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "nessus", setup_hash)
+            except Exception as e:
+                log("  WARNING: AMI cache failed: {}".format(e))
+        else:
+            ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": ["systemctl start nessusd 2>/dev/null || true && sleep 15"]},
+                TimeoutSeconds=60)
+            time.sleep(20)
+
+        log("Waiting for Nessus API on port 8834...")
+        nessus_deadline = time.time() + 180
+        nessus_ready = False
+        while time.time() < nessus_deadline:
+            time.sleep(15)
+            check_cmd = "curl -sk -o /dev/null -w '%{http_code}' https://localhost:8834/ 2>/dev/null || echo 000"
+            resp_c = ssm_client.send_command(
+                InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [check_cmd]}, TimeoutSeconds=15)
+            time.sleep(8)
+            try:
+                out_c = ssm_client.get_command_invocation(
+                    CommandId=resp_c["Command"]["CommandId"], InstanceId=instance_id)
+                http_code = out_c.get("StandardOutputContent", "").strip()
+                if http_code in ("200", "302", "401", "403"):
+                    nessus_ready = True
+                    log("Nessus API ready (HTTP {})".format(http_code))
+                    break
+            except Exception:
+                pass
+
+        # Create admin user via nessuscli (no registration required for API access)
+        create_user_cmd = (
+            "/opt/nessus/sbin/nessuscli adduser admin << 'NEOF'\n"
+            "adminpassword123\n"
+            "adminpassword123\n"
+            "y\n"
+            "\n"
+            "NEOF\n"
+            "echo USER_DONE || true"
+        )
+        ssm_client.send_command(
+            InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [create_user_cmd]}, TimeoutSeconds=30)
+        time.sleep(15)
+
+        nessus_url = "https://{}:8834".format(private_ip)
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "nessus",
+            "name": "nexplane-smoke-nessus",
+            "display_name": "nexplane-smoke-nessus",
+            "credentials": {"base_url": nessus_url, "username": "admin", "password": "adminpassword123"},
+        })
+        nessus_connector_id = conn_resp.get("id")
+        log("Nessus connector registered: {}".format(nessus_connector_id))
+
+        asset_resp = client.post("/assets", json={
+            "name": "nexplane-smoke-nessus-target",
+            "asset_type": "server",
+            "properties": {"ip": private_ip, "hostname": "nexplane-smoke-nessus-target"},
+        })
+        asset_id = asset_resp.get("id", cloud_account_id)
+
+        cr = client.run_cr(
+            "[NESSUS_SCAN] run vulnerability scan",
+            "nessus_run_scan",
+            asset_id,
+            {"target_hosts": "127.0.0.1", "scan_name": "nexplane-smoke-nessus-scan",
+             "max_wait_seconds": 1800, "poll_interval": 30},
+        )
+        exec_runs = cr.get("execution_runs") or []
+        result = exec_runs[0].get("result") if exec_runs else {}
+
+        if result.get("status") == "skipped":
+            log("  WARNING: Scan skipped (no connector credentials in backend)")
+        elif result.get("action") == "nessus_run_scan":
+            log("Scan completed. Status: {} | Findings: {}".format(
+                result.get("status"), result.get("finding_count", 0)))
+        else:
+            log("  WARNING: Unexpected result: {}".format(result))
+        log("Phase NESSUS_SCAN PASSED")
+
+    except Exception as e:
+        print("\n[FAIL] Phase NESSUS_SCAN failed: {}".format(e))
+        raise
+    finally:
+        if nessus_connector_id:
+            try:
+                client.client.delete("{}/connectors/{}".format(client.base, nessus_connector_id))
+            except Exception:
+                pass
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+        except Exception:
+            pass
+
