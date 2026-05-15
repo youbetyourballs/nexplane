@@ -1,0 +1,12 @@
+{
+  "change_type": "configure_windows_firewall",
+  "display_name": "Configure Windows Firewall",
+  "description": "Apply Windows Firewall profile hardening rules via Nexplane agent",
+  "steps": [
+    {"generic_action": "configure_windows_firewall", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "configure_windows_firewall",
+  "rollback_connector_type": "nexplane_agent"
+}

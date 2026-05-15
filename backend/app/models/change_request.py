@@ -129,6 +129,7 @@ class ChangeType(str, enum.Enum):
     gcp_block_public_bucket_access = "gcp_block_public_bucket_access"
     gcp_disable_service_account = "gcp_disable_service_account"
     gcp_rotate_service_account_key = "gcp_rotate_service_account_key"
+    rotate_gcp_service_account_key = "rotate_gcp_service_account_key"
     # Azure Plans 4 — NSG, blob storage, storage key
     azure_update_nsg_rule = "azure_update_nsg_rule"
     azure_restore_nsg_rule = "azure_restore_nsg_rule"
@@ -277,6 +278,18 @@ class ChangeType(str, enum.Enum):
     # Credential rotation additions
     rotate_secrets_manager_secret = "rotate_secrets_manager_secret"
     rotate_jwt_signing_key = "rotate_jwt_signing_key"
+    # Windows hardening — Phase WIN_OSSEC_WIRE / WIN_HARDENING_PIPELINE / WIN_POLICY_PIPELINE
+    configure_windows_firewall = "configure_windows_firewall"
+    deploy_applocker_policy = "deploy_applocker_policy"
+    configure_windows_audit_policy = "configure_windows_audit_policy"
+    wdac_audit = "wdac_audit"
+    wdac_enforce = "wdac_enforce"
+    asr_audit = "asr_audit"
+    asr_enforce = "asr_enforce"
+    sysmon_deploy = "sysmon_deploy"
+    sysmon_fim = "sysmon_fim"
+    # Cloud credential rotation
+    rotate_azure_service_principal_secret = "rotate_azure_service_principal_secret"
 
 
 class RiskLevel(str, enum.Enum):

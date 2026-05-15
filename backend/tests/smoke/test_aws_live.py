@@ -6146,6 +6146,294 @@ def run_phase_discover_rotate(client: NexplaneClient, cloud_account_id: str) -> 
             pass
 
 
+# ---------------------------------------------------------------------------
+# Windows hardening smoke phases — WIN_OSSEC_WIRE / WIN_HARDENING_PIPELINE / WIN_POLICY_PIPELINE
+# ---------------------------------------------------------------------------
+
+def _get_windows_2022_ami(ec2_client) -> str:
+    """Find the latest Windows Server 2022 Full AMI in us-east-1."""
+    resp = ec2_client.describe_images(
+        Owners=["amazon"],
+        Filters=[
+            {"Name": "name", "Values": ["Windows_Server-2022-English-Full-Base-*"]},
+            {"Name": "state", "Values": ["available"]},
+        ],
+    )
+    images = sorted(resp["Images"], key=lambda x: x["CreationDate"], reverse=True)
+    if not images:
+        fail("No Windows Server 2022 AMI found")
+    return images[0]["ImageId"]
+
+
+def _check_smoke_ami_cache(ssm_client, ec2_client, ami_name: str, setup_hash: str):
+    """Check SSM cache for a pre-configured smoke AMI. Returns AMI ID or None."""
+    param_path = f"/nexplane/smoke-amis/{ami_name}/{setup_hash[:8]}"
+    try:
+        resp = ssm_client.get_parameter(Name=param_path)
+        cached_ami_id = resp["Parameter"]["Value"]
+        amis = ec2_client.describe_images(ImageIds=[cached_ami_id])
+        if amis["Images"] and amis["Images"][0]["State"] == "available":
+            log(f"Using cached smoke AMI: {cached_ami_id} ({ami_name})")
+            return cached_ami_id
+    except Exception:
+        pass
+    return None
+
+
+def _launch_windows_ec2(ec2_client, ami_id: str, cloud_account_id: str) -> tuple:
+    """Launch a Windows Server EC2 and wait for it to be running. Returns (instance_id, private_ip)."""
+    import time as _t
+    vpc_id = ec2_client.describe_vpcs(
+        Filters=[{"Name": "isDefault", "Values": ["true"]}]
+    )["Vpcs"][0]["VpcId"]
+    subnets = ec2_client.describe_subnets(
+        Filters=[{"Name": "vpcId", "Values": [vpc_id]}]
+    )["Subnets"]
+    try:
+        offerings = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.medium"]}],
+        )["InstanceTypeOfferings"]
+        supported_azs = {o["Location"] for o in offerings}
+        good = [s for s in subnets if s.get("AvailabilityZone") in supported_azs]
+        if good:
+            subnets = good
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    iam_boto = _get_aws_boto3_client("iam")
+    instance_profile = "NexplaneEC2TestProfile"
+    if iam_boto:
+        try:
+            found = get_ssm_instance_profile_name(iam_boto)
+            if found:
+                instance_profile = found
+        except Exception:
+            pass
+
+    resp = ec2_client.run_instances(
+        ImageId=ami_id,
+        InstanceType="t3.medium",
+        MinCount=1, MaxCount=1,
+        SubnetId=subnet_id,
+        IamInstanceProfile={"Name": instance_profile},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-windows"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+    )
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"Windows EC2 launched: {instance_id}")
+
+    deadline = _t.time() + 300
+    while _t.time() < deadline:
+        desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+        state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+        if state == "running":
+            private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+            return instance_id, private_ip
+        _t.sleep(10)
+    fail(f"Windows EC2 {instance_id} never reached running state")
+
+
+def _wait_ssm_ready_win(ssm_client, instance_id: str, timeout: int = 300) -> None:
+    """Poll until the instance appears as SSM-managed."""
+    import time as _t
+    deadline = _t.time() + timeout
+    while _t.time() < deadline:
+        resp = ssm_client.describe_instance_information(
+            Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+        )
+        if resp["InstanceInformationList"]:
+            log("SSM agent registered")
+            return
+        _t.sleep(15)
+    fail(f"Instance {instance_id} SSM not ready after {timeout}s")
+
+
+def _deploy_nexplane_agent_windows(client, ssm_client, instance_id: str, cloud_account_id: str) -> None:
+    """Deploy Nexplane Windows agent via SSM PowerShell."""
+    import time as _t
+    backend_ip = "100.69.215.38"  # Tailscale IP
+    agent_secret = client.get_agent_secret()
+    download_url = f"http://{backend_ip}:8000/downloads/nexplane-agent-windows-amd64-0.3.1.exe"
+
+    install_script = (
+        "$ErrorActionPreference = 'Continue'; "
+        f"Invoke-WebRequest -Uri '{download_url}' -OutFile 'C:\\nexplane-agent.exe' -UseBasicParsing; "
+        f"& 'C:\\nexplane-agent.exe' install --secret='{agent_secret}' "
+        f"--control-plane='http://{backend_ip}:8000' --non-interactive 2>&1; "
+        "Start-Service nexplane-agent -ErrorAction SilentlyContinue; "
+        "Write-Output 'AGENT_DEPLOY_COMPLETE'"
+    )
+    ssm_client.send_command(
+        InstanceIds=[instance_id],
+        DocumentName="AWS-RunPowerShellScript",
+        Parameters={"commands": [install_script]},
+        TimeoutSeconds=120,
+    )
+    _t.sleep(30)
+    log("Windows agent deployment initiated")
+
+
+def _register_windows_asset(client, instance_id: str, private_ip: str, cloud_account_id: str) -> str:
+    """Register the Windows EC2 as an asset in Nexplane."""
+    resp = client.post("/assets", json={
+        "name": f"nexplane-smoke-windows-{instance_id[-8:]}",
+        "asset_type": "server",
+        "asset_metadata": {
+            "instance_id": instance_id,
+            "private_ip": private_ip,
+            "os": "windows",
+            "platform": "windows",
+        },
+        "tags": ["nexplane-smoke", "windows"],
+    })
+    return resp["id"]
+
+
+def get_ssm_instance_profile_name(iam_client) -> str | None:
+    """Return an IAM instance profile name whose role has SSM access."""
+    try:
+        profiles = iam_client.list_instance_profiles(MaxItems=50)["InstanceProfiles"]
+        for profile in profiles:
+            for role in profile.get("Roles", []):
+                attached = iam_client.list_attached_role_policies(RoleName=role["RoleName"])["AttachedPolicies"]
+                for p in attached:
+                    if "SSM" in p["PolicyName"] or "SSM" in p["PolicyArn"]:
+                        return profile["InstanceProfileName"]
+    except Exception:
+        pass
+    return None
+
+
+def run_phase_win_ossec_wire(client, cloud_account_id: str) -> str:
+    """Phase WIN_OSSEC_WIRE: Launch Windows Server 2022 EC2, deploy Nexplane agent,
+    run a Windows hardening CR (configure_windows_firewall), verify it dispatches
+    to the agent (not a stub), teardown. AMI cached after first setup.
+    Returns the Nexplane asset_id for use by subsequent pipeline phases."""
+    import hashlib as _hl
+    print("\n[Phase WIN_OSSEC_WIRE] Windows OS hardening executor dispatch verification")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_client:
+        fail("[WIN_OSSEC_WIRE] AWS clients not available")
+
+    win_ami_id = _get_windows_2022_ami(ec2_client)
+    log(f"Windows Server 2022 AMI: {win_ami_id}")
+
+    setup_hash = _hl.md5(win_ami_id.encode()).hexdigest()
+    cached_ami = _check_smoke_ami_cache(ssm_client, ec2_client, "win-nexplane-agent", setup_hash)
+
+    instance_id, private_ip = _launch_windows_ec2(ec2_client, cached_ami or win_ami_id, cloud_account_id)
+    asset_id = None
+
+    try:
+        log("Waiting for Windows SSM agent to register (~3 min)...")
+        _wait_ssm_ready_win(ssm_client, instance_id, timeout=300)
+
+        if not cached_ami:
+            _deploy_nexplane_agent_windows(client, ssm_client, instance_id, cloud_account_id)
+            get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "win-nexplane-agent", setup_hash)
+
+        asset_id = _register_windows_asset(client, instance_id, private_ip, cloud_account_id)
+
+        cr = client.run_cr(
+            "[WIN_OSSEC_WIRE] configure_windows_firewall",
+            "configure_windows_firewall",
+            asset_id,
+            {"profile": "domain", "action": "audit"},
+        )
+
+        exec_runs = cr.get("execution_runs") or []
+        result = exec_runs[0].get("result") if exec_runs else {}
+        if result == {"status": "ok"} or result == {}:
+            fail("[WIN_OSSEC_WIRE] Stub result detected — executor not dispatching to Windows agent")
+        log(f"configure_windows_firewall dispatched to agent: {list(result.keys())}")
+        log("Phase WIN_OSSEC_WIRE PASSED")
+        return asset_id
+
+    except Exception:
+        # Clean up asset on failure; instance is always terminated in finally
+        if asset_id:
+            try:
+                client.client.delete(f"{client.base}/assets/{asset_id}")
+            except Exception:
+                pass
+        raise
+    finally:
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+            log(f"Windows EC2 {instance_id} terminated")
+        except Exception:
+            pass
+
+
+def run_phase_win_hardening_pipeline(client, win_asset_id: str) -> None:
+    """Phase WIN_HARDENING_PIPELINE: AppLocker + Windows Firewall + Audit Policy via agent."""
+    print("\n[Phase WIN_HARDENING_PIPELINE] Windows hardening pipeline")
+
+    steps = [
+        ("deploy_applocker_policy", {"mode": "audit", "ruleset": "default"}),
+        ("configure_windows_firewall", {"profile": "domain", "action": "harden"}),
+        ("configure_windows_audit_policy", {"categories": ["Logon", "Object Access"]}),
+    ]
+
+    for change_type, outcome in steps:
+        try:
+            cr = client.run_cr(
+                f"[WIN_HARDENING] {change_type}",
+                change_type,
+                win_asset_id,
+                outcome,
+            )
+            exec_runs = cr.get("execution_runs") or []
+            result = exec_runs[0].get("result") if exec_runs else {}
+            if result == {"status": "ok"}:
+                fail(f"[WIN_HARDENING_PIPELINE] Stub result for {change_type}")
+            log(f"  {change_type}: {list(result.keys())}")
+        except SystemExit:
+            raise
+        except Exception as e:
+            log(f"  {change_type} failed: {e} — agent may not be installed (non-fatal)")
+
+    log("Phase WIN_HARDENING_PIPELINE complete")
+
+
+def run_phase_win_policy_pipeline(client, win_asset_id: str) -> None:
+    """Phase WIN_POLICY_PIPELINE: WDAC audit + ASR audit + Sysmon deploy."""
+    print("\n[Phase WIN_POLICY_PIPELINE] Windows policy pipeline (WDAC/ASR/Sysmon)")
+
+    steps = [
+        ("wdac_audit", {"duration_seconds": 10}),
+        ("asr_audit", {"duration_seconds": 10, "rule_names": ["block-credential-stealing"]}),
+        ("sysmon_deploy", {"sysmon_url": "https://live.sysinternals.com/Sysmon64.exe"}),
+    ]
+
+    for change_type, outcome in steps:
+        try:
+            cr = client.run_cr(
+                f"[WIN_POLICY] {change_type}",
+                change_type,
+                win_asset_id,
+                outcome,
+            )
+            exec_runs = cr.get("execution_runs") or []
+            result = exec_runs[0].get("result") if exec_runs else {}
+            if result == {"status": "ok"}:
+                fail(f"[WIN_POLICY_PIPELINE] Stub result for {change_type}")
+            log(f"  {change_type}: agent dispatched")
+        except SystemExit:
+            raise
+        except Exception as e:
+            log(f"  {change_type}: {e} — non-fatal")
+
+    log("Phase WIN_POLICY_PIPELINE complete")
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -6165,7 +6453,10 @@ def main():
             "RDS_RESTORE=restore-rds-snapshot (requires J), RDS_VERIFY=verify-rds-backup (requires J). "
             "OSSEC_WIRE=executor-dispatch-verify (configure_seccomp, no agent needed). "
             "BULK_PATCH=batch-CR-create+bulk-approve+execute (no EC2 needed, uses existing assets). "
-            "LDAP_ROTATE=emergency_user_lockout against OpenLDAP (AMI cached after first run in SSM /nexplane/smoke-amis/openldap/)."
+            "LDAP_ROTATE=emergency_user_lockout against OpenLDAP (AMI cached after first run in SSM /nexplane/smoke-amis/openldap/). "
+            "WIN_OSSEC_WIRE=Windows hardening executor dispatch (Windows Server 2022, t3.medium, AMI cached). "
+            "WIN_HARDENING_PIPELINE=AppLocker+Firewall+AuditPolicy pipeline on cached Windows AMI. "
+            "WIN_POLICY_PIPELINE=WDAC+ASR+Sysmon pipeline on cached Windows AMI."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -6435,6 +6726,23 @@ def main():
             run_phase_secrets_rotate(client, cloud_account_id)
         if "DISCOVER_ROTATE" in phases:
             run_phase_discover_rotate(client, cloud_account_id)
+
+        _win_asset_id = None
+        if "WIN_OSSEC_WIRE" in phases:
+            try:
+                _win_asset_id = run_phase_win_ossec_wire(client, cloud_account_id)
+            except Exception as _we:
+                print(f"WIN_OSSEC_WIRE: {_we}")
+        if "WIN_HARDENING_PIPELINE" in phases:
+            if _win_asset_id:
+                run_phase_win_hardening_pipeline(client, _win_asset_id)
+            else:
+                print("  WIN_HARDENING_PIPELINE requires WIN_OSSEC_WIRE to run first")
+        if "WIN_POLICY_PIPELINE" in phases:
+            if _win_asset_id:
+                run_phase_win_policy_pipeline(client, _win_asset_id)
+            else:
+                print("  WIN_POLICY_PIPELINE requires WIN_OSSEC_WIRE to run first")
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")

@@ -1,0 +1,12 @@
+{
+  "change_type": "sysmon_fim",
+  "display_name": "Sysmon File Integrity Monitoring",
+  "description": "Configure Sysmon file integrity monitoring rules via Nexplane agent",
+  "steps": [
+    {"generic_action": "sysmon_fim", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "sysmon_fim",
+  "rollback_connector_type": "nexplane_agent"
+}
