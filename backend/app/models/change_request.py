@@ -352,6 +352,11 @@ class ChangeType(str, enum.Enum):
     elastic_create_rule = "elastic_create_rule"
     splunk_sync_notables = "splunk_sync_notables"
     splunk_create_alert = "splunk_create_alert"
+    # Supply chain security
+    snyk_scan_image = "snyk_scan_image"
+    snyk_sync_findings = "snyk_sync_findings"
+    jfrog_scan_artifact = "jfrog_scan_artifact"
+    jfrog_sync_violations = "jfrog_sync_violations"
 
 
 class RiskLevel(str, enum.Enum):
