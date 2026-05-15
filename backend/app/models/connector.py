@@ -55,6 +55,7 @@ class ConnectorType(str, enum.Enum):
     ansible_local = "ansible_local"
     oci = "oci"
     ldap = "ldap"
+    vault = "vault"
 
 
 class ConnectorStatus(str, enum.Enum):
