@@ -1,0 +1,51 @@
+{
+  "connector_type": "elastic",
+  "display_name": "Elastic Security",
+  "credential_fields": [
+    {"name": "base_url", "label": "Elasticsearch URL", "type": "string", "required": true, "placeholder": "http://elastic.example.com:9200"},
+    {"name": "username", "label": "Username", "type": "string", "required": true, "placeholder": "elastic"},
+    {"name": "password", "label": "Password", "type": "password", "required": true},
+    {"name": "kibana_url", "label": "Kibana URL (optional)", "type": "string", "required": false, "placeholder": "http://elastic.example.com:5601"},
+    {"name": "verify_ssl", "label": "Verify SSL", "type": "boolean", "required": false}
+  ],
+  "actions": [
+    {
+      "action_id": "sync_alerts",
+      "generic_action": "sync_alerts",
+      "action_type": "ingest",
+      "execution_tier": 1,
+      "display_name": "Sync Security Alerts",
+      "description": "Pull security alerts from Elastic Security and sync as Nexplane findings.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "start_time", "type": "string", "required": false, "default": "now-24h"},
+        {"name": "end_time", "type": "string", "required": false, "default": "now"},
+        {"name": "min_severity", "type": "string", "required": false}
+      ],
+      "executor": "elastic.sync_alerts",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "create_detection_rule",
+      "generic_action": "create_rule",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Create Detection Rule",
+      "description": "Create a KQL detection rule in Kibana Security. Rollback deletes the rule.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "rule_id", "type": "string", "required": false},
+        {"name": "name", "type": "string", "required": true},
+        {"name": "description", "type": "string", "required": false},
+        {"name": "query", "type": "string", "required": true},
+        {"name": "index", "type": "array", "required": false},
+        {"name": "severity", "type": "string", "required": false},
+        {"name": "risk_score", "type": "integer", "required": false},
+        {"name": "interval", "type": "string", "required": false},
+        {"name": "enabled", "type": "boolean", "required": false}
+      ],
+      "executor": "elastic.create_detection_rule",
+      "estimated_duration_seconds": 10
+    }
+  ]
+}
