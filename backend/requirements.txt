@@ -53,3 +53,6 @@ google-auth>=2.27.0
 google-auth-httplib2>=0.2.0
 slack-sdk>=3.27.0
 dnspython>=2.4.0
+pymongo>=4.6.0
+redis>=5.0.0
+psycopg2-binary>=2.9.0

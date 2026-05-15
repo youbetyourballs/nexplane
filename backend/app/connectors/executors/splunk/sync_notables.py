@@ -1,6 +1,11 @@
 from __future__ import annotations
 """Sync Splunk notable events (or saved search results) as Nexplane findings."""
 
+try:
+    from ._client import get_splunk_client
+except ImportError:
+    get_splunk_client = None  # type: ignore[assignment]
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Pull notable events from Splunk ES (or fallback generic events) and return as findings.
@@ -15,9 +20,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         count: number of events found
         events: list of event dicts
     """
-    from ._client import get_splunk_client
-
-    client = get_splunk_client(connector)
+    _gsc = get_splunk_client
+    if _gsc is None:
+        from ._client import get_splunk_client as _gsc  # type: ignore[assignment]
+    client = _gsc(connector)
     if client is None:
         return {
             "action": "splunk_sync_notables",
