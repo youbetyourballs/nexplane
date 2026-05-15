@@ -292,6 +292,16 @@ class ChangeType(str, enum.Enum):
     rotate_azure_service_principal_secret = "rotate_azure_service_principal_secret"
     # HashiCorp Vault secret rotation
     rotate_vault_secret = "rotate_vault_secret"
+    # Security audit agent commands
+    trivy_scan = "trivy_scan"
+    lynis_audit = "lynis_audit"
+    openscap_scan = "openscap_scan"
+    authorized_keys_audit = "authorized_keys_audit"
+    sudoers_audit = "sudoers_audit"
+    suid_scan = "suid_scan"
+    ssl_cert_inspect = "ssl_cert_inspect"
+    # Keycloak identity
+    keycloak_disable_user = "keycloak_disable_user"
 
 
 class RiskLevel(str, enum.Enum):
