@@ -1,40 +1,13 @@
 {
   "connector_type": "jfrog",
   "display_name": "JFrog Xray",
-  "credentials": [
-    {"name": "url", "label": "JFrog Platform URL", "type": "text", "required": true, "default": "https://yourcompany.jfrog.io"},
-    {"name": "user", "label": "Username", "type": "text", "required": true},
-    {"name": "token", "label": "API Token", "type": "password", "required": true}
+  "credential_fields": [
+    {"name": "base_url", "label": "JFrog Base URL", "type": "string", "required": true},
+    {"name": "username", "label": "Username", "type": "string", "required": true},
+    {"name": "password_or_token", "label": "Password or API Token", "type": "password", "required": true}
   ],
   "actions": [
-    {
-      "action_id": "jfrog_scan_artifact",
-      "generic_action": "jfrog_scan_artifact",
-      "display_name": "Scan Artifact for Vulnerabilities",
-      "description": "Triggers an Xray security scan on a specific artifact and returns violations/CVEs.",
-      "executor": "jfrog.scan_artifact",
-      "action_type": "change",
-      "execution_tier": 1,
-      "estimated_duration_seconds": 60,
-      "applicable_asset_types": ["server", "container_image"],
-      "parameters": [
-        {"name": "repo", "type": "string", "required": true, "description": "Repository key in Artifactory"},
-        {"name": "path", "type": "string", "required": true, "description": "Artifact path within the repository"}
-      ]
-    },
-    {
-      "action_id": "jfrog_sync_violations",
-      "generic_action": "jfrog_sync_violations",
-      "display_name": "Sync Xray Violations as Findings",
-      "description": "Pulls all current Xray policy violations and imports them as Nexplane vulnerability findings.",
-      "executor": "jfrog.sync_violations",
-      "action_type": "change",
-      "execution_tier": 1,
-      "estimated_duration_seconds": 30,
-      "applicable_asset_types": ["server"],
-      "parameters": [
-        {"name": "repo", "type": "string", "required": false, "description": "Filter violations to a specific repository (optional)"}
-      ]
-    }
+    {"action_id": "scan_artifact", "generic_action": "scan", "action_type": "change", "execution_tier": 2, "display_name": "Scan Artifact", "description": "Trigger Xray security scan of a specific artifact and return violations/CVEs.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "repo", "type": "string", "required": true}, {"name": "path", "type": "string", "required": true}], "executor": "jfrog.scan_artifact", "estimated_duration_seconds": 60},
+    {"action_id": "sync_violations", "generic_action": "discover", "action_type": "ingest", "execution_tier": 1, "display_name": "Sync Violations", "description": "Pull all Xray policy violations and import as Nexplane findings.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "filters", "type": "object", "required": false}], "executor": "jfrog.sync_violations", "estimated_duration_seconds": 30}
   ]
 }
