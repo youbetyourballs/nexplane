@@ -309,6 +309,11 @@ class ChangeType(str, enum.Enum):
     # Gitea identity
     gitea_suspend_user = "gitea_suspend_user"
 
+    # Database credential rotation
+    rotate_postgres_password = "rotate_postgres_password"
+    rotate_redis_password = "rotate_redis_password"
+    rotate_mongodb_password = "rotate_mongodb_password"
+
 
 class RiskLevel(str, enum.Enum):
     low = "low"
