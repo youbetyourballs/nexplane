@@ -1,0 +1,12 @@
+{
+  "change_type": "sysmon_deploy",
+  "display_name": "Deploy Sysmon",
+  "description": "Download and install Sysmon with a baseline config via Nexplane agent",
+  "steps": [
+    {"generic_action": "sysmon_deploy", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "sysmon_deploy",
+  "rollback_connector_type": "nexplane_agent"
+}

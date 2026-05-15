@@ -1,0 +1,12 @@
+{
+  "change_type": "asr_audit",
+  "display_name": "ASR Rules Audit",
+  "description": "Run Attack Surface Reduction rules in audit mode via Nexplane agent",
+  "steps": [
+    {"generic_action": "asr_audit", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "asr_audit",
+  "rollback_connector_type": "nexplane_agent"
+}
