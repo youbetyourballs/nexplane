@@ -1,0 +1,51 @@
+{
+  "connector_type": "step_ca",
+  "display_name": "step-ca (Smallstep)",
+  "credential_fields": [
+    {"name": "ca_url", "label": "CA URL", "type": "string", "required": true, "placeholder": "https://ca.example.com:9000"},
+    {"name": "fingerprint", "label": "Root CA Fingerprint", "type": "string", "required": true, "description": "SHA-256 fingerprint from `step ca bootstrap`"},
+    {"name": "provisioner", "label": "Provisioner Name", "type": "string", "required": false, "default": "admin"},
+    {"name": "provisioner_password", "label": "Provisioner Password", "type": "password", "required": false},
+    {"name": "step_cli", "label": "step CLI Path", "type": "string", "required": false, "default": "step"}
+  ],
+  "actions": [
+    {
+      "action_id": "rotate_certificate",
+      "generic_action": "rotate_credentials",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Rotate Certificate",
+      "description": "Reissue a TLS certificate for a domain via step-ca, optionally deploying via SSM and triggering a service reload.",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "subject", "type": "string", "required": true, "description": "Certificate subject / common name (e.g. api.example.com)"},
+        {"name": "san", "type": "string", "required": false, "description": "Subject Alternative Name; defaults to subject"},
+        {"name": "not_after", "type": "string", "required": false, "default": "720h", "description": "Certificate validity duration (e.g. 720h = 30 days)"},
+        {"name": "deploy_via_ssm", "type": "boolean", "required": false, "default": false},
+        {"name": "instance_id", "type": "string", "required": false, "description": "EC2 instance ID for SSM deployment"},
+        {"name": "cert_dest_path", "type": "string", "required": false, "default": "/etc/ssl/certs/nexplane.crt"},
+        {"name": "key_dest_path", "type": "string", "required": false, "default": "/etc/ssl/private/nexplane.key"},
+        {"name": "reload_command", "type": "string", "required": false, "default": "nginx -s reload"}
+      ],
+      "executor": "step_ca.rotate_certificate",
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "cert_rotation"
+    },
+    {
+      "action_id": "check_expiry",
+      "generic_action": "audit",
+      "action_type": "ingest",
+      "execution_tier": 1,
+      "display_name": "Check Certificate Expiry",
+      "description": "Check remaining TLS certificate validity days for a host:port endpoint. Warns when under threshold.",
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "host", "type": "string", "required": true, "description": "Hostname to check"},
+        {"name": "port", "type": "integer", "required": false, "default": 443},
+        {"name": "warning_threshold_days", "type": "integer", "required": false, "default": 30}
+      ],
+      "executor": "step_ca.check_expiry",
+      "estimated_duration_seconds": 10
+    }
+  ]
+}
