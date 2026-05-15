@@ -225,7 +225,22 @@ export type ConnectorType =
   | "ldap"
   | "vault"
   | "keycloak"
-  | "gitea";
+  | "gitea"
+  | "wazuh"
+  | "falco"
+  | "infisical"
+  | "postgres"
+  | "redis"
+  | "mongodb"
+  | "opnsense"
+  | "step_ca"
+  | "freeipa"
+  | "gitlab"
+  | "teleport"
+  | "openvas"
+  | "nessus"
+  | "elastic"
+  | "jfrog";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 

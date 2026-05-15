@@ -1,6 +1,10 @@
 {
   "connector_type": "mongodb",
   "display_name": "MongoDB",
+  "credentials": [
+    {"name": "uri", "label": "Connection URI", "type": "text", "required": true, "default": "mongodb://admin:password@localhost:27017"},
+    {"name": "auth_db", "label": "Auth Database", "type": "text", "required": false, "default": "admin"}
+  ],
   "actions": [
     {
       "action_id": "rotate_mongodb_password",

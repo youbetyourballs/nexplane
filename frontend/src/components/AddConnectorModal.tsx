@@ -50,6 +50,21 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   vault: "HashiCorp Vault (KV)",
   keycloak: "Keycloak",
   gitea: "Gitea",
+  wazuh: "Wazuh",
+  falco: "Falco",
+  infisical: "Infisical",
+  postgres: "PostgreSQL",
+  redis: "Redis",
+  mongodb: "MongoDB",
+  opnsense: "OPNsense",
+  step_ca: "step-ca (PKI)",
+  freeipa: "FreeIPA",
+  gitlab: "GitLab",
+  teleport: "Teleport",
+  openvas: "OpenVAS / Greenbone",
+  nessus: "Nessus Essentials",
+  elastic: "Elastic Security",
+  jfrog: "JFrog Xray",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -99,6 +114,21 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   vault: "🔑",
   keycloak: "🔑",
   gitea: "🐱",
+  wazuh: "🛡️",
+  falco: "🦅",
+  infisical: "🔐",
+  postgres: "🐘",
+  redis: "🔴",
+  mongodb: "🍃",
+  opnsense: "🧱",
+  step_ca: "📜",
+  freeipa: "🏢",
+  gitlab: "🦊",
+  teleport: "🚀",
+  openvas: "🔍",
+  nessus: "🔍",
+  elastic: "🔎",
+  jfrog: "🐸",
 };
 
 const ALL_TYPES = (Object.keys(CONNECTOR_LABELS) as ConnectorType[]).filter(

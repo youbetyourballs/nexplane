@@ -1,6 +1,11 @@
 {
   "connector_type": "redis",
   "display_name": "Redis",
+  "credentials": [
+    {"name": "host", "label": "Host", "type": "text", "required": true},
+    {"name": "port", "label": "Port", "type": "text", "required": false, "default": "6379"},
+    {"name": "password", "label": "Current Auth Password (if set)", "type": "password", "required": false}
+  ],
   "actions": [
     {
       "action_id": "rotate_redis_password",
