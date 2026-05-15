@@ -1,0 +1,26 @@
+{
+  "connector_type": "gitea",
+  "display_name": "Gitea",
+  "credential_fields": [
+    {"name": "url", "label": "Gitea Server URL", "type": "string", "required": true},
+    {"name": "token", "label": "API Token", "type": "password", "required": true}
+  ],
+  "actions": [
+    {
+      "action_id": "gitea_suspend_user",
+      "generic_action": "gitea_suspend_user",
+      "display_name": "Suspend User",
+      "description": "Suspends a Gitea user account by setting prohibit_login=true.",
+      "executor": "gitea.suspend_user",
+      "action_type": "change",
+      "execution_tier": 2,
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true},
+        {"name": "gitea_url", "type": "string", "required": false},
+        {"name": "gitea_token", "type": "string", "required": false}
+      ]
+    }
+  ]
+}

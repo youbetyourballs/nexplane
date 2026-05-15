@@ -48,6 +48,8 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   oci: "Oracle Cloud Infrastructure",
   ldap: "LDAP / Active Directory",
   vault: "HashiCorp Vault (KV)",
+  keycloak: "Keycloak",
+  gitea: "Gitea",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -95,6 +97,8 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   oci: "🔶",
   ldap: "🏢",
   vault: "🔑",
+  keycloak: "🔑",
+  gitea: "🐱",
 };
 
 const ALL_TYPES = (Object.keys(CONNECTOR_LABELS) as ConnectorType[]).filter(
