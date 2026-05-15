@@ -12064,7 +12064,7 @@ def run_phase_elastic_alerts(client: NexplaneClient, cloud_account_id: str) -> N
         fail("[ELASTIC_ALERTS] AWS clients not available")
 
     AL2023_AMI = "ami-0953476d60561c955"
-    INSTANCE_TYPE = "t3.large"   # Elastic needs 4GB+ RAM
+    INSTANCE_TYPE = "t3.small"   # t3.large not available in this account; t3.small (2GB) with 512MB ES heap
 
     setup_script = r"""#!/bin/bash
 set -e
@@ -12096,11 +12096,11 @@ xpack.security.transport.ssl.enabled: false
 xpack.license.self_generated.type: basic
 ES_CFG
 
-# Cap JVM heap for t3.large (8GB RAM) — prevent OOM and memory_lock errors
+# Cap JVM heap for t3.small (2GB RAM) — use 512MB to leave room for OS + Kibana
 mkdir -p /etc/elasticsearch/jvm.options.d
 cat > /etc/elasticsearch/jvm.options.d/heap.options << 'JVM_CFG'
--Xms1g
--Xmx1g
+-Xms512m
+-Xmx512m
 JVM_CFG
 
 # Configure Kibana
@@ -12168,8 +12168,13 @@ echo "ELASTIC_SETUP_COMPLETE"
 
     resp = ec2_client.run_instances(
         ImageId=cached_ami or AL2023_AMI, InstanceType=INSTANCE_TYPE,
-        MinCount=1, MaxCount=1, SubnetId=subnet_id,
+        MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+        NetworkInterfaces=[{
+            "DeviceIndex": 0,
+            "SubnetId": subnet_id,
+            "AssociatePublicIpAddress": True,
+        }],
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name", "Value": "nexplane-smoke-elastic"},
             {"Key": "nexplane-smoke", "Value": "true"},
@@ -12491,7 +12496,7 @@ def run_phase_splunk_alerts(client: NexplaneClient, cloud_account_id: str) -> No
         fail("[SPLUNK_ALERTS] AWS clients not available")
 
     AL2023_AMI = "ami-0953476d60561c955"
-    INSTANCE_TYPE = "t3.large"   # Splunk needs 4GB+ RAM
+    INSTANCE_TYPE = "t3.small"   # t3.large not available in this account; t3.small (2GB) is sufficient for Splunk Free smoke test
 
     SPLUNK_RPM_URL = "https://download.splunk.com/products/splunk/releases/9.3.2/linux/splunk-9.3.2-d8bb32809498-linux-2.6-x86_64.rpm"
     SPLUNK_VERSION = "9.3.2"
@@ -12548,8 +12553,13 @@ echo "SPLUNK_SETUP_COMPLETE"
 
     resp = ec2_client.run_instances(
         ImageId=cached_ami or AL2023_AMI, InstanceType=INSTANCE_TYPE,
-        MinCount=1, MaxCount=1, SubnetId=subnet_id,
+        MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+        NetworkInterfaces=[{
+            "DeviceIndex": 0,
+            "SubnetId": subnet_id,
+            "AssociatePublicIpAddress": True,
+        }],
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name", "Value": "nexplane-smoke-splunk"},
             {"Key": "nexplane-smoke", "Value": "true"},
