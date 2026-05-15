@@ -58,6 +58,10 @@ class ConnectorType(str, enum.Enum):
     vault = "vault"
     keycloak = "keycloak"
     gitea = "gitea"
+    # Security platforms
+    wazuh = "wazuh"
+    falco = "falco"
+    infisical = "infisical"
 
 
 class ConnectorStatus(str, enum.Enum):
