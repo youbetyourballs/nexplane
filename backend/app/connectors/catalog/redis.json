@@ -1,0 +1,18 @@
+{
+  "connector_type": "redis",
+  "display_name": "Redis",
+  "actions": [
+    {
+      "action_id": "rotate_redis_password",
+      "generic_action": "rotate_redis_password",
+      "display_name": "Rotate Redis Auth Password",
+      "description": "Rotates the Redis requirepass via CONFIG SET. Stores old password in execution result for rollback.",
+      "executor": "redis.rotate_auth_password",
+      "action_type": "change",
+      "execution_tier": 2,
+      "estimated_duration_seconds": 5,
+      "applicable_asset_types": ["server", "database"],
+      "parameters": []
+    }
+  ]
+}
