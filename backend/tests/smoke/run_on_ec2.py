@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 from __future__ import annotations  # Python 3.9 compat
+import sys as _sys_enc
+if hasattr(_sys_enc.stdout, 'reconfigure'):
+    try:
+        _sys_enc.stdout.reconfigure(encoding='utf-8', errors='replace')
+        _sys_enc.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 """
 Nexplane smoke test EC2 runner.
 
@@ -45,6 +53,8 @@ dnf install -y python3-pip
 pip3 install httpx boto3
 # Deps needed by app/ module (credential decryption helpers)
 pip3 install cryptography pydantic pydantic-settings sqlalchemy 2>/dev/null || true
+# Deps for standalone connector executor phases
+pip3 install pymongo redis psycopg2-binary 2>/dev/null || true
 """
 
 
@@ -86,17 +96,24 @@ def get_ssm_instance_profile(iam) -> str | None:
 
 
 def make_test_tarball() -> bytes:
-    """Package tests/smoke/ into a tarball for transfer.
+    """Package tests/smoke/ and connector executor code into a tarball for transfer.
 
-    The app/ directory is intentionally excluded: on the EC2 runner, AWS credentials
-    come from environment variables (set by run_on_ec2.py), so the credential decryption
-    helpers in app/ are not needed. Excluding app/ keeps the tarball small enough to
-    transfer reliably via SSM (which has document size limits per chunk).
+    The full app/ directory is intentionally excluded (credential decryption helpers
+    require asyncpg/DB which are not available on the runner). However, the connector
+    executor subdirectories (opnsense/, step_ca/) are included so that standalone smoke
+    phases can import them directly without a Nexplane backend.
     """
     buf = io.BytesIO()
+    executors_dir = BACKEND_DIR / "app" / "connectors" / "executors"
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        # Add smoke test files only
+        # Add smoke test files
         tar.add(SMOKE_DIR, arcname="smoke")
+        # Add connector executor packages needed for standalone phases
+        for connector_pkg in ("opnsense", "step_ca", "postgres", "redis", "mongodb",
+                              "elastic", "splunk"):
+            pkg_dir = executors_dir / connector_pkg
+            if pkg_dir.exists():
+                tar.add(pkg_dir, arcname=f"smoke/{connector_pkg}")
     return buf.getvalue()
 
 
@@ -169,9 +186,15 @@ def ssm_run(ssm, instance_id: str, script: str, timeout: int = 3600) -> str:
             stdout = result.get("StandardOutputContent", "")
             stderr = result.get("StandardErrorContent", "")
             if stdout:
-                print(stdout, end="")
+                try:
+                    print(stdout, end="")
+                except UnicodeEncodeError:
+                    print(stdout.encode("ascii", "replace").decode("ascii"), end="")
             if stderr:
-                print(stderr, end="", file=sys.stderr)
+                try:
+                    print(stderr, end="", file=sys.stderr)
+                except UnicodeEncodeError:
+                    print(stderr.encode("ascii", "replace").decode("ascii"), end="", file=sys.stderr)
             if status != "Success":
                 raise RuntimeError(f"SSM command failed with status: {status}")
             return stdout
@@ -335,8 +358,8 @@ Examples:
     )
     parser.add_argument("--base-url", default="http://100.122.229.11:8000",
                         help="Backend URL (default: Tailscale IP)")
-    parser.add_argument("--email", required=True, help="Nexplane user email")
-    parser.add_argument("--password", required=True, help="Nexplane user password")
+    parser.add_argument("--email", default="", help="Nexplane user email (optional for standalone phases)")
+    parser.add_argument("--password", default="", help="Nexplane user password (optional for standalone phases)")
     parser.add_argument("--phases", default="A,AUTO_AI", help="Comma-separated phases")
     parser.add_argument("--tailscale-auth-key", default="",
                         help="Tailscale reusable auth key (required if phases include A)")
@@ -397,12 +420,15 @@ Examples:
             f"AWS_SECRET_ACCESS_KEY={aws_secret} "
             f"AWS_DEFAULT_REGION={aws_region} "
         )
+        # Build test command — email/password are optional for standalone phases
+        _email_arg = f" --email {args.email}" if args.email else ""
+        _password_arg = f" --password {args.password}" if args.password else ""
         test_cmd_parts = [
             "cd /tmp/nexplane_smoke",
             f"{aws_env}NEXPLANE_RUNNER_EC2=1 PYTHONPATH=/tmp/nexplane_smoke python3 smoke/test_aws_live.py"
             f" --base-url {args.base_url}"
-            f" --email {args.email}"
-            f" --password {args.password}"
+            f"{_email_arg}"
+            f"{_password_arg}"
             f" --phases {args.phases}"
             f" --backend-tailscale-ip {backend_ts_ip}",
         ]
