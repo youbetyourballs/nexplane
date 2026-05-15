@@ -221,7 +221,8 @@ export type ConnectorType =
   | "tailscale"
   | "terraform_local"
   | "ansible_local"
-  | "oci";
+  | "oci"
+  | "ldap";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 
@@ -423,7 +424,34 @@ export type ChangeType =
   | "oci_alarm_create"
   | "oci_alarm_delete"
   | "oci_logging_enable"
-  | "suppress";
+  | "suppress"
+  | "emergency_user_lockout"
+  | "user_suspension"
+  | "user_scope_reduction"
+  | "enforce_mfa"
+  | "azure_ad_disable_user"
+  | "azure_ad_create_user"
+  | "rotate_secrets_manager_secret"
+  | "rotate_jwt_signing_key"
+  | "configure_seccomp"
+  | "configure_apparmor"
+  | "configure_selinux"
+  | "apply_sysctl_hardening"
+  | "configure_host_firewall"
+  | "blacklist_kernel_modules"
+  | "harden_mount_options"
+  | "deploy_auditd_rules"
+  | "setup_file_integrity_monitoring"
+  | "deploy_ebpf_policy"
+  | "harden_ssh"
+  | "configure_pam"
+  | "seccomp_learn"
+  | "wdac_audit"
+  | "wdac_enforce"
+  | "asr_audit"
+  | "asr_enforce"
+  | "sysmon_deploy"
+  | "sysmon_fim";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 

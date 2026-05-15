@@ -111,9 +111,9 @@ async def onboarding_checklist(
         "steps": [
             {
                 "id": "connector",
-                "label": "Add a cloud connector",
+                "label": "Add a connector",
                 "complete": len(connectors) > 0,
-                "detail": f"{len(connectors)} connector(s) configured" if connectors else "No connectors yet",
+                "detail": f"{len(connectors)} connector(s) configured" if connectors else "Connect AWS, Azure AD, LDAP, GCP, Okta, Tailscale, or any supported provider",
             },
             {
                 "id": "assets",
