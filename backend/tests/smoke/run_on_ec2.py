@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations  # Python 3.9 compat
 """
 Nexplane smoke test EC2 runner.
 
@@ -12,7 +13,7 @@ Usage:
 
 All unknown arguments are forwarded to test_aws_live.py.
 """
-from __future__ import annotations
+
 import argparse
 import base64
 import json
