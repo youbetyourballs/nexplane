@@ -1744,6 +1744,37 @@
                         "action_id": "enforce_mfa",
                         "estimated_duration_seconds": 10,
                         "execution_tier": 2
+                    },
+                    {
+                        "action_id": "rotate_gcp_service_account_key",
+                        "generic_action": "rotate_gcp_service_account_key",
+                        "display_name": "Rotate GCP Service Account Key",
+                        "description": "Creates a new GCP SA key and deactivates old keys. Dispatches to GCP executor.",
+                        "applicable_asset_types": ["cloud_account", "server"],
+                        "parameters": [
+                            {"name": "service_account_email", "type": "string", "required": true},
+                            {"name": "project_id", "type": "string", "required": false}
+                        ],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.rotate_gcp_service_account_key",
+                        "estimated_duration_seconds": 15,
+                        "execution_tier": 2
+                    },
+                    {
+                        "action_id": "rotate_vault_secret",
+                        "generic_action": "rotate_vault_secret",
+                        "display_name": "Rotate Vault Secret",
+                        "description": "Generates a new value for a field in a HashiCorp Vault KV secret.",
+                        "applicable_asset_types": ["server", "cloud_account"],
+                        "parameters": [
+                            {"name": "secret_path", "type": "string", "required": true},
+                            {"name": "field", "type": "string", "required": false},
+                            {"name": "mount_point", "type": "string", "required": false}
+                        ],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.rotate_vault_secret",
+                        "estimated_duration_seconds": 10,
+                        "execution_tier": 2
                     }
                 ]
 }
