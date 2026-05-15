@@ -138,6 +138,31 @@ async def activity_execute_change(
                 )
                 connector = result.scalar_one_or_none()
 
+            # Fallback: if no locked connector but connector_type is known, look up any
+            # active connector of that type in the org (needed for wazuh/falco/infisical phases
+            # where the plan is generated without a locked connector_id).
+            if connector is None and connector_type and connector_type not in ("", "unknown"):
+                try:
+                    _ct_enum = ConnectorType(connector_type)
+                    _cr_result = await db.execute(
+                        select(ChangeRequest).where(ChangeRequest.id == uuid.UUID(change_request_id))
+                    )
+                    _cr_obj = _cr_result.scalar_one_or_none()
+                    if _cr_obj:
+                        _conn_result = await db.execute(
+                            select(Connector).where(
+                                Connector.organization_id == _cr_obj.organization_id,
+                                Connector.connector_type == _ct_enum,
+                            ).order_by(Connector.created_at.desc()).limit(1)
+                        )
+                        _fallback = _conn_result.scalar_one_or_none()
+                        if _fallback:
+                            connector = _fallback
+                            logger.info("Step %s: using fallback connector %s (type=%s)",
+                                        step.get("step_number"), connector.id, connector_type)
+                except Exception as _lookup_exc:
+                    logger.debug("Fallback connector lookup failed: %s", _lookup_exc)
+
             # Use the actual connector type from the DB record when the plan stored "unknown"
             if connector and (not connector_type or connector_type == "unknown"):
                 connector_type = connector.connector_type.value
@@ -145,7 +170,7 @@ async def activity_execute_change(
             try:
                 result = await execute_action(
                     connector_type, action_id, parameters, asset_ids,
-                    connector=connector, db=db if connector else None,
+                    connector=connector, db=db if connector is not None else None,
                 )
             except Exception as exc:
                 import traceback

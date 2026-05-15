@@ -1,0 +1,9 @@
+{
+  "change_type": "falco_policy_update",
+  "display_name": "Update Falco Policy Rule",
+  "steps": [
+    {"generic_action": "update_policy", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

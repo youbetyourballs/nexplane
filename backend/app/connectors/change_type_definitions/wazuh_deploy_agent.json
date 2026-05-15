@@ -1,0 +1,9 @@
+{
+  "change_type": "wazuh_deploy_agent",
+  "display_name": "Deploy Wazuh Agent",
+  "steps": [
+    {"generic_action": "deploy_agent", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
