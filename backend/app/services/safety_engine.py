@@ -279,7 +279,15 @@ def score_change_request(change_request: ChangeRequest, assets: list[Asset]) -> 
 
 def check_approval_requirements(risk_level: RiskLevel, approvals: list) -> dict:
     approved_decisions = [a for a in approvals if a.decision == "approved"]
-    approver_roles = {a.approver.role for a in approved_decisions}
+    # Normalise to string values (UserRole is str enum so .value == str)
+    approver_roles = {
+        r.value if hasattr(r, "value") else str(r)
+        for a in approved_decisions
+        for r in [a.approver.role]
+    }
+    # Admin is a superset of all roles — satisfies approver and security_operator requirements
+    if "admin" in approver_roles:
+        approver_roles |= {"approver", "security_operator"}
 
     requirements = {
         RiskLevel.low: {
