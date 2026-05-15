@@ -1,0 +1,28 @@
+{
+  "connector_type": "nessus",
+  "display_name": "Nessus Essentials",
+  "credential_fields": [
+    {"name": "base_url", "label": "Nessus URL", "type": "string", "required": true, "placeholder": "https://nessus-host:8834"},
+    {"name": "username", "label": "Username", "type": "string", "required": true},
+    {"name": "password", "label": "Password", "type": "password", "required": true}
+  ],
+  "actions": [
+    {
+      "action_id": "run_scan",
+      "generic_action": "scan",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Run Vulnerability Scan",
+      "description": "Create and launch a Nessus scan, poll to completion (up to 30 min), return vulnerability findings.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "target_hosts", "type": "string", "required": true, "description": "Comma-separated IPs or CIDR ranges to scan"},
+        {"name": "scan_name", "type": "string", "required": false, "default": "nexplane-scan"},
+        {"name": "policy_id", "type": "integer", "required": false, "description": "Nessus policy ID (defaults to Basic Network Scan template)"}
+      ],
+      "executor": "nessus.run_scan",
+      "estimated_duration_seconds": 600,
+      "rollback_action": "nessus.run_scan.rollback"
+    }
+  ]
+}

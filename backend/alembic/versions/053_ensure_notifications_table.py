@@ -1,8 +1,12 @@
-"""add_notifications_table
+"""ensure_notifications_table
 
-Revision ID: 165954e097c8
-Revises: 049
-Create Date: 2026-05-14 01:51:36.036873
+Creates the notifications table if it does not already exist.
+This handles the case where the 165954e097c8 migration (which depends on
+revision 049 in a separate branch) was not applied.
+
+Revision ID: 053_ensure_notifications
+Revises: 052_all_missing_change_types
+Create Date: 2026-05-15 04:00:00.000000
 
 """
 from typing import Sequence, Union
@@ -12,14 +16,13 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '165954e097c8'
+revision: str = '053_ensure_notifications'
 down_revision: Union[str, None] = '052_all_missing_change_types'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create notifications table (idempotent — skip if already exists)
     conn = op.get_bind()
     inspector = sa.inspect(conn)
     if 'notifications' not in inspector.get_table_names():
@@ -41,6 +44,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index('ix_notifications_recipient_user_id', table_name='notifications')
-    op.drop_index('ix_notifications_organization_id', table_name='notifications')
-    op.drop_table('notifications')
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    if 'notifications' in inspector.get_table_names():
+        op.drop_index('ix_notifications_recipient_user_id', table_name='notifications')
+        op.drop_index('ix_notifications_organization_id', table_name='notifications')
+        op.drop_table('notifications')

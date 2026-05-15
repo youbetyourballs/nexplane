@@ -1,0 +1,44 @@
+{
+  "connector_type": "openvas",
+  "display_name": "OpenVAS / Greenbone Community Edition",
+  "credential_fields": [
+    {"name": "base_url", "label": "GSA URL", "type": "string", "required": true, "placeholder": "http://openvas-host:9392"},
+    {"name": "username", "label": "Username", "type": "string", "required": true, "placeholder": "admin"},
+    {"name": "password", "label": "Password", "type": "password", "required": true}
+  ],
+  "actions": [
+    {
+      "action_id": "run_scan",
+      "generic_action": "scan",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Run Vulnerability Scan",
+      "description": "Create target and task, launch a full OpenVAS scan, poll to completion (up to 30 min), return CVE findings.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "target_hosts", "type": "string", "required": true, "description": "Comma-separated IPs or CIDR ranges to scan"},
+        {"name": "scan_name", "type": "string", "required": false, "default": "nexplane-scan"},
+        {"name": "config_id", "type": "string", "required": false, "description": "Greenbone scan config UUID (default: Full and Fast)"}
+      ],
+      "executor": "openvas.run_scan",
+      "estimated_duration_seconds": 600,
+      "rollback_action": "openvas.run_scan.rollback"
+    },
+    {
+      "action_id": "import_findings",
+      "generic_action": "ingest",
+      "action_type": "ingest",
+      "execution_tier": 1,
+      "display_name": "Import Scan Findings",
+      "description": "Import OpenVAS scan findings as Nexplane vulnerabilities linked to assets.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "findings", "type": "array", "required": true, "description": "Findings list from openvas_run_scan"},
+        {"name": "scan_report_id", "type": "string", "required": false},
+        {"name": "source_connector_id", "type": "string", "required": false}
+      ],
+      "executor": "openvas.import_findings",
+      "estimated_duration_seconds": 10
+    }
+  ]
+}

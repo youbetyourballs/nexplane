@@ -2,6 +2,11 @@ from __future__ import annotations
 """Sync Elastic Security alerts into Nexplane findings."""
 from typing import Optional
 
+try:
+    from ._client import get_elastic_client
+except ImportError:
+    get_elastic_client = None  # type: ignore[assignment]
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Pull security alerts from Elastic and return them as Nexplane findings.
@@ -16,9 +21,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         count: number of alerts synced
         alerts: list of finding dicts
     """
-    from ._client import get_elastic_client
-
-    client = get_elastic_client(connector)
+    _gec = get_elastic_client
+    if _gec is None:
+        from ._client import get_elastic_client as _gec  # type: ignore[assignment]
+    client = _gec(connector)
     if client is None:
         return {
             "action": "elastic_sync_alerts",
