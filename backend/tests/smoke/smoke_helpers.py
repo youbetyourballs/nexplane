@@ -50,7 +50,7 @@ def fail(msg: str) -> None:
 class NexplaneClient:
     def __init__(self, base_url: str, email: str, password: str):
         self.base = base_url.rstrip("/")
-        self.client = httpx.Client(timeout=120)
+        self.client = httpx.Client(timeout=300)  # CR execution can take up to 5 min
         resp = self.client.post(f"{self.base}/auth/login", json={"email": email, "password": password})
         resp.raise_for_status()
         self.client.headers["Authorization"] = f"Bearer {resp.json()['access_token']}"
