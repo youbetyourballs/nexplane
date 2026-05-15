@@ -1,0 +1,9 @@
+{
+  "change_type": "openscap_scan",
+  "display_name": "OpenSCAP Compliance Scan",
+  "steps": [
+    {"generic_action": "openscap_scan", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}
