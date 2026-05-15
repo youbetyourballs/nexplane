@@ -2050,6 +2050,22 @@
       "action_id": "user_scope_reduction"
     }, 
     {
+      "action_id": "rotate_secrets_manager_secret",
+      "generic_action": "rotate_secrets_manager_secret",
+      "display_name": "Rotate Secrets Manager Secret",
+      "description": "Rotates an AWS Secrets Manager secret value.",
+      "executor": "aws.rotate_secrets_manager_secret",
+      "action_type": "change",
+      "execution_tier": 2,
+      "estimated_duration_seconds": 15,
+      "applicable_asset_types": ["cloud_account", "server"],
+      "parameters": [
+        {"name": "secret_id", "type": "string", "required": true, "description": "Secret ARN or name"},
+        {"name": "secret_type", "type": "string", "required": false, "description": "string or json"},
+        {"name": "new_value", "type": "string", "required": false}
+      ]
+    },
+    {
       "display_name": "Remove Emergency Lockout", 
       "description": "Removes the nexplane-emergency-lockout deny-all inline IAM policy from a user.", 
       "parameters": [

@@ -274,6 +274,9 @@ class ChangeType(str, enum.Enum):
     configure_seccomp = "configure_seccomp"
     # OS security posture audit — Phase BULK_PATCH
     audit_os_security_posture = "audit_os_security_posture"
+    # Credential rotation additions
+    rotate_secrets_manager_secret = "rotate_secrets_manager_secret"
+    rotate_jwt_signing_key = "rotate_jwt_signing_key"
 
 
 class RiskLevel(str, enum.Enum):

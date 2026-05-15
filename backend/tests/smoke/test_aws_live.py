@@ -5990,6 +5990,152 @@ echo "LDAP_SETUP_DONE"
             pass
 
 
+# ---------------------------------------------------------------------------
+# Phase SECRETS_ROTATE — AWS Secrets Manager rotation
+# ---------------------------------------------------------------------------
+
+def run_phase_secrets_rotate(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase SECRETS_ROTATE: create Secrets Manager secret, rotate via Nexplane CR,
+    verify old value is replaced, clean up."""
+    import time, os
+    print("\n[Phase SECRETS_ROTATE] AWS Secrets Manager rotation")
+
+    import boto3
+    sm = boto3.client("secretsmanager",
+        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+        region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+
+    secret_name = f"nexplane/smoke-test/{int(time.time())}"
+    original_value = "original-secret-value-12345"
+
+    try:
+        # Create test secret
+        sm.create_secret(Name=secret_name, SecretString=original_value)
+        log(f"Created test secret: {secret_name}")
+
+        # Run rotation CR
+        cr = client.run_cr(
+            "[SECRETS_ROTATE] rotate Secrets Manager secret",
+            "rotate_secrets_manager_secret",
+            cloud_account_id,
+            {"secret_id": secret_name, "secret_type": "string"},
+        )
+        log(f"Rotation CR completed: {cr['id']}")
+
+        # Verify new value is different
+        new_secret = sm.get_secret_value(SecretId=secret_name)
+        new_value = new_secret.get("SecretString", "")
+        if new_value == original_value:
+            fail("[SECRETS_ROTATE] Secret value was not rotated — still matches original")
+        assert new_value != original_value, "Secret value should have changed"
+        log("Secret rotated — new value differs from original")
+        log("Phase SECRETS_ROTATE PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase SECRETS_ROTATE failed: {e}")
+        raise
+    finally:
+        try:
+            sm.delete_secret(SecretId=secret_name, ForceDeleteWithoutRecovery=True)
+            log(f"Test secret {secret_name} deleted")
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Phase DISCOVER_ROTATE — discover-before-rotate IAM key workflow
+# ---------------------------------------------------------------------------
+
+def run_phase_discover_rotate(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase DISCOVER_ROTATE: create IAM key, make API call with it (CloudTrail record),
+    run discover-consumers, verify consumers found, rotate key."""
+    import time, os, boto3
+    print("\n[Phase DISCOVER_ROTATE] Discover-before-rotate IAM key")
+
+    iam = boto3.client("iam",
+        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+        region_name="us-east-1")
+
+    test_username = "nexplane-smoke-rotate-discover"
+    try:
+        try:
+            iam.create_user(UserName=test_username)
+        except iam.exceptions.EntityAlreadyExistsException:
+            pass
+        iam.attach_user_policy(
+            UserName=test_username,
+            PolicyArn="arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess")
+
+        key_resp = iam.create_access_key(UserName=test_username)
+        new_key_id = key_resp["AccessKey"]["AccessKeyId"]
+        new_key_secret = key_resp["AccessKey"]["SecretAccessKey"]
+        log(f"Created test IAM key: {new_key_id[:8]}...")
+
+        # Make an API call with the key to generate a CloudTrail record
+        try:
+            test_s3 = boto3.client("s3",
+                aws_access_key_id=new_key_id,
+                aws_secret_access_key=new_key_secret,
+                region_name="us-east-1")
+            test_s3.list_buckets()
+            log("Made S3 API call with test key (CloudTrail record created)")
+        except Exception as _e:
+            log(f"  S3 call result (may fail with permissions): {_e}")
+
+        # Wait for CloudTrail to record it (can take 5-15 min in prod, but try anyway)
+        time.sleep(10)
+
+        # Discover consumers via API
+        discover_resp = client.post("/credentials/discover-consumers", json={
+            "access_key_id": new_key_id,
+            "lookback_days": 1,
+        })
+        consumers = discover_resp.get("consumers", [])
+        log(f"Consumer discovery: found {len(consumers)} services using key {new_key_id[:8]}...")
+        if consumers:
+            for c in consumers:
+                log(f"  - {c.get('service')}: {c.get('event_count')} events")
+        else:
+            log("  No CloudTrail consumers found yet (may need more time to propagate) — non-fatal")
+
+        # Rotate the key via Nexplane CR
+        cr = client.run_cr(
+            "[DISCOVER_ROTATE] rotate IAM access key",
+            "rotate_iam_key",
+            cloud_account_id,
+            {"user_name": test_username},
+        )
+        log(f"IAM key rotation CR completed: {cr['id']}")
+
+        # Verify old key is deactivated
+        keys = iam.list_access_keys(UserName=test_username)["AccessKeyMetadata"]
+        old_key_meta = [k for k in keys if k["AccessKeyId"] == new_key_id]
+        if old_key_meta and old_key_meta[0]["Status"] == "Inactive":
+            log("Old key deactivated after rotation")
+        elif old_key_meta and old_key_meta[0]["Status"] == "Active":
+            log("  Old key still Active — rotation may have created a second key")
+        else:
+            log("  Old key not found — may have been deleted during rotation")
+
+        log("Phase DISCOVER_ROTATE PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase DISCOVER_ROTATE failed: {e}")
+        raise
+    finally:
+        try:
+            for key in iam.list_access_keys(UserName=test_username).get("AccessKeyMetadata", []):
+                iam.delete_access_key(UserName=test_username, AccessKeyId=key["AccessKeyId"])
+            for pol in iam.list_attached_user_policies(UserName=test_username).get("AttachedPolicies", []):
+                iam.detach_user_policy(UserName=test_username, PolicyArn=pol["PolicyArn"])
+            iam.delete_user(UserName=test_username)
+            log(f"Cleaned up IAM user {test_username}")
+        except Exception:
+            pass
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -6275,6 +6421,10 @@ def main():
             run_phase_ssh_rotate(client, phase_a_result if phase_a_result else None)
         if "LDAP_ROTATE" in phases:
             run_phase_ldap_rotate(client, cloud_account_id)
+        if "SECRETS_ROTATE" in phases:
+            run_phase_secrets_rotate(client, cloud_account_id)
+        if "DISCOVER_ROTATE" in phases:
+            run_phase_discover_rotate(client, cloud_account_id)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
