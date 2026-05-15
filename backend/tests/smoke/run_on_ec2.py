@@ -204,21 +204,109 @@ def ssm_run(ssm, instance_id: str, script: str, timeout: int = 3600) -> str:
     raise RuntimeError(f"SSM command timed out after {timeout}s")
 
 
+def ssm_run_with_retry(ssm, instance_id: str, script: str, retries: int = 3,
+                       timeout: int = 60) -> str:
+    """Run an SSM command with retry for transient 'Undeliverable' failures."""
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            return ssm_run(ssm, instance_id, script, timeout=timeout)
+        except RuntimeError as e:
+            last_exc = e
+            if "Undeliverable" in str(e) or "Failed" in str(e):
+                if attempt < retries - 1:
+                    print(f"\n  SSM transient failure (attempt {attempt+1}/{retries}), retrying...")
+                    time.sleep(10)
+                    continue
+            raise
+    raise last_exc  # type: ignore[misc]
+
+
 def transfer_files(ssm, instance_id: str, tarball: bytes) -> None:
-    """Transfer test files to the runner via SSM (base64 encoded)."""
+    """Transfer test files to the runner via S3 (preferred) or SSM base64 chunks (fallback).
+
+    S3 upload + download is fast, reliable, and avoids SSM document size limits.
+    Falls back to SSM chunked transfer if S3 upload fails.
+    """
+    import boto3 as _boto3
+    import uuid as _uuid
+
+    # Wait for userdata to settle (userdata installs pip packages; SSM may flicker briefly)
+    time.sleep(45)
+
+    # --- Primary path: S3 pre-signed URL upload + curl download ---
+    # The runner's IAM profile (NexplaneEC2TestProfile) doesn't have S3 access,
+    # but we can upload from the local machine (which has full creds) and generate
+    # a pre-signed URL that the runner can curl without needing IAM permissions.
+    s3_key = f"nexplane-smoke-runner/{_uuid.uuid4().hex}/smoke.tar.gz"
+    bucket = None
+    try:
+        s3 = _boto3.client("s3", region_name="us-east-1")
+        # Try to find an existing nexplane bucket, or create a temporary one
+        try:
+            buckets = s3.list_buckets().get("Buckets", [])
+            smoke_buckets = [b["Name"] for b in buckets if "nexplane" in b["Name"].lower()]
+            if smoke_buckets:
+                bucket = smoke_buckets[0]
+        except Exception:
+            pass
+
+        if not bucket:
+            bucket = f"nexplane-smoke-tmp-{_uuid.uuid4().hex[:8]}"
+            s3.create_bucket(Bucket=bucket)
+            print(f"  Created temporary S3 bucket: {bucket}")
+
+        print(f"  Uploading {len(tarball)//1024}KB to s3://{bucket}/{s3_key}...")
+        s3.put_object(Bucket=bucket, Key=s3_key, Body=tarball,
+                      ContentType="application/gzip")
+
+        # Generate a pre-signed URL (valid for 30 min) — no IAM needed on the runner
+        presigned_url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": s3_key},
+            ExpiresIn=1800,
+        )
+        download_cmd = (
+            f"curl -fsSL -o /tmp/smoke.tar.gz '{presigned_url}' && "
+            "mkdir -p /tmp/nexplane_smoke && "
+            "tar -xzf /tmp/smoke.tar.gz -C /tmp/nexplane_smoke && "
+            "echo 'Files extracted successfully'"
+        )
+        ssm_run(ssm, instance_id, download_cmd, timeout=120)
+        # Clean up S3 object
+        try:
+            s3.delete_object(Bucket=bucket, Key=s3_key)
+        except Exception:
+            pass
+        return
+    except Exception as s3_e:
+        print(f"  S3 transfer failed ({s3_e}), falling back to SSM chunked transfer...")
+
+    # --- Fallback: SSM chunked base64 transfer ---
     b64 = base64.b64encode(tarball).decode()
-    # Split into chunks to avoid SSM document size limits (16KB per command)
-    chunk_size = 8192
+    # Use 1900-char chunks to stay under SSM per-parameter limits
+    chunk_size = 1900
     chunks = [b64[i:i+chunk_size] for i in range(0, len(b64), chunk_size)]
 
-    print(f"  Transferring {len(tarball)//1024}KB in {len(chunks)} chunk(s)...")
+    print(f"  SSM-chunked transfer: {len(tarball)//1024}KB in {len(chunks)} chunk(s)...")
 
-    # Write first chunk (create file)
-    ssm_run(ssm, instance_id, f"echo -n '{chunks[0]}' > /tmp/smoke_b64.txt")
+    # Use Python heredoc approach — more reliable than shell echo/printf for large strings
+    first_chunk_py = (
+        "python3 -c \""
+        f"open('/tmp/smoke_b64.txt','w').write('{chunks[0]}')"
+        "\""
+    )
+    ssm_run_with_retry(ssm, instance_id, first_chunk_py)
 
-    # Append remaining chunks
-    for chunk in chunks[1:]:
-        ssm_run(ssm, instance_id, f"echo -n '{chunk}' >> /tmp/smoke_b64.txt")
+    for i, chunk in enumerate(chunks[1:], 1):
+        append_py = (
+            "python3 -c \""
+            f"open('/tmp/smoke_b64.txt','a').write('{chunk}')"
+            "\""
+        )
+        ssm_run_with_retry(ssm, instance_id, append_py)
+        if i % 50 == 0:
+            print(f"  ... {i}/{len(chunks)-1} chunks done")
 
     # Decode and extract
     ssm_run(ssm, instance_id,
@@ -358,8 +446,10 @@ Examples:
     )
     parser.add_argument("--base-url", default="http://100.122.229.11:8000",
                         help="Backend URL (default: Tailscale IP)")
-    parser.add_argument("--email", default="", help="Nexplane user email (optional for standalone phases)")
-    parser.add_argument("--password", default="", help="Nexplane user password (optional for standalone phases)")
+    parser.add_argument("--email", default="admin@acme.example",
+                        help="Nexplane user email (default: admin@acme.example)")
+    parser.add_argument("--password", default="admin123",
+                        help="Nexplane user password (default: admin123)")
     parser.add_argument("--phases", default="A,AUTO_AI", help="Comma-separated phases")
     parser.add_argument("--tailscale-auth-key", default="",
                         help="Tailscale reusable auth key (required if phases include A)")

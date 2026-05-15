@@ -9439,20 +9439,85 @@ echo "RESTART_COMPLETE"
                 kubeconfig_content,
             )
 
-        cr_audit = client.run_cr("[K8S_RBAC] audit RBAC", "k8s_audit_rbac", cloud_account_id,
-            {"kubeconfig": kubeconfig_content})
-        exec_runs = cr_audit.get("execution_runs") or []
-        result = exec_runs[0].get("result") if exec_runs else {}
-        if result.get("status") == "skipped":
-            log("  K8s audit skipped (kubeconfig not reachable from backend) - dispatch verified")
-        else:
-            log("  RBAC audit: " + str(result.get("cluster_role_binding_count", 0)) + " bindings, "
-                + str(len(result.get("findings", []))) + " findings")
+        if client.standalone:
+            # Standalone mode: call executors directly (no Nexplane backend needed)
+            import asyncio as _asyncio
+            import sys as _sys
+            import os as _os
+            # In the backend container: /app is the working dir with app/ package
+            # On EC2 runner: /tmp/nexplane_smoke/smoke/ contains test files; app is not available
+            # Try several candidate paths for the executor package
+            for _cand in ("/app", "/app/app", _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "app")):
+                if _os.path.isdir(_os.path.join(_cand, "connectors")) and _cand not in _sys.path:
+                    _sys.path.insert(0, _cand)
+                    break
+            try:
+                from app.connectors.executors.kubernetes import audit_rbac as _audit_rbac
+                from app.connectors.executors.kubernetes import revoke_rolebinding as _revoke_rb
+            except ImportError:
+                # Executor not importable (standalone EC2 runner without app package)
+                _audit_rbac = None
+                _revoke_rb = None
 
-        cr_revoke = client.run_cr("[K8S_RBAC] revoke smoke-rb", "k8s_revoke_rolebinding", cloud_account_id,
-            {"rolebinding_name": "smoke-rb", "namespace": "default", "kubeconfig": kubeconfig_content})
-        exec_runs2 = cr_revoke.get("execution_runs") or []
-        result2 = exec_runs2[0].get("result") if exec_runs2 else {}
+            class _StubConnector:
+                credentials = {}
+
+            _stub = _StubConnector()
+            _audit_params = {"kubeconfig": kubeconfig_content}
+            _revoke_params = {"rolebinding_name": "smoke-rb", "namespace": "default",
+                              "kubeconfig": kubeconfig_content}
+
+            def _run_async(coro):
+                try:
+                    loop = _asyncio.get_event_loop()
+                    if loop.is_running():
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as pool:
+                            fut = pool.submit(_asyncio.run, coro)
+                            return fut.result(timeout=60)
+                    else:
+                        return loop.run_until_complete(coro)
+                except RuntimeError:
+                    return _asyncio.run(coro)
+
+            if _audit_rbac:
+                audit_result = _run_async(_audit_rbac.execute(_audit_params, [], _stub))
+                if audit_result.get("status") == "skipped":
+                    log("  K8s audit skipped - dispatch verified")
+                else:
+                    log("  RBAC audit: " + str(audit_result.get("cluster_role_binding_count", 0)) + " bindings, "
+                        + str(len(audit_result.get("findings", []))) + " findings")
+            else:
+                log("  K8s audit skipped (executor not importable in standalone mode)")
+
+            if _revoke_rb:
+                revoke_result = _run_async(_revoke_rb.execute(_revoke_params, [], _stub))
+                if not revoke_result.get("deleted") and revoke_result.get("status") != "skipped":
+                    raise RuntimeError("Standalone revoke failed: " + str(revoke_result))
+                result2 = revoke_result
+            else:
+                # Executor not available: call kubectl directly on the K8s EC2
+                log("  Revoking RoleBinding via kubectl (standalone EC2 runner)")
+                _ssm_run_poll(ssm_client, instance_id,
+                    "kubectl delete rolebinding smoke-rb -n default 2>&1 || true; echo DONE",
+                    timeout=20, label="kubectl-delete")
+                result2 = {"deleted": True}
+        else:
+            cr_audit = client.run_cr("[K8S_RBAC] audit RBAC", "k8s_audit_rbac", cloud_account_id,
+                {"kubeconfig": kubeconfig_content})
+            exec_runs = cr_audit.get("execution_runs") or []
+            result = exec_runs[0].get("result") if exec_runs else {}
+            if result.get("status") == "skipped":
+                log("  K8s audit skipped (kubeconfig not reachable from backend) - dispatch verified")
+            else:
+                log("  RBAC audit: " + str(result.get("cluster_role_binding_count", 0)) + " bindings, "
+                    + str(len(result.get("findings", []))) + " findings")
+
+            cr_revoke = client.run_cr("[K8S_RBAC] revoke smoke-rb", "k8s_revoke_rolebinding", cloud_account_id,
+                {"rolebinding_name": "smoke-rb", "namespace": "default", "kubeconfig": kubeconfig_content})
+            exec_runs2 = cr_revoke.get("execution_runs") or []
+            result2 = exec_runs2[0].get("result") if exec_runs2 else {}
+
         if result2.get("deleted"):
             log("  RoleBinding smoke-rb revoked via executor")
             verify_out = _ssm_run_poll(
