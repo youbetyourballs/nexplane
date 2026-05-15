@@ -13,6 +13,22 @@
     {"action_id": "send_event", "generic_action": "send_event", "action_type": "change", "execution_tier": 2, "display_name": "Send Event", "description": "Send an event to Splunk HEC.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "event", "type": "object", "required": true}, {"name": "source", "type": "string", "required": false}, {"name": "sourcetype", "type": "string", "required": false}, {"name": "index", "type": "string", "required": false}], "executor": "splunk.send_event", "estimated_duration_seconds": 5},
     {"action_id": "create_alert", "generic_action": "create_alert", "action_type": "change", "execution_tier": 2, "display_name": "Create Alert", "description": "Create a scheduled Splunk alert.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "name", "type": "string", "required": true}, {"name": "search", "type": "string", "required": true}, {"name": "cron_schedule", "type": "string", "required": false}], "executor": "splunk.create_alert", "estimated_duration_seconds": 10},
     {"action_id": "suppress_notable", "generic_action": "dismiss_alert", "action_type": "change", "execution_tier": 2, "display_name": "Suppress Notable Event", "description": "Suppress a notable event in Splunk ES.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "event_id", "type": "string", "required": true}, {"name": "comment", "type": "string", "required": false}], "executor": "splunk.suppress_notable", "estimated_duration_seconds": 5},
-    {"action_id": "run_adaptive_response", "generic_action": "run_playbook", "action_type": "change", "execution_tier": 2, "display_name": "Run Adaptive Response", "description": "Trigger an adaptive response action on a notable event.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "event_id", "type": "string", "required": true}, {"name": "action_name", "type": "string", "required": true}], "executor": "splunk.run_adaptive_response", "estimated_duration_seconds": 30}
+    {"action_id": "run_adaptive_response", "generic_action": "run_playbook", "action_type": "change", "execution_tier": 2, "display_name": "Run Adaptive Response", "description": "Trigger an adaptive response action on a notable event.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "event_id", "type": "string", "required": true}, {"name": "action_name", "type": "string", "required": true}], "executor": "splunk.run_adaptive_response", "estimated_duration_seconds": 30},
+    {
+      "action_id": "sync_notables",
+      "generic_action": "sync_alerts",
+      "action_type": "ingest",
+      "execution_tier": 1,
+      "display_name": "Sync Notable Events",
+      "description": "Pull notable events from Splunk ES (or saved search) and sync as Nexplane findings.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "earliest", "type": "string", "required": false},
+        {"name": "latest", "type": "string", "required": false},
+        {"name": "saved_search", "type": "string", "required": false}
+      ],
+      "executor": "splunk.sync_notables",
+      "estimated_duration_seconds": 30
+    }
   ]
 }
