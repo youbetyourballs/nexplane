@@ -1,0 +1,30 @@
+{
+  "connector_type": "teleport",
+  "display_name": "Teleport CE",
+  "credential_fields": [
+    {"name": "proxy_addr", "label": "Teleport Proxy Address (e.g. teleport.example.com:3025)", "type": "string", "required": true},
+    {"name": "auth_token", "label": "Auth Token (optional, for tctl auth)", "type": "password", "required": false},
+    {"name": "tctl_bin", "label": "Path to tctl binary", "type": "string", "required": false}
+  ],
+  "actions": [
+    {
+      "action_id": "teleport_lock_user",
+      "generic_action": "teleport_lock_user",
+      "display_name": "Lock Teleport User",
+      "description": "Creates a Teleport lock for a user via tctl, preventing all access for the specified TTL. Rollback deletes the lock.",
+      "executor": "teleport.lock_user",
+      "action_type": "change",
+      "execution_tier": 3,
+      "estimated_duration_seconds": 15,
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true},
+        {"name": "ttl", "type": "string", "required": false, "default": "1h"},
+        {"name": "message", "type": "string", "required": false},
+        {"name": "teleport_proxy_addr", "type": "string", "required": false},
+        {"name": "teleport_auth_token", "type": "string", "required": false},
+        {"name": "tctl_bin", "type": "string", "required": false}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "connector_type": "freeipa",
+  "display_name": "FreeIPA",
+  "credential_fields": [
+    {"name": "url", "label": "FreeIPA Server URL (e.g. https://ipa.example.com)", "type": "string", "required": true},
+    {"name": "username", "label": "Admin Username", "type": "string", "required": true},
+    {"name": "password", "label": "Admin Password", "type": "password", "required": true},
+    {"name": "verify_ssl", "label": "Verify SSL", "type": "boolean", "required": false}
+  ],
+  "actions": [
+    {
+      "action_id": "freeipa_disable_user",
+      "generic_action": "freeipa_disable_user",
+      "display_name": "Disable FreeIPA User",
+      "description": "Disables a FreeIPA user account via the JSON-RPC API. Rollback re-enables the account.",
+      "executor": "freeipa.disable_user",
+      "action_type": "change",
+      "execution_tier": 3,
+      "estimated_duration_seconds": 15,
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true},
+        {"name": "freeipa_url", "type": "string", "required": false},
+        {"name": "freeipa_username", "type": "string", "required": false},
+        {"name": "freeipa_password", "type": "string", "required": false}
+      ]
+    }
+  ]
+}
