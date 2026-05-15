@@ -52,9 +52,11 @@ class NexplaneClient:
     def __init__(self, base_url: str, email: str, password: str):
         self.base = base_url.rstrip("/")
         self.client = httpx.Client(timeout=300)  # CR execution can take up to 5 min
-        resp = self.client.post(f"{self.base}/auth/login", json={"email": email, "password": password})
-        resp.raise_for_status()
-        self.client.headers["Authorization"] = f"Bearer {resp.json()['access_token']}"
+        self.standalone = not (email and password)
+        if not self.standalone:
+            resp = self.client.post(f"{self.base}/auth/login", json={"email": email, "password": password})
+            resp.raise_for_status()
+            self.client.headers["Authorization"] = f"Bearer {resp.json()['access_token']}"
 
     def get(self, path: str, **kwargs) -> dict:
         resp = self.client.get(f"{self.base}{path}", **kwargs)
@@ -792,8 +794,10 @@ def make_base_parser(description: str) -> argparse.ArgumentParser:
     """Return a parser pre-loaded with common arguments shared across all smoke test files."""
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--base-url", default="http://localhost:8000")
-    parser.add_argument("--email", required=True)
-    parser.add_argument("--password", required=True)
+    parser.add_argument("--email", default="admin@acme.example",
+                        help="Nexplane user email (default: admin@acme.example)")
+    parser.add_argument("--password", default="admin123",
+                        help="Nexplane user password (default: admin123)")
     parser.add_argument(
         "--backend-tailscale-ip", default="",
         help="Pre-known backend Tailscale IP (set by run_on_ec2.py). "
