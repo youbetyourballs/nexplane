@@ -1,0 +1,27 @@
+{
+  "connector_type": "falco",
+  "display_name": "Falco",
+  "credential_fields": [
+    {"name": "instance_id", "label": "EC2 Instance ID (SSM target)", "type": "string", "required": true, "placeholder": "i-0abc123456789def0"},
+    {"name": "region", "label": "AWS Region", "type": "string", "required": false, "placeholder": "us-east-1"}
+  ],
+  "actions": [
+    {
+      "action_id": "update_policy",
+      "generic_action": "update_policy",
+      "display_name": "Update Falco Policy (Local Rule)",
+      "description": "Write a Falco local rule to /etc/falco/falco_rules.local.yaml and restart the Falco service. Rollback removes the rule and restarts.",
+      "executor": "falco.update_policy",
+      "action_type": "change",
+      "execution_tier": 2,
+      "estimated_duration_seconds": 30,
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "rule_name", "type": "string", "required": true, "description": "Unique rule name"},
+        {"name": "rule_condition", "type": "string", "required": true, "description": "Falco condition expression"},
+        {"name": "priority", "type": "string", "required": false, "description": "Rule priority (WARNING, ERROR, CRITICAL, etc.)"},
+        {"name": "output", "type": "string", "required": false, "description": "Falco output format string"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "connector_type": "infisical",
+  "display_name": "Infisical",
+  "credential_fields": [
+    {"name": "base_url", "label": "Infisical Base URL", "type": "string", "required": true, "placeholder": "https://app.infisical.com"},
+    {"name": "token", "label": "API Token", "type": "password", "required": true}
+  ],
+  "actions": [
+    {
+      "action_id": "rotate_secret",
+      "generic_action": "rotate_credentials",
+      "display_name": "Rotate Infisical Secret",
+      "description": "Generate a new value for a secret in an Infisical workspace. Stores old value for rollback.",
+      "executor": "infisical.rotate_secret",
+      "action_type": "change",
+      "execution_tier": 2,
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["cloud_account", "server"],
+      "parameters": [
+        {"name": "workspace_id", "type": "string", "required": true, "description": "Infisical workspace ID"},
+        {"name": "environment", "type": "string", "required": true, "description": "Environment slug (e.g. dev, prod)"},
+        {"name": "secret_name", "type": "string", "required": true, "description": "Name of the secret to rotate"},
+        {"name": "new_value", "type": "string", "required": false, "description": "Explicit new value (auto-generated if omitted)"}
+      ]
+    }
+  ]
+}

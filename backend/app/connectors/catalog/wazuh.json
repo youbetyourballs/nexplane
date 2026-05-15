@@ -1,0 +1,26 @@
+{
+  "connector_type": "wazuh",
+  "display_name": "Wazuh",
+  "credential_fields": [
+    {"name": "base_url", "label": "Wazuh API URL", "type": "string", "required": true, "placeholder": "https://wazuh.example.com:55000"},
+    {"name": "username", "label": "API Username", "type": "string", "required": true, "placeholder": "wazuh-wui"},
+    {"name": "password", "label": "API Password", "type": "password", "required": true},
+    {"name": "verify_ssl", "label": "Verify SSL", "type": "boolean", "required": false}
+  ],
+  "actions": [
+    {
+      "action_id": "deploy_agent",
+      "generic_action": "deploy_agent",
+      "display_name": "Deploy / Register Agent",
+      "description": "Register a new Wazuh agent by name. Returns the agent_id assigned by the manager.",
+      "executor": "wazuh.deploy_agent",
+      "action_type": "change",
+      "execution_tier": 2,
+      "estimated_duration_seconds": 15,
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "agent_name", "type": "string", "required": true, "description": "Friendly name for the new Wazuh agent"}
+      ]
+    }
+  ]
+}
