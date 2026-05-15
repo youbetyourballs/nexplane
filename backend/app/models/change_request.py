@@ -306,8 +306,21 @@ class ChangeType(str, enum.Enum):
     k8s_revoke_rolebinding = "k8s_revoke_rolebinding"
     k8s_rotate_sa_token = "k8s_rotate_sa_token"
     k8s_audit_rbac = "k8s_audit_rbac"
+    # Wazuh agent management
+    wazuh_deploy_agent = "wazuh_deploy_agent"
+    # Falco runtime security policy
+    falco_policy_update = "falco_policy_update"
+    # Infisical secret rotation
+    rotate_infisical_secret = "rotate_infisical_secret"
     # Gitea identity
     gitea_suspend_user = "gitea_suspend_user"
+    # FreeIPA identity
+    freeipa_disable_user = "freeipa_disable_user"
+    # GitLab CE identity
+    gitlab_suspend_user = "gitlab_suspend_user"
+    gitlab_rotate_token = "gitlab_rotate_token"
+    # Teleport CE access
+    teleport_lock_user = "teleport_lock_user"
 
     # Database credential rotation
     rotate_postgres_password = "rotate_postgres_password"

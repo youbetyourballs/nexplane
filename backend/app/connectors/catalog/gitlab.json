@@ -1,0 +1,44 @@
+{
+  "connector_type": "gitlab",
+  "display_name": "GitLab CE",
+  "credential_fields": [
+    {"name": "url", "label": "GitLab Server URL (e.g. http://gitlab.example.com)", "type": "string", "required": true},
+    {"name": "token", "label": "Personal Access Token (admin)", "type": "password", "required": true}
+  ],
+  "actions": [
+    {
+      "action_id": "gitlab_suspend_user",
+      "generic_action": "gitlab_suspend_user",
+      "display_name": "Suspend GitLab User",
+      "description": "Blocks a GitLab user account via PUT /api/v4/users/{id}/block. Rollback calls unblock.",
+      "executor": "gitlab.suspend_user",
+      "action_type": "change",
+      "execution_tier": 2,
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true},
+        {"name": "gitlab_url", "type": "string", "required": false},
+        {"name": "gitlab_token", "type": "string", "required": false}
+      ]
+    },
+    {
+      "action_id": "gitlab_rotate_token",
+      "generic_action": "gitlab_rotate_token",
+      "display_name": "Rotate GitLab Personal Access Token",
+      "description": "Revokes all active personal access tokens for a GitLab user and creates a new one. Rollback revokes the newly created token.",
+      "executor": "gitlab.rotate_token",
+      "action_type": "change",
+      "execution_tier": 3,
+      "estimated_duration_seconds": 15,
+      "applicable_asset_types": ["server", "cloud_account"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true},
+        {"name": "token_name", "type": "string", "required": false},
+        {"name": "scopes", "type": "array", "required": false},
+        {"name": "gitlab_url", "type": "string", "required": false},
+        {"name": "gitlab_token", "type": "string", "required": false}
+      ]
+    }
+  ]
+}
