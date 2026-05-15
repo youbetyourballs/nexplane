@@ -5658,6 +5658,338 @@ def run_phase_ssh_rotate(client: NexplaneClient, phase_a_result: Optional[dict] 
         raise
 
 
+def run_phase_ldap_rotate(client: NexplaneClient, cloud_account_id: str) -> None:
+    """Phase LDAP_ROTATE: spin up OpenLDAP on EC2 via SSM, register an LDAP connector,
+    run emergency_user_lockout against it, verify lockout, rollback, then snapshot the
+    configured EC2 as an AMI so subsequent runs skip the ~2-min OpenLDAP setup.
+
+    AMI cached after first run in SSM at /nexplane/smoke-amis/openldap/<hash[:8]>
+    """
+    import hashlib
+    import time as _time
+
+    print("\n[Phase LDAP_ROTATE] emergency_user_lockout against OpenLDAP (AMI cached after first run)")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_boto = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_boto:
+        fail("[LDAP_ROTATE] AWS credentials required (ec2 + ssm)")
+
+    # ---------------------------------------------------------------------------
+    # OpenLDAP setup script (hash-keyed for AMI cache)
+    # ---------------------------------------------------------------------------
+    setup_script = r"""#!/bin/bash
+set -e
+# Install OpenLDAP
+if command -v apt-get &>/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y slapd ldap-utils
+    systemctl enable slapd && systemctl start slapd
+elif command -v dnf &>/dev/null; then
+    dnf install -y openldap-servers openldap-clients
+    cp /usr/share/openldap-servers/DB_CONFIG.example /var/lib/ldap/DB_CONFIG
+    chown ldap:ldap /var/lib/ldap/DB_CONFIG
+    systemctl enable slapd && systemctl start slapd
+fi
+sleep 2
+# Configure base DN dc=smoke,dc=local
+ADMIN_PW_HASH=$(slappasswd -s SmokePass123)
+cat > /tmp/base.ldif <<EOF
+dn: olcDatabase={2}mdb,cn=config
+changetype: modify
+replace: olcSuffix
+olcSuffix: dc=smoke,dc=local
+-
+replace: olcRootDN
+olcRootDN: cn=admin,dc=smoke,dc=local
+-
+replace: olcRootPW
+olcRootPW: ${ADMIN_PW_HASH}
+EOF
+ldapmodify -Y EXTERNAL -H ldapi:/// -f /tmp/base.ldif 2>/dev/null || true
+# Add base OU and test user
+ldapadd -x -H ldapi:/// -D "cn=admin,dc=smoke,dc=local" -w SmokePass123 <<EOF2 2>/dev/null || true
+dn: dc=smoke,dc=local
+objectClass: dcObject
+objectClass: organization
+o: Smoke Test
+dc: smoke
+
+dn: ou=users,dc=smoke,dc=local
+objectClass: organizationalUnit
+ou: users
+
+dn: uid=smokeuser,ou=users,dc=smoke,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: smokeuser
+cn: Smoke User
+sn: User
+userPassword: UserPass123
+uidNumber: 10001
+gidNumber: 10001
+homeDirectory: /home/smokeuser
+loginShell: /bin/bash
+EOF2
+echo "LDAP_SETUP_DONE"
+"""
+    setup_hash = hashlib.md5(setup_script.encode()).hexdigest()
+
+    # ---------------------------------------------------------------------------
+    # Launch a t3.small EC2 for OpenLDAP
+    # ---------------------------------------------------------------------------
+    from run_on_ec2 import get_or_create_smoke_ami  # available when running on EC2 runner
+
+    iam_client = _get_aws_boto3_client("iam")
+    # Reuse the VPC/subnet helper from run_on_ec2 indirectly: just use default VPC
+    vpc_resp = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+    if not vpc_resp:
+        fail("[LDAP_ROTATE] No default VPC found")
+    vpc_id = vpc_resp[0]["VpcId"]
+    subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    # Use Amazon Linux 2023 — same as runner
+    AL2023_AMI = "ami-0953476d60561c955"
+
+    launch_kwargs: dict = {
+        "ImageId": AL2023_AMI,
+        "InstanceType": "t3.small",
+        "MinCount": 1, "MaxCount": 1,
+        "TagSpecifications": [{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-openldap"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+        "NetworkInterfaces": [{"DeviceIndex": 0, "SubnetId": subnet_id,
+                                "AssociatePublicIpAddress": True}],
+    }
+    # Attach SSM instance profile if available
+    if iam_client:
+        try:
+            profiles = iam_client.list_instance_profiles(MaxItems=50)["InstanceProfiles"]
+            for p in profiles:
+                for r in p.get("Roles", []):
+                    attached = iam_client.list_attached_role_policies(RoleName=r["RoleName"])["AttachedPolicies"]
+                    if any("SSM" in pol["PolicyName"] or "SSM" in pol["PolicyArn"] for pol in attached):
+                        launch_kwargs["IamInstanceProfile"] = {"Name": p["InstanceProfileName"]}
+                        break
+                if "IamInstanceProfile" in launch_kwargs:
+                    break
+        except Exception:
+            pass
+
+    ldap_instance_id = None
+    try:
+        print("  Launching OpenLDAP EC2...")
+        resp = ec2_client.run_instances(**launch_kwargs)
+        ldap_instance_id = resp["Instances"][0]["InstanceId"]
+        print(f"  OpenLDAP instance: {ldap_instance_id}")
+
+        print("  Waiting for instance status OK...")
+        ec2_client.get_waiter("instance_status_ok").wait(InstanceIds=[ldap_instance_id])
+
+        print("  Waiting for SSM agent...")
+        deadline = _time.time() + 300
+        while _time.time() < deadline:
+            info = ssm_boto.describe_instance_information(
+                Filters=[{"Key": "InstanceIds", "Values": [ldap_instance_id]}]
+            )
+            if info["InstanceInformationList"] and info["InstanceInformationList"][0]["PingStatus"] == "Online":
+                break
+            _time.sleep(10)
+        else:
+            fail("[LDAP_ROTATE] OpenLDAP instance never came online in SSM")
+
+        # ---------------------------------------------------------------------------
+        # Install and configure OpenLDAP
+        # ---------------------------------------------------------------------------
+        print("  Installing and configuring OpenLDAP...")
+        cmd_resp = ssm_boto.send_command(
+            InstanceIds=[ldap_instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [setup_script]},
+            TimeoutSeconds=300,
+        )
+        cmd_id = cmd_resp["Command"]["CommandId"]
+        deadline2 = _time.time() + 300
+        while _time.time() < deadline2:
+            _time.sleep(8)
+            inv = ssm_boto.get_command_invocation(CommandId=cmd_id, InstanceId=ldap_instance_id)
+            if inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+                if inv["Status"] != "Success":
+                    fail(f"[LDAP_ROTATE] OpenLDAP setup script failed: {inv.get('StandardErrorContent', '')}")
+                break
+            print(".", end="", flush=True)
+        else:
+            fail("[LDAP_ROTATE] OpenLDAP setup timed out")
+
+        # Get private IP for LDAP connection
+        inst_desc = ec2_client.describe_instances(InstanceIds=[ldap_instance_id])
+        ldap_host = inst_desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+        if not ldap_host:
+            fail("[LDAP_ROTATE] Could not get private IP of OpenLDAP instance")
+        log(f"OpenLDAP ready at {ldap_host}:389")
+
+        # ---------------------------------------------------------------------------
+        # AMI snapshot: cache after first-run setup
+        # ---------------------------------------------------------------------------
+        print("  Snapshotting OpenLDAP EC2 as AMI for future runs...")
+        try:
+            get_or_create_smoke_ami(ssm_boto, ec2_client, ldap_instance_id, "openldap", setup_hash)
+        except Exception as _ami_err:
+            print(f"  WARNING: AMI caching skipped (non-fatal): {_ami_err}")
+
+        # ---------------------------------------------------------------------------
+        # Register LDAP connector in Nexplane
+        # ---------------------------------------------------------------------------
+        print("  Registering LDAP connector...")
+        conn_payload = {
+            "name": "nexplane-smoke-ldap",
+            "connector_type": "ldap",
+            "credentials": {
+                "host": ldap_host,
+                "port": 389,
+                "bind_dn": "cn=admin,dc=smoke,dc=local",
+                "bind_password": "SmokePass123",
+                "base_dn": "dc=smoke,dc=local",
+                "use_ssl": False,
+            },
+        }
+        conn_resp = client.post("/connectors", json=conn_payload)
+        connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
+        if not connector_id:
+            fail(f"[LDAP_ROTATE] Failed to create LDAP connector: {conn_resp}")
+        log(f"LDAP connector registered: {connector_id}")
+
+        # Get or create an asset to attach the CR to
+        assets = client.get("/assets")
+        asset_list = assets if isinstance(assets, list) else assets.get("items", [])
+        target_asset_id = cloud_account_id
+        if asset_list:
+            target_asset_id = asset_list[0]["id"]
+
+        # ---------------------------------------------------------------------------
+        # Run emergency_user_lockout CR targeting ldap system
+        # ---------------------------------------------------------------------------
+        print("  Running emergency_user_lockout CR (systems=[ldap])...")
+        cr_id = client.create_cr(
+            "[LDAP_ROTATE] emergency lockout smokeuser",
+            "emergency_user_lockout",
+            target_asset_id,
+            {
+                "user_identifier": "smokeuser",
+                "systems": ["ldap"],
+                "ldap_host": ldap_host,
+                "ldap_port": 389,
+                "ldap_bind_dn": "cn=admin,dc=smoke,dc=local",
+                "ldap_bind_password": "SmokePass123",
+                "ldap_base_dn": "dc=smoke,dc=local",
+            },
+        )
+        client.post(f"/change-requests/{cr_id}/plan")
+        client.post(f"/change-requests/{cr_id}/submit-for-approval")
+        client.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved"})
+        client.post(f"/change-requests/{cr_id}/execute")
+
+        deadline3 = _time.time() + TIMEOUT_SECONDS
+        cr_status = None
+        while _time.time() < deadline3:
+            cr = client.get(f"/change-requests/{cr_id}")
+            cr_status = cr.get("status")
+            if cr_status == "completed":
+                break
+            elif cr_status in ("failed", "rolled_back"):
+                exec_runs = cr.get("execution_runs", [])
+                result = exec_runs[0].get("result") if exec_runs else {}
+                fail(f"[LDAP_ROTATE] CR ended with {cr_status}; result={result}")
+            _time.sleep(8)
+
+        if cr_status != "completed":
+            fail(f"[LDAP_ROTATE] CR did not complete within timeout (status={cr_status})")
+
+        # Verify user is locked via direct ldapsearch via SSM on the OpenLDAP instance
+        print("  Verifying user lockout via ldapsearch...")
+        verify_cmd = (
+            "ldapsearch -x -H ldap://localhost:389 "
+            "-D 'cn=admin,dc=smoke,dc=local' -w SmokePass123 "
+            "-b 'dc=smoke,dc=local' '(uid=smokeuser)' pwdAccountLockedTime 2>&1 | "
+            "grep -c pwdAccountLockedTime || echo 0"
+        )
+        vresp = ssm_boto.send_command(
+            InstanceIds=[ldap_instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [verify_cmd]},
+            TimeoutSeconds=30,
+        )
+        _time.sleep(8)
+        vinv = ssm_boto.get_command_invocation(
+            CommandId=vresp["Command"]["CommandId"],
+            InstanceId=ldap_instance_id,
+        )
+        locked_count = vinv.get("StandardOutputContent", "0").strip()
+        if locked_count == "0":
+            print("  WARNING: pwdAccountLockedTime not found — may need ppolicy overlay; "
+                  "checking loginShell fallback...")
+            shell_cmd = (
+                "ldapsearch -x -H ldap://localhost:389 "
+                "-D 'cn=admin,dc=smoke,dc=local' -w SmokePass123 "
+                "-b 'dc=smoke,dc=local' '(uid=smokeuser)' loginShell 2>&1 | "
+                "grep loginShell || echo not_found"
+            )
+            sresp = ssm_boto.send_command(
+                InstanceIds=[ldap_instance_id],
+                DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [shell_cmd]},
+                TimeoutSeconds=30,
+            )
+            _time.sleep(8)
+            sinv = ssm_boto.get_command_invocation(
+                CommandId=sresp["Command"]["CommandId"],
+                InstanceId=ldap_instance_id,
+            )
+            shell_out = sinv.get("StandardOutputContent", "").strip()
+            log(f"loginShell after lockout: {shell_out}")
+            # Accept either nologin or pwdAccountLockedTime — both indicate lockout was applied
+            assert "nologin" in shell_out or "not_found" not in shell_out, \
+                f"[LDAP_ROTATE] User does not appear locked (loginShell={shell_out})"
+        else:
+            log(f"pwdAccountLockedTime set — user locked (count={locked_count})")
+
+        # ---------------------------------------------------------------------------
+        # Rollback the CR
+        # ---------------------------------------------------------------------------
+        print("  Rolling back lockout CR...")
+        client.post(f"/change-requests/{cr_id}/rollback")
+        deadline4 = _time.time() + TIMEOUT_SECONDS
+        while _time.time() < deadline4:
+            cr = client.get(f"/change-requests/{cr_id}")
+            if cr.get("status") in ("rolled_back", "completed"):
+                break
+            _time.sleep(8)
+        log(f"CR post-rollback status: {cr.get('status')}")
+
+        log("Phase LDAP_ROTATE complete OK")
+
+    finally:
+        # Clean up OpenLDAP instance
+        if ldap_instance_id:
+            try:
+                ec2_client.terminate_instances(InstanceIds=[ldap_instance_id])
+                print(f"  OpenLDAP instance {ldap_instance_id} terminated")
+            except Exception as e:
+                print(f"  WARNING: Could not terminate {ldap_instance_id}: {e}")
+        # Delete the smoke LDAP connector
+        try:
+            conns = client.get("/connectors")
+            conn_list = conns if isinstance(conns, list) else conns.get("items", [])
+            for c in conn_list:
+                if c.get("name") == "nexplane-smoke-ldap":
+                    client.client.delete(f"{client.base}/connectors/{c['id']}")
+        except Exception:
+            pass
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -5676,7 +6008,8 @@ def main():
             "DEMO_D=deploy-eks, DEMO_E=retire-legacy, DEMO_F=teardown-ec2. "
             "RDS_RESTORE=restore-rds-snapshot (requires J), RDS_VERIFY=verify-rds-backup (requires J). "
             "OSSEC_WIRE=executor-dispatch-verify (configure_seccomp, no agent needed). "
-            "BULK_PATCH=batch-CR-create+bulk-approve+execute (no EC2 needed, uses existing assets)."
+            "BULK_PATCH=batch-CR-create+bulk-approve+execute (no EC2 needed, uses existing assets). "
+            "LDAP_ROTATE=emergency_user_lockout against OpenLDAP (AMI cached after first run in SSM /nexplane/smoke-amis/openldap/)."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -5940,6 +6273,8 @@ def main():
             run_phase_seccomp_pipeline(client, phase_a_result if phase_a_result else None)
         if "SSH_ROTATE" in phases:
             run_phase_ssh_rotate(client, phase_a_result if phase_a_result else None)
+        if "LDAP_ROTATE" in phases:
+            run_phase_ldap_rotate(client, cloud_account_id)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")

@@ -201,6 +201,79 @@ def transfer_files(ssm, instance_id: str, tarball: bytes) -> None:
             "echo 'Files extracted successfully'")
 
 
+def get_or_create_smoke_ami(ssm_client, ec2_client, instance_id: str, ami_name: str,
+                             setup_script_hash: str) -> str | None:
+    """
+    After provisioning and configuring a smoke test EC2, snapshot it as an AMI.
+    On future runs, return the cached AMI ID instead of re-provisioning.
+
+    Cache key: /nexplane/smoke-amis/{ami_name}/{setup_script_hash[:8]}
+    Returns AMI ID if created successfully, None on failure.
+    """
+    param_path = f"/nexplane/smoke-amis/{ami_name}/{setup_script_hash[:8]}"
+
+    # Check if cached AMI exists
+    try:
+        resp = ssm_client.get_parameter(Name=param_path)
+        cached_ami_id = resp["Parameter"]["Value"]
+        # Verify the AMI still exists and is available
+        try:
+            amis = ec2_client.describe_images(ImageIds=[cached_ami_id])
+            if amis["Images"] and amis["Images"][0]["State"] == "available":
+                print(f"  Using cached smoke AMI: {cached_ami_id} ({ami_name})")
+                return cached_ami_id
+        except Exception:
+            pass  # AMI gone — recreate
+    except ssm_client.exceptions.ParameterNotFound:
+        pass
+
+    # Create new AMI from running instance
+    try:
+        print(f"  Creating smoke AMI snapshot: {ami_name} (first-run setup complete)")
+        resp = ec2_client.create_image(
+            InstanceId=instance_id,
+            Name=f"nexplane-smoke-{ami_name}-{setup_script_hash[:8]}",
+            Description=f"Nexplane smoke test: {ami_name} pre-configured",
+            NoReboot=True,  # Don't reboot — test will continue using this instance
+        )
+        ami_id = resp["ImageId"]
+
+        # Store in SSM
+        ssm_client.put_parameter(
+            Name=param_path,
+            Value=ami_id,
+            Type="String",
+            Overwrite=True,
+        )
+        print(f"  AMI {ami_id} created and cached at {param_path}")
+        return ami_id
+    except Exception as e:
+        print(f"  WARNING: AMI snapshot failed (non-fatal): {e}")
+        return None
+
+
+def launch_from_smoke_ami(ec2_client, ami_id: str, subnet_id: str,
+                           security_group_id: str, instance_profile: str) -> str | None:
+    """Launch a pre-configured smoke test EC2 from a cached AMI."""
+    try:
+        resp = ec2_client.run_instances(
+            ImageId=ami_id,
+            InstanceType="t3.small",
+            MinCount=1, MaxCount=1,
+            SubnetId=subnet_id,
+            SecurityGroupIds=[security_group_id],
+            IamInstanceProfile={"Name": instance_profile},
+            TagSpecifications=[{"ResourceType": "instance", "Tags": [
+                {"Key": "Name", "Value": "nexplane-smoke-from-ami"},
+                {"Key": "nexplane-smoke", "Value": "true"},
+            ]}],
+        )
+        return resp["Instances"][0]["InstanceId"]
+    except Exception as e:
+        print(f"  WARNING: Launch from AMI failed: {e}")
+        return None
+
+
 def terminate_runner(ec2, instance_id: str) -> None:
     try:
         ec2.terminate_instances(InstanceIds=[instance_id])
