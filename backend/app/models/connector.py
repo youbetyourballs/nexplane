@@ -54,6 +54,7 @@ class ConnectorType(str, enum.Enum):
     terraform_local = "terraform_local"
     ansible_local = "ansible_local"
     oci = "oci"
+    ldap = "ldap"
 
 
 class ConnectorStatus(str, enum.Enum):

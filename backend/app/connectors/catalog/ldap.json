@@ -1,0 +1,20 @@
+{
+  "connector_type": "ldap",
+  "display_name": "LDAP / Active Directory",
+  "actions": [
+    {
+      "action_id": "ldap_disable_user",
+      "generic_action": "ldap_disable_user",
+      "display_name": "Disable LDAP User",
+      "description": "Disables an LDAP user account by setting pwdAccountLockedTime.",
+      "executor": "ldap.disable_user",
+      "action_type": "change",
+      "execution_tier": 3,
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["server", "identity"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true}
+      ]
+    }
+  ]
+}
