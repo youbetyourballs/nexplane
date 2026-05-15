@@ -1,0 +1,12 @@
+{
+  "change_type": "asr_enforce",
+  "display_name": "ASR Rules Enforce",
+  "description": "Enable Attack Surface Reduction rules in block mode via Nexplane agent",
+  "steps": [
+    {"generic_action": "asr_enforce", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "asr_enforce",
+  "rollback_connector_type": "nexplane_agent"
+}

@@ -1,0 +1,12 @@
+{
+  "change_type": "deploy_applocker_policy",
+  "display_name": "Deploy AppLocker Policy",
+  "description": "Deploy or update AppLocker application whitelisting policy via Nexplane agent",
+  "steps": [
+    {"generic_action": "deploy_applocker_policy", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "deploy_applocker_policy",
+  "rollback_connector_type": "nexplane_agent"
+}

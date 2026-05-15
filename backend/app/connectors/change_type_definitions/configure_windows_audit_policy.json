@@ -1,0 +1,12 @@
+{
+  "change_type": "configure_windows_audit_policy",
+  "display_name": "Configure Windows Audit Policy",
+  "description": "Configure Windows Advanced Audit Policy categories via Nexplane agent",
+  "steps": [
+    {"generic_action": "configure_windows_audit_policy", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "configure_windows_audit_policy",
+  "rollback_connector_type": "nexplane_agent"
+}
