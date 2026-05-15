@@ -67,6 +67,19 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                 inline = _InlineLDAP() if parameters.get("ldap_host") else connector
                 r = await ldap_disable({"username": user}, asset_ids, inline)
                 results["ldap"] = "locked" if r.get("success") or r.get("status") != "skipped" else "skipped_no_credentials"
+            elif system == "keycloak":
+                from app.connectors.executors.keycloak.disable_user import execute as kc_disable
+                class _InlineKeycloak:
+                    credentials = {
+                        "url": parameters.get("keycloak_url"),
+                        "realm": parameters.get("keycloak_realm", "master"),
+                        "client_id": parameters.get("keycloak_client_id", "admin-cli"),
+                        "username": parameters.get("keycloak_admin"),
+                        "password": parameters.get("keycloak_password"),
+                    }
+                inline = _InlineKeycloak() if parameters.get("keycloak_url") else connector
+                r = await kc_disable({"username": user}, asset_ids, inline)
+                results["keycloak"] = "locked" if r.get("success") else "skipped_no_credentials"
         except Exception as e:
             results[system] = "failed"
             errors.append({"system": system, "error": str(e)})
