@@ -155,11 +155,14 @@ def ssm_run(ssm, instance_id: str, script: str, timeout: int = 3600) -> str:
     )
     command_id = resp["Command"]["CommandId"]
 
-    # Poll for completion
+    # Poll for completion — SSM invocation record may not exist immediately
     deadline = time.time() + timeout
     while time.time() < deadline:
         time.sleep(5)
-        result = ssm.get_command_invocation(CommandId=command_id, InstanceId=instance_id)
+        try:
+            result = ssm.get_command_invocation(CommandId=command_id, InstanceId=instance_id)
+        except ssm.exceptions.InvocationDoesNotExist:
+            continue  # Race condition — invocation not registered yet, retry
         status = result["Status"]
         if status in ("Success", "Failed", "Cancelled", "TimedOut"):
             stdout = result.get("StandardOutputContent", "")
