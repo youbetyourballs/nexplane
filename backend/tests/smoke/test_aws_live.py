@@ -6413,7 +6413,7 @@ def _launch_windows_ec2(ec2_client, ami_id: str, cloud_account_id: str) -> tuple
     try:
         offerings = ec2_client.describe_instance_type_offerings(
             LocationType="availability-zone",
-            Filters=[{"Name": "instance-type", "Values": ["t3.medium"]}],
+            Filters=[{"Name": "instance-type", "Values": ["t3.large"]}],
         )["InstanceTypeOfferings"]
         supported_azs = {o["Location"] for o in offerings}
         good = [s for s in subnets if s.get("AvailabilityZone") in supported_azs]
@@ -6436,7 +6436,7 @@ def _launch_windows_ec2(ec2_client, ami_id: str, cloud_account_id: str) -> tuple
 
     resp = ec2_client.run_instances(
         ImageId=ami_id,
-        InstanceType="t3.medium",
+        InstanceType="t3.large",
         MinCount=1, MaxCount=1,
         SubnetId=subnet_id,
         IamInstanceProfile={"Name": instance_profile},
