@@ -332,6 +332,26 @@ class ChangeType(str, enum.Enum):
     # step-ca certificate lifecycle
     step_ca_rotate_cert = "step_ca_rotate_cert"
     step_ca_check_expiry = "step_ca_check_expiry"
+    # Okta identity management
+    okta_disable_user = "okta_disable_user"
+    okta_enforce_mfa = "okta_enforce_mfa"
+    okta_sync_users = "okta_sync_users"
+    # ServiceNow ITSM
+    servicenow_create_incident = "servicenow_create_incident"
+    servicenow_close_incident = "servicenow_close_incident"
+    # PagerDuty incident management
+    pagerduty_create_incident = "pagerduty_create_incident"
+    pagerduty_resolve_incident = "pagerduty_resolve_incident"
+    # OpenVAS / Greenbone CE vulnerability scanning
+    openvas_run_scan = "openvas_run_scan"
+    openvas_import_findings = "openvas_import_findings"
+    # Nessus Essentials vulnerability scanning
+    nessus_run_scan = "nessus_run_scan"
+    # SIEM connectors — Elastic Security + Splunk Free
+    elastic_sync_alerts = "elastic_sync_alerts"
+    elastic_create_rule = "elastic_create_rule"
+    splunk_sync_notables = "splunk_sync_notables"
+    splunk_create_alert = "splunk_create_alert"
 
 
 class RiskLevel(str, enum.Enum):
