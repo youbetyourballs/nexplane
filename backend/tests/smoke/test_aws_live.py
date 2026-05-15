@@ -5747,6 +5747,16 @@ echo "LDAP_SETUP_DONE"
         fail("[LDAP_ROTATE] No default VPC found")
     vpc_id = vpc_resp[0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    # Filter to AZs that support t3.small (us-east-1e does not)
+    try:
+        _offerings = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}]
+        )["InstanceTypeOfferings"]
+        _supported_azs = {o["Location"] for o in _offerings}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in _supported_azs] or subnets
+    except Exception:
+        pass
     subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
     subnet_id = subnets[0]["SubnetId"]
 
