@@ -123,9 +123,10 @@ var commands = map[string]CommandFunc{
 	"apply_windows_patches":      winpatch.ApplyWindowsPatchesExecute,
 	"audit_windows_patch_status": winpatch.AuditWindowsPatchStatusExecute,
 	// Credential rotation
-	"rotate_ssh_keys": credrotation.SSHKeyExecute,
-	"rotate_db_creds": credrotation.DBRotateExecute,
-	"rotate_api_key":  credrotation.APIKeyEnvExecute,
+	"rotate_ssh_keys":        credrotation.SSHKeyExecute,
+	"rotate_db_creds":        credrotation.DBRotateExecute,
+	"rotate_api_key":         credrotation.APIKeyEnvExecute,
+	"rotate_jwt_signing_key": credrotation.JWTKeyRotateExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -180,9 +181,10 @@ var rollbacks = map[string]CommandFunc{
 	// Windows patching rollback
 	"apply_windows_patches": winpatch.ApplyWindowsPatchesRollback,
 	// Credential rotation rollback
-	"rotate_ssh_keys": credrotation.SSHKeyRollback,
-	"rotate_db_creds": credrotation.DBRotateRollback,
-	"rotate_api_key":  credrotation.APIKeyEnvRollback,
+	"rotate_ssh_keys":        credrotation.SSHKeyRollback,
+	"rotate_db_creds":        credrotation.DBRotateRollback,
+	"rotate_api_key":         credrotation.APIKeyEnvRollback,
+	"rotate_jwt_signing_key": credrotation.JWTKeyRotateRollback,
 }
 
 // Dispatch routes a command to its implementation.

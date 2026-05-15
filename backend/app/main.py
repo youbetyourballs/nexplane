@@ -25,6 +25,7 @@ from app.routers import current_user
 from app.routers.audit import list_cr_audit_events
 from app.routers.asset_timeline import router as asset_timeline_router
 from app.routers.onboarding import router as onboarding_router
+from app.routers.credential_discovery import router as credential_discovery_router
 from app.services import scheduler_service
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.workers.escalation_worker import check_emergency_escalations
@@ -144,6 +145,7 @@ app.include_router(asset_timeline_router)
 app.include_router(policy_generate_router)
 app.include_router(drift_alerts_router)
 app.include_router(onboarding_router)
+app.include_router(credential_discovery_router)
 
 
 @app.get("/change-requests/{cr_id}/audit-events", tags=["Audit"])
