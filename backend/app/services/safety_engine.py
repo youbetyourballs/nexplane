@@ -316,7 +316,9 @@ def check_approval_requirements(risk_level: RiskLevel, approvals: list) -> dict:
     }
 
     req = requirements[risk_level]
-    met = len(approved_decisions) >= req["min_approvals"]
+    # Admin approval counts as satisfying all multi-approval requirements (admin = highest authority)
+    effective_min = 1 if "admin" in approver_roles else req["min_approvals"]
+    met = len(approved_decisions) >= effective_min
 
     if met and "must_include" not in req:
         required_roles = req.get("required_roles", [])
