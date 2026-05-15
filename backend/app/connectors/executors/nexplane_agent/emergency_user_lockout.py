@@ -52,6 +52,21 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                     results["okta"] = "locked"
                 else:
                     results["okta"] = "skipped_no_credentials"
+            elif system == "ldap":
+                from app.connectors.executors.ldap.disable_user import execute as ldap_disable
+
+                class _InlineLDAP:
+                    credentials = {
+                        "host": parameters.get("ldap_host"),
+                        "port": parameters.get("ldap_port", 389),
+                        "bind_dn": parameters.get("ldap_bind_dn"),
+                        "bind_password": parameters.get("ldap_bind_password"),
+                        "base_dn": parameters.get("ldap_base_dn", "dc=example,dc=com"),
+                    }
+
+                inline = _InlineLDAP() if parameters.get("ldap_host") else connector
+                r = await ldap_disable({"username": user}, asset_ids, inline)
+                results["ldap"] = "locked" if r.get("success") or r.get("status") != "skipped" else "skipped_no_credentials"
         except Exception as e:
             results[system] = "failed"
             errors.append({"system": system, "error": str(e)})
@@ -85,5 +100,13 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         rollback_results["azure_ad"] = "unlocked" if r.get("rolled_back") else "skipped"
     except Exception as e:
         rollback_results["azure_ad"] = f"error: {e}"
+
+    if execution_result.get("lockout_status", {}).get("ldap") == "locked":
+        try:
+            from app.connectors.executors.ldap.disable_user import rollback as ldap_restore
+            r = await ldap_restore({"username": user}, execution_result, connector)
+            rollback_results["ldap"] = "unlocked" if r.get("rolled_back") else "failed"
+        except Exception as e:
+            rollback_results["ldap"] = f"error: {e}"
 
     return {"rolled_back": True, "systems": rollback_results}
