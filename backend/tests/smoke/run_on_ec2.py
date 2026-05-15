@@ -110,7 +110,7 @@ def make_test_tarball() -> bytes:
         tar.add(SMOKE_DIR, arcname="smoke")
         # Add connector executor packages needed for standalone phases
         for connector_pkg in ("opnsense", "step_ca", "postgres", "redis", "mongodb",
-                              "elastic", "splunk"):
+                              "elastic", "splunk", "openvas", "nessus", "snyk", "jfrog"):
             pkg_dir = executors_dir / connector_pkg
             if pkg_dir.exists():
                 tar.add(pkg_dir, arcname=f"smoke/{connector_pkg}")
@@ -384,7 +384,10 @@ Examples:
 
         # Join backend to Tailscale so the runner can reach it
         backend_ts_ip = args.base_url.split("//")[-1].split(":")[0]
-        if args.tailscale_auth_key:
+        # If the base-url already contains a Tailscale IP (100.x.x.x), the backend is
+        # already on Tailscale — skip setup_backend_tailscale to avoid crashing the container.
+        _already_on_tailscale = backend_ts_ip.startswith("100.")
+        if args.tailscale_auth_key and not _already_on_tailscale:
             try:
                 backend_ts_ip = setup_backend_tailscale(args.tailscale_auth_key)
                 # Override base_url to use the fresh Tailscale IP
