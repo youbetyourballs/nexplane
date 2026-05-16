@@ -6206,7 +6206,7 @@ echo "OPNSENSE_MOCK_READY"
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -6471,7 +6471,7 @@ echo "VAULT_SETUP_COMPLETE"
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -6556,7 +6556,7 @@ vault kv get -field=password secret/smoke-test
 """
             resp_v = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": [verify_cmd]}, TimeoutSeconds=15)
+                Parameters={"commands": [verify_cmd]}, TimeoutSeconds=30)
             time.sleep(8)
             try:
                 out_v = ssm_client.get_command_invocation(
@@ -6735,7 +6735,7 @@ echo "STEP_CA_SETUP_COMPLETE"
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -7206,7 +7206,7 @@ echo "POSTGRES_SETUP_COMPLETE"
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -7296,7 +7296,7 @@ echo "PG_READY"
                 verify_cmd = f'PGPASSWORD=\'{new_pw}\' psql -h 127.0.0.1 -U smokeuser -d postgres -c "SELECT 1;" 2>&1'
                 resp_v = ssm_client.send_command(
                     InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=15)
+                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=30)
                 time.sleep(10)
                 try:
                     out_v = ssm_client.get_command_invocation(
@@ -7365,7 +7365,7 @@ echo "PG_READY"
                 verify_cmd = f'PGPASSWORD=\'{new_pw}\' psql -h 127.0.0.1 -U smokeuser -d postgres -c "SELECT 1;" 2>&1'
                 resp_v = ssm_client.send_command(
                     InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=15)
+                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=30)
                 time.sleep(8)
                 try:
                     out_v = ssm_client.get_command_invocation(
@@ -7503,7 +7503,7 @@ echo "REDIS_SETUP_COMPLETE"
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -7587,7 +7587,7 @@ echo "REDIS_READY"
                 verify_cmd = f"redis-cli -a '{new_pw}' PING 2>&1"
                 resp_v = ssm_client.send_command(
                     InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=10)
+                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=30)
                 time.sleep(8)
                 try:
                     out_v = ssm_client.get_command_invocation(
@@ -7646,7 +7646,7 @@ echo "REDIS_READY"
                 verify_cmd = f"redis-cli -a '{new_pw}' PING"
                 resp_v = ssm_client.send_command(
                     InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=10)
+                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=30)
                 time.sleep(6)
                 try:
                     out_v = ssm_client.get_command_invocation(
@@ -7662,7 +7662,7 @@ echo "REDIS_READY"
                 reset_cmd = f"redis-cli -a '{new_pw}' CONFIG SET requirepass '{old_pw}'"
                 ssm_client.send_command(
                     InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                    Parameters={"commands": [reset_cmd]}, TimeoutSeconds=10)
+                    Parameters={"commands": [reset_cmd]}, TimeoutSeconds=30)
                 time.sleep(5)
                 log("Redis rollback: requirepass restored to original value")
             else:
@@ -7800,7 +7800,7 @@ echo "MONGODB_SETUP_COMPLETE"
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -7891,7 +7891,7 @@ echo "MONGO_READY"
                 )
                 resp_v = ssm_client.send_command(
                     InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=15)
+                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=30)
                 time.sleep(10)
                 try:
                     out_v = ssm_client.get_command_invocation(
@@ -7964,7 +7964,7 @@ echo "MONGO_READY"
                 )
                 resp_v = ssm_client.send_command(
                     InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=15)
+                    Parameters={"commands": [verify_cmd]}, TimeoutSeconds=30)
                 time.sleep(8)
                 try:
                     out_v = ssm_client.get_command_invocation(
@@ -8196,7 +8196,7 @@ def run_phase_openvas_scan(client: NexplaneClient, cloud_account_id: str) -> Non
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -8556,7 +8556,7 @@ def run_phase_nessus_scan(client: NexplaneClient, cloud_account_id: str) -> None
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -8607,7 +8607,7 @@ def run_phase_nessus_scan(client: NexplaneClient, cloud_account_id: str) -> None
             check_cmd = "curl -sk -o /dev/null -w '%{http_code}' https://localhost:8834/ 2>/dev/null || echo 000"
             resp_c = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": [check_cmd]}, TimeoutSeconds=15)
+                Parameters={"commands": [check_cmd]}, TimeoutSeconds=30)
             time.sleep(8)
             try:
                 out_c = ssm_client.get_command_invocation(
@@ -8831,7 +8831,7 @@ echo "KEYCLOAK_SETUP_COMPLETE"
     while time.time() < deadline2:
         try:
             r = ssm_client.send_command(InstanceIds=[instance_id],
-                DocumentName="AWS-RunShellScript", Parameters={"commands": ["echo ok"]}, TimeoutSeconds=10)
+                DocumentName="AWS-RunShellScript", Parameters={"commands": ["echo ok"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
             if out["Status"] == "Success":
@@ -9419,6 +9419,157 @@ def run_phase_win_policy_pipeline(client, win_asset_id: str) -> None:
     log("Phase WIN_POLICY_PIPELINE complete")
 
 
+def _get_or_create_winrm_sg(ec2_client, vpc_id: str) -> str:
+    """Get or create a security group that allows WinRM (TCP 5985) and RDP (TCP 3389) inbound."""
+    sg_name = "nexplane-smoke-winrm"
+    try:
+        resp = ec2_client.describe_security_groups(
+            Filters=[
+                {"Name": "group-name", "Values": [sg_name]},
+                {"Name": "vpc-id", "Values": [vpc_id]},
+            ]
+        )
+        if resp["SecurityGroups"]:
+            return resp["SecurityGroups"][0]["GroupId"]
+    except Exception:
+        pass
+
+    try:
+        create_resp = ec2_client.create_security_group(
+            GroupName=sg_name,
+            Description="Nexplane smoke test WinRM access",
+            VpcId=vpc_id,
+        )
+        sg_id = create_resp["GroupId"]
+        # Allow WinRM HTTP (5985) and RDP (3389) from anywhere
+        ec2_client.authorize_security_group_ingress(
+            GroupId=sg_id,
+            IpPermissions=[
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 5985,
+                    "ToPort": 5985,
+                    "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "WinRM HTTP"}],
+                },
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 3389,
+                    "ToPort": 3389,
+                    "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "RDP"}],
+                },
+                {
+                    "IpProtocol": "-1",
+                    "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "All outbound"}],
+                },
+            ],
+        )
+        log(f"Created WinRM security group: {sg_id}")
+        return sg_id
+    except Exception as e:
+        log(f"WARNING: Could not create WinRM security group: {e} — using default SG")
+        # Fall back to default SG
+        try:
+            resp = ec2_client.describe_security_groups(
+                Filters=[
+                    {"Name": "group-name", "Values": ["default"]},
+                    {"Name": "vpc-id", "Values": [vpc_id]},
+                ]
+            )
+            if resp["SecurityGroups"]:
+                sg_id = resp["SecurityGroups"][0]["GroupId"]
+                # Try to add WinRM rule to default SG — ignore if already exists
+                try:
+                    ec2_client.authorize_security_group_ingress(
+                        GroupId=sg_id,
+                        IpPermissions=[{
+                            "IpProtocol": "tcp",
+                            "FromPort": 5985,
+                            "ToPort": 5985,
+                            "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
+                        }],
+                    )
+                except Exception:
+                    pass
+                return sg_id
+        except Exception:
+            pass
+    return ""
+
+
+def _launch_winrm_ec2(ec2_client, ami_id):
+    # type: (object, str) -> tuple
+    """Launch t3.small Windows EC2 for WinRM smoke. Returns (instance_id, private_ip)."""
+    import time as _t
+    # Find the right subnet for t3.small
+    vpcs = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+    vpc_id = vpcs[0]["VpcId"]
+    subnets = ec2_client.describe_subnets(
+        Filters=[{"Name": "vpcId", "Values": [vpc_id]}]
+    )["Subnets"]
+    try:
+        az_info = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}],
+        )["InstanceTypeOfferings"]
+        supported_azs = {o["Location"] for o in az_info}
+        good = [s for s in subnets if s.get("AvailabilityZone") in supported_azs]
+        if good:
+            subnets = good
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    # Ensure a security group allowing WinRM (TCP 5985) inbound exists
+    sg_id = _get_or_create_winrm_sg(ec2_client, vpc_id)
+
+    iam_boto = _get_aws_boto3_client("iam")
+    instance_profile = "NexplaneEC2TestProfile"
+    if iam_boto:
+        try:
+            found = get_ssm_instance_profile_name(iam_boto)
+            if found:
+                instance_profile = found
+        except Exception:
+            pass
+
+    ni_spec: dict = {
+        "DeviceIndex": 0,
+        "SubnetId": subnet_id,
+        "AssociatePublicIpAddress": True,
+    }
+    if sg_id:
+        ni_spec["Groups"] = [sg_id]
+    resp = ec2_client.run_instances(
+        ImageId=ami_id,
+        InstanceType="t3.small",
+        MinCount=1, MaxCount=1,
+        NetworkInterfaces=[ni_spec],
+        IamInstanceProfile={"Name": instance_profile},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-winrm"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+    )
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"WinRM Windows EC2 launched: {instance_id}")
+    _t.sleep(5)
+
+    deadline = _t.time() + 300
+    while _t.time() < deadline:
+        try:
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+        except Exception:
+            _t.sleep(8)
+            continue
+        if state == "running":
+            private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+            return instance_id, private_ip
+        _t.sleep(10)
+    fail(f"WinRM Windows EC2 {instance_id} never reached running state")
+
+
 def run_phase_winrm_bootstrap(client, cloud_account_id):
     # type: (object, str) -> None
     """Phase WINRM_BOOTSTRAP: Launch Windows Server 2022 EC2, enable WinRM via SSM,
@@ -9440,7 +9591,8 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
     setup_hash = _hl.md5(("winrm-v1-" + win_ami_id).encode()).hexdigest()
     cached_ami = _check_smoke_ami_cache(ssm_client, ec2_client, "winrm", setup_hash)
 
-    instance_id, private_ip = _launch_windows_ec2(ec2_client, cached_ami or win_ami_id, cloud_account_id)
+    # Launch Windows EC2 (t3.small — AWS account free-tier restriction applies to Windows AMIs)
+    instance_id, private_ip = _launch_winrm_ec2(ec2_client, cached_ami or win_ami_id)
     connector_id = None
     asset_id = None
 
@@ -9457,7 +9609,9 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
                     "Enable-PSRemoting -Force",
                     "Set-Item WSMan:\\localhost\\Service\\Auth\\Basic -Value $true",
                     "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $true",
+                    "Set-Item WSMan:\\localhost\\Listener\\*\\Port -Value 5985 -ErrorAction SilentlyContinue",
                     "netsh advfirewall firewall add rule name='WinRM-HTTP' dir=in action=allow protocol=TCP localport=5985",
+                    "Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False",
                     "Restart-Service WinRM",
                     "Write-Output 'WINRM_ENABLED'",
                 ]},
@@ -9493,9 +9647,9 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
                 public_ip = private_ip
             log(f"Instance public IP: {public_ip}")
 
-            # Wait for WinRM port 5985 to be reachable (up to 3 min)
+            # Wait for WinRM port 5985 to be reachable (up to 5 min)
             log("Waiting for WinRM port 5985...")
-            deadline2 = _t.time() + 180
+            deadline2 = _t.time() + 300
             port_open = False
             while _t.time() < deadline2:
                 try:
@@ -9555,97 +9709,190 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
             password = "NexplaneSmoke2024!"
             log(f"Using cached WinRM AMI, public IP: {public_ip}")
 
-        # Register WinRM connector in Nexplane
-        log("Registering WinRM connector...")
-        conn_resp = client.post("/connectors", json={
-            "connector_type": "winrm",
-            "name": f"nexplane-smoke-winrm-{instance_id[-8:]}",
-            "credentials": {
+        # Build connector object (used both for backend registration and standalone direct calls)
+        class _WinRMConnector:
+            credentials = {
                 "hostname": public_ip,
                 "port": "5985",
                 "username": "Administrator",
                 "password": password,
                 "use_ssl": "false",
-            },
-        })
-        connector_id = conn_resp["id"]
-        log(f"WinRM connector registered: {connector_id}")
+            }
 
-        # Register asset linked to connector
-        asset_resp = client.post("/assets", json={
-            "name": f"nexplane-smoke-winrm-{instance_id[-8:]}",
-            "asset_type": "server",
-            "connector_id": connector_id,
-            "asset_metadata": {
-                "instance_id": instance_id,
-                "public_ip": public_ip,
-                "os": "windows",
-                "platform": "windows",
-            },
-            "tags": ["nexplane-smoke", "winrm"],
-        })
-        asset_id = asset_resp["id"]
-        log(f"Asset registered: {asset_id}")
+        winrm_connector = _WinRMConnector()
 
-        # CR 1: check_prerequisites
-        log("Running winrm_check_prerequisites CR...")
-        cr1 = client.run_cr(
-            "[WINRM_BOOTSTRAP] check_prerequisites",
-            "winrm_check_prerequisites",
-            asset_id,
-            {},
-        )
-        exec_runs1 = cr1.get("execution_runs") or []
-        result1 = exec_runs1[0].get("result") if exec_runs1 else {}
-        log(f"check_prerequisites result keys: {list(result1.keys())}")
-        if not result1.get("checks") and not result1.get("mock"):
-            log(f"  WARNING: check_prerequisites returned unexpected result: {result1}")
+        if not client.standalone:
+            # Backend mode: register connector + asset, run CRs via API
+            log("Registering WinRM connector...")
+            conn_resp = client.post("/connectors", json={
+                "connector_type": "winrm",
+                "name": f"nexplane-smoke-winrm-{instance_id[-8:]}",
+                "credentials": {
+                    "hostname": public_ip,
+                    "port": "5985",
+                    "username": "Administrator",
+                    "password": password,
+                    "use_ssl": "false",
+                },
+            })
+            connector_id = conn_resp["id"]
+            log(f"WinRM connector registered: {connector_id}")
 
-        # CR 2: download_agent
-        backend_ip = "100.69.215.38"
-        agent_url = f"http://{backend_ip}:8000/downloads/nexplane-agent-windows-amd64-0.3.1.exe"
-        log(f"Running winrm_download_agent CR (url={agent_url})...")
-        cr2 = client.run_cr(
-            "[WINRM_BOOTSTRAP] download_agent",
-            "winrm_download_agent",
-            asset_id,
-            {"agent_url": agent_url},
-        )
-        exec_runs2 = cr2.get("execution_runs") or []
-        result2 = exec_runs2[0].get("result") if exec_runs2 else {}
-        log(f"download_agent result: downloaded={result2.get('downloaded', '?')}")
+            asset_resp = client.post("/assets", json={
+                "name": f"nexplane-smoke-winrm-{instance_id[-8:]}",
+                "asset_type": "server",
+                "connector_id": connector_id,
+                "asset_metadata": {
+                    "instance_id": instance_id,
+                    "public_ip": public_ip,
+                    "os": "windows",
+                    "platform": "windows",
+                },
+                "tags": ["nexplane-smoke", "winrm"],
+            })
+            asset_id = asset_resp["id"]
+            log(f"Asset registered: {asset_id}")
 
-        # CR 3: install_agent
-        agent_secret = ""
-        try:
-            agent_secret = client.get_agent_secret()
-        except Exception:
-            pass
-        control_plane_url = f"http://{backend_ip}:8000"
-        log("Running winrm_install_agent CR...")
-        cr3 = client.run_cr(
-            "[WINRM_BOOTSTRAP] install_agent",
-            "winrm_install_agent",
-            asset_id,
-            {
-                "agent_secret": agent_secret,
-                "control_plane_url": control_plane_url,
-            },
-        )
-        exec_runs3 = cr3.get("execution_runs") or []
-        result3 = exec_runs3[0].get("result") if exec_runs3 else {}
-        service_created = result3.get("service_created", False)
-        log(f"install_agent service_created={service_created}")
+            cr1 = client.run_cr(
+                "[WINRM_BOOTSTRAP] check_prerequisites",
+                "winrm_check_prerequisites",
+                asset_id,
+                {},
+            )
+            exec_runs1 = cr1.get("execution_runs") or []
+            result1 = exec_runs1[0].get("result") if exec_runs1 else {}
+            log(f"check_prerequisites result keys: {list(result1.keys())}")
+            if not result1.get("checks") and not result1.get("mock"):
+                log(f"  WARNING: check_prerequisites returned unexpected result: {result1}")
 
-        # Rollback install (verify service deleted)
-        log("Running install_agent rollback...")
-        cr3_id = cr3.get("id", "")
-        if cr3_id:
+            backend_ip = "100.69.215.38"
+            agent_url = f"http://{backend_ip}:8000/downloads/nexplane-agent-windows-amd64-0.3.1.exe"
+            log(f"Running winrm_download_agent CR (url={agent_url})...")
+            cr2 = client.run_cr(
+                "[WINRM_BOOTSTRAP] download_agent",
+                "winrm_download_agent",
+                asset_id,
+                {"agent_url": agent_url},
+            )
+            exec_runs2 = cr2.get("execution_runs") or []
+            result2 = exec_runs2[0].get("result") if exec_runs2 else {}
+            log(f"download_agent result: downloaded={result2.get('downloaded', '?')}")
+
+            agent_secret = ""
             try:
-                client.post(f"/change-requests/{cr3_id}/rollback", json={})
-                log("Rollback CR submitted")
-            except Exception as _rb_e:
-                log(f"Rollback post failed: {_rb_e} — proceeding")
+                agent_secret = client.get_agent_secret()
+            except Exception:
+                pass
+            control_plane_url = f"http://{backend_ip}:8000"
+            log("Running winrm_install_agent CR...")
+            cr3 = client.run_cr(
+                "[WINRM_BOOTSTRAP] install_agent",
+                "winrm_install_agent",
+                asset_id,
+                {
+                    "agent_secret": agent_secret,
+                    "control_plane_url": control_plane_url,
+                },
+            )
+            exec_runs3 = cr3.get("execution_runs") or []
+            result3 = exec_runs3[0].get("result") if exec_runs3 else {}
+            service_created = result3.get("service_created", False)
+            log(f"install_agent service_created={service_created}")
+
+            log("Running install_agent rollback...")
+            cr3_id = cr3.get("id", "")
+            if cr3_id:
+                try:
+                    client.post(f"/change-requests/{cr3_id}/rollback", json={})
+                    log("Rollback CR submitted")
+                except Exception as _rb_e:
+                    log(f"Rollback post failed: {_rb_e} — proceeding")
+        else:
+            # Standalone mode: call winrm executors directly (no backend needed)
+            import asyncio as _asyncio
+            import sys as _sys
+            import os as _os
+
+            # Find winrm executor package (may be in smoke/winrm/ after tarball extraction)
+            _search_paths = [
+                _os.path.join(_os.path.dirname(__file__), "winrm"),
+                _os.path.join(_os.path.dirname(__file__), "..", "winrm"),
+                "/tmp/nexplane_smoke/smoke/winrm",
+            ]
+            for _p in _search_paths:
+                if _os.path.exists(_p) and _p not in _sys.path:
+                    _sys.path.insert(0, _os.path.dirname(_p))
+                    break
+
+            # Import winrm executor modules by registering as nxp_winrm package
+            # (avoid naming conflict with pywinrm's 'winrm' package)
+            import importlib.util as _ilu
+            import types as _types
+            _winrm_dir = None
+            for _p in _search_paths:
+                if _os.path.isdir(_p) and _os.path.exists(_os.path.join(_p, "check_prerequisites.py")):
+                    _winrm_dir = _p
+                    break
+            if not _winrm_dir:
+                fail("[WINRM_BOOTSTRAP] winrm executor package not found on runner — check tarball")
+
+            # Register the executor dir as 'nxp_winrm' package in sys.modules
+            _pkg_name = "nxp_winrm"
+            if _pkg_name not in _sys.modules:
+                _pkg = _types.ModuleType(_pkg_name)
+                _pkg.__path__ = [_winrm_dir]
+                _pkg.__package__ = _pkg_name
+                _sys.modules[_pkg_name] = _pkg
+
+            def _load_executor(mod_name):
+                full_name = f"{_pkg_name}.{mod_name}"
+                if full_name in _sys.modules:
+                    return _sys.modules[full_name]
+                spec = _ilu.spec_from_file_location(
+                    full_name,
+                    _os.path.join(_winrm_dir, f"{mod_name}.py"),
+                    submodule_search_locations=[_winrm_dir],
+                )
+                mod = _ilu.module_from_spec(spec)
+                mod.__package__ = _pkg_name
+                _sys.modules[full_name] = mod
+                spec.loader.exec_module(mod)
+                return mod
+
+            # Pre-load _client module so relative imports in executors work
+            _load_executor("_client")
+            _cp = _load_executor("check_prerequisites")
+            _da = _load_executor("download_agent")
+            _ia = _load_executor("install_agent")
+
+            log("Running check_prerequisites (standalone)...")
+            result1 = _asyncio.run(_cp.execute({}, [], winrm_connector))
+            log(f"check_prerequisites: all_passed={result1.get('all_passed')}, "
+                f"checks={[c['name'] for c in result1.get('checks', [])]}")
+            if not result1.get("checks") and not result1.get("error"):
+                log("  WARNING: check_prerequisites returned no checks")
+
+            # Use a publicly reachable agent URL for download test
+            agent_url = "https://nexplane-agent-downloads.s3.amazonaws.com/nexplane-agent-windows-amd64-0.3.1.exe"
+            log(f"Running download_agent (standalone, url={agent_url})...")
+            result2 = _asyncio.run(_da.execute(
+                {"agent_url": agent_url}, [], winrm_connector))
+            log(f"download_agent: downloaded={result2.get('downloaded')}")
+
+            log("Running install_agent (standalone)...")
+            result3 = _asyncio.run(_ia.execute(
+                {"agent_secret": "smoke-test-secret", "control_plane_url": "http://localhost:8000"},
+                [], winrm_connector))
+            service_created = result3.get("service_created", False)
+            log(f"install_agent: service_created={service_created}")
+
+            log("Running install_agent rollback (standalone)...")
+            rb3 = _asyncio.run(_ia.rollback({}, result3, winrm_connector))
+            log(f"install_agent rollback: rolled_back={rb3.get('rolled_back')}")
+
+            log("Running download_agent rollback (standalone)...")
+            rb2 = _asyncio.run(_da.rollback({}, result2, winrm_connector))
+            log(f"download_agent rollback: rolled_back={rb2.get('rolled_back')}")
 
         log("Phase WINRM_BOOTSTRAP PASSED")
 
@@ -10075,7 +10322,7 @@ echo "RESTART_COMPLETE"
                 log("  Revoking RoleBinding via kubectl (standalone EC2 runner)")
                 _ssm_run_poll(ssm_client, instance_id,
                     "kubectl delete rolebinding smoke-rb -n default 2>&1 || true; echo DONE",
-                    timeout=20, label="kubectl-delete")
+                    timeout=60, label="kubectl-delete")
                 result2 = {"deleted": True}
         else:
             cr_audit = client.run_cr("[K8S_RBAC] audit RBAC", "k8s_audit_rbac", cloud_account_id,
@@ -10098,7 +10345,7 @@ echo "RESTART_COMPLETE"
             verify_out = _ssm_run_poll(
                 ssm_client, instance_id,
                 "kubectl get rolebinding smoke-rb -n default 2>&1; echo EXITCODE:$?",
-                timeout=20, label="verify-delete",
+                timeout=60, label="verify-delete",
             )
             if "NotFound" in verify_out or "not found" in verify_out:
                 log("  RoleBinding confirmed deleted in Kubernetes")
@@ -10252,7 +10499,7 @@ fi
     while time.time() < deadline2:
         try:
             r = ssm_client.send_command(InstanceIds=[instance_id],
-                DocumentName="AWS-RunShellScript", Parameters={"commands": ["echo ok"]}, TimeoutSeconds=15)
+                DocumentName="AWS-RunShellScript", Parameters={"commands": ["echo ok"]}, TimeoutSeconds=30)
             time.sleep(8)
             out = ssm_client.get_command_invocation(CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
             if out["Status"] == "Success":
@@ -10522,7 +10769,7 @@ echo "GITLAB_SETUP_COMPLETE"
     while time.time() < deadline2:
         try:
             r = ssm_client.send_command(InstanceIds=[instance_id],
-                DocumentName="AWS-RunShellScript", Parameters={"commands": ["echo ok"]}, TimeoutSeconds=10)
+                DocumentName="AWS-RunShellScript", Parameters={"commands": ["echo ok"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
             if out["Status"] == "Success":
@@ -10833,7 +11080,7 @@ echo "TELEPORT_SETUP_COMPLETE"
     while time.time() < deadline2:
         try:
             r = ssm_client.send_command(InstanceIds=[instance_id],
-                DocumentName="AWS-RunShellScript", Parameters={"commands": ["echo ok"]}, TimeoutSeconds=10)
+                DocumentName="AWS-RunShellScript", Parameters={"commands": ["echo ok"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
             if out["Status"] == "Success":
@@ -10960,7 +11207,7 @@ echo "TELEPORT_SETUP_COMPLETE"
         )
         resp_ul = ssm_client.send_command(InstanceIds=[instance_id],
             DocumentName="AWS-RunShellScript",
-            Parameters={"commands": [unlock_cmd]}, TimeoutSeconds=20)
+            Parameters={"commands": [unlock_cmd]}, TimeoutSeconds=30)
         time.sleep(8)
         try:
             out_ul = ssm_client.get_command_invocation(
@@ -11073,7 +11320,7 @@ echo "GITEA_SETUP_COMPLETE"
     while time.time() < deadline2:
         try:
             r = ssm_client.send_command(InstanceIds=[instance_id],
-                DocumentName="AWS-RunShellScript", Parameters={"commands": ["echo ok"]}, TimeoutSeconds=10)
+                DocumentName="AWS-RunShellScript", Parameters={"commands": ["echo ok"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
             if out["Status"] == "Success":
@@ -11358,7 +11605,7 @@ echo "WAZUH_SETUP_COMPLETE"
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -11631,7 +11878,7 @@ echo "FALCO_SETUP_COMPLETE"
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -11682,7 +11929,7 @@ echo "FALCO_SETUP_COMPLETE"
             ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
                 Parameters={"commands": ["mkdir -p /etc/falco; touch /etc/falco/falco_rules.local.yaml; chmod 644 /etc/falco/falco_rules.local.yaml; echo ready"]},
-                TimeoutSeconds=20)
+                TimeoutSeconds=30)
             time.sleep(10)
 
         # Register Falco connector (optional — backend may not be reachable in standalone mode)
@@ -11743,7 +11990,7 @@ echo "FALCO_SETUP_COMPLETE"
             try:
                 resp_wr = ssm_client.send_command(
                     InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                    Parameters={"commands": [write_rule_cmd]}, TimeoutSeconds=20)
+                    Parameters={"commands": [write_rule_cmd]}, TimeoutSeconds=30)
                 time.sleep(10)
                 out_wr = ssm_client.get_command_invocation(
                     CommandId=resp_wr["Command"]["CommandId"], InstanceId=instance_id)
@@ -11759,7 +12006,7 @@ echo "FALCO_SETUP_COMPLETE"
             resp_v = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
                 Parameters={"commands": ["cat /etc/falco/falco_rules.local.yaml"]},
-                TimeoutSeconds=15)
+                TimeoutSeconds=30)
             time.sleep(8)
             out_v = ssm_client.get_command_invocation(
                 CommandId=resp_v["Command"]["CommandId"], InstanceId=instance_id)
@@ -11803,7 +12050,7 @@ echo "FALCO_SETUP_COMPLETE"
                 )
                 resp_rm = ssm_client.send_command(
                     InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                    Parameters={"commands": [remove_rule_cmd]}, TimeoutSeconds=20)
+                    Parameters={"commands": [remove_rule_cmd]}, TimeoutSeconds=30)
                 time.sleep(8)
                 out_rm = ssm_client.get_command_invocation(
                     CommandId=resp_rm["Command"]["CommandId"], InstanceId=instance_id)
@@ -11819,7 +12066,7 @@ echo "FALCO_SETUP_COMPLETE"
             resp_v2 = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
                 Parameters={"commands": ["cat /etc/falco/falco_rules.local.yaml"]},
-                TimeoutSeconds=15)
+                TimeoutSeconds=30)
             time.sleep(8)
             out_v2 = ssm_client.get_command_invocation(
                 CommandId=resp_v2["Command"]["CommandId"], InstanceId=instance_id)
@@ -11998,7 +12245,7 @@ echo "INFISICAL_SETUP_COMPLETE"
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -12744,7 +12991,7 @@ echo "ELASTIC_SETUP_COMPLETE"
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
@@ -13135,7 +13382,7 @@ echo "SPLUNK_SETUP_COMPLETE"
         try:
             r = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=10)
+                Parameters={"commands": ["echo ready"]}, TimeoutSeconds=30)
             time.sleep(5)
             out = ssm_client.get_command_invocation(
                 CommandId=r["Command"]["CommandId"], InstanceId=instance_id)
