@@ -25,6 +25,7 @@ Phase descriptions:
     K  CloudWatch: alarms + SSM metric push with rollback stack
     W  ALB lifecycle: create ALB + target group + listener, register EC2 target, verify health, deregister, rollback
     MAC_AGENT_BOOTSTRAP  macOS agent: launch mac2.metal on Dedicated Host, install Nexplane agent, run defaults_write + santa_check CRs
+    AD_DC_INTEGRITY  Windows Server 2022 AD DC: provision DC via SSM, snapshot AMI, run dc_integrity_check + ad_forest_snapshot CRs
 
 Requirements:
     AWS connector with credentials + NexplaneEC2TestProfile IAM role
@@ -12766,6 +12767,620 @@ def run_phase_pagerduty_incident(client: NexplaneClient) -> dict:
                 pass
 
 
+# Phase SCCM_BOOTSTRAP — One-time AMI pair builder (DC + SCCM site server)
+# ---------------------------------------------------------------------------
+# COST: ~$2.30 one-time (2x t3.xlarge Windows × 4 hr) + ~$5/month AMI storage
+# LICENSING: SCCM eval is free for 180 days. Refresh AMIs before expiry.
+# RUNTIME: 3-4 hours. Only runs once — subsequent runs use cached AMIs (~10 min).
+
+def run_phase_sccm_bootstrap(client, ec2_client, ssm_boto, cloud_account_id):
+    # type: (object, object, object, str) -> None
+    """Phase SCCM_BOOTSTRAP: build a Windows AMI pair (DC + SCCM site server) for
+    use by SCCM_DEPLOY smoke tests.  Idempotent — checks SSM cache first and skips
+    the 3-4 hour install when AMIs already exist.
+
+    AMI cache keys:
+      /nexplane/smoke/sccm-ami/dc          — Windows Server 2022 promoted as AD DC
+      /nexplane/smoke/sccm-ami/site-server — SCCM primary site installed on top of DC AMI
+    """
+    import hashlib as _hl
+    import os as _os
+    import time as _t
+
+    print("\n[Phase SCCM_BOOTSTRAP] SCCM AMI pair bootstrap")
+
+    # ── Step 1: Check cache ────────────────────────────────────────────────────
+    DC_AMI_PARAM   = "/nexplane/smoke/sccm-ami/dc"
+    SITE_AMI_PARAM = "/nexplane/smoke/sccm-ami/site-server"
+
+    def _get_ssm_param(name):
+        try:
+            return ssm_boto.get_parameter(Name=name, WithDecryption=False)["Parameter"]["Value"]
+        except Exception:
+            return None
+
+    cached_dc_ami   = _get_ssm_param(DC_AMI_PARAM)
+    cached_site_ami = _get_ssm_param(SITE_AMI_PARAM)
+
+    if cached_dc_ami and cached_site_ami:
+        log(f"[SCCM_BOOTSTRAP] Using cached SCCM AMIs — DC: {cached_dc_ami}  Site: {cached_site_ami}")
+        log("[SCCM_BOOTSTRAP] SKIP — both AMIs exist. Delete SSM params to force rebuild.")
+        return
+
+    log("[SCCM_BOOTSTRAP] No cached AMIs found — beginning full 3-4 hour build")
+
+    # ── Step 2: Resolve base Windows Server 2022 AMI ──────────────────────────
+    win_ami_id = _get_windows_2022_ami(ec2_client)
+    log(f"[SCCM_BOOTSTRAP] Base Windows 2022 AMI: {win_ami_id}")
+
+    # ── Shared launch helper ───────────────────────────────────────────────────
+    iam_boto = _get_aws_boto3_client("iam")
+    instance_profile = "NexplaneEC2TestProfile"
+    if iam_boto:
+        try:
+            found = get_ssm_instance_profile_name(iam_boto)
+            if found:
+                instance_profile = found
+        except Exception:
+            pass
+
+    def _launch_windows_xlarge(ami_id, name_tag):
+        vpcs = ec2_client.describe_vpcs(
+            Filters=[{"Name": "isDefault", "Values": ["true"]}]
+        )["Vpcs"]
+        vpc_id = vpcs[0]["VpcId"]
+        subnets = ec2_client.describe_subnets(
+            Filters=[{"Name": "vpcId", "Values": [vpc_id]}]
+        )["Subnets"]
+        try:
+            az_info = ec2_client.describe_instance_type_offerings(
+                LocationType="availability-zone",
+                Filters=[{"Name": "instance-type", "Values": ["t3.xlarge"]}],
+            )["InstanceTypeOfferings"]
+            supported_azs = {o["Location"] for o in az_info}
+            good = [s for s in subnets if s.get("AvailabilityZone") in supported_azs]
+            if good:
+                subnets = good
+        except Exception:
+            pass
+        subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+        subnet_id = subnets[0]["SubnetId"]
+
+        resp = ec2_client.run_instances(
+            ImageId=ami_id,
+            InstanceType="t3.xlarge",
+            MinCount=1, MaxCount=1,
+            NetworkInterfaces=[{
+                "DeviceIndex": 0,
+                "SubnetId": subnet_id,
+                "AssociatePublicIpAddress": True,
+            }],
+            IamInstanceProfile={"Name": instance_profile},
+            BlockDeviceMappings=[{
+                "DeviceName": "/dev/sda1",
+                "Ebs": {"VolumeSize": 100, "VolumeType": "gp3", "DeleteOnTermination": True},
+            }],
+            TagSpecifications=[{"ResourceType": "instance", "Tags": [
+                {"Key": "Name", "Value": name_tag},
+                {"Key": "nexplane-smoke", "Value": "true"},
+                {"Key": "nexplane-smoke-sccm-bootstrap", "Value": "true"},
+            ]}],
+        )
+        instance_id = resp["Instances"][0]["InstanceId"]
+        log(f"[SCCM_BOOTSTRAP] Launched {name_tag}: {instance_id}")
+        _t.sleep(5)
+        deadline = _t.time() + 300
+        while _t.time() < deadline:
+            try:
+                desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+                state = desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+                if state == "running":
+                    private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+                    return instance_id, private_ip
+            except Exception:
+                pass
+            _t.sleep(10)
+        fail(f"[SCCM_BOOTSTRAP] {name_tag} {instance_id} never reached running state")
+
+    def _run_ssm_script(instance_id, script_path, label, timeout_sec=14400):
+        """Send a local PowerShell script to an instance via SSM and poll to completion."""
+        with open(script_path, "r", encoding="utf-8") as fh:
+            script_lines = fh.read().splitlines()
+        log(f"[SCCM_BOOTSTRAP] Sending {label} script via SSM ({len(script_lines)} lines)")
+        resp = ssm_boto.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": script_lines, "executionTimeout": [str(timeout_sec)]},
+            TimeoutSeconds=min(timeout_sec, 3600),
+        )
+        cmd_id = resp["Command"]["CommandId"]
+        deadline = _t.time() + timeout_sec + 300
+        log(f"[SCCM_BOOTSTRAP] SSM command {cmd_id} dispatched for {label} — polling (may take hours)...")
+        while _t.time() < deadline:
+            _t.sleep(30)
+            try:
+                inv = ssm_boto.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+                status = inv["Status"]
+                log(f"[SCCM_BOOTSTRAP] {label} SSM status: {status}")
+                if status in ("Success", "Failed", "TimedOut", "Cancelled", "DeliveryTimedOut"):
+                    if status != "Success":
+                        stdout = inv.get("StandardOutputContent", "")[-2000:]
+                        stderr = inv.get("StandardErrorContent", "")[-1000:]
+                        fail(
+                            f"[SCCM_BOOTSTRAP] {label} SSM command {status}.\n"
+                            f"STDOUT (tail): {stdout}\nSTDERR (tail): {stderr}"
+                        )
+                    log(f"[SCCM_BOOTSTRAP] {label} completed successfully")
+                    return
+            except ssm_boto.exceptions.InvocationDoesNotExist:
+                pass
+            except Exception as _e:
+                log(f"[SCCM_BOOTSTRAP] SSM poll error (continuing): {_e}")
+        fail(f"[SCCM_BOOTSTRAP] {label} timed out after {timeout_sec}s")
+
+    # ── Step 3: Build DC AMI ───────────────────────────────────────────────────
+    dc_instance_id = None
+    site_instance_id = None
+
+    try:
+        # 3a. Launch DC instance
+        log("[SCCM_BOOTSTRAP] Launching DC instance (t3.xlarge Windows 2022)...")
+        dc_instance_id, dc_private_ip = _launch_windows_xlarge(win_ami_id, "nexplane-smoke-sccm-dc")
+
+        # 3b. Wait for SSM availability
+        log("[SCCM_BOOTSTRAP] Waiting for DC SSM agent (~5 min)...")
+        _wait_ssm_ready_win(ssm_boto, dc_instance_id, timeout=600)
+
+        # 3c. Run DC setup script (triggers automatic reboot at end)
+        _sccm_smoke_dir = _os.path.dirname(_os.path.abspath(__file__))
+        dc_script = _os.path.join(_sccm_smoke_dir, "sccm_dc_setup.ps1")
+        # DC setup installs AD DS and reboots — 20-35 min including reboot
+        _run_ssm_script(dc_instance_id, dc_script, "sccm_dc_setup", timeout_sec=3600)
+
+        # 3d. Wait for reboot and SSM re-registration (AD DS install reboots automatically)
+        log("[SCCM_BOOTSTRAP] DC rebooting after AD DS promotion — waiting for SSM re-registration (~5 min)...")
+        _t.sleep(120)  # give the instance time to start rebooting before we poll
+        _wait_ssm_ready_win(ssm_boto, dc_instance_id, timeout=600)
+        log("[SCCM_BOOTSTRAP] DC SSM re-registered after reboot")
+
+        # 3e. Snapshot DC as AMI
+        log("[SCCM_BOOTSTRAP] Snapshotting DC as AMI...")
+        dc_ami_id = None
+        try:
+            from run_on_ec2 import get_or_create_smoke_ami
+            dc_hash = _hl.md5(f"sccm-dc-v1-{win_ami_id}".encode()).hexdigest()[:8]
+            dc_ami_id = get_or_create_smoke_ami(ssm_boto, ec2_client, dc_instance_id, "sccm-dc", dc_hash)
+            log(f"[SCCM_BOOTSTRAP] DC AMI: {dc_ami_id}")
+        except Exception as _ami_e:
+            log(f"[SCCM_BOOTSTRAP] get_or_create_smoke_ami failed ({_ami_e}) — creating AMI directly")
+            snap_resp = ec2_client.create_image(
+                InstanceId=dc_instance_id,
+                Name=f"nexplane-smoke-sccm-dc-{_hl.md5(win_ami_id.encode()).hexdigest()[:8]}",
+                Description="Nexplane smoke: SCCM DC (smoke.nexplane.local)",
+                NoReboot=False,
+            )
+            dc_ami_id = snap_resp["ImageId"]
+            log(f"[SCCM_BOOTSTRAP] DC AMI create initiated: {dc_ami_id}")
+            # Wait for AMI to be available
+            log("[SCCM_BOOTSTRAP] Waiting for DC AMI to become available (~5-10 min)...")
+            ami_deadline = _t.time() + 900
+            while _t.time() < ami_deadline:
+                _t.sleep(30)
+                imgs = ec2_client.describe_images(ImageIds=[dc_ami_id])["Images"]
+                if imgs and imgs[0]["State"] == "available":
+                    log(f"[SCCM_BOOTSTRAP] DC AMI {dc_ami_id} is available")
+                    break
+            else:
+                log(f"[SCCM_BOOTSTRAP] Warning: DC AMI {dc_ami_id} not yet available — continuing")
+
+        # 3f. Store DC AMI ID in SSM
+        ssm_boto.put_parameter(
+            Name=DC_AMI_PARAM,
+            Value=dc_ami_id,
+            Type="String",
+            Overwrite=True,
+            Description="Nexplane smoke SCCM DC AMI — smoke.nexplane.local domain controller",
+        )
+        log(f"[SCCM_BOOTSTRAP] Stored DC AMI {dc_ami_id} at SSM {DC_AMI_PARAM}")
+
+        # ── Step 4: Build site server AMI ─────────────────────────────────────
+        # Launch site server from the BASE Windows 2022 AMI (not the DC AMI).
+        # The site server joins the domain over the network; the DC must remain running.
+        log("[SCCM_BOOTSTRAP] Launching site server instance (t3.xlarge Windows 2022)...")
+        site_instance_id, site_private_ip = _launch_windows_xlarge(
+            win_ami_id, "nexplane-smoke-sccm-site"
+        )
+
+        log("[SCCM_BOOTSTRAP] Waiting for site server SSM agent (~5 min)...")
+        _wait_ssm_ready_win(ssm_boto, site_instance_id, timeout=600)
+
+        # Patch the site setup script on-the-fly: inject the DC's private IP as the DNS server
+        # so the domain join succeeds (the DC is the authoritative DNS for smoke.nexplane.local).
+        site_script_path = _os.path.join(_sccm_smoke_dir, "sccm_site_setup.ps1")
+        with open(site_script_path, "r", encoding="utf-8") as fh:
+            site_script_raw = fh.read()
+
+        # Inject DC IP into DNS configuration block so domain join resolves smoke.nexplane.local
+        dns_inject = (
+            f"\n# DNS injected by SCCM_BOOTSTRAP runner — DC IP: {dc_private_ip}\n"
+            f"$adapters2 = Get-NetAdapter | Where-Object {{ $_.Status -eq 'Up' }}\n"
+            f"foreach ($a2 in $adapters2) {{\n"
+            f"    Set-DnsClientServerAddress -InterfaceIndex $a2.InterfaceIndex "
+            f"-ServerAddresses '{dc_private_ip}','8.8.8.8' -ErrorAction SilentlyContinue\n"
+            f"}}\n"
+            f"Write-Log 'DNS set to DC {dc_private_ip}'\n"
+        )
+        site_script_patched = dns_inject + site_script_raw
+
+        # Send patched script via SSM inline (not from file) so DC IP is embedded
+        site_lines = site_script_patched.splitlines()
+        log(f"[SCCM_BOOTSTRAP] Sending site server setup via SSM ({len(site_lines)} lines, ~3-4 hr)...")
+        site_resp = ssm_boto.send_command(
+            InstanceIds=[site_instance_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": site_lines, "executionTimeout": ["18000"]},
+            TimeoutSeconds=3600,
+        )
+        site_cmd_id = site_resp["Command"]["CommandId"]
+        log(f"[SCCM_BOOTSTRAP] Site server SSM command: {site_cmd_id} — polling every 60s")
+        site_deadline = _t.time() + 18000 + 600
+        while _t.time() < site_deadline:
+            _t.sleep(60)
+            try:
+                inv = ssm_boto.get_command_invocation(CommandId=site_cmd_id, InstanceId=site_instance_id)
+                status = inv["Status"]
+                log(f"[SCCM_BOOTSTRAP] Site server SSM status: {status}")
+                if status in ("Success", "Failed", "TimedOut", "Cancelled", "DeliveryTimedOut"):
+                    if status != "Success":
+                        stdout = inv.get("StandardOutputContent", "")[-3000:]
+                        fail(f"[SCCM_BOOTSTRAP] Site setup {status}.\nSTDOUT tail:\n{stdout}")
+                    log("[SCCM_BOOTSTRAP] Site server setup completed successfully")
+                    break
+            except Exception as _pe:
+                log(f"[SCCM_BOOTSTRAP] Site SSM poll error (continuing): {_pe}")
+        else:
+            fail("[SCCM_BOOTSTRAP] Site server setup timed out after 5 hours")
+
+        # 4b. Snapshot site server as AMI
+        log("[SCCM_BOOTSTRAP] Snapshotting site server as AMI...")
+        site_ami_id = None
+        try:
+            from run_on_ec2 import get_or_create_smoke_ami
+            site_hash = _hl.md5(f"sccm-site-v1-{win_ami_id}".encode()).hexdigest()[:8]
+            site_ami_id = get_or_create_smoke_ami(
+                ssm_boto, ec2_client, site_instance_id, "sccm-site-server", site_hash
+            )
+            log(f"[SCCM_BOOTSTRAP] Site server AMI: {site_ami_id}")
+        except Exception as _ami_e2:
+            log(f"[SCCM_BOOTSTRAP] get_or_create_smoke_ami failed ({_ami_e2}) — creating AMI directly")
+            snap_resp2 = ec2_client.create_image(
+                InstanceId=site_instance_id,
+                Name=f"nexplane-smoke-sccm-site-{_hl.md5(win_ami_id.encode()).hexdigest()[:8]}",
+                Description="Nexplane smoke: SCCM site server (NXP, smoke.nexplane.local)",
+                NoReboot=False,
+            )
+            site_ami_id = snap_resp2["ImageId"]
+            log(f"[SCCM_BOOTSTRAP] Site server AMI create initiated: {site_ami_id}")
+            ami2_deadline = _t.time() + 900
+            while _t.time() < ami2_deadline:
+                _t.sleep(30)
+                imgs2 = ec2_client.describe_images(ImageIds=[site_ami_id])["Images"]
+                if imgs2 and imgs2[0]["State"] == "available":
+                    log(f"[SCCM_BOOTSTRAP] Site AMI {site_ami_id} is available")
+                    break
+            else:
+                log(f"[SCCM_BOOTSTRAP] Warning: site AMI {site_ami_id} not yet available — stored anyway")
+
+        # 4c. Store site server AMI ID in SSM
+        ssm_boto.put_parameter(
+            Name=SITE_AMI_PARAM,
+            Value=site_ami_id,
+            Type="String",
+            Overwrite=True,
+            Description="Nexplane smoke SCCM site server AMI — site NXP on smoke.nexplane.local",
+        )
+        log(f"[SCCM_BOOTSTRAP] Stored site AMI {site_ami_id} at SSM {SITE_AMI_PARAM}")
+
+        log("[SCCM_BOOTSTRAP] COMPLETE — AMI pair ready for SCCM_DEPLOY phase")
+        log(f"[SCCM_BOOTSTRAP]   DC AMI:          {dc_ami_id}  (SSM: {DC_AMI_PARAM})")
+        log(f"[SCCM_BOOTSTRAP]   Site server AMI: {site_ami_id}  (SSM: {SITE_AMI_PARAM})")
+        log("[SCCM_BOOTSTRAP] Next: populate SSM credentials for SCCM_DEPLOY:")
+        log(f"  /nexplane/smoke/sccm/server   = <site-server-private-ip>")
+        log(f"  /nexplane/smoke/sccm/username = SMOKE\\Administrator")
+        log(f"  /nexplane/smoke/sccm/password = NexplaneSmoke2024!")
+        log(f"  /nexplane/smoke/sccm/site_code = NXP")
+        log("[SCCM_BOOTSTRAP] REMINDER: SCCM eval license expires 180 days from today. "
+            "Rebuild AMIs before expiry with: --phases SCCM_BOOTSTRAP (delete SSM params first).")
+
+    finally:
+        # Terminate both builder instances (AMIs have been snapshotted)
+        for _iid, _label in [(dc_instance_id, "DC"), (site_instance_id, "Site")]:
+            if _iid:
+                try:
+                    ec2_client.terminate_instances(InstanceIds=[_iid])
+                    log(f"[SCCM_BOOTSTRAP] Terminated {_label} instance {_iid}")
+                except Exception as _te:
+                    log(f"[SCCM_BOOTSTRAP] Could not terminate {_label} {_iid}: {_te}")
+
+
+# Phase INTUNE_DEPLOY — Microsoft Intune connector smoke test (SSM-credential-gated)
+# ---------------------------------------------------------------------------
+
+def run_phase_intune_deploy(client: NexplaneClient) -> dict:
+    """Phase INTUNE_DEPLOY: validate Microsoft Intune connector against a real tenant.
+
+    Credential-gated: reads creds from SSM at /nexplane/smoke/intune/*.
+    If absent the phase skips cleanly. Runs discover_managed_devices (ingest)
+    and check_compliance against the first discovered device (change, read-only).
+
+    Required Graph API permissions on the app registration:
+      DeviceManagementManagedDevices.ReadWrite.All
+      DeviceManagementConfiguration.ReadWrite.All
+
+    To activate, store in SSM:
+      /nexplane/smoke/intune/tenant_id
+      /nexplane/smoke/intune/client_id
+      /nexplane/smoke/intune/client_secret
+    """
+    import boto3
+
+    print("\n[Phase INTUNE_DEPLOY] Microsoft Intune connector smoke test")
+
+    tenant_id = client_id = client_secret = ""
+    try:
+        ssm = boto3.client("ssm", region_name="us-east-1")
+        for param, var_name in [
+            ("/nexplane/smoke/intune/tenant_id", "tenant_id"),
+            ("/nexplane/smoke/intune/client_id", "client_id"),
+            ("/nexplane/smoke/intune/client_secret", "client_secret"),
+        ]:
+            try:
+                val = ssm.get_parameter(Name=param, WithDecryption=True)["Parameter"]["Value"]
+                if var_name == "tenant_id":
+                    tenant_id = val
+                elif var_name == "client_id":
+                    client_id = val
+                elif var_name == "client_secret":
+                    client_secret = val
+            except ssm.exceptions.ParameterNotFound:
+                pass
+    except Exception as e:
+        print(f"  SSM lookup failed: {e}")
+
+    if not all([tenant_id, client_id, client_secret]):
+        print(
+            "INTUNE_DEPLOY skipped — no credentials in SSM at "
+            "/nexplane/smoke/intune/{tenant_id,client_id,client_secret}"
+        )
+        return {"status": "skipped", "reason": "no credentials in SSM"}
+
+    import asyncio
+    from app.connectors.executors.intune import discover_managed_devices, check_compliance
+
+    class _MockConnector:
+        credentials = {"tenant_id": tenant_id, "client_id": client_id, "client_secret": client_secret}
+
+    connector = _MockConnector()
+
+    # Step 1 — ingest: discover managed devices
+    discover_result = asyncio.get_event_loop().run_until_complete(
+        discover_managed_devices.execute({}, [], connector)
+    )
+    devices = discover_result.get("devices", [])
+    log(f"[INTUNE_DEPLOY] discover_managed_devices returned {len(devices)} device(s)")
+    assert isinstance(devices, list), f"Expected list of devices, got: {type(devices)}"
+
+    # Step 2 — change (read-only): check compliance on first device if available
+    if devices:
+        first_device_id = devices[0].get("id", "")
+        if first_device_id:
+            compliance_result = asyncio.get_event_loop().run_until_complete(
+                check_compliance.execute({"device_id": first_device_id}, [], connector)
+            )
+            log(
+                f"[INTUNE_DEPLOY] check_compliance({first_device_id}) — "
+                f"state={compliance_result.get('complianceState')}"
+            )
+            assert "complianceState" in compliance_result, (
+                f"check_compliance missing complianceState: {compliance_result}"
+            )
+    else:
+        log("[INTUNE_DEPLOY] No managed devices found — skipping compliance check")
+
+    log("Phase INTUNE_DEPLOY PASSED")
+    return {"status": "passed", "device_count": len(devices)}
+
+
+# Phase WUFB_DEPLOY — Windows Update for Business connector smoke test (SSM-credential-gated)
+# ---------------------------------------------------------------------------
+
+def run_phase_wufb_deploy(client: NexplaneClient) -> dict:
+    """Phase WUFB_DEPLOY: validate Windows Update for Business connector against a real tenant.
+
+    Credential-gated: reads creds from SSM at /nexplane/smoke/wufb/*.
+    If absent the phase skips cleanly. Runs discover_update_policies (ingest)
+    and create_update_ring + delete_update_ring (change + rollback).
+
+    Required Graph API permissions:
+      WindowsUpdates.ReadWrite.All
+
+    To activate, store in SSM:
+      /nexplane/smoke/wufb/tenant_id
+      /nexplane/smoke/wufb/client_id
+      /nexplane/smoke/wufb/client_secret
+    """
+    import boto3
+
+    print("\n[Phase WUFB_DEPLOY] Windows Update for Business connector smoke test")
+
+    tenant_id = client_id = client_secret = ""
+    try:
+        ssm = boto3.client("ssm", region_name="us-east-1")
+        for param, var_name in [
+            ("/nexplane/smoke/wufb/tenant_id", "tenant_id"),
+            ("/nexplane/smoke/wufb/client_id", "client_id"),
+            ("/nexplane/smoke/wufb/client_secret", "client_secret"),
+        ]:
+            try:
+                val = ssm.get_parameter(Name=param, WithDecryption=True)["Parameter"]["Value"]
+                if var_name == "tenant_id":
+                    tenant_id = val
+                elif var_name == "client_id":
+                    client_id = val
+                elif var_name == "client_secret":
+                    client_secret = val
+            except ssm.exceptions.ParameterNotFound:
+                pass
+    except Exception as e:
+        print(f"  SSM lookup failed: {e}")
+
+    if not all([tenant_id, client_id, client_secret]):
+        print(
+            "WUFB_DEPLOY skipped — no credentials in SSM at "
+            "/nexplane/smoke/wufb/{tenant_id,client_id,client_secret}"
+        )
+        return {"status": "skipped", "reason": "no credentials in SSM"}
+
+    import asyncio
+    from app.connectors.executors.wufb import (
+        discover_update_policies,
+        create_update_ring,
+        delete_update_ring,
+    )
+
+    class _MockConnector:
+        credentials = {"tenant_id": tenant_id, "client_id": client_id, "client_secret": client_secret}
+
+    connector = _MockConnector()
+
+    # Step 1 — ingest: discover update policies
+    discover_result = asyncio.get_event_loop().run_until_complete(
+        discover_update_policies.execute({}, [], connector)
+    )
+    policies = discover_result.get("policies", [])
+    log(f"[WUFB_DEPLOY] discover_update_policies returned {len(policies)} policy(ies)")
+    assert isinstance(policies, list), f"Expected list of policies, got: {type(policies)}"
+
+    # Step 2 — change: create a smoke test update ring
+    ring_name = "nexplane-smoke-wufb-ring"
+    create_result = asyncio.get_event_loop().run_until_complete(
+        create_update_ring.execute(
+            {
+                "ring_name": ring_name,
+                "quality_deferral_days": 3,
+                "feature_deferral_days": 7,
+                "deadline_days": 5,
+            },
+            [],
+            connector,
+        )
+    )
+    ring_id = create_result.get("ring_id", "")
+    log(f"[WUFB_DEPLOY] create_update_ring({ring_name}) — ring_id={ring_id}")
+    assert ring_id, f"create_update_ring returned no ring_id: {create_result}"
+
+    # Step 3 — rollback: delete the smoke ring
+    delete_result = asyncio.get_event_loop().run_until_complete(
+        delete_update_ring.execute({"ring_id": ring_id}, [], connector)
+    )
+    log(f"[WUFB_DEPLOY] delete_update_ring({ring_id}) — status={delete_result.get('status')}")
+    assert delete_result.get("status") == "deleted", (
+        f"delete_update_ring unexpected status: {delete_result}"
+    )
+
+    log("Phase WUFB_DEPLOY PASSED")
+    return {"status": "passed", "policy_count": len(policies), "ring_id": ring_id}
+
+
+# Phase LAPS_DEPLOY — Microsoft LAPS connector smoke test (SSM-credential-gated)
+# ---------------------------------------------------------------------------
+
+def run_phase_laps_deploy(client: NexplaneClient) -> dict:
+    """Phase LAPS_DEPLOY: validate Microsoft LAPS connector against a real tenant.
+
+    Credential-gated: reads creds from SSM at /nexplane/smoke/laps/*.
+    If absent the phase skips cleanly. Runs discover_laps_devices (ingest)
+    and get_local_password against the first discovered device (read-only change).
+
+    Required Graph API permissions:
+      DeviceLocalCredential.Read.All
+
+    To activate, store in SSM:
+      /nexplane/smoke/laps/tenant_id
+      /nexplane/smoke/laps/client_id
+      /nexplane/smoke/laps/client_secret
+    """
+    import boto3
+
+    print("\n[Phase LAPS_DEPLOY] Microsoft LAPS connector smoke test")
+
+    tenant_id = client_id = client_secret = ""
+    try:
+        ssm = boto3.client("ssm", region_name="us-east-1")
+        for param, var_name in [
+            ("/nexplane/smoke/laps/tenant_id", "tenant_id"),
+            ("/nexplane/smoke/laps/client_id", "client_id"),
+            ("/nexplane/smoke/laps/client_secret", "client_secret"),
+        ]:
+            try:
+                val = ssm.get_parameter(Name=param, WithDecryption=True)["Parameter"]["Value"]
+                if var_name == "tenant_id":
+                    tenant_id = val
+                elif var_name == "client_id":
+                    client_id = val
+                elif var_name == "client_secret":
+                    client_secret = val
+            except ssm.exceptions.ParameterNotFound:
+                pass
+    except Exception as e:
+        print(f"  SSM lookup failed: {e}")
+
+    if not all([tenant_id, client_id, client_secret]):
+        print(
+            "LAPS_DEPLOY skipped — no credentials in SSM at "
+            "/nexplane/smoke/laps/{tenant_id,client_id,client_secret}"
+        )
+        return {"status": "skipped", "reason": "no credentials in SSM"}
+
+    import asyncio
+    from app.connectors.executors.laps import discover_laps_devices, get_local_password
+
+    class _MockConnector:
+        credentials = {"tenant_id": tenant_id, "client_id": client_id, "client_secret": client_secret}
+
+    connector = _MockConnector()
+
+    # Step 1 — ingest: discover LAPS-managed devices
+    discover_result = asyncio.get_event_loop().run_until_complete(
+        discover_laps_devices.execute({}, [], connector)
+    )
+    devices = discover_result.get("devices", [])
+    log(f"[LAPS_DEPLOY] discover_laps_devices returned {len(devices)} device(s)")
+    assert isinstance(devices, list), f"Expected list of devices, got: {type(devices)}"
+
+    # Step 2 — change (read-only): retrieve local admin password for first device
+    if devices:
+        first_device_id = devices[0].get("id", "")
+        if first_device_id:
+            password_result = asyncio.get_event_loop().run_until_complete(
+                get_local_password.execute({"device_id": first_device_id}, [], connector)
+            )
+            # Do not log the actual password value
+            has_password = bool(password_result.get("localAdminPassword"))
+            log(
+                f"[LAPS_DEPLOY] get_local_password({first_device_id}) — "
+                f"password_present={has_password}"
+            )
+            assert "localAdminPassword" in password_result, (
+                f"get_local_password missing localAdminPassword key: {password_result}"
+            )
+    else:
+        log("[LAPS_DEPLOY] No LAPS-managed devices found — skipping password retrieval")
+
+    log("Phase LAPS_DEPLOY PASSED")
+    return {"status": "passed", "device_count": len(devices)}
+
+
 # Phase SCCM_DEPLOY — SCCM/MECM connector smoke test (SSM-credential-gated, read-only)
 # ---------------------------------------------------------------------------
 
@@ -13674,10 +14289,34 @@ def main():
             "OKTA_DISABLE=Okta user disable+rollback via real Okta Developer API (no EC2, skips if no creds in SSM). "
             "SERVICENOW_INCIDENT=ServiceNow create+close incident via real PDI API (no EC2, skips if no creds in SSM). "
             "PAGERDUTY_INCIDENT=PagerDuty create+resolve incident via real API (no EC2, skips if no creds in SSM). "
-            "SCCM_DEPLOY=SCCM/MECM connector smoke test (no EC2, read-only, skips if no creds in SSM at /nexplane/smoke/sccm/*)."
+            "SCCM_DEPLOY=SCCM/MECM connector smoke test (no EC2, read-only, skips if no creds in SSM at /nexplane/smoke/sccm/*). "
+            "SCCM_BOOTSTRAP=One-time SCCM AMI pair builder (DC + site server, 2x t3.xlarge Windows, ~3-4 hr, AMIs cached in SSM at /nexplane/smoke/sccm-ami/dc and /nexplane/smoke/sccm-ami/site-server). "
+            "MAC_AGENT_BOOTSTRAP=macOS agent smoke test on mac2.metal Dedicated Host (requires --dedicated-host-id and --ssh-key-path; skipped if host not provided). "
+            "AD_DC_INTEGRITY=Windows Server 2022 AD DC smoke test: provision DC, snapshot AMI, run dc_integrity_check + ad_forest_snapshot CRs (t3.large, AMI cached in SSM /nexplane/smoke-amis/dc-smoke/). "
+            "INTUNE_DEPLOY=Microsoft Intune connector smoke test (no EC2, credential-gated, skips if no creds in SSM at /nexplane/smoke/intune/*). "
+            "WUFB_DEPLOY=Windows Update for Business connector smoke test (no EC2, credential-gated, skips if no creds in SSM at /nexplane/smoke/wufb/*). "
+            "LAPS_DEPLOY=Microsoft LAPS connector smoke test (no EC2, credential-gated, skips if no creds in SSM at /nexplane/smoke/laps/*). "
+            "BIND_DNS=BIND9/RFC-2136 DNS connector: list_zone/create_record/check_record/delete_record; "
+            "auto-provisions t3.small on AWS (AMI cached) or uses --bind-server-ip for external servers. "
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
+    parser.add_argument("--bind-server-ip", default="",
+                        help="Pre-existing BIND server IP (GCP/Azure/on-prem). "
+                             "When set, skips AWS EC2 provisioning.")
+    parser.add_argument("--bind-tsig-key-name", default="",
+                        help="TSIG key name for --bind-server-ip (required when --bind-server-ip is set)")
+    parser.add_argument("--bind-tsig-key-secret", default="",
+                        help="TSIG key secret (base64) for --bind-server-ip")
+    parser.add_argument(
+        "--dedicated-host-id", default="",
+        help="EC2 Dedicated Host ID for MAC_AGENT_BOOTSTRAP (mac2.metal). "
+             "Required when running MAC_AGENT_BOOTSTRAP; phase is skipped if not provided.",
+    )
+    parser.add_argument(
+        "--ssh-key-path", default="",
+        help="Path to SSH private key file for EC2 Mac instance access (MAC_AGENT_BOOTSTRAP).",
+    )
     parser.add_argument(
         "--local", action="store_true",
         help="Acknowledge that you are running locally (not recommended). "
@@ -13735,7 +14374,7 @@ def main():
     _BACKEND_FREE_PHASES = {
         "SNYK_SCAN", "JFROG_SCAN", "OKTA_DISABLE",
         "SERVICENOW_INCIDENT", "PAGERDUTY_INCIDENT",
-        "SCCM_DEPLOY",
+        "SCCM_DEPLOY", "INTUNE_DEPLOY", "WUFB_DEPLOY", "LAPS_DEPLOY",
     }
     _all_backend_free = phases.issubset(_BACKEND_FREE_PHASES)
 
@@ -14049,8 +14688,43 @@ def main():
             run_phase_snyk_scan(client, cloud_account_id)
         if "JFROG_SCAN" in phases:
             run_phase_jfrog_scan(client, cloud_account_id)
+        if "SCCM_BOOTSTRAP" in phases:
+            _sccm_bs_ec2 = _get_aws_boto3_client("ec2")
+            _sccm_bs_ssm = _get_aws_boto3_client("ssm")
+            if not _sccm_bs_ec2 or not _sccm_bs_ssm:
+                fail("SCCM_BOOTSTRAP requires AWS credentials (ec2, ssm)")
+            run_phase_sccm_bootstrap(client, _sccm_bs_ec2, _sccm_bs_ssm, cloud_account_id)
         if "SCCM_DEPLOY" in phases:
             run_phase_sccm_deploy(client)
+        if "INTUNE_DEPLOY" in phases:
+            run_phase_intune_deploy(client)
+        if "WUFB_DEPLOY" in phases:
+            run_phase_wufb_deploy(client)
+        if "LAPS_DEPLOY" in phases:
+            run_phase_laps_deploy(client)
+        if "MAC_AGENT_BOOTSTRAP" in phases:
+            _mac_ec2 = _get_aws_boto3_client("ec2")
+            _mac_ssm = _get_aws_boto3_client("ssm")
+            if not _mac_ec2:
+                fail("MAC_AGENT_BOOTSTRAP requires AWS credentials (ec2)")
+            run_phase_mac_agent_bootstrap(
+                client,
+                _mac_ec2,
+                _mac_ssm,
+                tailscale_auth_key=getattr(args, "tailscale_auth_key", ""),
+                backend_tailscale_ip=getattr(args, "backend_tailscale_ip", ""),
+                dedicated_host_id=getattr(args, "dedicated_host_id", ""),
+                ssh_key_path=getattr(args, "ssh_key_path", ""),
+            )
+        if "AD_DC_INTEGRITY" in phases:
+            run_phase_ad_dc_integrity(client, cloud_account_id)
+        if "BIND_DNS" in phases:
+            run_phase_bind_dns(
+                client, cloud_account_id,
+                bind_server_ip=args.bind_server_ip,
+                bind_tsig_key_name=args.bind_tsig_key_name,
+                bind_tsig_key_secret=args.bind_tsig_key_secret,
+            )
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
@@ -14316,6 +14990,905 @@ def run_phase_mac_agent_bootstrap(
             )
         elif instance_id:
             log(f"MAC_AGENT_BOOTSTRAP: reused existing instance {instance_id} — no termination performed")
+
+
+def run_phase_ad_dc_integrity(client, cloud_account_id):
+    # type: (object, str) -> None
+    """Phase AD_DC_INTEGRITY: Provision Windows Server 2022 AD DC on EC2, snapshot as AMI,
+    run dc_integrity_check and ad_forest_snapshot CRs against the live domain controller.
+    AMI cached in SSM at /nexplane/smoke-amis/dc-smoke/ for fast subsequent runs.
+
+    COST: ~$0.50 one-time for AD DS setup (t3.large Windows x 2hr)
+    Per run from cached AMI: ~$0.05 (t3.large x 15min)
+    Note: Windows Server 2022 AMI includes OS licensing in EC2 pricing
+    """
+    import hashlib as _hl
+    import time as _t
+    print("\n[Phase AD_DC_INTEGRITY] AD Domain Controller smoke test")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_boto = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_boto:
+        fail("[AD_DC_INTEGRITY] AWS clients not available")
+
+    # ------------------------------------------------------------------
+    # Step 1 — Find or launch a Windows Server 2022 DC instance
+    # ------------------------------------------------------------------
+    log("AD_DC_INTEGRITY: checking for existing nexplane-smoke-dc instance...")
+    running = ec2_client.describe_instances(Filters=[
+        {"Name": "tag:Name", "Values": ["nexplane-smoke-dc"]},
+        {"Name": "instance-state-name", "Values": ["running", "pending"]},
+    ])
+    reservations = running.get("Reservations", [])
+    instance_id = ""
+    private_ip = ""
+    from_existing = False
+
+    if reservations:
+        instance_id = reservations[0]["Instances"][0]["InstanceId"]
+        private_ip = reservations[0]["Instances"][0].get("PrivateIpAddress", "")
+        from_existing = True
+        log(f"AD_DC_INTEGRITY: reusing existing instance {instance_id} ({private_ip})")
+    else:
+        log("AD_DC_INTEGRITY: finding latest Windows Server 2022 AMI...")
+        images_resp = ec2_client.describe_images(
+            Owners=["amazon"],
+            Filters=[
+                {"Name": "name", "Values": ["Windows_Server-2022-English-Full-Base-*"]},
+                {"Name": "state", "Values": ["available"]},
+            ],
+        )
+        images = sorted(
+            images_resp.get("Images", []), key=lambda x: x["CreationDate"], reverse=True
+        )
+        if not images:
+            fail("AD_DC_INTEGRITY: no Windows Server 2022 AMI found")
+        win_ami_id = images[0]["ImageId"]
+        log(f"AD_DC_INTEGRITY: using base AMI {win_ami_id} ({images[0]['Name']})")
+
+        _setup_key = (
+            "ad-ds-v1-install-addomain-"
+            "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
+        )
+        setup_hash = _hl.md5(_setup_key.encode()).hexdigest()
+        cached_ami = _check_smoke_ami_cache(ssm_boto, ec2_client, "dc-smoke", setup_hash)
+        launch_ami = cached_ami or win_ami_id
+
+        log(
+            f"AD_DC_INTEGRITY: launching t3.large Windows instance from "
+            f"{'cached' if cached_ami else 'base'} AMI {launch_ami}..."
+        )
+        launch_resp = ec2_client.run_instances(
+            ImageId=launch_ami,
+            InstanceType="t3.large",
+            MinCount=1,
+            MaxCount=1,
+            IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+            TagSpecifications=[{
+                "ResourceType": "instance",
+                "Tags": [
+                    {"Key": "Name", "Value": "nexplane-smoke-dc"},
+                    {"Key": "nexplane-smoke", "Value": "dc-integrity"},
+                ],
+            }],
+        )
+        instance_id = launch_resp["Instances"][0]["InstanceId"]
+        log(f"AD_DC_INTEGRITY: launched instance {instance_id}")
+
+        log("AD_DC_INTEGRITY: waiting for instance to reach running state...")
+        ec2_client.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+        desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+        private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+        log(f"AD_DC_INTEGRITY: instance running — private IP {private_ip}")
+
+    connector_id = None
+    dc_asset_id = None
+
+    try:
+        # ------------------------------------------------------------------
+        # Wait for SSM agent
+        # ------------------------------------------------------------------
+        log("AD_DC_INTEGRITY: waiting for SSM agent (~3-8 min for Windows)...")
+        _wait_ssm_ready_win(ssm_boto, instance_id, timeout=600)
+        log("AD_DC_INTEGRITY: SSM agent ready")
+
+        if not from_existing:
+            _setup_key2 = (
+                "ad-ds-v1-install-addomain-"
+                "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
+            )
+            setup_hash2 = _hl.md5(_setup_key2.encode()).hexdigest()
+            cached_ami2 = _check_smoke_ami_cache(ssm_boto, ec2_client, "dc-smoke", setup_hash2)
+
+            if not cached_ami2:
+                # ----------------------------------------------------------
+                # Step 2 — Install AD DS and promote to domain controller
+                # ----------------------------------------------------------
+                log("AD_DC_INTEGRITY: installing AD DS role and promoting to DC...")
+                promote_resp = ssm_boto.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName="AWS-RunPowerShellScript",
+                    Parameters={"commands": [
+                        "Install-WindowsFeature -Name AD-Domain-Services "
+                        "-IncludeManagementTools -ErrorAction Stop",
+                        "Import-Module ADDSDeployment",
+                        (
+                            "Install-ADDSForest "
+                            "-DomainName 'smoke.nexplane.local' "
+                            "-DomainNetbiosName 'SMOKE' "
+                            "-SafeModeAdministratorPassword "
+                            "(ConvertTo-SecureString 'NexplaneSmoke2024!' -AsPlainText -Force) "
+                            "-InstallDns:$true "
+                            "-Force:$true "
+                            "-NoRebootOnCompletion:$false"
+                        ),
+                        "Write-Output 'AD_DS_PROMOTED'",
+                    ]},
+                    TimeoutSeconds=600,
+                )
+                promote_cmd_id = promote_resp["Command"]["CommandId"]
+
+                log("AD_DC_INTEGRITY: waiting for AD promotion (includes reboot — up to 10 min)...")
+                _promote_deadline = _t.time() + 600
+                while _t.time() < _promote_deadline:
+                    _t.sleep(15)
+                    try:
+                        inv = ssm_boto.get_command_invocation(
+                            CommandId=promote_cmd_id, InstanceId=instance_id
+                        )
+                        status = inv["Status"]
+                        if status in ("Success", "Failed", "TimedOut", "Cancelled"):
+                            log(f"AD_DC_INTEGRITY: promote command status={status}")
+                            break
+                    except Exception:
+                        log("AD_DC_INTEGRITY: SSM offline (instance rebooting for DC promotion)...")
+                        break
+
+                # Wait for SSM to come back after reboot
+                log("AD_DC_INTEGRITY: waiting for SSM to return after DC reboot (up to 10 min)...")
+                _t.sleep(60)  # allow reboot to fully start before polling
+                _wait_ssm_ready_win(ssm_boto, instance_id, timeout=600)
+                log("AD_DC_INTEGRITY: SSM back online — AD reboot complete")
+
+                # Verify AD DS is running
+                log("AD_DC_INTEGRITY: verifying AD DS services...")
+                verify_resp = ssm_boto.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName="AWS-RunPowerShellScript",
+                    Parameters={"commands": [
+                        "Get-Service NTDS | Select-Object Status",
+                        "(Get-ADDomain).DNSRoot",
+                        "Write-Output 'AD_VERIFY_DONE'",
+                    ]},
+                    TimeoutSeconds=120,
+                )
+                verify_cmd_id = verify_resp["Command"]["CommandId"]
+                _verify_deadline = _t.time() + 180
+                while _t.time() < _verify_deadline:
+                    _t.sleep(8)
+                    try:
+                        inv2 = ssm_boto.get_command_invocation(
+                            CommandId=verify_cmd_id, InstanceId=instance_id
+                        )
+                        if inv2["Status"] in ("Success", "Failed", "TimedOut"):
+                            output = inv2.get("StandardOutputContent", "")
+                            log(f"AD_DC_INTEGRITY: verify output: {output[:200]}")
+                            if "AD_VERIFY_DONE" not in output:
+                                fail(
+                                    f"AD_DC_INTEGRITY: AD DS verification failed — "
+                                    f"output: {output[:400]}"
+                                )
+                            break
+                    except Exception:
+                        pass
+
+                # ----------------------------------------------------------
+                # Step 3 — Create smoke test domain user
+                # ----------------------------------------------------------
+                log("AD_DC_INTEGRITY: creating smoke test domain user...")
+                user_resp = ssm_boto.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName="AWS-RunPowerShellScript",
+                    Parameters={"commands": [
+                        (
+                            "New-ADUser -Name 'SmokeUser' -SamAccountName 'smokeuser' "
+                            "-Enabled $true "
+                            "-AccountPassword "
+                            "(ConvertTo-SecureString 'UserPass123!' -AsPlainText -Force) "
+                            "-PassThru"
+                        ),
+                        "Add-ADGroupMember -Identity 'Domain Admins' -Members 'smokeuser'",
+                        "Write-Output 'SMOKE_USER_CREATED'",
+                    ]},
+                    TimeoutSeconds=120,
+                )
+                user_cmd_id = user_resp["Command"]["CommandId"]
+                _user_deadline = _t.time() + 180
+                while _t.time() < _user_deadline:
+                    _t.sleep(8)
+                    try:
+                        inv3 = ssm_boto.get_command_invocation(
+                            CommandId=user_cmd_id, InstanceId=instance_id
+                        )
+                        if inv3["Status"] in ("Success", "Failed", "TimedOut"):
+                            output3 = inv3.get("StandardOutputContent", "")
+                            if "SMOKE_USER_CREATED" not in output3:
+                                log(
+                                    f"AD_DC_INTEGRITY: smoke user creation "
+                                    f"status={inv3['Status']} output={output3[:200]}"
+                                )
+                            else:
+                                log(
+                                    "AD_DC_INTEGRITY: smoke user 'smokeuser' created "
+                                    "and added to Domain Admins"
+                                )
+                            break
+                    except Exception:
+                        pass
+
+                # ----------------------------------------------------------
+                # Step 4 — Snapshot AMI for fast future runs
+                # ----------------------------------------------------------
+                log("AD_DC_INTEGRITY: snapshotting AMI for future runs...")
+                try:
+                    from run_on_ec2 import get_or_create_smoke_ami
+                    get_or_create_smoke_ami(
+                        ssm_boto, ec2_client, instance_id, "dc-smoke", setup_hash2
+                    )
+                    log("AD_DC_INTEGRITY: AMI snapshot initiated")
+                except Exception as _ami_e:
+                    log(f"AD_DC_INTEGRITY: AMI cache step skipped: {_ami_e}")
+
+        # ------------------------------------------------------------------
+        # Step 5 — Register Nexplane AD connector and server asset
+        # ------------------------------------------------------------------
+        log(f"AD_DC_INTEGRITY: registering active_directory connector for {private_ip}...")
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "active_directory",
+            "name": f"nexplane-smoke-dc-{instance_id[-8:]}",
+            "credentials": {
+                "server": private_ip,
+                "port": "389",
+                "base_dn": "DC=smoke,DC=nexplane,DC=local",
+                "bind_dn": "CN=Administrator,CN=Users,DC=smoke,DC=nexplane,DC=local",
+                "bind_password": "NexplaneSmoke2024!",
+                "use_ssl": "false",
+                "winrm_hostname": private_ip,
+                "winrm_port": "5985",
+                "winrm_username": "Administrator",
+                "winrm_password": "NexplaneSmoke2024!",
+                "winrm_use_ssl": "false",
+            },
+        })
+        connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
+        log(f"AD_DC_INTEGRITY: connector created — id={connector_id}")
+
+        asset_resp = client.post("/assets", json={
+            "name": f"nexplane-smoke-dc-{instance_id[-8:]}",
+            "asset_type": "server",
+            "hostname": private_ip,
+            "tags": ["nexplane-smoke", "active-directory"],
+        })
+        dc_asset_id = asset_resp.get("id")
+        log(f"AD_DC_INTEGRITY: DC server asset created — id={dc_asset_id}")
+
+        # ------------------------------------------------------------------
+        # Step 6 — Run dc_integrity_check CR
+        # ------------------------------------------------------------------
+        log("AD_DC_INTEGRITY: running dc_integrity_check CR...")
+        cr = client.run_cr(
+            "[AD_DC_INTEGRITY] dc_integrity_check",
+            "dc_integrity_check",
+            dc_asset_id,
+            {"dc_hostname": private_ip},
+        )
+        result = client.get_cr_step_result(cr)
+        assert result.get("overall_health") in ("healthy", "degraded"), (
+            f"AD_DC_INTEGRITY: DC health check failed: {result}"
+        )
+        baseline_gpo_hash = result.get("gpo_hash", "")
+        log(
+            f"AD_DC_INTEGRITY: health={result.get('overall_health')}, "
+            f"gpo_hash={baseline_gpo_hash[:16]}..."
+        )
+
+        # ------------------------------------------------------------------
+        # Step 7 — Ensure nexplane-smoke-snapshots S3 bucket, then run ad_forest_snapshot
+        # ------------------------------------------------------------------
+        log("AD_DC_INTEGRITY: ensuring nexplane-smoke-snapshots S3 bucket exists...")
+        s3_boto = _get_aws_boto3_client("s3")
+        snap_bucket = "nexplane-smoke-snapshots"
+        if s3_boto:
+            try:
+                s3_boto.head_bucket(Bucket=snap_bucket)
+                log(f"AD_DC_INTEGRITY: S3 bucket {snap_bucket} already exists")
+            except Exception:
+                try:
+                    region = s3_boto.meta.region_name or "us-east-1"
+                    if region == "us-east-1":
+                        s3_boto.create_bucket(Bucket=snap_bucket)
+                    else:
+                        s3_boto.create_bucket(
+                            Bucket=snap_bucket,
+                            CreateBucketConfiguration={"LocationConstraint": region},
+                        )
+                    log(f"AD_DC_INTEGRITY: created S3 bucket {snap_bucket}")
+                except Exception as _s3e:
+                    log(f"AD_DC_INTEGRITY: could not create/verify S3 bucket: {_s3e} — continuing")
+
+        log("AD_DC_INTEGRITY: running ad_forest_snapshot CR...")
+        cr2 = client.run_cr(
+            "[AD_DC_INTEGRITY] ad_forest_snapshot",
+            "ad_forest_snapshot",
+            dc_asset_id,
+            {
+                "s3_bucket": snap_bucket,
+                "s3_prefix": f"ad-smoke/{instance_id}",
+                "dc_hostname": private_ip,
+                "include_sysvol": True,
+            },
+        )
+        result2 = client.get_cr_step_result(cr2)
+        assert result2.get("snapshot_id"), (
+            f"AD_DC_INTEGRITY: Snapshot ID missing from result: {result2}"
+        )
+        log(
+            f"AD_DC_INTEGRITY: snapshot_id={result2.get('snapshot_id')}, "
+            f"artifacts={result2.get('artifacts')}"
+        )
+
+        # ------------------------------------------------------------------
+        # Step 8 — Re-run dc_integrity_check with GPO baseline hash (drift check)
+        # ------------------------------------------------------------------
+        log("AD_DC_INTEGRITY: re-running dc_integrity_check with GPO baseline hash...")
+        cr3 = client.run_cr(
+            "[AD_DC_INTEGRITY] dc_integrity_check (with baseline)",
+            "dc_integrity_check",
+            dc_asset_id,
+            {"dc_hostname": private_ip, "baseline_gpo_hash": baseline_gpo_hash},
+        )
+        result3 = client.get_cr_step_result(cr3)
+        assert not result3.get("gpo_drift_detected"), (
+            f"AD_DC_INTEGRITY: GPO drift detected unexpectedly: {result3}"
+        )
+        log("AD_DC_INTEGRITY: GPO baseline check passed — no drift")
+
+        # ------------------------------------------------------------------
+        # Step 9 — AD DNS: create A record
+        # ------------------------------------------------------------------
+        log("AD_DC_INTEGRITY: creating DNS A record...")
+        cr = client.run_cr(
+            "[AD_DC_INTEGRITY] create_dns_record",
+            "create_dns_record",
+            dc_asset_id,
+            {
+                "zone_name": "smoke.nexplane.local",
+                "record_name": "nexplane-smoke-dns-test",
+                "record_type": "A",
+                "value": "10.0.0.99",
+                "ttl": 60,
+                "dc_hostname": private_ip,
+            },
+        )
+        result = client.get_cr_step_result(cr)
+        assert result.get("record_name") == "nexplane-smoke-dns-test", (
+            f"AD_DC_INTEGRITY: create_dns_record unexpected result: {result}"
+        )
+        log("AD_DC_INTEGRITY: DNS A record created")
+
+        # ------------------------------------------------------------------
+        # Step 10 — list records, verify our record is present
+        # ------------------------------------------------------------------
+        log("AD_DC_INTEGRITY: listing DNS records to verify creation...")
+        cr = client.run_cr(
+            "[AD_DC_INTEGRITY] list_dns_records",
+            "list_dns_records",
+            dc_asset_id,
+            {"zone_name": "smoke.nexplane.local", "dc_hostname": private_ip},
+        )
+        result = client.get_cr_step_result(cr)
+        names = [r.get("name") for r in result.get("records", [])]
+        assert "nexplane-smoke-dns-test" in names, (
+            f"AD_DC_INTEGRITY: created record not found in zone listing: {names}"
+        )
+        log("AD_DC_INTEGRITY: DNS record verified in zone listing")
+
+        # ------------------------------------------------------------------
+        # Step 11 — update record
+        # ------------------------------------------------------------------
+        log("AD_DC_INTEGRITY: updating DNS record to 10.0.0.100...")
+        cr = client.run_cr(
+            "[AD_DC_INTEGRITY] update_dns_record",
+            "update_dns_record",
+            dc_asset_id,
+            {
+                "zone_name": "smoke.nexplane.local",
+                "record_name": "nexplane-smoke-dns-test",
+                "record_type": "A",
+                "new_value": "10.0.0.100",
+                "dc_hostname": private_ip,
+            },
+        )
+        result = client.get_cr_step_result(cr)
+        assert result.get("new_value") == "10.0.0.100", (
+            f"AD_DC_INTEGRITY: update_dns_record unexpected result: {result}"
+        )
+        log("AD_DC_INTEGRITY: DNS record updated")
+
+        # ------------------------------------------------------------------
+        # Step 12 — delete record
+        # ------------------------------------------------------------------
+        log("AD_DC_INTEGRITY: deleting DNS record...")
+        cr = client.run_cr(
+            "[AD_DC_INTEGRITY] delete_dns_record",
+            "delete_dns_record",
+            dc_asset_id,
+            {
+                "zone_name": "smoke.nexplane.local",
+                "record_name": "nexplane-smoke-dns-test",
+                "record_type": "A",
+                "dc_hostname": private_ip,
+            },
+        )
+        result = client.get_cr_step_result(cr)
+        assert result.get("deleted_at"), (
+            f"AD_DC_INTEGRITY: delete_dns_record missing deleted_at: {result}"
+        )
+        log("AD_DC_INTEGRITY: DNS record deleted")
+
+        log("AD_DC_INTEGRITY: all steps passed")
+
+    finally:
+        # Cleanup: delete connector + asset; terminate instance only if freshly launched.
+        # Do NOT delete the AMI — it is the reuse cache for future runs.
+        if connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{connector_id}")
+                log(f"AD_DC_INTEGRITY: deleted connector {connector_id}")
+            except Exception as _ce:
+                log(f"AD_DC_INTEGRITY: could not delete connector: {_ce}")
+        if dc_asset_id:
+            try:
+                client.client.delete(f"{client.base}/assets/{dc_asset_id}")
+                log(f"AD_DC_INTEGRITY: deleted DC asset {dc_asset_id}")
+            except Exception as _ae:
+                log(f"AD_DC_INTEGRITY: could not delete DC asset: {_ae}")
+        if instance_id and not from_existing:
+            try:
+                ec2_client.terminate_instances(InstanceIds=[instance_id])
+                log(f"AD_DC_INTEGRITY: terminated instance {instance_id}")
+            except Exception as _te:
+                log(f"AD_DC_INTEGRITY: could not terminate instance: {_te}")
+        elif instance_id and from_existing:
+            log(
+                f"AD_DC_INTEGRITY: leaving existing instance {instance_id} running "
+                f"(reused from cache — do not terminate)"
+            )
+
+
+def _run_bind_dns_tests(
+    client: NexplaneClient,
+    bind_server_ip: str,
+    tsig_key_name: str,
+    tsig_key_secret: str,
+    instance_id_for_cleanup: Optional[str] = None,
+) -> None:
+    """Cloud-agnostic BIND DNS test sequence.
+
+    Registers a bind_dns connector pointing at bind_server_ip, runs the
+    5-step CR sequence (list_zone, create_record, check_record, delete_record,
+    check_record), asserts each result, then deletes the connector.
+
+    instance_id_for_cleanup: EC2 instance ID to terminate in the finally block.
+    Pass None when the server was pre-provisioned externally (GCP/Azure/on-prem).
+    """
+    import time as _time
+
+    connector_id: str = ""
+    ec2_for_cleanup = _get_aws_boto3_client("ec2") if instance_id_for_cleanup else None
+
+    try:
+        # ------------------------------------------------------------------
+        # Register bind_dns connector
+        # ------------------------------------------------------------------
+        log("BIND_DNS: registering bind_dns connector...")
+        suffix = (instance_id_for_cleanup or bind_server_ip)[-8:].replace(".", "-")
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "bind_dns",
+            "name": f"nexplane-smoke-bind-{suffix}",
+            "credentials": {
+                "server": bind_server_ip,
+                "port": "53",
+                "zone": "smoke.nexplane.local",
+                "tsig_key_name": tsig_key_name,
+                "tsig_key_secret": tsig_key_secret,
+                "tsig_algorithm": "hmac-sha256",
+            },
+        })
+        connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
+        log(f"BIND_DNS: connector created — id={connector_id}")
+
+        # ------------------------------------------------------------------
+        # Step 1: list_zone — verify zone is queryable via AXFR
+        # ------------------------------------------------------------------
+        log("BIND_DNS: step 1 — list_zone")
+        cr = client.run_cr(
+            "[BIND_DNS] list_zone", "list_zone", connector_id,
+            {"zone": "smoke.nexplane.local"},
+        )
+        result = client.get_cr_step_result(cr)
+        assert result.get("zone") == "smoke.nexplane.local", (
+            f"BIND_DNS: list_zone zone mismatch: {result}"
+        )
+        log(f"BIND_DNS: list_zone passed — {result.get('count', 0)} records")
+
+        # ------------------------------------------------------------------
+        # Step 2: create_record — A 10.0.0.42
+        # ------------------------------------------------------------------
+        log("BIND_DNS: step 2 — create_record nexplane-test A 10.0.0.42")
+        cr2 = client.run_cr(
+            "[BIND_DNS] create_record", "create_record", connector_id,
+            {
+                "record_name": "nexplane-test",
+                "record_type": "A",
+                "value": "10.0.0.42",
+                "ttl": 60,
+                "zone": "smoke.nexplane.local",
+            },
+        )
+        result2 = client.get_cr_step_result(cr2)
+        assert result2.get("record_name") == "nexplane-test", (
+            f"BIND_DNS: create_record result unexpected: {result2}"
+        )
+        log("BIND_DNS: create_record passed")
+
+        # ------------------------------------------------------------------
+        # Step 3: check_record — verify A = 10.0.0.42
+        # ------------------------------------------------------------------
+        log("BIND_DNS: step 3 — check_record (expect 10.0.0.42)")
+        cr3 = client.run_cr(
+            "[BIND_DNS] check_record (after create)", "check_record", connector_id,
+            {"record_name": "nexplane-test", "record_type": "A"},
+        )
+        result3 = client.get_cr_step_result(cr3)
+        assert result3.get("exists") is True, (
+            f"BIND_DNS: record should exist after create: {result3}"
+        )
+        assert "10.0.0.42" in result3.get("values", []), (
+            f"BIND_DNS: expected 10.0.0.42 in values: {result3}"
+        )
+        log(f"BIND_DNS: check_record passed — values={result3.get('values')}")
+
+        # ------------------------------------------------------------------
+        # Step 4: delete_record
+        # ------------------------------------------------------------------
+        log("BIND_DNS: step 4 — delete_record nexplane-test A")
+        cr4 = client.run_cr(
+            "[BIND_DNS] delete_record", "delete_record", connector_id,
+            {
+                "record_name": "nexplane-test",
+                "record_type": "A",
+                "zone": "smoke.nexplane.local",
+            },
+        )
+        result4 = client.get_cr_step_result(cr4)
+        assert result4.get("record_name") == "nexplane-test", (
+            f"BIND_DNS: delete_record result unexpected: {result4}"
+        )
+        log(f"BIND_DNS: delete_record passed — previous_value={result4.get('previous_value')}")
+
+        # ------------------------------------------------------------------
+        # Step 5: check_record — verify exists: False
+        # ------------------------------------------------------------------
+        log("BIND_DNS: step 5 — check_record (expect exists: False)")
+        cr5 = client.run_cr(
+            "[BIND_DNS] check_record (after delete)", "check_record", connector_id,
+            {"record_name": "nexplane-test", "record_type": "A"},
+        )
+        result5 = client.get_cr_step_result(cr5)
+        assert result5.get("exists") is False, (
+            f"BIND_DNS: record should not exist after delete: {result5}"
+        )
+        log("BIND_DNS: check_record (post-delete) passed — exists=False")
+
+        log("BIND_DNS: all steps passed")
+
+    finally:
+        # Delete connector
+        if connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{connector_id}")
+                log(f"BIND_DNS: deleted connector {connector_id}")
+            except Exception as _ce:
+                log(f"BIND_DNS: could not delete connector: {_ce}")
+        # Terminate EC2 instance only if we launched it (not for external servers)
+        if instance_id_for_cleanup and ec2_for_cleanup:
+            try:
+                ec2_for_cleanup.terminate_instances(InstanceIds=[instance_id_for_cleanup])
+                log(f"BIND_DNS: terminated instance {instance_id_for_cleanup}")
+            except Exception as _te:
+                log(f"BIND_DNS: could not terminate instance: {_te}")
+
+
+# COST: ~$0.01/run (t3.small × 15min) when auto-provisioning on AWS — AMI cached after first run
+def run_phase_bind_dns(
+    client: NexplaneClient,
+    cloud_account_id: str,
+    bind_server_ip: str = "",
+    bind_tsig_key_name: str = "",
+    bind_tsig_key_secret: str = "",
+) -> None:
+    """Phase BIND_DNS: BIND9 / RFC 2136 DNS connector smoke test.
+
+    If bind_server_ip is provided (non-empty) — skip all AWS infrastructure and
+    call _run_bind_dns_tests directly. Use this path when the BIND server is
+    pre-existing on GCP, Azure, or on-prem.
+
+    If bind_server_ip is empty — launch a BIND9 server on AWS EC2 (t3.small,
+    AMI-cached in SSM at /nexplane/smoke-amis/bind-dns/<hash[:8]>), extract
+    TSIG credentials via SSM, call _run_bind_dns_tests, then terminate.
+    """
+    import hashlib
+    import time as _time
+
+    print("\n[Phase BIND_DNS] BIND9 / RFC 2136 DNS connector smoke test")
+
+    # ------------------------------------------------------------------
+    # PATH A: external server provided (GCP / Azure / on-prem)
+    # ------------------------------------------------------------------
+    if bind_server_ip:
+        if not bind_tsig_key_name or not bind_tsig_key_secret:
+            fail("[BIND_DNS] --bind-server-ip requires --bind-tsig-key-name and --bind-tsig-key-secret")
+        log(f"BIND_DNS: using external server {bind_server_ip} (no AWS infra)")
+        _run_bind_dns_tests(
+            client,
+            bind_server_ip=bind_server_ip,
+            tsig_key_name=bind_tsig_key_name,
+            tsig_key_secret=bind_tsig_key_secret,
+            instance_id_for_cleanup=None,
+        )
+        return
+
+    # ------------------------------------------------------------------
+    # PATH B: auto-provision BIND9 on AWS EC2
+    # ------------------------------------------------------------------
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_boto = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_boto:
+        fail("[BIND_DNS] AWS credentials required for auto-provision (ec2 + ssm). "
+             "Pass --bind-server-ip to use an external BIND server instead.")
+
+    setup_script = r"""#!/bin/bash
+set -e
+dnf install -y bind bind-utils
+
+mkdir -p /etc/named
+tsig-keygen nexplane-smoke-key > /etc/named/nexplane-smoke.key
+chmod 640 /etc/named/nexplane-smoke.key
+chown root:named /etc/named/nexplane-smoke.key
+
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+mkdir -p /var/named
+cat > /var/named/smoke.nexplane.local.zone <<ZONEOF
+\$ORIGIN smoke.nexplane.local.
+\$TTL 300
+@  IN  SOA  ns1.smoke.nexplane.local. admin.smoke.nexplane.local. (
+   2026051701 3600 900 604800 300 )
+@  IN  NS   ns1.smoke.nexplane.local.
+ns1 IN  A   ${PRIVATE_IP}
+ZONEOF
+chown named:named /var/named/smoke.nexplane.local.zone
+chmod 640 /var/named/smoke.nexplane.local.zone
+
+cat > /etc/named.conf <<NAMEDEOF
+options {
+    directory "/var/named";
+    recursion no;
+    allow-query { any; };
+    allow-transfer { none; };
+    listen-on { any; };
+    listen-on-v6 { none; };
+};
+
+include "/etc/named/nexplane-smoke.key";
+
+zone "smoke.nexplane.local" {
+    type master;
+    file "/var/named/smoke.nexplane.local.zone";
+    allow-update { key "nexplane-smoke-key"; };
+    allow-transfer { any; };
+};
+NAMEDEOF
+
+systemctl enable named
+systemctl start named
+sleep 2
+systemctl is-active named
+echo "BIND_READY"
+"""
+    setup_hash = hashlib.md5(setup_script.encode()).hexdigest()
+
+    try:
+        from run_on_ec2 import get_or_create_smoke_ami
+    except ImportError:
+        get_or_create_smoke_ami = None
+
+    iam_client = _get_aws_boto3_client("iam")
+    vpc_resp = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+    if not vpc_resp:
+        fail("[BIND_DNS] No default VPC found")
+    vpc_id = vpc_resp[0]["VpcId"]
+    subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        _offerings = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}],
+        )["InstanceTypeOfferings"]
+        _supported_azs = {o["Location"] for o in _offerings}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in _supported_azs] or subnets
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = subnets[0]["SubnetId"]
+
+    AL2023_AMI = "ami-0953476d60561c955"
+
+    launch_kwargs: dict = {
+        "ImageId": AL2023_AMI,
+        "InstanceType": "t3.small",
+        "MinCount": 1, "MaxCount": 1,
+        "TagSpecifications": [{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-bind-dns"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+        "NetworkInterfaces": [{"DeviceIndex": 0, "SubnetId": subnet_id,
+                                "AssociatePublicIpAddress": True}],
+    }
+    if iam_client:
+        try:
+            profiles = iam_client.list_instance_profiles(MaxItems=50)["InstanceProfiles"]
+            for p in profiles:
+                for r in p.get("Roles", []):
+                    attached = iam_client.list_attached_role_policies(RoleName=r["RoleName"])["AttachedPolicies"]
+                    if any("SSM" in pol["PolicyName"] or "SSM" in pol["PolicyArn"] for pol in attached):
+                        launch_kwargs["IamInstanceProfile"] = {"Name": p["InstanceProfileName"]}
+                        break
+                if "IamInstanceProfile" in launch_kwargs:
+                    break
+        except Exception:
+            pass
+
+    instance_id: str = ""
+    launched_fresh = False
+
+    # Check for cached AMI
+    cached_ami_id = None
+    try:
+        param = ssm_boto.get_parameter(Name=f"/nexplane/smoke-amis/bind-dns/{setup_hash[:8]}")
+        cached_ami_id = param["Parameter"]["Value"].strip()
+        log(f"BIND_DNS: found cached AMI {cached_ami_id} — launching from cache")
+    except Exception:
+        pass
+
+    if cached_ami_id:
+        launch_kwargs["ImageId"] = cached_ami_id
+        resp = ec2_client.run_instances(**launch_kwargs)
+        instance_id = resp["Instances"][0]["InstanceId"]
+        log(f"BIND_DNS: launched from cached AMI: {instance_id}")
+        # Wait for SSM availability
+        ec2_client.get_waiter("instance_status_ok").wait(InstanceIds=[instance_id])
+        deadline = _time.time() + 300
+        while _time.time() < deadline:
+            info = ssm_boto.describe_instance_information(
+                Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+            )
+            if (info["InstanceInformationList"]
+                    and info["InstanceInformationList"][0]["PingStatus"] == "Online"):
+                break
+            _time.sleep(10)
+        else:
+            fail("[BIND_DNS] Cached-AMI instance never came online in SSM")
+    else:
+        launched_fresh = True
+        log("BIND_DNS: no cached AMI — launching fresh instance and installing BIND9...")
+        resp = ec2_client.run_instances(**launch_kwargs)
+        instance_id = resp["Instances"][0]["InstanceId"]
+        log(f"BIND_DNS: instance {instance_id} — waiting for status OK...")
+        ec2_client.get_waiter("instance_status_ok").wait(InstanceIds=[instance_id])
+
+        log("BIND_DNS: waiting for SSM agent...")
+        deadline = _time.time() + 300
+        while _time.time() < deadline:
+            info = ssm_boto.describe_instance_information(
+                Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+            )
+            if (info["InstanceInformationList"]
+                    and info["InstanceInformationList"][0]["PingStatus"] == "Online"):
+                break
+            _time.sleep(10)
+        else:
+            fail("[BIND_DNS] Instance never came online in SSM")
+
+        log("BIND_DNS: running BIND9 setup script...")
+        cmd_resp = ssm_boto.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [setup_script]},
+            TimeoutSeconds=300,
+        )
+        cmd_id = cmd_resp["Command"]["CommandId"]
+        deadline2 = _time.time() + 300
+        while _time.time() < deadline2:
+            _time.sleep(8)
+            inv = ssm_boto.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+            if inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+                if inv["Status"] != "Success":
+                    # Terminate on setup failure before raising
+                    try:
+                        ec2_client.terminate_instances(InstanceIds=[instance_id])
+                    except Exception:
+                        pass
+                    fail(f"[BIND_DNS] BIND9 setup failed: {inv.get('StandardErrorContent', '')}")
+                break
+            print(".", end="", flush=True)
+        else:
+            fail("[BIND_DNS] BIND9 setup timed out")
+
+        # Cache instance as AMI for future runs
+        if get_or_create_smoke_ami:
+            try:
+                get_or_create_smoke_ami(ssm_boto, ec2_client, instance_id, "bind-dns", setup_hash)
+            except Exception as _ami_e:
+                log(f"BIND_DNS: AMI caching skipped (non-fatal): {_ami_e}")
+
+    # Get private IP
+    inst_desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+    private_ip = inst_desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+    if not private_ip:
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+        except Exception:
+            pass
+        fail("[BIND_DNS] Could not get private IP of BIND instance")
+    log(f"BIND_DNS: BIND9 running at {private_ip}:53")
+
+    # Read TSIG secret from key file via SSM
+    read_key_resp = ssm_boto.send_command(
+        InstanceIds=[instance_id],
+        DocumentName="AWS-RunShellScript",
+        Parameters={"commands": [
+            "awk '/secret/ {gsub(/[\";\\ ]/,\"\",$2); print $2}' /etc/named/nexplane-smoke.key"
+        ]},
+        TimeoutSeconds=30,
+    )
+    read_cmd_id = read_key_resp["Command"]["CommandId"]
+    tsig_secret_b64 = ""
+    deadline3 = _time.time() + 60
+    while _time.time() < deadline3:
+        _time.sleep(5)
+        key_inv = ssm_boto.get_command_invocation(
+            CommandId=read_cmd_id, InstanceId=instance_id
+        )
+        if key_inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+            tsig_secret_b64 = key_inv.get("StandardOutputContent", "").strip()
+            break
+    if not tsig_secret_b64:
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+        except Exception:
+            pass
+        fail("[BIND_DNS] Could not read TSIG key secret from instance")
+    log(f"BIND_DNS: TSIG key secret retrieved ({len(tsig_secret_b64)} chars)")
+
+    # Delegate the actual CR sequence to the cloud-agnostic helper.
+    # Pass instance_id so the helper terminates it in its finally block.
+    _run_bind_dns_tests(
+        client,
+        bind_server_ip=private_ip,
+        tsig_key_name="nexplane-smoke-key",
+        tsig_key_secret=tsig_secret_b64,
+        instance_id_for_cleanup=instance_id,
+    )
 
 
 if __name__ == "__main__":
