@@ -1,0 +1,80 @@
+{
+  "connector_type": "bind_dns",
+  "display_name": "BIND / RFC 2136 DNS",
+  "credential_fields": [
+    {"name": "server", "label": "DNS Server Hostname/IP", "type": "string", "required": true},
+    {"name": "port", "label": "Port", "type": "string", "required": false, "default": "53"},
+    {"name": "zone", "label": "Default Zone", "type": "string", "required": true, "description": "e.g. corp.example.com"},
+    {"name": "tsig_key_name", "label": "TSIG Key Name", "type": "string", "required": false, "description": "Required for authenticated updates"},
+    {"name": "tsig_key_secret", "label": "TSIG Key Secret (base64)", "type": "password", "required": false},
+    {"name": "tsig_algorithm", "label": "TSIG Algorithm", "type": "string", "required": false, "default": "hmac-sha256"}
+  ],
+  "actions": [
+    {
+      "action_id": "list_zone",
+      "generic_action": "list_dns_records",
+      "action_type": "ingest",
+      "display_name": "List Zone Records",
+      "description": "Lists all records in the DNS zone via AXFR zone transfer",
+      "produces_asset_types": [],
+      "applicable_asset_types": [],
+      "executor": "bind_dns.list_zone",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "none"
+    },
+    {
+      "action_id": "create_record",
+      "generic_action": "create_dns_record",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Create DNS Record",
+      "description": "Creates an A, CNAME, or TXT record via RFC 2136 dynamic update",
+      "applicable_asset_types": [],
+      "parameters": [
+        {"name": "record_name", "type": "string", "required": true, "description": "FQDN or relative name"},
+        {"name": "record_type", "type": "string", "required": true, "description": "A, CNAME, TXT, MX"},
+        {"name": "value", "type": "string", "required": true},
+        {"name": "ttl", "type": "integer", "required": false, "default": 300},
+        {"name": "zone", "type": "string", "required": false, "description": "Override default zone from credentials"}
+      ],
+      "executor": "bind_dns.create_record",
+      "rollback_action": "delete_record",
+      "estimated_duration_seconds": 5,
+      "blast_radius_hint": "dns_change"
+    },
+    {
+      "action_id": "delete_record",
+      "generic_action": "delete_dns_record",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Delete DNS Record",
+      "description": "Deletes a DNS record via RFC 2136 dynamic update",
+      "applicable_asset_types": [],
+      "parameters": [
+        {"name": "record_name", "type": "string", "required": true},
+        {"name": "record_type", "type": "string", "required": true},
+        {"name": "zone", "type": "string", "required": false}
+      ],
+      "executor": "bind_dns.delete_record",
+      "estimated_duration_seconds": 5,
+      "blast_radius_hint": "dns_change"
+    },
+    {
+      "action_id": "check_record",
+      "generic_action": "check_dns_record",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Check DNS Record",
+      "description": "Queries a specific record and returns its current value",
+      "applicable_asset_types": [],
+      "parameters": [
+        {"name": "record_name", "type": "string", "required": true},
+        {"name": "record_type", "type": "string", "required": false, "default": "A"}
+      ],
+      "executor": "bind_dns.check_record",
+      "rollback_action": null,
+      "estimated_duration_seconds": 5,
+      "blast_radius_hint": "none"
+    }
+  ]
+}
