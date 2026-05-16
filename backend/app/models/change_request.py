@@ -357,6 +357,12 @@ class ChangeType(str, enum.Enum):
     snyk_sync_findings = "snyk_sync_findings"
     jfrog_scan_artifact = "jfrog_scan_artifact"
     jfrog_sync_violations = "jfrog_sync_violations"
+    # WinRM connector
+    winrm_check_prerequisites = "winrm_check_prerequisites"
+    winrm_download_agent = "winrm_download_agent"
+    winrm_install_agent = "winrm_install_agent"
+    winrm_execute_template = "winrm_execute_template"
+    winrm_collect_diagnostics = "winrm_collect_diagnostics"
 
 
 class RiskLevel(str, enum.Enum):
