@@ -32,3 +32,29 @@ func RollbackGatekeeperDisable(_ map[string]any) (map[string]any, error) {
 	}
 	return map[string]any{"rolled_back": true, "output": out}, nil
 }
+
+// RollbackDefaultsWrite restores a defaults key to its previous value, or deletes it if it didn't exist before.
+func RollbackDefaultsWrite(params map[string]any) (map[string]any, error) {
+	domain, _ := params["domain"].(string)
+	key, _ := params["key"].(string)
+	if domain == "" || key == "" {
+		return nil, fmt.Errorf("defaults_write rollback requires domain and key in params")
+	}
+
+	previousValue, hasPrev := params["previous_value"]
+	if !hasPrev || previousValue == nil {
+		// Key didn't exist before — delete it.
+		out, err := run("defaults", "delete", domain, key)
+		if err != nil {
+			return nil, fmt.Errorf("defaults delete %s %s (rollback): %s: %w", domain, key, out, err)
+		}
+		return map[string]any{"rolled_back": true, "action": "deleted", "output": out}, nil
+	}
+
+	prev := fmt.Sprintf("%v", previousValue)
+	out, err := run("defaults", "write", domain, key, prev)
+	if err != nil {
+		return nil, fmt.Errorf("defaults write %s %s (rollback): %s: %w", domain, key, out, err)
+	}
+	return map[string]any{"rolled_back": true, "action": "restored", "output": out}, nil
+}

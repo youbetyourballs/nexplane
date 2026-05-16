@@ -658,14 +658,54 @@ Examples:
         print(f"Phases: {args.phases}")
         print(f"{'='*60}\n")
 
-        # Wrap test in a script that tees output to a file, so we can retrieve the
-        # full log via a second SSM command even if the first SSM truncates stdout.
-        logged_test_script = (
-            f"({test_script}) 2>&1 | tee /tmp/smoke_test.log; "
-            "echo SMOKE_EXIT_CODE:${PIPESTATUS[0]}"
+        # Run the test in the background (SSM TimeoutSeconds max is 2800 ~47 min,
+        # but multi-phase runs can take 60-90+ min). We launch via nohup and poll.
+        bg_launch_script = (
+            f"nohup sh -c '({test_script}) 2>&1 | tee /tmp/smoke_test.log; "
+            "echo SMOKE_EXIT_CODE:${{PIPESTATUS[0]}} >> /tmp/smoke_test.log; "
+            "touch /tmp/smoke_done' </dev/null >/dev/null 2>&1 &\n"
+            "echo LAUNCHED:$$"
         )
         try:
-            out = ssm_run(ssm, runner_id, logged_test_script, timeout=7200)
+            ssm_run(ssm, runner_id, bg_launch_script, timeout=30)
+            print("  Test launched in background, polling for completion...")
+            # Poll /tmp/smoke_done + tail log every 30s, up to 7200s total
+            out = ""
+            poll_deadline = time.time() + 7200
+            last_log_size = 0
+            while time.time() < poll_deadline:
+                time.sleep(30)
+                # Stream new log lines
+                try:
+                    log_out = ssm_run(ssm, runner_id,
+                        f"tail -c +{last_log_size + 1} /tmp/smoke_test.log 2>/dev/null | head -c 4096",
+                        timeout=30)
+                    if log_out:
+                        print(log_out, end="", flush=True)
+                        last_log_size += len(log_out)
+                        out += log_out
+                except Exception:
+                    pass
+                # Check if done
+                try:
+                    done_out = ssm_run(ssm, runner_id, "test -f /tmp/smoke_done && echo DONE", timeout=30)
+                    if "DONE" in done_out:
+                        # Fetch rest of log
+                        try:
+                            rest = ssm_run(ssm, runner_id,
+                                f"tail -c +{last_log_size + 1} /tmp/smoke_test.log 2>/dev/null",
+                                timeout=60)
+                            if rest:
+                                print(rest, end="", flush=True)
+                                out += rest
+                        except Exception:
+                            pass
+                        break
+                except Exception:
+                    pass
+                print(".", end="", flush=True)
+            else:
+                raise RuntimeError("Smoke test polling timed out after 7200s")
             # Check if the test itself failed (exit code embedded in output)
             if "SMOKE_EXIT_CODE:0" not in out:
                 # Retrieve full log if available

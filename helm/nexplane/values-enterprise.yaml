@@ -1,0 +1,8 @@
+postgres:
+  enabled: false   # use external database; set backend.env.DATABASE_URL
+
+redis:
+  enabled: false   # use external Redis; set redisUrl
+
+ingress:
+  enabled: true

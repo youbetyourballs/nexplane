@@ -1,0 +1,97 @@
+0 info it worked if it ends with ok
+1 verbose cli [ 'C:\\Program Files\\nodejs\\node.exe',
+1 verbose cli   'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js',
+1 verbose cli   'install',
+1 verbose cli   '-g',
+1 verbose cli   'netlify-cli' ]
+2 info using npm@3.6.0
+3 info using node@v5.7.1
+4 silly loadCurrentTree Starting
+5 silly install loadCurrentTree
+6 silly install readGlobalPackageData
+7 silly fetchPackageMetaData netlify-cli
+8 silly fetchNamedPackageData netlify-cli
+9 silly mapToRegistry name netlify-cli
+10 silly mapToRegistry using default registry
+11 silly mapToRegistry registry https://registry.npmjs.org/
+12 silly mapToRegistry uri https://registry.npmjs.org/netlify-cli
+13 verbose request uri https://registry.npmjs.org/netlify-cli
+14 verbose request no auth needed
+15 info attempt registry request try #1 at 12:46:28 AM
+16 verbose request id 3a24fa4867214b9c
+17 http request GET https://registry.npmjs.org/netlify-cli
+18 http 200 https://registry.npmjs.org/netlify-cli
+19 verbose headers { date: 'Sat, 16 May 2026 04:46:25 GMT',
+19 verbose headers   'content-type': 'application/json',
+19 verbose headers   'transfer-encoding': 'chunked',
+19 verbose headers   connection: 'keep-alive',
+19 verbose headers   'set-cookie': [ '_cfuvid=02vTIRtWwi2fN1srReFkfXy9uJyDTt1jK8i55As3HfI-1778906785.189654-1.0.1.1-0jBn3OEN_E3z1GtltXev8xkEYBxslLRySwywUyFZBHU; HttpOnly; SameSite=None; Secure; Path=/; Domain=npmjs.org' ],
+19 verbose headers   'cf-ray': '9fc7bd0f6e60c598-EWR',
+19 verbose headers   'cf-cache-status': 'HIT',
+19 verbose headers   'access-control-allow-origin': '*',
+19 verbose headers   'cache-control': 'public, max-age=300',
+19 verbose headers   vary: 'accept-encoding, accept',
+19 verbose headers   'last-modified': 'Fri, 15 May 2026 16:26:27 GMT',
+19 verbose headers   server: 'cloudflare',
+19 verbose headers   etag: 'W/"ef7f5550908db051d54c70badd3b8dfd"',
+19 verbose headers   'content-encoding': 'gzip' }
+20 silly get cb [ 200,
+20 silly get   { date: 'Sat, 16 May 2026 04:46:25 GMT',
+20 silly get     'content-type': 'application/json',
+20 silly get     'transfer-encoding': 'chunked',
+20 silly get     connection: 'keep-alive',
+20 silly get     'set-cookie': [ '_cfuvid=02vTIRtWwi2fN1srReFkfXy9uJyDTt1jK8i55As3HfI-1778906785.189654-1.0.1.1-0jBn3OEN_E3z1GtltXev8xkEYBxslLRySwywUyFZBHU; HttpOnly; SameSite=None; Secure; Path=/; Domain=npmjs.org' ],
+20 silly get     'cf-ray': '9fc7bd0f6e60c598-EWR',
+20 silly get     'cf-cache-status': 'HIT',
+20 silly get     'access-control-allow-origin': '*',
+20 silly get     'cache-control': 'public, max-age=300',
+20 silly get     vary: 'accept-encoding, accept',
+20 silly get     'last-modified': 'Fri, 15 May 2026 16:26:27 GMT',
+20 silly get     server: 'cloudflare',
+20 silly get     etag: 'W/"ef7f5550908db051d54c70badd3b8dfd"',
+20 silly get     'content-encoding': 'gzip' } ]
+21 verbose get saving netlify-cli to C:\Users\john\AppData\Roaming\npm-cache\registry.npmjs.org\netlify-cli\.cache.json
+22 verbose correctMkdir C:\Users\john\AppData\Roaming\npm-cache correctMkdir not in flight; initializing
+23 silly install normalizeTree
+24 silly loadCurrentTree Finishing
+25 silly loadIdealTree Starting
+26 silly install loadIdealTree
+27 silly cloneCurrentTree Starting
+28 silly install cloneCurrentTreeToIdealTree
+29 silly cloneCurrentTree Finishing
+30 silly loadShrinkwrap Starting
+31 silly install loadShrinkwrap
+32 silly loadShrinkwrap Finishing
+33 silly loadAllDepsIntoIdealTree Starting
+34 silly install loadAllDepsIntoIdealTree
+35 verbose stack Error: Missing required argument #1
+35 verbose stack     at andLogAndFinish (C:\Program Files\nodejs\node_modules\npm\lib\fetch-package-metadata.js:31:3)
+35 verbose stack     at fetchPackageMetadata (C:\Program Files\nodejs\node_modules\npm\lib\fetch-package-metadata.js:51:22)
+35 verbose stack     at resolveWithNewModule (C:\Program Files\nodejs\node_modules\npm\lib\install\deps.js:456:12)
+35 verbose stack     at C:\Program Files\nodejs\node_modules\npm\lib\install\deps.js:190:5
+35 verbose stack     at C:\Program Files\nodejs\node_modules\npm\node_modules\slide\lib\async-map.js:52:35
+35 verbose stack     at Array.forEach (native)
+35 verbose stack     at C:\Program Files\nodejs\node_modules\npm\node_modules\slide\lib\async-map.js:52:11
+35 verbose stack     at Array.forEach (native)
+35 verbose stack     at asyncMap (C:\Program Files\nodejs\node_modules\npm\node_modules\slide\lib\async-map.js:51:8)
+35 verbose stack     at exports.loadRequestedDeps (C:\Program Files\nodejs\node_modules\npm\lib\install\deps.js:188:3)
+36 verbose cwd F:\Nexplane\nexplane
+37 error Windows_NT 10.0.19045
+38 error argv "C:\\Program Files\\nodejs\\node.exe" "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js" "install" "-g" "netlify-cli"
+39 error node v5.7.1
+40 error npm  v3.6.0
+41 error code EMISSINGARG
+42 error typeerror Error: Missing required argument #1
+42 error typeerror     at andLogAndFinish (C:\Program Files\nodejs\node_modules\npm\lib\fetch-package-metadata.js:31:3)
+42 error typeerror     at fetchPackageMetadata (C:\Program Files\nodejs\node_modules\npm\lib\fetch-package-metadata.js:51:22)
+42 error typeerror     at resolveWithNewModule (C:\Program Files\nodejs\node_modules\npm\lib\install\deps.js:456:12)
+42 error typeerror     at C:\Program Files\nodejs\node_modules\npm\lib\install\deps.js:190:5
+42 error typeerror     at C:\Program Files\nodejs\node_modules\npm\node_modules\slide\lib\async-map.js:52:35
+42 error typeerror     at Array.forEach (native)
+42 error typeerror     at C:\Program Files\nodejs\node_modules\npm\node_modules\slide\lib\async-map.js:52:11
+42 error typeerror     at Array.forEach (native)
+42 error typeerror     at asyncMap (C:\Program Files\nodejs\node_modules\npm\node_modules\slide\lib\async-map.js:51:8)
+42 error typeerror     at exports.loadRequestedDeps (C:\Program Files\nodejs\node_modules\npm\lib\install\deps.js:188:3)
+43 error typeerror This is an error with npm itself. Please report this error at:
+43 error typeerror     <http://github.com/npm/npm/issues>
+44 verbose exit [ 1, true ]
