@@ -65,6 +65,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   nessus: "Nessus Essentials",
   elastic: "Elastic Security",
   jfrog: "JFrog Xray",
+  winrm: "WinRM (Windows Remote Management)",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -129,6 +130,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   nessus: "🔍",
   elastic: "🔎",
   jfrog: "🐸",
+  winrm: "🪟",
 };
 
 const ALL_TYPES = (Object.keys(CONNECTOR_LABELS) as ConnectorType[]).filter(

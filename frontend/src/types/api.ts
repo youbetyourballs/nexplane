@@ -240,7 +240,8 @@ export type ConnectorType =
   | "openvas"
   | "nessus"
   | "elastic"
-  | "jfrog";
+  | "jfrog"
+  | "winrm";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 
