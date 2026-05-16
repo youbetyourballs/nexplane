@@ -1,0 +1,42 @@
+global:
+  namespace: nexplane
+
+backend:
+  image:
+    repository: ghcr.io/nexplane/nexplane-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 8000
+  resources: {}
+  env:
+    SECRET_KEY: ""       # populated from secrets
+    DATABASE_URL: ""     # populated from secrets
+
+frontend:
+  image:
+    repository: ghcr.io/nexplane/nexplane-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 80
+  resources: {}
+
+postgres:
+  enabled: true
+  image: postgres:16
+  storage: 20Gi
+  password: ""           # must be set at install time
+
+redis:
+  enabled: true
+  image: redis:7
+
+ingress:
+  enabled: false
+  host: ""
+  tls: false
+  annotations: {}
+
+secretKey: ""            # application secret key, must be set at install time
+redisUrl: "redis://{{ include \"nexplane.fullname\" . }}-redis:6379/0"

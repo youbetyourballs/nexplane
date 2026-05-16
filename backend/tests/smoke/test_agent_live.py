@@ -1751,6 +1751,91 @@ def run_azure_linux_track(client: NexplaneClient, cloud_account_id: str,
 
 
 # ---------------------------------------------------------------------------
+# Poller backoff phase
+# ---------------------------------------------------------------------------
+
+def run_phase_poller_backoff(
+    client: "NexplaneClient",
+    ec2_client,
+    ssm_boto,
+    instance_id: str,
+    instance_asset_id: str,
+    endpoint_asset_id: str,
+    backend_tailscale_ip: str = "",
+) -> None:
+    """Verify agent exponential backoff and reconnection against real infrastructure.
+
+    Requires --backend-tailscale-ip to be set. Skipped if not provided.
+
+    Steps:
+    1. Confirm the agent processes a CR (baseline).
+    2. Block outbound HTTPS to the control plane via iptables.
+    3. Wait 90 s — enough for 3 poll cycles — then sample the agent log.
+    4. Unblock the control plane.
+    5. Wait 60 s then confirm the agent processes another CR (reconnect).
+
+    The log check in step 3 is observational only; the reconnect CR in step 5 is the
+    authoritative proof of recovery.
+    """
+    if not backend_tailscale_ip:
+        log("POLLER_BACKOFF: backend_tailscale_ip not set — skipping phase")
+        return
+
+    block_cmd = (
+        f"sudo iptables -A OUTPUT -d {backend_tailscale_ip} -p tcp --dport 443 -j DROP\n"
+        f"sudo iptables -A OUTPUT -d {backend_tailscale_ip} -p tcp --dport 8000 -j DROP\n"
+        "echo BLOCKED"
+    )
+    unblock_cmd = (
+        f"sudo iptables -D OUTPUT -d {backend_tailscale_ip} -p tcp --dport 443 -j DROP 2>/dev/null || true\n"
+        f"sudo iptables -D OUTPUT -d {backend_tailscale_ip} -p tcp --dport 8000 -j DROP 2>/dev/null || true\n"
+        "echo UNBLOCKED"
+    )
+
+    try:
+        # Step 1 — baseline: verify agent is connected before testing backoff
+        _agent_cr(client, endpoint_asset_id, "POLLER_BACKOFF-baseline", "agent_compliance",
+                  {"dry_run": True})
+        log("POLLER_BACKOFF: baseline CR completed — agent is connected")
+
+        # Step 2 — block outbound HTTPS to control plane
+        _ssm(client, instance_asset_id, instance_id,
+             "POLLER_BACKOFF", "block control plane", block_cmd)
+        log("POLLER_BACKOFF: outbound to control plane blocked via iptables")
+
+        # Step 3 — wait for agent to accumulate poll failures and back off
+        time.sleep(90)
+        log_cmd = (
+            "sudo journalctl -u nexplane-agent --since '2 minutes ago' --no-pager 2>/dev/null "
+            "| tail -30 "
+            "|| sudo tail -30 /var/log/nexplane-agent.log 2>/dev/null "
+            "|| echo NO_LOG"
+        )
+        _ssm(client, instance_asset_id, instance_id,
+             "POLLER_BACKOFF", "check agent log for backoff", log_cmd)
+        log("POLLER_BACKOFF: agent log checked (backoff messages expected)")
+
+        # Step 4 — unblock control plane
+        _ssm(client, instance_asset_id, instance_id,
+             "POLLER_BACKOFF", "unblock control plane", unblock_cmd)
+        log("POLLER_BACKOFF: outbound to control plane unblocked")
+
+        # Step 5 — wait for reconnection then verify CR processing resumes
+        time.sleep(60)  # give agent time to reconnect after backoff expires
+        _agent_cr(client, endpoint_asset_id, "POLLER_BACKOFF-reconnect", "agent_compliance",
+                  {"dry_run": True})
+        log("POLLER_BACKOFF: reconnect CR completed — agent recovered after backoff")
+
+    finally:
+        # Step 6 — always clean up iptables rules regardless of test outcome
+        try:
+            _ssm(client, instance_asset_id, instance_id,
+                 "POLLER_BACKOFF", "cleanup iptables", unblock_cmd)
+        except Exception as cleanup_err:
+            log(f"POLLER_BACKOFF: cleanup warning — {cleanup_err}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 

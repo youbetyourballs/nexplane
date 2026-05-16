@@ -62,6 +62,49 @@ func TestLoadDefaultMode(t *testing.T) {
 	}
 }
 
+func TestLoadMaxBackoffDefault(t *testing.T) {
+	cfg, err := config.Load([]string{
+		"--control-plane", "https://nexplane.example.com",
+		"--secret", "sk-agent-abc",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxBackoff != 5*60*1e9 { // 5 minutes in nanoseconds
+		t.Errorf("default max backoff should be 5m, got %v", cfg.MaxBackoff)
+	}
+}
+
+func TestLoadMaxBackoffFlag(t *testing.T) {
+	cfg, err := config.Load([]string{
+		"--control-plane", "https://nexplane.example.com",
+		"--secret", "sk-agent-abc",
+		"--max-backoff", "2m",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxBackoff != 2*60*1e9 {
+		t.Errorf("expected max backoff 2m, got %v", cfg.MaxBackoff)
+	}
+}
+
+func TestLoadMaxBackoffEnv(t *testing.T) {
+	os.Setenv("NP_MAX_BACKOFF", "10m")
+	defer os.Unsetenv("NP_MAX_BACKOFF")
+
+	cfg, err := config.Load([]string{
+		"--control-plane", "https://nexplane.example.com",
+		"--secret", "sk-agent-abc",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxBackoff != 10*60*1e9 {
+		t.Errorf("expected max backoff 10m, got %v", cfg.MaxBackoff)
+	}
+}
+
 func TestLoadErrorsMissingRequired(t *testing.T) {
 	_, err := config.Load([]string{})
 	if err == nil {

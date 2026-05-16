@@ -24,6 +24,7 @@ Phase descriptions:
     J  RDS: instance + snapshot lifecycle (~30 min) with rollback stack
     K  CloudWatch: alarms + SSM metric push with rollback stack
     W  ALB lifecycle: create ALB + target group + listener, register EC2 target, verify health, deregister, rollback
+    MAC_AGENT_BOOTSTRAP  macOS agent: launch mac2.metal on Dedicated Host, install Nexplane agent, run defaults_write + santa_check CRs
 
 Requirements:
     AWS connector with credentials + NexplaneEC2TestProfile IAM role
@@ -7238,7 +7239,10 @@ echo "POSTGRES_SETUP_COMPLETE"
             # Ensure user exists on cached instance
             ensure_cmd = """
 systemctl start postgresql 2>/dev/null || service postgresql start 2>/dev/null || true
-sleep 3
+# Wait up to 30s for postgres to become ready
+for i in $(seq 1 30); do
+  sudo -u postgres psql -c "SELECT 1;" >/dev/null 2>&1 && break || sleep 1
+done
 sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres-admin-pw-smoke';" 2>/dev/null || true
 sudo -u postgres psql -c "CREATE USER smokeuser WITH PASSWORD 'initial-smoke-pw-12345';" 2>/dev/null || \
   sudo -u postgres psql -c "ALTER USER smokeuser PASSWORD 'initial-smoke-pw-12345';" 2>/dev/null || true
@@ -7247,7 +7251,7 @@ echo "PG_READY"
             resp_e = ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
                 Parameters={"commands": [ensure_cmd]}, TimeoutSeconds=60)
-            time.sleep(15)
+            time.sleep(35)
 
         if getattr(client, "standalone", False):
             # Standalone mode: call executor directly — no Nexplane backend needed
@@ -10231,12 +10235,30 @@ echo "K8S_RBAC_SETUP_COMPLETE"
 set -e
 systemctl start docker
 for i in $(seq 1 20); do docker info >/dev/null 2>&1 && break || sleep 3; done
-kind get clusters | grep -q smoke-test || kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
+# Restart any stopped kind containers (cluster may have been stopped with the instance)
+docker ps -a --filter "label=io.x-k8s.kind.cluster=smoke-test" --format "{{.ID}}" | xargs -r docker start 2>/dev/null || true
+# Give containers 30s to become ready, then check if cluster responds
+sleep 30
+if ! kubectl get nodes --request-timeout=30s 2>/dev/null | grep -q Ready; then
+  # Cluster not healthy - delete and recreate
+  kind delete cluster --name smoke-test 2>/dev/null || true
+  PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+  cat > /tmp/kind-config.yaml <<KINDEOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  apiServerAddress: "$PRIVATE_IP"
+  apiServerPort: 6443
+KINDEOF
+  kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
+fi
+kubectl create serviceaccount smoke-sa --namespace default 2>/dev/null || true
 kubectl get rolebinding smoke-rb -n default 2>/dev/null || \\
   kubectl create rolebinding smoke-rb --clusterrole=view --serviceaccount=default:smoke-sa --namespace=default || true
+iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 echo "RESTART_COMPLETE"
 """
-            restart_out = _ssm_run_poll(ssm_client, instance_id, restart_script, timeout=400, label="k8s-restart")
+            restart_out = _ssm_run_poll(ssm_client, instance_id, restart_script, timeout=900, label="k8s-restart")
             if "RESTART_COMPLETE" not in restart_out:
                 log("  Warning: restart may not have completed: " + restart_out[-300:])
 
@@ -14049,6 +14071,251 @@ def main():
             print("\n❌ SMOKE TEST FAILED")
             import sys as _sys
             _sys.exit(1)
+
+
+# EC2 Mac dedicated host: $25-30/day, 24-hour minimum — do not run on a CI budget
+def run_phase_mac_agent_bootstrap(
+    client: "NexplaneClient",
+    ec2_client,
+    ssm_boto,
+    tailscale_auth_key: str = "",
+    backend_tailscale_ip: str = "",
+    dedicated_host_id: str = "",
+    ssh_key_path: str = "",
+) -> None:
+    """Phase MAC_AGENT_BOOTSTRAP: Install Nexplane agent on a mac2.metal EC2 instance and
+    run defaults_write and santa_check CRs to validate macOS agent command support.
+
+    Requires a pre-allocated Dedicated Host (mac2.metal). If dedicated_host_id is empty
+    the phase is skipped with a warning — this is expected when not running with Mac infra.
+    SSM is NOT available on EC2 Mac instances; all side-effect verification uses SSH (paramiko).
+    """
+    import paramiko  # already in requirements
+
+    # Step 1 — Validate dedicated host
+    if not dedicated_host_id:
+        log("MAC_AGENT_BOOTSTRAP: no dedicated_host_id provided — skipping (Mac infra not available)")
+        return
+
+    log(f"MAC_AGENT_BOOTSTRAP: using dedicated host {dedicated_host_id}")
+
+    instance_id = ""
+    fresh_launch = False
+
+    try:
+        # Step 2 — Find or launch mac2.metal instance
+        log("MAC_AGENT_BOOTSTRAP: checking for existing nexplane-smoke-mac instance...")
+        running = ec2_client.describe_instances(Filters=[
+            {"Name": "tag:Name", "Values": ["nexplane-smoke-mac"]},
+            {"Name": "instance-state-name", "Values": ["running", "pending"]},
+            {"Name": "host-id", "Values": [dedicated_host_id]},
+        ])
+        reservations = running.get("Reservations", [])
+        if reservations:
+            instance_id = reservations[0]["Instances"][0]["InstanceId"]
+            private_ip = reservations[0]["Instances"][0].get("PrivateIpAddress", "")
+            public_ip = reservations[0]["Instances"][0].get("PublicIpAddress", "") or private_ip
+            hostname = reservations[0]["Instances"][0].get("PrivateDnsName", private_ip)
+            log(f"MAC_AGENT_BOOTSTRAP: found existing instance {instance_id} ({public_ip})")
+        else:
+            # Find latest macOS AMI from AWS
+            log("MAC_AGENT_BOOTSTRAP: finding latest macOS AMI...")
+            images_resp = ec2_client.describe_images(
+                Owners=["amazon"],
+                Filters=[
+                    {"Name": "platform", "Values": ["mac"]},
+                    {"Name": "name", "Values": ["amzn-ec2-macos-*"]},
+                ],
+            )
+            images = sorted(images_resp.get("Images", []), key=lambda x: x["CreationDate"], reverse=True)
+            if not images:
+                fail("MAC_AGENT_BOOTSTRAP: no macOS AMI found from AWS")
+            ami_id = images[0]["ImageId"]
+            log(f"MAC_AGENT_BOOTSTRAP: using AMI {ami_id} ({images[0]['Name']})")
+
+            # Launch on the dedicated host
+            log(f"MAC_AGENT_BOOTSTRAP: launching mac2.metal on dedicated host {dedicated_host_id}...")
+            launch_resp = ec2_client.run_instances(
+                ImageId=ami_id,
+                InstanceType="mac2.metal",
+                MinCount=1,
+                MaxCount=1,
+                KeyName=KEY_NAME,
+                Placement={"HostId": dedicated_host_id},
+                TagSpecifications=[{
+                    "ResourceType": "instance",
+                    "Tags": [
+                        {"Key": "Name", "Value": "nexplane-smoke-mac"},
+                        {"Key": "nexplane-smoke", "Value": "true"},
+                    ],
+                }],
+            )
+            instance_id = launch_resp["Instances"][0]["InstanceId"]
+            fresh_launch = True
+            log(f"MAC_AGENT_BOOTSTRAP: launched {instance_id} — waiting for running state...")
+
+            # Wait for running
+            waiter = ec2_client.get_waiter("instance_running")
+            waiter.wait(InstanceIds=[instance_id])
+
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            inst = desc["Reservations"][0]["Instances"][0]
+            private_ip = inst.get("PrivateIpAddress", "")
+            public_ip = inst.get("PublicIpAddress", "") or private_ip
+            hostname = inst.get("PrivateDnsName", private_ip)
+            log(f"MAC_AGENT_BOOTSTRAP: instance running — public_ip={public_ip} hostname={hostname}")
+
+            # Wait for SSH on port 22
+            import socket as _socket
+            log("MAC_AGENT_BOOTSTRAP: waiting for SSH port 22...")
+            for _attempt in range(60):
+                try:
+                    with _socket.create_connection((public_ip, 22), timeout=5):
+                        break
+                except OSError:
+                    time.sleep(10)
+            else:
+                fail(f"MAC_AGENT_BOOTSTRAP: SSH port 22 not available on {public_ip} after 600s")
+
+            # Step 3 — Install Nexplane agent via SSH
+            log("MAC_AGENT_BOOTSTRAP: connecting via SSH to install Nexplane agent...")
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(
+                hostname=public_ip,
+                username="ec2-user",
+                key_filename=ssh_key_path,
+                timeout=30,
+            )
+
+            def _ssh_run(cmd: str) -> str:
+                _, stdout, stderr = ssh.exec_command(cmd)
+                out = stdout.read().decode().strip()
+                err = stderr.read().decode().strip()
+                log(f"  $ {cmd[:80]}")
+                if out:
+                    log(f"    stdout: {out[:200]}")
+                if err:
+                    log(f"    stderr: {err[:200]}")
+                return out
+
+            # Download agent version and binary
+            version = _ssh_run("curl -sf https://nexplane-agent-downloads.s3.amazonaws.com/version").strip()
+            if not version:
+                fail("MAC_AGENT_BOOTSTRAP: could not fetch agent version from S3")
+            log(f"MAC_AGENT_BOOTSTRAP: agent version={version}")
+
+            agent_url = f"https://nexplane-agent-downloads.s3.amazonaws.com/nexplane-agent-darwin-arm64-{version}"
+            _ssh_run(f"curl -sf -o ~/nexplane-agent-darwin-arm64 '{agent_url}'")
+            _ssh_run("chmod +x ~/nexplane-agent-darwin-arm64")
+
+            # Get agent secret for registration
+            agent_secret = ""
+            control_plane_url = f"http://{backend_tailscale_ip}:8000" if backend_tailscale_ip else "http://localhost:8000"
+            try:
+                agent_secret = client.get_agent_secret()
+            except Exception as _se:
+                log(f"MAC_AGENT_BOOTSTRAP: could not get agent secret: {_se}")
+
+            _ssh_run(
+                f"sudo ~/nexplane-agent-darwin-arm64 install "
+                f"--secret='{agent_secret}' "
+                f"--control-plane='{control_plane_url}' "
+                f"--non-interactive"
+            )
+            _ssh_run("sudo launchctl load /Library/LaunchDaemons/com.nexplane.agent.plist")
+            log("MAC_AGENT_BOOTSTRAP: agent installed and launchd plist loaded")
+            ssh.close()
+
+            # Step 4 — AMI snapshot (best-effort; SSM is not available on Mac EC2)
+            # Note: get_or_create_smoke_ami uses SSM to read the cache key — this will not work
+            # on the Mac instance itself, but the helper only needs SSM on the runner side.
+            import hashlib as _hashlib
+            setup_hash = _hashlib.md5(f"mac-nexplane-agent-{version}".encode()).hexdigest()[:8]
+            try:
+                from run_on_ec2 import get_or_create_smoke_ami
+                get_or_create_smoke_ami(ssm_boto, ec2_client, instance_id, "mac-nexplane-agent", setup_hash)
+                log("MAC_AGENT_BOOTSTRAP: AMI snapshot initiated")
+            except Exception as _ami_e:
+                log(f"MAC_AGENT_BOOTSTRAP: AMI cache skipped (best-effort for Mac): {_ami_e}")
+
+        # Step 5 — Wait for agent registration
+        log(f"MAC_AGENT_BOOTSTRAP: polling for agent registration (hostname={hostname}, timeout=600s)...")
+        from test_agent_live import _poll_for_endpoint
+        endpoint_asset = _poll_for_endpoint(client, hostname, timeout=600)
+        endpoint_asset_id = endpoint_asset["id"]
+        log(f"MAC_AGENT_BOOTSTRAP: agent registered as asset {endpoint_asset_id}")
+
+        # Step 6a — defaults_write CR: write, verify via SSH, rollback, verify deletion
+        log("MAC_AGENT_BOOTSTRAP: running defaults_write CR...")
+        cr_dw = client.run_cr(
+            "[MAC_AGENT_BOOTSTRAP] defaults_write com.nexplane.smoke",
+            "defaults_write",
+            endpoint_asset_id,
+            {"domain": "com.nexplane.smoke", "key": "SmokeTestValue", "value": "hello", "type": "string"},
+        )
+        result_dw = client.get_cr_step_result(cr_dw)
+        assert result_dw.get("domain") == "com.nexplane.smoke", (
+            f"MAC_AGENT_BOOTSTRAP: defaults_write result missing expected domain: {result_dw}"
+        )
+
+        # Verify side effect via SSH: defaults read should return "hello"
+        ssh2 = paramiko.SSHClient()
+        ssh2.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh2.connect(hostname=public_ip, username="ec2-user", key_filename=ssh_key_path, timeout=30)
+        _, _out, _ = ssh2.exec_command("defaults read com.nexplane.smoke SmokeTestValue")
+        written_val = _out.read().decode().strip()
+        assert written_val == "hello", (
+            f"MAC_AGENT_BOOTSTRAP: defaults read returned unexpected value: {written_val!r}"
+        )
+        log("MAC_AGENT_BOOTSTRAP: defaults_write verified via SSH — value='hello'")
+
+        # Rollback via Nexplane
+        cr_dw_id = cr_dw["id"]
+        client.post(f"/change-requests/{cr_dw_id}/rollback", json={})
+        # Poll for rollback CR completion
+        for _rb_wait in range(60):
+            cr_rb = client.get(f"/change-requests/{cr_dw_id}")
+            if cr_rb.get("rollback_status") in ("completed", "failed", "rolled_back"):
+                break
+            time.sleep(5)
+
+        # Verify key was deleted via SSH
+        _, _out2, _ = ssh2.exec_command("defaults read com.nexplane.smoke SmokeTestValue 2>&1; echo EXIT:$?")
+        rb_out = _out2.read().decode().strip()
+        assert "does not exist" in rb_out or "EXIT:1" in rb_out, (
+            f"MAC_AGENT_BOOTSTRAP: expected key deleted after rollback but got: {rb_out!r}"
+        )
+        ssh2.close()
+        log("MAC_AGENT_BOOTSTRAP: defaults_write rollback verified — key deleted")
+
+        # Step 6b — santa_check CR: read-only, verify returns installed field cleanly
+        log("MAC_AGENT_BOOTSTRAP: running santa_check CR...")
+        cr_sc = client.run_cr(
+            "[MAC_AGENT_BOOTSTRAP] santa_check",
+            "santa_check",
+            endpoint_asset_id,
+            {},
+        )
+        result_sc = client.get_cr_step_result(cr_sc)
+        assert "installed" in result_sc, (
+            f"MAC_AGENT_BOOTSTRAP: santa_check result missing 'installed' key: {result_sc}"
+        )
+        # Santa is not installed on a fresh EC2 Mac — installed should be False
+        log(f"MAC_AGENT_BOOTSTRAP: santa_check complete — installed={result_sc.get('installed')}")
+
+        log("MAC_AGENT_BOOTSTRAP: all CRs passed")
+
+    finally:
+        # Step 7 — Cleanup note (do NOT terminate; 24-hour billing window applies)
+        if fresh_launch and instance_id:
+            log(
+                f"MAC_AGENT_BOOTSTRAP: instance {instance_id} left running on dedicated host {dedicated_host_id}. "
+                f"EC2 Mac Dedicated Hosts have a 24-hour minimum billing commitment — "
+                f"do NOT release the host or terminate the instance until the 24-hour window has elapsed."
+            )
+        elif instance_id:
+            log(f"MAC_AGENT_BOOTSTRAP: reused existing instance {instance_id} — no termination performed")
 
 
 if __name__ == "__main__":

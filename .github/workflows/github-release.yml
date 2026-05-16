@@ -1,0 +1,78 @@
+name: Publish Agent Binary to GitHub Releases
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'agent/**'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "0.2.0")
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build linux-amd64 binary
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          cd agent
+          go build -o nexplane-agent-linux-amd64 ./cmd/agent
+
+      - name: Build darwin-amd64 binary
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          cd agent
+          go build -o nexplane-agent-darwin-amd64 ./cmd/agent
+
+      - name: Build darwin-arm64 binary
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: |
+          cd agent
+          go build -o nexplane-agent-darwin-arm64 ./cmd/agent
+
+      - name: Create or update GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          TAG="agent/v${VERSION}"
+          BINARIES=(
+            "agent/nexplane-agent-linux-amd64"
+            "agent/nexplane-agent-darwin-amd64"
+            "agent/nexplane-agent-darwin-arm64"
+          )
+
+          if gh release view "$TAG" &>/dev/null; then
+            gh release upload "$TAG" "${BINARIES[@]}" --clobber
+          else
+            gh release create "$TAG" "${BINARIES[@]}" \
+              --title "Nexplane Agent ${VERSION}" \
+              --notes "Nexplane agent binaries - linux/amd64, darwin/amd64, darwin/arm64"
+          fi

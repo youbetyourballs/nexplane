@@ -1,0 +1,52 @@
+site_name: Nexplane Docs
+site_url: https://docs.nexplane.ai
+repo_url: https://github.com/nexplane/nexplane
+docs_dir: docs-site/docs
+theme:
+  name: material
+  palette:
+    primary: indigo
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - search.suggest
+    - content.code.copy
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Overview: getting-started/overview.md
+    - Quick Start (Docker Compose): getting-started/quickstart.md
+    - Connecting Your First Account: getting-started/first-connector.md
+    - Your First Change Request: getting-started/first-change-request.md
+    - Using Rollback: getting-started/rollback.md
+  - Connectors:
+    - Overview: connectors/index.md
+    - AWS: connectors/aws.md
+    - GCP: connectors/gcp.md
+    - Azure: connectors/azure.md
+    - Kubernetes: connectors/kubernetes.md
+    - Vault: connectors/vault.md
+    - LDAP: connectors/ldap.md
+    - PostgreSQL: connectors/postgresql.md
+    - SSH: connectors/ssh.md
+    - WinRM: connectors/winrm.md
+  - Comparisons:
+    - vs. Ansible: comparisons/vs-ansible.md
+    - vs. SOAR: comparisons/vs-soar.md
+    - vs. Terraform: comparisons/vs-terraform.md
+  - Change Types: change-types/index.md
+  - Architecture: architecture.md
+  - Security Model: security-model.md
+  - Runbooks:
+    - Agent Registration Failure: runbooks/agent-registration.md
+    - Connector Credential Errors: runbooks/connector-credentials.md
+    - Rollback Failures: runbooks/rollback-failures.md
+  - CHANGELOG: changelog.md
+plugins:
+  - search
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - tables

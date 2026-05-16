@@ -43,3 +43,11 @@ func launchctlList(_ map[string]any) (map[string]any, error) {
 func macosSysinfo(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("macos_sysinfo is only supported on macOS")
 }
+
+func defaultsWrite(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("defaults_write is only supported on macOS")
+}
+
+func santaCheck(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_check is only supported on macOS")
+}
