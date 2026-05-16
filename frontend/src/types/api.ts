@@ -241,7 +241,8 @@ export type ConnectorType =
   | "nessus"
   | "elastic"
   | "jfrog"
-  | "winrm";
+  | "winrm"
+  | "sccm";
 
 export type ConnectorStatus = "active" | "inactive" | "error";
 

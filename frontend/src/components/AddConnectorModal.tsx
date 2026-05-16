@@ -66,6 +66,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   elastic: "Elastic Security",
   jfrog: "JFrog Xray",
   winrm: "WinRM (Windows Remote Management)",
+  sccm: "SCCM / MECM",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -131,6 +132,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   elastic: "🔎",
   jfrog: "🐸",
   winrm: "🪟",
+  sccm: "🖥️",
 };
 
 const ALL_TYPES = (Object.keys(CONNECTOR_LABELS) as ConnectorType[]).filter(
