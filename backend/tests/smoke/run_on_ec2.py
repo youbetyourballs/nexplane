@@ -56,6 +56,8 @@ pip3 install httpx boto3 || true
 pip3 install cryptography pydantic pydantic-settings sqlalchemy 2>/dev/null || true
 # Deps for standalone connector executor phases
 pip3 install pymongo redis psycopg2-binary 2>/dev/null || true
+# WinRM connector
+pip3 install pywinrm>=0.4.3 2>/dev/null || true
 echo "RUNNER_USERDATA_COMPLETE"
 """
 
@@ -158,7 +160,7 @@ def make_test_tarball() -> bytes:
         _add_dir_safe(tar, SMOKE_DIR, "smoke")
         # Add connector executor packages needed for standalone phases
         for connector_pkg in ("opnsense", "step_ca", "postgres", "redis", "mongodb",
-                              "elastic", "splunk", "openvas", "nessus", "snyk", "jfrog"):
+                              "elastic", "splunk", "openvas", "nessus", "snyk", "jfrog", "winrm"):
             pkg_dir = executors_dir / connector_pkg
             if pkg_dir.exists():
                 _add_dir_safe(tar, pkg_dir, f"smoke/{connector_pkg}")
