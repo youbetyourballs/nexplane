@@ -1,0 +1,37 @@
+name: Docs
+
+on:
+  push:
+    branches: [master]
+    paths: ['docs-site/**', 'mkdocs.yml']
+  pull_request:
+    paths: ['docs-site/**', 'mkdocs.yml']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install mkdocs-material
+      - run: mkdocs build --strict
+        # --strict turns warnings into errors (catches broken links, missing pages)
+
+  deploy:
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install mkdocs-material
+      - run: mkdocs gh-deploy --force
+        # Deploys to gh-pages branch; point docs.nexplane.ai CNAME to <org>.github.io/nexplane

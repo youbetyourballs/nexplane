@@ -188,6 +188,80 @@ func parseLaunchctl(out string) []map[string]any {
 	return services
 }
 
+// defaultsWrite reads the current value of a defaults key, then writes the new value.
+func defaultsWrite(params map[string]any) (map[string]any, error) {
+	domain, _ := params["domain"].(string)
+	key, _ := params["key"].(string)
+	value, _ := params["value"].(string)
+	typ, _ := params["type"].(string)
+	if domain == "" || key == "" || value == "" {
+		return nil, fmt.Errorf("defaults_write requires domain, key, and value")
+	}
+	if typ == "" {
+		typ = "string"
+	}
+
+	// Capture previous value for rollback; non-zero exit means key didn't exist.
+	prevOut, prevErr := run("defaults", "read", domain, key)
+	var previousValue any
+	if prevErr == nil {
+		previousValue = prevOut
+	}
+
+	out, err := run("defaults", "write", domain, key, "-"+typ, value)
+	if err != nil {
+		return nil, fmt.Errorf("defaults write %s %s: %s: %w", domain, key, out, err)
+	}
+
+	result := map[string]any{
+		"domain":         domain,
+		"key":            key,
+		"value":          value,
+		"type":           typ,
+		"previous_value": previousValue,
+		"written_at":     time.Now().UTC().Format(time.RFC3339),
+	}
+	return result, nil
+}
+
+// santaCheck audits Santa binary allowlisting status via santactl status.
+func santaCheck(_ map[string]any) (map[string]any, error) {
+	checkedAt := time.Now().UTC().Format(time.RFC3339)
+
+	out, err := run("santactl", "status")
+	if err != nil {
+		// santactl not installed or not running — return installed:false, don't error.
+		return map[string]any{"installed": false, "checked_at": checkedAt}, nil
+	}
+
+	result := map[string]any{
+		"installed":    true,
+		"mode":         "",
+		"file_logging": false,
+		"raw_output":   out,
+		"checked_at":   checkedAt,
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		k := strings.TrimSpace(parts[0])
+		v := strings.TrimSpace(parts[1])
+		switch k {
+		case "Mode":
+			result["mode"] = v
+		case "File Logging":
+			result["file_logging"] = strings.EqualFold(v, "yes") || strings.EqualFold(v, "true")
+		case "Watch Items":
+			result["watch_items"] = v
+		}
+	}
+
+	return result, nil
+}
+
 // macosSysinfo returns macOS version and hardware info.
 func macosSysinfo(_ map[string]any) (map[string]any, error) {
 	swVers, err := run("sw_vers")

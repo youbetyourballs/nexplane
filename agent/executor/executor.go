@@ -141,6 +141,8 @@ var commands = map[string]CommandFunc{
 	"profiles_list":          macos.ProfilesListExecute,
 	"launchctl_list":         macos.LaunchctlListExecute,
 	"macos_sysinfo":          macos.MacosSysinfoExecute,
+	"defaults_write":         macos.DefaultsWriteExecute,
+	"santa_check":            macos.SantaCheckExecute,
 	// Credential rotation
 	"rotate_ssh_keys":        credrotation.SSHKeyExecute,
 	"rotate_db_creds":        credrotation.DBRotateExecute,
@@ -208,6 +210,7 @@ var rollbacks = map[string]CommandFunc{
 	"apply_windows_patches": winpatch.ApplyWindowsPatchesRollback,
 	// macOS rollbacks
 	"filevault_enable":   macos.FilevaultEnableRollback,
+	"defaults_write":     macos.DefaultsWriteRollback,
 	"gatekeeper_enable":  macos.GatekeeperEnableRollback,
 	"gatekeeper_disable": macos.GatekeeperDisableRollback,
 	// Credential rotation rollback

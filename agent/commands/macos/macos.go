@@ -64,3 +64,18 @@ func GatekeeperEnableRollback(params map[string]any) (map[string]any, error) {
 func GatekeeperDisableRollback(params map[string]any) (map[string]any, error) {
 	return RollbackGatekeeperDisable(params)
 }
+
+// DefaultsWriteExecute writes a macOS defaults preference value.
+func DefaultsWriteExecute(params map[string]any) (map[string]any, error) {
+	return defaultsWrite(params)
+}
+
+// DefaultsWriteRollback rolls back a defaults_write by restoring the previous value.
+func DefaultsWriteRollback(params map[string]any) (map[string]any, error) {
+	return RollbackDefaultsWrite(params)
+}
+
+// SantaCheckExecute audits Santa binary allowlisting status.
+func SantaCheckExecute(params map[string]any) (map[string]any, error) {
+	return santaCheck(params)
+}

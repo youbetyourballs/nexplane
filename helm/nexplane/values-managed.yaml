@@ -1,0 +1,22 @@
+backend:
+  replicas: 2
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: 500m
+    requests:
+      memory: 256Mi
+      cpu: 250m
+
+frontend:
+  replicas: 2
+  resources:
+    limits:
+      memory: 128Mi
+      cpu: 100m
+    requests:
+      memory: 64Mi
+      cpu: 50m
+
+postgres:
+  storage: 50Gi

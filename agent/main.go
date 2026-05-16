@@ -73,7 +73,7 @@ func main() {
 			log.Fatalf("Ephemeral run failed: %v", err)
 		}
 	case "service":
-		poller.RunService(ctx, c, info.AgentID, cfg.Secret, cfg.PollInterval)
+		poller.RunService(ctx, c, info.AgentID, cfg.Secret, cfg.PollInterval, cfg.MaxBackoff)
 	}
 
 	log.Println("Agent stopped.")

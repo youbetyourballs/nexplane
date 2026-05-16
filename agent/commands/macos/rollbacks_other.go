@@ -18,3 +18,8 @@ func RollbackGatekeeperEnable(_ map[string]any) (map[string]any, error) {
 func RollbackGatekeeperDisable(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("gatekeeper_disable rollback is only supported on macOS")
 }
+
+// RollbackDefaultsWrite is a stub; defaults_write rollback is only supported on macOS.
+func RollbackDefaultsWrite(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("defaults_write rollback is only supported on macOS")
+}

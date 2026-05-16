@@ -14,6 +14,7 @@ type Config struct {
 	Mode         string
 	Hostname     string
 	PollInterval time.Duration
+	MaxBackoff   time.Duration
 }
 
 // Load parses configuration from flags first, then falls back to environment variables.
@@ -25,6 +26,7 @@ func Load(args []string) (*Config, error) {
 	mode := fs.String("mode", "", "Operation mode: ephemeral or service (default: service)")
 	hostname := fs.String("hostname", "", "Override hostname used for registration (default: OS hostname)")
 	pollInterval := fs.Duration("poll-interval", 0, "Poll interval in service mode (default: 30s)")
+	maxBackoff := fs.Duration("max-backoff", 0, "Maximum backoff duration on poll errors (default: 5m)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, fmt.Errorf("parsing flags: %w", err)
@@ -68,6 +70,18 @@ func Load(args []string) (*Config, error) {
 		cfg.PollInterval = d
 	} else {
 		cfg.PollInterval = 30 * time.Second
+	}
+
+	if *maxBackoff != 0 {
+		cfg.MaxBackoff = *maxBackoff
+	} else if v := os.Getenv("NP_MAX_BACKOFF"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid NP_MAX_BACKOFF %q: %w", v, err)
+		}
+		cfg.MaxBackoff = d
+	} else {
+		cfg.MaxBackoff = 5 * time.Minute
 	}
 
 	var errs []string

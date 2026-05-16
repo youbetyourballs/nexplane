@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"time"
 
 	"nexplane-agent/agenthmac"
@@ -25,8 +26,13 @@ func RunEphemeral(ctx context.Context, c *client.Client, agentID, secret string)
 }
 
 // RunService loops indefinitely, polling for jobs at the given interval.
-func RunService(ctx context.Context, c *client.Client, agentID, secret string, pollInterval time.Duration) {
-	log.Printf("Starting service mode (poll interval: %s)", pollInterval)
+// On poll errors it applies exponential backoff with full jitter, capped at maxBackoff.
+// A successful poll (job found or nil) resets the backoff to pollInterval.
+func RunService(ctx context.Context, c *client.Client, agentID, secret string, pollInterval, maxBackoff time.Duration) {
+	log.Printf("Starting service mode (poll interval: %s, max backoff: %s)", pollInterval, maxBackoff)
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	currentBackoff := pollInterval
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -36,10 +42,21 @@ func RunService(ctx context.Context, c *client.Client, agentID, secret string, p
 
 		job, err := c.PollNextJob(ctx, agentID)
 		if err != nil {
-			log.Printf("Poll error: %v — retrying in %s", err, pollInterval)
-			sleep(ctx, pollInterval)
+			// Exponential backoff with full jitter.
+			jitter := time.Duration(rng.Int63n(int64(currentBackoff) + 1))
+			log.Printf("Poll error: %v — retrying in %s", err, jitter)
+			sleep(ctx, jitter)
+			// Double for next error, cap at maxBackoff.
+			currentBackoff *= 2
+			if currentBackoff > maxBackoff {
+				currentBackoff = maxBackoff
+			}
 			continue
 		}
+
+		// Any non-error response resets the backoff.
+		currentBackoff = pollInterval
+
 		if job == nil {
 			sleep(ctx, pollInterval)
 			continue
