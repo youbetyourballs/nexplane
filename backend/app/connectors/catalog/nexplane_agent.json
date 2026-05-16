@@ -1865,6 +1865,133 @@
                         "executor": "nexplane_agent.ssl_cert_inspect",
                         "estimated_duration_seconds": 60,
                         "execution_tier": 2
+                    },
+                    {
+                        "action_id": "macos_filevault_status",
+                        "generic_action": "macos_filevault_status",
+                        "display_name": "FileVault Status",
+                        "description": "Returns the current FileVault encryption status on macOS.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "action_type": "read",
+                        "executor": "nexplane_agent.macos_filevault_status",
+                        "estimated_duration_seconds": 10,
+                        "execution_tier": 1
+                    },
+                    {
+                        "action_id": "macos_filevault_enable",
+                        "generic_action": "macos_filevault_enable",
+                        "display_name": "Enable FileVault",
+                        "description": "Enables FileVault full-disk encryption on macOS and returns the generated recovery key.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.macos_filevault_enable",
+                        "estimated_duration_seconds": 60,
+                        "execution_tier": 3
+                    },
+                    {
+                        "action_id": "macos_gatekeeper_status",
+                        "generic_action": "macos_gatekeeper_status",
+                        "display_name": "Gatekeeper Status",
+                        "description": "Returns the current Gatekeeper enforcement status on macOS.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "action_type": "read",
+                        "executor": "nexplane_agent.macos_gatekeeper_status",
+                        "estimated_duration_seconds": 10,
+                        "execution_tier": 1
+                    },
+                    {
+                        "action_id": "macos_gatekeeper_enable",
+                        "generic_action": "macos_gatekeeper_enable",
+                        "display_name": "Enable Gatekeeper",
+                        "description": "Enables Gatekeeper app verification on macOS via spctl --master-enable.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.macos_gatekeeper_enable",
+                        "estimated_duration_seconds": 10,
+                        "execution_tier": 3
+                    },
+                    {
+                        "action_id": "macos_gatekeeper_disable",
+                        "generic_action": "macos_gatekeeper_disable",
+                        "display_name": "Disable Gatekeeper",
+                        "description": "Disables Gatekeeper app verification on macOS via spctl --master-disable.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.macos_gatekeeper_disable",
+                        "estimated_duration_seconds": 10,
+                        "execution_tier": 3
+                    },
+                    {
+                        "action_id": "macos_softwareupdate_list",
+                        "generic_action": "macos_softwareupdate_list",
+                        "display_name": "List macOS Software Updates",
+                        "description": "Lists all available software updates via softwareupdate --list --all.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "action_type": "read",
+                        "executor": "nexplane_agent.macos_softwareupdate_list",
+                        "estimated_duration_seconds": 60,
+                        "execution_tier": 1
+                    },
+                    {
+                        "action_id": "macos_softwareupdate_install",
+                        "generic_action": "macos_softwareupdate_install",
+                        "display_name": "Install macOS Software Updates",
+                        "description": "Installs all available updates or a specific labeled update via softwareupdate --install.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [
+                            {
+                                "name": "label",
+                                "type": "string",
+                                "required": false,
+                                "description": "Specific update label to install. If omitted, all available updates are installed."
+                            }
+                        ],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.macos_softwareupdate_install",
+                        "estimated_duration_seconds": 1800,
+                        "execution_tier": 3
+                    },
+                    {
+                        "action_id": "macos_profiles_list",
+                        "generic_action": "macos_profiles_list",
+                        "display_name": "List Configuration Profiles",
+                        "description": "Lists all installed MDM configuration profiles on macOS.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "action_type": "read",
+                        "executor": "nexplane_agent.macos_profiles_list",
+                        "estimated_duration_seconds": 15,
+                        "execution_tier": 1
+                    },
+                    {
+                        "action_id": "macos_launchctl_list",
+                        "generic_action": "macos_launchctl_list",
+                        "display_name": "List launchd Services",
+                        "description": "Lists all running launchd services and daemons on macOS.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "action_type": "read",
+                        "executor": "nexplane_agent.macos_launchctl_list",
+                        "estimated_duration_seconds": 10,
+                        "execution_tier": 1
+                    },
+                    {
+                        "action_id": "macos_sysinfo",
+                        "generic_action": "macos_sysinfo",
+                        "display_name": "macOS System Info",
+                        "description": "Returns macOS version, build number, hardware model, and serial number.",
+                        "applicable_asset_types": ["server", "workstation"],
+                        "parameters": [],
+                        "action_type": "read",
+                        "executor": "nexplane_agent.macos_sysinfo",
+                        "estimated_duration_seconds": 15,
+                        "execution_tier": 1
                     }
                 ]
 }
