@@ -57,6 +57,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   ansible_local: "Ansible (Local CLI)",
   oci: "Oracle Cloud Infrastructure",
   ldap: "LDAP / Active Directory",
+  sccm: "SCCM / MECM",
 };
 
 const CONNECTOR_ICONS: Record<ConnectorType, string> = {
@@ -106,6 +107,7 @@ const CONNECTOR_ICONS: Record<ConnectorType, string> = {
   ansible_local: "⚙️",
   oci: "🔶",
   ldap: "🏢",
+  sccm: "🖥️",
 };
 
 // Primary ingest action per connector type — controls Run Discovery button and Schedule sync badge

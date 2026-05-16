@@ -189,6 +189,16 @@ class ChangeType(str, enum.Enum):
     oci_dns_zone_create = "oci_dns_zone_create"
     oci_dns_record_upsert = "oci_dns_record_upsert"
     # Agent command group change types (Plans 4)
+    # macOS agent commands
+    macos_filevault_status = "macos_filevault_status"
+    macos_filevault_enable = "macos_filevault_enable"
+    macos_gatekeeper_enable = "macos_gatekeeper_enable"
+    macos_gatekeeper_disable = "macos_gatekeeper_disable"
+    macos_softwareupdate_list = "macos_softwareupdate_list"
+    macos_softwareupdate_install = "macos_softwareupdate_install"
+    macos_profiles_list = "macos_profiles_list"
+    macos_launchctl_list = "macos_launchctl_list"
+    macos_sysinfo = "macos_sysinfo"
     agent_linux_patch = "agent_linux_patch"
     agent_ossecurity = "agent_ossecurity"
     agent_linuxauth = "agent_linuxauth"
@@ -363,6 +373,11 @@ class ChangeType(str, enum.Enum):
     winrm_install_agent = "winrm_install_agent"
     winrm_execute_template = "winrm_execute_template"
     winrm_collect_diagnostics = "winrm_collect_diagnostics"
+    # SCCM / MECM connector
+    sccm_deploy_application = "sccm_deploy_application"
+    sccm_run_script = "sccm_run_script"
+    sccm_collect_inventory = "sccm_collect_inventory"
+    sccm_trigger_client_action = "sccm_trigger_client_action"
 
 
 class RiskLevel(str, enum.Enum):

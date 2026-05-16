@@ -1,0 +1,172 @@
+{
+    "connector_type": "sccm",
+    "display_name": "SCCM / MECM (Microsoft Endpoint Configuration Manager)",
+    "credential_fields": [
+        {
+            "name": "server",
+            "label": "SCCM Server Hostname / IP",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "username",
+            "label": "Username (DOMAIN\\user or user@domain)",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "password",
+            "label": "Password",
+            "type": "password",
+            "required": true
+        },
+        {
+            "name": "site_code",
+            "label": "Site Code (3-letter, e.g. PS1)",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "verify_ssl",
+            "label": "Verify SSL Certificate",
+            "type": "string",
+            "required": false,
+            "default": "false"
+        },
+        {
+            "name": "use_ntlm",
+            "label": "Use NTLM Authentication (set false to use Basic Auth)",
+            "type": "string",
+            "required": false,
+            "default": "true"
+        }
+    ],
+    "actions": [
+        {
+            "action_id": "deploy_application",
+            "generic_action": "deploy_application",
+            "action_type": "change",
+            "execution_tier": 5,
+            "display_name": "Deploy Application",
+            "description": "Deploys an SCCM application to a device or user collection. Rollback removes the deployment.",
+            "applicable_asset_types": ["server", "endpoint"],
+            "parameters": [
+                {
+                    "name": "app_name",
+                    "type": "string",
+                    "required": true,
+                    "description": "Exact name of the application as registered in SCCM"
+                },
+                {
+                    "name": "collection_id",
+                    "type": "string",
+                    "required": true,
+                    "description": "Target SCCM collection ID (e.g. SMS00001)"
+                },
+                {
+                    "name": "deployment_purpose",
+                    "type": "string",
+                    "required": false,
+                    "default": "Required",
+                    "description": "Required or Available"
+                }
+            ],
+            "executor": "sccm.deploy_application",
+            "rollback_action": "remove_deployment",
+            "estimated_duration_seconds": 30,
+            "blast_radius_hint": "collection_wide"
+        },
+        {
+            "action_id": "remove_deployment",
+            "generic_action": "remove_deployment",
+            "action_type": "change",
+            "execution_tier": 5,
+            "display_name": "Remove Application Deployment",
+            "description": "Removes an application deployment from a collection (rollback for deploy_application).",
+            "applicable_asset_types": ["server", "endpoint"],
+            "parameters": [
+                {
+                    "name": "deployment_id",
+                    "type": "string",
+                    "required": true,
+                    "description": "SCCM DeploymentID to remove"
+                }
+            ],
+            "executor": "sccm.deploy_application",
+            "estimated_duration_seconds": 15
+        },
+        {
+            "action_id": "run_script",
+            "generic_action": "run_script",
+            "action_type": "change",
+            "execution_tier": 5,
+            "display_name": "Run Approved Script",
+            "description": "Runs a pre-approved SCCM script (by GUID) against a collection. Scripts must be approved in the SCCM console — no freeform execution.",
+            "applicable_asset_types": ["server", "endpoint"],
+            "parameters": [
+                {
+                    "name": "script_guid",
+                    "type": "string",
+                    "required": true,
+                    "description": "GUID of the pre-approved SCCM script"
+                },
+                {
+                    "name": "collection_id",
+                    "type": "string",
+                    "required": true,
+                    "description": "Target collection ID"
+                }
+            ],
+            "executor": "sccm.run_script",
+            "estimated_duration_seconds": 60,
+            "blast_radius_hint": "collection_wide",
+            "safety_notes": [
+                "Only scripts pre-approved in the SCCM console can be executed — no freeform PowerShell permitted"
+            ]
+        },
+        {
+            "action_id": "collect_inventory",
+            "generic_action": "collect_inventory",
+            "action_type": "read",
+            "execution_tier": 5,
+            "display_name": "Collect Software Inventory",
+            "description": "Pulls hardware and software inventory for a specific device from SCCM. Read-only.",
+            "applicable_asset_types": ["server", "endpoint"],
+            "parameters": [
+                {
+                    "name": "device_name",
+                    "type": "string",
+                    "required": true,
+                    "description": "NetBIOS name of the device as registered in SCCM"
+                }
+            ],
+            "executor": "sccm.collect_inventory",
+            "estimated_duration_seconds": 15
+        },
+        {
+            "action_id": "trigger_client_action",
+            "generic_action": "trigger_client_action",
+            "action_type": "change",
+            "execution_tier": 5,
+            "display_name": "Trigger Client Action",
+            "description": "Triggers a client policy action on all devices in a collection (e.g. MachinePolicyRetrieve, HardwareInventory).",
+            "applicable_asset_types": ["server", "endpoint"],
+            "parameters": [
+                {
+                    "name": "collection_id",
+                    "type": "string",
+                    "required": true,
+                    "description": "Target collection ID"
+                },
+                {
+                    "name": "action",
+                    "type": "string",
+                    "required": true,
+                    "description": "MachinePolicyRetrieve | SoftwareInventory | HardwareInventory | UpdateDeploymentReEval"
+                }
+            ],
+            "executor": "sccm.trigger_client_action",
+            "estimated_duration_seconds": 10
+        }
+    ]
+}
