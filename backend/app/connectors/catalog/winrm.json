@@ -1,0 +1,154 @@
+{
+    "connector_type": "winrm",
+    "display_name": "WinRM (Windows Remote Management)",
+    "credential_fields": [
+        {
+            "name": "hostname",
+            "label": "Hostname / IP",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "port",
+            "label": "Port",
+            "type": "string",
+            "required": false,
+            "default": "5985"
+        },
+        {
+            "name": "username",
+            "label": "Username",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "password",
+            "label": "Password",
+            "type": "password",
+            "required": true
+        },
+        {
+            "name": "use_ssl",
+            "label": "Use SSL (HTTPS on port 5986)",
+            "type": "string",
+            "required": false,
+            "default": "false"
+        }
+    ],
+    "actions": [
+        {
+            "action_id": "check_prerequisites",
+            "generic_action": "check_prerequisites",
+            "action_type": "change",
+            "execution_tier": 5,
+            "display_name": "Check Prerequisites",
+            "description": "Verifies OS version (Windows Server 2016+), disk space, .NET version, and WinRM accessibility",
+            "applicable_asset_types": ["server"],
+            "parameters": [],
+            "executor": "winrm.check_prerequisites",
+            "estimated_duration_seconds": 15
+        },
+        {
+            "action_id": "download_agent",
+            "generic_action": "download_agent",
+            "action_type": "change",
+            "execution_tier": 5,
+            "display_name": "Download Nexplane Agent",
+            "description": "Downloads the Nexplane agent binary to C:\\nexplane\\nexplane-agent.exe via Invoke-WebRequest",
+            "applicable_asset_types": ["server"],
+            "parameters": [
+                {
+                    "name": "agent_url",
+                    "type": "string",
+                    "required": true
+                }
+            ],
+            "executor": "winrm.download_agent",
+            "rollback_action": "remove_agent",
+            "estimated_duration_seconds": 60
+        },
+        {
+            "action_id": "remove_agent",
+            "generic_action": "remove_agent",
+            "action_type": "change",
+            "execution_tier": 5,
+            "display_name": "Remove Agent Binary",
+            "description": "Removes the downloaded agent binary from C:\\nexplane\\nexplane-agent.exe",
+            "applicable_asset_types": ["server"],
+            "parameters": [],
+            "executor": "winrm.download_agent",
+            "estimated_duration_seconds": 10
+        },
+        {
+            "action_id": "install_agent",
+            "generic_action": "install_agent",
+            "action_type": "change",
+            "execution_tier": 5,
+            "display_name": "Install Nexplane Agent Service",
+            "description": "Creates and starts the nexplane-agent Windows service",
+            "applicable_asset_types": ["server"],
+            "parameters": [
+                {
+                    "name": "agent_secret",
+                    "type": "string",
+                    "required": true
+                },
+                {
+                    "name": "control_plane_url",
+                    "type": "string",
+                    "required": true
+                }
+            ],
+            "executor": "winrm.install_agent",
+            "rollback_action": "uninstall_agent",
+            "estimated_duration_seconds": 30,
+            "blast_radius_hint": "host_service_interruption"
+        },
+        {
+            "action_id": "uninstall_agent",
+            "generic_action": "uninstall_agent",
+            "action_type": "change",
+            "execution_tier": 5,
+            "display_name": "Uninstall Nexplane Agent Service",
+            "description": "Stops and deletes the nexplane-agent Windows service",
+            "applicable_asset_types": ["server"],
+            "parameters": [],
+            "executor": "winrm.install_agent",
+            "estimated_duration_seconds": 15
+        },
+        {
+            "action_id": "execute_template",
+            "generic_action": "execute_template",
+            "action_type": "change",
+            "execution_tier": 5,
+            "display_name": "Execute Approved PowerShell Template",
+            "description": "Executes a pre-approved PowerShell template by name. No freeform scripts.",
+            "applicable_asset_types": ["server"],
+            "parameters": [
+                {
+                    "name": "template_id",
+                    "type": "string",
+                    "required": true
+                }
+            ],
+            "executor": "winrm.execute_template",
+            "estimated_duration_seconds": 30,
+            "blast_radius_hint": "host_service_interruption",
+            "safety_notes": [
+                "Only approved templates may be executed — no freeform PowerShell permitted"
+            ]
+        },
+        {
+            "action_id": "collect_diagnostics",
+            "generic_action": "collect_diagnostics",
+            "action_type": "change",
+            "execution_tier": 5,
+            "display_name": "Collect Diagnostics",
+            "description": "Collects System event log, running services list, and systeminfo from the target host",
+            "applicable_asset_types": ["server"],
+            "parameters": [],
+            "executor": "winrm.collect_diagnostics",
+            "estimated_duration_seconds": 20
+        }
+    ]
+}
