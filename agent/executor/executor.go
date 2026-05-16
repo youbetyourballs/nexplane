@@ -25,6 +25,7 @@ import (
 	"nexplane-agent/commands/linuxpatch"
 	"nexplane-agent/commands/winpatch"
 	"nexplane-agent/commands/credrotation"
+	"nexplane-agent/commands/macos"
 )
 
 // Result is the outcome of a command execution.
@@ -129,6 +130,17 @@ var commands = map[string]CommandFunc{
 	// Windows patching (Spec 5f)
 	"apply_windows_patches":      winpatch.ApplyWindowsPatchesExecute,
 	"audit_windows_patch_status": winpatch.AuditWindowsPatchStatusExecute,
+	// macOS hardening
+	"filevault_status":       macos.FilevaultStatusExecute,
+	"filevault_enable":       macos.FilevaultEnableExecute,
+	"gatekeeper_status":      macos.GatekeeperStatusExecute,
+	"gatekeeper_enable":      macos.GatekeeperEnableExecute,
+	"gatekeeper_disable":     macos.GatekeeperDisableExecute,
+	"softwareupdate_list":    macos.SoftwareupdateListExecute,
+	"softwareupdate_install": macos.SoftwareupdateInstallExecute,
+	"profiles_list":          macos.ProfilesListExecute,
+	"launchctl_list":         macos.LaunchctlListExecute,
+	"macos_sysinfo":          macos.MacosSysinfoExecute,
 	// Credential rotation
 	"rotate_ssh_keys":        credrotation.SSHKeyExecute,
 	"rotate_db_creds":        credrotation.DBRotateExecute,
@@ -194,6 +206,10 @@ var rollbacks = map[string]CommandFunc{
 	"apply_linux_patches":   linuxpatch.ApplyLinuxPatchesRollback,
 	// Windows patching rollback
 	"apply_windows_patches": winpatch.ApplyWindowsPatchesRollback,
+	// macOS rollbacks
+	"filevault_enable":   macos.FilevaultEnableRollback,
+	"gatekeeper_enable":  macos.GatekeeperEnableRollback,
+	"gatekeeper_disable": macos.GatekeeperDisableRollback,
 	// Credential rotation rollback
 	"rotate_ssh_keys":        credrotation.SSHKeyRollback,
 	"rotate_db_creds":        credrotation.DBRotateRollback,
