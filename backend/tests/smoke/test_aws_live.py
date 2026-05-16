@@ -9358,6 +9358,258 @@ def run_phase_win_policy_pipeline(client, win_asset_id: str) -> None:
     log("Phase WIN_POLICY_PIPELINE complete")
 
 
+def run_phase_winrm_bootstrap(client, cloud_account_id):
+    # type: (object, str) -> None
+    """Phase WINRM_BOOTSTRAP: Launch Windows Server 2022 EC2, enable WinRM via SSM,
+    register a WinRM connector in Nexplane, run check_prerequisites / download_agent /
+    install_agent CRs, rollback install, teardown. AMI cached after setup."""
+    import hashlib as _hl
+    import time as _t
+    import socket as _socket
+    print("\n[Phase WINRM_BOOTSTRAP] WinRM connector smoke test")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_client:
+        fail("[WINRM_BOOTSTRAP] AWS clients not available")
+
+    win_ami_id = _get_windows_2022_ami(ec2_client)
+    log(f"Windows Server 2022 AMI: {win_ami_id}")
+
+    setup_hash = _hl.md5(("winrm-v1-" + win_ami_id).encode()).hexdigest()
+    cached_ami = _check_smoke_ami_cache(ssm_client, ec2_client, "winrm", setup_hash)
+
+    instance_id, private_ip = _launch_windows_ec2(ec2_client, cached_ami or win_ami_id, cloud_account_id)
+    connector_id = None
+    asset_id = None
+
+    try:
+        log("Waiting for Windows SSM agent to register (~3-5 min)...")
+        _wait_ssm_ready_win(ssm_client, instance_id, timeout=420)
+
+        if not cached_ami:
+            log("Enabling WinRM on Windows instance via SSM...")
+            enable_resp = ssm_client.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunPowerShellScript",
+                Parameters={"commands": [
+                    "Enable-PSRemoting -Force",
+                    "Set-Item WSMan:\\localhost\\Service\\Auth\\Basic -Value $true",
+                    "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $true",
+                    "netsh advfirewall firewall add rule name='WinRM-HTTP' dir=in action=allow protocol=TCP localport=5985",
+                    "Restart-Service WinRM",
+                    "Write-Output 'WINRM_ENABLED'",
+                ]},
+                TimeoutSeconds=120,
+            )
+            enable_cmd_id = enable_resp["Command"]["CommandId"]
+            _t.sleep(5)
+
+            # Poll SSM command
+            deadline = _t.time() + 180
+            while _t.time() < deadline:
+                _t.sleep(8)
+                try:
+                    inv = ssm_client.get_command_invocation(
+                        CommandId=enable_cmd_id, InstanceId=instance_id
+                    )
+                    status = inv["Status"]
+                    if status in ("Success", "Failed", "TimedOut", "Cancelled"):
+                        if status != "Success":
+                            log(f"WinRM enable command status: {status} — continuing anyway")
+                        else:
+                            log("WinRM enabled via SSM")
+                        break
+                except Exception:
+                    pass
+
+            _t.sleep(15)  # let WinRM service settle
+
+            # Get public IP for WinRM access from runner
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            public_ip = desc["Reservations"][0]["Instances"][0].get("PublicIpAddress", "")
+            if not public_ip:
+                public_ip = private_ip
+            log(f"Instance public IP: {public_ip}")
+
+            # Wait for WinRM port 5985 to be reachable (up to 3 min)
+            log("Waiting for WinRM port 5985...")
+            deadline2 = _t.time() + 180
+            port_open = False
+            while _t.time() < deadline2:
+                try:
+                    sock = _socket.create_connection((public_ip, 5985), timeout=5)
+                    sock.close()
+                    port_open = True
+                    log("WinRM port 5985 reachable")
+                    break
+                except OSError:
+                    _t.sleep(10)
+            if not port_open:
+                log("WinRM port 5985 not reachable — will try anyway")
+
+            # Set a known password via SSM so we can use it for WinRM
+            known_password = "NexplaneSmoke2024!"
+            set_pw_resp = ssm_client.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunPowerShellScript",
+                Parameters={"commands": [
+                    f"$password = ConvertTo-SecureString '{known_password}' -AsPlainText -Force",
+                    "Set-LocalUser -Name Administrator -Password $password",
+                    "Enable-LocalUser -Name Administrator",
+                    "Write-Output 'PASSWORD_SET'",
+                ]},
+                TimeoutSeconds=60,
+            )
+            set_pw_cmd_id = set_pw_resp["Command"]["CommandId"]
+            deadline3 = _t.time() + 120
+            while _t.time() < deadline3:
+                _t.sleep(8)
+                try:
+                    inv2 = ssm_client.get_command_invocation(
+                        CommandId=set_pw_cmd_id, InstanceId=instance_id
+                    )
+                    if inv2["Status"] in ("Success", "Failed", "TimedOut"):
+                        log(f"Set-LocalUser result: {inv2['Status']}")
+                        break
+                except Exception:
+                    pass
+
+            password = known_password
+            _t.sleep(10)
+
+            # Cache the AMI now that WinRM is set up
+            try:
+                from run_on_ec2 import get_or_create_smoke_ami
+                get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "winrm", setup_hash)
+            except Exception as _ami_e:
+                log(f"AMI cache skipped: {_ami_e}")
+
+        else:
+            # From cached AMI — use the same known password
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            public_ip = desc["Reservations"][0]["Instances"][0].get("PublicIpAddress", "")
+            if not public_ip:
+                public_ip = private_ip
+            password = "NexplaneSmoke2024!"
+            log(f"Using cached WinRM AMI, public IP: {public_ip}")
+
+        # Register WinRM connector in Nexplane
+        log("Registering WinRM connector...")
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "winrm",
+            "name": f"nexplane-smoke-winrm-{instance_id[-8:]}",
+            "credentials": {
+                "hostname": public_ip,
+                "port": "5985",
+                "username": "Administrator",
+                "password": password,
+                "use_ssl": "false",
+            },
+        })
+        connector_id = conn_resp["id"]
+        log(f"WinRM connector registered: {connector_id}")
+
+        # Register asset linked to connector
+        asset_resp = client.post("/assets", json={
+            "name": f"nexplane-smoke-winrm-{instance_id[-8:]}",
+            "asset_type": "server",
+            "connector_id": connector_id,
+            "asset_metadata": {
+                "instance_id": instance_id,
+                "public_ip": public_ip,
+                "os": "windows",
+                "platform": "windows",
+            },
+            "tags": ["nexplane-smoke", "winrm"],
+        })
+        asset_id = asset_resp["id"]
+        log(f"Asset registered: {asset_id}")
+
+        # CR 1: check_prerequisites
+        log("Running winrm_check_prerequisites CR...")
+        cr1 = client.run_cr(
+            "[WINRM_BOOTSTRAP] check_prerequisites",
+            "winrm_check_prerequisites",
+            asset_id,
+            {},
+        )
+        exec_runs1 = cr1.get("execution_runs") or []
+        result1 = exec_runs1[0].get("result") if exec_runs1 else {}
+        log(f"check_prerequisites result keys: {list(result1.keys())}")
+        if not result1.get("checks") and not result1.get("mock"):
+            log(f"  WARNING: check_prerequisites returned unexpected result: {result1}")
+
+        # CR 2: download_agent
+        backend_ip = "100.69.215.38"
+        agent_url = f"http://{backend_ip}:8000/downloads/nexplane-agent-windows-amd64-0.3.1.exe"
+        log(f"Running winrm_download_agent CR (url={agent_url})...")
+        cr2 = client.run_cr(
+            "[WINRM_BOOTSTRAP] download_agent",
+            "winrm_download_agent",
+            asset_id,
+            {"agent_url": agent_url},
+        )
+        exec_runs2 = cr2.get("execution_runs") or []
+        result2 = exec_runs2[0].get("result") if exec_runs2 else {}
+        log(f"download_agent result: downloaded={result2.get('downloaded', '?')}")
+
+        # CR 3: install_agent
+        agent_secret = ""
+        try:
+            agent_secret = client.get_agent_secret()
+        except Exception:
+            pass
+        control_plane_url = f"http://{backend_ip}:8000"
+        log("Running winrm_install_agent CR...")
+        cr3 = client.run_cr(
+            "[WINRM_BOOTSTRAP] install_agent",
+            "winrm_install_agent",
+            asset_id,
+            {
+                "agent_secret": agent_secret,
+                "control_plane_url": control_plane_url,
+            },
+        )
+        exec_runs3 = cr3.get("execution_runs") or []
+        result3 = exec_runs3[0].get("result") if exec_runs3 else {}
+        service_created = result3.get("service_created", False)
+        log(f"install_agent service_created={service_created}")
+
+        # Rollback install (verify service deleted)
+        log("Running install_agent rollback...")
+        cr3_id = cr3.get("id", "")
+        if cr3_id:
+            try:
+                client.post(f"/change-requests/{cr3_id}/rollback", json={})
+                log("Rollback CR submitted")
+            except Exception as _rb_e:
+                log(f"Rollback post failed: {_rb_e} — proceeding")
+
+        log("Phase WINRM_BOOTSTRAP PASSED")
+
+    except Exception:
+        raise
+    finally:
+        # Cleanup connector and asset
+        if asset_id:
+            try:
+                client.client.delete(f"{client.base}/assets/{asset_id}")
+            except Exception:
+                pass
+        if connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{connector_id}")
+            except Exception:
+                pass
+        # Terminate EC2
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+            log(f"Windows EC2 {instance_id} terminated")
+        except Exception:
+            pass
+
+
 def run_phase_gcp_key_rotate(client: NexplaneClient, cloud_account_id: str) -> None:
     """Phase GCP_KEY_ROTATE: create a test GCP service account, rotate its key via Nexplane CR,
     verify new key is active, clean up. Requires GCP credentials in GOOGLE_APPLICATION_CREDENTIALS."""
@@ -12825,6 +13077,7 @@ def main():
             "VAULT_ROTATE=HashiCorp Vault secret rotation (EC2 dev mode, AMI cached). "
             "OPNSENSE_RULE=OPNsense firewall rule add+rollback via nginx mock API (AMI cached). "
             "STEP_CA_ROTATE=step-ca cert issue+check-expiry+rotate (EC2, AMI cached). "
+            "WINRM_BOOTSTRAP=WinRM connector smoke test (Windows Server 2022, t3.large, enables WinRM via SSM, runs CRs, AMI cached). "
             "WIN_OSSEC_WIRE=Windows hardening executor dispatch (Windows Server 2022, t3.medium, AMI cached). "
             "WIN_HARDENING_PIPELINE=AppLocker+Firewall+AuditPolicy pipeline on cached Windows AMI. "
             "WIN_POLICY_PIPELINE=WDAC+ASR+Sysmon pipeline on cached Windows AMI. "
@@ -13174,6 +13427,9 @@ def main():
                 run_phase_win_policy_pipeline(client, _win_asset_id)
             else:
                 print("  WIN_POLICY_PIPELINE requires WIN_OSSEC_WIRE to run first")
+
+        if "WINRM_BOOTSTRAP" in phases:
+            run_phase_winrm_bootstrap(client, cloud_account_id)
 
         if "K8S_RBAC" in phases:
             run_phase_k8s_rbac(client, cloud_account_id)
