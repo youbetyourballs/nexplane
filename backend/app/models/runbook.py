@@ -17,6 +17,7 @@ class Runbook(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     tags: Mapped[list] = mapped_column(ARRAY(String), nullable=False, default=list)
     is_seed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    auto_execute: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
