@@ -15054,16 +15054,25 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
         cached_ami = _check_smoke_ami_cache(ssm_boto, ec2_client, "dc-smoke", setup_hash)
         launch_ami = cached_ami or win_ami_id
 
+        # t3.medium: 4GB RAM sufficient for smoke DC. t3.large hits Free Tier
+        # Windows AMI restriction on this account (same limit as WINRM_BOOTSTRAP).
+        _dc_instance_type = "t3.medium"
+        _, _dc_subnet_id = get_default_vpc_subnet(ec2_client, _dc_instance_type)
         log(
-            f"AD_DC_INTEGRITY: launching t3.large Windows instance from "
+            f"AD_DC_INTEGRITY: launching {_dc_instance_type} Windows instance from "
             f"{'cached' if cached_ami else 'base'} AMI {launch_ami}..."
         )
         launch_resp = ec2_client.run_instances(
             ImageId=launch_ami,
-            InstanceType="t3.large",
+            InstanceType=_dc_instance_type,
             MinCount=1,
             MaxCount=1,
             IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+            NetworkInterfaces=[{
+                "DeviceIndex": 0,
+                "SubnetId": _dc_subnet_id,
+                "AssociatePublicIpAddress": True,
+            }],
             TagSpecifications=[{
                 "ResourceType": "instance",
                 "Tags": [
