@@ -7343,6 +7343,8 @@ echo "PG_READY"
             asset_resp = client.post("/assets", json={
                 "name": f"smoke-postgres-{instance_id}",
                 "asset_type": "server",
+                "environment": "staging",
+                "criticality": "medium",
                 "organization_id": cloud_account_id,
                 "attributes": {"instance_id": instance_id, "private_ip": private_ip},
             })
@@ -7628,6 +7630,8 @@ echo "REDIS_READY"
             asset_resp = client.post("/assets", json={
                 "name": f"smoke-redis-{instance_id}",
                 "asset_type": "server",
+                "environment": "staging",
+                "criticality": "medium",
                 "organization_id": cloud_account_id,
                 "attributes": {"instance_id": instance_id, "private_ip": private_ip},
             })
@@ -7938,6 +7942,8 @@ echo "MONGO_READY"
             asset_resp = client.post("/assets", json={
                 "name": f"smoke-mongodb-{instance_id}",
                 "asset_type": "server",
+                "environment": "staging",
+                "criticality": "medium",
                 "organization_id": cloud_account_id,
                 "attributes": {"instance_id": instance_id, "private_ip": private_ip},
             })
@@ -8702,6 +8708,8 @@ def run_phase_nessus_scan(client: NexplaneClient, cloud_account_id: str) -> None
             asset_resp = client.post("/assets", json={
                 "name": "nexplane-smoke-nessus-target",
                 "asset_type": "server",
+                "environment": "staging",
+                "criticality": "medium",
                 "properties": {"ip": private_ip, "hostname": "nexplane-smoke-nessus-target"},
             })
             asset_id = asset_resp.get("id", cloud_account_id)
@@ -9273,6 +9281,8 @@ def _register_windows_asset(client, instance_id: str, private_ip: str, cloud_acc
     resp = client.post("/assets", json={
         "name": f"nexplane-smoke-windows-{instance_id[-8:]}",
         "asset_type": "server",
+        "environment": "staging",
+        "criticality": "medium",
         "asset_metadata": {
             "instance_id": instance_id,
             "private_ip": private_ip,
@@ -9746,6 +9756,8 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
             asset_resp = client.post("/assets", json={
                 "name": f"nexplane-smoke-winrm-{instance_id[-8:]}",
                 "asset_type": "server",
+                "environment": "staging",
+                "criticality": "medium",
                 "connector_id": connector_id,
                 "asset_metadata": {
                     "instance_id": instance_id,
@@ -12533,8 +12545,10 @@ def run_phase_okta_disable(client: NexplaneClient) -> dict:
     try:
         # Create a test user (staged, no activation)
         import random, string
-        rand_suffix = "".join(random.choices(string.ascii_lowercase, k=6))
-        login = f"nexplane-smoke-{rand_suffix}@example.com"
+        rand_suffix = "".join(random.choices(string.ascii_lowercase, k=8))
+        # Use the Okta org domain for the email — always accepted in developer orgs
+        okta_org = okta_domain.replace("https://", "").replace("http://", "").rstrip("/")
+        login = f"nexplane.smoke.{rand_suffix}@{okta_org}"
         user_payload = {
             "profile": {
                 "firstName": "NexplaneSmoke",
@@ -12542,7 +12556,7 @@ def run_phase_okta_disable(client: NexplaneClient) -> dict:
                 "email": login,
                 "login": login,
             },
-            "credentials": {"password": {"value": "Smoke@Test1234!"}},
+            # No credentials — staged user avoids password policy issues in dev orgs
         }
         with httpx.Client() as http:
             resp = http.post(f"{base_url}/users?activate=false", headers=headers, json=user_payload)
@@ -15294,6 +15308,8 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
         asset_resp = client.post("/assets", json={
             "name": f"nexplane-smoke-dc-{instance_id[-8:]}",
             "asset_type": "server",
+            "environment": "staging",
+            "criticality": "medium",
             "hostname": private_ip,
             "tags": ["nexplane-smoke", "active-directory"],
         })
