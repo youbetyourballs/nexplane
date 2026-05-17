@@ -8117,7 +8117,7 @@ def run_phase_openvas_scan(client: NexplaneClient, cloud_account_id: str) -> Non
         "    security_opt:\\n"
         "      - seccomp=unconfined\\n"
         "      - apparmor=unconfined\\n"
-        "    command: [ospd-openvas, -f, --config, /etc/gvm/ospd-openvas.conf, -m, 666]\\n"
+        "    command: [ospd-openvas, -f, --config, /etc/gvm/ospd-openvas.conf, -m, \"666\"]\\n"
         "    volumes:\\n"
         "      - ospd_openvas_socket_vol:/var/run/ospd\\n"
         "  gsa:\\n"
