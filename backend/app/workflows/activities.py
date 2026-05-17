@@ -158,6 +158,7 @@ async def activity_execute_change(
                         _fallback = _conn_result.scalar_one_or_none()
                         if _fallback:
                             connector = _fallback
+                            await connector_service._attach_credentials(connector, db)
                             logger.info("Step %s: using fallback connector %s (type=%s)",
                                         step.get("step_number"), connector.id, connector_type)
                 except Exception as _lookup_exc:
