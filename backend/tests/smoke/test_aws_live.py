@@ -7345,7 +7345,7 @@ echo "PG_READY"
                 "asset_type": "server",
                 "environment": "staging",
                 "criticality": "medium",
-                "organization_id": cloud_account_id,
+                "connector_id": pg_connector_id,
                 "attributes": {"instance_id": instance_id, "private_ip": private_ip},
             })
             asset_id = asset_resp.get("id") or asset_resp.get("asset_id", "")
@@ -7632,7 +7632,7 @@ echo "REDIS_READY"
                 "asset_type": "server",
                 "environment": "staging",
                 "criticality": "medium",
-                "organization_id": cloud_account_id,
+                "connector_id": redis_connector_id,
                 "attributes": {"instance_id": instance_id, "private_ip": private_ip},
             })
             asset_id = asset_resp.get("id") or asset_resp.get("asset_id", "")
@@ -7944,7 +7944,7 @@ echo "MONGO_READY"
                 "asset_type": "server",
                 "environment": "staging",
                 "criticality": "medium",
-                "organization_id": cloud_account_id,
+                "connector_id": mongo_connector_id,
                 "attributes": {"instance_id": instance_id, "private_ip": private_ip},
             })
             asset_id = asset_resp.get("id") or asset_resp.get("asset_id", "")
