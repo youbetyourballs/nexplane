@@ -12519,6 +12519,9 @@ def run_phase_okta_disable(client: NexplaneClient) -> dict:
         print("SKIP: OKTA credentials not in SSM, skipping OKTA_DISABLE phase")
         return {"status": "skipped", "reason": "no credentials"}
 
+    # Ensure domain has https:// prefix — SSM value stored without protocol
+    if not okta_domain.startswith("http"):
+        okta_domain = "https://" + okta_domain
     base_url = okta_domain.rstrip("/") + "/api/v1"
     headers = {
         "Authorization": f"SSWS {okta_api_token}",
@@ -15054,9 +15057,9 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
         cached_ami = _check_smoke_ami_cache(ssm_boto, ec2_client, "dc-smoke", setup_hash)
         launch_ami = cached_ami or win_ami_id
 
-        # t3.medium: 4GB RAM sufficient for smoke DC. t3.large hits Free Tier
-        # Windows AMI restriction on this account (same limit as WINRM_BOOTSTRAP).
-        _dc_instance_type = "t3.medium"
+        # t3.small: same as WINRM_BOOTSTRAP — Free Tier Windows AMI restriction
+        # applies to t3.medium and larger on this account.
+        _dc_instance_type = "t3.small"
         _dc_vpcs = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
         _dc_vpc_id = _dc_vpcs[0]["VpcId"]
         _dc_subnets = ec2_client.describe_subnets(
