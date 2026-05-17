@@ -378,6 +378,22 @@ class ChangeType(str, enum.Enum):
     sccm_run_script = "sccm_run_script"
     sccm_collect_inventory = "sccm_collect_inventory"
     sccm_trigger_client_action = "sccm_trigger_client_action"
+    # AD/DC disaster recovery
+    dc_integrity_check = "dc_integrity_check"
+    ad_forest_snapshot = "ad_forest_snapshot"
+    ad_forest_restore = "ad_forest_restore"
+    ad_tiered_backup = "ad_tiered_backup"
+    discover_ad_snapshots = "discover_ad_snapshots"
+    # AD DNS management
+    list_dns_records = "list_dns_records"
+    create_dns_record = "create_dns_record"
+    delete_dns_record = "delete_dns_record"
+    update_dns_record = "update_dns_record"
+    # BIND DNS
+    bind_list_zone = "bind_list_zone"
+    bind_create_record = "bind_create_record"
+    bind_delete_record = "bind_delete_record"
+    bind_check_record = "bind_check_record"
 
 
 class RiskLevel(str, enum.Enum):
