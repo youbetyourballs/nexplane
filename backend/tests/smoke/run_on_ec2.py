@@ -815,8 +815,11 @@ Examples:
         # Run the test in the background (SSM TimeoutSeconds max is 2800 ~47 min,
         # but multi-phase runs can take 60-90+ min). We launch via nohup and poll.
         bg_launch_script = (
-            f"nohup sh -c '({test_script}) 2>&1 | tee /tmp/smoke_test.log; "
-            "echo SMOKE_EXIT_CODE:${{PIPESTATUS[0]}} >> /tmp/smoke_test.log; "
+            # Use bash explicitly (not sh/dash) so PIPESTATUS is available.
+            # The trap ensures smoke_done is always created even on SIGKILL.
+            f"nohup bash -c '{test_script} 2>&1 | tee /tmp/smoke_test.log; "
+            "_ec=${{PIPESTATUS[0]}}; "
+            "echo SMOKE_EXIT_CODE:$_ec >> /tmp/smoke_test.log; "
             "touch /tmp/smoke_done' </dev/null >/dev/null 2>&1 &\n"
             "echo LAUNCHED:$$"
         )
