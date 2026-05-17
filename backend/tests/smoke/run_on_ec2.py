@@ -610,6 +610,45 @@ Examples:
         except Exception as _e:
             print(f"  Could not auto-fetch Tailscale auth key: {_e}")
 
+    # Auto-fetch AWS credentials from platform DB if not in environment
+    if not os.environ.get("AWS_ACCESS_KEY_ID"):
+        try:
+            import asyncio as _asyncio2, sys as _sys2
+            if "/app" not in _sys2.path:
+                _sys2.path.insert(0, "/app")
+            from app.config import settings as _cfg2
+            from app.services.secrets_service import SecretsService as _Secrets2
+            from app.models.connector import Connector as _Connector2
+            from app.models.connector_credential import ConnectorCredential as _CC2
+            from sqlalchemy import select as _select2
+            from sqlalchemy.ext.asyncio import create_async_engine as _cae2, AsyncSession as _AS2
+            from sqlalchemy.orm import sessionmaker as _sm2
+
+            async def _fetch_aws_creds():
+                engine = _cae2(_cfg2.DATABASE_URL, pool_pre_ping=False)
+                Session = _sm2(engine, class_=_AS2, expire_on_commit=False)
+                async with Session() as db:
+                    row = await db.execute(_select2(_Connector2).where(_Connector2.connector_type == "aws"))
+                    conn = row.scalar_one_or_none()
+                    if not conn:
+                        return {}
+                    cred_row = await db.execute(_select2(_CC2).where(_CC2.connector_id == conn.id))
+                    cred = cred_row.scalar_one_or_none()
+                    if not cred:
+                        return {}
+                    svc = _Secrets2(_cfg2.SECRET_KEY)
+                    return svc.decrypt_json(cred.credentials_encrypted)
+
+            _aws = _asyncio2.run(_fetch_aws_creds())
+            if _aws.get("access_key_id"):
+                os.environ["AWS_ACCESS_KEY_ID"] = _aws["access_key_id"]
+                os.environ["AWS_SECRET_ACCESS_KEY"] = _aws.get("secret_access_key", "")
+                if _aws.get("region"):
+                    args.region = _aws["region"]
+                print("  AWS credentials auto-fetched from platform DB")
+        except Exception as _e2:
+            print(f"  Could not auto-fetch AWS credentials: {_e2}")
+
     region = args.region
     ec2 = boto3.client("ec2", region_name=region)
     ssm = boto3.client("ssm", region_name=region)

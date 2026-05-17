@@ -817,7 +817,7 @@ def run_dbadmin_aws_cr(
 _LINUX_PHASES = [
     "linux_patch", "ossecurity", "linuxauth", "crossplatform",
     "compliance", "forensics", "fleet", "backup", "reboot",
-    "credrotation", "iac", "linuxupgrade",
+    "credrotation", "iac", "linuxupgrade", "poller_backoff",
 ]
 
 _LINUX_PHASE_MAP_AWS_SSM = {
@@ -948,6 +948,15 @@ def run_aws_linux_worker(base_url: str, email: str, password: str,
         run_iac_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
         run_linuxupgrade_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
         run_dbadmin_aws_cr(client, endpoint_asset_id, instance_asset_id, instance_id)
+
+        # Poller backoff phase — verifies exponential backoff and reconnection
+        ec2_client = _get_aws_boto3_client("ec2")
+        ssm_boto = _get_aws_boto3_client("ssm")
+        run_phase_poller_backoff(
+            client, ec2_client, ssm_boto,
+            instance_id, instance_asset_id, endpoint_asset_id,
+            backend_tailscale_ip=backend_ip,
+        )
 
         result["passed"] = True
         log("[Phase aws-linux] track complete")

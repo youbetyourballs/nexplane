@@ -1,0 +1,52 @@
+{
+  "connector_type": "laps",
+  "display_name": "Microsoft LAPS",
+  "credential_fields": [
+    {"name": "tenant_id", "label": "Tenant ID", "type": "string", "required": true},
+    {"name": "client_id", "label": "Client ID (App Registration)", "type": "string", "required": true},
+    {"name": "client_secret", "label": "Client Secret", "type": "password", "required": true}
+  ],
+  "actions": [
+    {
+      "action_id": "get_local_password",
+      "generic_action": "get_local_password",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Get Local Admin Password",
+      "description": "Retrieves the current LAPS-managed local administrator password for a device",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "device_id", "type": "string", "required": true}],
+      "executor": "laps.get_local_password",
+      "rollback_action": null,
+      "estimated_duration_seconds": 5,
+      "blast_radius_hint": "none",
+      "safety_notes": ["Password is returned in plaintext in the CR result — treat this CR as sensitive"]
+    },
+    {
+      "action_id": "rotate_local_password",
+      "generic_action": "rotate_local_password",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Rotate Local Admin Password",
+      "description": "Forces an immediate LAPS password rotation on the device",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "device_id", "type": "string", "required": true}],
+      "executor": "laps.rotate_local_password",
+      "rollback_action": null,
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "credential_change",
+      "safety_notes": ["Previous password is immediately invalidated — ensure no active sessions depend on it"]
+    },
+    {
+      "action_id": "discover_laps_devices",
+      "generic_action": "discover_laps_devices",
+      "action_type": "ingest",
+      "display_name": "Discover LAPS-Managed Devices",
+      "description": "Discovers all devices with LAPS enabled and last password rotation timestamp",
+      "produces_asset_types": ["server"],
+      "applicable_asset_types": [],
+      "executor": "laps.discover_laps_devices",
+      "estimated_duration_seconds": 20
+    }
+  ]
+}
