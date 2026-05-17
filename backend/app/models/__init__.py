@@ -27,3 +27,4 @@ __all__ = [
     "PatchCampaign",
 ]
 from app.models.review_campaign import ReviewCampaign, ReviewEntry  # noqa: F401
+from app.models.smoke_test_run import SmokeTestRun  # noqa: F401
