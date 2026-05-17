@@ -117,6 +117,33 @@ def get_ssm_instance_profile(iam) -> str | None:
     return fallback
 
 
+def write_progress_event(ssm_client, ssm_key: str, event: dict) -> None:
+    """Append a progress event to the SSM parameter for live streaming.
+
+    SSM is used here only as a transport for progress data — never to make
+    changes to managed infrastructure. All infrastructure changes go through
+    the Nexplane CR lifecycle.
+    """
+    if not ssm_key:
+        return
+    import json as _json
+    try:
+        try:
+            param = ssm_client.get_parameter(Name=ssm_key)
+            events = _json.loads(param["Parameter"]["Value"])
+        except ssm_client.exceptions.ParameterNotFound:
+            events = []
+        events.append(event)
+        ssm_client.put_parameter(
+            Name=ssm_key,
+            Value=_json.dumps(events),
+            Type="String",
+            Overwrite=True,
+        )
+    except Exception as e:
+        print(f"  ⚠️  Progress write failed: {e}")
+
+
 def make_test_tarball() -> bytes:
     """Package tests/smoke/ and connector executor code into a tarball for transfer.
 
@@ -533,12 +560,55 @@ Examples:
                         help="Nexplane user password (default: admin123)")
     parser.add_argument("--phases", default="A,AUTO_AI", help="Comma-separated phases")
     parser.add_argument("--tailscale-auth-key", default="",
-                        help="Tailscale reusable auth key (required if phases include A)")
+                        help="Tailscale reusable auth key (required if phases include A). "
+                             "If not provided, auto-fetched from the Tailscale connector in the platform DB.")
+    parser.add_argument("--run-id", default="",
+                        help="SmokeTestRun UUID — enables SSM progress streaming and DB state updates")
+    parser.add_argument("--agent-asset-id", default="",
+                        help="Pre-provisioned agent endpoint asset ID (from Phase A output)")
+    parser.add_argument("--ec2-instance-id", default="",
+                        help="EC2 instance ID with agent installed (for SSM side-effect verification)")
     parser.add_argument("--region", default="us-east-1", help="AWS region")
     parser.add_argument("--keep-runner", action="store_true",
                         help="Do not terminate the runner EC2 after the test")
 
     args, extra = parser.parse_known_args()
+
+    # Auto-fetch Tailscale auth key from platform DB if not provided
+    if not args.tailscale_auth_key:
+        try:
+            import asyncio as _asyncio, sys as _sys
+            if "/app" not in _sys.path:
+                _sys.path.insert(0, "/app")
+            from app.config import settings as _cfg
+            from app.services.secrets_service import SecretsService as _Secrets
+            from app.models.connector import Connector as _Connector
+            from app.models.connector_credential import ConnectorCredential as _CC
+            from sqlalchemy import select as _select
+            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession as _AS
+            from sqlalchemy.orm import sessionmaker as _sm
+
+            async def _fetch_ts_key():
+                engine = create_async_engine(_cfg.DATABASE_URL, pool_pre_ping=False)
+                Session = _sm(engine, class_=_AS, expire_on_commit=False)
+                async with Session() as db:
+                    row = await db.execute(_select(_Connector).where(_Connector.connector_type == "tailscale"))
+                    conn = row.scalar_one_or_none()
+                    if not conn:
+                        return ""
+                    cred_row = await db.execute(_select(_CC).where(_CC.connector_id == conn.id))
+                    cred = cred_row.scalar_one_or_none()
+                    if not cred:
+                        return ""
+                    svc = _Secrets(_cfg.SECRET_KEY)
+                    return svc.decrypt_json(cred.credentials_encrypted).get("auth_key", "")
+
+            _key = _asyncio.run(_fetch_ts_key())
+            if _key:
+                args.tailscale_auth_key = _key
+                print(f"  Tailscale auth key auto-fetched from platform DB")
+        except Exception as _e:
+            print(f"  Could not auto-fetch Tailscale auth key: {_e}")
 
     region = args.region
     ec2 = boto3.client("ec2", region_name=region)
@@ -570,6 +640,35 @@ Examples:
         print(f"Launching {RUNNER_INSTANCE_TYPE} runner EC2...")
         runner_id = launch_runner(ec2, iam)
         print(f"  Runner: {runner_id}")
+
+        # Update SmokeTestRun with runner instance ID if run_id provided
+        if args.run_id:
+            try:
+                import sys as _sys
+                if "/app" not in _sys.path:
+                    _sys.path.insert(0, "/app")
+                import asyncio as _asyncio
+                from app.config import settings as _cfg
+                from app.models.smoke_test_run import SmokeTestRun as _STR
+                from sqlalchemy import select as _select
+                from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession as _AS
+                from sqlalchemy.orm import sessionmaker as _sm
+                import uuid as _uuid
+
+                async def _update_runner():
+                    engine = create_async_engine(_cfg.DATABASE_URL)
+                    Session = _sm(engine, class_=_AS, expire_on_commit=False)
+                    async with Session() as db:
+                        r = await db.execute(_select(_STR).where(_STR.id == _uuid.UUID(args.run_id)))
+                        run = r.scalar_one_or_none()
+                        if run:
+                            run.runner_instance_id = runner_id
+                            await db.commit()
+                    await engine.dispose()
+
+                _asyncio.run(_update_runner())
+            except Exception as _e:
+                print(f"  ⚠️  Could not update run record: {_e}")
 
         # Wait for instance to pass status checks — manual loop to handle transient DNS failures
         print("  Waiting for instance to pass status checks (up to 20 min)...")
@@ -638,6 +737,12 @@ Examples:
         ]
         if args.tailscale_auth_key:
             test_cmd_parts[-1] += f" --tailscale-auth-key {args.tailscale_auth_key}"
+        if args.run_id:
+            test_cmd_parts[-1] += f" --run-id {args.run_id}"
+        if args.agent_asset_id:
+            test_cmd_parts[-1] += f" --agent-asset-id {args.agent_asset_id}"
+        if args.ec2_instance_id:
+            test_cmd_parts[-1] += f" --ec2-instance-id {args.ec2_instance_id}"
         for ex in extra:
             test_cmd_parts[-1] += f" {ex}"
 
