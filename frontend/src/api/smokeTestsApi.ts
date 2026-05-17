@@ -56,6 +56,46 @@ export interface CleanupPreview {
   count: number;
 }
 
+export interface SmokeRun {
+  id: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  phases: string[];
+  started_at: string;
+  completed_at: string | null;
+  runner_instance_id: string | null;
+  result_summary: Record<string, PhaseResult> | null;
+  error: string | null;
+}
+
+export interface PhaseResult {
+  phase: string;
+  status: 'passed' | 'failed' | 'skipped';
+  duration_seconds: number;
+  connectors_exercised: string[];
+  connectors_skipped: string[];
+  rollback_verified: boolean;
+  coverage_gaps: string[];
+}
+
+export const startSmokeRun = async (phases: string[]): Promise<SmokeRun> => {
+  const res = await apiClient.post('/smoke-tests/runs', { phases });
+  return res.data;
+};
+
+export const listSmokeRuns = async (): Promise<SmokeRun[]> => {
+  const res = await apiClient.get('/smoke-tests/runs');
+  return res.data;
+};
+
+export const getSmokeRun = async (id: string): Promise<SmokeRun> => {
+  const res = await apiClient.get(`/smoke-tests/runs/${id}`);
+  return res.data;
+};
+
+export const cancelSmokeRun = async (id: string): Promise<void> => {
+  await apiClient.delete(`/smoke-tests/runs/${id}`);
+};
+
 export const smokeTestsApi = {
   getSuites: () =>
     apiClient.get<SmokeTestSuite[]>("/smoke-tests/suites").then((r) => r.data),

@@ -1,4 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { PhasePickerPanel } from '../components/smoke/PhasePickerPanel';
+import { SmokeRunCard } from '../components/smoke/SmokeRunCard';
+import { SmokeRunHistory } from '../components/smoke/SmokeRunHistory';
+import { startSmokeRun, listSmokeRuns, cancelSmokeRun, type SmokeRun } from '../api/smokeTestsApi';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Play,
@@ -472,6 +476,36 @@ export function SmokeTests() {
   const [modalSuite, setModalSuite] = useState<SmokeTestSuite | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [showCleanupModal, setShowCleanupModal] = useState(false);
+  const [runs, setRuns] = useState<SmokeRun[]>([]);
+  const [activeRun, setActiveRun] = useState<SmokeRun | null>(null);
+  const [runLoading, setRunLoading] = useState(false);
+
+  useEffect(() => {
+    listSmokeRuns().then(setRuns).catch(() => {});
+  }, []);
+
+  const handleStartRun = async (phases: string[]) => {
+    setRunLoading(true);
+    try {
+      const run = await startSmokeRun(phases);
+      setRuns(prev => [run, ...prev]);
+      setActiveRun(run);
+    } catch (e) {
+      console.error('Failed to start run:', e);
+    } finally {
+      setRunLoading(false);
+    }
+  };
+
+  const handleCancelRun = async (id: string) => {
+    try {
+      await cancelSmokeRun(id);
+      setRuns(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled' as const } : r));
+      if (activeRun?.id === id) setActiveRun(null);
+    } catch (e) {
+      console.error('Failed to cancel run:', e);
+    }
+  };
 
   const { data: suites, isLoading } = useQuery({
     queryKey: ["smoke-tests-suites"],
@@ -526,20 +560,33 @@ export function SmokeTests() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {(suites ?? []).map((suite) => (
-          <SuiteCard
-            key={suite.id}
-            suite={suite}
-            onRun={setModalSuite}
-            activeRunId={activeRunId}
-          />
-        ))}
-      </div>
+      <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start' }}>
+        <PhasePickerPanel
+          onStart={handleStartRun}
+          disabled={runLoading || activeRun?.status === 'running'}
+        />
+        <div style={{ flex: 1 }}>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {(suites ?? []).map((suite) => (
+              <SuiteCard
+                key={suite.id}
+                suite={suite}
+                onRun={setModalSuite}
+                activeRunId={activeRunId}
+              />
+            ))}
+          </div>
 
-      {activeRunId && (
-        <LogPanel runId={activeRunId} onStop={() => stopMutation.mutate()} />
-      )}
+          {activeRunId && (
+            <LogPanel runId={activeRunId} onStop={() => stopMutation.mutate()} />
+          )}
+
+          {activeRun && (
+            <SmokeRunCard run={activeRun} active={activeRun.status === 'running'} />
+          )}
+          <SmokeRunHistory runs={runs} onCancel={handleCancelRun} />
+        </div>
+      </div>
 
       {modalSuite && (
         <RunModal
