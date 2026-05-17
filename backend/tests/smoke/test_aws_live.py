@@ -15668,13 +15668,19 @@ def run_phase_bind_dns(
              "Pass --bind-server-ip to use an external BIND server instead.")
 
     setup_script = r"""#!/bin/bash
-set -e
-dnf install -y bind bind-utils
+# Suppress AL2023 upgrade nag — avoids false failure on stderr check
+echo "[nexplane] installing bind..."
+dnf install -y bind bind-utils --setopt=obsoletes=0 2>/dev/null || \
+    dnf install -y bind bind-utils 2>/dev/null || \
+    { echo "BIND_INSTALL_FAILED"; exit 1; }
 
+# named group is created by bind package install
 mkdir -p /etc/named
-tsig-keygen nexplane-smoke-key > /etc/named/nexplane-smoke.key
+tsig-keygen nexplane-smoke-key > /etc/named/nexplane-smoke.key || \
+    { ddns-confgen -q -k nexplane-smoke-key > /etc/named/nexplane-smoke.key; }
 chmod 640 /etc/named/nexplane-smoke.key
-chown root:named /etc/named/nexplane-smoke.key
+chown root:named /etc/named/nexplane-smoke.key 2>/dev/null || \
+    chown root:bind /etc/named/nexplane-smoke.key 2>/dev/null || true
 
 PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
 mkdir -p /var/named
