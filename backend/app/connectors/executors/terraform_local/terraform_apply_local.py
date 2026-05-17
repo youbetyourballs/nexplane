@@ -41,11 +41,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     loop = asyncio.get_event_loop()
 
     def _run():
+        tf_env = {**env, "TF_PLUGIN_CACHE_DIR": "/root/.terraform.d/plugin-cache"}
         cmd = ["terraform", "apply", "-no-color", "-auto-approve"]
         if plan_file and os.path.exists(plan_file):
             cmd.append(plan_file)
         result = subprocess.run(
-            cmd, cwd=working_dir, env=env, capture_output=True, text=True, timeout=300,
+            cmd, cwd=working_dir, env=tf_env, capture_output=True, text=True, timeout=600,
         )
         if result.returncode != 0:
             raise RuntimeError(f"terraform apply failed:\n{result.stderr}")
