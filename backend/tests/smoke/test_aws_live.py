@@ -15057,7 +15057,23 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
         # t3.medium: 4GB RAM sufficient for smoke DC. t3.large hits Free Tier
         # Windows AMI restriction on this account (same limit as WINRM_BOOTSTRAP).
         _dc_instance_type = "t3.medium"
-        _, _dc_subnet_id = get_default_vpc_subnet(ec2_client, _dc_instance_type)
+        _dc_vpcs = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+        _dc_vpc_id = _dc_vpcs[0]["VpcId"]
+        _dc_subnets = ec2_client.describe_subnets(
+            Filters=[{"Name": "vpcId", "Values": [_dc_vpc_id]}]
+        )["Subnets"]
+        try:
+            _dc_az_info = ec2_client.describe_instance_type_offerings(
+                LocationType="availability-zone",
+                Filters=[{"Name": "instance-type", "Values": [_dc_instance_type]}],
+            )["InstanceTypeOfferings"]
+            _dc_good = [s for s in _dc_subnets if s.get("AvailabilityZone") in {o["Location"] for o in _dc_az_info}]
+            if _dc_good:
+                _dc_subnets = _dc_good
+        except Exception:
+            pass
+        _dc_subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+        _dc_subnet_id = _dc_subnets[0]["SubnetId"]
         log(
             f"AD_DC_INTEGRITY: launching {_dc_instance_type} Windows instance from "
             f"{'cached' if cached_ami else 'base'} AMI {launch_ami}..."
