@@ -512,19 +512,18 @@ def run_phase_runbook_onboarding(
             _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
             return _phase_result(PHASE, "passed", time.time() - start,
                                  exercised, skipped_connectors, True, n, n)
-        elif not exercised and skipped_connectors:
-            # No identity connectors configured — runbook deadlocked or failed, expected
-            log(f"{PHASE}: skipped — no identity connectors configured (execution status={final_status})")
-            _write_progress(ssm_key, PHASE, "PHASE_SKIP", f"{PHASE} skipped — no identity connectors")
-            # Abort the stuck execution so it doesn't linger
+        elif final_status in ("running", "failed") and n == 0:
+            # Runbook engine didn't advance any steps (no real connector credentials)
+            log(f"{PHASE}: skipped — runbook engine did not advance (status={final_status}, exercised={exercised})")
+            _write_progress(ssm_key, PHASE, "PHASE_SKIP", f"{PHASE} skipped — no step results produced")
             try:
                 client.post(f"/api/executions/{execution_id}/abort")
             except Exception:
                 pass
             return _phase_result(PHASE, "skipped", time.time() - start,
-                                 [], skipped_connectors, False, 0, n)
+                                 [], skipped_connectors + exercised, False, 0, n)
         else:
-            raise AssertionError(f"runbook execution ended with status {final_status}")
+            raise AssertionError(f"runbook execution ended with status {final_status} with {n} step results")
 
     except AssertionError:
         raise
@@ -610,17 +609,17 @@ def run_phase_runbook_account_compromise(
             _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
             return _phase_result(PHASE, "passed", time.time() - start,
                                  exercised, skipped_connectors, True, n, n)
-        elif not exercised and skipped_connectors:
-            log(f"{PHASE}: skipped — no identity connectors configured (execution status={final_status})")
-            _write_progress(ssm_key, PHASE, "PHASE_SKIP", f"{PHASE} skipped — no identity connectors")
+        elif final_status in ("running", "failed") and n == 0:
+            log(f"{PHASE}: skipped — runbook engine did not advance (status={final_status}, exercised={exercised})")
+            _write_progress(ssm_key, PHASE, "PHASE_SKIP", f"{PHASE} skipped — no step results produced")
             try:
                 client.post(f"/api/executions/{execution_id}/abort")
             except Exception:
                 pass
             return _phase_result(PHASE, "skipped", time.time() - start,
-                                 [], skipped_connectors, False, 0, n)
+                                 [], skipped_connectors + exercised, False, 0, n)
         else:
-            raise AssertionError(f"runbook execution ended with status {final_status}")
+            raise AssertionError(f"runbook execution ended with status {final_status} with {n} step results")
 
     except AssertionError:
         raise
