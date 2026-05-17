@@ -1,0 +1,20 @@
+{
+  "change_type": "pagerduty_resolve_incident",
+  "display_name": "Pagerduty Resolve Incident",
+  "description": "Executes Pagerduty Resolve Incident operation.",
+  "steps": [
+    {
+      "generic_action": "pagerduty_resolve_incident",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "pagerduty_resolve_incident",
+  "rollback_connector_type": "pagerduty"
+}

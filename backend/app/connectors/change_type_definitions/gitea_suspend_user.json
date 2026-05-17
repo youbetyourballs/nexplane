@@ -1,0 +1,20 @@
+{
+  "change_type": "gitea_suspend_user",
+  "display_name": "Gitea Suspend User",
+  "description": "Executes Gitea Suspend User operation.",
+  "steps": [
+    {
+      "generic_action": "gitea_suspend_user",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "gitea_suspend_user",
+  "rollback_connector_type": "gitea"
+}

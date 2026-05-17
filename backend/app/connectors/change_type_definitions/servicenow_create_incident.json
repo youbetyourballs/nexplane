@@ -1,0 +1,20 @@
+{
+  "change_type": "servicenow_create_incident",
+  "display_name": "Servicenow Create Incident",
+  "description": "Executes Servicenow Create Incident operation.",
+  "steps": [
+    {
+      "generic_action": "servicenow_create_incident",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "servicenow_create_incident",
+  "rollback_connector_type": "servicenow"
+}

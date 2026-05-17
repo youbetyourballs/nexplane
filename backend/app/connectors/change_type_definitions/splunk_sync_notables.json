@@ -1,0 +1,20 @@
+{
+  "change_type": "splunk_sync_notables",
+  "display_name": "Splunk Sync Notables",
+  "description": "Executes Splunk Sync Notables operation.",
+  "steps": [
+    {
+      "generic_action": "splunk_sync_notables",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "splunk_sync_notables",
+  "rollback_connector_type": "splunk"
+}

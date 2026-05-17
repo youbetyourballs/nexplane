@@ -760,8 +760,7 @@ def run_phase_project_microseg(
 
 
 if __name__ == "__main__":
-    parser = make_base_parser()
-    parser.description = "Nexplane Platform Feature Smoke Tests"
+    parser = make_base_parser("Nexplane Platform Feature Smoke Tests")
     parser.add_argument("--agent-asset-id", default="",
                         help="Pre-provisioned agent endpoint asset ID")
     parser.add_argument("--ec2-instance-id", default="",

@@ -1,0 +1,20 @@
+{
+  "change_type": "bind_delete_record",
+  "display_name": "Bind Delete Record",
+  "description": "Executes Bind Delete Record operation.",
+  "steps": [
+    {
+      "generic_action": "bind_delete_record",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "bind_delete_record",
+  "rollback_connector_type": "bind_dns"
+}

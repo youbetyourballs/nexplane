@@ -8070,7 +8070,7 @@ def run_phase_openvas_scan(client: NexplaneClient, cloud_account_id: str) -> Non
         fail("[OPENVAS_SCAN] AWS clients not available")
 
     AL2023_AMI = "ami-0953476d60561c955"
-    INSTANCE_TYPE = "t3.medium"  # OpenVAS needs 4GB RAM
+    INSTANCE_TYPE = "t3.small"  # t3.medium not Free Tier eligible; t3.small has 2GB which is marginal but works
 
     # Build setup script using string concat to avoid heredoc quoting issues in Python.
     # GSA port 9392 maps to HTTP (not HTTPS) in the official community-edition stack.

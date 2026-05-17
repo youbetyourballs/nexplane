@@ -1,0 +1,20 @@
+{
+  "change_type": "dc_integrity_check",
+  "display_name": "Dc Integrity Check",
+  "description": "Executes Dc Integrity Check operation.",
+  "steps": [
+    {
+      "generic_action": "dc_integrity_check",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "dc_integrity_check",
+  "rollback_connector_type": "active_directory"
+}

@@ -1,0 +1,20 @@
+{
+  "change_type": "snyk_sync_findings",
+  "display_name": "Snyk Sync Findings",
+  "description": "Executes Snyk Sync Findings operation.",
+  "steps": [
+    {
+      "generic_action": "snyk_sync_findings",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "snyk_sync_findings",
+  "rollback_connector_type": "snyk"
+}

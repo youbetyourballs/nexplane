@@ -1,0 +1,20 @@
+{
+  "change_type": "bind_list_zone",
+  "display_name": "Bind List Zone",
+  "description": "Executes Bind List Zone operation.",
+  "steps": [
+    {
+      "generic_action": "bind_list_zone",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "bind_list_zone",
+  "rollback_connector_type": "bind_dns"
+}
