@@ -726,9 +726,19 @@ Examples:
         # Build test command — email/password are optional for standalone phases
         _email_arg = f" --email {args.email}" if args.email else ""
         _password_arg = f" --password {args.password}" if args.password else ""
+        PLATFORM_PHASES = {
+            "IR_ISOLATE_HOST", "IR_PRESERVE_EVIDENCE", "IR_LOCKDOWN_ACCOUNT", "IR_PHISHING_RESPONSE",
+            "RUNBOOK_ONBOARDING", "RUNBOOK_ACCOUNT_COMPROMISE", "RUNBOOK_PATCH_CAMPAIGN",
+            "ACCESS_REVIEW", "PROJECT_MICROSEG", "VULN_PIPELINE",
+        }
+        selected_phases = set(args.phases.split(","))
+        if selected_phases & PLATFORM_PHASES:
+            test_script = "test_platform_live.py"
+        else:
+            test_script = "test_aws_live.py"
         test_cmd_parts = [
             "cd /tmp/nexplane_smoke",
-            f"{aws_env}NEXPLANE_RUNNER_EC2=1 PYTHONPATH=/tmp/nexplane_smoke python3 smoke/test_aws_live.py"
+            f"{aws_env}NEXPLANE_RUNNER_EC2=1 PYTHONPATH=/tmp/nexplane_smoke python3 smoke/{test_script}"
             f" --base-url {args.base_url}"
             f"{_email_arg}"
             f"{_password_arg}"
