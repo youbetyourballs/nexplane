@@ -1,0 +1,66 @@
+{
+  "connector_type": "wufb",
+  "display_name": "Windows Update for Business",
+  "credential_fields": [
+    {"name": "tenant_id", "label": "Tenant ID", "type": "string", "required": true},
+    {"name": "client_id", "label": "Client ID (App Registration)", "type": "string", "required": true},
+    {"name": "client_secret", "label": "Client Secret", "type": "password", "required": true}
+  ],
+  "actions": [
+    {
+      "action_id": "discover_update_policies",
+      "generic_action": "discover_update_policies",
+      "action_type": "ingest",
+      "display_name": "Discover Update Policies",
+      "description": "Discovers WUfB update rings/policies with deferral settings and assigned groups",
+      "produces_asset_types": [],
+      "applicable_asset_types": [],
+      "executor": "wufb.discover_update_policies",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "create_update_ring",
+      "generic_action": "create_update_ring",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Create Update Ring",
+      "description": "Creates a Windows Update deployment ring with deferral and deadline settings",
+      "applicable_asset_types": [],
+      "parameters": [
+        {"name": "ring_name", "type": "string", "required": true},
+        {"name": "quality_deferral_days", "type": "integer", "required": false, "default": 7},
+        {"name": "feature_deferral_days", "type": "integer", "required": false, "default": 30},
+        {"name": "deadline_days", "type": "integer", "required": false, "default": 14}
+      ],
+      "executor": "wufb.create_update_ring",
+      "rollback_action": "delete_update_ring",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "delete_update_ring",
+      "generic_action": "delete_update_ring",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Delete Update Ring",
+      "description": "Removes a Windows Update deployment ring",
+      "applicable_asset_types": [],
+      "parameters": [{"name": "ring_id", "type": "string", "required": true}],
+      "executor": "wufb.delete_update_ring",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "check_device_compliance",
+      "generic_action": "check_wufb_compliance",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Check Update Compliance",
+      "description": "Returns update compliance state for devices — which are missing updates and by how much",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "device_id", "type": "string", "required": false, "description": "Specific device; omit for all devices"}],
+      "executor": "wufb.check_device_compliance",
+      "rollback_action": null,
+      "estimated_duration_seconds": 20,
+      "blast_radius_hint": "none"
+    }
+  ]
+}
