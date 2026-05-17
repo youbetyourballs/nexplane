@@ -1,0 +1,80 @@
+{
+  "connector_type": "intune",
+  "display_name": "Microsoft Intune",
+  "credential_fields": [
+    {"name": "tenant_id", "label": "Tenant ID", "type": "string", "required": true},
+    {"name": "client_id", "label": "Client ID (App Registration)", "type": "string", "required": true},
+    {"name": "client_secret", "label": "Client Secret", "type": "password", "required": true}
+  ],
+  "actions": [
+    {
+      "action_id": "discover_managed_devices",
+      "generic_action": "discover_managed_devices",
+      "action_type": "ingest",
+      "display_name": "Discover Managed Devices",
+      "description": "Discovers all Intune-managed devices with compliance state, OS version, and last sync",
+      "produces_asset_types": ["server"],
+      "applicable_asset_types": [],
+      "executor": "intune.discover_managed_devices",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "sync_device",
+      "generic_action": "sync_device",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Sync Device",
+      "description": "Triggers an immediate MDM sync on the device to pull latest policy",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "device_id", "type": "string", "required": true}],
+      "executor": "intune.sync_device",
+      "rollback_action": null,
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "none",
+      "safety_notes": ["Read-only trigger — device syncs policy but nothing is changed"]
+    },
+    {
+      "action_id": "push_script",
+      "generic_action": "push_script",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Push PowerShell Script",
+      "description": "Deploys a PowerShell script to a device or group via Intune",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "script_content", "type": "string", "required": true},
+        {"name": "script_name", "type": "string", "required": true},
+        {"name": "device_id", "type": "string", "required": false, "description": "Target specific device; omit to target all managed devices"}
+      ],
+      "executor": "intune.push_script",
+      "rollback_action": "delete_script",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "delete_script",
+      "generic_action": "delete_script",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Delete Deployed Script",
+      "description": "Removes a previously deployed Intune script",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "script_id", "type": "string", "required": true}],
+      "executor": "intune.delete_script",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "check_compliance",
+      "generic_action": "check_compliance",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Check Device Compliance",
+      "description": "Returns current compliance state and failing policies for a device",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "device_id", "type": "string", "required": true}],
+      "executor": "intune.check_compliance",
+      "rollback_action": null,
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "none"
+    }
+  ]
+}

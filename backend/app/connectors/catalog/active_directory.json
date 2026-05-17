@@ -7,7 +7,12 @@
     {"name": "base_dn", "label": "Base DN", "type": "string", "required": true},
     {"name": "bind_dn", "label": "Bind DN", "type": "string", "required": true},
     {"name": "bind_password", "label": "Bind Password", "type": "password", "required": true},
-    {"name": "use_ssl", "label": "Use SSL/TLS", "type": "string", "required": false, "default": "false"}
+    {"name": "use_ssl", "label": "Use SSL/TLS", "type": "string", "required": false, "default": "false"},
+    {"name": "winrm_hostname", "label": "WinRM Hostname (for DC ops)", "type": "string", "required": false},
+    {"name": "winrm_port", "label": "WinRM Port", "type": "string", "required": false, "default": "5985"},
+    {"name": "winrm_username", "label": "WinRM Username", "type": "string", "required": false},
+    {"name": "winrm_password", "label": "WinRM Password", "type": "password", "required": false},
+    {"name": "winrm_use_ssl", "label": "WinRM Use SSL", "type": "string", "required": false, "default": "false"}
   ],
   "actions": [
     {
@@ -136,6 +141,192 @@
       "parameters": [{"name": "username", "type": "string", "required": true}],
       "executor": "active_directory.unlock_account",
       "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "list_dns_records",
+      "generic_action": "list_dns_records",
+      "action_type": "ingest",
+      "display_name": "List DNS Records",
+      "description": "Lists DNS records in an AD-integrated zone via PowerShell on the DC",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "zone_name", "type": "string", "required": true},
+        {"name": "record_type", "type": "string", "required": false, "description": "A, CNAME, MX, etc. — omit for all types"},
+        {"name": "dc_hostname", "type": "string", "required": false}
+      ],
+      "executor": "active_directory.list_dns_records",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "none"
+    },
+    {
+      "action_id": "create_dns_record",
+      "generic_action": "create_dns_record",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Create DNS Record",
+      "description": "Creates an A, CNAME, or TXT record in an AD-integrated DNS zone",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "zone_name", "type": "string", "required": true},
+        {"name": "record_name", "type": "string", "required": true, "description": "Hostname without zone suffix"},
+        {"name": "record_type", "type": "string", "required": true, "description": "A, CNAME, or TXT"},
+        {"name": "value", "type": "string", "required": true, "description": "IP for A, target for CNAME, string for TXT"},
+        {"name": "ttl", "type": "integer", "required": false, "default": 300},
+        {"name": "dc_hostname", "type": "string", "required": false}
+      ],
+      "executor": "active_directory.create_dns_record",
+      "rollback_action": "delete_dns_record",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "dns_change"
+    },
+    {
+      "action_id": "delete_dns_record",
+      "generic_action": "delete_dns_record",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Delete DNS Record",
+      "description": "Deletes a DNS record from an AD-integrated zone",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "zone_name", "type": "string", "required": true},
+        {"name": "record_name", "type": "string", "required": true},
+        {"name": "record_type", "type": "string", "required": true},
+        {"name": "dc_hostname", "type": "string", "required": false}
+      ],
+      "executor": "active_directory.delete_dns_record",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "dns_change"
+    },
+    {
+      "action_id": "update_dns_record",
+      "generic_action": "update_dns_record",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Update DNS Record",
+      "description": "Updates an existing DNS record value in an AD-integrated zone (delete + create)",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "zone_name", "type": "string", "required": true},
+        {"name": "record_name", "type": "string", "required": true},
+        {"name": "record_type", "type": "string", "required": true},
+        {"name": "new_value", "type": "string", "required": true},
+        {"name": "ttl", "type": "integer", "required": false, "default": 300},
+        {"name": "dc_hostname", "type": "string", "required": false}
+      ],
+      "executor": "active_directory.update_dns_record",
+      "rollback_action": "update_dns_record",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "dns_change"
+    },
+    {
+      "action_id": "dc_integrity_check",
+      "generic_action": "dc_integrity_check",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "DC Integrity Check",
+      "description": "Read-only health check: replication status, SYSVOL consistency, GPO baseline hash, unauthorized privileged accounts",
+      "applicable_asset_types": ["server", "identity"],
+      "parameters": [
+        {"name": "dc_hostname", "type": "string", "required": false, "description": "DC to check (defaults to server in connector credentials)"},
+        {"name": "baseline_gpo_hash", "type": "string", "required": false, "description": "Expected GPO hash to compare against (from a previous snapshot)"}
+      ],
+      "executor": "active_directory.dc_integrity_check",
+      "rollback_action": null,
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "none",
+      "safety_notes": ["Read-only operation — no changes made to AD"]
+    },
+    {
+      "action_id": "ad_forest_snapshot",
+      "generic_action": "ad_forest_snapshot",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "AD Forest Snapshot",
+      "description": "Captures ntds.dit, SYSVOL, and GPO state to immutable S3 storage. Requires AD DS service stop/start on the target DC.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "s3_bucket", "type": "string", "required": true, "description": "S3 bucket for snapshot storage"},
+        {"name": "s3_prefix", "type": "string", "required": false, "description": "Key prefix (default: ad-snapshots/{timestamp})"},
+        {"name": "dc_hostname", "type": "string", "required": false},
+        {"name": "include_sysvol", "type": "boolean", "required": false, "default": true}
+      ],
+      "executor": "active_directory.ad_forest_snapshot",
+      "rollback_action": "ad_forest_snapshot_cleanup",
+      "estimated_duration_seconds": 120,
+      "blast_radius_hint": "service_interruption",
+      "safety_notes": [
+        "Stops AD DS service briefly for ntds.dit consistency — brief authentication disruption expected",
+        "Ensure at least one other DC is available before running",
+        "S3 bucket should have Object Lock enabled for immutability"
+      ]
+    },
+    {
+      "action_id": "discover_ad_snapshots",
+      "generic_action": "discover_ad_snapshots",
+      "action_type": "ingest",
+      "display_name": "Discover AD Snapshots",
+      "description": "Lists available AD forest snapshots in S3 with timestamps and artifact inventory",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "s3_bucket", "type": "string", "required": true},
+        {"name": "s3_prefix", "type": "string", "required": false, "default": "ad-snapshots/"}
+      ],
+      "executor": "active_directory.discover_ad_snapshots",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "ad_forest_restore",
+      "generic_action": "ad_forest_restore",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "AD Forest Restore",
+      "description": "Restores ntds.dit and SYSVOL from S3 snapshot onto a pre-provisioned clean Windows Server, promotes it as a DC, and cuts over DNS. DESTRUCTIVE — use only for post-incident recovery.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "target_hostname", "type": "string", "required": true, "description": "WinRM-accessible clean Windows Server to restore onto"},
+        {"name": "winrm_username", "type": "string", "required": true},
+        {"name": "winrm_password", "type": "password", "required": true},
+        {"name": "winrm_port", "type": "integer", "required": false, "default": 5985},
+        {"name": "winrm_use_ssl", "type": "boolean", "required": false, "default": false},
+        {"name": "snapshot_s3_key", "type": "string", "required": true, "description": "S3 key of the ntds.dit snapshot to restore"},
+        {"name": "s3_bucket", "type": "string", "required": true, "description": "S3 bucket containing the snapshot"},
+        {"name": "domain_name", "type": "string", "required": true, "description": "e.g. corp.example.com"},
+        {"name": "domain_netbios_name", "type": "string", "required": false, "description": "Defaults to first label of domain_name uppercased"},
+        {"name": "safe_mode_password", "type": "password", "required": true, "description": "DSRM password for the restored DC"},
+        {"name": "existing_dc_hostnames", "type": "array", "required": false, "description": "WinRM-checked for reachability; halt if any respond"},
+        {"name": "dns_update_mode", "type": "string", "required": false, "default": "manual", "description": "route53 | azure | manual"},
+        {"name": "route53_zone_id", "type": "string", "required": false, "description": "Required if dns_update_mode == route53"},
+        {"name": "azure_zone_name", "type": "string", "required": false, "description": "Required if dns_update_mode == azure"},
+        {"name": "azure_resource_group", "type": "string", "required": false, "description": "Required if dns_update_mode == azure"},
+        {"name": "aws_region", "type": "string", "required": false, "default": "us-east-1"}
+      ],
+      "executor": "active_directory.ad_forest_restore",
+      "rollback_action": null,
+      "estimated_duration_seconds": 1800,
+      "blast_radius_hint": "infrastructure_replacement",
+      "safety_notes": [
+        "DESTRUCTIVE — promotes a new DC and cuts over DNS",
+        "Operator must pre-provision a clean Windows Server and pass its hostname",
+        "Verify all existing DCs are isolated before running (use existing_dc_hostnames to enforce)",
+        "This is a post-incident recovery operation, not routine maintenance"
+      ]
+    },
+    {
+      "action_id": "ad_tiered_backup",
+      "generic_action": "ad_tiered_backup",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "AD Tiered Backup",
+      "description": "Microsoft tier model backup: Tier 0 (DC/PKI/ADFS), Tier 1 (servers), Tier 2 (desktops) with separate schedules and isolated restore paths",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "tier", "type": "string", "required": true, "description": "0, 1, or 2"},
+        {"name": "s3_bucket", "type": "string", "required": true},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "active_directory.ad_tiered_backup",
+      "rollback_action": null,
+      "estimated_duration_seconds": 300
     }
   ]
 }
