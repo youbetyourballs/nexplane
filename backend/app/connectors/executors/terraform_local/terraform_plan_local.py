@@ -61,16 +61,20 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         if tf_content:
             Path(os.path.join(work_dir, "main.tf")).write_text(tf_content)
 
+        # Use plugin cache so providers don't need to be re-downloaded each run
+        tf_env = {**env, "TF_PLUGIN_CACHE_DIR": "/root/.terraform.d/plugin-cache"}
+        os.makedirs("/root/.terraform.d/plugin-cache", exist_ok=True)
+
         init_result = subprocess.run(
             ["terraform", "init", "-no-color"],
-            cwd=work_dir, env=env, capture_output=True, text=True, timeout=300,
+            cwd=work_dir, env=tf_env, capture_output=True, text=True, timeout=600,
         )
         if init_result.returncode != 0:
             raise RuntimeError(f"terraform init failed:\n{init_result.stderr}")
 
         plan_result = subprocess.run(
             ["terraform", "plan", "-no-color", f"-out={plan_file}"],
-            cwd=work_dir, env=env, capture_output=True, text=True, timeout=600,
+            cwd=work_dir, env=tf_env, capture_output=True, text=True, timeout=600,
         )
         if plan_result.returncode != 0:
             raise RuntimeError(f"terraform plan failed:\n{plan_result.stderr}")

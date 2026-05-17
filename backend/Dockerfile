@@ -38,6 +38,13 @@ RUN curl -fsSL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_li
     && rm /tmp/tf.zip \
     && chmod +x /usr/local/bin/terraform
 
+# Pre-cache the Terraform AWS provider so smoke tests don't download it at runtime
+RUN mkdir -p /root/.terraform.d/plugin-cache /tmp/tf-aws-init \
+    && printf 'terraform {\n  required_providers {\n    aws = { source = "hashicorp/aws", version = "~> 5.0" }\n  }\n}\nprovider "aws" {}\n' > /tmp/tf-aws-init/main.tf \
+    && cd /tmp/tf-aws-init \
+    && TF_PLUGIN_CACHE_DIR=/root/.terraform.d/plugin-cache terraform init -no-color \
+    && rm -rf /tmp/tf-aws-init
+
 # Install Ansible + AWS collections for local Ansible smoke tests
 RUN pip install --no-cache-dir ansible boto3 botocore \
     && ansible-galaxy collection install amazon.aws community.aws --timeout 120
