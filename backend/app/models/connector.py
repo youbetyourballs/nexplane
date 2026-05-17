@@ -62,6 +62,31 @@ class ConnectorType(str, enum.Enum):
     wazuh = "wazuh"
     falco = "falco"
     infisical = "infisical"
+    # Open-source connectors
+    freeipa = "freeipa"
+    gitlab = "gitlab"
+    teleport = "teleport"
+    opnsense = "opnsense"
+    step_ca = "step_ca"
+    # Databases
+    postgres = "postgres"
+    redis = "redis"
+    mongodb = "mongodb"
+    # Scanners
+    nessus = "nessus"
+    openvas = "openvas"
+    elastic = "elastic"
+    # Windows/endpoint management
+    winrm = "winrm"
+    sccm = "sccm"
+    intune = "intune"
+    wufb = "wufb"
+    laps = "laps"
+    # DNS
+    bind_dns = "bind_dns"
+    # SaaS
+    slack = "slack"
+    jfrog = "jfrog"
 
 
 class ConnectorStatus(str, enum.Enum):
