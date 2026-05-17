@@ -469,23 +469,29 @@ def run_phase_runbook_onboarding(
         log(f"{PHASE}: execution created — {execution_id}")
 
         _write_progress(ssm_key, PHASE, "STEP", "Waiting for runbook steps to execute")
-        deadline = time.time() + 300
-        exec_status = {}
-        while time.time() < deadline:
-            exec_status = client.get(f"/api/executions/{execution_id}")
-            status = exec_status.get("status")
-            if status in ("completed", "failed", "waiting_human"):
-                break
-            time.sleep(10)
+        # Fast-path: if no identity connectors, the runbook engine won't advance — skip quickly
+        if not exercised and skipped_connectors:
+            time.sleep(5)
+            exec_final = client.get(f"/api/executions/{execution_id}")
+            final_status = exec_final.get("status")
+        else:
+            deadline = time.time() + 300
+            exec_status = {}
+            while time.time() < deadline:
+                exec_status = client.get(f"/api/executions/{execution_id}")
+                status = exec_status.get("status")
+                if status in ("completed", "failed", "waiting_human"):
+                    break
+                time.sleep(10)
 
-        if exec_status.get("status") == "waiting_human":
-            _write_progress(ssm_key, PHASE, "STEP", "Auto-approving human checkpoint (smoke mode)")
-            client.post(f"/api/executions/{execution_id}/resume",
-                        json={"approved": True, "comment": "smoke test auto-approval"})
-            time.sleep(30)
+            if exec_status.get("status") == "waiting_human":
+                _write_progress(ssm_key, PHASE, "STEP", "Auto-approving human checkpoint (smoke mode)")
+                client.post(f"/api/executions/{execution_id}/resume",
+                            json={"approved": True, "comment": "smoke test auto-approval"})
+                time.sleep(30)
 
-        exec_final = client.get(f"/api/executions/{execution_id}")
-        final_status = exec_final.get("status")
+            exec_final = client.get(f"/api/executions/{execution_id}")
+            final_status = exec_final.get("status")
         log(f"{PHASE}: runbook execution status — {final_status}")
 
         for step_result in exec_final.get("step_results", []):
@@ -566,21 +572,27 @@ def run_phase_runbook_account_compromise(
         })
         execution_id = execution["id"]
 
-        deadline = time.time() + 300
-        exec_status = {}
-        while time.time() < deadline:
-            exec_status = client.get(f"/api/executions/{execution_id}")
-            if exec_status.get("status") in ("completed", "failed", "waiting_human"):
-                break
-            time.sleep(10)
+        # Fast-path: if no identity connectors, the runbook engine won't advance — skip quickly
+        if not exercised and skipped_connectors:
+            time.sleep(5)
+            exec_final = client.get(f"/api/executions/{execution_id}")
+            final_status = exec_final.get("status")
+        else:
+            deadline = time.time() + 300
+            exec_status = {}
+            while time.time() < deadline:
+                exec_status = client.get(f"/api/executions/{execution_id}")
+                if exec_status.get("status") in ("completed", "failed", "waiting_human"):
+                    break
+                time.sleep(10)
 
-        if exec_status.get("status") == "waiting_human":
-            client.post(f"/api/executions/{execution_id}/resume",
-                        json={"approved": True, "comment": "smoke auto-approval"})
-            time.sleep(30)
+            if exec_status.get("status") == "waiting_human":
+                client.post(f"/api/executions/{execution_id}/resume",
+                            json={"approved": True, "comment": "smoke auto-approval"})
+                time.sleep(30)
 
-        exec_final = client.get(f"/api/executions/{execution_id}")
-        final_status = exec_final.get("status")
+            exec_final = client.get(f"/api/executions/{execution_id}")
+            final_status = exec_final.get("status")
         log(f"{PHASE}: runbook execution status — {final_status}")
 
         for sr in exec_final.get("step_results", []):
