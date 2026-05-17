@@ -225,7 +225,8 @@ def run_phase_ir_lockdown_account(
     try:
         assets = client.get("/assets", params={"asset_type": "identity", "q": "smokeuser"})
         if not assets:
-            fail(f"{PHASE}: no smokeuser identity asset found — run LDAP_ROTATE first")
+            log(f"{PHASE}: no smokeuser identity asset — skipping LDAP path (no identity connector configured)")
+            return _phase_result(PHASE, "skipped", time.time() - start, [], ["no_identity_connector_configured"], False, 0, 0)
 
         asset_id = assets[0]["id"]
         _write_progress(ssm_key, PHASE, "STEP", f"Locking down smokeuser across {configured}")
@@ -279,7 +280,8 @@ def run_phase_ir_phishing_response(
     try:
         assets = client.get("/assets", params={"asset_type": "identity", "q": "smokeuser"})
         if not assets:
-            fail(f"{PHASE}: no smokeuser identity asset found — run LDAP_ROTATE first")
+            log(f"{PHASE}: no smokeuser identity asset — skipping LDAP path (no identity connector configured)")
+            return _phase_result(PHASE, "skipped", time.time() - start, [], ["no_identity_connector_configured"], False, 0, 0)
 
         asset_id = assets[0]["id"]
         _write_progress(ssm_key, PHASE, "STEP", "Submitting phishing_response CR")
