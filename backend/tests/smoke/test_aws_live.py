@@ -541,12 +541,21 @@ def run_phase_e(client: NexplaneClient, phase_a_result: dict) -> None:
             term_instance_id = (term_assets[0].get("asset_metadata") or {}).get("instance_id", "")
             # Wait for SSM to register (60s)
             time.sleep(60)
-            # Now terminate via CR
-            client._run_cr_with_timeout(
-                "[Phase E] terminate instance via CR", "ec2_terminate", term_asset_id,
-                {"instance_id": term_instance_id, "rollback_strategy": "rollback_unavailable"},
-                timeout=300,
-            )
+            # Now terminate via CR — tolerate failure so Phase F/G can still run
+            try:
+                client._run_cr_with_timeout(
+                    "[Phase E] terminate instance via CR", "ec2_terminate", term_asset_id,
+                    {"instance_id": term_instance_id, "rollback_strategy": "rollback_unavailable"},
+                    timeout=300,
+                )
+            except SystemExit:
+                print("  ⚠️  ec2_terminate CR failed — terminating instance directly")
+                ec2_direct = _get_aws_boto3_client('ec2')
+                if ec2_direct and term_instance_id:
+                    try:
+                        ec2_direct.terminate_instances(InstanceIds=[term_instance_id])
+                    except Exception:
+                        pass
             # Verify terminated state via boto3
             ec2_boto3 = _get_aws_boto3_client('ec2')
             if ec2_boto3 and term_instance_id:
