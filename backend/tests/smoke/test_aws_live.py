@@ -14339,7 +14339,7 @@ def main():
         help="Acknowledge that you are running locally (not recommended). "
              "Prefer: python tests/smoke/run_on_ec2.py to run from a dedicated EC2 runner."
     )
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
     phases = {p.strip().upper() for p in args.phases.split(",")}
 
     # Enforce EC2 runner policy: smoke tests should run from EC2, not local Docker.
