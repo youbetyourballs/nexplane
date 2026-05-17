@@ -8488,7 +8488,7 @@ def run_phase_nessus_scan(client: NexplaneClient, cloud_account_id: str) -> None
         fail("[NESSUS_SCAN] AWS clients not available")
 
     AL2023_AMI = "ami-0953476d60561c955"
-    INSTANCE_TYPE = "t3.medium"
+    INSTANCE_TYPE = "t3.small"  # t3.medium not Free Tier eligible on this account
 
     # Dynamically find the latest Nessus RPM (el9 = RHEL9, compatible with AL2023)
     NESSUS_RPM_URL = _get_nessus_rpm_url()
@@ -9185,7 +9185,7 @@ def _launch_windows_ec2(ec2_client, ami_id: str, cloud_account_id: str) -> tuple
     try:
         offerings = ec2_client.describe_instance_type_offerings(
             LocationType="availability-zone",
-            Filters=[{"Name": "instance-type", "Values": ["t3.large"]}],
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}],
         )["InstanceTypeOfferings"]
         supported_azs = {o["Location"] for o in offerings}
         good = [s for s in subnets if s.get("AvailabilityZone") in supported_azs]
@@ -9208,7 +9208,7 @@ def _launch_windows_ec2(ec2_client, ami_id: str, cloud_account_id: str) -> tuple
 
     resp = ec2_client.run_instances(
         ImageId=ami_id,
-        InstanceType="t3.large",
+        InstanceType="t3.small",  # t3.large not Free Tier eligible
         MinCount=1, MaxCount=1,
         SubnetId=subnet_id,
         IamInstanceProfile={"Name": instance_profile},
