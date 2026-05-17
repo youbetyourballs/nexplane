@@ -761,6 +761,8 @@ def run_phase_project_microseg(
 
 if __name__ == "__main__":
     parser = make_base_parser("Nexplane Platform Feature Smoke Tests")
+    parser.add_argument("--phases", default="IR_ISOLATE_HOST,IR_PRESERVE_EVIDENCE,IR_LOCKDOWN_ACCOUNT,IR_PHISHING_RESPONSE,RUNBOOK_ONBOARDING,RUNBOOK_ACCOUNT_COMPROMISE,RUNBOOK_PATCH_CAMPAIGN,ACCESS_REVIEW,PROJECT_MICROSEG,VULN_PIPELINE",
+                        help="Comma-separated list of phases to run")
     parser.add_argument("--agent-asset-id", default="",
                         help="Pre-provisioned agent endpoint asset ID")
     parser.add_argument("--ec2-instance-id", default="",
@@ -769,6 +771,8 @@ if __name__ == "__main__":
                         help="SmokeTestRun UUID for DB state updates")
     parser.add_argument("--ssm-progress-key", default="",
                         help="SSM key for progress streaming")
+    parser.add_argument("--tailscale-auth-key", default="",
+                        help="Tailscale auth key (passed by run_on_ec2.py)")
     args, _ = parser.parse_known_args()
 
     phases = [p.strip() for p in args.phases.split(",")]
