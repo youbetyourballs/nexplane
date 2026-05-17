@@ -814,22 +814,14 @@ Examples:
 
         # Run the test in the background (SSM TimeoutSeconds max is 2800 ~47 min,
         # but multi-phase runs can take 60-90+ min). We launch via nohup and poll.
-        # Write launch script to file first, then execute it.
-        # This avoids shell quoting issues and ensures the background process
-        # survives SSM session termination via setsid (new process group).
-        launch_script_content = (
-            "#!/bin/bash\n"
-            f"{test_script} 2>&1 | tee /tmp/smoke_test.log\n"
-            "_ec=${PIPESTATUS[0]}\n"
-            "echo SMOKE_EXIT_CODE:$_ec >> /tmp/smoke_test.log\n"
-            "touch /tmp/smoke_done\n"
-        )
+        # Run test in background using nohup+bash. The watchdog (smoke-watchdog
+        # tmux session) will create smoke_done if bash doesn't for any reason.
         bg_launch_script = (
-            f"cat > /tmp/smoke_launch.sh << 'SMOKE_EOF'\n"
-            f"{launch_script_content}"
-            f"SMOKE_EOF\n"
-            "chmod +x /tmp/smoke_launch.sh\n"
-            "setsid nohup /tmp/smoke_launch.sh </dev/null >/dev/null 2>&1 &\n"
+            # Use bash explicitly (not sh/dash) so PIPESTATUS is available.
+            f"nohup bash -c '{test_script} 2>&1 | tee /tmp/smoke_test.log; "
+            "_ec=${{PIPESTATUS[0]}}; "
+            "echo SMOKE_EXIT_CODE:$_ec >> /tmp/smoke_test.log; "
+            "touch /tmp/smoke_done' </dev/null >/dev/null 2>&1 &\n"
             "echo LAUNCHED:$$"
         )
         try:
