@@ -134,3 +134,31 @@ async def test_get_execution_wrong_org_fails(client: AsyncClient, other_org_clie
     _, exec_id = await _create_and_trigger(client)
     resp = await other_org_client.get(f"/api/executions/{exec_id}")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_runbook_has_auto_execute_field(db):
+    """Runbook model must have an auto_execute bool field defaulting to False."""
+    from app.models.runbook import Runbook
+
+    org = Organization(id=uuid.uuid4(), name="AE Test Org")
+    db.add(org)
+    await db.flush()
+    user = User(
+        id=uuid.uuid4(), organization_id=org.id,
+        email=f"ae-{uuid.uuid4().hex[:8]}@test.example",
+        name="AE User", role=UserRole.admin,
+        hashed_password=hash_password("test"),
+    )
+    db.add(user)
+    await db.flush()
+    rb = Runbook(
+        organization_id=org.id,
+        name="AE Test Runbook",
+        version=1,
+        is_seed=False,
+        created_by=user.id,
+    )
+    db.add(rb)
+    await db.flush()
+    assert rb.auto_execute is False
