@@ -1,0 +1,20 @@
+{
+  "change_type": "suppress",
+  "display_name": "Suppress",
+  "description": "Executes Suppress operation.",
+  "steps": [
+    {
+      "generic_action": "suppress",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "suppress",
+  "rollback_connector_type": "aws"
+}

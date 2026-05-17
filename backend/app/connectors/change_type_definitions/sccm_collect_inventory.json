@@ -1,0 +1,20 @@
+{
+  "change_type": "sccm_collect_inventory",
+  "display_name": "Sccm Collect Inventory",
+  "description": "Executes Sccm Collect Inventory operation.",
+  "steps": [
+    {
+      "generic_action": "sccm_collect_inventory",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "sccm_collect_inventory",
+  "rollback_connector_type": "sccm"
+}

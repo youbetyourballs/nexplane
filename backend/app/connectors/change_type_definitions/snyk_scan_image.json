@@ -1,0 +1,20 @@
+{
+  "change_type": "snyk_scan_image",
+  "display_name": "Snyk Scan Image",
+  "description": "Executes Snyk Scan Image operation.",
+  "steps": [
+    {
+      "generic_action": "snyk_scan_image",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "snyk_scan_image",
+  "rollback_connector_type": "snyk"
+}

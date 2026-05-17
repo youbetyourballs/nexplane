@@ -1,0 +1,20 @@
+{
+  "change_type": "k8s_rotate_sa_token",
+  "display_name": "K8S Rotate Sa Token",
+  "description": "Executes K8S Rotate Sa Token operation.",
+  "steps": [
+    {
+      "generic_action": "k8s_rotate_sa_token",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "k8s_rotate_sa_token",
+  "rollback_connector_type": "kubernetes"
+}

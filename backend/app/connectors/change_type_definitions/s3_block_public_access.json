@@ -1,0 +1,20 @@
+{
+  "change_type": "s3_block_public_access",
+  "display_name": "S3 Block Public Access",
+  "description": "Executes S3 Block Public Access operation.",
+  "steps": [
+    {
+      "generic_action": "s3_block_public_access",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "s3_block_public_access",
+  "rollback_connector_type": "aws"
+}

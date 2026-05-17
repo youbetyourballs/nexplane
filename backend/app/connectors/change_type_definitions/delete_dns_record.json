@@ -1,0 +1,20 @@
+{
+  "change_type": "delete_dns_record",
+  "display_name": "Delete Dns Record",
+  "description": "Executes Delete Dns Record operation.",
+  "steps": [
+    {
+      "generic_action": "delete_dns_record",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "delete_dns_record",
+  "rollback_connector_type": "active_directory"
+}

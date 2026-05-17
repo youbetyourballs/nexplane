@@ -1,0 +1,20 @@
+{
+  "change_type": "step_ca_rotate_cert",
+  "display_name": "Step Ca Rotate Cert",
+  "description": "Executes Step Ca Rotate Cert operation.",
+  "steps": [
+    {
+      "generic_action": "step_ca_rotate_cert",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "step_ca_rotate_cert",
+  "rollback_connector_type": "step_ca"
+}

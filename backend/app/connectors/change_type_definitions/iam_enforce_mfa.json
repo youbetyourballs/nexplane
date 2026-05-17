@@ -1,0 +1,20 @@
+{
+  "change_type": "iam_enforce_mfa",
+  "display_name": "Iam Enforce Mfa",
+  "description": "Executes Iam Enforce Mfa operation.",
+  "steps": [
+    {
+      "generic_action": "iam_enforce_mfa",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "iam_enforce_mfa",
+  "rollback_connector_type": "aws"
+}

@@ -1,0 +1,20 @@
+{
+  "change_type": "jfrog_scan_artifact",
+  "display_name": "Jfrog Scan Artifact",
+  "description": "Executes Jfrog Scan Artifact operation.",
+  "steps": [
+    {
+      "generic_action": "jfrog_scan_artifact",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "jfrog_scan_artifact",
+  "rollback_connector_type": "jfrog"
+}

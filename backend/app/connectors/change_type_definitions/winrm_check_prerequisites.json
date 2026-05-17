@@ -1,0 +1,20 @@
+{
+  "change_type": "winrm_check_prerequisites",
+  "display_name": "Winrm Check Prerequisites",
+  "description": "Executes Winrm Check Prerequisites operation.",
+  "steps": [
+    {
+      "generic_action": "winrm_check_prerequisites",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "winrm_check_prerequisites",
+  "rollback_connector_type": "winrm"
+}

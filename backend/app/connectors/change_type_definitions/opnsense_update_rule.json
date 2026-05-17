@@ -1,0 +1,20 @@
+{
+  "change_type": "opnsense_update_rule",
+  "display_name": "Opnsense Update Rule",
+  "description": "Executes Opnsense Update Rule operation.",
+  "steps": [
+    {
+      "generic_action": "opnsense_update_rule",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "opnsense_update_rule",
+  "rollback_connector_type": "opnsense"
+}

@@ -1,0 +1,20 @@
+{
+  "change_type": "macos_filevault_enable",
+  "display_name": "Macos Filevault Enable",
+  "description": "Executes Macos Filevault Enable operation.",
+  "steps": [
+    {
+      "generic_action": "macos_filevault_enable",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "macos_filevault_enable",
+  "rollback_connector_type": "macos"
+}
