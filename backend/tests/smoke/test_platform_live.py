@@ -485,9 +485,8 @@ def run_phase_runbook_onboarding(
             time.sleep(30)
 
         exec_final = client.get(f"/api/executions/{execution_id}")
-        assert exec_final["status"] == "completed", \
-            f"{PHASE}: runbook execution ended with status {exec_final['status']}"
-        log(f"{PHASE}: runbook execution completed")
+        final_status = exec_final.get("status")
+        log(f"{PHASE}: runbook execution status — {final_status}")
 
         for step_result in exec_final.get("step_results", []):
             if step_result.get("cr_id") and step_result.get("status") == "completed":
@@ -501,11 +500,23 @@ def run_phase_runbook_onboarding(
                 log(f"{PHASE}: rollback of {cr_id} failed: {e}", ok=False)
 
         log(f"{PHASE}: all rollbacks completed")
-        _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
         n = len(exec_final.get("step_results", []))
-        return _phase_result(PHASE, "passed", time.time() - start,
-                             exercised, skipped_connectors, True, n, n)
 
+        if final_status == "completed":
+            _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
+            return _phase_result(PHASE, "passed", time.time() - start,
+                                 exercised, skipped_connectors, True, n, n)
+        elif not exercised and skipped_connectors:
+            # No identity connectors configured — runbook steps all failed, expected
+            log(f"{PHASE}: skipped — no identity connectors configured")
+            _write_progress(ssm_key, PHASE, "PHASE_SKIP", f"{PHASE} skipped — no identity connectors")
+            return _phase_result(PHASE, "skipped", time.time() - start,
+                                 [], skipped_connectors, False, 0, n)
+        else:
+            raise AssertionError(f"runbook execution ended with status {final_status}")
+
+    except AssertionError:
+        raise
     except Exception as e:
         _write_progress(ssm_key, PHASE, "PHASE_FAIL", f"{PHASE} failed: {e}")
         for cr_id in reversed(rollback_crs):
@@ -564,7 +575,8 @@ def run_phase_runbook_account_compromise(
             time.sleep(30)
 
         exec_final = client.get(f"/api/executions/{execution_id}")
-        assert exec_final["status"] == "completed"
+        final_status = exec_final.get("status")
+        log(f"{PHASE}: runbook execution status — {final_status}")
 
         for sr in exec_final.get("step_results", []):
             if sr.get("cr_id") and sr.get("status") == "completed":
@@ -576,11 +588,21 @@ def run_phase_runbook_account_compromise(
             except Exception:
                 pass
 
-        _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
         n = len(exec_final.get("step_results", []))
-        return _phase_result(PHASE, "passed", time.time() - start,
-                             exercised, skipped_connectors, True, n, n)
+        if final_status == "completed":
+            _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
+            return _phase_result(PHASE, "passed", time.time() - start,
+                                 exercised, skipped_connectors, True, n, n)
+        elif not exercised and skipped_connectors:
+            log(f"{PHASE}: skipped — no identity connectors configured")
+            _write_progress(ssm_key, PHASE, "PHASE_SKIP", f"{PHASE} skipped — no identity connectors")
+            return _phase_result(PHASE, "skipped", time.time() - start,
+                                 [], skipped_connectors, False, 0, n)
+        else:
+            raise AssertionError(f"runbook execution ended with status {final_status}")
 
+    except AssertionError:
+        raise
     except Exception as e:
         _write_progress(ssm_key, PHASE, "PHASE_FAIL", f"{PHASE} failed: {e}")
         for cr_id in reversed(rollback_crs):
@@ -638,7 +660,8 @@ def run_phase_runbook_patch_campaign(
             time.sleep(60)
 
         exec_final = client.get(f"/api/executions/{execution_id}")
-        assert exec_final["status"] == "completed"
+        final_status = exec_final.get("status")
+        log(f"{PHASE}: runbook execution status — {final_status}")
 
         for sr in exec_final.get("step_results", []):
             if sr.get("cr_id") and sr.get("status") == "completed":
@@ -650,11 +673,16 @@ def run_phase_runbook_patch_campaign(
             except Exception:
                 pass
 
-        _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
         n = len(exec_final.get("step_results", []))
-        return _phase_result(PHASE, "passed", time.time() - start,
-                             ["nexplane_agent"], [], True, n, n)
+        if final_status == "completed":
+            _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
+            return _phase_result(PHASE, "passed", time.time() - start,
+                                 ["nexplane_agent"], [], True, n, n)
+        else:
+            raise AssertionError(f"runbook execution ended with status {final_status}")
 
+    except AssertionError:
+        raise
     except Exception as e:
         _write_progress(ssm_key, PHASE, "PHASE_FAIL", f"{PHASE} failed: {e}")
         for cr_id in reversed(rollback_crs):
