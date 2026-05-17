@@ -10,7 +10,25 @@ def _get_ec2_client(creds: dict):
 async def _real_execute(creds: dict, parameters: dict) -> dict:
     ec2 = _get_ec2_client(creds)
     loop = asyncio.get_event_loop()
-    volume_id = parameters["volume_id"]
+    volume_id = parameters.get("volume_id", "")
+
+    # If no volume_id but instance_id provided, look up the root volume
+    if not volume_id and parameters.get("instance_id"):
+        instance_id = parameters["instance_id"]
+
+        def _lookup_volume():
+            resp = ec2.describe_instances(InstanceIds=[instance_id])
+            block_devs = resp["Reservations"][0]["Instances"][0].get("BlockDeviceMappings", [])
+            for bd in block_devs:
+                if bd.get("Ebs", {}).get("VolumeId"):
+                    return bd["Ebs"]["VolumeId"]
+            return None
+
+        volume_id = await loop.run_in_executor(None, _lookup_volume) or ""
+
+    if not volume_id:
+        return {"action": "create_ebs_snapshot", "skipped": True, "reason": "no volume_id available"}
+
     name = parameters.get("backup_name", "nexplane-backup")
     retention = int(parameters.get("retention_days", 30))
 
