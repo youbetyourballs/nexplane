@@ -394,6 +394,371 @@ def run_phase_vuln_pipeline(
         return _phase_result(PHASE, "failed", time.time() - start, [], [], False, 0, 5)
 
 
+def run_phase_runbook_onboarding(
+    client: NexplaneClient,
+    endpoint_asset_id: str,
+    run_id: str = "",
+    ssm_key: str = "",
+) -> dict:
+    """RUNBOOK_ONBOARDING: Engineer Onboarding seeded runbook template end-to-end.
+
+    Uses the seeded 'Engineer Onboarding' runbook template. Exercises the full
+    runbook execution lifecycle: create execution → step CRs → human checkpoint
+    (auto-approved in smoke mode) → rollback all step CRs in reverse order.
+
+    Missing identity connectors are tolerated and reported as coverage gaps.
+    """
+    PHASE = "RUNBOOK_ONBOARDING"
+    start = time.time()
+    _write_progress(ssm_key, PHASE, "PHASE_START", "Starting Engineer Onboarding runbook")
+
+    runbooks = client.get("/runbooks", params={"name": "Engineer Onboarding"})
+    if not runbooks:
+        fail(f"{PHASE}: 'Engineer Onboarding' seeded runbook not found — check seed data")
+    runbook_id = runbooks[0]["id"]
+
+    connectors = client.get("/connectors")
+    configured_types = {c["connector_type"] for c in connectors}
+    identity_types = {"active_directory", "okta", "github"}
+    exercised = list(identity_types & configured_types)
+    skipped_connectors = list(identity_types - configured_types)
+
+    for ct in skipped_connectors:
+        _write_progress(ssm_key, PHASE, "CONNECTOR_SKIP", f"{ct} — not configured")
+
+    rollback_crs = []
+    try:
+        _write_progress(ssm_key, PHASE, "STEP", "Creating runbook execution")
+        execution = client.post(f"/runbooks/{runbook_id}/execute", json={
+            "context": {
+                "engineer_name": "Smoke Test Engineer",
+                "engineer_email": "smoke@nexplane.test",
+                "github_username": "nexplane-smoke-user",
+                "manager_email": "admin@nexplane.local",
+            }
+        })
+        execution_id = execution["id"]
+        log(f"{PHASE}: execution created — {execution_id}")
+
+        _write_progress(ssm_key, PHASE, "STEP", "Waiting for runbook steps to execute")
+        deadline = time.time() + 300
+        exec_status = {}
+        while time.time() < deadline:
+            exec_status = client.get(f"/runbooks/executions/{execution_id}")
+            status = exec_status.get("status")
+            if status in ("completed", "failed", "waiting_human"):
+                break
+            time.sleep(10)
+
+        if exec_status.get("status") == "waiting_human":
+            _write_progress(ssm_key, PHASE, "STEP", "Auto-approving human checkpoint (smoke mode)")
+            client.post(f"/runbooks/executions/{execution_id}/resume",
+                        json={"approved": True, "comment": "smoke test auto-approval"})
+            time.sleep(30)
+
+        exec_final = client.get(f"/runbooks/executions/{execution_id}")
+        assert exec_final["status"] == "completed", \
+            f"{PHASE}: runbook execution ended with status {exec_final['status']}"
+        log(f"{PHASE}: runbook execution completed")
+
+        for step_result in exec_final.get("step_results", []):
+            if step_result.get("cr_id") and step_result.get("status") == "completed":
+                rollback_crs.append(step_result["cr_id"])
+
+        _write_progress(ssm_key, PHASE, "STEP", f"Rolling back {len(rollback_crs)} step CRs")
+        for cr_id in reversed(rollback_crs):
+            try:
+                client.post(f"/change-requests/{cr_id}/rollback")
+            except Exception as e:
+                log(f"{PHASE}: rollback of {cr_id} failed: {e}", ok=False)
+
+        log(f"{PHASE}: all rollbacks completed")
+        _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
+        n = len(exec_final.get("step_results", []))
+        return _phase_result(PHASE, "passed", time.time() - start,
+                             exercised, skipped_connectors, True, n, n)
+
+    except Exception as e:
+        _write_progress(ssm_key, PHASE, "PHASE_FAIL", f"{PHASE} failed: {e}")
+        for cr_id in reversed(rollback_crs):
+            try:
+                client.post(f"/change-requests/{cr_id}/rollback")
+            except Exception:
+                pass
+        return _phase_result(PHASE, "failed", time.time() - start,
+                             [], skipped_connectors, False, 0, 0)
+
+
+def run_phase_runbook_account_compromise(
+    client: NexplaneClient,
+    endpoint_asset_id: str,
+    run_id: str = "",
+    ssm_key: str = "",
+) -> dict:
+    """RUNBOOK_ACCOUNT_COMPROMISE: Account Compromise IR seeded runbook template."""
+    PHASE = "RUNBOOK_ACCOUNT_COMPROMISE"
+    start = time.time()
+    _write_progress(ssm_key, PHASE, "PHASE_START", "Starting Account Compromise IR runbook")
+
+    runbooks = client.get("/runbooks", params={"name": "Account Compromise IR"})
+    if not runbooks:
+        fail(f"{PHASE}: 'Account Compromise IR' seeded runbook not found")
+    runbook_id = runbooks[0]["id"]
+
+    connectors = client.get("/connectors")
+    configured_types = {c["connector_type"] for c in connectors}
+    identity_types = {"active_directory", "okta", "entra_id"}
+    exercised = list(identity_types & configured_types)
+    skipped_connectors = list(identity_types - configured_types)
+
+    for ct in skipped_connectors:
+        _write_progress(ssm_key, PHASE, "CONNECTOR_SKIP", f"{ct} — not configured")
+
+    rollback_crs = []
+    try:
+        execution = client.post(f"/runbooks/{runbook_id}/execute", json={
+            "context": {"compromised_username": "smokeuser", "incident_id": "INC-SMOKE-001"}
+        })
+        execution_id = execution["id"]
+
+        deadline = time.time() + 300
+        exec_status = {}
+        while time.time() < deadline:
+            exec_status = client.get(f"/runbooks/executions/{execution_id}")
+            if exec_status.get("status") in ("completed", "failed", "waiting_human"):
+                break
+            time.sleep(10)
+
+        if exec_status.get("status") == "waiting_human":
+            client.post(f"/runbooks/executions/{execution_id}/resume",
+                        json={"approved": True, "comment": "smoke auto-approval"})
+            time.sleep(30)
+
+        exec_final = client.get(f"/runbooks/executions/{execution_id}")
+        assert exec_final["status"] == "completed"
+
+        for sr in exec_final.get("step_results", []):
+            if sr.get("cr_id") and sr.get("status") == "completed":
+                rollback_crs.append(sr["cr_id"])
+
+        for cr_id in reversed(rollback_crs):
+            try:
+                client.post(f"/change-requests/{cr_id}/rollback")
+            except Exception:
+                pass
+
+        _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
+        n = len(exec_final.get("step_results", []))
+        return _phase_result(PHASE, "passed", time.time() - start,
+                             exercised, skipped_connectors, True, n, n)
+
+    except Exception as e:
+        _write_progress(ssm_key, PHASE, "PHASE_FAIL", f"{PHASE} failed: {e}")
+        for cr_id in reversed(rollback_crs):
+            try:
+                client.post(f"/change-requests/{cr_id}/rollback")
+            except Exception:
+                pass
+        return _phase_result(PHASE, "failed", time.time() - start,
+                             [], skipped_connectors, False, 0, 0)
+
+
+def run_phase_runbook_patch_campaign(
+    client: NexplaneClient,
+    endpoint_asset_id: str,
+    run_id: str = "",
+    ssm_key: str = "",
+) -> dict:
+    """RUNBOOK_PATCH_CAMPAIGN: Patch Campaign seeded runbook template. Requires agent."""
+    PHASE = "RUNBOOK_PATCH_CAMPAIGN"
+    start = time.time()
+    _write_progress(ssm_key, PHASE, "PHASE_START", "Starting Patch Campaign runbook")
+
+    if not endpoint_asset_id:
+        log(f"{PHASE}: skipped — no agent asset ID provided")
+        return _phase_result(PHASE, "skipped", 0, [], [], False, 0, 0)
+
+    runbooks = client.get("/runbooks", params={"name": "Patch Campaign"})
+    if not runbooks:
+        fail(f"{PHASE}: 'Patch Campaign' seeded runbook not found")
+    runbook_id = runbooks[0]["id"]
+
+    rollback_crs = []
+    try:
+        execution = client.post(f"/runbooks/{runbook_id}/execute", json={
+            "context": {
+                "target_asset_ids": [endpoint_asset_id],
+                "patch_type": "security",
+            }
+        })
+        execution_id = execution["id"]
+
+        deadline = time.time() + 600
+        exec_status = {}
+        while time.time() < deadline:
+            exec_status = client.get(f"/runbooks/executions/{execution_id}")
+            if exec_status.get("status") in ("completed", "failed", "waiting_human"):
+                break
+            time.sleep(15)
+            _write_progress(ssm_key, PHASE, "STEP", "Patch campaign in progress...")
+
+        if exec_status.get("status") == "waiting_human":
+            client.post(f"/runbooks/executions/{execution_id}/resume",
+                        json={"approved": True, "comment": "smoke auto-approval"})
+            time.sleep(60)
+
+        exec_final = client.get(f"/runbooks/executions/{execution_id}")
+        assert exec_final["status"] == "completed"
+
+        for sr in exec_final.get("step_results", []):
+            if sr.get("cr_id") and sr.get("status") == "completed":
+                rollback_crs.append(sr["cr_id"])
+
+        for cr_id in reversed(rollback_crs):
+            try:
+                client.post(f"/change-requests/{cr_id}/rollback")
+            except Exception:
+                pass
+
+        _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
+        n = len(exec_final.get("step_results", []))
+        return _phase_result(PHASE, "passed", time.time() - start,
+                             ["nexplane_agent"], [], True, n, n)
+
+    except Exception as e:
+        _write_progress(ssm_key, PHASE, "PHASE_FAIL", f"{PHASE} failed: {e}")
+        for cr_id in reversed(rollback_crs):
+            try:
+                client.post(f"/change-requests/{cr_id}/rollback")
+            except Exception:
+                pass
+        return _phase_result(PHASE, "failed", time.time() - start, [], [], False, 0, 0)
+
+
+def run_phase_access_review(
+    client: NexplaneClient,
+    run_id: str = "",
+    ssm_key: str = "",
+) -> dict:
+    """ACCESS_REVIEW: full access review campaign lifecycle.
+
+    Tests: create campaign → collect entries → reviewer decisions → approve → generate removal CRs.
+    """
+    PHASE = "ACCESS_REVIEW"
+    start = time.time()
+    _write_progress(ssm_key, PHASE, "PHASE_START", "Starting access review campaign")
+
+    rollback_crs = []
+    campaign_id = None
+    try:
+        _write_progress(ssm_key, PHASE, "STEP", "Creating access review campaign")
+        campaign = client.post("/access-reviews/campaigns", json={
+            "name": "Smoke Test Access Review",
+            "reviewer_model": "security_team",
+            "scope": {"asset_types": ["server"]},
+        })
+        campaign_id = campaign["id"]
+
+        _write_progress(ssm_key, PHASE, "STEP", "Launching collection")
+        client.post(f"/access-reviews/campaigns/{campaign_id}/launch")
+        time.sleep(15)
+
+        _write_progress(ssm_key, PHASE, "STEP", "Making reviewer decisions")
+        entries = client.get(f"/access-reviews/campaigns/{campaign_id}/entries")
+        for entry in entries[:2]:
+            client.post(f"/access-reviews/entries/{entry['id']}/decide",
+                        json={"decision": "revoke", "reason": "smoke test"})
+
+        _write_progress(ssm_key, PHASE, "STEP", "Approving campaign")
+        client.post(f"/access-reviews/campaigns/{campaign_id}/approve")
+        time.sleep(10)
+
+        campaign_final = client.get(f"/access-reviews/campaigns/{campaign_id}")
+        generated_crs = campaign_final.get("generated_cr_ids", [])
+        assert generated_crs, f"{PHASE}: no CRs generated from revoke decisions"
+        rollback_crs.extend(generated_crs)
+        log(f"{PHASE}: {len(generated_crs)} removal CRs generated")
+
+        for cr_id in generated_crs:
+            try:
+                client.post(f"/change-requests/{cr_id}/reject",
+                            json={"decision": "rejected", "comment": "smoke test cleanup"})
+            except Exception:
+                pass
+
+        try:
+            client.client.delete(f"{client.base}/access-reviews/campaigns/{campaign_id}")
+        except Exception:
+            pass
+
+        _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
+        return _phase_result(PHASE, "passed", time.time() - start,
+                             ["access_review_engine"], [], True, 4, 4)
+
+    except Exception as e:
+        _write_progress(ssm_key, PHASE, "PHASE_FAIL", f"{PHASE} failed: {e}")
+        if campaign_id:
+            try:
+                client.client.delete(f"{client.base}/access-reviews/campaigns/{campaign_id}")
+            except Exception:
+                pass
+        return _phase_result(PHASE, "failed", time.time() - start, [], [], False, 0, 4)
+
+
+def run_phase_project_microseg(
+    client: NexplaneClient,
+    run_id: str = "",
+    ssm_key: str = "",
+) -> dict:
+    """PROJECT_MICROSEG: microsegmentation project with AI-assisted planning.
+
+    Tests the Project entity + AI planning endpoint. Does not execute generated
+    CRs (they require PaloAlto which is not available) — validates planning only.
+    """
+    PHASE = "PROJECT_MICROSEG"
+    start = time.time()
+    _write_progress(ssm_key, PHASE, "PHASE_START", "Starting microsegmentation project")
+
+    project_id = None
+    try:
+        _write_progress(ssm_key, PHASE, "STEP", "Creating microsegmentation project")
+        project = client.post("/projects", json={
+            "name": "Smoke Test Microsegmentation",
+            "goal": "Implement microsegmentation between the smoke test EC2 and the internet",
+            "generation_method": "ai_assisted",
+        })
+        project_id = project["id"]
+
+        _write_progress(ssm_key, PHASE, "STEP", "Requesting AI-assisted plan generation")
+        plan = client.post(f"/projects/{project_id}/generate-plan", json={
+            "prompt": "Identify network segments and propose firewall rules to restrict lateral movement"
+        })
+        assert plan.get("proposed_changes"), f"{PHASE}: AI planning returned no proposed changes"
+        log(f"{PHASE}: AI proposed {len(plan['proposed_changes'])} changes")
+
+        project_detail = client.get(f"/projects/{project_id}")
+        assert project_detail.get("status") in ("draft", "planning"), \
+            f"{PHASE}: unexpected project status {project_detail.get('status')}"
+
+        try:
+            client.client.delete(f"{client.base}/projects/{project_id}")
+        except Exception:
+            pass
+
+        _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
+        return _phase_result(PHASE, "passed", time.time() - start,
+                             ["ai_planning_engine"], [], False, 2, 2)
+
+    except Exception as e:
+        _write_progress(ssm_key, PHASE, "PHASE_FAIL", f"{PHASE} failed: {e}")
+        if project_id:
+            try:
+                client.client.delete(f"{client.base}/projects/{project_id}")
+            except Exception:
+                pass
+        return _phase_result(PHASE, "failed", time.time() - start, [], [], False, 0, 2)
+
+
 if __name__ == "__main__":
     parser = make_base_parser()
     parser.description = "Nexplane Platform Feature Smoke Tests"
@@ -429,6 +794,21 @@ if __name__ == "__main__":
             client, args.run_id, args.ssm_progress_key,
         ),
         "VULN_PIPELINE": lambda: run_phase_vuln_pipeline(
+            client, args.run_id, args.ssm_progress_key,
+        ),
+        "RUNBOOK_ONBOARDING": lambda: run_phase_runbook_onboarding(
+            client, args.agent_asset_id, args.run_id, args.ssm_progress_key,
+        ),
+        "RUNBOOK_ACCOUNT_COMPROMISE": lambda: run_phase_runbook_account_compromise(
+            client, args.agent_asset_id, args.run_id, args.ssm_progress_key,
+        ),
+        "RUNBOOK_PATCH_CAMPAIGN": lambda: run_phase_runbook_patch_campaign(
+            client, args.agent_asset_id, args.run_id, args.ssm_progress_key,
+        ),
+        "ACCESS_REVIEW": lambda: run_phase_access_review(
+            client, args.run_id, args.ssm_progress_key,
+        ),
+        "PROJECT_MICROSEG": lambda: run_phase_project_microseg(
             client, args.run_id, args.ssm_progress_key,
         ),
     }
