@@ -1,0 +1,20 @@
+{
+  "change_type": "winrm_execute_template",
+  "display_name": "Winrm Execute Template",
+  "description": "Executes Winrm Execute Template operation.",
+  "steps": [
+    {
+      "generic_action": "winrm_execute_template",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "winrm_execute_template",
+  "rollback_connector_type": "winrm"
+}

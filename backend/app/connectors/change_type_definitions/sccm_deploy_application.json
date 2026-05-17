@@ -1,0 +1,20 @@
+{
+  "change_type": "sccm_deploy_application",
+  "display_name": "Sccm Deploy Application",
+  "description": "Executes Sccm Deploy Application operation.",
+  "steps": [
+    {
+      "generic_action": "sccm_deploy_application",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "sccm_deploy_application",
+  "rollback_connector_type": "sccm"
+}

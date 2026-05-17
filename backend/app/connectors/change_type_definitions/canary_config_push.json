@@ -1,0 +1,20 @@
+{
+  "change_type": "canary_config_push",
+  "display_name": "Canary Config Push",
+  "description": "Executes Canary Config Push operation.",
+  "steps": [
+    {
+      "generic_action": "canary_config_push",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "canary_config_push",
+  "rollback_connector_type": "aws"
+}

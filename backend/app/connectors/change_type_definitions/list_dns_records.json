@@ -1,0 +1,20 @@
+{
+  "change_type": "list_dns_records",
+  "display_name": "List Dns Records",
+  "description": "Executes List Dns Records operation.",
+  "steps": [
+    {
+      "generic_action": "list_dns_records",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "list_dns_records",
+  "rollback_connector_type": "active_directory"
+}

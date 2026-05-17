@@ -1,0 +1,20 @@
+{
+  "change_type": "splunk_create_alert",
+  "display_name": "Splunk Create Alert",
+  "description": "Executes Splunk Create Alert operation.",
+  "steps": [
+    {
+      "generic_action": "splunk_create_alert",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "splunk_create_alert",
+  "rollback_connector_type": "splunk"
+}

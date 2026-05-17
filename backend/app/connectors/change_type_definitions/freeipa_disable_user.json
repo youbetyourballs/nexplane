@@ -1,0 +1,20 @@
+{
+  "change_type": "freeipa_disable_user",
+  "display_name": "Freeipa Disable User",
+  "description": "Executes Freeipa Disable User operation.",
+  "steps": [
+    {
+      "generic_action": "freeipa_disable_user",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "freeipa_disable_user",
+  "rollback_connector_type": "freeipa"
+}

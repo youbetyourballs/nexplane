@@ -1,0 +1,20 @@
+{
+  "change_type": "ad_forest_snapshot",
+  "display_name": "Ad Forest Snapshot",
+  "description": "Executes Ad Forest Snapshot operation.",
+  "steps": [
+    {
+      "generic_action": "ad_forest_snapshot",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "ad_forest_snapshot",
+  "rollback_connector_type": "active_directory"
+}

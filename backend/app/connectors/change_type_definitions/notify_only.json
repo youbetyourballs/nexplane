@@ -1,0 +1,20 @@
+{
+  "change_type": "notify_only",
+  "display_name": "Notify Only",
+  "description": "Executes Notify Only operation.",
+  "steps": [
+    {
+      "generic_action": "notify_only",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "notify_only",
+  "rollback_connector_type": "aws"
+}

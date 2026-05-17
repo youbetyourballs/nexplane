@@ -1,0 +1,20 @@
+{
+  "change_type": "macos_filevault_status",
+  "display_name": "Macos Filevault Status",
+  "description": "Executes Macos Filevault Status operation.",
+  "steps": [
+    {
+      "generic_action": "macos_filevault_status",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "macos_filevault_status",
+  "rollback_connector_type": "macos"
+}

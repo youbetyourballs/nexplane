@@ -1,0 +1,20 @@
+{
+  "change_type": "winrm_install_agent",
+  "display_name": "Winrm Install Agent",
+  "description": "Executes Winrm Install Agent operation.",
+  "steps": [
+    {
+      "generic_action": "winrm_install_agent",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "winrm_install_agent",
+  "rollback_connector_type": "winrm"
+}

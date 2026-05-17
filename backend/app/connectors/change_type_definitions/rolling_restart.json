@@ -1,0 +1,20 @@
+{
+  "change_type": "rolling_restart",
+  "display_name": "Rolling Restart",
+  "description": "Executes Rolling Restart operation.",
+  "steps": [
+    {
+      "generic_action": "rolling_restart",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "rolling_restart",
+  "rollback_connector_type": "aws"
+}

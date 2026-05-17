@@ -1,0 +1,20 @@
+{
+  "change_type": "bind_check_record",
+  "display_name": "Bind Check Record",
+  "description": "Executes Bind Check Record operation.",
+  "steps": [
+    {
+      "generic_action": "bind_check_record",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "bind_check_record",
+  "rollback_connector_type": "bind_dns"
+}

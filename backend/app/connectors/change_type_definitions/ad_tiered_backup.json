@@ -1,0 +1,20 @@
+{
+  "change_type": "ad_tiered_backup",
+  "display_name": "Ad Tiered Backup",
+  "description": "Executes Ad Tiered Backup operation.",
+  "steps": [
+    {
+      "generic_action": "ad_tiered_backup",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "ad_tiered_backup",
+  "rollback_connector_type": "active_directory"
+}

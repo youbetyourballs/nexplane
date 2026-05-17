@@ -1,0 +1,20 @@
+{
+  "change_type": "okta_enforce_mfa",
+  "display_name": "Okta Enforce Mfa",
+  "description": "Executes Okta Enforce Mfa operation.",
+  "steps": [
+    {
+      "generic_action": "okta_enforce_mfa",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "okta_enforce_mfa",
+  "rollback_connector_type": "okta"
+}

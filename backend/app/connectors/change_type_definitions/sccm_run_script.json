@@ -1,0 +1,20 @@
+{
+  "change_type": "sccm_run_script",
+  "display_name": "Sccm Run Script",
+  "description": "Executes Sccm Run Script operation.",
+  "steps": [
+    {
+      "generic_action": "sccm_run_script",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "sccm_run_script",
+  "rollback_connector_type": "sccm"
+}

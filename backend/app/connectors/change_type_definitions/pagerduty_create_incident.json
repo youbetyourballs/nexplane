@@ -1,0 +1,20 @@
+{
+  "change_type": "pagerduty_create_incident",
+  "display_name": "Pagerduty Create Incident",
+  "description": "Executes Pagerduty Create Incident operation.",
+  "steps": [
+    {
+      "generic_action": "pagerduty_create_incident",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "pagerduty_create_incident",
+  "rollback_connector_type": "pagerduty"
+}
