@@ -507,9 +507,14 @@ def run_phase_runbook_onboarding(
             return _phase_result(PHASE, "passed", time.time() - start,
                                  exercised, skipped_connectors, True, n, n)
         elif not exercised and skipped_connectors:
-            # No identity connectors configured — runbook steps all failed, expected
-            log(f"{PHASE}: skipped — no identity connectors configured")
+            # No identity connectors configured — runbook deadlocked or failed, expected
+            log(f"{PHASE}: skipped — no identity connectors configured (execution status={final_status})")
             _write_progress(ssm_key, PHASE, "PHASE_SKIP", f"{PHASE} skipped — no identity connectors")
+            # Abort the stuck execution so it doesn't linger
+            try:
+                client.post(f"/api/executions/{execution_id}/abort")
+            except Exception:
+                pass
             return _phase_result(PHASE, "skipped", time.time() - start,
                                  [], skipped_connectors, False, 0, n)
         else:
@@ -594,8 +599,12 @@ def run_phase_runbook_account_compromise(
             return _phase_result(PHASE, "passed", time.time() - start,
                                  exercised, skipped_connectors, True, n, n)
         elif not exercised and skipped_connectors:
-            log(f"{PHASE}: skipped — no identity connectors configured")
+            log(f"{PHASE}: skipped — no identity connectors configured (execution status={final_status})")
             _write_progress(ssm_key, PHASE, "PHASE_SKIP", f"{PHASE} skipped — no identity connectors")
+            try:
+                client.post(f"/api/executions/{execution_id}/abort")
+            except Exception:
+                pass
             return _phase_result(PHASE, "skipped", time.time() - start,
                                  [], skipped_connectors, False, 0, n)
         else:
