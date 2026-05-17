@@ -132,6 +132,7 @@ async def load_seed_templates(
             tags=template["tags"],
             version=1,
             is_seed=True,
+            auto_execute=True,
             created_by=system_user_id,
         )
         db.add(rb)
