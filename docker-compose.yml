@@ -42,7 +42,9 @@ services:
       - ./backend:/app
       - tailscale_state:/var/lib/tailscale-state
     command: >
-      sh -c "alembic upgrade head &&
+      sh -c "tailscaled --state=/var/lib/tailscale-state/tailscaled.state --tun=userspace-networking &
+             sleep 3 &&
+             alembic upgrade head &&
              python seed.py &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app"
 
