@@ -83,9 +83,14 @@ async def _execute_change_step(
     db: AsyncSession, execution: RunbookExecution, step_def: dict, step_result: RunbookStepResult
 ) -> None:
     if step_result.status == "pending":
-        # Import here to avoid circular imports
-        from app.services.runbook_cr_bridge import create_runbook_change_request
-        cr = await create_runbook_change_request(db, execution, step_def)
+        from app.services.runbook_cr_bridge import create_and_execute_runbook_cr
+        try:
+            cr = await create_and_execute_runbook_cr(db, execution, step_def)
+        except ValueError as exc:
+            step_result.status = "failed"
+            step_result.error_message = str(exc)
+            await _handle_step_failure(db, execution, step_def)
+            return
         step_result.change_request_ids = [str(cr.id)]
         step_result.status = "running"
         step_result.started_at = datetime.now(timezone.utc)
@@ -188,11 +193,18 @@ async def _execute_parallel_step(
     child_steps = step_def.get("parallel_steps", [])
 
     if step_result.status == "pending":
-        from app.services.runbook_cr_bridge import create_runbook_change_request
+        from app.services.runbook_cr_bridge import create_and_execute_runbook_cr
         cr_ids = []
         for child in child_steps:
-            cr = await create_runbook_change_request(db, execution, child)
-            cr_ids.append(str(cr.id))
+            try:
+                cr = await create_and_execute_runbook_cr(db, execution, child)
+                cr_ids.append(str(cr.id))
+            except ValueError as exc:
+                log.error("Parallel step child failed for execution %s: %s", execution.id, exc)
+                step_result.status = "failed"
+                step_result.error_message = str(exc)
+                await _handle_step_failure(db, execution, step_def)
+                return
         step_result.change_request_ids = cr_ids
         step_result.status = "running"
         step_result.started_at = datetime.now(timezone.utc)
