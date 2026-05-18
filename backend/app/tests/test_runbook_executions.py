@@ -187,7 +187,7 @@ async def test_trigger_blocked_when_auto_execute_false(client: AsyncClient):
     assert "auto-execution" in trigger_resp.json()["detail"].lower()
 
 
-from app.services.change_plan_service import plan_cr
+from app.services.change_plan_service import plan_cr, PlanResult
 from app.models.change_request import ChangeRequest, ChangeType, RiskLevel, ChangeRequestStatus
 
 
@@ -225,3 +225,9 @@ async def test_plan_cr_sets_status_to_planned(db):
     plan = await plan_cr(db, cr)
     assert cr.status == ChangeRequestStatus.planned
     assert plan is not None
+    assert isinstance(plan, PlanResult)
+    assert plan.plan is not None
+    assert isinstance(plan.risk_level, str)
+    assert isinstance(plan.risk_score, (int, float))
+    assert isinstance(plan.risk_factors, list)
+    assert isinstance(plan.warnings, list)
