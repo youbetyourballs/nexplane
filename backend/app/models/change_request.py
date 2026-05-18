@@ -394,6 +394,18 @@ class ChangeType(str, enum.Enum):
     bind_create_record = "bind_create_record"
     bind_delete_record = "bind_delete_record"
     bind_check_record = "bind_check_record"
+    # Runbook change types — identity lifecycle
+    create_ad_account = "create_ad_account"
+    assign_okta_groups = "assign_okta_groups"
+    add_github_org_member = "add_github_org_member"
+    send_welcome_email = "send_welcome_email"
+    force_password_reset = "force_password_reset"
+    # Runbook change types — incident response
+    preserve_cloudtrail_logs = "preserve_cloudtrail_logs"
+    close_incident_ticket = "close_incident_ticket"
+    # Runbook change types — fleet operations (read-only)
+    check_fleet_health = "check_fleet_health"
+    check_compliance = "check_compliance"
 
 
 class RiskLevel(str, enum.Enum):
