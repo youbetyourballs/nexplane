@@ -1,0 +1,1 @@
+{"change_type":"assign_okta_groups","display_name":"Assign Okta Groups","description":"Assigns an Okta user to one or more groups.","steps":[{"generic_action":"assign_okta_groups","purpose":"execute","required":true}],"preflight_checks":["connector_reachable"],"verification_methods":["api_check"],"rollback_action":"assign_okta_groups","rollback_connector_type":"okta"}
