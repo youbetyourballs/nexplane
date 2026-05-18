@@ -211,3 +211,49 @@ async def test_servicenow_close_incident_rollback_reopens_no_creds():
         _MockConnector(),
     )
     assert result["rolled_back"] is True
+
+
+# --- check_fleet_health ---
+
+@pytest.mark.asyncio
+async def test_check_fleet_health_no_creds_returns_simulated():
+    from app.connectors.executors.nexplane_agent import check_fleet_health
+    result = await check_fleet_health.execute(
+        {"asset_ids": ["asset-1", "asset-2"], "environment": "production"},
+        ["asset-1", "asset-2"],
+        _MockConnector(),
+    )
+    assert result["action"] == "check_fleet_health"
+    assert "healthy" in result
+    assert "degraded" in result
+    assert "unreachable" in result
+
+
+@pytest.mark.asyncio
+async def test_check_fleet_health_rollback_is_noop():
+    from app.connectors.executors.nexplane_agent import check_fleet_health
+    result = await check_fleet_health.rollback({}, {}, _MockConnector())
+    assert result["rolled_back"] is False
+
+
+# --- check_compliance ---
+
+@pytest.mark.asyncio
+async def test_check_compliance_no_creds_returns_simulated():
+    from app.connectors.executors.nexplane_agent import check_compliance
+    result = await check_compliance.execute(
+        {"asset_ids": ["asset-1"], "framework": "cis"},
+        ["asset-1"],
+        _MockConnector(),
+    )
+    assert result["action"] == "check_compliance"
+    assert "compliant" in result
+    assert "non_compliant" in result
+    assert "unknown" in result
+
+
+@pytest.mark.asyncio
+async def test_check_compliance_rollback_is_noop():
+    from app.connectors.executors.nexplane_agent import check_compliance
+    result = await check_compliance.rollback({}, {}, _MockConnector())
+    assert result["rolled_back"] is False
