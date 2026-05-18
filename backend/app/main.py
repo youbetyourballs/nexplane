@@ -59,6 +59,7 @@ async def lifespan(app: FastAPI):
         seconds=30,
         id="runbook_executor_tick",
         replace_existing=True,
+        max_instances=1,
     )
     _escalation_scheduler.start()
     # Scrub orphaned CRs — any CR still in-flight when the backend
