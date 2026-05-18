@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
 from app.models.change_request import ChangeRequest, ChangeType, RiskLevel, ChangeRequestStatus
 from app.models.execution_run import ExecutionRun, ExecutionStatus
@@ -51,7 +52,14 @@ async def create_and_execute_runbook_cr(
     await db.flush()
 
     # Create execution run record
-    workflow_id = f"wf-rb-{cr.id}-1"
+    # Count existing runs to support retry scenarios
+    count_result = await db.execute(
+        select(func.count()).select_from(ExecutionRun).where(
+            ExecutionRun.change_request_id == cr.id
+        )
+    )
+    attempt = count_result.scalar_one() + 1
+    workflow_id = f"wf-rb-{cr.id}-{attempt}"
     run = ExecutionRun(
         change_request_id=cr.id,
         workflow_id=workflow_id,
