@@ -1993,5 +1993,37 @@
                         "estimated_duration_seconds": 15,
                         "execution_tier": 1
                     }
+                    ,{
+                      "action_id": "check_fleet_health",
+                      "generic_action": "check_fleet_health",
+                      "action_type": "change",
+                      "execution_tier": 3,
+                      "display_name": "Check Fleet Health",
+                      "description": "Dispatches a health check to each agent in the asset set; falls back to inventory metadata if agents are unreachable within 60s",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                        {"name": "asset_ids", "type": "array", "required": false},
+                        {"name": "tags", "type": "object", "required": false},
+                        {"name": "environment", "type": "string", "required": false}
+                      ],
+                      "executor": "nexplane_agent.check_fleet_health",
+                      "estimated_duration_seconds": 60
+                    }
+                    ,{
+                      "action_id": "check_compliance",
+                      "generic_action": "check_compliance",
+                      "action_type": "change",
+                      "execution_tier": 3,
+                      "display_name": "Check Compliance",
+                      "description": "Dispatches a compliance check to each agent in the asset set for the specified framework; falls back to last inventory scan results if agents are unreachable",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                        {"name": "asset_ids", "type": "array", "required": false},
+                        {"name": "tags", "type": "object", "required": false},
+                        {"name": "framework", "type": "string", "required": false, "default": "cis"}
+                      ],
+                      "executor": "nexplane_agent.check_compliance",
+                      "estimated_duration_seconds": 60
+                    }
                 ]
 }
