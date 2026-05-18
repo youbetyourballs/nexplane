@@ -231,3 +231,70 @@ async def test_plan_cr_sets_status_to_planned(db):
     assert isinstance(plan.risk_score, (int, float))
     assert isinstance(plan.risk_factors, list)
     assert isinstance(plan.warnings, list)
+
+
+from unittest.mock import patch, AsyncMock
+
+@pytest.mark.asyncio
+async def test_create_and_execute_runbook_cr_drives_cr_to_approved(db):
+    """
+    create_and_execute_runbook_cr must create a CR, plan it, set it to
+    approved, and fire the workflow — all without a commit in between.
+    """
+    from app.services.runbook_cr_bridge import create_and_execute_runbook_cr
+    from app.models.runbook import RunbookExecution, Runbook
+
+    org = Organization(id=uuid.uuid4(), name=f"Bridge Org {uuid.uuid4().hex[:4]}")
+    db.add(org)
+    await db.flush()
+    user = User(
+        id=uuid.uuid4(), organization_id=org.id,
+        email=f"bridge-{uuid.uuid4().hex[:8]}@test.example",
+        name="Bridge User", role=UserRole.admin,
+        hashed_password=hash_password("test"),
+    )
+    db.add(user)
+    await db.flush()
+
+    rb = Runbook(
+        organization_id=org.id,
+        name="Bridge Test Runbook",
+        version=1,
+        is_seed=False,
+        created_by=user.id,
+    )
+    db.add(rb)
+    await db.flush()
+
+    execution = RunbookExecution(
+        runbook_id=rb.id,
+        runbook_version=1,
+        runbook_snapshot={"organization_id": str(org.id), "steps": []},
+        triggered_by=user.id,
+        context={},
+        status="running",
+        current_step=1,
+    )
+    db.add(execution)
+    await db.flush()
+
+    step_def = {
+        "step_number": 1,
+        "name": "Isolate Host",
+        "type": "change",
+        "change_type": "isolate_host",
+        "parameters": {},
+        "asset_selector": None,
+        "on_failure": "abort",
+    }
+
+    # Patch start_workflow so we don't actually launch a workflow task
+    with patch(
+        "app.services.runbook_cr_bridge.start_workflow",
+        new_callable=AsyncMock,
+        return_value="wf-test-123",
+    ):
+        cr = await create_and_execute_runbook_cr(db, execution, step_def)
+
+    assert cr.status.value == "approved"
+    assert cr.source == "runbook"
