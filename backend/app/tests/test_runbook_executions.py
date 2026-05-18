@@ -48,6 +48,7 @@ async def _create_and_trigger(client: AsyncClient) -> tuple[str, str]:
     """Helper: create a runbook with a human checkpoint and trigger it."""
     resp = await client.post("/api/runbooks", json={
         "name": "Checkpoint Runbook",
+        "auto_execute": True,
         "tags": [],
         "steps": [
             {
@@ -162,3 +163,25 @@ async def test_runbook_has_auto_execute_field(db):
     db.add(rb)
     await db.flush()
     assert rb.auto_execute is False
+
+
+@pytest.mark.asyncio
+async def test_trigger_blocked_when_auto_execute_false(client: AsyncClient):
+    """Triggering a runbook with auto_execute=False must return 403."""
+    # Create a runbook (auto_execute defaults to False)
+    resp = await client.post("/api/runbooks", json={
+        "name": "Disabled Runbook",
+        "tags": [],
+        "steps": [
+            {"step_number": 1, "name": "Step 1", "type": "human_checkpoint",
+             "prompt": "Approve?", "required_role": "admin",
+             "timeout_hours": 1, "on_timeout": "abort", "on_failure": "abort",
+             "parallel_steps": []}
+        ],
+    })
+    assert resp.status_code == 201
+    rb_id = resp.json()["id"]
+
+    trigger_resp = await client.post(f"/api/runbooks/{rb_id}/trigger", json={"context": {}})
+    assert trigger_resp.status_code == 403
+    assert "auto-execution" in trigger_resp.json()["detail"].lower()
