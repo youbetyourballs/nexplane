@@ -27,16 +27,15 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         organization = g.get_organization(org)
         user = g.get_user(username)
         organization.add_to_members(user, role=role)
-        membership = organization.get_membership(user)
-        return membership.state, membership.role
+        return role
 
-    state, actual_role = await loop.run_in_executor(None, _call)
+    actual_role = await loop.run_in_executor(None, _call)
     return {
         "action": "add_org_member",
         "username": username,
         "org": org,
         "role": actual_role,
-        "state": state,
+        "state": "pending",
         "added": True,
         "added_at": datetime.now(timezone.utc).isoformat(),
     }
