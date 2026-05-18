@@ -1,0 +1,35 @@
+{
+  "connector_type": "smtp",
+  "display_name": "SMTP Email",
+  "credential_fields": [
+    {"name": "host", "label": "SMTP Host", "type": "string", "required": true},
+    {"name": "port", "label": "Port", "type": "string", "required": false, "default": "587"},
+    {"name": "username", "label": "Username", "type": "string", "required": false},
+    {"name": "password", "label": "Password", "type": "password", "required": false},
+    {"name": "use_tls", "label": "Use TLS (STARTTLS)", "type": "string", "required": false, "default": "true"},
+    {"name": "from_address", "label": "From Address", "type": "string", "required": false}
+  ],
+  "actions": [
+    {
+      "action_id": "send_welcome_email",
+      "generic_action": "send_welcome_email",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Send Welcome Email",
+      "description": "Sends an onboarding welcome email with temporary credentials to a new user",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "to_address", "type": "string", "required": true},
+        {"name": "recipient_name", "type": "string", "required": false},
+        {"name": "temp_password", "type": "string", "required": false},
+        {"name": "login_url", "type": "string", "required": false},
+        {"name": "org_name", "type": "string", "required": false},
+        {"name": "account_dn", "type": "string", "required": false},
+        {"name": "okta_user_id", "type": "string", "required": false}
+      ],
+      "executor": "smtp.send_welcome_email",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "email_sent_to_user"
+    }
+  ]
+}

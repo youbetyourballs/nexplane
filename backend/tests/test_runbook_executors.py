@@ -128,3 +128,35 @@ async def test_github_add_org_member_rollback_removes():
     )
     assert result["rolled_back"] is True
     assert result["simulated"] is True
+
+
+# --- SMTP send_welcome_email ---
+
+@pytest.mark.asyncio
+async def test_smtp_send_welcome_email_no_creds_returns_simulated():
+    from app.connectors.executors.smtp import send_welcome_email
+    result = await send_welcome_email.execute(
+        {
+            "to_address": "jdoe@example.com",
+            "recipient_name": "John Doe",
+            "temp_password": "Temp1234!",
+            "login_url": "https://login.example.com",
+        },
+        [],
+        _MockConnector(),
+    )
+    assert result["action"] == "send_welcome_email"
+    assert result["simulated"] is True
+    assert result["to_address"] == "jdoe@example.com"
+
+
+@pytest.mark.asyncio
+async def test_smtp_send_welcome_email_rollback_no_creds_reports_no_account():
+    from app.connectors.executors.smtp import send_welcome_email
+    result = await send_welcome_email.rollback(
+        {},
+        {"to_address": "jdoe@example.com"},
+        _MockConnector(),
+    )
+    assert result["rolled_back"] is True
+    assert result["account_removed"] is False
