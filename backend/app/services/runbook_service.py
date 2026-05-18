@@ -136,6 +136,16 @@ class RunbookService:
                 detail="Runbook is not enabled for auto-execution. An admin must enable it first.",
             )
 
+        # Only admins may force past a maintenance window
+        if force:
+            from app.models.user import User as _User, UserRole as _UserRole
+            triggering_user = await self.db.get(_User, user_id)
+            if not triggering_user or triggering_user.role != _UserRole.admin:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only admins may override a maintenance window freeze.",
+                )
+
         # Maintenance window pre-check
         if not force:
             from app.services.maintenance_window_service import is_in_maintenance_window

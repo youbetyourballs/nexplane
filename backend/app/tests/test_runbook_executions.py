@@ -298,3 +298,52 @@ async def test_create_and_execute_runbook_cr_drives_cr_to_approved(db):
 
     assert cr.status.value == "approved"
     assert cr.source == "runbook"
+
+
+@pytest.mark.asyncio
+async def test_force_trigger_blocked_for_non_admin(db):
+    """Non-admins must not be able to force-trigger past a maintenance window."""
+    org = Organization(id=uuid.uuid4(), name=f"Force Org {uuid.uuid4().hex[:4]}")
+    db.add(org)
+    await db.flush()
+    non_admin = User(
+        id=uuid.uuid4(), organization_id=org.id,
+        email=f"operator-{uuid.uuid4().hex[:8]}@test.example",
+        name="Operator", role=UserRole.security_operator,
+        hashed_password=hash_password("test"),
+    )
+    db.add(non_admin)
+    await db.flush()
+    token = create_access_token(str(non_admin.id))
+
+    async def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {token}"},
+        ) as c:
+            # Create an enabled runbook
+            rb_resp = await c.post("/api/runbooks", json={
+                "name": "Force Test Runbook",
+                "auto_execute": True,
+                "tags": [],
+                "steps": [
+                    {"step_number": 1, "name": "Step", "type": "human_checkpoint",
+                     "prompt": "Approve?", "required_role": "admin",
+                     "timeout_hours": 1, "on_timeout": "abort", "on_failure": "abort",
+                     "parallel_steps": []}
+                ],
+            })
+            assert rb_resp.status_code == 201
+            rb_id = rb_resp.json()["id"]
+
+            # Non-admin with force=True should get 403
+            resp = await c.post(f"/api/runbooks/{rb_id}/trigger", json={"context": {}, "force": True})
+            assert resp.status_code == 403
+            assert "admin" in resp.json()["detail"].lower()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
