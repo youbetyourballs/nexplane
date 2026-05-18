@@ -201,6 +201,7 @@ async def _execute_parallel_step(
                 cr_ids.append(str(cr.id))
             except ValueError as exc:
                 log.error("Parallel step child failed for execution %s: %s", execution.id, exc)
+                step_result.change_request_ids = cr_ids  # record what already fired
                 step_result.status = "failed"
                 step_result.error_message = str(exc)
                 await _handle_step_failure(db, execution, step_def)
