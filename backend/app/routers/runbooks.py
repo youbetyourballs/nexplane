@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.routers import current_user
+from app.routers import current_user, require_roles
+from app.models.user import UserRole
 from app.schemas.runbook import (
     RunbookCreate, RunbookUpdate, RunbookOut, RunbookExecutionOut,
     TriggerRunbookRequest, HumanCheckpointResumeRequest,
@@ -46,7 +47,7 @@ async def update_runbook(
     runbook_id: str,
     payload: RunbookUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(current_user),
+    user=Depends(require_roles(UserRole.admin)),
 ):
     return await RunbookService(db).update_runbook(runbook_id, user.organization_id, payload)
 
@@ -77,7 +78,7 @@ async def trigger_runbook(
     user=Depends(current_user),
 ):
     return await RunbookService(db).trigger_runbook(
-        runbook_id, user.organization_id, user.id, payload.context
+        runbook_id, user.organization_id, user.id, payload.context, force=payload.force
     )
 
 

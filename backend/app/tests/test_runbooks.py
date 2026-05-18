@@ -132,7 +132,7 @@ async def test_fork_runbook(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_trigger_runbook(client: AsyncClient):
     create_resp = await client.post("/api/runbooks", json={
-        "name": "Trigger Test", "tags": [], "steps": []
+        "name": "Trigger Test", "auto_execute": True, "tags": [], "steps": []
     })
     rb_id = create_resp.json()["id"]
     resp = await client.post(f"/api/runbooks/{rb_id}/trigger", json={"context": {"env": "prod"}})
@@ -146,7 +146,7 @@ async def test_trigger_runbook(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_list_executions(client: AsyncClient):
     create_resp = await client.post("/api/runbooks", json={
-        "name": "Exec List Test", "tags": [], "steps": []
+        "name": "Exec List Test", "auto_execute": True, "tags": [], "steps": []
     })
     rb_id = create_resp.json()["id"]
     await client.post(f"/api/runbooks/{rb_id}/trigger", json={"context": {}})
@@ -169,7 +169,7 @@ async def test_list_runbooks_tag_filter(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_delete_runbook_with_active_execution_fails(client: AsyncClient):
     create_resp = await client.post("/api/runbooks", json={
-        "name": "Active Exec", "tags": [], "steps": []
+        "name": "Active Exec", "auto_execute": True, "tags": [], "steps": []
     })
     rb_id = create_resp.json()["id"]
     await client.post(f"/api/runbooks/{rb_id}/trigger", json={"context": {}})

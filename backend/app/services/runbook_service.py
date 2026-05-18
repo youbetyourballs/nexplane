@@ -50,6 +50,7 @@ class RunbookService:
             name=payload.name,
             description=payload.description,
             tags=payload.tags,
+            auto_execute=payload.auto_execute,
             version=1,
             is_seed=False,
             created_by=user_id,
@@ -70,6 +71,8 @@ class RunbookService:
             rb.description = payload.description
         if payload.tags is not None:
             rb.tags = payload.tags
+        if payload.auto_execute is not None:
+            rb.auto_execute = payload.auto_execute
         if payload.steps is not None:
             # Replace all steps atomically
             await self.db.execute(
@@ -121,11 +124,54 @@ class RunbookService:
 
     # --- Trigger ---
 
-    async def trigger_runbook(self, runbook_id: str, org_id: uuid.UUID,
-                              user_id: uuid.UUID, context: dict) -> RunbookExecution:
+    async def trigger_runbook(
+        self, runbook_id: str, org_id: uuid.UUID,
+        user_id: uuid.UUID, context: dict, *, force: bool = False
+    ) -> RunbookExecution:
         rb = await self.get_runbook(runbook_id, org_id)
+
+        if not rb.auto_execute:
+            raise HTTPException(
+                status_code=403,
+                detail="Runbook is not enabled for auto-execution. An admin must enable it first.",
+            )
+
+        # Maintenance window pre-check
+        if not force:
+            from app.services.maintenance_window_service import is_in_maintenance_window
+            from app.models.asset import Asset
+            from sqlalchemy import select as _select
+
+            # Collect all asset_ids referenced across all steps in the runbook
+            all_asset_ids: list[uuid.UUID] = []
+            for step in rb.steps:
+                if step.asset_selector and step.asset_selector.get("asset_ids"):
+                    all_asset_ids.extend(
+                        uuid.UUID(str(aid)) for aid in step.asset_selector["asset_ids"]
+                    )
+
+            # Check maintenance windows on any matched asset tags
+            if all_asset_ids:
+                assets_result = await self.db.execute(
+                    _select(Asset).where(Asset.id.in_(all_asset_ids))
+                )
+                for asset in assets_result.scalars():
+                    window = await is_in_maintenance_window(
+                        self.db, asset.tags or [], enforcement="hard"
+                    )
+                    if window:
+                        raise HTTPException(
+                            status_code=409,
+                            detail={
+                                "maintenance_window": window.name,
+                                "warning": (
+                                    f"Active change freeze window '{window.name}' covers affected assets. "
+                                    "Set force=true to override as an emergency."
+                                ),
+                            },
+                        )
+
         snapshot = RunbookOut.model_validate(rb).model_dump(mode="json")
-        # Embed org_id in snapshot for executor
         snapshot["organization_id"] = str(org_id)
         execution = RunbookExecution(
             runbook_id=rb.id,
@@ -139,6 +185,17 @@ class RunbookService:
         self.db.add(execution)
         await self.db.commit()
         await self.db.refresh(execution)
+
+        # Write emergency override audit event if forced
+        if force:
+            from app.services.audit_service import record_event
+            await record_event(
+                self.db, org_id, "runbook.emergency_override",
+                {"runbook_id": str(rb.id), "execution_id": str(execution.id)},
+                actor_id=user_id,
+            )
+            await self.db.commit()
+
         return await self.get_execution(str(execution.id), org_id)
 
     # --- Execution queries ---
