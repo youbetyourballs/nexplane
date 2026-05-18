@@ -37,4 +37,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": False, "reason": "cannot reopen a closed incident automatically"}
+    creds = getattr(connector, "credentials", {})
+    sys_id = execution_result.get("sys_id") or parameters.get("sys_id")
+    if not sys_id:
+        return {"rolled_back": False, "reason": "no sys_id in execution_result"}
+    if not creds:
+        return {"rolled_back": True, "sys_id": sys_id, "simulated": True}
+    from ._client import get_client
+    async with get_client(creds) as client:
+        resp = await client.patch(f"/incident/{sys_id}", json={"state": "2"})  # 2 = In Progress
+        resp.raise_for_status()
+    return {"rolled_back": True, "sys_id": sys_id, "state": "2"}

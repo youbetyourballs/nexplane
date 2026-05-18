@@ -2083,8 +2083,27 @@
       "action_type": "change", 
       "executor": "aws.remove_emergency_lockout", 
       "generic_action": "remove_emergency_lockout", 
-      "action_id": "remove_emergency_lockout", 
+      "action_id": "remove_emergency_lockout",
       "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "preserve_cloudtrail_logs",
+      "generic_action": "preserve_cloudtrail_logs",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Preserve CloudTrail Logs",
+      "description": "Applies S3 Object Lock (Legal Hold) to CloudTrail log objects in an S3 bucket to prevent deletion during an incident",
+      "applicable_asset_types": ["cloud_account", "s3_bucket"],
+      "parameters": [
+        {"name": "bucket", "type": "string", "required": true},
+        {"name": "prefix", "type": "string", "required": false, "default": ""},
+        {"name": "region", "type": "string", "required": false, "default": "us-east-1"}
+      ],
+      "executor": "aws.preserve_cloudtrail_logs",
+      "rollback_action": "release_legal_hold",
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "s3_object_lock_applied",
+      "safety_notes": ["S3 bucket must have Object Lock enabled at bucket level before this action will succeed"]
     }
   ]
 }
