@@ -1,0 +1,54 @@
+name: Update Changelog
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  update-changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate and prepend changelog entry
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          DATE="$(date -u +%Y-%m-%d)"
+
+          # Find the previous tag (the one before this one)
+          PREV_TAG="$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -1)"
+
+          if [ -z "$PREV_TAG" ]; then
+            LOG_RANGE="${TAG}"
+          else
+            LOG_RANGE="${PREV_TAG}..${TAG}"
+          fi
+
+          ENTRIES="$(git log --oneline "${LOG_RANGE}" | sed 's/^/- /')"
+
+          NEW_SECTION="## ${TAG} (${DATE})
+
+${ENTRIES}
+
+"
+
+          CHANGELOG="docs-site/docs/changelog.md"
+
+          # Prepend the new section to the existing changelog
+          printf '%s' "${NEW_SECTION}" | cat - "${CHANGELOG}" > /tmp/changelog.tmp
+          mv /tmp/changelog.tmp "${CHANGELOG}"
+
+      - name: Commit updated changelog
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs-site/docs/changelog.md
+          git commit -m "chore: update changelog for ${TAG}"
+          git push origin HEAD:master

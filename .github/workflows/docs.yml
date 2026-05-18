@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install mkdocs-material
+      - run: pip install "mkdocs-material>=9.2"
       - run: mkdocs build --strict
         # --strict turns warnings into errors (catches broken links, missing pages)
 
@@ -32,6 +32,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install mkdocs-material
+      - run: pip install "mkdocs-material>=9.2"
       - run: mkdocs gh-deploy --force
         # Deploys to gh-pages branch; point docs.nexplane.ai CNAME to <org>.github.io/nexplane
