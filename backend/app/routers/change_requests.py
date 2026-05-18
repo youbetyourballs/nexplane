@@ -21,6 +21,7 @@ from app.schemas.change_request import (
 )
 from app.schemas.execution_run import ExecutionRunRead
 from app.services.audit_service import record_event
+from app.services.change_plan_service import plan_cr as _plan_cr
 from app.services.planning_engine import generate_plan
 from app.services.safety_engine import score_change_request, check_approval_requirements
 from app.workflows import runner as workflow_runner
@@ -230,56 +231,19 @@ async def generate_change_plan(
         raise HTTPException(status_code=400, detail=f"Cannot plan a change request in status '{cr.status.value}'")
 
     # Clear stale approvals so a re-planned CR can be approved fresh
-    await db.execute(
-        select(Approval).where(Approval.change_request_id == cr.id)
-    )
     from sqlalchemy import delete as sa_delete
     await db.execute(sa_delete(Approval).where(Approval.change_request_id == cr.id))
 
-    asset_ids = [uuid.UUID(aid) for aid in (cr.target_asset_ids or [])]
-    assets_result = await db.execute(
-        select(Asset).options(selectinload(Asset.connector)).where(Asset.id.in_(asset_ids))
-    )
-    assets = list(assets_result.scalars().all())
-
-    safety_result = score_change_request(cr, assets)
-
-    if safety_result.is_blocked:
+    try:
+        plan = await _plan_cr(db, cr)
+    except ValueError as e:
         raise HTTPException(
             status_code=422,
-            detail={"message": "Safety review blocked plan generation", "blocking_issues": safety_result.blocking_issues},
+            detail={"message": "Safety review blocked plan generation", "blocking_issues": str(e)},
         )
 
-    plan_data = generate_plan(cr, assets, safety_result)
-
-    if cr.change_plan:
-        plan = cr.change_plan
-        plan.generated_steps = plan_data.generated_steps
-        plan.preflight_checks = plan_data.preflight_checks
-        plan.blast_radius = plan_data.blast_radius
-        plan.rollback_plan = plan_data.rollback_plan
-        plan.verification_plan = plan_data.verification_plan
-    else:
-        plan = ChangePlan(
-            change_request_id=cr.id,
-            generated_steps=plan_data.generated_steps,
-            preflight_checks=plan_data.preflight_checks,
-            blast_radius=plan_data.blast_radius,
-            rollback_plan=plan_data.rollback_plan,
-            verification_plan=plan_data.verification_plan,
-            generated_by=PlanGeneratedBy.system,
-        )
-        db.add(plan)
-
-    cr.risk_level = safety_result.risk_level
-    cr.status = ChangeRequestStatus.planned
-    cr.updated_at = datetime.now(timezone.utc)
-
-    await db.flush()
     await record_event(db, user.organization_id, "change_plan.generated",
-                       {"change_request_id": str(cr.id), "risk_level": safety_result.risk_level.value,
-                        "risk_score": safety_result.risk_score, "risk_factors": [f.name for f in safety_result.risk_factors],
-                        "warnings": safety_result.warnings},
+                       {"change_request_id": str(cr.id)},
                        actor_id=user.id, change_request_id=cr.id)
     await db.commit()
     await db.refresh(plan)

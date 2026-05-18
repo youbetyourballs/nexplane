@@ -185,3 +185,43 @@ async def test_trigger_blocked_when_auto_execute_false(client: AsyncClient):
     trigger_resp = await client.post(f"/api/runbooks/{rb_id}/trigger", json={"context": {}})
     assert trigger_resp.status_code == 403
     assert "auto-execution" in trigger_resp.json()["detail"].lower()
+
+
+from app.services.change_plan_service import plan_cr
+from app.models.change_request import ChangeRequest, ChangeType, RiskLevel, ChangeRequestStatus
+
+
+@pytest.mark.asyncio
+async def test_plan_cr_sets_status_to_planned(db):
+    """plan_cr must set CR status to 'planned' and create a ChangePlan."""
+    from app.models.change_plan import ChangePlan
+    org = Organization(id=uuid.uuid4(), name=f"PlanCR Org {uuid.uuid4().hex[:4]}")
+    db.add(org)
+    await db.flush()
+    user = User(
+        id=uuid.uuid4(), organization_id=org.id,
+        email=f"plancr-{uuid.uuid4().hex[:8]}@test.example",
+        name="PlanCR User", role=UserRole.admin,
+        hashed_password=hash_password("test"),
+    )
+    db.add(user)
+    await db.flush()
+
+    cr = ChangeRequest(
+        organization_id=org.id,
+        requester_id=user.id,
+        title="Test CR",
+        description="Test",
+        change_type=ChangeType.isolate_host,
+        target_asset_ids=[],
+        desired_outcome={},
+        risk_level=RiskLevel.low,
+        status=ChangeRequestStatus.draft,
+        source="test",
+    )
+    db.add(cr)
+    await db.flush()
+
+    plan = await plan_cr(db, cr)
+    assert cr.status == ChangeRequestStatus.planned
+    assert plan is not None
