@@ -160,3 +160,54 @@ async def test_smtp_send_welcome_email_rollback_no_creds_reports_no_account():
     )
     assert result["rolled_back"] is True
     assert result["account_removed"] is False
+
+
+# --- AWS preserve_cloudtrail_logs ---
+
+@pytest.mark.asyncio
+async def test_aws_preserve_cloudtrail_logs_no_creds_returns_simulated():
+    from app.connectors.executors.aws import preserve_cloudtrail_logs
+    result = await preserve_cloudtrail_logs.execute(
+        {"bucket": "my-cloudtrail-bucket", "prefix": "AWSLogs/", "region": "us-east-1"},
+        [],
+        _MockConnector(),
+    )
+    assert result["action"] == "preserve_cloudtrail_logs"
+    assert result["simulated"] is True
+
+
+@pytest.mark.asyncio
+async def test_aws_preserve_cloudtrail_logs_rollback_no_creds():
+    from app.connectors.executors.aws import preserve_cloudtrail_logs
+    result = await preserve_cloudtrail_logs.rollback(
+        {"bucket": "my-cloudtrail-bucket", "prefix": "AWSLogs/"},
+        {"bucket": "my-cloudtrail-bucket", "prefix": "AWSLogs/", "objects_locked": 5},
+        _MockConnector(),
+    )
+    assert result["rolled_back"] is True
+    assert result["simulated"] is True
+
+
+# --- ServiceNow close_incident_ticket ---
+
+@pytest.mark.asyncio
+async def test_servicenow_close_incident_no_creds_returns_mock():
+    from app.connectors.executors.servicenow import close_incident
+    result = await close_incident.execute(
+        {"sys_id": "abc123"},
+        [],
+        _MockConnector(),
+    )
+    assert result["action"] == "close_incident"
+    assert result["state"] == "7"
+
+
+@pytest.mark.asyncio
+async def test_servicenow_close_incident_rollback_reopens_no_creds():
+    from app.connectors.executors.servicenow import close_incident
+    result = await close_incident.rollback(
+        {"sys_id": "abc123"},
+        {"sys_id": "abc123", "state": "7"},
+        _MockConnector(),
+    )
+    assert result["rolled_back"] is True

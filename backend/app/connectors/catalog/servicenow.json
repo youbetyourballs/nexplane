@@ -15,6 +15,22 @@
     {"action_id": "update_incident", "generic_action": "update_ticket", "action_type": "change", "execution_tier": 2, "display_name": "Update Incident", "description": "Update fields on a ServiceNow incident.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "sys_id", "type": "string", "required": true}, {"name": "fields", "type": "object", "required": true}], "executor": "servicenow.update_incident", "estimated_duration_seconds": 5},
     {"action_id": "resolve_incident", "generic_action": "resolve_incident", "action_type": "change", "execution_tier": 2, "display_name": "Resolve Incident", "description": "Resolve a ServiceNow incident.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "sys_id", "type": "string", "required": true}, {"name": "resolution_notes", "type": "string", "required": false}], "executor": "servicenow.resolve_incident", "estimated_duration_seconds": 5},
     {"action_id": "sync_cmdb", "generic_action": "sync", "action_type": "change", "execution_tier": 2, "display_name": "Sync CMDB", "description": "Upsert an asset record into ServiceNow CMDB.", "applicable_asset_types": ["server"], "parameters": [{"name": "ci_data", "type": "object", "required": true}], "executor": "servicenow.sync_cmdb", "estimated_duration_seconds": 10},
-    {"action_id": "close_incident", "generic_action": "close_incident", "action_type": "change", "execution_tier": 2, "display_name": "Close Incident", "description": "Close a ServiceNow incident (state=7). Provide close_code and close_notes.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "sys_id", "type": "string", "required": true}, {"name": "close_code", "type": "string", "required": false}, {"name": "close_notes", "type": "string", "required": false}], "executor": "servicenow.close_incident", "estimated_duration_seconds": 5}
+    {"action_id": "close_incident", "generic_action": "close_incident", "action_type": "change", "execution_tier": 2, "display_name": "Close Incident", "description": "Close a ServiceNow incident (state=7). Provide close_code and close_notes.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "sys_id", "type": "string", "required": true}, {"name": "close_code", "type": "string", "required": false}, {"name": "close_notes", "type": "string", "required": false}], "executor": "servicenow.close_incident", "estimated_duration_seconds": 5},
+    {
+      "action_id": "close_incident_ticket",
+      "generic_action": "close_incident_ticket",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Close Incident Ticket",
+      "description": "Closes a ServiceNow incident (state=7) with a resolution code and notes",
+      "applicable_asset_types": [],
+      "parameters": [
+        {"name": "sys_id", "type": "string", "required": true},
+        {"name": "close_code", "type": "string", "required": false, "default": "Solved (Permanently)"},
+        {"name": "close_notes", "type": "string", "required": false, "default": "Closed by Nexplane"}
+      ],
+      "executor": "servicenow.close_incident",
+      "estimated_duration_seconds": 5
+    }
   ]
 }
