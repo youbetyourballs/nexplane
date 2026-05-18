@@ -42,8 +42,13 @@ nav:
     - Connector Credential Errors: runbooks/connector-credentials.md
     - Rollback Failures: runbooks/rollback-failures.md
   - CHANGELOG: changelog.md
+  - Blog: blog/index.md
 plugins:
   - search
+  - blog:
+      blog_dir: blog
+      post_date_format: long
+      post_url_format: "{slug}"
 markdown_extensions:
   - admonition
   - pymdownx.highlight
