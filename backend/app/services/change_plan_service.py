@@ -4,6 +4,7 @@ and the runbook CR bridge.
 """
 import uuid
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -19,16 +20,34 @@ from app.services.safety_engine import score_change_request
 log = logging.getLogger(__name__)
 
 
-async def plan_cr(db: AsyncSession, cr: ChangeRequest) -> ChangePlan:
+class PlanBlockedError(Exception):
+    """Raised when the safety scorer blocks plan generation."""
+    def __init__(self, blocking_issues: list):
+        self.blocking_issues = blocking_issues
+        super().__init__(f"Safety review blocked: {blocking_issues}")
+
+
+@dataclass
+class PlanResult:
+    plan: "ChangePlan"
+    risk_level: str
+    risk_score: float
+    risk_factors: list
+    warnings: list
+    blocking_issues: list = field(default_factory=list)
+
+
+async def plan_cr(db: AsyncSession, cr: ChangeRequest) -> PlanResult:
     """
     Generate a plan for a ChangeRequest in-place.
 
     Sets cr.status = 'planned', creates or updates the associated ChangePlan,
     and flushes (does NOT commit — caller must commit).
 
-    Raises ValueError if the safety scorer blocks the plan.
+    Raises PlanBlockedError if the safety scorer blocks the plan.
+    The cr.change_plan relationship will be eagerly loaded if not already present.
     """
-    # Eagerly load the change_plan relationship to avoid lazy-load in async context
+    # Refresh to ensure change_plan is loaded for callers that didn't pre-load it.
     await db.refresh(cr, ["change_plan"])
 
     asset_ids = [uuid.UUID(str(aid)) for aid in (cr.target_asset_ids or [])]
@@ -40,9 +59,7 @@ async def plan_cr(db: AsyncSession, cr: ChangeRequest) -> ChangePlan:
     safety_result = score_change_request(cr, assets)
 
     if safety_result.is_blocked:
-        raise ValueError(
-            f"Safety review blocked plan generation: {safety_result.blocking_issues}"
-        )
+        raise PlanBlockedError(safety_result.blocking_issues)
 
     plan_data = generate_plan(cr, assets, safety_result)
 
@@ -70,4 +87,11 @@ async def plan_cr(db: AsyncSession, cr: ChangeRequest) -> ChangePlan:
     cr.updated_at = datetime.now(timezone.utc)
 
     await db.flush()
-    return plan
+    return PlanResult(
+        plan=plan,
+        risk_level=safety_result.risk_level.value,
+        risk_score=float(safety_result.risk_score),
+        risk_factors=[f.name for f in safety_result.risk_factors],
+        warnings=list(safety_result.warnings or []),
+        blocking_issues=[],
+    )

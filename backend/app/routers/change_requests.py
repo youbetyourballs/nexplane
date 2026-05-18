@@ -21,7 +21,7 @@ from app.schemas.change_request import (
 )
 from app.schemas.execution_run import ExecutionRunRead
 from app.services.audit_service import record_event
-from app.services.change_plan_service import plan_cr as _plan_cr
+from app.services.change_plan_service import plan_cr as _plan_cr, PlanBlockedError
 from app.services.planning_engine import generate_plan
 from app.services.safety_engine import score_change_request, check_approval_requirements
 from app.workflows import runner as workflow_runner
@@ -235,15 +235,20 @@ async def generate_change_plan(
     await db.execute(sa_delete(Approval).where(Approval.change_request_id == cr.id))
 
     try:
-        plan = await _plan_cr(db, cr)
-    except ValueError as e:
+        result = await _plan_cr(db, cr)
+    except PlanBlockedError as e:
         raise HTTPException(
             status_code=422,
-            detail={"message": "Safety review blocked plan generation", "blocking_issues": str(e)},
+            detail={"message": "Safety review blocked plan generation", "blocking_issues": e.blocking_issues},
         )
 
+    plan = result.plan
     await record_event(db, user.organization_id, "change_plan.generated",
-                       {"change_request_id": str(cr.id)},
+                       {"change_request_id": str(cr.id),
+                        "risk_level": result.risk_level,
+                        "risk_score": result.risk_score,
+                        "risk_factors": result.risk_factors,
+                        "warnings": result.warnings},
                        actor_id=user.id, change_request_id=cr.id)
     await db.commit()
     await db.refresh(plan)
