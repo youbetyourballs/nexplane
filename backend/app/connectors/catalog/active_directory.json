@@ -327,6 +327,27 @@
       "executor": "active_directory.ad_tiered_backup",
       "rollback_action": null,
       "estimated_duration_seconds": 300
+    },
+    {
+      "action_id": "create_user",
+      "generic_action": "create_ad_account",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Create User",
+      "description": "Creates a new Active Directory user account in the specified OU with a temporary password",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true},
+        {"name": "first_name", "type": "string", "required": true},
+        {"name": "last_name", "type": "string", "required": true},
+        {"name": "ou", "type": "string", "required": false},
+        {"name": "temp_password", "type": "string", "required": true}
+      ],
+      "executor": "active_directory.create_user",
+      "rollback_action": "delete_user",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "new_account_created",
+      "safety_notes": ["Ensure temp_password meets domain complexity requirements"]
     }
   ]
 }
