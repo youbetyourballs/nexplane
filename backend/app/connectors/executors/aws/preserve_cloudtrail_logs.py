@@ -37,7 +37,8 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
 
 async def _apply_legal_hold(bucket: str, prefix: str, region: str, status: str, creds: dict) -> dict:
     def _sync():
-        s3 = get_boto3_client("s3", creds, region_name=region)
+        creds_with_region = {**creds, "region": region}
+        s3 = get_boto3_client(creds_with_region, "s3")
         paginator = s3.get_paginator("list_objects_v2")
         count = 0
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
