@@ -26,7 +26,7 @@
       "applicable_asset_types": [],
       "parameters": [
         {"name": "sys_id", "type": "string", "required": true},
-        {"name": "close_code", "type": "string", "required": false, "default": "Solved (Permanently)"},
+        {"name": "close_code", "type": "string", "required": false, "default": "Solution provided"},
         {"name": "close_notes", "type": "string", "required": false, "default": "Closed by Nexplane"}
       ],
       "executor": "servicenow.close_incident",

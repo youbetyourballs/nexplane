@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Close (resolve) an existing ServiceNow incident."""
     creds = getattr(connector, "credentials", {})
     sys_id = parameters["sys_id"]
-    close_code = parameters.get("close_code", "Solved (Permanently)")
+    close_code = parameters.get("close_code", "Solution provided")
     close_notes = parameters.get("close_notes", "Closed by Nexplane")
     if not creds:
         return {
