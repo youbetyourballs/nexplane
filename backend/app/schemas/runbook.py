@@ -36,6 +36,7 @@ class RunbookCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
     tags: list[str] = []
+    auto_execute: bool = False
     steps: list[RunbookStepCreate]
 
 
@@ -43,6 +44,7 @@ class RunbookUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     tags: list[str] | None = None
+    auto_execute: bool | None = None
     steps: list[RunbookStepCreate] | None = None
 
 
@@ -65,6 +67,7 @@ class RunbookOut(BaseModel):
     version: int
     tags: list[str]
     is_seed: bool
+    auto_execute: bool
     created_by: UUID
     created_at: datetime
     updated_at: datetime
@@ -75,6 +78,7 @@ class RunbookOut(BaseModel):
 
 class TriggerRunbookRequest(BaseModel):
     context: dict[str, Any] = {}
+    force: bool = False
 
 
 class RunbookStepResultOut(BaseModel):
