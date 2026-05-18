@@ -101,3 +101,30 @@ async def test_okta_force_password_reset_rollback_is_noop():
     result = await force_password_reset.rollback({}, {}, _MockConnector())
     assert result["rolled_back"] is False
     assert "reason" in result
+
+
+# --- GitHub add_org_member ---
+
+@pytest.mark.asyncio
+async def test_github_add_org_member_no_creds_returns_simulated():
+    from app.connectors.executors.github import add_org_member
+    result = await add_org_member.execute(
+        {"username": "octocat", "org": "nexplane-org", "role": "member"},
+        [],
+        _MockConnector(),
+    )
+    assert result["action"] == "add_org_member"
+    assert result["simulated"] is True
+    assert result["username"] == "octocat"
+
+
+@pytest.mark.asyncio
+async def test_github_add_org_member_rollback_removes():
+    from app.connectors.executors.github import add_org_member
+    result = await add_org_member.rollback(
+        {"username": "octocat", "org": "nexplane-org"},
+        {"username": "octocat", "org": "nexplane-org", "added": True},
+        _MockConnector(),
+    )
+    assert result["rolled_back"] is True
+    assert result["simulated"] is True
