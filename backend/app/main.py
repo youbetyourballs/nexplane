@@ -34,6 +34,7 @@ from app.workers.soak_timer_worker import check_soak_timers
 from app.workers.scheduled_cr_worker import execute_scheduled_crs
 from app.workers.drift_check_worker import check_policy_drift
 from app.workers.credential_expiry_worker import check_credential_expiry
+from app.services.runbook_executor import tick_all_executions as _tick_runbooks
 
 _escalation_scheduler: AsyncIOScheduler | None = None
 
@@ -52,6 +53,13 @@ async def lifespan(app: FastAPI):
     _escalation_scheduler.add_job(execute_scheduled_crs, "interval", minutes=1)
     _escalation_scheduler.add_job(check_policy_drift, "interval", hours=24)
     _escalation_scheduler.add_job(check_credential_expiry, "cron", hour=6, minute=0)
+    _escalation_scheduler.add_job(
+        lambda: _tick_runbooks(AsyncSessionLocal),
+        "interval",
+        seconds=30,
+        id="runbook_executor_tick",
+        replace_existing=True,
+    )
     _escalation_scheduler.start()
     # Scrub orphaned CRs — any CR still in-flight when the backend
     # restarted will never complete; mark them failed now so the
