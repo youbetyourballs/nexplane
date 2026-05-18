@@ -202,6 +202,36 @@
       ],
       "executor": "okta.sync_users",
       "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "assign_groups",
+      "generic_action": "assign_okta_groups",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Assign to Groups",
+      "description": "Assigns an Okta user to one or more groups",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "user_id", "type": "string", "required": true},
+        {"name": "group_ids", "type": "array", "required": true}
+      ],
+      "executor": "okta.assign_groups",
+      "rollback_action": "remove_from_groups",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "force_password_reset",
+      "generic_action": "force_password_reset",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Force Password Reset",
+      "description": "Forces an Okta user to reset their password; returns a one-time reset URL",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "user_id", "type": "string", "required": true}
+      ],
+      "executor": "okta.force_password_reset",
+      "estimated_duration_seconds": 5
     }
   ]
 }
