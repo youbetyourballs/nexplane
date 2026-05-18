@@ -87,6 +87,8 @@ class ConnectorType(str, enum.Enum):
     # SaaS
     slack = "slack"
     jfrog = "jfrog"
+    # Email
+    smtp = "smtp"
 
 
 class ConnectorStatus(str, enum.Enum):
