@@ -105,8 +105,8 @@ function RunbookRow({
             <span className="text-xs text-slate-400">v{rb.version}</span>
           </div>
           <div className="flex gap-1 mt-0.5">
-            {rb.tags.map((t) => (
-              <span key={t} className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">
+            {rb.tags.map((t, idx) => (
+              <span key={`${rb.id}-tag-${idx}`} className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">
                 {t}
               </span>
             ))}
@@ -188,11 +188,11 @@ function TriggerButton({ runbook }: { runbook: RunbookOut }) {
       {
         onSuccess: (exec: RunbookExecutionOut) => navigate(`/executions/${exec.id}`),
         onError: (err: unknown) => {
-          const resp = (err as { response?: { status: number; data?: { maintenance_window?: string; warning?: string } } }).response;
-          if (resp?.status === 409 && resp?.data?.maintenance_window) {
+          const resp = (err as { response?: { status: number; data?: { detail?: { maintenance_window?: string; warning?: string } } } }).response;
+          if (resp?.status === 409 && resp?.data?.detail?.maintenance_window) {
             setWindowWarning({
-              name: resp.data.maintenance_window,
-              warning: resp.data.warning ?? "Active change freeze window detected.",
+              name: resp.data.detail.maintenance_window,
+              warning: resp.data.detail.warning ?? "Active change freeze window detected.",
             });
           }
         },
