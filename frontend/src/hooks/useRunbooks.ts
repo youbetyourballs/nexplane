@@ -28,6 +28,7 @@ export interface RunbookOut {
   version: number;
   tags: string[];
   is_seed: boolean;
+  auto_execute: boolean;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -123,11 +124,25 @@ export const useForkRunbook = () => {
   });
 };
 
+export const useToggleRunbookAutoExecute = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (auto_execute: boolean) =>
+      apiClient
+        .put<RunbookOut>(`/api/runbooks/${id}`, { auto_execute })
+        .then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["runbooks"] });
+      qc.invalidateQueries({ queryKey: ["runbook", id] });
+    },
+  });
+};
+
 export const useTriggerRunbook = (id: string) =>
   useMutation({
-    mutationFn: (ctx: Record<string, unknown>) =>
+    mutationFn: ({ context = {}, force = false }: { context?: Record<string, unknown>; force?: boolean }) =>
       apiClient
-        .post<RunbookExecutionOut>(`/api/runbooks/${id}/trigger`, { context: ctx })
+        .post<RunbookExecutionOut>(`/api/runbooks/${id}/trigger`, { context, force })
         .then((r) => r.data),
   });
 
