@@ -15294,25 +15294,27 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
         # Step 5 — Register Nexplane AD connector and server asset
         # ------------------------------------------------------------------
         log(f"AD_DC_INTEGRITY: registering active_directory connector for {private_ip}...")
+        _dc_creds = {
+            "server": private_ip,
+            "port": "389",
+            "base_dn": "DC=smoke,DC=nexplane,DC=local",
+            "bind_dn": "CN=Administrator,CN=Users,DC=smoke,DC=nexplane,DC=local",
+            "bind_password": "NexplaneSmoke2024!",
+            "use_ssl": "false",
+            "winrm_hostname": private_ip,
+            "winrm_port": "5985",
+            "winrm_username": "Administrator",
+            "winrm_password": "NexplaneSmoke2024!",
+            "winrm_use_ssl": "false",
+        }
         conn_resp = client.post("/connectors", json={
             "connector_type": "active_directory",
             "name": f"nexplane-smoke-dc-{instance_id[-8:]}",
-            "credentials": {
-                "server": private_ip,
-                "port": "389",
-                "base_dn": "DC=smoke,DC=nexplane,DC=local",
-                "bind_dn": "CN=Administrator,CN=Users,DC=smoke,DC=nexplane,DC=local",
-                "bind_password": "NexplaneSmoke2024!",
-                "use_ssl": "false",
-                "winrm_hostname": private_ip,
-                "winrm_port": "5985",
-                "winrm_username": "Administrator",
-                "winrm_password": "NexplaneSmoke2024!",
-                "winrm_use_ssl": "false",
-            },
         })
         connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
         log(f"AD_DC_INTEGRITY: connector created — id={connector_id}")
+        # Store credentials separately — POST /connectors ignores credentials in body
+        client.put(f"/connectors/{connector_id}/credentials", json={"credentials": _dc_creds})
 
         asset_resp = client.post("/assets", json={
             "name": f"nexplane-smoke-dc-{instance_id[-8:]}",
