@@ -21,11 +21,14 @@ SEED_TEMPLATES = [
         "tags": ["onboarding", "identity"],
         "steps": [
             {"step_number": 1, "name": "Create AD Account", "type": "change",
-             "change_type": "create_ad_account", "on_failure": "abort"},
+             "change_type": "create_ad_account", "on_failure": "abort",
+             "parameters": {"username": "", "first_name": "", "last_name": "", "temp_password": "Welcome1!"}},
             {"step_number": 2, "name": "Assign Okta Groups", "type": "change",
-             "change_type": "assign_okta_groups", "on_failure": "abort"},
+             "change_type": "assign_okta_groups", "on_failure": "abort",
+             "parameters": {"user_id": "", "group_ids": []}},
             {"step_number": 3, "name": "Add to GitHub Org", "type": "change",
-             "change_type": "add_github_org_member", "on_failure": "continue"},
+             "change_type": "add_github_org_member", "on_failure": "continue",
+             "parameters": {"username": "", "org": "NexplaneAI"}},
             {
                 "step_number": 4, "name": "Manager Approval", "type": "human_checkpoint",
                 "prompt": (
@@ -48,11 +51,14 @@ SEED_TEMPLATES = [
         "tags": ["incident-response", "security"],
         "steps": [
             {"step_number": 1, "name": "Lockdown Account", "type": "change",
-             "change_type": "lockdown_account", "on_failure": "abort"},
+             "change_type": "lockdown_account", "on_failure": "abort",
+             "parameters": {"user_identifier": ""}},
             {"step_number": 2, "name": "Preserve Evidence", "type": "change",
-             "change_type": "preserve_cloudtrail_logs", "on_failure": "continue"},
+             "change_type": "preserve_cloudtrail_logs", "on_failure": "continue",
+             "parameters": {"bucket": "", "prefix": "", "region": "us-east-1"}},
             {"step_number": 3, "name": "Force Password Reset", "type": "change",
-             "change_type": "force_password_reset", "on_failure": "abort"},
+             "change_type": "force_password_reset", "on_failure": "abort",
+             "parameters": {"user_id": ""}},
             {
                 "step_number": 4, "name": "Notify Security Team", "type": "human_checkpoint",
                 "prompt": (

@@ -461,8 +461,16 @@ def run_phase_runbook_onboarding(
             "context": {
                 "engineer_name": "Smoke Test Engineer",
                 "engineer_email": "smoke@nexplane.test",
-                "github_username": "nexplane-smoke-user",
+                "github_username": "nexplane-smoke-bot",
                 "manager_email": "admin@nexplane.local",
+                # AD account creation fields
+                "username": "smoke-onboard",
+                "first_name": "Smoke",
+                "last_name": "Engineer",
+                "temp_password": "Welcome1!",
+                # Okta group assignment
+                "user_id": "00u133bp8qw0ZHr76698",
+                "group_ids": ["00g134g40dxmLBcoM698"],
             }
         })
         execution_id = execution["id"]
@@ -567,7 +575,18 @@ def run_phase_runbook_account_compromise(
     rollback_crs = []
     try:
         execution = client.post(f"/api/runbooks/{runbook_id}/trigger", json={
-            "context": {"compromised_username": "smokeuser", "incident_id": "INC-SMOKE-001"}
+            "context": {
+                "compromised_username": "smokeuser",
+                "incident_id": "INC-SMOKE-001",
+                # preserve_cloudtrail_logs parameters
+                "bucket": "nexplane-smoke-cloudtrail-test",
+                "prefix": "AWSLogs/",
+                "region": "us-east-1",
+                # force_password_reset parameters
+                "user_id": "00u133bp8qw0ZHr76698",
+                # close_incident_ticket parameters
+                "sys_id": "",  # will be skipped if empty
+            }
         })
         execution_id = execution["id"]
 
