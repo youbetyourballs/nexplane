@@ -271,12 +271,45 @@ def run_phase_snow_close(client: NexplaneClient, endpoint_asset_id: str, snow_in
 
 
 # ---------------------------------------------------------------------------
+# PAGERDUTY_INCIDENT
+# ---------------------------------------------------------------------------
+
+def run_phase_pagerduty_incident(client: NexplaneClient, endpoint_asset_id: str, run_id: str = "") -> dict:
+    """PAGERDUTY_INCIDENT: create PagerDuty incident, verify, rollback (resolve)."""
+    PHASE = "PAGERDUTY_INCIDENT"
+    start = time.time()
+
+    connectors = client.get("/connectors")
+    pd_connector = next((c for c in connectors if c["connector_type"] == "pagerduty"), None)
+    if not pd_connector:
+        return _phase_result(PHASE, "skipped", time.time() - start, [], ["pagerduty"], False, 0, 1)
+
+    cr = client.run_cr(
+        f"{PHASE}: create smoke incident",
+        "pagerduty_create_incident",
+        endpoint_asset_id,
+        {
+            "title": f"Nexplane smoke test incident {run_id}",
+            "urgency": "low",
+        },
+    )
+    cr_id = cr["id"]
+    log(f"{PHASE}: incident created via CR {cr_id}")
+
+    rollback_ok = client.rollback_cr(cr_id, f"{PHASE}: rollback (resolve incident)")
+    if not rollback_ok:
+        fail(f"{PHASE}: rollback failed")
+
+    return _phase_result(PHASE, "passed", time.time() - start, ["pagerduty"], [], True, 1, 1)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main():
     parser = make_base_parser("Connector-level smoke tests for runbook change type executors")
-    parser.add_argument("--phases", default="AD_CREATE,OKTA_GROUPS,OKTA_PWRESET,GITHUB_MEMBER,SMTP_EMAIL,CLOUDTRAIL,SNOW_CLOSE")
+    parser.add_argument("--phases", default="AD_CREATE,OKTA_GROUPS,OKTA_PWRESET,GITHUB_MEMBER,SMTP_EMAIL,CLOUDTRAIL,SNOW_CLOSE,PAGERDUTY_INCIDENT")
     parser.add_argument("--endpoint-asset-id", required=True, help="Asset ID for CR targeting")
     parser.add_argument("--run-id", default="smoke")
     parser.add_argument("--okta-user-id", default="")
@@ -300,6 +333,7 @@ def main():
         "SMTP_EMAIL": lambda: run_phase_smtp_email(client, args.endpoint_asset_id, args.mailhog_url, args.run_id),
         "CLOUDTRAIL": lambda: run_phase_cloudtrail(client, args.endpoint_asset_id, args.cloudtrail_bucket, args.cloudtrail_prefix, args.aws_region, args.run_id),
         "SNOW_CLOSE": lambda: run_phase_snow_close(client, args.endpoint_asset_id, args.snow_incident_sys_id, args.run_id),
+        "PAGERDUTY_INCIDENT": lambda: run_phase_pagerduty_incident(client, args.endpoint_asset_id, args.run_id),
     }
 
     results = []
