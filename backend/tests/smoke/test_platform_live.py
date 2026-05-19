@@ -494,8 +494,14 @@ def run_phase_runbook_onboarding(
 
             if exec_status.get("status") == "waiting_human":
                 _write_progress(ssm_key, PHASE, "STEP", "Auto-approving human checkpoint (smoke mode)")
-                client.post(f"/api/executions/{execution_id}/resume",
-                            json={"approved": True, "comment": "smoke test auto-approval"})
+                waiting_step = next(
+                    (sr["step_number"] for sr in exec_status.get("step_results", [])
+                     if sr.get("status") == "waiting_human"),
+                    None
+                )
+                if waiting_step is not None:
+                    client.post(f"/api/executions/{execution_id}/resume",
+                                json={"step_number": waiting_step, "action": "resume"})
                 time.sleep(30)
 
             exec_final = client.get(f"/api/executions/{execution_id}")
@@ -611,8 +617,14 @@ def run_phase_runbook_account_compromise(
                 time.sleep(10)
 
             if exec_status.get("status") == "waiting_human":
-                client.post(f"/api/executions/{execution_id}/resume",
-                            json={"approved": True, "comment": "smoke auto-approval"})
+                waiting_step = next(
+                    (sr["step_number"] for sr in exec_status.get("step_results", [])
+                     if sr.get("status") == "waiting_human"),
+                    None
+                )
+                if waiting_step is not None:
+                    client.post(f"/api/executions/{execution_id}/resume",
+                                json={"step_number": waiting_step, "action": "resume"})
                 time.sleep(30)
 
             exec_final = client.get(f"/api/executions/{execution_id}")
@@ -705,8 +717,16 @@ def run_phase_runbook_patch_campaign(
             _write_progress(ssm_key, PHASE, "STEP", "Patch campaign in progress...")
 
         if exec_status.get("status") == "waiting_human":
-            client.post(f"/api/executions/{execution_id}/resume",
-                        json={"approved": True, "comment": "smoke auto-approval"})
+            # Find the waiting step number
+            waiting_step = next(
+                (sr["step_number"] for sr in exec_status.get("step_results", [])
+                 if sr.get("status") == "waiting_human"),
+                None
+            )
+            if waiting_step is not None:
+                client.post(f"/api/executions/{execution_id}/resume",
+                            json={"step_number": waiting_step, "action": "resume"})
+                log(f"{PHASE}: auto-approved human checkpoint at step {waiting_step}")
             time.sleep(60)
 
         exec_final = client.get(f"/api/executions/{execution_id}")
