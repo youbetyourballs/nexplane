@@ -3,7 +3,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "create_incident", "incident_id": "Q0001MOCK", "title": parameters.get("title"), "status": "triggered"}
     from ._client import get_client
-    payload = {"incident": {"type": "incident", "title": parameters["title"], "service": {"id": parameters["service_id"], "type": "service_reference"}, "urgency": parameters.get("urgency", "high")}}
+    service_id = parameters.get("service_id") or creds.get("service_id", "")
+    payload = {"incident": {"type": "incident", "title": parameters["title"], "service": {"id": service_id, "type": "service_reference"}, "urgency": parameters.get("urgency", "high")}}
     if parameters.get("body"):
         payload["incident"]["body"] = {"type": "incident_body", "details": parameters["body"]}
     async with get_client(creds) as client:
