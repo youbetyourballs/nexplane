@@ -91,6 +91,19 @@ class NexplaneClient:
             raise Exception(f"HTTP {resp.status_code} {path}: {body}")
         return resp.json()
 
+    def put(self, path: str, **kwargs) -> dict:
+        resp = self.client.put(f"{self.base}{path}", **kwargs)
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+            except Exception:
+                body = resp.text
+            raise Exception(f"HTTP {resp.status_code} {path}: {body}")
+        try:
+            return resp.json()
+        except Exception:
+            return {}
+
     def get_cloud_account_asset_id(self) -> str:
         assets = self.get("/assets", params={"asset_type": "cloud_account"})
         if not assets:
