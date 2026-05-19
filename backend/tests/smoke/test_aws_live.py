@@ -15282,22 +15282,24 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
                 # so new instances launched from the AMI register without
                 # needing a public IP (stale data prevents SSM re-registration)
                 # ----------------------------------------------------------
-                log("AD_DC_INTEGRITY: clearing SSM registration data before snapshot...")
+                log("AD_DC_INTEGRITY: resetting EC2Launch state before snapshot so new instances register SSM cleanly...")
                 try:
                     ssm_boto.send_command(
                         InstanceIds=[instance_id],
                         DocumentName="AWS-RunPowerShellScript",
                         Parameters={"commands": [
-                            "Stop-Service AmazonSSMAgent -Force -ErrorAction SilentlyContinue",
-                            "Remove-Item -Recurse -Force 'C:\\ProgramData\\Amazon\\SSM\\*' -ErrorAction SilentlyContinue",
-                            "Write-Output 'SSM_STATE_CLEARED'",
+                            # EC2Launch reset is the correct way to prepare a Windows AMI for cloning.
+                            # It resets SSM registration, SID, and other instance-specific state.
+                            # Stop-Service alone does not reset EC2Launch's SSM tracking.
+                            "& 'C:\\Program Files\\Amazon\\EC2Launch\\EC2Launch.exe' reset --block",
+                            "Write-Output 'EC2LAUNCH_RESET_COMPLETE'",
                         ]},
-                        TimeoutSeconds=60,
+                        TimeoutSeconds=120,
                     )
-                    import time as _t2; _t2.sleep(10)
-                    log("AD_DC_INTEGRITY: SSM state cleared")
+                    import time as _t2; _t2.sleep(15)
+                    log("AD_DC_INTEGRITY: EC2Launch reset complete — AMI will register SSM on next boot")
                 except Exception as _ssm_e:
-                    log(f"AD_DC_INTEGRITY: SSM clear step skipped: {_ssm_e}")
+                    log(f"AD_DC_INTEGRITY: EC2Launch reset step skipped: {_ssm_e}")
 
                 # ----------------------------------------------------------
                 # Step 5 — Snapshot AMI for fast future runs
