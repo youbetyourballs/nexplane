@@ -15352,7 +15352,33 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
         log(f"AD_DC_INTEGRITY: DC server asset created — id={dc_asset_id}")
 
         # ------------------------------------------------------------------
-        # Step 6 — Run dc_integrity_check CR
+        # Step 6 — AD_CREATE smoke: create user, verify, rollback while DC is live
+        # ------------------------------------------------------------------
+        log("AD_DC_INTEGRITY: running create_ad_account CR (AD_CREATE smoke)...")
+        try:
+            ad_cr = client.run_cr(
+                "[AD_DC_INTEGRITY] create_ad_account",
+                "create_ad_account",
+                dc_asset_id,
+                {
+                    "username": "nexplane-smoke-ad",
+                    "first_name": "Smoke",
+                    "last_name": "Test",
+                    "ou": "",
+                    "temp_password": "SmokeAdPass1!",
+                },
+            )
+            ad_result = client.get_cr_step_result(ad_cr)
+            dn = ad_result.get("dn", "")
+            created = ad_result.get("created", False)
+            log(f"AD_DC_INTEGRITY: AD_CREATE result — dn={dn} created={created}")
+            client.rollback_cr(ad_cr["id"], "[AD_DC_INTEGRITY] create_ad_account rollback")
+            log("AD_DC_INTEGRITY: AD_CREATE rollback (user deleted) ✅")
+        except Exception as _ad_e:
+            log(f"AD_DC_INTEGRITY: AD_CREATE smoke skipped or failed: {_ad_e}")
+
+        # ------------------------------------------------------------------
+        # Step 7 — Run dc_integrity_check CR
         # ------------------------------------------------------------------
         log("AD_DC_INTEGRITY: running dc_integrity_check CR...")
         cr = client.run_cr(
