@@ -15278,7 +15278,29 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
                         pass
 
                 # ----------------------------------------------------------
-                # Step 4 — Snapshot AMI for fast future runs
+                # Step 4 — Clear SSM registration data before snapshot
+                # so new instances launched from the AMI register without
+                # needing a public IP (stale data prevents SSM re-registration)
+                # ----------------------------------------------------------
+                log("AD_DC_INTEGRITY: clearing SSM registration data before snapshot...")
+                try:
+                    ssm_boto.send_command(
+                        InstanceIds=[instance_id],
+                        DocumentName="AWS-RunPowerShellScript",
+                        Parameters={"commands": [
+                            "Stop-Service AmazonSSMAgent -Force -ErrorAction SilentlyContinue",
+                            "Remove-Item -Recurse -Force 'C:\\ProgramData\\Amazon\\SSM\\*' -ErrorAction SilentlyContinue",
+                            "Write-Output 'SSM_STATE_CLEARED'",
+                        ]},
+                        TimeoutSeconds=60,
+                    )
+                    import time as _t2; _t2.sleep(10)
+                    log("AD_DC_INTEGRITY: SSM state cleared")
+                except Exception as _ssm_e:
+                    log(f"AD_DC_INTEGRITY: SSM clear step skipped: {_ssm_e}")
+
+                # ----------------------------------------------------------
+                # Step 5 — Snapshot AMI for fast future runs
                 # ----------------------------------------------------------
                 log("AD_DC_INTEGRITY: snapshotting AMI for future runs...")
                 try:
