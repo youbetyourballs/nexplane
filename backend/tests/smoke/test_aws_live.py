@@ -15137,6 +15137,9 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
 
     connector_id = None
     dc_asset_id = None
+    # dc_connect_ip: IP the platform uses to reach the DC over LDAP/WinRM.
+    # Defaults to private VPC IP; overridden with Tailscale IP after Tailscale joins.
+    dc_connect_ip = private_ip
 
     try:
         # ------------------------------------------------------------------
@@ -15145,6 +15148,113 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         log("AD_DC_INTEGRITY: waiting for SSM agent (~3-8 min for Windows)...")
         _wait_ssm_ready_win(ssm_boto, instance_id, timeout=600)
         log("AD_DC_INTEGRITY: SSM agent ready")
+
+        # ------------------------------------------------------------------
+        # Ensure Tailscale is installed and connected on this DC instance.
+        # Runs for both fresh builds and reused existing instances.
+        # The platform backend reaches the DC at its Tailscale IP — never
+        # via the public or private VPC IP.
+        # ------------------------------------------------------------------
+        if tailscale_auth_key:
+            log("AD_DC_INTEGRITY: checking Tailscale status on DC...")
+            try:
+                _ts_check_resp = ssm_boto.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName="AWS-RunPowerShellScript",
+                    Parameters={"commands": [
+                        "if (Get-Command tailscale -ErrorAction SilentlyContinue) { "
+                        "& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip -4 2>$null } "
+                        "else { Write-Output 'TAILSCALE_NOT_INSTALLED' }",
+                    ]},
+                    TimeoutSeconds=30,
+                )
+                _ts_check_cmd = _ts_check_resp["Command"]["CommandId"]
+                _ts_check_deadline = _t.time() + 60
+                _ts_existing_ip = ""
+                while _t.time() < _ts_check_deadline:
+                    _t.sleep(5)
+                    try:
+                        _ts_check_inv = ssm_boto.get_command_invocation(
+                            CommandId=_ts_check_cmd, InstanceId=instance_id
+                        )
+                        if _ts_check_inv["Status"] in ("Success", "Failed", "TimedOut"):
+                            _ts_check_out = _ts_check_inv.get("StandardOutputContent", "")
+                            import re as _re
+                            _ts_existing_match = _re.search(r"100\.\d+\.\d+\.\d+", _ts_check_out)
+                            if _ts_existing_match:
+                                _ts_existing_ip = _ts_existing_match.group(0)
+                            break
+                    except Exception:
+                        pass
+
+                if _ts_existing_ip:
+                    dc_connect_ip = _ts_existing_ip
+                    log(f"AD_DC_INTEGRITY: Tailscale already running on DC — IP: {dc_connect_ip}")
+                else:
+                    log("AD_DC_INTEGRITY: Tailscale not on DC — installing...")
+                    # Install
+                    _ts_inst2 = ssm_boto.send_command(
+                        InstanceIds=[instance_id],
+                        DocumentName="AWS-RunPowerShellScript",
+                        Parameters={"commands": [
+                            "$tsInstaller = \"$env:TEMP\\tailscale-setup.exe\"",
+                            "Invoke-WebRequest -Uri https://pkgs.tailscale.com/stable/tailscale-setup.exe "
+                            "-OutFile $tsInstaller -UseBasicParsing",
+                            "Start-Process -Wait -FilePath $tsInstaller -ArgumentList /S",
+                            "Write-Output 'TAILSCALE_INSTALLED'",
+                        ]},
+                        TimeoutSeconds=300,
+                    )
+                    _ts_inst2_cmd = _ts_inst2["Command"]["CommandId"]
+                    _ts_inst2_dl = _t.time() + 360
+                    while _t.time() < _ts_inst2_dl:
+                        _t.sleep(10)
+                        try:
+                            _inv = ssm_boto.get_command_invocation(
+                                CommandId=_ts_inst2_cmd, InstanceId=instance_id
+                            )
+                            if _inv["Status"] in ("Success", "Failed", "TimedOut"):
+                                log(f"AD_DC_INTEGRITY: Tailscale install status={_inv['Status']}")
+                                break
+                        except Exception:
+                            pass
+                    # Join
+                    _ts_join2 = ssm_boto.send_command(
+                        InstanceIds=[instance_id],
+                        DocumentName="AWS-RunPowerShellScript",
+                        Parameters={"commands": [
+                            f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up "
+                            f"--authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
+                            "Start-Sleep -Seconds 15",
+                            "& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip -4",
+                            "Write-Output 'TAILSCALE_JOINED'",
+                        ]},
+                        TimeoutSeconds=120,
+                    )
+                    _ts_join2_cmd = _ts_join2["Command"]["CommandId"]
+                    _ts_join2_dl = _t.time() + 180
+                    while _t.time() < _ts_join2_dl:
+                        _t.sleep(8)
+                        try:
+                            _j2inv = ssm_boto.get_command_invocation(
+                                CommandId=_ts_join2_cmd, InstanceId=instance_id
+                            )
+                            if _j2inv["Status"] in ("Success", "Failed", "TimedOut"):
+                                _j2out = _j2inv.get("StandardOutputContent", "")
+                                import re as _re
+                                _j2match = _re.search(r"100\.\d+\.\d+\.\d+", _j2out)
+                                if _j2match:
+                                    dc_connect_ip = _j2match.group(0)
+                                    log(f"AD_DC_INTEGRITY: Tailscale joined — DC IP: {dc_connect_ip}")
+                                else:
+                                    log(f"AD_DC_INTEGRITY: Tailscale join output: {_j2out[:200]}")
+                                break
+                        except Exception:
+                            pass
+            except Exception as _ts_any:
+                log(f"AD_DC_INTEGRITY: Tailscale check/install error: {_ts_any} — will use private IP")
+        else:
+            log("AD_DC_INTEGRITY: no --tailscale-auth-key — using private VPC IP for connector (may fail if platform not in same VPC)")
 
         if not from_existing:
             _setup_key2 = (
@@ -15329,8 +15439,8 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                             Parameters={"commands": [
                                 f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up "
                                 f"--authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
-                                "Start-Sleep -Seconds 10",
-                                "& 'C:\\Program Files\\Tailscale\\tailscale.exe' status",
+                                "Start-Sleep -Seconds 15",
+                                "& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip -4",
                                 "Write-Output 'TAILSCALE_JOINED'",
                             ]},
                             TimeoutSeconds=120,
@@ -15347,7 +15457,14 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                                     _ts_j_out = _ts_j_inv.get("StandardOutputContent", "")
                                     log(f"AD_DC_INTEGRITY: Tailscale join output: {_ts_j_out[:300]}")
                                     if "TAILSCALE_JOINED" in _ts_j_out:
-                                        log("AD_DC_INTEGRITY: Tailscale pre-joined ✓ — DC will auto-reconnect on boot")
+                                        # Extract the Tailscale IP (100.x.x.x) from output
+                                        import re as _re
+                                        _ts_ip_match = _re.search(r"100\.\d+\.\d+\.\d+", _ts_j_out)
+                                        if _ts_ip_match:
+                                            dc_connect_ip = _ts_ip_match.group(0)
+                                            log(f"AD_DC_INTEGRITY: Tailscale pre-joined ✓ — DC Tailscale IP: {dc_connect_ip}")
+                                        else:
+                                            log("AD_DC_INTEGRITY: Tailscale joined but could not parse IP — using private IP")
                                     else:
                                         log(f"AD_DC_INTEGRITY: Tailscale join status={_ts_j_inv['Status']} — continuing")
                                     break
@@ -15444,15 +15561,15 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         # ------------------------------------------------------------------
         # Step 5 — Register Nexplane AD connector and server asset
         # ------------------------------------------------------------------
-        log(f"AD_DC_INTEGRITY: registering active_directory connector for {private_ip}...")
+        log(f"AD_DC_INTEGRITY: registering active_directory connector for {dc_connect_ip} (Tailscale: {dc_connect_ip != private_ip})...")
         _dc_creds = {
-            "server": private_ip,
+            "server": dc_connect_ip,
             "port": "389",
             "base_dn": "DC=smoke,DC=nexplane,DC=local",
             "bind_dn": "CN=Administrator,CN=Users,DC=smoke,DC=nexplane,DC=local",
             "bind_password": "NexplaneSmoke2024!",
             "use_ssl": "false",
-            "winrm_hostname": private_ip,
+            "winrm_hostname": dc_connect_ip,
             "winrm_port": "5985",
             "winrm_username": "Administrator",
             "winrm_password": "NexplaneSmoke2024!",
