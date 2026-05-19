@@ -53,8 +53,11 @@ async def lifespan(app: FastAPI):
     _escalation_scheduler.add_job(execute_scheduled_crs, "interval", minutes=1)
     _escalation_scheduler.add_job(check_policy_drift, "interval", hours=24)
     _escalation_scheduler.add_job(check_credential_expiry, "cron", hour=6, minute=0)
+    async def _tick_runbooks_job():
+        await _tick_runbooks(AsyncSessionLocal)
+
     _escalation_scheduler.add_job(
-        lambda: _tick_runbooks(AsyncSessionLocal),
+        _tick_runbooks_job,
         "interval",
         seconds=30,
         id="runbook_executor_tick",
