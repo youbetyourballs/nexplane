@@ -68,6 +68,10 @@ async def create_and_execute_runbook_cr(
     db.add(run)
     await db.flush()
 
+    # Commit before starting the workflow so the CR exists on disk when the
+    # workflow activity tries to load it (start_workflow is background async).
+    await db.commit()
+
     # Fire the workflow in the background — returns immediately
     wf_input = WorkflowInput(
         change_request_id=str(cr.id),
