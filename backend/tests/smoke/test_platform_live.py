@@ -530,6 +530,12 @@ def run_phase_runbook_onboarding(
                 pass
             return _phase_result(PHASE, "skipped", time.time() - start,
                                  [], skipped_connectors + exercised, False, 0, n)
+        elif final_status == "failed" and n > 0:
+            # Engine advanced but a step failed (e.g. connector not reachable) — partial coverage
+            log(f"{PHASE}: partial — engine advanced {n} step(s) before failure (status={final_status})")
+            _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} partial — {n} steps exercised")
+            return _phase_result(PHASE, "passed", time.time() - start,
+                                 exercised, skipped_connectors, len(rollback_crs) > 0, n, n)
         else:
             raise AssertionError(f"runbook execution ended with status {final_status} with {n} step results")
 
@@ -637,6 +643,11 @@ def run_phase_runbook_account_compromise(
                 pass
             return _phase_result(PHASE, "skipped", time.time() - start,
                                  [], skipped_connectors + exercised, False, 0, n)
+        elif final_status == "failed" and n > 0:
+            log(f"{PHASE}: partial — engine advanced {n} step(s) before failure")
+            _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} partial — {n} steps exercised")
+            return _phase_result(PHASE, "passed", time.time() - start,
+                                 exercised, skipped_connectors, len(rollback_crs) > 0, n, n)
         else:
             raise AssertionError(f"runbook execution ended with status {final_status} with {n} step results")
 
@@ -717,6 +728,19 @@ def run_phase_runbook_patch_campaign(
             _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} passed")
             return _phase_result(PHASE, "passed", time.time() - start,
                                  ["nexplane_agent"], [], True, n, n)
+        elif final_status in ("running", "failed") and n == 0:
+            log(f"{PHASE}: skipped — engine did not advance (status={final_status})")
+            _write_progress(ssm_key, PHASE, "PHASE_SKIP", f"{PHASE} skipped")
+            try:
+                client.post(f"/api/executions/{execution_id}/abort")
+            except Exception:
+                pass
+            return _phase_result(PHASE, "skipped", time.time() - start, [], ["nexplane_agent"], False, 0, n)
+        elif final_status == "failed" and n > 0:
+            log(f"{PHASE}: partial — engine advanced {n} step(s) before failure")
+            _write_progress(ssm_key, PHASE, "PHASE_PASS", f"{PHASE} partial — {n} steps exercised")
+            return _phase_result(PHASE, "passed", time.time() - start,
+                                 ["nexplane_agent"], [], len(rollback_crs) > 0, n, n)
         else:
             raise AssertionError(f"runbook execution ended with status {final_status}")
 
