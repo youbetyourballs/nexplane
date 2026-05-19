@@ -14743,7 +14743,10 @@ def main():
                 ssh_key_path=getattr(args, "ssh_key_path", ""),
             )
         if "AD_DC_INTEGRITY" in phases:
-            run_phase_ad_dc_integrity(client, cloud_account_id)
+            run_phase_ad_dc_integrity(
+                client, cloud_account_id,
+                tailscale_auth_key=getattr(args, "tailscale_auth_key", ""),
+            )
         if "BIND_DNS" in phases:
             run_phase_bind_dns(
                 client, cloud_account_id,
@@ -15018,8 +15021,8 @@ def run_phase_mac_agent_bootstrap(
             log(f"MAC_AGENT_BOOTSTRAP: reused existing instance {instance_id} — no termination performed")
 
 
-def run_phase_ad_dc_integrity(client, cloud_account_id):
-    # type: (object, str) -> None
+def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
+    # type: (object, str, str) -> None
     """Phase AD_DC_INTEGRITY: Provision Windows Server 2022 AD DC on EC2, snapshot as AMI,
     run dc_integrity_check and ad_forest_snapshot CRs against the live domain controller.
     AMI cached in SSM at /nexplane/smoke-amis/dc-smoke/ for fast subsequent runs.
@@ -15073,7 +15076,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
         log(f"AD_DC_INTEGRITY: using base AMI {win_ami_id} ({images[0]['Name']})")
 
         _setup_key = (
-            "ad-ds-v1-install-addomain-"
+            "ad-ds-v2-tailscale-ssm-delay-"
             "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
         )
         setup_hash = _hl.md5(_setup_key.encode()).hexdigest()
@@ -15145,7 +15148,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
 
         if not from_existing:
             _setup_key2 = (
-                "ad-ds-v1-install-addomain-"
+                "ad-ds-v2-tailscale-ssm-delay-"
                 "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
             )
             setup_hash2 = _hl.md5(_setup_key2.encode()).hexdigest()
@@ -15278,19 +15281,143 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
                         pass
 
                 # ----------------------------------------------------------
-                # Step 4 — Clear SSM registration data before snapshot
-                # so new instances launched from the AMI register without
-                # needing a public IP (stale data prevents SSM re-registration)
+                # Step 4a — Install Tailscale and pre-join to Tailscale network
+                # Tailscale is the VPN path from the platform to the DC —
+                # the DC must never accept inbound connections on a public IP.
+                # Pre-joining the AMI means boot → Tailscale auto-reconnects
+                # without needing SSM to complete first.
                 # ----------------------------------------------------------
-                log("AD_DC_INTEGRITY: resetting EC2Launch state before snapshot so new instances register SSM cleanly...")
+                if tailscale_auth_key:
+                    log("AD_DC_INTEGRITY: installing Tailscale on DC and pre-joining Tailscale network...")
+                    try:
+                        _ts_install_resp = ssm_boto.send_command(
+                            InstanceIds=[instance_id],
+                            DocumentName="AWS-RunPowerShellScript",
+                            Parameters={"commands": [
+                                # Download and install Tailscale silently
+                                "$tsInstaller = \"$env:TEMP\\tailscale-setup.exe\"",
+                                "Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/tailscale-setup.exe' "
+                                "-OutFile $tsInstaller -UseBasicParsing",
+                                "Start-Process -Wait -FilePath $tsInstaller -ArgumentList '/S'",
+                                "Write-Output 'TAILSCALE_INSTALLED'",
+                            ]},
+                            TimeoutSeconds=300,
+                        )
+                        _ts_install_cmd = _ts_install_resp["Command"]["CommandId"]
+                        _ts_deadline = _t.time() + 360
+                        while _t.time() < _ts_deadline:
+                            _t.sleep(10)
+                            try:
+                                _ts_inv = ssm_boto.get_command_invocation(
+                                    CommandId=_ts_install_cmd, InstanceId=instance_id
+                                )
+                                if _ts_inv["Status"] in ("Success", "Failed", "TimedOut"):
+                                    _ts_out = _ts_inv.get("StandardOutputContent", "")
+                                    if "TAILSCALE_INSTALLED" in _ts_out:
+                                        log("AD_DC_INTEGRITY: Tailscale installed")
+                                    else:
+                                        log(f"AD_DC_INTEGRITY: Tailscale install status={_ts_inv['Status']} — continuing")
+                                    break
+                            except Exception:
+                                pass
+
+                        # Pre-join Tailscale with the reusable auth key
+                        # --accept-routes so DC can reach the platform backend
+                        _ts_join_resp = ssm_boto.send_command(
+                            InstanceIds=[instance_id],
+                            DocumentName="AWS-RunPowerShellScript",
+                            Parameters={"commands": [
+                                f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up "
+                                f"--authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
+                                "Start-Sleep -Seconds 10",
+                                "& 'C:\\Program Files\\Tailscale\\tailscale.exe' status",
+                                "Write-Output 'TAILSCALE_JOINED'",
+                            ]},
+                            TimeoutSeconds=120,
+                        )
+                        _ts_join_cmd = _ts_join_resp["Command"]["CommandId"]
+                        _ts_j_deadline = _t.time() + 180
+                        while _t.time() < _ts_j_deadline:
+                            _t.sleep(8)
+                            try:
+                                _ts_j_inv = ssm_boto.get_command_invocation(
+                                    CommandId=_ts_join_cmd, InstanceId=instance_id
+                                )
+                                if _ts_j_inv["Status"] in ("Success", "Failed", "TimedOut"):
+                                    _ts_j_out = _ts_j_inv.get("StandardOutputContent", "")
+                                    log(f"AD_DC_INTEGRITY: Tailscale join output: {_ts_j_out[:300]}")
+                                    if "TAILSCALE_JOINED" in _ts_j_out:
+                                        log("AD_DC_INTEGRITY: Tailscale pre-joined ✓ — DC will auto-reconnect on boot")
+                                    else:
+                                        log(f"AD_DC_INTEGRITY: Tailscale join status={_ts_j_inv['Status']} — continuing")
+                                    break
+                            except Exception:
+                                pass
+                    except Exception as _ts_e:
+                        log(f"AD_DC_INTEGRITY: Tailscale install/join step failed: {_ts_e} — continuing without Tailscale in AMI")
+                else:
+                    log("AD_DC_INTEGRITY: no --tailscale-auth-key provided — skipping Tailscale pre-install (DC will not have Tailscale in AMI)")
+
+                # ----------------------------------------------------------
+                # Step 4b — Add Windows Scheduled Task to delay SSM agent restart
+                # AD DS initialization blocks SSM outbound HTTPS on first boot
+                # from AMI. A 5-minute startup delay lets AD DS fully initialize
+                # before SSM tries to register, fixing the SSM registration race.
+                # ----------------------------------------------------------
+                log("AD_DC_INTEGRITY: adding startup scheduled task to delay SSM agent restart...")
+                try:
+                    _delay_resp = ssm_boto.send_command(
+                        InstanceIds=[instance_id],
+                        DocumentName="AWS-RunPowerShellScript",
+                        Parameters={"commands": [
+                            # Create a scheduled task that runs once at startup (with 5-min delay)
+                            # to restart the SSM agent. This gives AD DS time to initialize
+                            # before SSM tries to contact the SSM endpoints.
+                            "$action = New-ScheduledTaskAction -Execute 'powershell.exe' "
+                            "-Argument '-NonInteractive -Command \""
+                            "Start-Sleep -Seconds 300; "
+                            "Restart-Service AmazonSSMAgent -Force"
+                            "\"'",
+                            "$trigger = New-ScheduledTaskTrigger -AtStartup",
+                            "$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 1)",
+                            "Register-ScheduledTask -TaskName 'NexplaneSSMStartupDelay' "
+                            "-Action $action -Trigger $trigger -Settings $settings "
+                            "-RunLevel Highest -User 'SYSTEM' -Force",
+                            "Write-Output 'SSM_DELAY_TASK_CREATED'",
+                        ]},
+                        TimeoutSeconds=60,
+                    )
+                    _delay_cmd = _delay_resp["Command"]["CommandId"]
+                    _delay_deadline = _t.time() + 90
+                    while _t.time() < _delay_deadline:
+                        _t.sleep(8)
+                        try:
+                            _delay_inv = ssm_boto.get_command_invocation(
+                                CommandId=_delay_cmd, InstanceId=instance_id
+                            )
+                            if _delay_inv["Status"] in ("Success", "Failed", "TimedOut"):
+                                _delay_out = _delay_inv.get("StandardOutputContent", "")
+                                if "SSM_DELAY_TASK_CREATED" in _delay_out:
+                                    log("AD_DC_INTEGRITY: SSM startup delay task created ✓")
+                                else:
+                                    log(f"AD_DC_INTEGRITY: SSM delay task status={_delay_inv['Status']}")
+                                break
+                        except Exception:
+                            pass
+                except Exception as _delay_e:
+                    log(f"AD_DC_INTEGRITY: SSM delay task step failed: {_delay_e} — continuing")
+
+                # ----------------------------------------------------------
+                # Step 4c — Clear SSM registration data before snapshot
+                # EC2Launch reset clears instance-specific state (SSM ID, SID)
+                # so new instances from the AMI register fresh.
+                # ----------------------------------------------------------
+                log("AD_DC_INTEGRITY: resetting EC2Launch state before snapshot...")
                 try:
                     ssm_boto.send_command(
                         InstanceIds=[instance_id],
                         DocumentName="AWS-RunPowerShellScript",
                         Parameters={"commands": [
-                            # EC2Launch reset is the correct way to prepare a Windows AMI for cloning.
-                            # It resets SSM registration, SID, and other instance-specific state.
-                            # Stop-Service alone does not reset EC2Launch's SSM tracking.
                             "& 'C:\\Program Files\\Amazon\\EC2Launch\\EC2Launch.exe' reset --block",
                             "Write-Output 'EC2LAUNCH_RESET_COMPLETE'",
                         ]},
