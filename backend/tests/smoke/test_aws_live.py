@@ -15404,26 +15404,29 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         # ------------------------------------------------------------------
         import subprocess as _sp, json as _jj, time as _ttime
         if tailscale_auth_key:
-            try:
-                _ttime.sleep(20)  # give DC Tailscale time to register with coordinator
-                _ts_status = _sp.run(
-                    ["tailscale", "status", "--json"],
-                    capture_output=True, text=True, timeout=15,
-                )
-                if _ts_status.returncode == 0:
-                    _ts_data = _jj.loads(_ts_status.stdout)
-                    for _peer in _ts_data.get("Peer", {}).values():
-                        _hn = _peer.get("HostName", "").lower()
-                        if _hn == "nexplane-smoke-dc":
-                            _addrs = [a.split("/")[0] for a in _peer.get("TailscaleIPs", []) if a.startswith("100.")]
-                            if _addrs:
-                                dc_connect_ip = _addrs[0]
-                                log(f"AD_DC_INTEGRITY: DC Tailscale IP from runner peer list: {dc_connect_ip}")
-                            break
-                if dc_connect_ip == private_ip:
-                    log(f"AD_DC_INTEGRITY: DC not found in Tailscale peer list — using private IP {private_ip}")
-            except Exception as _tsip_e:
-                log(f"AD_DC_INTEGRITY: Tailscale IP lookup failed ({_tsip_e}) — using private IP {private_ip}")
+            # Poll the runner's Tailscale peer list until the DC appears (up to 90s).
+            # Tailscale install + up on Windows takes time; the peer needs to propagate.
+            _ts_deadline = _ttime.time() + 90
+            while _ttime.time() < _ts_deadline and dc_connect_ip == private_ip:
+                _ttime.sleep(10)
+                try:
+                    _ts_status = _sp.run(
+                        ["tailscale", "status", "--json"],
+                        capture_output=True, text=True, timeout=15,
+                    )
+                    if _ts_status.returncode == 0:
+                        _ts_data = _jj.loads(_ts_status.stdout)
+                        for _peer in _ts_data.get("Peer", {}).values():
+                            if _peer.get("HostName", "").lower() == "nexplane-smoke-dc":
+                                _addrs = [a.split("/")[0] for a in _peer.get("TailscaleIPs", []) if a.startswith("100.")]
+                                if _addrs:
+                                    dc_connect_ip = _addrs[0]
+                                    log(f"AD_DC_INTEGRITY: DC Tailscale IP from runner peer list: {dc_connect_ip}")
+                                break
+                except Exception:
+                    pass
+            if dc_connect_ip == private_ip:
+                log(f"AD_DC_INTEGRITY: DC not found in Tailscale peer list after 90s — using private IP {private_ip}")
 
         log(f"AD_DC_INTEGRITY: registering active_directory connector for {dc_connect_ip}...")
         _dc_creds = {
