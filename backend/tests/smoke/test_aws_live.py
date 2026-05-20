@@ -15410,63 +15410,46 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         # Runtime Tailscale join — runs after any AMI build (which ends with
         # 'tailscale logout'). Binary is pre-installed in the AMI so this is
         # just 'tailscale up' — completes in seconds, not minutes.
+        # Ask the DC for its own Tailscale IP via SSM directly — more reliable
+        # than polling the runner's peer list, which has propagation lag.
         # ------------------------------------------------------------------
         if tailscale_auth_key:
-            log("AD_DC_INTEGRITY: joining Tailscale (binary pre-installed in AMI)...")
+            log("AD_DC_INTEGRITY: joining Tailscale and getting DC IP...")
             try:
                 _rts_resp = ssm_boto.send_command(
                     InstanceIds=[instance_id],
                     DocumentName="AWS-RunPowerShellScript",
                     Parameters={"commands": [
                         f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
+                        # Poll for IP assignment (up to 30s)
+                        "$tsIP = $null; for ($i=0; $i -lt 6; $i++) { Start-Sleep 5; $tsIP = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip -4 2>$null).Trim(); if ($tsIP -match '^100\\.') { break } }",
+                        "if ($tsIP -match '^100\\.') { Write-Output \"TS_IP:$tsIP\" } else { Write-Output 'TS_IP:UNKNOWN' }",
                         "Write-Output 'TAILSCALE_UP'",
                     ]},
-                    TimeoutSeconds=60,
+                    TimeoutSeconds=90,
                 )
                 _rts_cmd = _rts_resp["Command"]["CommandId"]
-                _rts_dl = _t.time() + 90
+                _rts_dl = _t.time() + 120
                 while _t.time() < _rts_dl:
                     _t.sleep(8)
                     try:
                         _rts_inv = ssm_boto.get_command_invocation(CommandId=_rts_cmd, InstanceId=instance_id)
                         if _rts_inv["Status"] in ("Success", "Failed", "TimedOut"):
-                            log(f"AD_DC_INTEGRITY: tailscale up status={_rts_inv['Status']}")
+                            _rts_out = _rts_inv.get("StandardOutputContent", "")
+                            import re as _re
+                            _ip_m = _re.search(r"TS_IP:(100\.\d+\.\d+\.\d+)", _rts_out)
+                            if _ip_m:
+                                dc_connect_ip = _ip_m.group(1)
+                                log(f"AD_DC_INTEGRITY: DC Tailscale IP: {dc_connect_ip}")
+                            else:
+                                log(f"AD_DC_INTEGRITY: tailscale up output: {_rts_out[:200]}")
                             break
                     except Exception:
                         pass
             except Exception as _rts_e:
                 log(f"AD_DC_INTEGRITY: tailscale up error: {_rts_e}")
-
-        # ------------------------------------------------------------------
-        # Step 5 — Resolve DC Tailscale IP via runner's local tailscale status
-        # The runner is already on Tailscale — after the DC joins, it appears
-        # as a peer. Query the runner's own tailscale status to find the DC IP.
-        # ------------------------------------------------------------------
-        import subprocess as _sp, json as _jj, time as _ttime
-        if tailscale_auth_key:
-            # Poll the runner's Tailscale peer list until the DC appears (up to 90s).
-            # Tailscale install + up on Windows takes time; the peer needs to propagate.
-            _ts_deadline = _ttime.time() + 90
-            while _ttime.time() < _ts_deadline and dc_connect_ip == private_ip:
-                _ttime.sleep(10)
-                try:
-                    _ts_status = _sp.run(
-                        ["tailscale", "status", "--json"],
-                        capture_output=True, text=True, timeout=15,
-                    )
-                    if _ts_status.returncode == 0:
-                        _ts_data = _jj.loads(_ts_status.stdout)
-                        for _peer in _ts_data.get("Peer", {}).values():
-                            if _peer.get("HostName", "").lower() == "nexplane-smoke-dc":
-                                _addrs = [a.split("/")[0] for a in _peer.get("TailscaleIPs", []) if a.startswith("100.")]
-                                if _addrs:
-                                    dc_connect_ip = _addrs[0]
-                                    log(f"AD_DC_INTEGRITY: DC Tailscale IP from runner peer list: {dc_connect_ip}")
-                                break
-                except Exception:
-                    pass
-            if dc_connect_ip == private_ip:
-                log(f"AD_DC_INTEGRITY: DC not found in Tailscale peer list after 90s — using private IP {private_ip}")
+        if dc_connect_ip == private_ip:
+            log(f"AD_DC_INTEGRITY: no Tailscale IP obtained — using private IP (LDAP will likely fail)")
 
         log(f"AD_DC_INTEGRITY: registering active_directory connector for {dc_connect_ip}...")
         _dc_creds = {
