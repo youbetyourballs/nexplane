@@ -15137,7 +15137,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         log(f"AD_DC_INTEGRITY: using base AMI {win_ami_id} ({images[0]['Name']})")
 
         _setup_key = (
-            "ad-ds-v4-fw-vpc-socat-proxy-"
+            "ad-ds-v5-ldap-signing-off-"
             "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
         )
         setup_hash = _hl.md5(_setup_key.encode()).hexdigest()
@@ -15341,6 +15341,40 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                             break
                     except Exception:
                         pass
+
+                # ----------------------------------------------------------
+                # Step 3a — Disable LDAP signing requirement
+                # Windows Server 2022 DCs enforce LDAP signing by default,
+                # which rejects plain ldap3 Simple Bind connections.
+                # Set LDAPServerIntegrity=0 (off) so the smoke connector can bind.
+                # ----------------------------------------------------------
+                log("AD_DC_INTEGRITY: disabling LDAP signing requirement...")
+                try:
+                    _ldap_sign_resp = ssm_boto.send_command(
+                        InstanceIds=[instance_id],
+                        DocumentName="AWS-RunPowerShellScript",
+                        Parameters={"commands": [
+                            "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NTDS\\Parameters' "
+                            "-Name 'LDAPServerIntegrity' -Value 0 -Type DWord -Force",
+                            "Write-Output 'LDAP_SIGNING_DISABLED'",
+                        ]},
+                        TimeoutSeconds=30,
+                    )
+                    _lsd_deadline = _t.time() + 60
+                    while _t.time() < _lsd_deadline:
+                        _t.sleep(5)
+                        try:
+                            _lsd_inv = ssm_boto.get_command_invocation(
+                                CommandId=_ldap_sign_resp["Command"]["CommandId"],
+                                InstanceId=instance_id,
+                            )
+                            if _lsd_inv["Status"] in ("Success", "Failed", "TimedOut"):
+                                log(f"AD_DC_INTEGRITY: LDAP signing status={_lsd_inv['Status']}")
+                                break
+                        except Exception:
+                            pass
+                except Exception as _lsd_e:
+                    log(f"AD_DC_INTEGRITY: LDAP signing disable failed: {_lsd_e}")
 
                 # ----------------------------------------------------------
                 # Step 3b — Open Windows Firewall for LDAP and WinRM
