@@ -15420,16 +15420,18 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                     InstanceIds=[instance_id],
                     DocumentName="AWS-RunPowerShellScript",
                     Parameters={"commands": [
+                        # Ensure Tailscale service is running before calling up
+                        "Start-Service -Name Tailscale -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3",
                         f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
-                        # Poll for IP via Windows NIC (more reliable than 'tailscale ip' on Windows)
-                        "$tsIP = $null; for ($i=0; $i -lt 12; $i++) { Start-Sleep 5; $tsIP = (Get-NetIPAddress -InterfaceAlias 'Tailscale' -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress; if ($tsIP) { break }; $tsIP = (Get-NetAdapter | Where-Object { $_.InterfaceDescription -like '*Tailscale*' -or $_.Name -eq 'Tailscale' } | Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -like '100.*' } | Select-Object -First 1).IPAddress; if ($tsIP) { break } }",
-                        "if ($tsIP) { Write-Output \"TS_IP:$tsIP\" } else { Write-Output 'TS_IP:UNKNOWN' }",
+                        # Search all IPv4 addresses for 100.x.x.x (Tailscale CGNAT range)
+                        "$tsIP = $null; for ($i=0; $i -lt 12; $i++) { Start-Sleep 5; $tsIP = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -like '100.*' } | Select-Object -First 1).IPAddress; if ($tsIP) { break } }",
+                        "if ($tsIP) { Write-Output \"TS_IP:$tsIP\" } else { Write-Output \"TS_IP:UNKNOWN\"; Get-NetIPAddress -AddressFamily IPv4 | Select-Object IPAddress,InterfaceAlias | ForEach-Object { Write-Output \"NIC:$($_.InterfaceAlias)=$($_.IPAddress)\" } }",
                         "Write-Output 'TAILSCALE_UP'",
                     ]},
-                    TimeoutSeconds=90,
+                    TimeoutSeconds=120,
                 )
                 _rts_cmd = _rts_resp["Command"]["CommandId"]
-                _rts_dl = _t.time() + 120
+                _rts_dl = _t.time() + 150
                 while _t.time() < _rts_dl:
                     _t.sleep(8)
                     try:
