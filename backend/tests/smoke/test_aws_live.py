@@ -15076,7 +15076,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         log(f"AD_DC_INTEGRITY: using base AMI {win_ami_id} ({images[0]['Name']})")
 
         _setup_key = (
-            "ad-ds-v3-tailscale-install-logout-"
+            "ad-ds-v4-fw-vpc-socat-proxy-"
             "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
         )
         setup_hash = _hl.md5(_setup_key.encode()).hexdigest()
@@ -15294,14 +15294,14 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                         InstanceIds=[instance_id],
                         DocumentName="AWS-RunPowerShellScript",
                         Parameters={"commands": [
-                            # Inbound: allow LDAP and WinRM only from the Tailscale CGNAT range.
-                            # Firewall stays enabled — no public exposure.
-                            # SSM agent is unaffected: it communicates outbound over HTTPS (443)
-                            # to AWS SSM endpoints and does not require any inbound rules.
+                            # Allow LDAP and WinRM from Tailscale CGNAT range AND the AWS VPC
+                            # subnet (172.16.0.0/12). The VPC range covers the runner's private IP
+                            # which proxies connections from the platform backend to the DC.
+                            # SSM agent is unaffected: it uses outbound HTTPS only.
                             "New-NetFirewallRule -DisplayName 'LDAP-Tailscale' -Direction Inbound "
-                            "-Protocol TCP -LocalPort 389 -RemoteAddress '100.64.0.0/10' -Action Allow -ErrorAction SilentlyContinue",
+                            "-Protocol TCP -LocalPort 389 -RemoteAddress '100.64.0.0/10,172.16.0.0/12' -Action Allow -ErrorAction SilentlyContinue",
                             "New-NetFirewallRule -DisplayName 'WinRM-Tailscale' -Direction Inbound "
-                            "-Protocol TCP -LocalPort 5985 -RemoteAddress '100.64.0.0/10' -Action Allow -ErrorAction SilentlyContinue",
+                            "-Protocol TCP -LocalPort 5985 -RemoteAddress '100.64.0.0/10,172.16.0.0/12' -Action Allow -ErrorAction SilentlyContinue",
                             "Enable-PSRemoting -Force",
                             "Set-Item WSMan:\\localhost\\Service\\Auth\\Basic -Value $true",
                             "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $true",
