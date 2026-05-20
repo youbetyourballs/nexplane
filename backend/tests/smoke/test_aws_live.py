@@ -14743,7 +14743,10 @@ def main():
                 ssh_key_path=getattr(args, "ssh_key_path", ""),
             )
         if "AD_DC_INTEGRITY" in phases:
-            run_phase_ad_dc_integrity(client, cloud_account_id)
+            run_phase_ad_dc_integrity(
+                client, cloud_account_id,
+                tailscale_auth_key=getattr(args, "tailscale_auth_key", ""),
+            )
         if "BIND_DNS" in phases:
             run_phase_bind_dns(
                 client, cloud_account_id,
@@ -15018,7 +15021,7 @@ def run_phase_mac_agent_bootstrap(
             log(f"MAC_AGENT_BOOTSTRAP: reused existing instance {instance_id} — no termination performed")
 
 
-def run_phase_ad_dc_integrity(client, cloud_account_id):
+def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
     # type: (object, str) -> None
     """Phase AD_DC_INTEGRITY: Provision Windows Server 2022 AD DC on EC2, snapshot as AMI,
     run dc_integrity_check and ad_forest_snapshot CRs against the live domain controller.
