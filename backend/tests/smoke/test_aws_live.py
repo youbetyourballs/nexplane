@@ -15421,9 +15421,9 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                     DocumentName="AWS-RunPowerShellScript",
                     Parameters={"commands": [
                         f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
-                        # Poll for IP assignment (up to 30s)
-                        "$tsIP = $null; for ($i=0; $i -lt 6; $i++) { Start-Sleep 5; $tsIP = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip -4 2>$null).Trim(); if ($tsIP -match '^100\\.') { break } }",
-                        "if ($tsIP -match '^100\\.') { Write-Output \"TS_IP:$tsIP\" } else { Write-Output 'TS_IP:UNKNOWN' }",
+                        # Poll for IP via Windows NIC (more reliable than 'tailscale ip' on Windows)
+                        "$tsIP = $null; for ($i=0; $i -lt 12; $i++) { Start-Sleep 5; $tsIP = (Get-NetIPAddress -InterfaceAlias 'Tailscale' -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress; if ($tsIP) { break }; $tsIP = (Get-NetAdapter | Where-Object { $_.InterfaceDescription -like '*Tailscale*' -or $_.Name -eq 'Tailscale' } | Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -like '100.*' } | Select-Object -First 1).IPAddress; if ($tsIP) { break } }",
+                        "if ($tsIP) { Write-Output \"TS_IP:$tsIP\" } else { Write-Output 'TS_IP:UNKNOWN' }",
                         "Write-Output 'TAILSCALE_UP'",
                     ]},
                     TimeoutSeconds=90,
