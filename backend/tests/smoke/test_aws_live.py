@@ -15698,6 +15698,30 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
 
         log("AD_DC_INTEGRITY: all steps passed")
 
+        # ------------------------------------------------------------------
+        # Extended DC smoke — run AD_CREATE and AD-dependent runbook phases
+        # while the DC is still live. These phases need a live AD connector.
+        # ------------------------------------------------------------------
+        log("AD_DC_INTEGRITY: running extended AD connector smoke tests...")
+        try:
+            from test_runbook_connectors_live import run_phase_ad_create as _run_ad_create
+            _ad_create_result = _run_ad_create(client, dc_asset_id, run_id="dc-integrity")
+            log(f"AD_DC_INTEGRITY: AD_CREATE phase — {_ad_create_result.get('status', 'unknown')}")
+        except Exception as _ext_e:
+            log(f"AD_DC_INTEGRITY: extended AD_CREATE phase error: {_ext_e}")
+
+        try:
+            from test_platform_live import (
+                run_phase_runbook_onboarding as _run_rb_onboard,
+                run_phase_runbook_account_compromise as _run_rb_ac,
+            )
+            _rb1 = _run_rb_onboard(client, dc_asset_id, run_id="dc-integrity")
+            log(f"AD_DC_INTEGRITY: RUNBOOK_ONBOARDING — {_rb1.get('status', 'unknown')}")
+            _rb2 = _run_rb_ac(client, dc_asset_id, run_id="dc-integrity")
+            log(f"AD_DC_INTEGRITY: RUNBOOK_ACCOUNT_COMPROMISE — {_rb2.get('status', 'unknown')}")
+        except Exception as _rb_e:
+            log(f"AD_DC_INTEGRITY: runbook phases error (non-fatal): {_rb_e}")
+
     finally:
         # Cleanup: delete connector + asset; terminate instance only if freshly launched.
         # Do NOT delete the AMI — it is the reuse cache for future runs.
