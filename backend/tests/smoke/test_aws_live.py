@@ -15426,14 +15426,20 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
             _sp.run(["bash", "-c", "which socat || dnf install -y socat -q"], check=True, timeout=60)
 
             # Kill any stale proxies then start fresh ones via Popen (non-blocking)
+            # Bind to 0.0.0.0 so socat listens on ALL interfaces including Tailscale
             _sp.run(["bash", "-c", f"pkill -f 'socat.*{private_ip}' 2>/dev/null || true"], timeout=5)
             _ttime.sleep(1)
-            _sp.Popen(["socat", f"TCP-LISTEN:10389,bind={_runner_ts_ip},fork,reuseaddr", f"TCP:{private_ip}:389"])
-            _sp.Popen(["socat", f"TCP-LISTEN:10985,bind={_runner_ts_ip},fork,reuseaddr", f"TCP:{private_ip}:5985"])
-            _ttime.sleep(2)  # let socat bind
+            _sp.Popen(["socat", "TCP-LISTEN:10389,bind=0.0.0.0,fork,reuseaddr", f"TCP:{private_ip}:389"])
+            _sp.Popen(["socat", "TCP-LISTEN:10985,bind=0.0.0.0,fork,reuseaddr", f"TCP:{private_ip}:5985"])
+            _ttime.sleep(3)  # let socat bind
+
+            # Verify socat is actually listening before registering connector
+            _chk = _sp.run(["bash", "-c", "ss -tlnp | grep ':10389'"], capture_output=True, text=True, timeout=5)
+            if ":10389" not in _chk.stdout:
+                raise RuntimeError(f"socat not listening on 10389: {_chk.stdout!r}")
 
             dc_connect_ip = _runner_ts_ip
-            log(f"AD_DC_INTEGRITY: socat proxy — {_runner_ts_ip}:10389 → {private_ip}:389")
+            log(f"AD_DC_INTEGRITY: socat proxy — {_runner_ts_ip}:10389 → {private_ip}:389 ✓")
         except Exception as _proxy_e:
             log(f"AD_DC_INTEGRITY: socat proxy failed ({_proxy_e}) — using private IP")
 
