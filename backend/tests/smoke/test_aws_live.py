@@ -15163,7 +15163,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                     DocumentName="AWS-RunPowerShellScript",
                     Parameters={"commands": [
                         "if (Test-Path 'C:\\Program Files\\Tailscale\\tailscale.exe') { "
-                        "$tsIP = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip 2>$null) -match '^100\\.' | Select-Object -First 1; "
+                        "$tsIP = (Get-NetIPAddress -InterfaceAlias 'Tailscale' -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress; "
                         "if ($tsIP) { Write-Output \"TS_IP:$tsIP\" } else { Write-Output 'TS_IP:NOT_CONNECTED' } } "
                         "else { Write-Output 'TAILSCALE_NOT_INSTALLED' }",
                     ]},
@@ -15226,7 +15226,8 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                         Parameters={"commands": [
                             f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up "
                             f"--authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
-                            "$tsIP = $null; for ($i=0; $i -lt 12; $i++) { Start-Sleep 5; $tsIP = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip 2>$null) -match '^100\\.' | Select-Object -First 1; if ($tsIP) { break } }",
+                            "& 'C:\\Program Files\\Tailscale\\tailscale.exe' status 2>&1 | Select-Object -First 5 | ForEach-Object { Write-Output \"TSSTATUS:$_\" }",
+                            "$tsIP = $null; for ($i=0; $i -lt 12; $i++) { Start-Sleep 5; $tsIP = (Get-NetIPAddress -InterfaceAlias 'Tailscale' -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress; if ($tsIP) { break }; $tsIP2 = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip 2>$null | Select-String '100\\.').Line; if ($tsIP2) { $tsIP = $tsIP2.Trim(); break } }",
                             "if ($tsIP) { Write-Output \"TS_IP:$tsIP\" } else { Write-Output 'TS_IP:UNKNOWN' }",
                             "Write-Output 'TAILSCALE_JOINED'",
                         ]},
@@ -15462,7 +15463,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                                 )
                                 if _ts_j_inv["Status"] in ("Success", "Failed", "TimedOut"):
                                     _ts_j_out = _ts_j_inv.get("StandardOutputContent", "")
-                                    log(f"AD_DC_INTEGRITY: Tailscale join output: {_ts_j_out[:300]}")
+                                    log(f"AD_DC_INTEGRITY: Tailscale join output: {_ts_j_out[:500]}")
                                     if "TAILSCALE_JOINED" in _ts_j_out:
                                         # Extract Tailscale IP from TS_IP: prefix line
                                         import re as _re
