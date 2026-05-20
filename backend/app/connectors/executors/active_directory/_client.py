@@ -6,3 +6,47 @@ def get_connection(creds: dict) -> Connection:
     port = int(creds.get("port", 636 if use_ssl else 389))
     server = Server(creds["server"], port=port, use_ssl=use_ssl, get_info=ALL)
     return Connection(server, user=creds["bind_dn"], password=creds["bind_password"], auto_bind=True)
+
+
+def has_ssm_transport(creds: dict) -> bool:
+    """True when credentials specify an EC2 instance to reach via SSM instead of direct LDAP."""
+    return bool(creds.get("ssm_instance_id"))
+
+
+async def run_ssm_powershell(creds: dict, commands: list[str], timeout: int = 60) -> str:
+    """Run PowerShell commands on a DC via SSM and return stdout. Raises on failure."""
+    import asyncio
+    import boto3
+
+    instance_id = creds["ssm_instance_id"]
+    region = creds.get("ssm_region", "us-east-1")
+    aws_key = creds.get("aws_access_key_id")
+    aws_secret = creds.get("aws_secret_access_key")
+
+    def _sync():
+        kwargs: dict = {"region_name": region}
+        if aws_key and aws_secret:
+            kwargs["aws_access_key_id"] = aws_key
+            kwargs["aws_secret_access_key"] = aws_secret
+        ssm = boto3.client("ssm", **kwargs)
+        resp = ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": commands},
+            TimeoutSeconds=timeout,
+        )
+        cmd_id = resp["Command"]["CommandId"]
+        import time
+        deadline = time.time() + timeout + 30
+        while time.time() < deadline:
+            time.sleep(5)
+            inv = ssm.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+            status = inv["Status"]
+            if status == "Success":
+                return inv.get("StandardOutputContent", "")
+            if status in ("Failed", "TimedOut", "Cancelled"):
+                err = inv.get("StandardErrorContent", "")
+                raise RuntimeError(f"SSM command {status}: {err[:300]}")
+        raise TimeoutError(f"SSM command did not complete within {timeout}s")
+
+    return await asyncio.get_event_loop().run_in_executor(None, _sync)
