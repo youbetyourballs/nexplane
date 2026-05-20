@@ -15147,37 +15147,6 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         _wait_ssm_ready_win(ssm_boto, instance_id, timeout=600)
         log("AD_DC_INTEGRITY: SSM agent ready")
 
-        # ------------------------------------------------------------------
-        # Runtime Tailscale join — binary is pre-installed in the AMI,
-        # so this is just 'tailscale up' (seconds, not minutes).
-        # Runs for both cached and fresh builds.
-        # ------------------------------------------------------------------
-        if tailscale_auth_key:
-            log("AD_DC_INTEGRITY: joining Tailscale (binary pre-installed in AMI)...")
-            try:
-                _rts_resp = ssm_boto.send_command(
-                    InstanceIds=[instance_id],
-                    DocumentName="AWS-RunPowerShellScript",
-                    Parameters={"commands": [
-                        f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
-                        "Write-Output 'TAILSCALE_UP'",
-                    ]},
-                    TimeoutSeconds=60,
-                )
-                _rts_cmd = _rts_resp["Command"]["CommandId"]
-                _rts_dl = _t.time() + 90
-                while _t.time() < _rts_dl:
-                    _t.sleep(8)
-                    try:
-                        _rts_inv = ssm_boto.get_command_invocation(CommandId=_rts_cmd, InstanceId=instance_id)
-                        if _rts_inv["Status"] in ("Success", "Failed", "TimedOut"):
-                            log(f"AD_DC_INTEGRITY: tailscale up status={_rts_inv['Status']}")
-                            break
-                    except Exception:
-                        pass
-            except Exception as _rts_e:
-                log(f"AD_DC_INTEGRITY: tailscale up error: {_rts_e}")
-
         if not from_existing:
             _setup_key2 = (
                 "ad-ds-v2-firewall-open-ldap-winrm-"
@@ -15436,6 +15405,37 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                     log("AD_DC_INTEGRITY: AMI snapshot initiated")
                 except Exception as _ami_e:
                     log(f"AD_DC_INTEGRITY: AMI cache step skipped: {_ami_e}")
+
+        # ------------------------------------------------------------------
+        # Runtime Tailscale join — runs after any AMI build (which ends with
+        # 'tailscale logout'). Binary is pre-installed in the AMI so this is
+        # just 'tailscale up' — completes in seconds, not minutes.
+        # ------------------------------------------------------------------
+        if tailscale_auth_key:
+            log("AD_DC_INTEGRITY: joining Tailscale (binary pre-installed in AMI)...")
+            try:
+                _rts_resp = ssm_boto.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName="AWS-RunPowerShellScript",
+                    Parameters={"commands": [
+                        f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
+                        "Write-Output 'TAILSCALE_UP'",
+                    ]},
+                    TimeoutSeconds=60,
+                )
+                _rts_cmd = _rts_resp["Command"]["CommandId"]
+                _rts_dl = _t.time() + 90
+                while _t.time() < _rts_dl:
+                    _t.sleep(8)
+                    try:
+                        _rts_inv = ssm_boto.get_command_invocation(CommandId=_rts_cmd, InstanceId=instance_id)
+                        if _rts_inv["Status"] in ("Success", "Failed", "TimedOut"):
+                            log(f"AD_DC_INTEGRITY: tailscale up status={_rts_inv['Status']}")
+                            break
+                    except Exception:
+                        pass
+            except Exception as _rts_e:
+                log(f"AD_DC_INTEGRITY: tailscale up error: {_rts_e}")
 
         # ------------------------------------------------------------------
         # Step 5 — Resolve DC Tailscale IP via runner's local tailscale status
