@@ -5862,7 +5862,7 @@ echo "LDAP_SETUP_DONE"
             {"Key": "nexplane-smoke", "Value": "true"},
         ]}],
         "NetworkInterfaces": [{"DeviceIndex": 0, "SubnetId": subnet_id,
-                                "AssociatePublicIpAddress": True}],
+                                "AssociatePublicIpAddress": False}],
     }
     # Attach SSM instance profile if available
     if iam_client:
@@ -9167,6 +9167,67 @@ def _get_windows_2022_ami(ec2_client) -> str:
     return images[0]["ImageId"]
 
 
+def _install_tailscale_ssm(ssm_client, instance_id: str, tailscale_auth_key: str, hostname: str) -> str:
+    """Install Tailscale on a Linux EC2 instance via SSM and return its Tailscale IP (100.x.x.x)."""
+    import time as _t, re as _re
+    resp = ssm_client.send_command(
+        InstanceIds=[instance_id],
+        DocumentName="AWS-RunShellScript",
+        Parameters={"commands": [
+            "curl -fsSL https://tailscale.com/install.sh | sh",
+            f"tailscale up --authkey={tailscale_auth_key} --accept-routes --hostname={hostname}",
+            "sleep 8",
+            "tailscale ip -4",
+        ]},
+        TimeoutSeconds=120,
+    )
+    cmd_id = resp["Command"]["CommandId"]
+    deadline = _t.time() + 150
+    while _t.time() < deadline:
+        _t.sleep(10)
+        try:
+            inv = ssm_client.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+            if inv["Status"] in ("Success", "Failed", "TimedOut"):
+                m = _re.search(r"(100\.\d+\.\d+\.\d+)", inv.get("StandardOutputContent", ""))
+                return m.group(1) if m else ""
+        except Exception:
+            pass
+    return ""
+
+
+def _get_tailscale_auth_key_from_db() -> str:
+    """Fetch the Tailscale pre-auth key from the platform connector DB."""
+    try:
+        import asyncio, sys
+        if "/app" not in sys.path:
+            sys.path.insert(0, "/app")
+        from app.config import settings
+        from app.services.secrets_service import SecretsService
+        from app.models.connector import Connector
+        from app.models.connector_credential import ConnectorCredential
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
+
+        async def _fetch():
+            engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=False)
+            Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with Session() as db:
+                r = await db.execute(select(Connector).where(Connector.connector_type == "tailscale"))
+                c = r.scalar_one_or_none()
+                if not c:
+                    return ""
+                cr = await db.execute(select(ConnectorCredential).where(ConnectorCredential.connector_id == c.id))
+                cc = cr.scalar_one_or_none()
+                if not cc:
+                    return ""
+                return SecretsService(settings.SECRET_KEY).decrypt_json(cc.credentials_encrypted).get("auth_key", "")
+
+        return asyncio.run(_fetch())
+    except Exception:
+        return ""
+
+
 def _check_smoke_ami_cache(ssm_client, ec2_client, ami_name: str, setup_hash: str):
     """Check SSM cache for a pre-configured smoke AMI. Returns AMI ID or None."""
     param_path = f"/nexplane/smoke-amis/{ami_name}/{setup_hash[:8]}"
@@ -9444,7 +9505,7 @@ def run_phase_win_policy_pipeline(client, win_asset_id: str) -> None:
 
 
 def _get_or_create_winrm_sg(ec2_client, vpc_id: str) -> str:
-    """Get or create a security group that allows WinRM (TCP 5985) and RDP (TCP 3389) inbound."""
+    """Get or create a security group that allows WinRM (TCP 5985) from Tailscale only."""
     sg_name = "nexplane-smoke-winrm"
     try:
         resp = ec2_client.describe_security_groups(
@@ -9465,7 +9526,7 @@ def _get_or_create_winrm_sg(ec2_client, vpc_id: str) -> str:
             VpcId=vpc_id,
         )
         sg_id = create_resp["GroupId"]
-        # Allow WinRM HTTP (5985) and RDP (3389) from anywhere
+        # Allow WinRM from Tailscale CGNAT range and VPC only — no public exposure
         ec2_client.authorize_security_group_ingress(
             GroupId=sg_id,
             IpPermissions=[
@@ -9473,17 +9534,10 @@ def _get_or_create_winrm_sg(ec2_client, vpc_id: str) -> str:
                     "IpProtocol": "tcp",
                     "FromPort": 5985,
                     "ToPort": 5985,
-                    "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "WinRM HTTP"}],
-                },
-                {
-                    "IpProtocol": "tcp",
-                    "FromPort": 3389,
-                    "ToPort": 3389,
-                    "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "RDP"}],
-                },
-                {
-                    "IpProtocol": "-1",
-                    "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "All outbound"}],
+                    "IpRanges": [
+                        {"CidrIp": "100.64.0.0/10", "Description": "WinRM from Tailscale"},
+                        {"CidrIp": "172.16.0.0/12", "Description": "WinRM from VPC"},
+                    ],
                 },
             ],
         )
@@ -9560,7 +9614,7 @@ def _launch_winrm_ec2(ec2_client, ami_id):
     ni_spec: dict = {
         "DeviceIndex": 0,
         "SubnetId": subnet_id,
-        "AssociatePublicIpAddress": True,
+        "AssociatePublicIpAddress": False,
     }
     if sg_id:
         ni_spec["Groups"] = [sg_id]
@@ -9664,28 +9718,16 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
 
             _t.sleep(15)  # let WinRM service settle
 
-            # Get public IP for WinRM access from runner
-            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
-            public_ip = desc["Reservations"][0]["Instances"][0].get("PublicIpAddress", "")
-            if not public_ip:
-                public_ip = private_ip
-            log(f"Instance public IP: {public_ip}")
-
-            # Wait for WinRM port 5985 to be reachable (up to 5 min)
-            log("Waiting for WinRM port 5985...")
-            deadline2 = _t.time() + 300
-            port_open = False
-            while _t.time() < deadline2:
-                try:
-                    sock = _socket.create_connection((public_ip, 5985), timeout=5)
-                    sock.close()
-                    port_open = True
-                    log("WinRM port 5985 reachable")
-                    break
-                except OSError:
-                    _t.sleep(10)
-            if not port_open:
-                log("WinRM port 5985 not reachable — will try anyway")
+            # Set up socat proxy on runner: runner-tailscale-ip:15985 → instance:5985
+            # No public IP — all connectivity via Tailscale through the runner proxy.
+            import subprocess as _sp2
+            _sp2.run(["bash", "-c", "which socat || dnf install -y socat -q"], check=True, timeout=60)
+            _sp2.run(["bash", "-c", f"pkill -f 'socat.*{private_ip}.*5985' 2>/dev/null || true"], timeout=5)
+            _sp2.Popen(["socat", "TCP-LISTEN:15985,bind=0.0.0.0,fork,reuseaddr", f"TCP:{private_ip}:5985"])
+            _t.sleep(3)
+            _runner_ts = _sp2.run(["tailscale", "ip", "-4"], capture_output=True, text=True).stdout.strip()
+            winrm_connect_ip = _runner_ts if _runner_ts.startswith("100.") else private_ip
+            log(f"WinRM via socat proxy: {winrm_connect_ip}:15985 → {private_ip}:5985")
 
             # Set a known password via SSM so we can use it for WinRM
             known_password = "NexplaneSmoke2024!"
@@ -9725,19 +9767,22 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
                 log(f"AMI cache skipped: {_ami_e}")
 
         else:
-            # From cached AMI — use the same known password
-            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
-            public_ip = desc["Reservations"][0]["Instances"][0].get("PublicIpAddress", "")
-            if not public_ip:
-                public_ip = private_ip
+            # From cached AMI — set up socat proxy, use same known password
+            import subprocess as _sp2
+            _sp2.run(["bash", "-c", "which socat || dnf install -y socat -q"], check=True, timeout=60)
+            _sp2.run(["bash", "-c", f"pkill -f 'socat.*{private_ip}.*5985' 2>/dev/null || true"], timeout=5)
+            _sp2.Popen(["socat", "TCP-LISTEN:15985,bind=0.0.0.0,fork,reuseaddr", f"TCP:{private_ip}:5985"])
+            _t.sleep(3)
+            _runner_ts = _sp2.run(["tailscale", "ip", "-4"], capture_output=True, text=True).stdout.strip()
+            winrm_connect_ip = _runner_ts if _runner_ts.startswith("100.") else private_ip
             password = "NexplaneSmoke2024!"
-            log(f"Using cached WinRM AMI, public IP: {public_ip}")
+            log(f"WinRM via socat proxy (cached): {winrm_connect_ip}:15985 → {private_ip}:5985")
 
         # Build connector object (used both for backend registration and standalone direct calls)
         class _WinRMConnector:
             credentials = {
-                "hostname": public_ip,
-                "port": "5985",
+                "hostname": winrm_connect_ip,
+                "port": "15985",
                 "username": "Administrator",
                 "password": password,
                 "use_ssl": "false",
@@ -9752,8 +9797,8 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
                 "connector_type": "winrm",
                 "name": f"nexplane-smoke-winrm-{instance_id[-8:]}",
                 "credentials": {
-                    "hostname": public_ip,
-                    "port": "5985",
+                    "hostname": winrm_connect_ip,
+                    "port": "15985",
                     "username": "Administrator",
                     "password": password,
                     "use_ssl": "false",
@@ -11578,7 +11623,7 @@ echo "WAZUH_SETUP_COMPLETE"
     subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
     subnet_id = subnets[0]["SubnetId"]
 
-    # Ensure a security group exists that allows Wazuh API (55000) from anywhere
+    # Security group: allow Wazuh API only from Tailscale CGNAT range
     sg_id = None
     try:
         sgs = ec2_client.describe_security_groups(
@@ -11589,16 +11634,16 @@ echo "WAZUH_SETUP_COMPLETE"
         else:
             sg_resp = ec2_client.create_security_group(
                 GroupName="nexplane-smoke-wazuh",
-                Description="Nexplane smoke test: Wazuh API access",
+                Description="Nexplane smoke test: Wazuh API access via Tailscale",
                 VpcId=vpc_id)
             sg_id = sg_resp["GroupId"]
             ec2_client.authorize_security_group_ingress(
                 GroupId=sg_id,
                 IpPermissions=[
                     {"IpProtocol": "tcp", "FromPort": 55000, "ToPort": 55000,
-                     "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+                     "IpRanges": [{"CidrIp": "100.64.0.0/10", "Description": "Wazuh API from Tailscale"}]},
                     {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
-                     "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+                     "IpRanges": [{"CidrIp": "100.64.0.0/10", "Description": "HTTPS from Tailscale"}]},
                 ])
     except Exception as sg_e:
         log(f"  WARNING: SG setup: {sg_e}")
@@ -11611,11 +11656,10 @@ echo "WAZUH_SETUP_COMPLETE"
             {"Key": "Name", "Value": "nexplane-smoke-wazuh"},
             {"Key": "nexplane-smoke", "Value": "true"},
         ]}],
-        # Use NetworkInterfaces to get a public IP
         NetworkInterfaces=[{
             "DeviceIndex": 0,
             "SubnetId": subnet_id,
-            "AssociatePublicIpAddress": True,
+            "AssociatePublicIpAddress": False,
             **({"Groups": [sg_id]} if sg_id else {}),
         }],
     )
@@ -11635,14 +11679,11 @@ echo "WAZUH_SETUP_COMPLETE"
             state = inst["State"]["Name"]
             if state == "running":
                 private_ip = inst.get("PrivateIpAddress", "")
-                public_ip = inst.get("PublicIpAddress", "")
                 break
         except Exception:
             pass
         time.sleep(8)
-    # Use public IP if available (backend in Docker can't reach private VPC IPs)
-    wazuh_connect_ip = public_ip or private_ip
-    log(f"  Wazuh IP: public={public_ip} private={private_ip} using={wazuh_connect_ip}")
+    log(f"  Wazuh private IP: {private_ip}")
 
     deadline2 = time.time() + 120
     while time.time() < deadline2:
@@ -11658,6 +11699,17 @@ echo "WAZUH_SETUP_COMPLETE"
         except Exception:
             pass
         time.sleep(10)
+
+    # Install Tailscale so the platform backend can reach Wazuh without a public IP.
+    wazuh_connect_ip = private_ip  # fallback
+    _ts_auth_w = _get_tailscale_auth_key_from_db()
+    if _ts_auth_w:
+        _ts_ip_w = _install_tailscale_ssm(ssm_client, instance_id, _ts_auth_w, "nexplane-smoke-wazuh")
+        if _ts_ip_w:
+            wazuh_connect_ip = _ts_ip_w
+            log(f"  Wazuh Tailscale IP: {wazuh_connect_ip}")
+        else:
+            log("  Tailscale IP not obtained for Wazuh — using private IP (may fail)")
 
     wazuh_connector_id = None
     try:
@@ -12220,7 +12272,7 @@ echo "INFISICAL_SETUP_COMPLETE"
     subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
     subnet_id = subnets[0]["SubnetId"]
 
-    # Ensure a security group exists that allows Infisical API (80) from anywhere
+    # Security group: allow Infisical API only from Tailscale CGNAT range
     infisical_sg_id = None
     try:
         sgs = ec2_client.describe_security_groups(
@@ -12231,16 +12283,16 @@ echo "INFISICAL_SETUP_COMPLETE"
         else:
             sg_resp = ec2_client.create_security_group(
                 GroupName="nexplane-smoke-infisical",
-                Description="Nexplane smoke test: Infisical API access",
+                Description="Nexplane smoke test: Infisical API via Tailscale",
                 VpcId=vpc_id)
             infisical_sg_id = sg_resp["GroupId"]
             ec2_client.authorize_security_group_ingress(
                 GroupId=infisical_sg_id,
                 IpPermissions=[
                     {"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80,
-                     "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+                     "IpRanges": [{"CidrIp": "100.64.0.0/10", "Description": "HTTP from Tailscale"}]},
                     {"IpProtocol": "tcp", "FromPort": 8080, "ToPort": 8080,
-                     "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+                     "IpRanges": [{"CidrIp": "100.64.0.0/10", "Description": "HTTP alt from Tailscale"}]},
                 ])
     except Exception as sg_e:
         log(f"  WARNING: Infisical SG setup: {sg_e}")
@@ -12256,7 +12308,7 @@ echo "INFISICAL_SETUP_COMPLETE"
         NetworkInterfaces=[{
             "DeviceIndex": 0,
             "SubnetId": subnet_id,
-            "AssociatePublicIpAddress": True,
+            "AssociatePublicIpAddress": False,
             **({"Groups": [infisical_sg_id]} if infisical_sg_id else {}),
         }],
     )
@@ -12276,13 +12328,11 @@ echo "INFISICAL_SETUP_COMPLETE"
             state = inst["State"]["Name"]
             if state == "running":
                 private_ip = inst.get("PrivateIpAddress", "")
-                public_ip_infisical = inst.get("PublicIpAddress", "")
                 break
         except Exception:
             pass
         time.sleep(8)
-    infisical_connect_ip = public_ip_infisical or private_ip
-    log(f"  Infisical IP: public={public_ip_infisical} private={private_ip} using={infisical_connect_ip}")
+    log(f"  Infisical private IP: {private_ip}")
 
     deadline2 = time.time() + 120
     while time.time() < deadline2:
@@ -12298,6 +12348,17 @@ echo "INFISICAL_SETUP_COMPLETE"
         except Exception:
             pass
         time.sleep(10)
+
+    # Install Tailscale for connectivity without a public IP.
+    infisical_connect_ip = private_ip  # fallback
+    _ts_auth_i = _get_tailscale_auth_key_from_db()
+    if _ts_auth_i:
+        _ts_ip_i = _install_tailscale_ssm(ssm_client, instance_id, _ts_auth_i, "nexplane-smoke-infisical")
+        if _ts_ip_i:
+            infisical_connect_ip = _ts_ip_i
+            log(f"  Infisical Tailscale IP: {infisical_connect_ip}")
+        else:
+            log("  Tailscale IP not obtained for Infisical — using private IP (may fail)")
 
     infisical_connector_id = None
     try:
@@ -16009,7 +16070,7 @@ echo "BIND_READY"
             {"Key": "nexplane-smoke", "Value": "true"},
         ]}],
         "NetworkInterfaces": [{"DeviceIndex": 0, "SubnetId": subnet_id,
-                                "AssociatePublicIpAddress": True}],
+                                "AssociatePublicIpAddress": False}],
     }
     if iam_client:
         try:
