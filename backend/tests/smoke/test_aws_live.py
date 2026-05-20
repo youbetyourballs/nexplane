@@ -15134,6 +15134,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
 
     connector_id = None
     dc_asset_id = None
+    dc_connect_ip = private_ip  # overridden with Tailscale IP after join
 
     try:
         # ------------------------------------------------------------------
@@ -15145,7 +15146,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
 
         if not from_existing:
             _setup_key2 = (
-                "ad-ds-v1-install-addomain-"
+                "ad-ds-v2-firewall-open-ldap-winrm-"
                 "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
             )
             setup_hash2 = _hl.md5(_setup_key2.encode()).hexdigest()
@@ -15323,6 +15324,40 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
                     log(f"AD_DC_INTEGRITY: firewall step failed: {_fw_e}")
 
                 # ----------------------------------------------------------
+                # Step 3c — Install Tailscale and join so the platform can
+                # reach the DC over LDAP/WinRM via the Tailscale network.
+                # ----------------------------------------------------------
+                if tailscale_auth_key:
+                    log("AD_DC_INTEGRITY: installing Tailscale on DC...")
+                    try:
+                        _ts_resp = ssm_boto.send_command(
+                            InstanceIds=[instance_id],
+                            DocumentName="AWS-RunPowerShellScript",
+                            Parameters={"commands": [
+                                "$i = \"$env:TEMP\\ts.exe\"",
+                                "Invoke-WebRequest -Uri https://pkgs.tailscale.com/stable/tailscale-setup.exe -OutFile $i -UseBasicParsing",
+                                "Start-Process -Wait -FilePath $i -ArgumentList '/S'",
+                                "Start-Sleep -Seconds 10",
+                                f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
+                                "Write-Output 'TAILSCALE_UP'",
+                            ]},
+                            TimeoutSeconds=300,
+                        )
+                        _ts_cmd = _ts_resp["Command"]["CommandId"]
+                        _ts_dl = _t.time() + 360
+                        while _t.time() < _ts_dl:
+                            _t.sleep(10)
+                            try:
+                                _ts_inv = ssm_boto.get_command_invocation(CommandId=_ts_cmd, InstanceId=instance_id)
+                                if _ts_inv["Status"] in ("Success", "Failed", "TimedOut"):
+                                    log(f"AD_DC_INTEGRITY: Tailscale install+join status={_ts_inv['Status']}")
+                                    break
+                            except Exception:
+                                pass
+                    except Exception as _ts_e:
+                        log(f"AD_DC_INTEGRITY: Tailscale install step error: {_ts_e}")
+
+                # ----------------------------------------------------------
                 # Step 4 — Clear SSM registration data before snapshot
                 # so new instances launched from the AMI register without
                 # needing a public IP (stale data prevents SSM re-registration)
@@ -15360,17 +15395,69 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
                     log(f"AD_DC_INTEGRITY: AMI cache step skipped: {_ami_e}")
 
         # ------------------------------------------------------------------
-        # Step 5 — Register Nexplane AD connector and server asset
+        # Step 5 — Resolve DC Tailscale IP via Tailscale API, then register connector
         # ------------------------------------------------------------------
-        log(f"AD_DC_INTEGRITY: registering active_directory connector for {private_ip}...")
+        try:
+            _ts_creds = client.get_tailscale_auth_key.__self__._get_tailscale_creds() if hasattr(client.get_tailscale_auth_key, "__self__") else {}
+        except Exception:
+            _ts_creds = {}
+
+        # Fetch Tailscale API key from platform DB connector
+        try:
+            import asyncio as _asyncio2, sys as _sys2
+            if "/app" not in _sys2.path:
+                _sys2.path.insert(0, "/app")
+            from app.config import settings as _cfg2
+            from app.services.secrets_service import SecretsService as _Sec2
+            from app.models.connector import Connector as _Con2
+            from app.models.connector_credential import ConnectorCredential as _CC2
+            from sqlalchemy import select as _sel2
+            from sqlalchemy.ext.asyncio import create_async_engine as _eng2, AsyncSession as _AS2
+            from sqlalchemy.orm import sessionmaker as _sm2
+
+            async def _get_ts_api_key():
+                engine = _eng2(_cfg2.DATABASE_URL, pool_pre_ping=False)
+                Sess = _sm2(engine, class_=_AS2, expire_on_commit=False)
+                async with Sess() as db:
+                    r = await db.execute(_sel2(_Con2).where(_Con2.connector_type == "tailscale"))
+                    c = r.scalar_one_or_none()
+                    if not c:
+                        return ""
+                    cr = await db.execute(_sel2(_CC2).where(_CC2.connector_id == c.id))
+                    cc = cr.scalar_one_or_none()
+                    if not cc:
+                        return ""
+                    return _Sec2(_cfg2.SECRET_KEY).decrypt_json(cc.credentials_encrypted).get("api_key", "")
+
+            _ts_api_key = _asyncio2.run(_get_ts_api_key())
+            if _ts_api_key:
+                import time as _ttime; _ttime.sleep(20)  # give Tailscale time to register
+                import urllib.request as _ur, json as _jj
+                _req = _ur.Request(
+                    "https://api.tailscale.com/api/v2/tailnet/-/devices",
+                    headers={"Authorization": f"Bearer {_ts_api_key}"},
+                )
+                with _ur.urlopen(_req, timeout=10) as _resp:
+                    _devices = _jj.loads(_resp.read())
+                for _dev in _devices.get("devices", []):
+                    if _dev.get("hostname", "").lower() == "nexplane-smoke-dc":
+                        _addrs = [a for a in _dev.get("addresses", []) if a.startswith("100.")]
+                        if _addrs:
+                            dc_connect_ip = _addrs[0]
+                            log(f"AD_DC_INTEGRITY: DC Tailscale IP from API: {dc_connect_ip}")
+                            break
+        except Exception as _tsapi_e:
+            log(f"AD_DC_INTEGRITY: could not resolve Tailscale IP ({_tsapi_e}) — using private IP {private_ip}")
+
+        log(f"AD_DC_INTEGRITY: registering active_directory connector for {dc_connect_ip}...")
         _dc_creds = {
-            "server": private_ip,
+            "server": dc_connect_ip,
             "port": "389",
             "base_dn": "DC=smoke,DC=nexplane,DC=local",
             "bind_dn": "CN=Administrator,CN=Users,DC=smoke,DC=nexplane,DC=local",
             "bind_password": "NexplaneSmoke2024!",
             "use_ssl": "false",
-            "winrm_hostname": private_ip,
+            "winrm_hostname": dc_connect_ip,
             "winrm_port": "5985",
             "winrm_username": "Administrator",
             "winrm_password": "NexplaneSmoke2024!",
@@ -15390,7 +15477,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
             "asset_type": "server",
             "environment": "staging",
             "criticality": "medium",
-            "hostname": private_ip,
+            "hostname": dc_connect_ip,
             "tags": ["nexplane-smoke", "active-directory"],
         })
         dc_asset_id = asset_resp.get("id")
@@ -15430,7 +15517,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
             "[AD_DC_INTEGRITY] dc_integrity_check",
             "dc_integrity_check",
             dc_asset_id,
-            {"dc_hostname": private_ip},
+            {"dc_hostname": dc_connect_ip},
         )
         result = client.get_cr_step_result(cr)
         # Accept healthy, degraded, or unknown (unknown occurs when WinRM credentials
@@ -15478,7 +15565,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
             {
                 "s3_bucket": snap_bucket,
                 "s3_prefix": f"ad-smoke/{instance_id}",
-                "dc_hostname": private_ip,
+                "dc_hostname": dc_connect_ip,
                 "include_sysvol": True,
             },
         )
@@ -15521,7 +15608,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
                 "record_type": "A",
                 "value": "10.0.0.99",
                 "ttl": 60,
-                "dc_hostname": private_ip,
+                "dc_hostname": dc_connect_ip,
             },
         )
         result = client.get_cr_step_result(cr)
@@ -15560,7 +15647,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
                 "record_name": "nexplane-smoke-dns-test",
                 "record_type": "A",
                 "new_value": "10.0.0.100",
-                "dc_hostname": private_ip,
+                "dc_hostname": dc_connect_ip,
             },
         )
         result = client.get_cr_step_result(cr)
@@ -15581,7 +15668,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
                 "zone_name": "smoke.nexplane.local",
                 "record_name": "nexplane-smoke-dns-test",
                 "record_type": "A",
-                "dc_hostname": private_ip,
+                "dc_hostname": dc_connect_ip,
             },
         )
         result = client.get_cr_step_result(cr)
