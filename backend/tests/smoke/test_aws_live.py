@@ -15076,7 +15076,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         log(f"AD_DC_INTEGRITY: using base AMI {win_ami_id} ({images[0]['Name']})")
 
         _setup_key = (
-            "ad-ds-v2-firewall-open-ldap-winrm-"
+            "ad-ds-v3-tailscale-install-logout-"
             "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
         )
         setup_hash = _hl.md5(_setup_key.encode()).hexdigest()
@@ -15146,6 +15146,37 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         log("AD_DC_INTEGRITY: waiting for SSM agent (~3-8 min for Windows)...")
         _wait_ssm_ready_win(ssm_boto, instance_id, timeout=600)
         log("AD_DC_INTEGRITY: SSM agent ready")
+
+        # ------------------------------------------------------------------
+        # Runtime Tailscale join — binary is pre-installed in the AMI,
+        # so this is just 'tailscale up' (seconds, not minutes).
+        # Runs for both cached and fresh builds.
+        # ------------------------------------------------------------------
+        if tailscale_auth_key:
+            log("AD_DC_INTEGRITY: joining Tailscale (binary pre-installed in AMI)...")
+            try:
+                _rts_resp = ssm_boto.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName="AWS-RunPowerShellScript",
+                    Parameters={"commands": [
+                        f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
+                        "Write-Output 'TAILSCALE_UP'",
+                    ]},
+                    TimeoutSeconds=60,
+                )
+                _rts_cmd = _rts_resp["Command"]["CommandId"]
+                _rts_dl = _t.time() + 90
+                while _t.time() < _rts_dl:
+                    _t.sleep(8)
+                    try:
+                        _rts_inv = ssm_boto.get_command_invocation(CommandId=_rts_cmd, InstanceId=instance_id)
+                        if _rts_inv["Status"] in ("Success", "Failed", "TimedOut"):
+                            log(f"AD_DC_INTEGRITY: tailscale up status={_rts_inv['Status']}")
+                            break
+                    except Exception:
+                        pass
+            except Exception as _rts_e:
+                log(f"AD_DC_INTEGRITY: tailscale up error: {_rts_e}")
 
         if not from_existing:
             _setup_key2 = (
@@ -15327,11 +15358,16 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                     log(f"AD_DC_INTEGRITY: firewall step failed: {_fw_e}")
 
                 # ----------------------------------------------------------
-                # Step 3c — Install Tailscale and join so the platform can
-                # reach the DC over LDAP/WinRM via the Tailscale network.
+                # Step 3c — Install Tailscale into the AMI.
+                # Install the binary and service, verify it can join, then
+                # LOGOUT before snapshotting. Each instance booted from the
+                # AMI will then run 'tailscale up --authkey=...' at runtime
+                # (fast — binary already installed) and get its own identity.
+                # Logging out before snapshot prevents multiple instances from
+                # sharing the same Tailscale node identity.
                 # ----------------------------------------------------------
                 if tailscale_auth_key:
-                    log("AD_DC_INTEGRITY: installing Tailscale on DC...")
+                    log("AD_DC_INTEGRITY: installing Tailscale into AMI (install + verify + logout)...")
                     try:
                         _ts_resp = ssm_boto.send_command(
                             InstanceIds=[instance_id],
@@ -15341,8 +15377,12 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                                 "Invoke-WebRequest -Uri https://pkgs.tailscale.com/stable/tailscale-setup.exe -OutFile $i -UseBasicParsing",
                                 "Start-Process -Wait -FilePath $i -ArgumentList '/S'",
                                 "Start-Sleep -Seconds 10",
-                                f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
-                                "Write-Output 'TAILSCALE_UP'",
+                                # Verify the service installed and can join
+                                f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc-build",
+                                "Start-Sleep -Seconds 15",
+                                # Logout — clears auth state so each AMI instance gets its own identity
+                                "& 'C:\\Program Files\\Tailscale\\tailscale.exe' logout",
+                                "Write-Output 'TAILSCALE_INSTALLED_AND_READY'",
                             ]},
                             TimeoutSeconds=300,
                         )
@@ -15353,12 +15393,12 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                             try:
                                 _ts_inv = ssm_boto.get_command_invocation(CommandId=_ts_cmd, InstanceId=instance_id)
                                 if _ts_inv["Status"] in ("Success", "Failed", "TimedOut"):
-                                    log(f"AD_DC_INTEGRITY: Tailscale install+join status={_ts_inv['Status']}")
+                                    log(f"AD_DC_INTEGRITY: Tailscale AMI install status={_ts_inv['Status']}")
                                     break
                             except Exception:
                                 pass
                     except Exception as _ts_e:
-                        log(f"AD_DC_INTEGRITY: Tailscale install step error: {_ts_e}")
+                        log(f"AD_DC_INTEGRITY: Tailscale AMI install error: {_ts_e}")
 
                 # ----------------------------------------------------------
                 # Step 4 — Clear SSM registration data before snapshot
