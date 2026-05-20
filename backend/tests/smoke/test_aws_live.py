@@ -15422,19 +15422,20 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
             if not _runner_ts_ip or not _runner_ts_ip.startswith("100."):
                 raise ValueError(f"unexpected runner Tailscale IP: {_runner_ts_ip!r}")
 
-            # Install socat if needed and start LDAP+WinRM proxies bound to Tailscale IP
-            _sp.run(["bash", "-c", "which socat || dnf install -y socat -q"], check=True, timeout=30)
-            _sp.run(["bash", "-c",
-                f"pkill -f 'socat.*{private_ip}' 2>/dev/null; "
-                f"socat TCP-LISTEN:10389,bind={_runner_ts_ip},fork,reuseaddr TCP:{private_ip}:389 &"
-                f"socat TCP-LISTEN:10985,bind={_runner_ts_ip},fork,reuseaddr TCP:{private_ip}:5985 &"
-            ], check=True, timeout=10)
-            _ttime.sleep(2)
+            # Install socat if needed
+            _sp.run(["bash", "-c", "which socat || dnf install -y socat -q"], check=True, timeout=60)
+
+            # Kill any stale proxies then start fresh ones via Popen (non-blocking)
+            _sp.run(["bash", "-c", f"pkill -f 'socat.*{private_ip}' 2>/dev/null || true"], timeout=5)
+            _ttime.sleep(1)
+            _sp.Popen(["socat", f"TCP-LISTEN:10389,bind={_runner_ts_ip},fork,reuseaddr", f"TCP:{private_ip}:389"])
+            _sp.Popen(["socat", f"TCP-LISTEN:10985,bind={_runner_ts_ip},fork,reuseaddr", f"TCP:{private_ip}:5985"])
+            _ttime.sleep(2)  # let socat bind
 
             dc_connect_ip = _runner_ts_ip
-            log(f"AD_DC_INTEGRITY: socat proxy running — LDAP: {_runner_ts_ip}:10389 → {private_ip}:389")
+            log(f"AD_DC_INTEGRITY: socat proxy — {_runner_ts_ip}:10389 → {private_ip}:389")
         except Exception as _proxy_e:
-            log(f"AD_DC_INTEGRITY: socat proxy setup failed ({_proxy_e}) — using private IP")
+            log(f"AD_DC_INTEGRITY: socat proxy failed ({_proxy_e}) — using private IP")
 
         _ldap_port = "10389" if dc_connect_ip != private_ip else "389"
         _winrm_port = "10985" if dc_connect_ip != private_ip else "5985"
