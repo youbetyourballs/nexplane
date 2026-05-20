@@ -15398,59 +15398,32 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                     log(f"AD_DC_INTEGRITY: AMI cache step skipped: {_ami_e}")
 
         # ------------------------------------------------------------------
-        # Step 5 — Resolve DC Tailscale IP via Tailscale API, then register connector
+        # Step 5 — Resolve DC Tailscale IP via runner's local tailscale status
+        # The runner is already on Tailscale — after the DC joins, it appears
+        # as a peer. Query the runner's own tailscale status to find the DC IP.
         # ------------------------------------------------------------------
-        try:
-            _ts_creds = client.get_tailscale_auth_key.__self__._get_tailscale_creds() if hasattr(client.get_tailscale_auth_key, "__self__") else {}
-        except Exception:
-            _ts_creds = {}
-
-        # Fetch Tailscale API key from platform DB connector
-        try:
-            import asyncio as _asyncio2, sys as _sys2
-            if "/app" not in _sys2.path:
-                _sys2.path.insert(0, "/app")
-            from app.config import settings as _cfg2
-            from app.services.secrets_service import SecretsService as _Sec2
-            from app.models.connector import Connector as _Con2
-            from app.models.connector_credential import ConnectorCredential as _CC2
-            from sqlalchemy import select as _sel2
-            from sqlalchemy.ext.asyncio import create_async_engine as _eng2, AsyncSession as _AS2
-            from sqlalchemy.orm import sessionmaker as _sm2
-
-            async def _get_ts_api_key():
-                engine = _eng2(_cfg2.DATABASE_URL, pool_pre_ping=False)
-                Sess = _sm2(engine, class_=_AS2, expire_on_commit=False)
-                async with Sess() as db:
-                    r = await db.execute(_sel2(_Con2).where(_Con2.connector_type == "tailscale"))
-                    c = r.scalar_one_or_none()
-                    if not c:
-                        return ""
-                    cr = await db.execute(_sel2(_CC2).where(_CC2.connector_id == c.id))
-                    cc = cr.scalar_one_or_none()
-                    if not cc:
-                        return ""
-                    return _Sec2(_cfg2.SECRET_KEY).decrypt_json(cc.credentials_encrypted).get("api_key", "")
-
-            _ts_api_key = _asyncio2.run(_get_ts_api_key())
-            if _ts_api_key:
-                import time as _ttime; _ttime.sleep(20)  # give Tailscale time to register
-                import urllib.request as _ur, json as _jj
-                _req = _ur.Request(
-                    "https://api.tailscale.com/api/v2/tailnet/-/devices",
-                    headers={"Authorization": f"Bearer {_ts_api_key}"},
+        import subprocess as _sp, json as _jj, time as _ttime
+        if tailscale_auth_key:
+            try:
+                _ttime.sleep(20)  # give DC Tailscale time to register with coordinator
+                _ts_status = _sp.run(
+                    ["tailscale", "status", "--json"],
+                    capture_output=True, text=True, timeout=15,
                 )
-                with _ur.urlopen(_req, timeout=10) as _resp:
-                    _devices = _jj.loads(_resp.read())
-                for _dev in _devices.get("devices", []):
-                    if _dev.get("hostname", "").lower() == "nexplane-smoke-dc":
-                        _addrs = [a for a in _dev.get("addresses", []) if a.startswith("100.")]
-                        if _addrs:
-                            dc_connect_ip = _addrs[0]
-                            log(f"AD_DC_INTEGRITY: DC Tailscale IP from API: {dc_connect_ip}")
+                if _ts_status.returncode == 0:
+                    _ts_data = _jj.loads(_ts_status.stdout)
+                    for _peer in _ts_data.get("Peer", {}).values():
+                        _hn = _peer.get("HostName", "").lower()
+                        if _hn == "nexplane-smoke-dc":
+                            _addrs = [a.split("/")[0] for a in _peer.get("TailscaleIPs", []) if a.startswith("100.")]
+                            if _addrs:
+                                dc_connect_ip = _addrs[0]
+                                log(f"AD_DC_INTEGRITY: DC Tailscale IP from runner peer list: {dc_connect_ip}")
                             break
-        except Exception as _tsapi_e:
-            log(f"AD_DC_INTEGRITY: could not resolve Tailscale IP ({_tsapi_e}) — using private IP {private_ip}")
+                if dc_connect_ip == private_ip:
+                    log(f"AD_DC_INTEGRITY: DC not found in Tailscale peer list — using private IP {private_ip}")
+            except Exception as _tsip_e:
+                log(f"AD_DC_INTEGRITY: Tailscale IP lookup failed ({_tsip_e}) — using private IP {private_ip}")
 
         log(f"AD_DC_INTEGRITY: registering active_directory connector for {dc_connect_ip}...")
         _dc_creds = {
