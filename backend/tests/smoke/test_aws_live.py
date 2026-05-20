@@ -15407,62 +15407,47 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                     log(f"AD_DC_INTEGRITY: AMI cache step skipped: {_ami_e}")
 
         # ------------------------------------------------------------------
-        # Runtime Tailscale join — runs after any AMI build (which ends with
-        # 'tailscale logout'). Binary is pre-installed in the AMI so this is
-        # just 'tailscale up' — completes in seconds, not minutes.
-        # Ask the DC for its own Tailscale IP via SSM directly — more reliable
-        # than polling the runner's peer list, which has propagation lag.
+        # Connectivity: use socat on the runner to proxy LDAP/WinRM from the
+        # runner's Tailscale IP to the DC's private VPC IP. The runner is in
+        # the same VPC as the DC and is already on Tailscale — no driver
+        # installation needed on the DC itself.
+        # Platform backend → (Tailscale) → runner:389 → (VPC) → DC:389
         # ------------------------------------------------------------------
-        if tailscale_auth_key:
-            log("AD_DC_INTEGRITY: joining Tailscale and getting DC IP...")
-            try:
-                _rts_resp = ssm_boto.send_command(
-                    InstanceIds=[instance_id],
-                    DocumentName="AWS-RunPowerShellScript",
-                    Parameters={"commands": [
-                        # Ensure Tailscale service is running before calling up
-                        "Start-Service -Name Tailscale -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3",
-                        f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up --authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
-                        # Search all IPv4 addresses for 100.x.x.x (Tailscale CGNAT range)
-                        "$tsIP = $null; for ($i=0; $i -lt 12; $i++) { Start-Sleep 5; $tsIP = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -like '100.*' } | Select-Object -First 1).IPAddress; if ($tsIP) { break } }",
-                        "if ($tsIP) { Write-Output \"TS_IP:$tsIP\" } else { Write-Output \"TS_IP:UNKNOWN\"; Get-NetIPAddress -AddressFamily IPv4 | Select-Object IPAddress,InterfaceAlias | ForEach-Object { Write-Output \"NIC:$($_.InterfaceAlias)=$($_.IPAddress)\" } }",
-                        "Write-Output 'TAILSCALE_UP'",
-                    ]},
-                    TimeoutSeconds=120,
-                )
-                _rts_cmd = _rts_resp["Command"]["CommandId"]
-                _rts_dl = _t.time() + 150
-                while _t.time() < _rts_dl:
-                    _t.sleep(8)
-                    try:
-                        _rts_inv = ssm_boto.get_command_invocation(CommandId=_rts_cmd, InstanceId=instance_id)
-                        if _rts_inv["Status"] in ("Success", "Failed", "TimedOut"):
-                            _rts_out = _rts_inv.get("StandardOutputContent", "")
-                            import re as _re
-                            _ip_m = _re.search(r"TS_IP:(100\.\d+\.\d+\.\d+)", _rts_out)
-                            if _ip_m:
-                                dc_connect_ip = _ip_m.group(1)
-                                log(f"AD_DC_INTEGRITY: DC Tailscale IP: {dc_connect_ip}")
-                            else:
-                                log(f"AD_DC_INTEGRITY: tailscale up output: {_rts_out[:200]}")
-                            break
-                    except Exception:
-                        pass
-            except Exception as _rts_e:
-                log(f"AD_DC_INTEGRITY: tailscale up error: {_rts_e}")
-        if dc_connect_ip == private_ip:
-            log(f"AD_DC_INTEGRITY: no Tailscale IP obtained — using private IP (LDAP will likely fail)")
+        import subprocess as _sp, time as _ttime
+        try:
+            _runner_ts_ip = _sp.run(
+                ["tailscale", "ip", "-4"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
+            if not _runner_ts_ip or not _runner_ts_ip.startswith("100."):
+                raise ValueError(f"unexpected runner Tailscale IP: {_runner_ts_ip!r}")
 
-        log(f"AD_DC_INTEGRITY: registering active_directory connector for {dc_connect_ip}...")
+            # Install socat if needed and start LDAP+WinRM proxies bound to Tailscale IP
+            _sp.run(["bash", "-c", "which socat || dnf install -y socat -q"], check=True, timeout=30)
+            _sp.run(["bash", "-c",
+                f"pkill -f 'socat.*{private_ip}' 2>/dev/null; "
+                f"socat TCP-LISTEN:10389,bind={_runner_ts_ip},fork,reuseaddr TCP:{private_ip}:389 &"
+                f"socat TCP-LISTEN:10985,bind={_runner_ts_ip},fork,reuseaddr TCP:{private_ip}:5985 &"
+            ], check=True, timeout=10)
+            _ttime.sleep(2)
+
+            dc_connect_ip = _runner_ts_ip
+            log(f"AD_DC_INTEGRITY: socat proxy running — LDAP: {_runner_ts_ip}:10389 → {private_ip}:389")
+        except Exception as _proxy_e:
+            log(f"AD_DC_INTEGRITY: socat proxy setup failed ({_proxy_e}) — using private IP")
+
+        _ldap_port = "10389" if dc_connect_ip != private_ip else "389"
+        _winrm_port = "10985" if dc_connect_ip != private_ip else "5985"
+        log(f"AD_DC_INTEGRITY: registering connector — server={dc_connect_ip}:{_ldap_port}")
         _dc_creds = {
             "server": dc_connect_ip,
-            "port": "389",
+            "port": _ldap_port,
             "base_dn": "DC=smoke,DC=nexplane,DC=local",
             "bind_dn": "CN=Administrator,CN=Users,DC=smoke,DC=nexplane,DC=local",
             "bind_password": "NexplaneSmoke2024!",
             "use_ssl": "false",
             "winrm_hostname": dc_connect_ip,
-            "winrm_port": "5985",
+            "winrm_port": _winrm_port,
             "winrm_username": "Administrator",
             "winrm_password": "NexplaneSmoke2024!",
             "winrm_use_ssl": "false",
