@@ -15290,12 +15290,15 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
                         InstanceIds=[instance_id],
                         DocumentName="AWS-RunPowerShellScript",
                         Parameters={"commands": [
-                            "Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False",
+                            # Allow LDAP and WinRM only from the Tailscale CGNAT range.
+                            # Firewall stays enabled — no broad exposure.
+                            "New-NetFirewallRule -DisplayName 'LDAP-Tailscale' -Direction Inbound "
+                            "-Protocol TCP -LocalPort 389 -RemoteAddress '100.64.0.0/10' -Action Allow -ErrorAction SilentlyContinue",
+                            "New-NetFirewallRule -DisplayName 'WinRM-Tailscale' -Direction Inbound "
+                            "-Protocol TCP -LocalPort 5985 -RemoteAddress '100.64.0.0/10' -Action Allow -ErrorAction SilentlyContinue",
                             "Enable-PSRemoting -Force",
                             "Set-Item WSMan:\\localhost\\Service\\Auth\\Basic -Value $true",
                             "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $true",
-                            "netsh advfirewall firewall add rule name='LDAP-In' dir=in action=allow protocol=TCP localport=389",
-                            "netsh advfirewall firewall add rule name='WinRM-In' dir=in action=allow protocol=TCP localport=5985",
                             "Restart-Service WinRM",
                             "Write-Output 'FIREWALL_OPENED'",
                         ]},
