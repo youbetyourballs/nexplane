@@ -15290,8 +15290,10 @@ def run_phase_ad_dc_integrity(client, cloud_account_id):
                         InstanceIds=[instance_id],
                         DocumentName="AWS-RunPowerShellScript",
                         Parameters={"commands": [
-                            # Allow LDAP and WinRM only from the Tailscale CGNAT range.
-                            # Firewall stays enabled — no broad exposure.
+                            # Inbound: allow LDAP and WinRM only from the Tailscale CGNAT range.
+                            # Firewall stays enabled — no public exposure.
+                            # SSM agent is unaffected: it communicates outbound over HTTPS (443)
+                            # to AWS SSM endpoints and does not require any inbound rules.
                             "New-NetFirewallRule -DisplayName 'LDAP-Tailscale' -Direction Inbound "
                             "-Protocol TCP -LocalPort 389 -RemoteAddress '100.64.0.0/10' -Action Allow -ErrorAction SilentlyContinue",
                             "New-NetFirewallRule -DisplayName 'WinRM-Tailscale' -Direction Inbound "
