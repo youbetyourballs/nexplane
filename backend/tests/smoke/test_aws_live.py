@@ -15162,8 +15162,9 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                     InstanceIds=[instance_id],
                     DocumentName="AWS-RunPowerShellScript",
                     Parameters={"commands": [
-                        "if (Get-Command tailscale -ErrorAction SilentlyContinue) { "
-                        "& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip -4 2>$null } "
+                        "if (Test-Path 'C:\\Program Files\\Tailscale\\tailscale.exe') { "
+                        "$tsIP = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip 2>$null) -match '^100\\.' | Select-Object -First 1; "
+                        "if ($tsIP) { Write-Output \"TS_IP:$tsIP\" } else { Write-Output 'TS_IP:NOT_CONNECTED' } } "
                         "else { Write-Output 'TAILSCALE_NOT_INSTALLED' }",
                     ]},
                     TimeoutSeconds=30,
@@ -15180,9 +15181,9 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                         if _ts_check_inv["Status"] in ("Success", "Failed", "TimedOut"):
                             _ts_check_out = _ts_check_inv.get("StandardOutputContent", "")
                             import re as _re
-                            _ts_existing_match = _re.search(r"100\.\d+\.\d+\.\d+", _ts_check_out)
+                            _ts_existing_match = _re.search(r"TS_IP:(100\.\d+\.\d+\.\d+)", _ts_check_out)
                             if _ts_existing_match:
-                                _ts_existing_ip = _ts_existing_match.group(0)
+                                _ts_existing_ip = _ts_existing_match.group(1)
                             break
                     except Exception:
                         pass
@@ -15226,7 +15227,8 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                             f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up "
                             f"--authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
                             "Start-Sleep -Seconds 15",
-                            "& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip -4",
+                            "$tsIP = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip 2>$null) -match '^100\\.' | Select-Object -First 1",
+                            "if ($tsIP) { Write-Output \"TS_IP:$tsIP\" } else { Write-Output 'TS_IP:UNKNOWN' }",
                             "Write-Output 'TAILSCALE_JOINED'",
                         ]},
                         TimeoutSeconds=120,
@@ -15242,12 +15244,17 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                             if _j2inv["Status"] in ("Success", "Failed", "TimedOut"):
                                 _j2out = _j2inv.get("StandardOutputContent", "")
                                 import re as _re
-                                _j2match = _re.search(r"100\.\d+\.\d+\.\d+", _j2out)
-                                if _j2match:
-                                    dc_connect_ip = _j2match.group(0)
+                                _j2match = _re.search(r"TS_IP:(100\.\d+\.\d+\.\d+)", _j2out)
+                                if not _j2match:
+                                    _j2match = _re.search(r"(100\.\d+\.\d+\.\d+)", _j2out)
+                                    if _j2match:
+                                        dc_connect_ip = _j2match.group(1)
+                                else:
+                                    dc_connect_ip = _j2match.group(1)
+                                if dc_connect_ip != private_ip:
                                     log(f"AD_DC_INTEGRITY: Tailscale joined — DC IP: {dc_connect_ip}")
                                 else:
-                                    log(f"AD_DC_INTEGRITY: Tailscale join output: {_j2out[:200]}")
+                                    log(f"AD_DC_INTEGRITY: Tailscale join output (IP not found): {_j2out[:200]}")
                                 break
                         except Exception:
                             pass
@@ -15440,7 +15447,9 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                                 f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up "
                                 f"--authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
                                 "Start-Sleep -Seconds 15",
-                                "& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip -4",
+                                # Use status to get IP — more reliable than ip -4 on Windows
+                                "$tsIP = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip 2>$null) -match '^100\\.' | Select-Object -First 1",
+                                "if ($tsIP) { Write-Output \"TS_IP:$tsIP\" } else { Write-Output 'TS_IP:UNKNOWN' }",
                                 "Write-Output 'TAILSCALE_JOINED'",
                             ]},
                             TimeoutSeconds=120,
@@ -15457,11 +15466,17 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                                     _ts_j_out = _ts_j_inv.get("StandardOutputContent", "")
                                     log(f"AD_DC_INTEGRITY: Tailscale join output: {_ts_j_out[:300]}")
                                     if "TAILSCALE_JOINED" in _ts_j_out:
-                                        # Extract the Tailscale IP (100.x.x.x) from output
+                                        # Extract Tailscale IP from TS_IP: prefix line
                                         import re as _re
-                                        _ts_ip_match = _re.search(r"100\.\d+\.\d+\.\d+", _ts_j_out)
-                                        if _ts_ip_match:
-                                            dc_connect_ip = _ts_ip_match.group(0)
+                                        _ts_ip_match = _re.search(r"TS_IP:(100\.\d+\.\d+\.\d+)", _ts_j_out)
+                                        if not _ts_ip_match:
+                                            # fallback: bare 100.x.x.x anywhere in output
+                                            _ts_ip_match2 = _re.search(r"(100\.\d+\.\d+\.\d+)", _ts_j_out)
+                                            if _ts_ip_match2:
+                                                dc_connect_ip = _ts_ip_match2.group(1)
+                                        else:
+                                            dc_connect_ip = _ts_ip_match.group(1)
+                                        if dc_connect_ip != private_ip:
                                             log(f"AD_DC_INTEGRITY: Tailscale pre-joined ✓ — DC Tailscale IP: {dc_connect_ip}")
                                         else:
                                             log("AD_DC_INTEGRITY: Tailscale joined but could not parse IP — using private IP")
