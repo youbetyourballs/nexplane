@@ -15226,15 +15226,14 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                         Parameters={"commands": [
                             f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up "
                             f"--authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
-                            "Start-Sleep -Seconds 15",
-                            "$tsIP = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip 2>$null) -match '^100\\.' | Select-Object -First 1",
+                            "$tsIP = $null; for ($i=0; $i -lt 12; $i++) { Start-Sleep 5; $tsIP = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip 2>$null) -match '^100\\.' | Select-Object -First 1; if ($tsIP) { break } }",
                             "if ($tsIP) { Write-Output \"TS_IP:$tsIP\" } else { Write-Output 'TS_IP:UNKNOWN' }",
                             "Write-Output 'TAILSCALE_JOINED'",
                         ]},
-                        TimeoutSeconds=120,
+                        TimeoutSeconds=180,
                     )
                     _ts_join2_cmd = _ts_join2["Command"]["CommandId"]
-                    _ts_join2_dl = _t.time() + 180
+                    _ts_join2_dl = _t.time() + 240
                     while _t.time() < _ts_join2_dl:
                         _t.sleep(8)
                         try:
@@ -15446,16 +15445,15 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                             Parameters={"commands": [
                                 f"& 'C:\\Program Files\\Tailscale\\tailscale.exe' up "
                                 f"--authkey={tailscale_auth_key} --accept-routes --hostname=nexplane-smoke-dc",
-                                "Start-Sleep -Seconds 15",
-                                # Use status to get IP — more reliable than ip -4 on Windows
-                                "$tsIP = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip 2>$null) -match '^100\\.' | Select-Object -First 1",
+                                # Retry up to 60s for Tailscale to get its 100.x.x.x IP
+                                "$tsIP = $null; for ($i=0; $i -lt 12; $i++) { Start-Sleep 5; $tsIP = (& 'C:\\Program Files\\Tailscale\\tailscale.exe' ip 2>$null) -match '^100\\.' | Select-Object -First 1; if ($tsIP) { break } }",
                                 "if ($tsIP) { Write-Output \"TS_IP:$tsIP\" } else { Write-Output 'TS_IP:UNKNOWN' }",
                                 "Write-Output 'TAILSCALE_JOINED'",
                             ]},
-                            TimeoutSeconds=120,
+                            TimeoutSeconds=180,
                         )
                         _ts_join_cmd = _ts_join_resp["Command"]["CommandId"]
-                        _ts_j_deadline = _t.time() + 180
+                        _ts_j_deadline = _t.time() + 240
                         while _t.time() < _ts_j_deadline:
                             _t.sleep(8)
                             try:
