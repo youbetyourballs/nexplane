@@ -207,12 +207,11 @@ def _ldap_checks(creds: dict) -> dict:
     conn = Connection(server, user=creds["bind_dn"], password=creds["bind_password"], auto_bind=True)
     base_dn = creds["base_dn"]
 
-    # DC objects
+    # DC objects (UAC bit 8192 = SERVER_TRUST_ACCOUNT = domain controller)
     conn.search(
         base_dn,
-        "(objectClass=computer)",
+        "(&(objectClass=computer)(userAccountControl:1.2.840.113556.1.4.803:=8192))",
         attributes=["cn", "userAccountControl", "operatingSystem"],
-        search_filter="(&(objectClass=computer)(userAccountControl:1.2.840.113556.1.4.803:=8192))",
     )
     dcs = [
         {
