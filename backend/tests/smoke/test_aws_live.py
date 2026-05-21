@@ -14606,8 +14606,6 @@ def main():
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
-    parser.add_argument("--backend-tailscale-ip", default="100.69.215.38",
-                        help="Backend Tailscale IP (passed by run_on_ec2.py; used for agent download/install URLs)")
     parser.add_argument("--bind-server-ip", default="",
                         help="Pre-existing BIND server IP (GCP/Azure/on-prem). "
                              "When set, skips AWS EC2 provisioning.")
@@ -15199,7 +15197,7 @@ def run_phase_mac_agent_bootstrap(
 
             # Get agent secret for registration
             agent_secret = ""
-            _bts = backend_tailscale_ip or _os.environ.get("NEXPLANE_BACKEND_TAILSCALE_IP", "")
+            import os as _mac_os; _bts = backend_tailscale_ip or _mac_os.environ.get("NEXPLANE_BACKEND_TAILSCALE_IP", "")
             control_plane_url = f"http://{_bts}:8000" if _bts else "http://localhost:8000"
             try:
                 agent_secret = client.get_agent_secret()
