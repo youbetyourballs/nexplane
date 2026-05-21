@@ -9273,7 +9273,7 @@ def _ensure_ssm_vpc_endpoints() -> None:
             else:
                 # Ensure existing endpoint covers all subnets
                 ep = next(ep for ep in existing if ep["ServiceName"] == svc)
-                existing_subnet_ids = {az["SubnetId"] for az in ep.get("SubnetIds", [])}
+                existing_subnet_ids = set(ep.get("SubnetIds", []))
                 missing = [s for s in subnet_ids if s not in existing_subnet_ids]
                 if missing:
                     try:
@@ -9952,7 +9952,6 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
                 "connector_id": connector_id,
                 "asset_metadata": {
                     "instance_id": instance_id,
-                    "public_ip": public_ip,
                     "os": "windows",
                     "platform": "windows",
                 },
