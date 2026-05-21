@@ -15735,6 +15735,22 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                     )
                     import time as _t2; _t2.sleep(15)
                     log("AD_DC_INTEGRITY: EC2Launch reset complete — AMI will register SSM on next boot")
+                    # EC2Launch reset may stop WinRM — restart it so the DC
+                    # remains reachable via WinRM for the rest of this test run.
+                    try:
+                        ssm_boto.send_command(
+                            InstanceIds=[instance_id],
+                            DocumentName="AWS-RunPowerShellScript",
+                            Parameters={"commands": [
+                                "Restart-Service WinRM -Force",
+                                "Write-Output 'WINRM_RESTARTED'",
+                            ]},
+                            TimeoutSeconds=30,
+                        )
+                        _t2.sleep(10)
+                        log("AD_DC_INTEGRITY: WinRM restarted after EC2Launch reset")
+                    except Exception:
+                        pass
                 except Exception as _ssm_e:
                     log(f"AD_DC_INTEGRITY: EC2Launch reset step skipped: {_ssm_e}")
 
