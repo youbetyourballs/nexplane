@@ -8924,7 +8924,7 @@ echo "KEYCLOAK_SETUP_COMPLETE"
                 log("  WARNING: Keycloak skipped — credentials not reaching executor (non-fatal)")
             else:
                 log(f"  WARNING: Keycloak status: {kc_status}")
-        except Exception as cr_e:
+        except (Exception, SystemExit) as cr_e:
             log(f"  INFO: Nexplane CR unavailable ({type(cr_e).__name__}) — calling keycloak executor directly")
             import asyncio as _kc_asyncio, importlib.util as _kc_ilu
 
@@ -10828,7 +10828,7 @@ echo "FREEIPA_RESTARTED"
                 log("  INFO: FreeIPA CR status=skipped — using direct SSM test")
             else:
                 log(f"  INFO: FreeIPA CR result: {result}")
-        except Exception as cr_e:
+        except (Exception, SystemExit) as cr_e:
             log(f"  INFO: FreeIPA Nexplane CR unavailable ({type(cr_e).__name__}) — direct SSM test")
 
         # Always verify disable/enable directly via SSM (tests the actual FreeIPA behavior)
@@ -11106,7 +11106,7 @@ puts 'ADMIN_TOKEN=' + t.token
                 log("  INFO: GitLab suspend CR status=skipped")
             else:
                 log(f"  INFO: GitLab suspend CR result: {result}")
-        except Exception as cr_e:
+        except (Exception, SystemExit) as cr_e:
             log(f"  INFO: GitLab Nexplane CR unavailable ({type(cr_e).__name__}) — direct API test")
 
         # Always verify suspend/unblock directly via GitLab API (tests actual behavior)
@@ -11397,7 +11397,7 @@ echo "TELEPORT_SETUP_COMPLETE"
                 log("  INFO: Teleport CR status=skipped (tctl not on backend)")
             else:
                 log(f"  INFO: Teleport lock CR result: {result}")
-        except Exception as cr_e:
+        except (Exception, SystemExit) as cr_e:
             log(f"  INFO: Teleport Nexplane CR unavailable ({type(cr_e).__name__}) — direct SSM test")
 
         # Always verify lock/unlock directly via tctl on the Teleport EC2 (tests real behavior)
@@ -11611,7 +11611,7 @@ echo "GITEA_SETUP_COMPLETE"
                 log("  Gitea skipped (credentials not reaching backend) — dispatch verified")
             else:
                 log(f"  INFO: Gitea CR result: {result}")
-        except Exception as cr_e:
+        except (Exception, SystemExit) as cr_e:
             log(f"  INFO: Nexplane CR unavailable ({type(cr_e).__name__}) — calling gitea executor directly")
             import asyncio as _gt_asyncio, importlib.util as _gt_ilu
 
@@ -11967,8 +11967,8 @@ echo "WAZUH_SETUP_COMPLETE"
                 log(f"Wazuh agent registered: {agent_name} (id={agent_id})")
             else:
                 log(f"  WARNING: Unexpected result: {result}")
-        except Exception as cr_e:
-            log(f"  INFO: Nexplane CR unavailable ({type(cr_e).__name__}) — verifying Wazuh API directly via SSM")
+        except (Exception, SystemExit) as cr_e:
+            log(f"  INFO: Nexplane CR path failed ({type(cr_e).__name__}) — verifying Wazuh API directly via SSM")
 
         # Always verify Wazuh API via SSM (best-effort)
         verify_cmd = (
@@ -12208,7 +12208,7 @@ echo "FALCO_SETUP_COMPLETE"
                 log(f"Falco rule {rule_name} written via CR")
             else:
                 log(f"  WARNING: Unexpected result: {result}")
-        except Exception as cr_e:
+        except (Exception, SystemExit) as cr_e:
             log(f"  INFO: Nexplane CR unavailable ({type(cr_e).__name__}) — writing Falco rule directly via SSM")
             falco_rule_yaml = (
                 f"- rule: {rule_name}\n"
@@ -15372,7 +15372,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
             NetworkInterfaces=[{
                 "DeviceIndex": 0,
                 "SubnetId": _dc_subnet_id,
-                "AssociatePublicIpAddress": True,
+                "AssociatePublicIpAddress": False,
             }],
             TagSpecifications=[{
                 "ResourceType": "instance",
