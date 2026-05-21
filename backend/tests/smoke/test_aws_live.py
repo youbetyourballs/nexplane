@@ -5853,8 +5853,16 @@ echo "LDAP_SETUP_DONE"
     # Use Amazon Linux 2023 — same as runner
     AL2023_AMI = "ami-0953476d60561c955"
 
+    # Check for cached AMI from a previous run (skips the ~2 min dnf install)
+    cached_openldap_ami = _check_smoke_ami_cache(ssm_boto, ec2_client, "openldap", setup_hash)
+    launch_ami = cached_openldap_ami or AL2023_AMI
+    if cached_openldap_ami:
+        print(f"  Using cached OpenLDAP AMI: {cached_openldap_ami}")
+    else:
+        print(f"  No cached AMI — will install OpenLDAP and snapshot for future runs")
+
     launch_kwargs: dict = {
-        "ImageId": AL2023_AMI,
+        "ImageId": launch_ami,
         "InstanceType": "t3.small",
         "MinCount": 1, "MaxCount": 1,
         "TagSpecifications": [{"ResourceType": "instance", "Tags": [
@@ -5902,27 +5910,30 @@ echo "LDAP_SETUP_DONE"
             fail("[LDAP_ROTATE] OpenLDAP instance never came online in SSM")
 
         # ---------------------------------------------------------------------------
-        # Install and configure OpenLDAP
+        # Install and configure OpenLDAP (skipped when using cached AMI)
         # ---------------------------------------------------------------------------
-        print("  Installing and configuring OpenLDAP...")
-        cmd_resp = ssm_boto.send_command(
-            InstanceIds=[ldap_instance_id],
-            DocumentName="AWS-RunShellScript",
-            Parameters={"commands": [setup_script]},
-            TimeoutSeconds=300,
-        )
-        cmd_id = cmd_resp["Command"]["CommandId"]
-        deadline2 = _time.time() + 300
-        while _time.time() < deadline2:
-            _time.sleep(8)
-            inv = ssm_boto.get_command_invocation(CommandId=cmd_id, InstanceId=ldap_instance_id)
-            if inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
-                if inv["Status"] != "Success":
-                    fail(f"[LDAP_ROTATE] OpenLDAP setup script failed: {inv.get('StandardErrorContent', '')}")
-                break
-            print(".", end="", flush=True)
+        if not cached_openldap_ami:
+            print("  Installing and configuring OpenLDAP...")
+            cmd_resp = ssm_boto.send_command(
+                InstanceIds=[ldap_instance_id],
+                DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [setup_script]},
+                TimeoutSeconds=300,
+            )
+            cmd_id = cmd_resp["Command"]["CommandId"]
+            deadline2 = _time.time() + 300
+            while _time.time() < deadline2:
+                _time.sleep(8)
+                inv = ssm_boto.get_command_invocation(CommandId=cmd_id, InstanceId=ldap_instance_id)
+                if inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+                    if inv["Status"] != "Success":
+                        fail(f"[LDAP_ROTATE] OpenLDAP setup script failed: {inv.get('StandardErrorContent', '')}")
+                    break
+                print(".", end="", flush=True)
+            else:
+                fail("[LDAP_ROTATE] OpenLDAP setup timed out")
         else:
-            fail("[LDAP_ROTATE] OpenLDAP setup timed out")
+            print("  OpenLDAP already configured (from cached AMI — skipping setup)")
 
         # Get private IP for LDAP connection
         inst_desc = ec2_client.describe_instances(InstanceIds=[ldap_instance_id])
@@ -5932,13 +5943,15 @@ echo "LDAP_SETUP_DONE"
         log(f"OpenLDAP ready at {ldap_host}:389")
 
         # ---------------------------------------------------------------------------
-        # AMI snapshot: cache after first-run setup
+        # AMI snapshot: cache after first-run setup (skip if already using cached AMI)
         # ---------------------------------------------------------------------------
-        print("  Snapshotting OpenLDAP EC2 as AMI for future runs...")
-        try:
-            get_or_create_smoke_ami(ssm_boto, ec2_client, ldap_instance_id, "openldap", setup_hash)
-        except Exception as _ami_err:
-            print(f"  WARNING: AMI caching skipped (non-fatal): {_ami_err}")
+        if not cached_openldap_ami:
+            print("  Snapshotting OpenLDAP EC2 as AMI for future runs...")
+            try:
+                get_or_create_smoke_ami(ssm_boto, ec2_client, ldap_instance_id, "openldap", setup_hash)
+                print("  AMI snapshot initiated — future runs will skip OpenLDAP install")
+            except Exception as _ami_err:
+                print(f"  WARNING: AMI caching skipped (non-fatal): {_ami_err}")
 
         # ---------------------------------------------------------------------------
         # Register LDAP connector in Nexplane
@@ -9208,6 +9221,31 @@ def _ensure_ssm_vpc_endpoints() -> None:
             )
 
         region = ec2.meta.region_name or "us-east-1"
+
+        # S3 gateway endpoint (free) — enables dnf/apt package installs without public IP.
+        # Amazon Linux repos are served from S3; gateway endpoints route traffic via AWS backbone.
+        s3_svc = f"com.amazonaws.{region}.s3"
+        existing_gw = ec2.describe_vpc_endpoints(
+            Filters=[{"Name": "vpc-id", "Values": [vpc_id]},
+                     {"Name": "service-name", "Values": [s3_svc]},
+                     {"Name": "vpc-endpoint-type", "Values": ["Gateway"]},
+                     {"Name": "vpc-endpoint-state", "Values": ["pending", "available"]}]
+        )["VpcEndpoints"]
+        if not existing_gw:
+            route_tables = ec2.describe_route_tables(
+                Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
+            )["RouteTables"]
+            rt_ids = [rt["RouteTableId"] for rt in route_tables]
+            ec2.create_vpc_endpoint(
+                VpcId=vpc_id,
+                ServiceName=s3_svc,
+                VpcEndpointType="Gateway",
+                RouteTableIds=rt_ids,
+            )
+            log(f"Created S3 gateway endpoint — dnf/apt package installs now work without public IP")
+        else:
+            log(f"S3 gateway endpoint already exists")
+
         needed = [
             f"com.amazonaws.{region}.ssm",
             f"com.amazonaws.{region}.ssmmessages",
