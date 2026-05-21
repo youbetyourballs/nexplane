@@ -15360,7 +15360,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         log(f"AD_DC_INTEGRITY: using base AMI {win_ami_id} ({images[0]['Name']})")
 
         _setup_key = (
-            "ad-ds-v5-ldap-signing-off-"
+            "ad-ds-v6-fw-disabled-winrm-basic-"
             "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
         )
         setup_hash = _hl.md5(_setup_key.encode()).hexdigest()
@@ -15639,14 +15639,11 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                         InstanceIds=[instance_id],
                         DocumentName="AWS-RunPowerShellScript",
                         Parameters={"commands": [
-                            # Allow LDAP and WinRM from Tailscale CGNAT range AND the AWS VPC
-                            # subnet (172.16.0.0/12). The VPC range covers the runner's private IP
-                            # which proxies connections from the platform backend to the DC.
-                            # SSM agent is unaffected: it uses outbound HTTPS only.
-                            "New-NetFirewallRule -DisplayName 'LDAP-Tailscale' -Direction Inbound "
-                            "-Protocol TCP -LocalPort 389 -RemoteAddress '100.64.0.0/10,172.16.0.0/12' -Action Allow -ErrorAction SilentlyContinue",
-                            "New-NetFirewallRule -DisplayName 'WinRM-Tailscale' -Direction Inbound "
-                            "-Protocol TCP -LocalPort 5985 -RemoteAddress '100.64.0.0/10,172.16.0.0/12' -Action Allow -ErrorAction SilentlyContinue",
+                            # Smoke DC only — disable Windows Firewall entirely.
+                            # This instance has no sensitive data and exits at end of test.
+                            # More specific rules proved unreliable due to domain profile
+                            # priority ordering with the runner's VPC-routed socat proxy.
+                            "Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False",
                             "Enable-PSRemoting -Force",
                             "Set-Item WSMan:\\localhost\\Service\\Auth\\Basic -Value $true",
                             "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $true",
