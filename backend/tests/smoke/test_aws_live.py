@@ -9167,6 +9167,77 @@ def _get_windows_2022_ami(ec2_client) -> str:
     return images[0]["ImageId"]
 
 
+def _ensure_ssm_vpc_endpoints() -> None:
+    """Create SSM VPC interface endpoints in the default VPC if they don't exist.
+
+    Without these, EC2 instances that have no public IP cannot reach SSM endpoints
+    (which are public AWS services). With them, SSM traffic stays within the VPC.
+    Safe to call multiple times — skips endpoints that already exist.
+    """
+    ec2 = _get_aws_boto3_client("ec2")
+    if not ec2:
+        return
+    try:
+        vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+        if not vpcs:
+            return
+        vpc_id = vpcs[0]["VpcId"]
+
+        # Get all subnets and a security group for the endpoints
+        subnets = ec2.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+        subnet_ids = [s["SubnetId"] for s in subnets]
+
+        # Find or create a security group for the endpoints
+        sgs = ec2.describe_security_groups(
+            Filters=[{"Name": "group-name", "Values": ["nexplane-ssm-endpoints"]},
+                     {"Name": "vpc-id", "Values": [vpc_id]}]
+        )["SecurityGroups"]
+        if sgs:
+            sg_id = sgs[0]["GroupId"]
+        else:
+            sg_resp = ec2.create_security_group(
+                GroupName="nexplane-ssm-endpoints",
+                Description="Allows SSM endpoint traffic within VPC",
+                VpcId=vpc_id,
+            )
+            sg_id = sg_resp["GroupId"]
+            ec2.authorize_security_group_ingress(
+                GroupId=sg_id,
+                IpPermissions=[{"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
+                                 "IpRanges": [{"CidrIp": "172.16.0.0/12"}]}],
+            )
+
+        region = ec2.meta.region_name or "us-east-1"
+        needed = [
+            f"com.amazonaws.{region}.ssm",
+            f"com.amazonaws.{region}.ssmmessages",
+            f"com.amazonaws.{region}.ec2messages",
+        ]
+
+        existing = ec2.describe_vpc_endpoints(
+            Filters=[{"Name": "vpc-id", "Values": [vpc_id]},
+                     {"Name": "service-name", "Values": needed},
+                     {"Name": "vpc-endpoint-state", "Values": ["pending", "available"]}]
+        )["VpcEndpoints"]
+        existing_services = {ep["ServiceName"] for ep in existing}
+
+        for svc in needed:
+            if svc not in existing_services:
+                ec2.create_vpc_endpoint(
+                    VpcId=vpc_id,
+                    ServiceName=svc,
+                    VpcEndpointType="Interface",
+                    SubnetIds=subnet_ids[:2],  # 2 AZs is enough
+                    SecurityGroupIds=[sg_id],
+                    PrivateDnsEnabled=True,
+                )
+                log(f"Created SSM VPC endpoint: {svc}")
+            else:
+                log(f"SSM VPC endpoint already exists: {svc}")
+    except Exception as _ep_e:
+        log(f"WARNING: SSM VPC endpoint setup failed: {_ep_e} — instances without public IPs may not reach SSM")
+
+
 def _install_tailscale_ssm(ssm_client, instance_id: str, tailscale_auth_key: str, hostname: str) -> str:
     """Install Tailscale on a Linux EC2 instance via SSM and return its Tailscale IP (100.x.x.x)."""
     import time as _t, re as _re
@@ -14482,6 +14553,10 @@ def main():
     else:
         log("Authenticated")
 
+    # Ensure SSM VPC endpoints exist in the default VPC so EC2 instances without
+    # public IPs can still register with SSM. Created once, reused on all runs.
+    _ensure_ssm_vpc_endpoints()
+
     if not client.standalone:
         try:
             # Only clean demo assets when actually running DEMO phases to avoid
@@ -15545,13 +15620,14 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
             "server": dc_connect_ip,
             "port": _ldap_port,
             "base_dn": "DC=smoke,DC=nexplane,DC=local",
-            "bind_dn": "CN=Administrator,CN=Users,DC=smoke,DC=nexplane,DC=local",
-            "bind_password": "NexplaneSmoke2024!",
+            # smokeuser is a Domain Admin with known password set during DC setup
+            "bind_dn": "CN=SmokeUser,CN=Users,DC=smoke,DC=nexplane,DC=local",
+            "bind_password": "UserPass123!",
             "use_ssl": "false",
             "winrm_hostname": dc_connect_ip,
             "winrm_port": _winrm_port,
-            "winrm_username": "Administrator",
-            "winrm_password": "NexplaneSmoke2024!",
+            "winrm_username": "SMOKE\\smokeuser",
+            "winrm_password": "UserPass123!",
             "winrm_use_ssl": "false",
         }
         conn_resp = client.post("/connectors", json={
