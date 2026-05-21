@@ -571,6 +571,9 @@ Examples:
     parser.add_argument("--region", default="us-east-1", help="AWS region")
     parser.add_argument("--keep-runner", action="store_true",
                         help="Do not terminate the runner EC2 after the test")
+    parser.add_argument("--tarball-path", default="",
+                        help="Path to pre-built tarball (skips make_test_tarball(); "
+                             "use when Docker bind mount 9P is slow/stuck)")
 
     args, extra = parser.parse_known_args()
 
@@ -659,8 +662,13 @@ Examples:
 
     try:
         # Package test files
-        print("Packaging smoke test files...")
-        tarball = make_test_tarball()
+        if args.tarball_path:
+            print(f"Using pre-built tarball: {args.tarball_path}")
+            with open(args.tarball_path, "rb") as _tf:
+                tarball = _tf.read()
+        else:
+            print("Packaging smoke test files...")
+            tarball = make_test_tarball()
 
         # Join backend to Tailscale so the runner can reach it
         backend_ts_ip = args.base_url.split("//")[-1].split(":")[0]
