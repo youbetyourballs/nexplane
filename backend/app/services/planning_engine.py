@@ -20,7 +20,7 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
     resolvers: dict[str, dict] = {
         "capture_dns_record": {"record_name": desired.get("record_name", ""), "record_type": desired.get("record_type", "A")},
         "validate_dns_target": {"new_value": desired.get("new_value", "")},
-        "update_dns_record": {"record_name": desired.get("record_name", ""), "record_type": desired.get("record_type", "A"), "new_value": desired.get("new_value", ""), "ttl": desired.get("ttl", 300)},
+        # update_dns_record: no explicit entry — fallback passthrough sends all desired keys including zone_name, dc_hostname
         "wait_dns_propagation": {"ttl": desired.get("ttl", 300)},
         "restore_dns_record": {"record_name": desired.get("record_name", "")},
         "health_check": {"instance_name": desired.get("instance_name", ""), "zone": desired.get("zone", ""), "instance_id": desired.get("instance_id", ""), "vm_name": desired.get("vm_name", desired.get("instance_name", "")), "resource_group": desired.get("resource_group", "")},
