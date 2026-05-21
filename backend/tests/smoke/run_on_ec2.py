@@ -757,10 +757,12 @@ Examples:
         aws_key = _os.environ.get("AWS_ACCESS_KEY_ID", "")
         aws_secret = _os.environ.get("AWS_SECRET_ACCESS_KEY", "")
         aws_region = _os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        _ts_key_env = args.tailscale_auth_key or ""
         aws_env = (
             f"AWS_ACCESS_KEY_ID={aws_key} "
             f"AWS_SECRET_ACCESS_KEY={aws_secret} "
             f"AWS_DEFAULT_REGION={aws_region} "
+            + (f"TAILSCALE_AUTH_KEY={_ts_key_env} " if _ts_key_env else "")
         )
         # Build test command — email/password are optional for standalone phases
         _email_arg = f" --email {args.email}" if args.email else ""
