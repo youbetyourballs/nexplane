@@ -15200,7 +15200,7 @@ def run_phase_mac_agent_bootstrap(
             # Get agent secret for registration
             agent_secret = ""
             _bts = backend_tailscale_ip or _os.environ.get("NEXPLANE_BACKEND_TAILSCALE_IP", "")
-    control_plane_url = f"http://{_bts}:8000" if _bts else "http://localhost:8000"
+            control_plane_url = f"http://{_bts}:8000" if _bts else "http://localhost:8000"
             try:
                 agent_secret = client.get_agent_secret()
             except Exception as _se:
