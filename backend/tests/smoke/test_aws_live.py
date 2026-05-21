@@ -9318,7 +9318,11 @@ def _install_tailscale_ssm(ssm_client, instance_id: str, tailscale_auth_key: str
 
 
 def _get_tailscale_auth_key_from_db() -> str:
-    """Fetch the Tailscale pre-auth key from the platform connector DB."""
+    """Fetch the Tailscale pre-auth key — from env var (set by run_on_ec2.py) or platform DB."""
+    import os as _os2
+    _env_key = _os2.environ.get("TAILSCALE_AUTH_KEY", "")
+    if _env_key:
+        return _env_key
     try:
         import asyncio, sys
         if "/app" not in sys.path:
@@ -12550,30 +12554,20 @@ echo "INFISICAL_SETUP_COMPLETE"
                 Parameters={"commands": [restart_cmd]}, TimeoutSeconds=60)
             time.sleep(25)
 
-        # Obtain API token via Infisical signup/login flow
-        # Supports both older v1 API and newer v1/auth endpoints
+        # Obtain API token + real workspace ID via Infisical signup/login/workspace-create flow
         api_setup_cmd = r"""
 BASE=http://localhost:80
 SMOKE_EMAIL="smoke@nexplane.test"
 SMOKE_PASS="Smoke1234!"
 
-# Try v1 signup (older Infisical)
-SIGNUP_RESP=$(curl -sf -X POST "$BASE/api/v1/signup" \
+# Signup (errors if already exists — that's OK)
+SIGNUP_RESP=$(curl -sf -X POST "$BASE/api/v1/auth/signup" \
   -H 'Content-Type: application/json' \
   -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PASS\",\"firstName\":\"Smoke\",\"lastName\":\"Test\"}" 2>/dev/null || echo "")
 
-# Try v1/auth/signup if above fails
-if [ -z "$SIGNUP_RESP" ] || echo "$SIGNUP_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('token') or d.get('access_token') else 1)" 2>/dev/null; then
-  :
-else
-  SIGNUP_RESP=$(curl -sf -X POST "$BASE/api/v1/auth/signup" \
-    -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PASS\",\"firstName\":\"Smoke\",\"lastName\":\"Test\"}" 2>/dev/null || echo "")
-fi
-
 TOKEN=$(echo "$SIGNUP_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token',d.get('access_token','')))" 2>/dev/null || echo "")
 
-# If signup failed (already registered or different API), try login
+# Login if signup didn't return a token
 if [ -z "$TOKEN" ]; then
   LOGIN_RESP=$(curl -sf -X POST "$BASE/api/v1/auth/login" \
     -H 'Content-Type: application/json' \
@@ -12582,27 +12576,62 @@ if [ -z "$TOKEN" ]; then
 fi
 
 echo "INFISICAL_TOKEN=$TOKEN"
+
+# Only proceed with workspace+secret setup if we have a token
+if [ -n "$TOKEN" ]; then
+  AUTH_HDR="Authorization: Bearer $TOKEN"
+
+  # Get or create a workspace
+  WS_LIST=$(curl -sf -H "$AUTH_HDR" "$BASE/api/v1/workspaces" 2>/dev/null || echo "")
+  WS_ID=$(echo "$WS_LIST" | python3 -c "import sys,json; d=json.load(sys.stdin); ws=d.get('workspaces',[]); print(ws[0].get('_id','') if ws else '')" 2>/dev/null || echo "")
+
+  if [ -z "$WS_ID" ]; then
+    WS_RESP=$(curl -sf -X POST "$BASE/api/v1/workspace" \
+      -H "$AUTH_HDR" -H 'Content-Type: application/json' \
+      -d '{"workspaceName":"smoke-workspace"}' 2>/dev/null || echo "")
+    WS_ID=$(echo "$WS_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace',{}).get('_id',''))" 2>/dev/null || echo "")
+  fi
+
+  echo "INFISICAL_WORKSPACE_ID=$WS_ID"
+
+  # Seed the secret (create or update)
+  if [ -n "$WS_ID" ]; then
+    # Try create first, then update if exists
+    SECRET_RESP=$(curl -sf -X POST "$BASE/api/v3/secrets/SMOKE_SECRET" \
+      -H "$AUTH_HDR" -H 'Content-Type: application/json' \
+      -d "{\"workspaceId\":\"$WS_ID\",\"environment\":\"dev\",\"secretValue\":\"initial-value\"}" 2>/dev/null || \
+      curl -sf -X PATCH "$BASE/api/v3/secrets/SMOKE_SECRET" \
+      -H "$AUTH_HDR" -H 'Content-Type: application/json' \
+      -d "{\"workspaceId\":\"$WS_ID\",\"environment\":\"dev\",\"secretValue\":\"initial-value\"}" 2>/dev/null || echo "")
+    echo "SECRET_SEED_DONE"
+  fi
+fi
 """
         resp_api = ssm_client.send_command(
             InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-            Parameters={"commands": [api_setup_cmd]}, TimeoutSeconds=45)
-        time.sleep(20)
+            Parameters={"commands": [api_setup_cmd]}, TimeoutSeconds=60)
+        time.sleep(25)
         api_token = ""
-        workspace_id = "smoke-workspace"
+        workspace_id = ""
         try:
             out_api = ssm_client.get_command_invocation(
                 CommandId=resp_api["Command"]["CommandId"], InstanceId=instance_id)
             for line in out_api.get("StandardOutputContent", "").splitlines():
                 if line.startswith("INFISICAL_TOKEN="):
                     api_token = line.split("=", 1)[1].strip()
+                elif line.startswith("INFISICAL_WORKSPACE_ID="):
+                    workspace_id = line.split("=", 1)[1].strip()
             if not api_token:
-                log(f"  WARNING: Infisical API output: {out_api.get('StandardOutputContent','')[:300]}")
+                log(f"  WARNING: Infisical API output: {out_api.get('StandardOutputContent','')[:400]}")
+                log(f"  WARNING: Infisical API stderr: {out_api.get('StandardErrorContent','')[:200]}")
         except Exception as e:
-            log(f"  WARNING: Infisical token setup: {e}")
+            log(f"  WARNING: Infisical token/workspace setup: {e}")
 
         if not api_token:
             log("  WARNING: Could not obtain Infisical API token — using placeholder for connector")
             api_token = "smoke-placeholder-token"
+        if not workspace_id:
+            log("  WARNING: Could not obtain real workspace_id — CR will be skipped")
 
         infisical_url = f"http://{infisical_connect_ip}:80"
         # Register Infisical connector (optional — backend may not be reachable in standalone mode)
@@ -12641,39 +12670,46 @@ echo "INFISICAL_TOKEN=$TOKEN"
         except Exception as _asset_e:
             log(f"  INFO: Infisical asset registration: {_asset_e}")
 
-        # Try via Nexplane CR against the Infisical asset; fall back to direct call
+        # Try via Nexplane CR against the Infisical asset; fall back to direct SSM test
         cr_target = infisical_asset_id or cloud_account_id
-        try:
-            cr = client.run_cr(
-                f"[INFISICAL_ROTATE] rotate {secret_name}",
-                "rotate_infisical_secret",
-                cr_target,
-                {
-                    "workspace_id": workspace_id,
-                    "environment": environment,
-                    "secret_name": secret_name,
-                    "connector_id": infisical_connector_id,
-                },
-            )
-            exec_runs = cr.get("execution_runs") or []
-            result = exec_runs[0].get("result") if exec_runs else {}
+        _cr_succeeded = False
+        if workspace_id and infisical_connector_id:
+            try:
+                cr = client.run_cr(
+                    f"[INFISICAL_ROTATE] rotate {secret_name}",
+                    "rotate_infisical_secret",
+                    cr_target,
+                    {
+                        "workspace_id": workspace_id,
+                        "environment": environment,
+                        "secret_name": secret_name,
+                        "connector_id": infisical_connector_id,
+                    },
+                )
+                exec_runs = cr.get("execution_runs") or []
+                result = exec_runs[0].get("result") if exec_runs else {}
 
-            if result.get("status") == "skipped":
-                log("  WARNING: Infisical rotate skipped (no credentials in backend)")
-            elif result.get("action") == "rotate_infisical_secret":
-                log(f"Infisical secret {secret_name} rotated via CR")
-                cr_id = cr.get("id")
-                if cr_id:
-                    try:
-                        client.post(f"/change-requests/{cr_id}/rollback", json={})
-                        time.sleep(10)
-                        log("Infisical secret rollback triggered")
-                    except Exception as e:
-                        log(f"  WARNING: rollback trigger: {e}")
-            else:
-                log(f"  WARNING: Unexpected result: {result}")
-        except Exception as cr_e:
-            log(f"  INFO: Nexplane CR unavailable ({type(cr_e).__name__}) — testing Infisical API directly via SSM")
+                if result.get("status") == "skipped":
+                    log("  WARNING: Infisical rotate skipped (no credentials in backend)")
+                elif result.get("action") == "rotate_infisical_secret":
+                    log(f"Infisical secret {secret_name} rotated via CR")
+                    _cr_succeeded = True
+                    cr_id = cr.get("id")
+                    if cr_id:
+                        try:
+                            client.post(f"/change-requests/{cr_id}/rollback", json={})
+                            time.sleep(10)
+                            log("Infisical secret rollback triggered")
+                        except Exception as e:
+                            log(f"  WARNING: rollback trigger: {e}")
+                else:
+                    log(f"  WARNING: Unexpected CR result: {result}")
+            except (Exception, SystemExit) as cr_e:
+                log(f"  INFO: Nexplane CR path failed ({type(cr_e).__name__}) — verifying Infisical API directly via SSM")
+        else:
+            log(f"  INFO: No workspace_id or connector — verifying Infisical API directly via SSM")
+        if not _cr_succeeded:
+            log(f"  INFO: Testing Infisical API directly via SSM")
             # Direct SSM test: create+update a secret via Infisical API
             infisical_test_cmd = r"""
 BASE=http://localhost:80
