@@ -15,40 +15,9 @@ from datetime import datetime, timezone
 # WinRM helpers (same pattern as dc_integrity_check)
 # ---------------------------------------------------------------------------
 
-def _winrm_client(creds: dict, dc_hostname: str | None = None):
-    import winrm
-
-    host = dc_hostname or creds["winrm_hostname"]
-    port = int(creds.get("winrm_port", 5985))
-    use_ssl = str(creds.get("winrm_use_ssl", "false")).lower() == "true"
-    scheme = "https" if use_ssl else "http"
-
-    return winrm.Protocol(
-        endpoint=f"{scheme}://{host}:{port}/wsman",
-        transport="ntlm",
-        username=creds["winrm_username"],
-        password=creds["winrm_password"],
-        server_cert_validation="ignore",
-    )
-
-
-def _run_ps(protocol, script: str) -> tuple[str, str, int]:
-    shell_id = protocol.open_shell()
-    try:
-        command_id = protocol.run_command(
-            shell_id,
-            "powershell",
-            ["-NonInteractive", "-NoProfile", "-Command", script],
-        )
-        stdout, stderr, status = protocol.get_command_output(shell_id, command_id)
-        protocol.cleanup_command(shell_id, command_id)
-        return (
-            stdout.decode("utf-8", errors="replace").strip(),
-            stderr.decode("utf-8", errors="replace").strip(),
-            status,
-        )
-    finally:
-        protocol.close_shell(shell_id)
+def _run_ps(creds: dict, script: str, dc_hostname: str | None = None) -> tuple[str, str, int]:
+    from ._client import run_winrm_ps
+    return run_winrm_ps(creds, script, dc_hostname)
 
 
 # ---------------------------------------------------------------------------
@@ -108,11 +77,9 @@ def _create_record(
     if rtype_upper not in _SUPPORTED_TYPES:
         raise ValueError(f"Unsupported record type '{record_type}'. Supported: {', '.join(sorted(_SUPPORTED_TYPES))}")
 
-    proto = _winrm_client(creds, dc_hostname)
-
     # Pre-existence check
     check_script = _PS_CHECK_EXISTS.format(zone=zone_name, name=record_name, rtype=rtype_upper)
-    check_out, _, _ = _run_ps(proto, check_script)
+    check_out, _, _ = _run_ps(creds, check_script, dc_hostname)
     if "EXISTS" in check_out:
         raise ValueError(
             f"DNS record '{record_name}' ({rtype_upper}) already exists in zone '{zone_name}'. "
@@ -128,7 +95,7 @@ def _create_record(
     else:  # TXT
         script = _PS_CREATE_TXT.format(**fmt)
 
-    stdout, stderr, rc = _run_ps(proto, script)
+    stdout, stderr, rc = _run_ps(creds, script, dc_hostname)
     if rc != 0:
         raise RuntimeError(f"DNS record creation failed (rc={rc}): {stderr or stdout}")
 

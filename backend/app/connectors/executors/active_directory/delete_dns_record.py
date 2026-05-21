@@ -14,40 +14,9 @@ from datetime import datetime, timezone
 # WinRM helpers (same pattern as dc_integrity_check)
 # ---------------------------------------------------------------------------
 
-def _winrm_client(creds: dict, dc_hostname: str | None = None):
-    import winrm
-
-    host = dc_hostname or creds["winrm_hostname"]
-    port = int(creds.get("winrm_port", 5985))
-    use_ssl = str(creds.get("winrm_use_ssl", "false")).lower() == "true"
-    scheme = "https" if use_ssl else "http"
-
-    return winrm.Protocol(
-        endpoint=f"{scheme}://{host}:{port}/wsman",
-        transport="ntlm",
-        username=creds["winrm_username"],
-        password=creds["winrm_password"],
-        server_cert_validation="ignore",
-    )
-
-
-def _run_ps(protocol, script: str) -> tuple[str, str, int]:
-    shell_id = protocol.open_shell()
-    try:
-        command_id = protocol.run_command(
-            shell_id,
-            "powershell",
-            ["-NonInteractive", "-NoProfile", "-Command", script],
-        )
-        stdout, stderr, status = protocol.get_command_output(shell_id, command_id)
-        protocol.cleanup_command(shell_id, command_id)
-        return (
-            stdout.decode("utf-8", errors="replace").strip(),
-            stderr.decode("utf-8", errors="replace").strip(),
-            status,
-        )
-    finally:
-        protocol.close_shell(shell_id)
+def _run_ps(creds: dict, script: str, dc_hostname: str | None = None) -> tuple[str, str, int]:
+    from ._client import run_winrm_ps
+    return run_winrm_ps(creds, script, dc_hostname)
 
 
 # ---------------------------------------------------------------------------
@@ -70,14 +39,14 @@ def _extract_record_value(rec: dict) -> str:
 # Delete logic
 # ---------------------------------------------------------------------------
 
-def _read_existing_value(proto, zone_name: str, record_name: str, record_type: str) -> str | None:
+def _read_existing_value(creds: dict, zone_name: str, record_name: str, record_type: str, dc_hostname: str | None = None) -> str | None:
     """Read the current record value before deletion. Returns None if not found."""
     script = (
         f"Get-DnsServerResourceRecord -ZoneName '{zone_name}' "
         f"-Name '{record_name}' -RRType '{record_type}' "
         f"-ErrorAction SilentlyContinue | ConvertTo-Json -Depth 5"
     )
-    stdout, _, rc = _run_ps(proto, script)
+    stdout, _, rc = _run_ps(creds, script, dc_hostname)
     if not stdout:
         return None
     try:
@@ -96,9 +65,7 @@ def _delete_record(
     record_type: str,
     dc_hostname: str | None,
 ) -> str | None:
-    proto = _winrm_client(creds, dc_hostname)
-
-    previous_value = _read_existing_value(proto, zone_name, record_name, record_type.upper())
+    previous_value = _read_existing_value(creds, zone_name, record_name, record_type.upper(), dc_hostname)
 
     script = (
         f"Remove-DnsServerResourceRecord "
@@ -108,7 +75,7 @@ def _delete_record(
         f"-Force "
         f"-ErrorAction Stop"
     )
-    stdout, stderr, rc = _run_ps(proto, script)
+    stdout, stderr, rc = _run_ps(creds, script, dc_hostname)
     if rc != 0:
         raise RuntimeError(f"Remove-DnsServerResourceRecord failed (rc={rc}): {stderr or stdout}")
 

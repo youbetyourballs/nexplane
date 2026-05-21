@@ -23,46 +23,10 @@ from datetime import datetime, timezone
 # WinRM helpers
 # ---------------------------------------------------------------------------
 
-def _winrm_client(creds: dict):
-    """Return a winrm.Protocol instance using connector winrm_* credentials."""
-    import winrm  # pywinrm
-
-    host = creds["winrm_hostname"]
-    port = int(creds.get("winrm_port", 5985))
-    use_ssl = str(creds.get("winrm_use_ssl", "false")).lower() == "true"
-    scheme = "https" if use_ssl else "http"
-
-    # Use basic auth — smoke DC setup explicitly enables Auth\Basic and AllowUnencrypted,
-    # and basic is more reliable from non-domain-joined hosts than NTLM.
-    return winrm.Protocol(
-        endpoint=f"{scheme}://{host}:{port}/wsman",
-        transport="basic",
-        username=creds["winrm_username"],
-        password=creds["winrm_password"],
-        server_cert_validation="ignore",
-    )
-
-
-def _run_ps(protocol, script: str) -> tuple[str, str, int]:
-    """Run a PowerShell script via WinRM and return (stdout, stderr, status_code)."""
-    import winrm
-
-    shell_id = protocol.open_shell()
-    try:
-        command_id = protocol.run_command(
-            shell_id,
-            "powershell",
-            ["-NonInteractive", "-NoProfile", "-Command", script],
-        )
-        stdout, stderr, status = protocol.get_command_output(shell_id, command_id)
-        protocol.cleanup_command(shell_id, command_id)
-        return (
-            stdout.decode("utf-8", errors="replace").strip(),
-            stderr.decode("utf-8", errors="replace").strip(),
-            status,
-        )
-    finally:
-        protocol.close_shell(shell_id)
+def _run_ps(creds: dict, script: str, dc_hostname: str | None = None) -> tuple[str, str, int]:
+    """Run a PowerShell script via WinRM Session.run_ps() (base64-encoded, avoids cmd.exe pipe issues)."""
+    from ._client import run_winrm_ps
+    return run_winrm_ps(creds, script, dc_hostname)
 
 
 # ---------------------------------------------------------------------------
@@ -130,10 +94,8 @@ $results | ConvertTo-Json -Depth 3
 
 
 def _winrm_checks(creds: dict, dc_hostname: str, baseline_gpo_hash: str | None) -> dict:
-    proto = _winrm_client(creds)
-
     # --- Replication ---
-    repl_raw, repl_err, repl_rc = _run_ps(proto, _PS_REPLICATION)
+    repl_raw, repl_err, repl_rc = _run_ps(creds, _PS_REPLICATION, dc_hostname)
     repl_status = "ok"
     repl_partners = []
     if repl_raw.startswith("ERROR") or repl_rc != 0:
@@ -153,7 +115,7 @@ def _winrm_checks(creds: dict, dc_hostname: str, baseline_gpo_hash: str | None) 
             repl_status = "degraded"
 
     # --- SYSVOL ---
-    sysvol_raw, _, _ = _run_ps(proto, _PS_SYSVOL)
+    sysvol_raw, _, _ = _run_ps(creds, _PS_SYSVOL, dc_hostname)
     try:
         sysvol_data = json.loads(sysvol_raw)
         sysvol = {
@@ -164,14 +126,14 @@ def _winrm_checks(creds: dict, dc_hostname: str, baseline_gpo_hash: str | None) 
         sysvol = {"reachable": False, "dfsr_backlog": sysvol_raw}
 
     # --- GPO hash ---
-    gpo_raw, _, _ = _run_ps(proto, _PS_GPO_HASH)
+    gpo_raw, _, _ = _run_ps(creds, _PS_GPO_HASH, dc_hostname)
     gpo_hash = f"sha256:{gpo_raw}" if not gpo_raw.startswith("ERROR") else "unavailable"
     gpo_drift = False
     if baseline_gpo_hash and gpo_hash != "unavailable":
         gpo_drift = (baseline_gpo_hash.lstrip("sha256:") != gpo_raw)
 
     # --- Privileged accounts ---
-    priv_raw, _, _ = _run_ps(proto, _PS_PRIV_ACCOUNTS)
+    priv_raw, _, _ = _run_ps(creds, _PS_PRIV_ACCOUNTS, dc_hostname)
     privileged_accounts = []
     try:
         raw_list = json.loads(priv_raw)
