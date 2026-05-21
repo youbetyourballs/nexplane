@@ -15466,6 +15466,34 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                     except Exception:
                         pass
                 _t.sleep(10)
+                # Also probe port 389 directly — NTDS Running != LDAP socket open
+                try:
+                    _port_resp = ssm_boto.send_command(
+                        InstanceIds=[instance_id],
+                        DocumentName="AWS-RunPowerShellScript",
+                        Parameters={"commands": [
+                            "$deadline2 = [datetime]::Now.AddMinutes(3)",
+                            "while ([datetime]::Now -lt $deadline2) {",
+                            "  try { (New-Object System.Net.Sockets.TcpClient).Connect('127.0.0.1', 389); Write-Output 'PORT389_OPEN'; break }",
+                            "  catch { Start-Sleep -Seconds 10 }",
+                            "}",
+                        ]},
+                        TimeoutSeconds=240,
+                    )
+                    _port_dl = _t.time() + 260
+                    while _t.time() < _port_dl:
+                        _t.sleep(8)
+                        try:
+                            _pi = ssm_boto.get_command_invocation(
+                                CommandId=_port_resp["Command"]["CommandId"],
+                                InstanceId=instance_id)
+                            if _pi["Status"] in ("Success", "Failed", "TimedOut"):
+                                log(f"AD_DC_INTEGRITY: LDAP port probe: {_pi.get('StandardOutputContent','')[:80]}")
+                                break
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             except Exception as _ntds_e:
                 log(f"AD_DC_INTEGRITY: NTDS wait error (continuing): {_ntds_e}")
 
