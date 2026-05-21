@@ -15432,8 +15432,44 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         log("AD_DC_INTEGRITY: SSM agent ready")
 
         if not from_existing and cached_ami:
-            # Booting from cached DC AMI — EC2Launch reset (done before snapshot) clears
-            # WinRM Basic auth settings. Re-enable before using WinRM.
+            # Booting from cached DC AMI — EC2Launch reset (done before snapshot) triggers
+            # first-boot setup which may delay AD DS (NTDS) startup. Wait for it.
+            log("AD_DC_INTEGRITY: waiting for AD DS (NTDS) to start after cached AMI boot...")
+            try:
+                _ntds_wait = ssm_boto.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName="AWS-RunPowerShellScript",
+                    Parameters={"commands": [
+                        "$deadline = [datetime]::Now.AddMinutes(5)",
+                        "while ([datetime]::Now -lt $deadline) {",
+                        "  $s = Get-Service NTDS -ErrorAction SilentlyContinue",
+                        "  if ($s -and $s.Status -eq 'Running') { break }",
+                        "  Start-Service NTDS -ErrorAction SilentlyContinue",
+                        "  Start-Sleep -Seconds 15",
+                        "}",
+                        "Get-Service NTDS | Select-Object -ExpandProperty Status",
+                        "Write-Output 'NTDS_CHECK_DONE'",
+                    ]},
+                    TimeoutSeconds=360,
+                )
+                _ntds_dl = _t.time() + 400
+                while _t.time() < _ntds_dl:
+                    _t.sleep(10)
+                    try:
+                        _ni = ssm_boto.get_command_invocation(
+                            CommandId=_ntds_wait["Command"]["CommandId"],
+                            InstanceId=instance_id)
+                        if _ni["Status"] in ("Success", "Failed", "TimedOut"):
+                            _ntds_out = _ni.get("StandardOutputContent", "")
+                            log(f"AD_DC_INTEGRITY: NTDS status: {_ntds_out[:100]}")
+                            break
+                    except Exception:
+                        pass
+                _t.sleep(10)
+            except Exception as _ntds_e:
+                log(f"AD_DC_INTEGRITY: NTDS wait error (continuing): {_ntds_e}")
+
+            # Re-enable WinRM Basic auth — EC2Launch reset may also clear this
             log("AD_DC_INTEGRITY: re-enabling WinRM Basic auth after cached AMI boot...")
             try:
                 _winrm_reconf = ssm_boto.send_command(
