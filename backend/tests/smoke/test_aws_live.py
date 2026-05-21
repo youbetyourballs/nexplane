@@ -9908,8 +9908,35 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
                 log(f"AMI cache skipped: {_ami_e}")
 
         else:
-            # From cached AMI — set up socat proxy, use same known password
+            # From cached AMI — re-enable WinRM Basic/unencrypted (EC2Launch reset clears these),
+            # set up socat proxy, use same known password.
             import subprocess as _sp2
+            # Re-enable WinRM auth via SSM (EC2Launch reset on the AMI clears Basic auth settings)
+            _winrm_recfg_resp = ssm_client.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunPowerShellScript",
+                Parameters={"commands": [
+                    "Set-Item WSMan:\\localhost\\Service\\Auth\\Basic -Value $true",
+                    "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $true",
+                    "Restart-Service WinRM",
+                    "Write-Output 'WINRM_RECONFIGURED'",
+                ]},
+                TimeoutSeconds=60,
+            )
+            _reconf_dl = _t.time() + 90
+            while _t.time() < _reconf_dl:
+                _t.sleep(6)
+                try:
+                    _ri = ssm_client.get_command_invocation(
+                        CommandId=_winrm_recfg_resp["Command"]["CommandId"],
+                        InstanceId=instance_id)
+                    if _ri["Status"] in ("Success", "Failed", "TimedOut"):
+                        log(f"WinRM reconfigure status: {_ri['Status']}")
+                        break
+                except Exception:
+                    pass
+            _t.sleep(5)
+
             _sp2.run(["bash", "-c", "which socat || dnf install -y socat -q"], check=True, timeout=60)
             _sp2.run(["bash", "-c", f"pkill -f 'socat.*{private_ip}.*5985' 2>/dev/null || true"], timeout=5)
             _sp2.Popen(["socat", "TCP-LISTEN:15985,bind=0.0.0.0,fork,reuseaddr", f"TCP:{private_ip}:5985"])
