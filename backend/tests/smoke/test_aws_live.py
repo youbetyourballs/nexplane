@@ -9227,13 +9227,26 @@ def _ensure_ssm_vpc_endpoints() -> None:
                     VpcId=vpc_id,
                     ServiceName=svc,
                     VpcEndpointType="Interface",
-                    SubnetIds=subnet_ids[:2],  # 2 AZs is enough
+                    SubnetIds=subnet_ids,  # All subnets — cover every AZ
                     SecurityGroupIds=[sg_id],
                     PrivateDnsEnabled=True,
                 )
                 log(f"Created SSM VPC endpoint: {svc}")
             else:
-                log(f"SSM VPC endpoint already exists: {svc}")
+                # Ensure existing endpoint covers all subnets
+                ep = next(ep for ep in existing if ep["ServiceName"] == svc)
+                existing_subnet_ids = {az["SubnetId"] for az in ep.get("SubnetIds", [])}
+                missing = [s for s in subnet_ids if s not in existing_subnet_ids]
+                if missing:
+                    try:
+                        ec2.modify_vpc_endpoint(
+                            VpcEndpointId=ep["VpcEndpointId"],
+                            AddSubnetIds=missing,
+                        )
+                        log(f"Extended SSM endpoint {svc} to cover {len(missing)} more subnets")
+                    except Exception:
+                        pass
+                log(f"SSM VPC endpoint exists: {svc}")
     except Exception as _ep_e:
         log(f"WARNING: SSM VPC endpoint setup failed: {_ep_e} — instances without public IPs may not reach SSM")
 
