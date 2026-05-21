@@ -762,6 +762,7 @@ Examples:
             f"AWS_ACCESS_KEY_ID={aws_key} "
             f"AWS_SECRET_ACCESS_KEY={aws_secret} "
             f"AWS_DEFAULT_REGION={aws_region} "
+            f"NEXPLANE_BACKEND_TAILSCALE_IP={backend_ts_ip} "
             + (f"TAILSCALE_AUTH_KEY={_ts_key_env} " if _ts_key_env else "")
         )
         # Build test command — email/password are optional for standalone phases

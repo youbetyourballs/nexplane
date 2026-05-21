@@ -9976,7 +9976,7 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
             if not result1.get("checks") and not result1.get("mock"):
                 log(f"  WARNING: check_prerequisites returned unexpected result: {result1}")
 
-            backend_ip = "100.69.215.38"
+            import os as _bip_os; backend_ip = _bip_os.environ.get("NEXPLANE_BACKEND_TAILSCALE_IP", "100.69.215.38")
             agent_url = f"http://{backend_ip}:8000/downloads/nexplane-agent-windows-amd64-0.3.1.exe"
             log(f"Running winrm_download_agent CR (url={agent_url})...")
             cr2 = client.run_cr(
@@ -14579,6 +14579,8 @@ def main():
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
+    parser.add_argument("--backend-tailscale-ip", default="100.69.215.38",
+                        help="Backend Tailscale IP (passed by run_on_ec2.py; used for agent download/install URLs)")
     parser.add_argument("--bind-server-ip", default="",
                         help="Pre-existing BIND server IP (GCP/Azure/on-prem). "
                              "When set, skips AWS EC2 provisioning.")
@@ -15170,7 +15172,8 @@ def run_phase_mac_agent_bootstrap(
 
             # Get agent secret for registration
             agent_secret = ""
-            control_plane_url = f"http://{backend_tailscale_ip}:8000" if backend_tailscale_ip else "http://localhost:8000"
+            _bts = backend_tailscale_ip or _os.environ.get("NEXPLANE_BACKEND_TAILSCALE_IP", "")
+    control_plane_url = f"http://{_bts}:8000" if _bts else "http://localhost:8000"
             try:
                 agent_secret = client.get_agent_secret()
             except Exception as _se:
