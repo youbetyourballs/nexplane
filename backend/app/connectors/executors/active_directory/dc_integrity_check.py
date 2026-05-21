@@ -215,9 +215,9 @@ def _ldap_checks(creds: dict) -> dict:
     )
     dcs = [
         {
-            "cn": str(e["cn"]),
-            "enabled": not bool(int(str(e.get("userAccountControl", 0))) & 2),
-            "os": str(e.get("operatingSystem", "")),
+            "cn": str(e.cn.value if e.cn else ""),
+            "enabled": not bool(int(str(e.userAccountControl.value if e.userAccountControl else 0)) & 2),
+            "os": str(e.operatingSystem.value if e.operatingSystem else ""),
         }
         for e in conn.entries
     ]
@@ -226,8 +226,8 @@ def _ldap_checks(creds: dict) -> dict:
     conn.search(base_dn, "(&(objectClass=user)(adminCount=1))", attributes=["sAMAccountName", "userAccountControl"])
     priv_ldap = [
         {
-            "sam": str(e["sAMAccountName"]),
-            "enabled": not bool(int(str(e.get("userAccountControl", 0))) & 2),
+            "sam": str(e.sAMAccountName.value if e.sAMAccountName else ""),
+            "enabled": not bool(int(str(e.userAccountControl.value if e.userAccountControl else 0)) & 2),
         }
         for e in conn.entries
     ]
