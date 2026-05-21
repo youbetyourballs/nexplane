@@ -32,9 +32,11 @@ def _winrm_client(creds: dict):
     use_ssl = str(creds.get("winrm_use_ssl", "false")).lower() == "true"
     scheme = "https" if use_ssl else "http"
 
+    # Use basic auth — smoke DC setup explicitly enables Auth\Basic and AllowUnencrypted,
+    # and basic is more reliable from non-domain-joined hosts than NTLM.
     return winrm.Protocol(
         endpoint=f"{scheme}://{host}:{port}/wsman",
-        transport="ntlm",
+        transport="basic",
         username=creds["winrm_username"],
         password=creds["winrm_password"],
         server_cert_validation="ignore",
