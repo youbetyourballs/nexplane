@@ -130,7 +130,9 @@ def _winrm_checks(creds: dict, dc_hostname: str, baseline_gpo_hash: str | None) 
     gpo_hash = f"sha256:{gpo_raw}" if not gpo_raw.startswith("ERROR") else "unavailable"
     gpo_drift = False
     if baseline_gpo_hash and gpo_hash != "unavailable":
-        gpo_drift = (baseline_gpo_hash.lstrip("sha256:") != gpo_raw)
+        # removeprefix (not lstrip) — lstrip strips individual chars, not the full prefix
+        baseline_raw = baseline_gpo_hash.removeprefix("sha256:")
+        gpo_drift = (baseline_raw != gpo_raw)
 
     # --- Privileged accounts ---
     priv_raw, _, _ = _run_ps(creds, _PS_PRIV_ACCOUNTS, dc_hostname)
