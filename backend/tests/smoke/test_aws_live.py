@@ -9788,7 +9788,7 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
     win_ami_id = _get_windows_2022_ami(ec2_client)
     log(f"Windows Server 2022 AMI: {win_ami_id}")
 
-    setup_hash = _hl.md5(("winrm-v1-" + win_ami_id).encode()).hexdigest()
+    setup_hash = _hl.md5(("winrm-v2-ec2launch-reset-tailscale-fw-" + win_ami_id).encode()).hexdigest()
     cached_ami = _check_smoke_ami_cache(ssm_client, ec2_client, "winrm", setup_hash)
 
     # Launch Windows EC2 (t3.small — AWS account free-tier restriction applies to Windows AMIs)
@@ -9797,8 +9797,8 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
     asset_id = None
 
     try:
-        log("Waiting for Windows SSM agent to register (~3-5 min)...")
-        _wait_ssm_ready_win(ssm_client, instance_id, timeout=420)
+        log("Waiting for Windows SSM agent to register (~3-8 min — VPC endpoint path may be slower)...")
+        _wait_ssm_ready_win(ssm_client, instance_id, timeout=600)
 
         if not cached_ami:
             log("Enabling WinRM on Windows instance via SSM...")
@@ -9810,8 +9810,7 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
                     "Set-Item WSMan:\\localhost\\Service\\Auth\\Basic -Value $true",
                     "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $true",
                     "Set-Item WSMan:\\localhost\\Listener\\*\\Port -Value 5985 -ErrorAction SilentlyContinue",
-                    "netsh advfirewall firewall add rule name='WinRM-HTTP' dir=in action=allow protocol=TCP localport=5985",
-                    "Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False",
+                    "New-NetFirewallRule -DisplayName 'WinRM-Tailscale' -Direction Inbound -Protocol TCP -LocalPort 5985 -RemoteAddress '100.64.0.0/10,172.16.0.0/12' -Action Allow -ErrorAction SilentlyContinue",
                     "Restart-Service WinRM",
                     "Write-Output 'WINRM_ENABLED'",
                 ]},
@@ -9881,7 +9880,23 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
             password = known_password
             _t.sleep(10)
 
-            # Cache the AMI now that WinRM is set up
+            # EC2Launch reset before snapshot — clears stale SSM registration so
+            # instances booted from this AMI register with SSM without a public IP.
+            try:
+                ssm_client.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName="AWS-RunPowerShellScript",
+                    Parameters={"commands": [
+                        "& 'C:\\Program Files\\Amazon\\EC2Launch\\EC2Launch.exe' reset --block",
+                        "Write-Output 'EC2LAUNCH_RESET'",
+                    ]},
+                    TimeoutSeconds=60,
+                )
+                _t.sleep(10)
+            except Exception:
+                pass
+
+            # Cache the AMI now that WinRM is set up and EC2Launch is reset
             try:
                 from run_on_ec2 import get_or_create_smoke_ami
                 get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "winrm", setup_hash)
@@ -12610,16 +12625,35 @@ echo "INFISICAL_TOKEN=$TOKEN"
         secret_name = "SMOKE_SECRET"
         environment = "dev"
 
-        # Try via Nexplane CR; fall back to direct executor call in standalone mode
+        # Register an asset for the Infisical server so the CR routes to the
+        # correct executor (not the cloud account's GCP executor)
+        infisical_asset_id = None
+        try:
+            asset_resp = client.post("/assets", json={
+                "name": f"nexplane-smoke-infisical-{instance_id[-8:]}",
+                "asset_type": "server",
+                "environment": "staging",
+                "criticality": "low",
+                "hostname": infisical_connect_ip,
+                "connector_id": infisical_connector_id,
+                "tags": ["nexplane-smoke", "infisical"],
+            })
+            infisical_asset_id = asset_resp.get("id")
+        except Exception as _asset_e:
+            log(f"  INFO: Infisical asset registration: {_asset_e}")
+
+        # Try via Nexplane CR against the Infisical asset; fall back to direct call
+        cr_target = infisical_asset_id or cloud_account_id
         try:
             cr = client.run_cr(
                 f"[INFISICAL_ROTATE] rotate {secret_name}",
                 "rotate_infisical_secret",
-                cloud_account_id,
+                cr_target,
                 {
                     "workspace_id": workspace_id,
                     "environment": environment,
                     "secret_name": secret_name,
+                    "connector_id": infisical_connector_id,
                 },
             )
             exec_runs = cr.get("execution_runs") or []
