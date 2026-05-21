@@ -104,7 +104,7 @@ def _winrm_client(creds: dict):
 
     return winrm.Protocol(
         endpoint=f"{scheme}://{host}:{port}/wsman",
-        transport="ntlm",
+        transport="basic",
         username=creds["winrm_username"],
         password=creds["winrm_password"],
         server_cert_validation="ignore",

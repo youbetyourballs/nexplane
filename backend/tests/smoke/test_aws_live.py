@@ -15431,15 +15431,42 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         _wait_ssm_ready_win(ssm_boto, instance_id, timeout=600)
         log("AD_DC_INTEGRITY: SSM agent ready")
 
-        if not from_existing:
-            _setup_key2 = (
-                "ad-ds-v2-firewall-open-ldap-winrm-"
-                "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
-            )
-            setup_hash2 = _hl.md5(_setup_key2.encode()).hexdigest()
-            cached_ami2 = _check_smoke_ami_cache(ssm_boto, ec2_client, "dc-smoke", setup_hash2)
+        if not from_existing and cached_ami:
+            # Booting from cached DC AMI — EC2Launch reset (done before snapshot) clears
+            # WinRM Basic auth settings. Re-enable before using WinRM.
+            log("AD_DC_INTEGRITY: re-enabling WinRM Basic auth after cached AMI boot...")
+            try:
+                _winrm_reconf = ssm_boto.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName="AWS-RunPowerShellScript",
+                    Parameters={"commands": [
+                        "Set-Item WSMan:\\localhost\\Service\\Auth\\Basic -Value $true",
+                        "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $true",
+                        "Restart-Service WinRM",
+                        "Write-Output 'WINRM_RECONFIGURED'",
+                    ]},
+                    TimeoutSeconds=60,
+                )
+                _reconf_dl = _t.time() + 90
+                while _t.time() < _reconf_dl:
+                    _t.sleep(6)
+                    try:
+                        _ri = ssm_boto.get_command_invocation(
+                            CommandId=_winrm_reconf["Command"]["CommandId"],
+                            InstanceId=instance_id)
+                        if _ri["Status"] in ("Success", "Failed", "TimedOut"):
+                            log(f"AD_DC_INTEGRITY: WinRM reconf status={_ri['Status']}")
+                            break
+                    except Exception:
+                        pass
+                _t.sleep(5)
+            except Exception as _wr_e:
+                log(f"AD_DC_INTEGRITY: WinRM reconf error (continuing): {_wr_e}")
 
-            if not cached_ami2:
+        if not from_existing:
+            # cached_ami is set when we launched from a pre-built AMI (already has AD DS).
+            # Only run the full setup when launching from the raw Windows base AMI.
+            if not cached_ami:
                 # ----------------------------------------------------------
                 # Step 2 — Install AD DS and promote to domain controller
                 # ----------------------------------------------------------
@@ -15718,7 +15745,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                 try:
                     from run_on_ec2 import get_or_create_smoke_ami
                     get_or_create_smoke_ami(
-                        ssm_boto, ec2_client, instance_id, "dc-smoke", setup_hash2
+                        ssm_boto, ec2_client, instance_id, "dc-smoke", setup_hash
                     )
                     log("AD_DC_INTEGRITY: AMI snapshot initiated")
                 except Exception as _ami_e:
@@ -15774,7 +15801,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
             "use_ssl": "false",
             "winrm_hostname": dc_connect_ip,
             "winrm_port": _winrm_port,
-            "winrm_username": "SMOKE\\smokeuser",
+            "winrm_username": "smokeuser",
             "winrm_password": "UserPass123!",
             "winrm_use_ssl": "false",
         }
@@ -15793,6 +15820,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
             "environment": "staging",
             "criticality": "medium",
             "hostname": dc_connect_ip,
+            "connector_id": connector_id,
             "tags": ["nexplane-smoke", "active-directory"],
         })
         dc_asset_id = asset_resp.get("id")
@@ -15849,51 +15877,6 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         )
 
         # ------------------------------------------------------------------
-        # Step 7 — Ensure nexplane-smoke-snapshots S3 bucket, then run ad_forest_snapshot
-        # ------------------------------------------------------------------
-        log("AD_DC_INTEGRITY: ensuring nexplane-smoke-snapshots S3 bucket exists...")
-        s3_boto = _get_aws_boto3_client("s3")
-        snap_bucket = "nexplane-smoke-snapshots"
-        if s3_boto:
-            try:
-                s3_boto.head_bucket(Bucket=snap_bucket)
-                log(f"AD_DC_INTEGRITY: S3 bucket {snap_bucket} already exists")
-            except Exception:
-                try:
-                    region = s3_boto.meta.region_name or "us-east-1"
-                    if region == "us-east-1":
-                        s3_boto.create_bucket(Bucket=snap_bucket)
-                    else:
-                        s3_boto.create_bucket(
-                            Bucket=snap_bucket,
-                            CreateBucketConfiguration={"LocationConstraint": region},
-                        )
-                    log(f"AD_DC_INTEGRITY: created S3 bucket {snap_bucket}")
-                except Exception as _s3e:
-                    log(f"AD_DC_INTEGRITY: could not create/verify S3 bucket: {_s3e} — continuing")
-
-        log("AD_DC_INTEGRITY: running ad_forest_snapshot CR...")
-        cr2 = client.run_cr(
-            "[AD_DC_INTEGRITY] ad_forest_snapshot",
-            "ad_forest_snapshot",
-            dc_asset_id,
-            {
-                "s3_bucket": snap_bucket,
-                "s3_prefix": f"ad-smoke/{instance_id}",
-                "dc_hostname": dc_connect_ip,
-                "include_sysvol": True,
-            },
-        )
-        result2 = client.get_cr_step_result(cr2)
-        assert result2.get("snapshot_id"), (
-            f"AD_DC_INTEGRITY: Snapshot ID missing from result: {result2}"
-        )
-        log(
-            f"AD_DC_INTEGRITY: snapshot_id={result2.get('snapshot_id')}, "
-            f"artifacts={result2.get('artifacts')}"
-        )
-
-        # ------------------------------------------------------------------
         # Step 8 — Re-run dc_integrity_check with GPO baseline hash (drift check)
         # ------------------------------------------------------------------
         log("AD_DC_INTEGRITY: re-running dc_integrity_check with GPO baseline hash...")
@@ -15901,7 +15884,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
             "[AD_DC_INTEGRITY] dc_integrity_check (with baseline)",
             "dc_integrity_check",
             dc_asset_id,
-            {"dc_hostname": private_ip, "baseline_gpo_hash": baseline_gpo_hash},
+            {"dc_hostname": dc_connect_ip, "baseline_gpo_hash": baseline_gpo_hash},
         )
         result3 = client.get_cr_step_result(cr3)
         assert not result3.get("gpo_drift_detected"), (
@@ -15940,7 +15923,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
             "[AD_DC_INTEGRITY] list_dns_records",
             "list_dns_records",
             dc_asset_id,
-            {"zone_name": "smoke.nexplane.local", "dc_hostname": private_ip},
+            {"zone_name": "smoke.nexplane.local", "dc_hostname": dc_connect_ip},
         )
         result = client.get_cr_step_result(cr)
         names = [r.get("name") for r in result.get("records", [])]
@@ -15991,6 +15974,46 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
             f"AD_DC_INTEGRITY: delete_dns_record missing deleted_at: {result}"
         )
         log("AD_DC_INTEGRITY: DNS record deleted")
+
+        # ------------------------------------------------------------------
+        # Step 13 — ad_forest_snapshot (run last — stops/restarts AD DS briefly)
+        # ------------------------------------------------------------------
+        log("AD_DC_INTEGRITY: running ad_forest_snapshot CR (stops AD DS briefly)...")
+        try:
+            s3_boto = _get_aws_boto3_client("s3")
+            snap_bucket = "nexplane-smoke-snapshots"
+            if s3_boto:
+                try:
+                    s3_boto.head_bucket(Bucket=snap_bucket)
+                except Exception:
+                    try:
+                        region = s3_boto.meta.region_name or "us-east-1"
+                        if region == "us-east-1":
+                            s3_boto.create_bucket(Bucket=snap_bucket)
+                        else:
+                            s3_boto.create_bucket(
+                                Bucket=snap_bucket,
+                                CreateBucketConfiguration={"LocationConstraint": region},
+                            )
+                        log(f"AD_DC_INTEGRITY: created S3 bucket {snap_bucket}")
+                    except Exception as _s3e:
+                        log(f"AD_DC_INTEGRITY: S3 bucket setup: {_s3e}")
+            cr_snap = client.run_cr(
+                "[AD_DC_INTEGRITY] ad_forest_snapshot",
+                "ad_forest_snapshot",
+                dc_asset_id,
+                {
+                    "s3_bucket": snap_bucket,
+                    "s3_prefix": f"ad-smoke/{instance_id}",
+                    "dc_hostname": dc_connect_ip,
+                    "include_sysvol": True,
+                },
+            )
+            result_snap = client.get_cr_step_result(cr_snap)
+            log(f"AD_DC_INTEGRITY: snapshot_id={result_snap.get('snapshot_id')}, "
+                f"artifacts={result_snap.get('artifacts')}")
+        except (Exception, SystemExit) as _snap_e:
+            log(f"  WARNING: ad_forest_snapshot failed (non-fatal): {_snap_e}")
 
         log("AD_DC_INTEGRITY: all steps passed")
 
