@@ -15,40 +15,9 @@ from datetime import datetime, timezone
 # WinRM helpers (same pattern as dc_integrity_check)
 # ---------------------------------------------------------------------------
 
-def _winrm_client(creds: dict, dc_hostname: str | None = None):
-    import winrm
-
-    host = dc_hostname or creds["winrm_hostname"]
-    port = int(creds.get("winrm_port", 5985))
-    use_ssl = str(creds.get("winrm_use_ssl", "false")).lower() == "true"
-    scheme = "https" if use_ssl else "http"
-
-    return winrm.Protocol(
-        endpoint=f"{scheme}://{host}:{port}/wsman",
-        transport="ntlm",
-        username=creds["winrm_username"],
-        password=creds["winrm_password"],
-        server_cert_validation="ignore",
-    )
-
-
-def _run_ps(protocol, script: str) -> tuple[str, str, int]:
-    shell_id = protocol.open_shell()
-    try:
-        command_id = protocol.run_command(
-            shell_id,
-            "powershell",
-            ["-NonInteractive", "-NoProfile", "-Command", script],
-        )
-        stdout, stderr, status = protocol.get_command_output(shell_id, command_id)
-        protocol.cleanup_command(shell_id, command_id)
-        return (
-            stdout.decode("utf-8", errors="replace").strip(),
-            stderr.decode("utf-8", errors="replace").strip(),
-            status,
-        )
-    finally:
-        protocol.close_shell(shell_id)
+def _run_ps(creds: dict, script: str, dc_hostname: str | None = None) -> tuple[str, str, int]:
+    from ._client import run_winrm_ps
+    return run_winrm_ps(creds, script, dc_hostname)
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +68,6 @@ def _update_record(
     dc_hostname: str | None,
 ) -> str | None:
     """Delete the existing record and recreate it with new_value. Returns old value."""
-    proto = _winrm_client(creds, dc_hostname)
     rtype = record_type.upper()
 
     # Read existing value for rollback
@@ -108,7 +76,7 @@ def _update_record(
         f"-Name '{record_name}' -RRType '{rtype}' "
         f"-ErrorAction SilentlyContinue | ConvertTo-Json -Depth 5"
     )
-    read_out, _, _ = _run_ps(proto, read_script)
+    read_out, _, _ = _run_ps(creds, read_script, dc_hostname)
     old_value: str | None = None
     if read_out:
         try:
@@ -125,7 +93,7 @@ def _update_record(
         f"-ZoneName '{zone_name}' -Name '{record_name}' -RRType '{rtype}' "
         f"-Force -ErrorAction Stop"
     )
-    _, del_err, del_rc = _run_ps(proto, del_script)
+    _, del_err, del_rc = _run_ps(creds, del_script, dc_hostname)
     if del_rc != 0:
         raise RuntimeError(f"Delete step of update failed (rc={del_rc}): {del_err}")
 
@@ -140,7 +108,7 @@ def _update_record(
     else:
         raise ValueError(f"Unsupported record type for update: '{rtype}'")
 
-    _, create_err, create_rc = _run_ps(proto, create_script)
+    _, create_err, create_rc = _run_ps(creds, create_script, dc_hostname)
     if create_rc != 0:
         raise RuntimeError(
             f"Recreate step of update failed (rc={create_rc}): {create_err}. "

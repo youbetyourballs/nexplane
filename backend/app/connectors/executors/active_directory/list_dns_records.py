@@ -14,42 +14,9 @@ from datetime import datetime, timezone
 # WinRM helpers (same pattern as dc_integrity_check)
 # ---------------------------------------------------------------------------
 
-def _winrm_client(creds: dict, dc_hostname: str | None = None):
-    import winrm
-
-    host = dc_hostname or creds["winrm_hostname"]
-    port = int(creds.get("winrm_port", 5985))
-    use_ssl = str(creds.get("winrm_use_ssl", "false")).lower() == "true"
-    scheme = "https" if use_ssl else "http"
-
-    return winrm.Protocol(
-        endpoint=f"{scheme}://{host}:{port}/wsman",
-        transport="ntlm",
-        username=creds["winrm_username"],
-        password=creds["winrm_password"],
-        server_cert_validation="ignore",
-    )
-
-
-def _run_ps(protocol, script: str) -> tuple[str, str, int]:
-    import winrm
-
-    shell_id = protocol.open_shell()
-    try:
-        command_id = protocol.run_command(
-            shell_id,
-            "powershell",
-            ["-NonInteractive", "-NoProfile", "-Command", script],
-        )
-        stdout, stderr, status = protocol.get_command_output(shell_id, command_id)
-        protocol.cleanup_command(shell_id, command_id)
-        return (
-            stdout.decode("utf-8", errors="replace").strip(),
-            stderr.decode("utf-8", errors="replace").strip(),
-            status,
-        )
-    finally:
-        protocol.close_shell(shell_id)
+def _run_ps(creds: dict, script: str, dc_hostname: str | None = None) -> tuple[str, str, int]:
+    from ._client import run_winrm_ps
+    return run_winrm_ps(creds, script, dc_hostname)
 
 
 # ---------------------------------------------------------------------------
@@ -102,14 +69,12 @@ def _parse_records(raw: str) -> list[dict]:
 
 
 def _list_records(creds: dict, zone_name: str, record_type: str | None, dc_hostname: str | None) -> list[dict]:
-    proto = _winrm_client(creds, dc_hostname)
-
     type_filter = f" -RRType '{record_type}'" if record_type else ""
     script = (
         f"Get-DnsServerResourceRecord -ZoneName '{zone_name}'{type_filter} "
         f"-ErrorAction Stop | ConvertTo-Json -Depth 5"
     )
-    stdout, stderr, rc = _run_ps(proto, script)
+    stdout, stderr, rc = _run_ps(creds, script, dc_hostname)
     if rc != 0 or stdout.startswith("ERROR"):
         raise RuntimeError(f"Get-DnsServerResourceRecord failed (rc={rc}): {stderr or stdout}")
     return _parse_records(stdout)
