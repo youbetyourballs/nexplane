@@ -10291,7 +10291,7 @@ def run_phase_k8s_rbac(client, cloud_account_id):
     KUBE_API_PORT = 6443
     S3_TOOLS_BUCKET = "nexplane-agent-downloads"
     KUBECTL_VERSION = "v1.29.0"
-    KIND_VERSION = "v0.23.0"
+    KIND_VERSION = "v0.24.0"
 
     # Stage tools to S3 (VPC gateway endpoint) so runners can download without internet.
     # Platform container has internet; runners have no public IP and no NAT route.
@@ -10371,7 +10371,7 @@ kubeadmConfigPatches:
     - "$PRIVATE_IP"
 KINDEOF
 
-kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0
 
 kubectl create serviceaccount smoke-sa --namespace default || true
 kubectl create rolebinding smoke-rb \\
@@ -10382,7 +10382,7 @@ kubectl create rolebinding smoke-rb \\
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 echo "K8S_RBAC_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(b"kind-0.23.0-k8s-rbac-port6443-certSANs-v2").hexdigest()
+    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-port6443-certSANs-v3").hexdigest()
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
@@ -10551,7 +10551,7 @@ kubeadmConfigPatches:
     - "0.0.0.0"
     - "$PRIVATE_IP"
 KINDEOF
-kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0
 kubectl create serviceaccount smoke-sa --namespace default 2>/dev/null || true
 kubectl get rolebinding smoke-rb -n default 2>/dev/null || \\
   kubectl create rolebinding smoke-rb --clusterrole=view --serviceaccount=default:smoke-sa --namespace=default || true
