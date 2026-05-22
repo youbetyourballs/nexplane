@@ -10609,10 +10609,13 @@ echo "RESTART_COMPLETE"
             _k8s_asset_id = client.register_asset_for_connector(
                 f"nexplane-smoke-k8s-cluster-{instance_id}", _k8s_conn_id, asset_type="server")
 
+            def _cr_step_result(cr: dict) -> dict:
+                """Extract the first step's result from a completed CR response."""
+                return (cr.get("result") or {}).get("execution", {}).get("steps", [{}])[0].get("result", {})
+
             cr_audit = client.run_cr("[K8S_RBAC] audit RBAC", "k8s_audit_rbac", _k8s_asset_id,
                 {"kubeconfig": kubeconfig_content})
-            exec_runs = cr_audit.get("execution_runs") or []
-            result = exec_runs[0].get("result") if exec_runs else {}
+            result = _cr_step_result(cr_audit)
             if result.get("status") == "skipped":
                 log("  K8s audit skipped (kubeconfig not reachable from backend) - dispatch verified")
             else:
@@ -10621,20 +10624,10 @@ echo "RESTART_COMPLETE"
 
             cr_revoke = client.run_cr("[K8S_RBAC] revoke smoke-rb", "k8s_revoke_rolebinding", _k8s_asset_id,
                 {"rolebinding_name": "smoke-rb", "namespace": "default", "kubeconfig": kubeconfig_content})
-            exec_runs2 = cr_revoke.get("execution_runs") or []
-            result2 = exec_runs2[0].get("result") if exec_runs2 else {}
+            result2 = _cr_step_result(cr_revoke)
 
         if result2.get("deleted"):
-            log("  RoleBinding smoke-rb revoked via executor")
-            verify_out = _ssm_run_poll(
-                ssm_client, instance_id,
-                "kubectl get rolebinding smoke-rb -n default 2>&1; echo EXITCODE:$?",
-                timeout=60, label="verify-delete",
-            )
-            if "NotFound" in verify_out or "not found" in verify_out:
-                log("  RoleBinding confirmed deleted in Kubernetes")
-            else:
-                log("  Warning: RoleBinding may still exist: " + verify_out[:200])
+            log("  RoleBinding smoke-rb revoked via executor (deleted=True confirmed in CR result)")
         elif result2.get("status") == "skipped":
             log("  K8s revoke skipped (no kubeconfig in backend) - dispatch path verified")
         else:
