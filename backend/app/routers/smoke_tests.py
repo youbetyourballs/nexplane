@@ -82,6 +82,22 @@ SUITES = [
         "slow_phases": "",
         "description": "AWS + GCP + Azure running concurrently",
     },
+    {
+        "id": "platform",
+        "name": "Platform",
+        "file": "test_platform_live.py",
+        "default_phases": "RUNBOOK_ONBOARDING,ACCESS_REVIEW,PROJECT_MICROSEG,VULN_PIPELINE",
+        "slow_phases": "",
+        "description": "Platform orchestration: IR playbooks, runbooks, access reviews, projects",
+    },
+    {
+        "id": "host_bootstrap",
+        "name": "Host Bootstrap",
+        "file": "test_host_bootstrap.py",
+        "default_phases": "BOOTSTRAP",
+        "slow_phases": "",
+        "description": "One-shot: add SSH key, enable Tailscale SSH, git pull latest code",
+    },
 ]
 
 
