@@ -6336,11 +6336,13 @@ echo "OPNSENSE_MOCK_READY"
             })
             opnsense_connector_id = conn_resp.get("id")
             log(f"OPNsense connector registered: {opnsense_connector_id}")
+            opnsense_asset_id = client.register_asset_for_connector(
+                "nexplane-smoke-opnsense", opnsense_connector_id, asset_type="firewall")
 
             cr1 = client.run_cr(
                 "[OPNSENSE_RULE] add block rule",
                 "opnsense_update_rule",
-                opnsense_connector_id,
+                opnsense_asset_id,
                 {
                     "interface": "lan",
                     "action": "block",
@@ -10402,7 +10404,6 @@ echo "K8S_RBAC_SETUP_COMPLETE"
     launch_kwargs = dict(
         ImageId=cached_ami or AL2023_AMI, InstanceType="t3.small",
         MinCount=1, MaxCount=1,
-        SubnetId=subnets[0]["SubnetId"],
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name", "Value": "nexplane-smoke-k8s"},
             {"Key": "nexplane-smoke", "Value": "true"},
@@ -14087,12 +14088,14 @@ done
             })
             elastic_connector_id = conn_resp.get("id")
             log(f"Elastic connector registered: {elastic_connector_id}")
+            elastic_asset_id = client.register_asset_for_connector(
+                f"nexplane-smoke-elastic-{rule_id}", elastic_connector_id)
 
             try:
                 cr_rule = client.run_cr(
                     f"[ELASTIC_ALERTS] create detection rule {rule_id}",
                     "elastic_create_rule",
-                    elastic_connector_id,
+                    elastic_asset_id,
                     {
                         "rule_id": rule_id,
                         "name": "Nexplane Smoke Test Rule",
@@ -14441,11 +14444,13 @@ echo "SPLUNK_SETUP_COMPLETE"
             })
             splunk_connector_id = conn_resp.get("id")
             log(f"Splunk connector registered: {splunk_connector_id}")
+            splunk_asset_id = client.register_asset_for_connector(
+                f"nexplane-smoke-splunk-{search_name}", splunk_connector_id)
 
             cr_search = client.run_cr(
                 f"[SPLUNK_ALERTS] create saved search {search_name}",
                 "splunk_create_alert",
-                splunk_connector_id,
+                splunk_asset_id,
                 {
                     "name": search_name,
                     "search": "index=main sourcetype=nexplane_smoke | head 10",
@@ -14525,7 +14530,7 @@ echo "EVENT_INDEXED"
             cr_rb = client.run_cr(
                 f"[SPLUNK_ALERTS] rollback delete {search_name}",
                 "splunk_create_alert",
-                splunk_connector_id,
+                splunk_asset_id,
                 {
                     "name": search_name,
                     "_rollback": True,
