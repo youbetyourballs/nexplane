@@ -10582,7 +10582,20 @@ echo "RESTART_COMPLETE"
                     timeout=60, label="kubectl-delete")
                 result2 = {"deleted": True}
         else:
-            cr_audit = client.run_cr("[K8S_RBAC] audit RBAC", "k8s_audit_rbac", cloud_account_id,
+            import base64 as _b64
+            _k8s_kubeconfig_b64 = _b64.b64encode(kubeconfig_content.encode()).decode()
+            _k8s_conn = client.post("/connectors", json={
+                "connector_type": "kubernetes",
+                "name": f"nexplane-smoke-k8s-{instance_id}",
+                "display_name": f"nexplane-smoke-k8s-{instance_id}",
+                "credentials": {"kubeconfig": _k8s_kubeconfig_b64},
+            })
+            _k8s_conn_id = _k8s_conn.get("id")
+            log(f"K8s connector registered: {_k8s_conn_id}")
+            _k8s_asset_id = client.register_asset_for_connector(
+                f"nexplane-smoke-k8s-cluster-{instance_id}", _k8s_conn_id, asset_type="server")
+
+            cr_audit = client.run_cr("[K8S_RBAC] audit RBAC", "k8s_audit_rbac", _k8s_asset_id,
                 {"kubeconfig": kubeconfig_content})
             exec_runs = cr_audit.get("execution_runs") or []
             result = exec_runs[0].get("result") if exec_runs else {}
@@ -10592,7 +10605,7 @@ echo "RESTART_COMPLETE"
                 log("  RBAC audit: " + str(result.get("cluster_role_binding_count", 0)) + " bindings, "
                     + str(len(result.get("findings", []))) + " findings")
 
-            cr_revoke = client.run_cr("[K8S_RBAC] revoke smoke-rb", "k8s_revoke_rolebinding", cloud_account_id,
+            cr_revoke = client.run_cr("[K8S_RBAC] revoke smoke-rb", "k8s_revoke_rolebinding", _k8s_asset_id,
                 {"rolebinding_name": "smoke-rb", "namespace": "default", "kubeconfig": kubeconfig_content})
             exec_runs2 = cr_revoke.get("execution_runs") or []
             result2 = exec_runs2[0].get("result") if exec_runs2 else {}
