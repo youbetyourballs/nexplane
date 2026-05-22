@@ -4,7 +4,7 @@
   "description": "Executes Opnsense Update Rule operation.",
   "steps": [
     {
-      "generic_action": "opnsense_update_rule",
+      "generic_action": "update_firewall_rule",
       "purpose": "execute",
       "required": true
     }

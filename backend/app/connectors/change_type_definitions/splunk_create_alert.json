@@ -4,7 +4,7 @@
   "description": "Executes Splunk Create Alert operation.",
   "steps": [
     {
-      "generic_action": "splunk_create_alert",
+      "generic_action": "create_alert",
       "purpose": "execute",
       "required": true
     }
