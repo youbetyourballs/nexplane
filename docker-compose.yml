@@ -42,7 +42,7 @@ services:
       - ./backend:/app
       - tailscale_state:/var/lib/tailscale-state
     command: >
-      sh -c "tailscaled --state=/var/lib/tailscale-state/tailscaled.state &
+      sh -c "tailscaled --tun=userspace-networking --state=/var/lib/tailscale-state/tailscaled.state &
              sleep 3 &&
              alembic upgrade head &&
              python seed.py &&
