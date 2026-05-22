@@ -10475,23 +10475,18 @@ echo "K8S_RBAC_SETUP_COMPLETE"
 set -e
 systemctl start docker
 for i in $(seq 1 20); do docker info >/dev/null 2>&1 && break || sleep 3; done
-# Restart any stopped kind containers (cluster may have been stopped with the instance)
-docker ps -a --filter "label=io.x-k8s.kind.cluster=smoke-test" --format "{{.ID}}" | xargs -r docker start 2>/dev/null || true
-# Give containers 30s to become ready, then check if cluster responds
-sleep 30
-if ! kubectl get nodes --request-timeout=30s 2>/dev/null | grep -q Ready; then
-  # Cluster not healthy - delete and recreate
-  kind delete cluster --name smoke-test 2>/dev/null || true
-  PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
-  cat > /tmp/kind-config.yaml <<KINDEOF
+# Always recreate the cluster so the API server binds to the current instance's IP.
+# Reusing a cached cluster risks the API server being bound to the old AMI instance's IP.
+kind delete cluster --name smoke-test 2>/dev/null || true
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+cat > /tmp/kind-config.yaml <<KINDEOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:
   apiServerAddress: "$PRIVATE_IP"
   apiServerPort: 6443
 KINDEOF
-  kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
-fi
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
 kubectl create serviceaccount smoke-sa --namespace default 2>/dev/null || true
 kubectl get rolebinding smoke-rb -n default 2>/dev/null || \\
   kubectl create rolebinding smoke-rb --clusterrole=view --serviceaccount=default:smoke-sa --namespace=default || true
@@ -14174,7 +14169,7 @@ echo "ALERT_INDEXED"
             cr_sync = client.run_cr(
                 "[ELASTIC_ALERTS] sync_alerts",
                 "elastic_sync_alerts",
-                cloud_account_id,
+                elastic_asset_id,
                 {
                     "start_time": "now-1h",
                     "end_time": "now",
@@ -14511,7 +14506,7 @@ echo "EVENT_INDEXED"
             cr_sync = client.run_cr(
                 "[SPLUNK_ALERTS] sync_notables",
                 "splunk_sync_notables",
-                cloud_account_id,
+                splunk_asset_id,
                 {
                     "earliest": "-1h",
                     "latest": "now",

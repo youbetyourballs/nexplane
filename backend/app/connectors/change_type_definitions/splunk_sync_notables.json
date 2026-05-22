@@ -4,7 +4,7 @@
   "description": "Executes Splunk Sync Notables operation.",
   "steps": [
     {
-      "generic_action": "splunk_sync_notables",
+      "generic_action": "sync_alerts",
       "purpose": "execute",
       "required": true
     }
