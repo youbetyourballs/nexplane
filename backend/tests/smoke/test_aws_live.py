@@ -10367,7 +10367,6 @@ kubeadmConfigPatches:
   apiServer:
     certSANs:
     - "127.0.0.1"
-    - "0.0.0.0"
     - "$PRIVATE_IP"
 KINDEOF
 
@@ -10382,7 +10381,7 @@ kubectl create rolebinding smoke-rb \\
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 echo "K8S_RBAC_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-port6443-certSANs-v3").hexdigest()
+    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-port6443-certSANs-v4").hexdigest()
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
@@ -10548,7 +10547,6 @@ kubeadmConfigPatches:
   apiServer:
     certSANs:
     - "127.0.0.1"
-    - "0.0.0.0"
     - "$PRIVATE_IP"
 KINDEOF
 kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0
