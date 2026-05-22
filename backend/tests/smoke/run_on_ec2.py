@@ -683,6 +683,21 @@ Examples:
             except Exception as e:
                 print(f"  ⚠️  Could not join backend to Tailscale: {e} — using {args.base_url}")
 
+        # Terminate any orphaned runners from previous aborted runs before launching.
+        # These accumulate when the platform process dies mid-run (e.g. crash) and
+        # the finally-block cleanup never executes. Hitting vCPU limits is the symptom.
+        try:
+            _orphans = ec2.describe_instances(Filters=[
+                {"Name": "tag:Name", "Values": [RUNNER_NAME]},
+                {"Name": "instance-state-name", "Values": ["running", "pending", "stopping"]},
+            ])["Reservations"]
+            _orphan_ids = [i["InstanceId"] for r in _orphans for i in r["Instances"]]
+            if _orphan_ids:
+                print(f"  Terminating {len(_orphan_ids)} orphaned runner(s): {_orphan_ids}")
+                ec2.terminate_instances(InstanceIds=_orphan_ids)
+        except Exception as _oe:
+            print(f"  Orphan cleanup skipped: {_oe}")
+
         # Launch runner
         print(f"Launching {RUNNER_INSTANCE_TYPE} runner EC2...")
         runner_id = launch_runner(ec2, iam)
