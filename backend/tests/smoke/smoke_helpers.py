@@ -209,6 +209,17 @@ class NexplaneClient:
         fail("Tailscale auth key not found — store credentials in the Tailscale connector or pass --tailscale-auth-key <key>")
         return ""
 
+    def register_asset_for_connector(self, name: str, connector_id: str, asset_type: str = "cloud_account") -> str:
+        """Register a transient asset linked to a specific connector for use as a CR target."""
+        asset = self.post("/assets", json={
+            "name": name,
+            "asset_type": asset_type,
+            "environment": "dev",
+            "criticality": "low",
+            "connector_id": connector_id,
+        })
+        return asset["id"]
+
     def create_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> str:
         # Always include rollback_strategy so the safety engine passes on production-tagged assets
         outcome = {"rollback_strategy": "snapshot_restore", "_smoke_test": True, **desired_outcome}
