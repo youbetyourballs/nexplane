@@ -16072,10 +16072,15 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                 DocumentName="AWS-RunPowerShellScript",
                 Parameters={"commands": [
                     "Start-Service NTDS -ErrorAction SilentlyContinue",
-                    "$dl = [datetime]::Now.AddMinutes(2)",
+                    "$dl = [datetime]::Now.AddMinutes(3)",
                     "while ([datetime]::Now -lt $dl) {",
-                    "  try { (New-Object System.Net.Sockets.TcpClient).Connect('127.0.0.1', 389); Write-Output 'LDAP_UP'; break }",
-                    "  catch { Start-Sleep 5 }",
+                    "  try {",
+                    "    (New-Object System.Net.Sockets.TcpClient).Connect('127.0.0.1', 389)",
+                    "    $cred = New-Object System.Management.Automation.PSCredential('smoke\\smokeuser', (ConvertTo-SecureString 'UserPass123!' -AsPlainText -Force))",
+                    "    Get-ADUser smokeuser -Credential $cred -ErrorAction Stop | Out-Null",
+                    "    Write-Output 'LDAP_AUTH_READY'; break",
+                    "  }",
+                    "  catch { Start-Sleep 10 }",
                     "}",
                 ]},
                 TimeoutSeconds=150,
@@ -16088,8 +16093,10 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                         CommandId=_ntds_recover["Command"]["CommandId"],
                         InstanceId=instance_id)
                     if _ri["Status"] in ("Success", "Failed", "TimedOut"):
-                        if "LDAP_UP" in _ri.get("StandardOutputContent", ""):
-                            log("AD_DC_INTEGRITY: NTDS/LDAP back up after snapshot")
+                        if "LDAP_AUTH_READY" in _ri.get("StandardOutputContent", ""):
+                            log("AD_DC_INTEGRITY: NTDS/LDAP auth ready after snapshot")
+                        elif "LDAP_UP" in _ri.get("StandardOutputContent", ""):
+                            log("AD_DC_INTEGRITY: NTDS port up but auth check timed out — proceeding")
                         break
                 except Exception:
                     pass
