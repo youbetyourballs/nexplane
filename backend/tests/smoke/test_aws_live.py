@@ -9851,7 +9851,8 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
             _sp2.Popen(["socat", "TCP-LISTEN:15985,bind=0.0.0.0,fork,reuseaddr", f"TCP:{private_ip}:5985"])
             _t.sleep(3)
             _runner_ts = _sp2.run(["tailscale", "ip", "-4"], capture_output=True, text=True).stdout.strip()
-            winrm_connect_ip = _runner_ts if _runner_ts.startswith("100.") else private_ip
+            _runner_priv = _sp2.run(["bash", "-c", "curl -s --max-time 3 http://169.254.169.254/latest/meta-data/local-ipv4"], capture_output=True, text=True, timeout=5).stdout.strip()
+            winrm_connect_ip = _runner_priv if (_runner_priv.startswith("172.") or _runner_priv.startswith("10.")) else (_runner_ts if _runner_ts.startswith("100.") else private_ip)
             log(f"WinRM via socat proxy: {winrm_connect_ip}:15985 → {private_ip}:5985")
 
             # Set a known password via SSM so we can use it for WinRM
@@ -9942,7 +9943,8 @@ def run_phase_winrm_bootstrap(client, cloud_account_id):
             _sp2.Popen(["socat", "TCP-LISTEN:15985,bind=0.0.0.0,fork,reuseaddr", f"TCP:{private_ip}:5985"])
             _t.sleep(3)
             _runner_ts = _sp2.run(["tailscale", "ip", "-4"], capture_output=True, text=True).stdout.strip()
-            winrm_connect_ip = _runner_ts if _runner_ts.startswith("100.") else private_ip
+            _runner_priv = _sp2.run(["bash", "-c", "curl -s --max-time 3 http://169.254.169.254/latest/meta-data/local-ipv4"], capture_output=True, text=True, timeout=5).stdout.strip()
+            winrm_connect_ip = _runner_priv if (_runner_priv.startswith("172.") or _runner_priv.startswith("10.")) else (_runner_ts if _runner_ts.startswith("100.") else private_ip)
             password = "NexplaneSmoke2024!"
             log(f"WinRM via socat proxy (cached): {winrm_connect_ip}:15985 → {private_ip}:5985")
 
@@ -15860,8 +15862,16 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
             if ":10389" not in _chk.stdout:
                 raise RuntimeError(f"socat not listening on 10389: {_chk.stdout!r}")
 
-            dc_connect_ip = _runner_ts_ip
-            log(f"AD_DC_INTEGRITY: socat proxy — {_runner_ts_ip}:10389 → {private_ip}:389 ✓")
+            # Prefer runner's private VPC IP over Tailscale IP: the platform
+            # backend runs in userspace-networking Tailscale mode (can't initiate
+            # kernel-routed connections to 100.x.x.x peers), but both platform
+            # and runner are in the same VPC so private IP is always reachable.
+            _runner_private_ip = _sp.run(
+                ["bash", "-c", "curl -s --max-time 3 http://169.254.169.254/latest/meta-data/local-ipv4"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+            dc_connect_ip = _runner_private_ip if _runner_private_ip.startswith("172.") or _runner_private_ip.startswith("10.") else _runner_ts_ip
+            log(f"AD_DC_INTEGRITY: socat proxy — {dc_connect_ip}:10389 → {private_ip}:389 ✓")
         except Exception as _proxy_e:
             log(f"AD_DC_INTEGRITY: socat proxy failed ({_proxy_e}) — using private IP")
 
