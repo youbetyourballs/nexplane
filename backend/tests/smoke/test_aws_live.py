@@ -10327,7 +10327,7 @@ kubectl create rolebinding smoke-rb \\
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 echo "K8S_RBAC_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(b"kind-0.23.0-k8s-rbac-port6443").hexdigest()
+    setup_hash = hashlib.md5(b"kind-0.23.0-k8s-rbac-port6443-certSANs-v2").hexdigest()
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
@@ -10479,15 +10479,22 @@ for i in $(seq 1 20); do docker info >/dev/null 2>&1 && break || sleep 3; done
 # Reusing a cached cluster risks the API server being bound to the old AMI instance's IP.
 kind delete cluster --name smoke-test 2>/dev/null || true
 PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
-# Use 0.0.0.0 so kind creates a Docker port binding on all interfaces (0.0.0.0:6443)
-# which accepts connections from the VPC. The kubeconfig will reference 0.0.0.0 which
-# we rewrite to the private IP with insecure TLS (cert covers 127.0.0.1 not private IP).
+# Bind on 0.0.0.0 so Docker maps port 6443 on all interfaces (VPC-reachable).
+# Add private IP as a SAN so the API server cert covers it — no TLS workarounds needed.
 cat > /tmp/kind-config.yaml <<KINDEOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:
   apiServerAddress: "0.0.0.0"
   apiServerPort: 6443
+kubeadmConfigPatches:
+- |
+  kind: ClusterConfiguration
+  apiServer:
+    certSANs:
+    - "127.0.0.1"
+    - "0.0.0.0"
+    - "$PRIVATE_IP"
 KINDEOF
 kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
 kubectl create serviceaccount smoke-sa --namespace default 2>/dev/null || true
@@ -10514,21 +10521,14 @@ echo "RESTART_COMPLETE"
             raise RuntimeError("Could not retrieve kubeconfig from kind cluster")
         log("  kubeconfig fetched (" + str(len(kubeconfig_content)) + " bytes)")
 
-        # Rewrite server URL to EC2 private IP (kind may write 127.0.0.1 or 0.0.0.0).
-        # Also inject insecure-skip-tls-verify because the API server cert covers
-        # 127.0.0.1/0.0.0.0 but not the instance's private IP.
+        # Rewrite server URL to EC2 private IP (kind writes 0.0.0.0 when apiServerAddress=0.0.0.0).
+        # The cert covers the private IP via certSANs — no TLS workarounds needed.
         _kube_server_pat = r"server: https://(?:127\.0\.0\.1|0\.0\.0\.0):(\d+)"
         if private_ip and re.search(_kube_server_pat, kubeconfig_content):
             log("  Rewriting kubeconfig server -> " + private_ip + ":" + str(KUBE_API_PORT))
             kubeconfig_content = re.sub(
                 _kube_server_pat,
                 "server: https://" + private_ip + ":" + str(KUBE_API_PORT),
-                kubeconfig_content,
-            )
-            # Strip certificate-authority-data and add insecure-skip-tls-verify
-            kubeconfig_content = re.sub(
-                r"    certificate-authority-data: [^\n]+\n",
-                "    insecure-skip-tls-verify: true\n",
                 kubeconfig_content,
             )
 
