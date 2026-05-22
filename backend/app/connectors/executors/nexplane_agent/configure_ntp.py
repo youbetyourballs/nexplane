@@ -1,15 +1,22 @@
-from datetime import datetime, timezone
+from app.connectors.executors.nexplane_agent import _dispatch
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
-    return {
-        "action": "configure_ntp",
-        "daemon": "chronyd",
-        "config_path": "/etc/chrony.conf",
-        "servers_configured": parameters.get("servers", ["time.cloudflare.com"]),
-        "snapshot": "# previous chrony.conf content",
-        "applied_at": datetime.now(timezone.utc).isoformat(),
-    }
+    result = await _dispatch.dispatch_agent_job(
+        command="configure_ntp",
+        parameters=parameters,
+        asset_ids=list(asset_ids),
+        timeout_seconds=60,
+    )
+    result["_asset_ids"] = [str(a) for a in asset_ids]
+    return result
+
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": True, "action": "configure_ntp",
-            "config_path": execution_result.get("config_path")}
+    asset_ids = execution_result.get("_asset_ids") or []
+    return await _dispatch.dispatch_agent_job(
+        command="configure_ntp",
+        parameters={"action": "restore", "snapshot_id": execution_result.get("snapshot_id", "")},
+        asset_ids=asset_ids,
+        timeout_seconds=60,
+    )
