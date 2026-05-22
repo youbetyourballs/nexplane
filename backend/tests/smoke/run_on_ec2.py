@@ -17,7 +17,7 @@ hot-reload interference that occurs when running inside the local Docker contain
 on Windows, and gives consistent network conditions for AWS API calls.
 
 Usage:
-    python run_on_ec2.py --phases A,AUTO_AI [--base-url http://100.x.x.x:8000] [OPTIONS]
+    python run_on_ec2.py --phases A,AUTO_AI [--base-url http://172.31.x.x:8000] [OPTIONS]
 
 All unknown arguments are forwarded to test_aws_live.py.
 """
@@ -549,11 +549,11 @@ All arguments after known flags are forwarded to test_aws_live.py.
 Examples:
     python run_on_ec2.py --email admin@acme.example --password admin123 --phases A,AUTO_AI
     python run_on_ec2.py --email admin@acme.example --password admin123 --phases A,AUTO_AI \\
-        --base-url http://100.82.163.49:8000
+        --base-url http://172.31.x.x:8000
 """,
     )
-    parser.add_argument("--base-url", default="http://100.82.163.49:8000",
-                        help="Backend URL (default: Tailscale IP)")
+    parser.add_argument("--base-url", default="",
+                        help="Backend URL. Defaults to platform VPC private IP via IMDS.")
     parser.add_argument("--email", default="admin@acme.example",
                         help="Nexplane user email (default: admin@acme.example)")
     parser.add_argument("--password", default="admin123",
@@ -576,6 +576,26 @@ Examples:
                              "use when Docker bind mount 9P is slow/stuck)")
 
     args, extra = parser.parse_known_args()
+
+    # Resolve base URL: use VPC private IP from IMDS if not explicitly set.
+    # Runners are in the same VPC as the platform — no Tailscale needed.
+    if not args.base_url:
+        try:
+            import urllib.request as _ur
+            _imds_token = _ur.urlopen(
+                _ur.Request("http://169.254.169.254/latest/api/token",
+                            headers={"X-aws-ec2-metadata-token-ttl-seconds": "10"},
+                            method="PUT"), timeout=2
+            ).read().decode()
+            _private_ip = _ur.urlopen(
+                _ur.Request("http://169.254.169.254/latest/meta-data/local-ipv4",
+                            headers={"X-aws-ec2-metadata-token": _imds_token}), timeout=2
+            ).read().decode()
+            args.base_url = f"http://{_private_ip}:8000"
+            print(f"Platform base URL (VPC): {args.base_url}")
+        except Exception as _e:
+            args.base_url = "http://localhost:8000"
+            print(f"IMDS unavailable ({_e}), falling back to {args.base_url}")
 
     # Auto-fetch Tailscale auth key from platform DB if not provided
     if not args.tailscale_auth_key:
@@ -670,15 +690,13 @@ Examples:
             print("Packaging smoke test files...")
             tarball = make_test_tarball()
 
-        # Join backend to Tailscale so the runner can reach it
+        # Runner and platform are in the same VPC — no Tailscale join needed.
+        # Only join Tailscale if the base URL is explicitly a Tailscale IP (100.x.x.x).
         backend_ts_ip = args.base_url.split("//")[-1].split(":")[0]
-        # If the base-url already contains a Tailscale IP (100.x.x.x), the backend is
-        # already on Tailscale — skip setup_backend_tailscale to avoid crashing the container.
-        _already_on_tailscale = backend_ts_ip.startswith("100.")
-        if args.tailscale_auth_key and not _already_on_tailscale:
+        _is_vpc_ip = not backend_ts_ip.startswith("100.")
+        if args.tailscale_auth_key and not _is_vpc_ip:
             try:
                 backend_ts_ip = setup_backend_tailscale(args.tailscale_auth_key)
-                # Override base_url to use the fresh Tailscale IP
                 args.base_url = f"http://{backend_ts_ip}:8000"
             except Exception as e:
                 print(f"  ⚠️  Could not join backend to Tailscale: {e} — using {args.base_url}")
