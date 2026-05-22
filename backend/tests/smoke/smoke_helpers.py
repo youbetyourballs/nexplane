@@ -37,7 +37,9 @@ if _IN_CONTAINER and "/app" not in sys.path:
 # ---------------------------------------------------------------------------
 
 def log(msg: str, ok: bool = True) -> None:
-    print(f"{'✅' if ok else '❌'} {msg}")
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    print(f"[{ts}] {'✅' if ok else '❌'} {msg}")
 
 
 def fail(msg: str) -> None:
