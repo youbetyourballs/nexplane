@@ -10490,7 +10490,10 @@ kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
 kubectl create serviceaccount smoke-sa --namespace default 2>/dev/null || true
 kubectl get rolebinding smoke-rb -n default 2>/dev/null || \\
   kubectl create rolebinding smoke-rb --clusterrole=view --serviceaccount=default:smoke-sa --namespace=default || true
+# Forward private-IP:6443 -> 127.0.0.1:6443 so backend can reach API server from VPC
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
+iptables -t nat -I PREROUTING -d "$PRIVATE_IP" -p tcp --dport 6443 -j DNAT --to-destination 127.0.0.1:6443 2>/dev/null || true
+iptables -t nat -I OUTPUT -d "$PRIVATE_IP" -p tcp --dport 6443 -j DNAT --to-destination 127.0.0.1:6443 2>/dev/null || true
 echo "RESTART_COMPLETE"
 """
             restart_out = _ssm_run_poll(ssm_client, instance_id, restart_script, timeout=900, label="k8s-restart")
