@@ -10299,12 +10299,16 @@ dnf install -y docker 2>/dev/null || apt-get install -y docker.io 2>/dev/null ||
 systemctl enable docker && systemctl start docker
 for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break || sleep 2; done
 
-# Install kubectl
-curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-chmod +x kubectl && mv kubectl /usr/local/bin/
+# Install kubectl v1.29.0 (hardcoded - avoids dynamic version lookup that can stall)
+curl -fsSL --retry 3 --max-time 120 \
+  -o /usr/local/bin/kubectl \
+  "https://storage.googleapis.com/kubernetes-release/release/v1.29.0/bin/linux/amd64/kubectl"
+chmod +x /usr/local/bin/kubectl
 
-# Install kind v0.23.0
-curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+# Install kind v0.23.0 from GitHub CDN
+curl -fsSL --retry 3 --max-time 120 \
+  -o /usr/local/bin/kind \
+  "https://github.com/kubernetes-sigs/kind/releases/download/v0.23.0/kind-linux-amd64"
 chmod +x /usr/local/bin/kind
 
 # Create kind config: bind on all interfaces + add private IP as SAN
