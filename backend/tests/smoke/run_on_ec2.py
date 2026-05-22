@@ -549,10 +549,10 @@ All arguments after known flags are forwarded to test_aws_live.py.
 Examples:
     python run_on_ec2.py --email admin@acme.example --password admin123 --phases A,AUTO_AI
     python run_on_ec2.py --email admin@acme.example --password admin123 --phases A,AUTO_AI \\
-        --base-url http://100.122.229.11:8000
+        --base-url http://100.82.163.49:8000
 """,
     )
-    parser.add_argument("--base-url", default="http://100.122.229.11:8000",
+    parser.add_argument("--base-url", default="http://100.82.163.49:8000",
                         help="Backend URL (default: Tailscale IP)")
     parser.add_argument("--email", default="admin@acme.example",
                         help="Nexplane user email (default: admin@acme.example)")
