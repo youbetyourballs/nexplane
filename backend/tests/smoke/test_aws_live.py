@@ -6340,7 +6340,7 @@ echo "OPNSENSE_MOCK_READY"
             cr1 = client.run_cr(
                 "[OPNSENSE_RULE] add block rule",
                 "opnsense_update_rule",
-                cloud_account_id,
+                opnsense_connector_id,
                 {
                     "interface": "lan",
                     "action": "block",
@@ -10389,6 +10389,16 @@ echo "K8S_RBAC_SETUP_COMPLETE"
             except Exception:
                 pass
 
+    # Look up nexplane-smoke-k8s SG (allows port 6443 from VPC so backend can reach API server)
+    _k8s_sg_id = None
+    try:
+        _sgs = ec2_client.describe_security_groups(
+            Filters=[{"Name": "group-name", "Values": ["nexplane-smoke-k8s"]}]
+        )["SecurityGroups"]
+        _k8s_sg_id = _sgs[0]["GroupId"] if _sgs else None
+    except Exception:
+        pass
+
     launch_kwargs = dict(
         ImageId=cached_ami or AL2023_AMI, InstanceType="t3.small",
         MinCount=1, MaxCount=1,
@@ -10397,6 +10407,12 @@ echo "K8S_RBAC_SETUP_COMPLETE"
             {"Key": "Name", "Value": "nexplane-smoke-k8s"},
             {"Key": "nexplane-smoke", "Value": "true"},
         ]}],
+        NetworkInterfaces=[{
+            "DeviceIndex": 0,
+            "SubnetId": subnets[0]["SubnetId"],
+            "AssociatePublicIpAddress": False,
+            **( {"Groups": [_k8s_sg_id]} if _k8s_sg_id else {} ),
+        }],
     )
     if instance_profile_name:
         launch_kwargs["IamInstanceProfile"] = {"Name": instance_profile_name}
@@ -14076,7 +14092,7 @@ done
                 cr_rule = client.run_cr(
                     f"[ELASTIC_ALERTS] create detection rule {rule_id}",
                     "elastic_create_rule",
-                    cloud_account_id,
+                    elastic_connector_id,
                     {
                         "rule_id": rule_id,
                         "name": "Nexplane Smoke Test Rule",
@@ -14429,7 +14445,7 @@ echo "SPLUNK_SETUP_COMPLETE"
             cr_search = client.run_cr(
                 f"[SPLUNK_ALERTS] create saved search {search_name}",
                 "splunk_create_alert",
-                cloud_account_id,
+                splunk_connector_id,
                 {
                     "name": search_name,
                     "search": "index=main sourcetype=nexplane_smoke | head 10",
@@ -14509,7 +14525,7 @@ echo "EVENT_INDEXED"
             cr_rb = client.run_cr(
                 f"[SPLUNK_ALERTS] rollback delete {search_name}",
                 "splunk_create_alert",
-                cloud_account_id,
+                splunk_connector_id,
                 {
                     "name": search_name,
                     "_rollback": True,
