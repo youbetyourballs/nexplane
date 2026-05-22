@@ -10307,13 +10307,21 @@ chmod +x kubectl && mv kubectl /usr/local/bin/
 curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
 chmod +x /usr/local/bin/kind
 
-# Create kind config: expose API server on private IP
+# Create kind config: bind on all interfaces + add private IP as SAN
 cat > /tmp/kind-config.yaml <<KINDEOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:
-  apiServerAddress: "$PRIVATE_IP"
+  apiServerAddress: "0.0.0.0"
   apiServerPort: 6443
+kubeadmConfigPatches:
+- |
+  kind: ClusterConfiguration
+  apiServer:
+    certSANs:
+    - "127.0.0.1"
+    - "0.0.0.0"
+    - "$PRIVATE_IP"
 KINDEOF
 
 kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
@@ -10462,7 +10470,7 @@ echo "K8S_RBAC_SETUP_COMPLETE"
     try:
         if not cached_ami:
             log("  Running k8s setup (docker + kind + cluster create, ~5 min)...")
-            setup_out = _ssm_run_poll(ssm_client, instance_id, setup_script, timeout=600, label="k8s-setup")
+            setup_out = _ssm_run_poll(ssm_client, instance_id, setup_script, timeout=1200, label="k8s-setup")
             if "K8S_RBAC_SETUP_COMPLETE" in setup_out:
                 log("  kind cluster created with test RoleBinding")
                 if get_or_create_smoke_ami:
