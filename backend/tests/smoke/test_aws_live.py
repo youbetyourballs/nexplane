@@ -10293,8 +10293,10 @@ def run_phase_k8s_rbac(client, cloud_account_id):
     KUBECTL_VERSION = "v1.29.0"
     KIND_VERSION = "v0.23.0"
 
-    # Stage kubectl and kind to S3 (VPC endpoint) so the runner can download without internet.
-    # The platform container has internet access; runners don't (no public IP, no NAT route).
+    # Stage tools to S3 (VPC gateway endpoint) so runners can download without internet.
+    # Platform container has internet; runners have no public IP and no NAT route.
+    KIND_NODE_IMAGE = "kindest/node:v1.30.0"
+    KIND_NODE_S3KEY = f"smoke-tools/kindest-node-v1.30.0.tar.gz"
     s3_client = _get_aws_boto3_client("s3")
     if s3_client:
         import urllib.request as _ur
@@ -10310,6 +10312,28 @@ def run_phase_k8s_rbac(client, cloud_account_id):
                 _data = _ur.urlopen(_url, timeout=120).read()
                 s3_client.put_object(Bucket=S3_TOOLS_BUCKET, Key=_s3key, Body=_data)
                 log(f"  {_tool} staged to s3://{S3_TOOLS_BUCKET}/{_s3key}")
+        # kindest/node Docker image: pulled via docker on the platform HOST (not container)
+        # and uploaded to S3 as a tar.gz — see run_on_ec2 bootstrap or manual staging step.
+        try:
+            s3_client.head_object(Bucket=S3_TOOLS_BUCKET, Key=KIND_NODE_S3KEY)
+            log(f"  kindest/node image already in S3")
+        except Exception:
+            log(f"  kindest/node not in S3 — pulling via platform host docker and staging...")
+            import subprocess as _sp
+            _pull = _sp.run(
+                ["docker", "pull", KIND_NODE_IMAGE],
+                capture_output=True, text=True, timeout=300
+            )
+            if _pull.returncode != 0:
+                log(f"  WARNING: docker pull failed (no docker in container?): {_pull.stderr[:200]}", ok=False)
+            else:
+                _save = _sp.run(["docker", "save", KIND_NODE_IMAGE], capture_output=True, timeout=300)
+                import gzip as _gz, io as _io
+                _buf = _io.BytesIO()
+                with _gz.GzipFile(fileobj=_buf, mode='wb') as _gz_f:
+                    _gz_f.write(_save.stdout)
+                s3_client.put_object(Bucket=S3_TOOLS_BUCKET, Key=KIND_NODE_S3KEY, Body=_buf.getvalue())
+                log(f"  kindest/node staged to s3://{S3_TOOLS_BUCKET}/{KIND_NODE_S3KEY}")
 
     setup_script = f"""
 set -e
@@ -10326,6 +10350,9 @@ aws s3 cp s3://{S3_TOOLS_BUCKET}/smoke-tools/kubectl-{KUBECTL_VERSION} /usr/loca
 chmod +x /usr/local/bin/kubectl
 aws s3 cp s3://{S3_TOOLS_BUCKET}/smoke-tools/kind-{KIND_VERSION} /usr/local/bin/kind
 chmod +x /usr/local/bin/kind
+
+# Pre-load kindest/node image from S3 (runner has no internet; image staged by platform)
+aws s3 cp s3://{S3_TOOLS_BUCKET}/smoke-tools/kindest-node-v1.30.0.tar.gz - | docker load
 
 # Create kind cluster: bind on 0.0.0.0 + add private IP as SAN for proper TLS
 cat > /tmp/kind-config.yaml <<KINDEOF
