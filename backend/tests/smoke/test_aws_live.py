@@ -10289,7 +10289,29 @@ def run_phase_k8s_rbac(client, cloud_account_id):
 
     AL2023_AMI = "ami-0953476d60561c955"
     KUBE_API_PORT = 6443
-    setup_script = """
+    S3_TOOLS_BUCKET = "nexplane-agent-downloads"
+    KUBECTL_VERSION = "v1.29.0"
+    KIND_VERSION = "v0.23.0"
+
+    # Stage kubectl and kind to S3 (VPC endpoint) so the runner can download without internet.
+    # The platform container has internet access; runners don't (no public IP, no NAT route).
+    s3_client = _get_aws_boto3_client("s3")
+    if s3_client:
+        import urllib.request as _ur
+        for _tool, _url, _s3key in [
+            ("kubectl", f"https://storage.googleapis.com/kubernetes-release/release/{KUBECTL_VERSION}/bin/linux/amd64/kubectl", f"smoke-tools/kubectl-{KUBECTL_VERSION}"),
+            ("kind",    f"https://github.com/kubernetes-sigs/kind/releases/download/{KIND_VERSION}/kind-linux-amd64", f"smoke-tools/kind-{KIND_VERSION}"),
+        ]:
+            try:
+                s3_client.head_object(Bucket=S3_TOOLS_BUCKET, Key=_s3key)
+                log(f"  {_tool} already in S3")
+            except Exception:
+                log(f"  Downloading {_tool} -> S3...")
+                _data = _ur.urlopen(_url, timeout=120).read()
+                s3_client.put_object(Bucket=S3_TOOLS_BUCKET, Key=_s3key, Body=_data)
+                log(f"  {_tool} staged to s3://{S3_TOOLS_BUCKET}/{_s3key}")
+
+    setup_script = f"""
 set -e
 PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
 echo "Private IP: $PRIVATE_IP"
@@ -10299,19 +10321,13 @@ dnf install -y docker 2>/dev/null || apt-get install -y docker.io 2>/dev/null ||
 systemctl enable docker && systemctl start docker
 for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break || sleep 2; done
 
-# Install kubectl v1.29.0 (hardcoded - avoids dynamic version lookup that can stall)
-curl -fsSL --retry 3 --max-time 120 \
-  -o /usr/local/bin/kubectl \
-  "https://storage.googleapis.com/kubernetes-release/release/v1.29.0/bin/linux/amd64/kubectl"
+# Download kubectl and kind from S3 VPC endpoint (no internet egress needed)
+aws s3 cp s3://{S3_TOOLS_BUCKET}/smoke-tools/kubectl-{KUBECTL_VERSION} /usr/local/bin/kubectl
 chmod +x /usr/local/bin/kubectl
-
-# Install kind v0.23.0 from GitHub CDN
-curl -fsSL --retry 3 --max-time 120 \
-  -o /usr/local/bin/kind \
-  "https://github.com/kubernetes-sigs/kind/releases/download/v0.23.0/kind-linux-amd64"
+aws s3 cp s3://{S3_TOOLS_BUCKET}/smoke-tools/kind-{KIND_VERSION} /usr/local/bin/kind
 chmod +x /usr/local/bin/kind
 
-# Create kind config: bind on all interfaces + add private IP as SAN
+# Create kind cluster: bind on 0.0.0.0 + add private IP as SAN for proper TLS
 cat > /tmp/kind-config.yaml <<KINDEOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
