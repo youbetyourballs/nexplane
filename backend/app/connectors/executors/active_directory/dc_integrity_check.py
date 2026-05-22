@@ -255,6 +255,34 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     else:
         result["ldap_checks"] = "skipped"
 
+    # Snapshot staleness — check S3 for the most recent ad_forest_snapshot
+    s3_bucket = parameters.get("s3_bucket", "nexplane-smoke-snapshots")
+    s3_prefix = parameters.get("s3_prefix", "ad-snapshots/")
+    try:
+        import boto3
+        s3 = boto3.client("s3")
+        paginator = s3.get_paginator("list_objects_v2")
+        latest_mod: datetime | None = None
+        prefix = s3_prefix.rstrip("/") + "/"
+        for page in paginator.paginate(Bucket=s3_bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                lm = obj.get("LastModified")
+                if lm and (latest_mod is None or lm > latest_mod):
+                    latest_mod = lm
+        if latest_mod:
+            age_days = round((datetime.now(timezone.utc) - latest_mod).total_seconds() / 86400, 1)
+            result["last_snapshot_age_days"] = age_days
+            if age_days > 7:
+                result["snapshot_staleness"] = "degraded"
+            else:
+                result["snapshot_staleness"] = "ok"
+        else:
+            result["last_snapshot_age_days"] = None
+            result["snapshot_staleness"] = "missing"
+    except Exception as _s3e:
+        result["last_snapshot_age_days"] = None
+        result["snapshot_staleness"] = f"check_failed: {_s3e}"
+
     # Overall health (best-effort if WinRM skipped)
     repl_status = result.get("replication", {}).get("status", "unknown")
     sysvol_reachable = result.get("sysvol", {}).get("reachable", True)
