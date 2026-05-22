@@ -848,6 +848,53 @@ def run_phase_access_review(
         return _phase_result(PHASE, "failed", time.time() - start, [], [], False, 0, 3)
 
 
+def run_phase_host_setup(ssm_boto) -> dict:
+    """One-time host setup: add laptop SSH key, enable Tailscale SSH, git pull latest code."""
+    PHASE = "HOST_SETUP"
+    HOST_INSTANCE_ID = "i-050bab85006f0b73c"
+    LAPTOP_PUBKEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIILQhOwkXHYQ91Mhhjn8tAbDoxXGnXOdWbFh01SNOuTX john.o.terrill@gmail.com"
+
+    commands = [
+        # Add laptop public key if not already present
+        f"grep -qxF '{LAPTOP_PUBKEY}' /home/ec2-user/.ssh/authorized_keys || echo '{LAPTOP_PUBKEY}' >> /home/ec2-user/.ssh/authorized_keys",
+        "chmod 600 /home/ec2-user/.ssh/authorized_keys",
+        # Enable Tailscale SSH
+        "tailscale up --ssh --accept-risk=lose-ssh 2>&1 || true",
+        # Pull latest code from GitHub
+        "cd /home/ec2-user/nexplane && git pull origin master 2>&1",
+        # Restart backend to pick up code changes
+        "cd /home/ec2-user/nexplane && docker compose restart backend 2>&1 | tail -3",
+        "echo HOST_SETUP_DONE",
+    ]
+    _start = time.time()
+    try:
+        resp = ssm_boto.send_command(
+            InstanceIds=[HOST_INSTANCE_ID],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": commands},
+            TimeoutSeconds=120,
+        )
+        cmd_id = resp["Command"]["CommandId"]
+        log(f"{PHASE}: SSM command sent ({cmd_id})")
+        for _ in range(24):
+            time.sleep(5)
+            inv = ssm_boto.get_command_invocation(CommandId=cmd_id, InstanceId=HOST_INSTANCE_ID)
+            status = inv["Status"]
+            if status in ("Success", "Failed", "TimedOut", "Cancelled"):
+                output = inv.get("StandardOutputContent", "")
+                log(f"{PHASE}: SSM status={status}")
+                if "HOST_SETUP_DONE" in output:
+                    log(f"{PHASE}: host setup complete")
+                    return _phase_result(PHASE, "passed", time.time() - _start, [], [], False, 3, 3)
+                else:
+                    log(f"{PHASE}: unexpected output: {output[-300:]}", ok=False)
+                    return _phase_result(PHASE, "failed", time.time() - _start, [], [], False, 0, 3)
+        return _phase_result(PHASE, "failed", 120, [], [], False, 0, 3)
+    except Exception as e:
+        log(f"{PHASE}: error: {e}", ok=False)
+        return _phase_result(PHASE, "failed", 0, [], [], False, 0, 3)
+
+
 def run_phase_project_microseg(
     client: NexplaneClient,
     run_id: str = "",
@@ -921,6 +968,7 @@ if __name__ == "__main__":
     ssm_boto = _get_aws_boto3_client("ssm")
 
     phase_map = {
+        "HOST_SETUP": lambda: run_phase_host_setup(ssm_boto),
         "IR_ISOLATE_HOST": lambda: run_phase_ir_isolate_host(
             client, ec2_client, ssm_boto,
             args.agent_asset_id, args.ec2_instance_id,
