@@ -15380,6 +15380,16 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
             f"AD_DC_INTEGRITY: launching {_dc_instance_type} Windows instance from "
             f"{'cached' if cached_ami else 'base'} AMI {launch_ami}..."
         )
+        # Ensure nexplane-smoke-dc SG exists (allows LDAP/WinRM from VPC)
+        _dc_sg_id = None
+        try:
+            _sgs = ec2_client.describe_security_groups(
+                Filters=[{"Name": "group-name", "Values": ["nexplane-smoke-dc"]}]
+            )["SecurityGroups"]
+            _dc_sg_id = _sgs[0]["GroupId"] if _sgs else None
+        except Exception:
+            pass
+
         launch_resp = ec2_client.run_instances(
             ImageId=launch_ami,
             InstanceType=_dc_instance_type,
@@ -15390,6 +15400,7 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                 "DeviceIndex": 0,
                 "SubnetId": _dc_subnet_id,
                 "AssociatePublicIpAddress": False,
+                **( {"Groups": [_dc_sg_id]} if _dc_sg_id else {} ),
             }],
             TagSpecifications=[{
                 "ResourceType": "instance",

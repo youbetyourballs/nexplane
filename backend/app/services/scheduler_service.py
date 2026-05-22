@@ -49,6 +49,13 @@ async def start():
         id="vuln_sla_escalation",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _run_smoke_reaper,
+        trigger="interval",
+        minutes=30,
+        id="smoke_reaper",
+        replace_existing=True,
+    )
 
     if _db_factory is None:
         return
@@ -166,6 +173,13 @@ async def _run_scanner_poll():
     for org_id in org_ids:
         async with _db_factory() as db:
             await poll_crowdstrike(db, org_id)
+
+
+async def _run_smoke_reaper():
+    if _db_factory is None:
+        return
+    from app.services.smoke_reaper import reap_smoke_zombies
+    await reap_smoke_zombies(_db_factory)
 
 
 async def dispatch_due_reboots():
