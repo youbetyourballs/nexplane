@@ -16063,6 +16063,39 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
         except (Exception, SystemExit) as _snap_e:
             log(f"  WARNING: ad_forest_snapshot failed (non-fatal): {_snap_e}")
 
+        # Ensure NTDS is back up after snapshot (snapshot stops AD DS briefly).
+        # If snapshot failed mid-execution, NTDS may still be stopped.
+        try:
+            import time as _t2
+            _ntds_recover = ssm_boto.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunPowerShellScript",
+                Parameters={"commands": [
+                    "Start-Service NTDS -ErrorAction SilentlyContinue",
+                    "$dl = [datetime]::Now.AddMinutes(2)",
+                    "while ([datetime]::Now -lt $dl) {",
+                    "  try { (New-Object System.Net.Sockets.TcpClient).Connect('127.0.0.1', 389); Write-Output 'LDAP_UP'; break }",
+                    "  catch { Start-Sleep 5 }",
+                    "}",
+                ]},
+                TimeoutSeconds=150,
+            )
+            _dl = _t2.time() + 160
+            while _t2.time() < _dl:
+                _t2.sleep(5)
+                try:
+                    _ri = ssm_boto.get_command_invocation(
+                        CommandId=_ntds_recover["Command"]["CommandId"],
+                        InstanceId=instance_id)
+                    if _ri["Status"] in ("Success", "Failed", "TimedOut"):
+                        if "LDAP_UP" in _ri.get("StandardOutputContent", ""):
+                            log("AD_DC_INTEGRITY: NTDS/LDAP back up after snapshot")
+                        break
+                except Exception:
+                    pass
+        except Exception as _nr_e:
+            log(f"  WARNING: NTDS recovery check failed: {_nr_e}")
+
         log("AD_DC_INTEGRITY: all steps passed")
 
         # ------------------------------------------------------------------
