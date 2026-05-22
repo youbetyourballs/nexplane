@@ -10479,21 +10479,23 @@ for i in $(seq 1 20); do docker info >/dev/null 2>&1 && break || sleep 3; done
 # Reusing a cached cluster risks the API server being bound to the old AMI instance's IP.
 kind delete cluster --name smoke-test 2>/dev/null || true
 PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+# Use 0.0.0.0 so kind creates a Docker port binding on all interfaces (0.0.0.0:6443)
+# which accepts connections from the VPC. The kubeconfig will reference 0.0.0.0 which
+# we rewrite to the private IP with insecure TLS (cert covers 127.0.0.1 not private IP).
 cat > /tmp/kind-config.yaml <<KINDEOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:
-  apiServerAddress: "$PRIVATE_IP"
+  apiServerAddress: "0.0.0.0"
   apiServerPort: 6443
 KINDEOF
 kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
 kubectl create serviceaccount smoke-sa --namespace default 2>/dev/null || true
 kubectl get rolebinding smoke-rb -n default 2>/dev/null || \\
   kubectl create rolebinding smoke-rb --clusterrole=view --serviceaccount=default:smoke-sa --namespace=default || true
-# Forward private-IP:6443 -> 127.0.0.1:6443 so backend can reach API server from VPC
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
-iptables -t nat -I PREROUTING -d "$PRIVATE_IP" -p tcp --dport 6443 -j DNAT --to-destination 127.0.0.1:6443 2>/dev/null || true
-iptables -t nat -I OUTPUT -d "$PRIVATE_IP" -p tcp --dport 6443 -j DNAT --to-destination 127.0.0.1:6443 2>/dev/null || true
+# Print private IP so the test can inject it into the kubeconfig
+echo "PRIVATE_IP_IS:$PRIVATE_IP"
 echo "RESTART_COMPLETE"
 """
             restart_out = _ssm_run_poll(ssm_client, instance_id, restart_script, timeout=900, label="k8s-restart")
@@ -10512,12 +10514,21 @@ echo "RESTART_COMPLETE"
             raise RuntimeError("Could not retrieve kubeconfig from kind cluster")
         log("  kubeconfig fetched (" + str(len(kubeconfig_content)) + " bytes)")
 
-        # If kubeconfig still has 127.0.0.1, rewrite to EC2 private IP
-        if private_ip and "127.0.0.1" in kubeconfig_content:
-            log("  Rewriting kubeconfig server 127.0.0.1 -> " + private_ip)
+        # Rewrite server URL to EC2 private IP (kind may write 127.0.0.1 or 0.0.0.0).
+        # Also inject insecure-skip-tls-verify because the API server cert covers
+        # 127.0.0.1/0.0.0.0 but not the instance's private IP.
+        _kube_server_pat = r"server: https://(?:127\.0\.0\.1|0\.0\.0\.0):(\d+)"
+        if private_ip and re.search(_kube_server_pat, kubeconfig_content):
+            log("  Rewriting kubeconfig server -> " + private_ip + ":" + str(KUBE_API_PORT))
             kubeconfig_content = re.sub(
-                r"server: https://127\.0\.0\.1:(\d+)",
+                _kube_server_pat,
                 "server: https://" + private_ip + ":" + str(KUBE_API_PORT),
+                kubeconfig_content,
+            )
+            # Strip certificate-authority-data and add insecure-skip-tls-verify
+            kubeconfig_content = re.sub(
+                r"    certificate-authority-data: [^\n]+\n",
+                "    insecure-skip-tls-verify: true\n",
                 kubeconfig_content,
             )
 
