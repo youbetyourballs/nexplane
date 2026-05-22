@@ -22,7 +22,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "127.0.0.1:8000:8000"
+      - "0.0.0.0:8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://nexplane:nexplane_dev@db:5432/nexplane
       SECRET_KEY: dev-secret-key-change-in-production-32chars
