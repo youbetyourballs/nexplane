@@ -23,3 +23,11 @@ func RollbackGatekeeperDisable(_ map[string]any) (map[string]any, error) {
 func RollbackDefaultsWrite(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("defaults_write rollback is only supported on macOS")
 }
+
+func RollbackProfilesInstall(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("profiles_install rollback is only supported on macOS")
+}
+
+func RollbackProfilesRemove(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("profiles_remove rollback is only supported on macOS")
+}

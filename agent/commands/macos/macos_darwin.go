@@ -3,7 +3,9 @@
 package macos
 
 import (
+	"encoding/base64"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -260,6 +262,76 @@ func santaCheck(_ map[string]any) (map[string]any, error) {
 	}
 
 	return result, nil
+}
+
+func profilesInstall(params map[string]any) (map[string]any, error) {
+	plistB64, _ := params["plist_b64"].(string)
+	if plistB64 == "" {
+		return nil, fmt.Errorf("profiles_install requires plist_b64")
+	}
+
+	plistBytes, err := base64.StdEncoding.DecodeString(plistB64)
+	if err != nil {
+		return nil, fmt.Errorf("profiles_install: invalid base64: %w", err)
+	}
+
+	identifier := extractPlistKey(string(plistBytes), "PayloadIdentifier")
+	if identifier == "" {
+		return nil, fmt.Errorf("profiles_install: PayloadIdentifier not found in plist")
+	}
+
+	tmp, err := os.CreateTemp("", "nexplane-profile-*.mobileconfig")
+	if err != nil {
+		return nil, fmt.Errorf("profiles_install: temp file: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.Write(plistBytes); err != nil {
+		return nil, fmt.Errorf("profiles_install: write temp: %w", err)
+	}
+	tmp.Close()
+
+	out, err := run("profiles", "install", "-path", tmp.Name())
+	if err != nil {
+		return nil, fmt.Errorf("profiles install: %s: %w", out, err)
+	}
+	return map[string]any{"identifier": identifier, "installed": true, "output": out}, nil
+}
+
+func profilesRemove(params map[string]any) (map[string]any, error) {
+	identifier, _ := params["identifier"].(string)
+	if identifier == "" {
+		return nil, fmt.Errorf("profiles_remove requires identifier")
+	}
+
+	listOut, _ := run("profiles", "list", "-output", "stdout-xml")
+	prevPlistB64 := base64.StdEncoding.EncodeToString([]byte(listOut))
+
+	out, err := run("profiles", "remove", "-identifier", identifier)
+	if err != nil {
+		return nil, fmt.Errorf("profiles remove %s: %s: %w", identifier, out, err)
+	}
+	return map[string]any{
+		"identifier":         identifier,
+		"removed":            true,
+		"previous_plist_b64": prevPlistB64,
+		"output":             out,
+	}, nil
+}
+
+func extractPlistKey(plist, key string) string {
+	lines := strings.Split(plist, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "<key>"+key+"</key>") && i+1 < len(lines) {
+			val := strings.TrimSpace(lines[i+1])
+			val = strings.TrimPrefix(val, "<string>")
+			val = strings.TrimSuffix(val, "</string>")
+			if val != lines[i+1] {
+				return val
+			}
+		}
+	}
+	return ""
 }
 
 // macosSysinfo returns macOS version and hardware info.
