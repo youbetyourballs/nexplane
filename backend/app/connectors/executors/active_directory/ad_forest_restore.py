@@ -102,7 +102,25 @@ Write-Output "DNS_SET"
 
 _PS_PROMOTE_IFM = r"""
 param([string]$DomainName, [string]$IFMPath, [string]$SafeModePassword,
-      [string]$DomainAdminUser, [string]$DomainAdminPassword)
+      [string]$DomainAdminUser, [string]$DomainAdminPassword, [string]$SourceDcIp)
+# Re-apply DNS to source DC right before dcpromo — DHCP can overwrite between WinRM sessions
+if ($SourceDcIp) {
+    $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
+    foreach ($adapter in $adapters) {
+        Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses $SourceDcIp
+    }
+    ipconfig /flushdns | Out-Null
+    # Wait up to 2 min for domain to be resolvable from the source DC's DNS
+    $deadline = (Get-Date).AddSeconds(120)
+    $resolved = $false
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $r = Resolve-DnsName $DomainName -Server $SourceDcIp -Type A -ErrorAction Stop
+            if ($r) { $resolved = $true; break }
+        } catch { Start-Sleep -Seconds 5 }
+    }
+    Write-Output "DNS_REAPPLIED=$resolved"
+}
 Import-Module ADDSDeployment
 $secPwd = ConvertTo-SecureString $SafeModePassword -AsPlainText -Force
 $credParams = @{}
@@ -388,6 +406,7 @@ def _do_restore(
         "SafeModePassword": safe_mode_password,
         "DomainAdminUser": domain_admin_username,
         "DomainAdminPassword": domain_admin_password,
+        "SourceDcIp": source_dc_ip,
     })
     if rc != 0 or "DC_PROMOTED" not in out:
         raise RuntimeError(f"DC promotion failed (rc={rc}): {err or out}")
