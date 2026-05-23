@@ -633,8 +633,20 @@ async def manual_rollback(
                         except Exception:
                             continue
                     if _mod and hasattr(_mod, "rollback"):
+                        # Extract step 1 result from nested execution structure so
+                        # rollback() receives the actual step result dict, not the
+                        # full workflow result envelope.
+                        _exec_steps = (
+                            execution_result.get("execution", {}).get("steps")
+                            or execution_result.get("steps")
+                            or []
+                        )
+                        _step1 = next(
+                            (s.get("result", {}) for s in _exec_steps if s.get("step_number") == 1),
+                            execution_result,
+                        )
                         rollback_result = await _mod.rollback(
-                            cr.desired_outcome or {}, execution_result, _connector
+                            cr.desired_outcome or {}, _step1, _connector
                         )
                     else:
                         rollback_result = {"rolled_back": False, "reason": "no_rollback_function_found"}

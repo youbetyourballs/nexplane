@@ -11,6 +11,5 @@
   ],
   "preflight_checks": ["connector_reachable"],
   "verification_methods": ["api_check"],
-  "rollback_action": "santa_rule_deploy",
-  "rollback_connector_type": "santa_sync_server"
+  "supports_rollback": true
 }
