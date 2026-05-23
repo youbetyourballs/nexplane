@@ -14881,18 +14881,19 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         _conn_resp = client.post("/connectors", json={
             "name": f"nexplane-smoke-ad-restore-{source_id}",
             "connector_type": "active_directory",
-            "credentials": {
-                "winrm_hostname": source_ip,
-                "winrm_username": _winrm_user,
-                "winrm_password": _winrm_pass,
-                "winrm_port": "5985",
-                "domain_name": "smoke.nexplane.local",
-                "server": source_ip,
-                "bind_dn": f"CN={_winrm_user},CN=Users,DC=smoke,DC=nexplane,DC=local",
-                "bind_password": _winrm_pass,
-            },
         })
         _ad_conn_id = _conn_resp["id"]
+        # POST /connectors ignores credentials in body — store separately
+        client.put(f"/connectors/{_ad_conn_id}/credentials", json={"credentials": {
+            "winrm_hostname": source_ip,
+            "winrm_username": _winrm_user,
+            "winrm_password": _winrm_pass,
+            "winrm_port": "5985",
+            "domain_name": "smoke.nexplane.local",
+            "server": source_ip,
+            "bind_dn": f"CN={_winrm_user},CN=Users,DC=smoke,DC=nexplane,DC=local",
+            "bind_password": _winrm_pass,
+        }})
 
         _asset_resp = client.post("/assets", json={
             "name": f"nexplane-smoke-restore-dc-{source_id}",
