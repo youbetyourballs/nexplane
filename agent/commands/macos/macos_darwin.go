@@ -366,6 +366,115 @@ func homebrewList(_ map[string]any) (map[string]any, error) {
 	return map[string]any{"installed": true, "packages": packages}, nil
 }
 
+func santaRuleCheck(identifierType, identifier string) string {
+	out, err := run("santactl", "rule", "--check", "--"+identifierType, identifier)
+	if err != nil || strings.Contains(strings.ToLower(out), "no rule") || strings.Contains(strings.ToLower(out), "unknown") {
+		return "absent"
+	}
+	lower := strings.ToLower(out)
+	if strings.Contains(lower, "allowlist") || strings.Contains(lower, "allow") {
+		return "allow"
+	}
+	if strings.Contains(lower, "denylist") || strings.Contains(lower, "deny") || strings.Contains(lower, "blocklist") {
+		return "deny"
+	}
+	return "absent"
+}
+
+func ruleTypeFlag(ruleType string) string {
+	switch ruleType {
+	case "allowlist":
+		return "--allowlist"
+	case "silent_blocklist":
+		return "--silent-blocklist"
+	default:
+		return "--denylist"
+	}
+}
+
+func santaRuleAdd(params map[string]any) (map[string]any, error) {
+	ruleType, _ := params["rule_type"].(string)
+	identifierType, _ := params["identifier_type"].(string)
+	identifier, _ := params["identifier"].(string)
+	customMessage, _ := params["custom_message"].(string)
+
+	if identifier == "" || identifierType == "" {
+		return nil, fmt.Errorf("santa_rule_add requires identifier_type and identifier")
+	}
+	if ruleType == "" {
+		ruleType = "denylist"
+	}
+
+	previousState := santaRuleCheck(identifierType, identifier)
+
+	args := []string{"rule", "--add", ruleTypeFlag(ruleType), "--" + identifierType, identifier}
+	if customMessage != "" {
+		args = append(args, "--message", customMessage)
+	}
+	out, err := run("santactl", args...)
+	if err != nil {
+		return nil, fmt.Errorf("santactl rule --add: %s: %w", out, err)
+	}
+	return map[string]any{
+		"added":           true,
+		"rule_type":       ruleType,
+		"identifier_type": identifierType,
+		"identifier":      identifier,
+		"previous_state":  previousState,
+		"output":          out,
+	}, nil
+}
+
+func santaRuleRemove(params map[string]any) (map[string]any, error) {
+	identifierType, _ := params["identifier_type"].(string)
+	identifier, _ := params["identifier"].(string)
+	if identifier == "" || identifierType == "" {
+		return nil, fmt.Errorf("santa_rule_remove requires identifier_type and identifier")
+	}
+
+	previousState := santaRuleCheck(identifierType, identifier)
+	if previousState == "absent" {
+		return map[string]any{"removed": false, "reason": "rule not found", "previous_state": "absent"}, nil
+	}
+
+	out, err := run("santactl", "rule", "--remove", "--"+identifierType, identifier)
+	if err != nil {
+		return nil, fmt.Errorf("santactl rule --remove: %s: %w", out, err)
+	}
+	return map[string]any{
+		"removed":         true,
+		"identifier_type": identifierType,
+		"identifier":      identifier,
+		"previous_state":  previousState,
+		"output":          out,
+	}, nil
+}
+
+func santaRuleList(_ map[string]any) (map[string]any, error) {
+	out, err := run("santactl", "rule", "--list")
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not installed") || strings.Contains(strings.ToLower(out), "not found") {
+			return map[string]any{"installed": false, "rules": []map[string]any{}}, nil
+		}
+		return nil, fmt.Errorf("santactl rule --list: %s: %w", out, err)
+	}
+	var rules []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Rule") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			rules = append(rules, map[string]any{"identifier": parts[0], "type": parts[1]})
+		}
+	}
+	if rules == nil {
+		rules = []map[string]any{}
+	}
+	return map[string]any{"installed": true, "rules": rules, "rule_count": len(rules)}, nil
+}
+
 // macosSysinfo returns macOS version and hardware info.
 func macosSysinfo(_ map[string]any) (map[string]any, error) {
 	swVers, err := run("sw_vers")

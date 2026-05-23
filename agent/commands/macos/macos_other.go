@@ -63,3 +63,15 @@ func profilesRemove(_ map[string]any) (map[string]any, error) {
 func homebrewList(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("homebrew_list is only supported on macOS")
 }
+
+func santaRuleAdd(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_rule_add is only supported on macOS")
+}
+
+func santaRuleRemove(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_rule_remove is only supported on macOS")
+}
+
+func santaRuleList(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_rule_list is only supported on macOS")
+}

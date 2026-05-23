@@ -73,6 +73,54 @@ func RollbackProfilesInstall(params map[string]any) (map[string]any, error) {
 	return map[string]any{"rolled_back": true, "identifier": identifier, "output": out}, nil
 }
 
+func RollbackSantaRuleAdd(params map[string]any) (map[string]any, error) {
+	identifierType, _ := params["identifier_type"].(string)
+	identifier, _ := params["identifier"].(string)
+	previousState, _ := params["previous_state"].(string)
+
+	if identifierType == "" || identifier == "" {
+		return nil, fmt.Errorf("santa_rule_add rollback requires identifier_type, identifier, and previous_state")
+	}
+
+	if previousState == "absent" || previousState == "" {
+		out, err := run("santactl", "rule", "--remove", "--"+identifierType, identifier)
+		if err != nil {
+			return nil, fmt.Errorf("santactl rule --remove (rollback): %s: %w", out, err)
+		}
+		return map[string]any{"rolled_back": true, "action": "removed", "output": out}, nil
+	}
+
+	flag := "--denylist"
+	if previousState == "allow" {
+		flag = "--allowlist"
+	}
+	out, err := run("santactl", "rule", "--add", flag, "--"+identifierType, identifier)
+	if err != nil {
+		return nil, fmt.Errorf("santactl rule --add %s (rollback): %s: %w", flag, out, err)
+	}
+	return map[string]any{"rolled_back": true, "action": "restored", "previous_state": previousState, "output": out}, nil
+}
+
+func RollbackSantaRuleRemove(params map[string]any) (map[string]any, error) {
+	identifierType, _ := params["identifier_type"].(string)
+	identifier, _ := params["identifier"].(string)
+	previousState, _ := params["previous_state"].(string)
+
+	if identifierType == "" || identifier == "" || previousState == "" || previousState == "absent" {
+		return nil, fmt.Errorf("santa_rule_remove rollback requires identifier_type, identifier, and previous_state")
+	}
+
+	flag := "--denylist"
+	if previousState == "allow" {
+		flag = "--allowlist"
+	}
+	out, err := run("santactl", "rule", "--add", flag, "--"+identifierType, identifier)
+	if err != nil {
+		return nil, fmt.Errorf("santactl rule --add (rollback): %s: %w", out, err)
+	}
+	return map[string]any{"rolled_back": true, "output": out}, nil
+}
+
 func RollbackProfilesRemove(params map[string]any) (map[string]any, error) {
 	plistB64, _ := params["previous_plist_b64"].(string)
 	if plistB64 == "" {

@@ -31,3 +31,11 @@ func RollbackProfilesInstall(_ map[string]any) (map[string]any, error) {
 func RollbackProfilesRemove(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("profiles_remove rollback is only supported on macOS")
 }
+
+func RollbackSantaRuleAdd(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_rule_add rollback is only supported on macOS")
+}
+
+func RollbackSantaRuleRemove(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_rule_remove rollback is only supported on macOS")
+}
