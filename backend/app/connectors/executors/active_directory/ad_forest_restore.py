@@ -120,15 +120,7 @@ if ($SourceDcIp) {
         } catch { Start-Sleep -Seconds 5 }
     }
     Write-Output "DNS_REAPPLIED=$resolved"
-    # Diagnostic: confirm DC is discoverable via Kerberos before dcpromo
-    $portTest = Test-NetConnection -ComputerName $SourceDcIp -Port 88 -InformationLevel Quiet -WarningAction SilentlyContinue
-    Write-Output "DIAG_PORT88_FROM_TARGET=$portTest"
-    $nltest = (nltest /dsgetdc:$DomainName /force 2>&1) -join " "
-    Write-Output "DIAG_NLTEST=$nltest"
-    # Time skew check — Kerberos requires <5min skew
-    $targetTime = Get-Date
-    Write-Output "DIAG_TARGET_TIME=$targetTime"
-    # Sync time with Amazon before dcpromo (clock skew causes Kerberos failures)
+    # Sync time to reduce Kerberos clock skew risk
     try { w32tm /resync /force 2>&1 | Out-Null } catch {}
 }
 Import-Module ADDSDeployment
@@ -407,6 +399,25 @@ def _do_restore(
                 logger.info("DNS diag: %s", _diag_line)
         if rc != 0 or "DNS_SET" not in out:
             raise RuntimeError(f"DNS configuration failed: {err or out}")
+
+    # Step 5c — Pre-promote diagnostic: verify DC reachability from target
+    if source_dc_ip:
+        _diag_script = f"""
+$ip = '{source_dc_ip}'
+$dom = '{domain_name}'
+$p88 = Test-NetConnection -ComputerName $ip -Port 88 -InformationLevel Quiet -WarningAction SilentlyContinue
+$p389 = Test-NetConnection -ComputerName $ip -Port 389 -InformationLevel Quiet -WarningAction SilentlyContinue
+$nl = (nltest /dsgetdc:$dom /force 2>&1) -join "; "
+Write-Output "PRE_PORT88=$p88"
+Write-Output "PRE_PORT389=$p389"
+Write-Output "PRE_NLTEST=$nl"
+Write-Output "PRE_DIAG_DONE"
+"""
+        try:
+            _dout, _derr, _drc = _run_ps(proto, _diag_script)
+            logger.info("Pre-promote diag: %s | err: %s", _dout[:400], _derr[:200])
+        except Exception as _de:
+            logger.warning("Pre-promote diag failed (non-fatal): %s", _de)
 
     # Step 6 — Promote via IFM (NoRebootOnCompletion so we can verify before reboot)
     logger.info("Step 6: promoting target as DC via IFM")
