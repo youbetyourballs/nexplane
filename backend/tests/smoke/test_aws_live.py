@@ -14973,6 +14973,7 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 # which also becomes the built-in domain Administrator password.
                 "domain_admin_username": "SMOKE\\Administrator",
                 "domain_admin_password": "NexplaneSmoke2024!",
+                "source_dc_ip": source_ip,
             },
             connector_id=_ad_conn_id,
             timeout=2400,  # 40 min: AD DS install + IFM download + promote + reboot + NTDS wait
