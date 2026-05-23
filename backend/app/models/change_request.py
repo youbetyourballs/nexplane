@@ -481,6 +481,12 @@ class ChangeRequest(Base):
     access_expiry_hours: Mapped[float | None] = mapped_column(nullable=True)
     scheduled_rollback_cr_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
+    parent_change_request: Mapped[Optional["ChangeRequest"]] = relationship(
+        "ChangeRequest",
+        foreign_keys=[parent_change_request_id],
+        remote_side="ChangeRequest.id",
+        back_populates=None,
+    )
     organization: Mapped["Organization"] = relationship("Organization", back_populates="change_requests")
     requester: Mapped["User"] = relationship("User", back_populates="change_requests")
     change_plan: Mapped["ChangePlan"] = relationship("ChangePlan", back_populates="change_request", uselist=False)
