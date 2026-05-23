@@ -3,7 +3,9 @@
 package macos
 
 import (
+	"encoding/base64"
 	"fmt"
+	"os"
 )
 
 // RollbackFilevaultEnable disables FileVault to undo a filevault_enable action.
@@ -57,4 +59,41 @@ func RollbackDefaultsWrite(params map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("defaults write %s %s (rollback): %s: %w", domain, key, out, err)
 	}
 	return map[string]any{"rolled_back": true, "action": "restored", "output": out}, nil
+}
+
+func RollbackProfilesInstall(params map[string]any) (map[string]any, error) {
+	identifier, _ := params["identifier"].(string)
+	if identifier == "" {
+		return nil, fmt.Errorf("profiles_install rollback requires identifier in params")
+	}
+	out, err := run("profiles", "remove", "-identifier", identifier)
+	if err != nil {
+		return nil, fmt.Errorf("profiles remove %s (rollback): %s: %w", identifier, out, err)
+	}
+	return map[string]any{"rolled_back": true, "identifier": identifier, "output": out}, nil
+}
+
+func RollbackProfilesRemove(params map[string]any) (map[string]any, error) {
+	plistB64, _ := params["previous_plist_b64"].(string)
+	if plistB64 == "" {
+		return nil, fmt.Errorf("profiles_remove rollback requires previous_plist_b64 in params")
+	}
+	plistBytes, err := base64.StdEncoding.DecodeString(plistB64)
+	if err != nil {
+		return nil, fmt.Errorf("profiles_remove rollback: invalid base64: %w", err)
+	}
+	tmp, err := os.CreateTemp("", "nexplane-profile-rollback-*.mobileconfig")
+	if err != nil {
+		return nil, fmt.Errorf("profiles_remove rollback: temp file: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(plistBytes); err != nil {
+		return nil, fmt.Errorf("profiles_remove rollback: write temp: %w", err)
+	}
+	tmp.Close()
+	out, err := run("profiles", "install", "-path", tmp.Name())
+	if err != nil {
+		return nil, fmt.Errorf("profiles install (rollback): %s: %w", out, err)
+	}
+	return map[string]any{"rolled_back": true, "output": out}, nil
 }

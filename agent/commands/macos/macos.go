@@ -79,3 +79,19 @@ func DefaultsWriteRollback(params map[string]any) (map[string]any, error) {
 func SantaCheckExecute(params map[string]any) (map[string]any, error) {
 	return santaCheck(params)
 }
+
+func ProfilesInstallExecute(params map[string]any) (map[string]any, error) {
+	return profilesInstall(params)
+}
+
+func ProfilesRemoveExecute(params map[string]any) (map[string]any, error) {
+	return profilesRemove(params)
+}
+
+func ProfilesInstallRollback(params map[string]any) (map[string]any, error) {
+	return RollbackProfilesInstall(params)
+}
+
+func ProfilesRemoveRollback(params map[string]any) (map[string]any, error) {
+	return RollbackProfilesRemove(params)
+}
