@@ -14898,6 +14898,10 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 "  -Protocol TCP -LocalPort $port -Action Allow -Profile Any "
                 "  -ErrorAction SilentlyContinue | Out-Null"
                 "};"
+                # Force Netlogon to re-register DNS SRV records with current IP
+                # (AMI boots with new IP; old SRV records become stale otherwise)
+                "ipconfig /registerdns | Out-Null;"
+                "nltest /dsregdns 2>&1 | Out-Null;"
                 "Write-Output 'FW_DONE'",
             ]},
             TimeoutSeconds=60,
@@ -14997,15 +15001,20 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
             InstanceIds=[source_id],
             DocumentName="AWS-RunPowerShellScript",
             Parameters={"commands": [
+                # Wait for Netlogon SRV records to be registered with current IP
+                # (ipconfig /registerdns was called but re-registration takes time)
                 "$deadline = (Get-Date).AddSeconds(600);"
                 "$ok = $false;"
                 "while ((Get-Date) -lt $deadline) {"
                 "  try {"
-                "    $r = Resolve-DnsName 'smoke.nexplane.local' -Type A -ErrorAction Stop;"
-                "    if ($r) { $ok = $true; break }"
+                "    $srv = Resolve-DnsName '_ldap._tcp.smoke.nexplane.local' -Type SRV -ErrorAction Stop;"
+                "    if ($srv) { $ok = $true; break }"
                 "  } catch { Start-Sleep 15 }"
                 "};"
-                "if (-not $ok) { throw 'DNS zone smoke.nexplane.local not ready on source DC after 10 min' };"
+                "if (-not $ok) {"
+                "  nltest /dsregdns 2>&1 | Out-Null;"
+                "  throw 'SRV records for smoke.nexplane.local not ready after 10 min'"
+                "};"
                 "Write-Output 'DNS_READY'",
             ]},
             TimeoutSeconds=660,
