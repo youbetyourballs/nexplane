@@ -1,0 +1,16 @@
+{
+  "change_type": "santa_machine_group_assign",
+  "display_name": "Santa Machine Group Assign",
+  "description": "Assigns a machine to a rule group on the sync server. Captures previous group for rollback.",
+  "steps": [
+    {
+      "generic_action": "santa_machine_group_assign",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "santa_machine_group_assign",
+  "rollback_connector_type": "santa_sync_server"
+}
