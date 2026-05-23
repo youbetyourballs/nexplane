@@ -15334,7 +15334,8 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 "require_dc_isolation": False,
                 "dns_update_mode": "manual",
                 # Domain admin creds for Install-ADDSDomainController -Credential
-                "domain_admin_username": "Administrator",
+                # Must use DOMAIN\user format; password normalized in Step 4b.
+                "domain_admin_username": "SMOKE\\Administrator",
                 "domain_admin_password": _domain_admin_pass_known,
                 "source_dc_ip": source_ip,
                 # Bypass UDP-based DC locator (nltest fails in VPC) by pointing
