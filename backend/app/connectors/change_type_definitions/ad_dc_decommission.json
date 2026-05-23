@@ -1,0 +1,16 @@
+{
+  "change_type": "ad_dc_decommission",
+  "display_name": "AD DC Decommission",
+  "description": "Terminate or shut down compromised domain controllers after a forest restore. Supports EC2 terminate, WinRM shutdown, and iLO/iDRAC stub.",
+  "steps": [
+    {
+      "generic_action": "ad_dc_decommission",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": null,
+  "rollback_connector_type": null
+}
