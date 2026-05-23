@@ -10799,9 +10799,9 @@ echo "${PRIVATE_IP} freeipa.smoke.test freeipa" >> /etc/hosts
 # Disable firewalld (interferes with ipa port binding)
 systemctl stop firewalld 2>/dev/null || true
 systemctl disable firewalld 2>/dev/null || true
-# Install FreeIPA server packages
-dnf install -y freeipa-server freeipa-server-dns 2>/dev/null
-# Run server install (unattended, ~15 min)
+# Wait for userdata pre-install to finish if still running
+for i in $(seq 1 12); do grep -q FREEIPA_PKGS_INSTALLED /tmp/freeipa_userdata.log 2>/dev/null && break || sleep 10; done
+# Run server install (unattended, ~15 min — packages already installed by userdata)
 ipa-server-install --unattended \
   --realm=SMOKE.TEST \
   --domain=smoke.test \
@@ -10841,18 +10841,22 @@ echo "FREEIPA_SETUP_COMPLETE"
         pass
     subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
 
-    # CentOS9 doesn't have SSM agent pre-installed — inject it via userdata
+    # CentOS9 doesn't have SSM agent pre-installed — inject it via userdata.
+    # Also pre-install freeipa packages in userdata so they're ready by the time
+    # SSM is reachable (~5 min), saving ~10-15 min off the SSM command runtime.
     freeipa_userdata = """#!/bin/bash
-set -e
-# Install SSM agent for SSM-based command execution
+# Install SSM agent
 if ! systemctl is-active --quiet amazon-ssm-agent 2>/dev/null; then
     dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm 2>/dev/null || \
     dnf install -y amazon-ssm-agent 2>/dev/null || true
     systemctl enable amazon-ssm-agent && systemctl start amazon-ssm-agent 2>/dev/null || true
 fi
+# Pre-install FreeIPA packages (runs in background during SSM readiness wait)
+dnf install -y freeipa-server freeipa-server-dns 2>/tmp/freeipa_dnf.log || true
+echo "FREEIPA_PKGS_INSTALLED" >> /tmp/freeipa_userdata.log
 """
     resp = ec2_client.run_instances(
-        ImageId=cached_ami or CENTOS9_AMI, InstanceType="t3.small",
+        ImageId=cached_ami or CENTOS9_AMI, InstanceType="t3.medium",
         MinCount=1, MaxCount=1, SubnetId=subnets[0]["SubnetId"],
         UserData=freeipa_userdata,
         IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
