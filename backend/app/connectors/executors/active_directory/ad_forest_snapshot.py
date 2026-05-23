@@ -76,7 +76,7 @@ def _run_ps(creds: dict, script: str, dc_hostname: str | None = None) -> tuple[s
 def _run_ps_params(creds: dict, script: str, params: dict,
                    dc_hostname: str | None = None) -> tuple[str, str, int]:
     """Inline param() declarations then call _run_ps."""
-    prefix = "\n".join(f"${k} = @\"\n{v}\n\"@" for k, v in params.items())
+    prefix = "\n".join(f"${k} = '{str(v).replace(chr(39), chr(39) * 2)}'" for k, v in params.items())
     body = script.strip()
     if body.startswith("param("):
         depth = 0
