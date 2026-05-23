@@ -690,11 +690,46 @@ Examples:
             print("Packaging smoke test files...")
             tarball = make_test_tarball()
 
-        # Runner and platform are in the same VPC — no Tailscale join needed.
-        # Only join Tailscale if the base URL is explicitly a Tailscale IP (100.x.x.x).
         backend_ts_ip = args.base_url.split("//")[-1].split(":")[0]
         _is_vpc_ip = not backend_ts_ip.startswith("100.")
-        if args.tailscale_auth_key and not _is_vpc_ip:
+
+        if args.tailscale_auth_key and _is_vpc_ip:
+            # Platform SG blocks all VPC inbound — runner must reach platform via Tailscale.
+            # Discover the host's Tailscale IP by probing online peers from the container's
+            # tailscale daemon (the host appears as a peer at 100.101.186.39 / nexplane-dev).
+            try:
+                import subprocess as _sp, json as _js, urllib.request as _ur3
+                _ts_out = _sp.run(
+                    ["tailscale", "--socket=/var/run/tailscale/tailscaled.sock",
+                     "status", "--json"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if _ts_out.returncode == 0:
+                    _ts_data = _js.loads(_ts_out.stdout)
+                    _candidates = [
+                        ip
+                        for peer in _ts_data.get("Peer", {}).values()
+                        if peer.get("Online")
+                        for ip in peer.get("TailscaleIPs", [])
+                        if ip.startswith("100.")
+                    ]
+                    for _cip in _candidates:
+                        try:
+                            _resp = _ur3.urlopen(
+                                f"http://{_cip}:8000/health", timeout=3
+                            )
+                            if _resp.status == 200:
+                                backend_ts_ip = _cip
+                                args.base_url = f"http://{_cip}:8000"
+                                print(f"  Tailscale backend discovered at {_cip} (peer probe)")
+                                break
+                        except Exception:
+                            continue
+                    else:
+                        print(f"  ⚠️  No Tailscale peer has port 8000 — runner will use VPC URL")
+            except Exception as _tse:
+                print(f"  ⚠️  Tailscale peer probe failed: {_tse} — using {args.base_url}")
+        elif args.tailscale_auth_key and not _is_vpc_ip:
             try:
                 backend_ts_ip = setup_backend_tailscale(args.tailscale_auth_key)
                 args.base_url = f"http://{backend_ts_ip}:8000"
