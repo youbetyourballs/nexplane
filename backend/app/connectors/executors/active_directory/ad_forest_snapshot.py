@@ -35,17 +35,10 @@ Write-Output "IFM_CREATED"
 _PS_ZIP_AND_UPLOAD = r"""
 param([string]$IFMDir, [string]$ZipPath, [string]$PresignedUrl)
 Compress-Archive -Path "$IFMDir\*" -DestinationPath $ZipPath -Force
-$bytes = [System.IO.File]::ReadAllBytes($ZipPath)
-$req = [System.Net.HttpWebRequest]::Create($PresignedUrl)
-$req.Method = "PUT"
-$req.ContentType = "application/octet-stream"
-$req.ContentLength = $bytes.Length
-$stream = $req.GetRequestStream()
-$stream.Write($bytes, 0, $bytes.Length)
-$stream.Close()
-$resp = $req.GetResponse()
-$resp.Close()
-Write-Output "IFM_UPLOADED:$($bytes.Length)"
+$size = (Get-Item $ZipPath).Length
+Invoke-WebRequest -Method PUT -Uri $PresignedUrl -InFile $ZipPath `
+    -ContentType "application/octet-stream" -UseBasicParsing
+Write-Output "IFM_UPLOADED:$size"
 """
 
 _PS_GPO_BACKUP = r"""
@@ -137,14 +130,21 @@ def _do_snapshot(creds: dict, s3_bucket: str, s3_prefix: str) -> dict:
     presigned_put = s3.generate_presigned_url(
         "put_object",
         Params={"Bucket": s3_bucket, "Key": ifm_s3_key, "ContentType": "application/octet-stream"},
-        ExpiresIn=900,
+        ExpiresIn=3600,
     )
     out, err, rc = _run_ps_params(creds, _PS_ZIP_AND_UPLOAD,
                                    {"IFMDir": ifm_dir, "ZipPath": ifm_zip,
                                     "PresignedUrl": presigned_put}, dc_hostname)
     if rc != 0 or "IFM_UPLOADED" not in out:
         raise RuntimeError(f"IFM zip/upload failed: {err or out}")
-    ifm_size = int(out.split("IFM_UPLOADED:")[-1].strip().splitlines()[0]) if ":" in out else 0
+    ifm_size = 0
+    for _line in out.splitlines():
+        if _line.startswith("IFM_UPLOADED:"):
+            try:
+                ifm_size = int(_line.split(":", 1)[1].strip())
+            except (ValueError, IndexError):
+                pass
+            break
 
     # Step 3: GPO backup
     out, err, rc = _run_ps_params(creds, _PS_GPO_BACKUP, {"OutDir": gpo_dir}, dc_hostname)
@@ -226,12 +226,11 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "artifact_sizes_bytes": snap["artifact_sizes_bytes"],
         "ad_ds_downtime_seconds": 0,
     }
-    import json as _json
     s3 = _s3_client(creds)
     s3.put_object(
         Bucket=s3_bucket,
         Key=f"{s3_prefix}/manifest.json",
-        Body=_json.dumps(manifest).encode(),
+        Body=json.dumps(manifest).encode(),
     )
 
     return {
