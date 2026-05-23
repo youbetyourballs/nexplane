@@ -10905,11 +10905,12 @@ fi
             try:
                 resp_s = ssm_client.send_command(InstanceIds=[instance_id],
                     DocumentName="AWS-RunShellScript",
-                    Parameters={"commands": [setup_script]}, TimeoutSeconds=1200)
+                    Parameters={"commands": [setup_script]}, TimeoutSeconds=2400)
             except Exception as ssm_e:
                 log(f"  WARNING: FreeIPA SSM send_command failed ({ssm_e}) — skipping install, testing directly")
-            # Poll for completion (only if command was sent)
-            setup_deadline = time.time() + (1200 if resp_s else 0)
+            # Poll for completion (only if command was sent) — 40 min max
+            setup_deadline = time.time() + (2400 if resp_s else 0)
+            _freeipa_ami_cached = False
             while time.time() < setup_deadline:
                 time.sleep(30)
                 try:
@@ -10922,13 +10923,32 @@ fi
                         elif "FREEIPA_INSTALL_COMPLETE" in _setup_out:
                             log("FreeIPA installed (test user creation may have failed — caching AMI anyway)")
                         else:
-                            log(f"  WARNING: FreeIPA setup output: {_setup_out[:200]}")
+                            log(f"  WARNING: FreeIPA setup status={out_s['Status']} output: {_setup_out[:300]}")
                         if "FREEIPA_INSTALL_COMPLETE" in _setup_out or "FREEIPA_SETUP_COMPLETE" in _setup_out:
                             if get_or_create_smoke_ami:
                                 get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "freeipa", setup_hash)
+                                _freeipa_ami_cached = True
                         break
                 except Exception:
                     pass
+            # Fallback: if setup timed out but FreeIPA is actually running, cache the AMI anyway
+            if not _freeipa_ami_cached and get_or_create_smoke_ami and resp_s:
+                try:
+                    _chk = ssm_client.send_command(InstanceIds=[instance_id],
+                        DocumentName="AWS-RunShellScript",
+                        Parameters={"commands": ["systemctl is-active ipa 2>/dev/null && echo IPA_RUNNING || echo IPA_NOT_RUNNING"]},
+                        TimeoutSeconds=30)
+                    time.sleep(15)
+                    _chk_out = ssm_client.get_command_invocation(
+                        CommandId=_chk["Command"]["CommandId"], InstanceId=instance_id)
+                    if "IPA_RUNNING" in _chk_out.get("StandardOutputContent", ""):
+                        log("FreeIPA running (confirmed via SSM) — caching AMI despite script timeout")
+                        get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "freeipa", setup_hash)
+                        _freeipa_ami_cached = True
+                    else:
+                        log(f"  WARNING: FreeIPA not running after install: {_chk_out.get('StandardOutputContent','')[:200]}")
+                except Exception as _chk_e:
+                    log(f"  WARNING: FreeIPA running-check failed: {_chk_e}")
         else:
             # Cached AMI: restart sssd/ipa services
             restart_cmd = """
