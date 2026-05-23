@@ -2025,5 +2025,34 @@
                       "executor": "nexplane_agent.check_compliance",
                       "estimated_duration_seconds": 60
                     }
+                    ,{
+                      "action_id": "macos_defaults_write",
+                      "generic_action": "macos_defaults_write",
+                      "display_name": "macOS Defaults Write",
+                      "description": "Writes a macOS defaults preference key/value. Captures previous value for rollback.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                        {"name": "domain", "type": "string", "required": true, "description": "Defaults domain, e.g. com.apple.finder"},
+                        {"name": "key", "type": "string", "required": true, "description": "Preference key name"},
+                        {"name": "value", "type": "string", "required": true, "description": "Value to write"},
+                        {"name": "type", "type": "string", "required": false, "description": "Value type: string (default), bool, int, float"}
+                      ],
+                      "action_type": "change",
+                      "executor": "nexplane_agent.macos_defaults_write",
+                      "estimated_duration_seconds": 10,
+                      "execution_tier": 2
+                    }
+                    ,{
+                      "action_id": "macos_santa_check",
+                      "generic_action": "macos_santa_check",
+                      "display_name": "Santa Status Check",
+                      "description": "Audits Google Santa binary allowlisting status. Returns installed flag, mode, and configuration.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [],
+                      "action_type": "read",
+                      "executor": "nexplane_agent.macos_santa_check",
+                      "estimated_duration_seconds": 10,
+                      "execution_tier": 1
+                    }
                 ]
 }
