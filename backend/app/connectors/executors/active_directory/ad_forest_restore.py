@@ -120,6 +120,16 @@ if ($SourceDcIp) {
         } catch { Start-Sleep -Seconds 5 }
     }
     Write-Output "DNS_REAPPLIED=$resolved"
+    # Diagnostic: confirm DC is discoverable via Kerberos before dcpromo
+    $portTest = Test-NetConnection -ComputerName $SourceDcIp -Port 88 -InformationLevel Quiet -WarningAction SilentlyContinue
+    Write-Output "DIAG_PORT88_FROM_TARGET=$portTest"
+    $nltest = (nltest /dsgetdc:$DomainName /force 2>&1) -join " "
+    Write-Output "DIAG_NLTEST=$nltest"
+    # Time skew check — Kerberos requires <5min skew
+    $targetTime = Get-Date
+    Write-Output "DIAG_TARGET_TIME=$targetTime"
+    # Sync time with Amazon before dcpromo (clock skew causes Kerberos failures)
+    try { w32tm /resync /force 2>&1 | Out-Null } catch {}
 }
 Import-Module ADDSDeployment
 $secPwd = ConvertTo-SecureString $SafeModePassword -AsPlainText -Force
@@ -408,6 +418,9 @@ def _do_restore(
         "DomainAdminPassword": domain_admin_password,
         "SourceDcIp": source_dc_ip,
     })
+    for _diag_line in out.splitlines():
+        if _diag_line.startswith("DIAG_"):
+            logger.info("Promote diag: %s", _diag_line)
     if rc != 0 or "DC_PROMOTED" not in out:
         raise RuntimeError(f"DC promotion failed (rc={rc}): {err or out}")
     logger.info("Promotion succeeded — triggering reboot")
