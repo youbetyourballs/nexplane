@@ -65,17 +65,20 @@ $tcpTest = Test-NetConnection -ComputerName $DnsServerIp -Port 389 -InformationL
 if (-not $tcpTest) {
     throw "Source DC at $DnsServerIp is not reachable on port 389 (LDAP) — check security groups"
 }
-# Wait for DNS resolution to work (source DC DNS must be serving the domain)
-$deadline = (Get-Date).AddSeconds(90)
+# Give the AD DNS zone time to fully load after DC boot (AD DNS zone loads after NTDS starts)
+Start-Sleep -Seconds 30
+ipconfig /flushdns | Out-Null
+# Wait up to 5 minutes for DNS resolution (AD DNS zone may take a few minutes to be available)
+$deadline = (Get-Date).AddSeconds(300)
 $resolved = $false
 while ((Get-Date) -lt $deadline) {
     try {
         $r = Resolve-DnsName $DomainName -Server $DnsServerIp -Type A -ErrorAction Stop
         if ($r) { $resolved = $true; break }
-    } catch { Start-Sleep -Seconds 5 }
+    } catch { Start-Sleep -Seconds 10 }
 }
 if (-not $resolved) {
-    throw "DNS for $DomainName did not resolve via $DnsServerIp within 90s — DNS server may not be running on source DC"
+    throw "DNS for $DomainName did not resolve via $DnsServerIp within 5 min — DNS server may not be running on source DC"
 }
 Write-Output "DNS_SET"
 """
