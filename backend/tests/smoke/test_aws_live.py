@@ -14872,7 +14872,7 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
 
         # Reuse existing smoke DC credentials
         _winrm_user = "smokeuser"
-        _winrm_pass = "Smoke@2024!"  # matches AD_DC_INTEGRITY smoke DC setup
+        _winrm_pass = "UserPass123!"  # matches AD_DC_INTEGRITY smoke DC setup
 
         # ------------------------------------------------------------------
         # Step 4 — Register AD connector + asset for source DC
