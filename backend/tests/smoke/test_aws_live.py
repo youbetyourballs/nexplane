@@ -14948,17 +14948,10 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         log(f"AD_DC_RESTORE: manifest.json verified — format=ifm, artifacts={_manifest['artifacts']}")
 
         # ------------------------------------------------------------------
-        # Step 5b — Terminate source DC before restore (simulates true DR:
-        #            IFM-based Install-ADDSDomainController requires domain
-        #            admin creds OR no other DC reachable)
-        # ------------------------------------------------------------------
-        log("AD_DC_RESTORE: terminating source DC before restore (DR simulation)...")
-        ec2_client.terminate_instances(InstanceIds=[source_id])
-        _t.sleep(15)  # give EC2 a moment to shut down networking
-        log("AD_DC_RESTORE: source DC terminated — proceeding with restore")
-
-        # ------------------------------------------------------------------
         # Step 6 — Restore CR onto clean target
+        # Note: source DC stays alive during promotion so dcpromo can
+        # authenticate against the domain. It is terminated via the
+        # ad_dc_decommission CR after the new DC is verified.
         # ------------------------------------------------------------------
         log(f"AD_DC_RESTORE: running ad_forest_restore CR → {target_ip}...")
         cr_restore = client.run_cr(
@@ -14984,12 +14977,6 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
             fail(f"[AD_DC_RESTORE] Restore CR verification failed: {restore_result}")
         log(f"AD_DC_RESTORE: restore complete — new DC at {restore_result.get('new_dc_ip')}")
         log(f"AD_DC_RESTORE: SYSVOL status: {restore_result.get('sysvol_status')}")
-
-        # Source DC already terminated before restore (Step 5b); verify state
-        _desc = ec2_client.describe_instances(InstanceIds=[source_id])
-        _state = _desc["Reservations"][0]["Instances"][0]["State"]["Name"]
-        log(f"AD_DC_RESTORE: source DC state: {_state}")
-        source_id = ""  # don't terminate again in finally
 
         log("Phase AD_DC_RESTORE PASSED")
 
