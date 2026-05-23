@@ -112,11 +112,13 @@ def _winrm_client(hostname: str, username: str, password: str,
 
 
 def _run_ps(proto, script: str) -> tuple[str, str, int]:
+    import base64
+    encoded = base64.b64encode(script.strip().encode("utf-16-le")).decode("ascii")
     shell_id = proto.open_shell()
     try:
         cmd_id = proto.run_command(
             shell_id, "powershell",
-            ["-NonInteractive", "-NoProfile", "-Command", script.strip()],
+            ["-NonInteractive", "-NoProfile", "-EncodedCommand", encoded],
         )
         stdout, stderr, rc = proto.get_command_output(shell_id, cmd_id)
         proto.cleanup_command(shell_id, cmd_id)
