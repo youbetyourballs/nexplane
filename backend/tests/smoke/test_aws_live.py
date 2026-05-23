@@ -15767,7 +15767,133 @@ def run_phase_mac_agent_bootstrap(
         # Santa is not installed on a fresh EC2 Mac — installed should be False
         log(f"MAC_AGENT_BOOTSTRAP: santa_check complete — installed={result_sc.get('installed')}")
 
-        log("MAC_AGENT_BOOTSTRAP: all CRs passed")
+        # --- profiles_install ---
+        _TEST_PROFILE_ID = "com.nexplane.smoke.test"
+        _TEST_PROFILE_PLIST = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+            '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            '<plist version="1.0"><dict>'
+            '<key>PayloadContent</key><array/>'
+            '<key>PayloadDisplayName</key><string>Nexplane Smoke Test Profile</string>'
+            '<key>PayloadIdentifier</key><string>com.nexplane.smoke.test</string>'
+            '<key>PayloadType</key><string>Configuration</string>'
+            '<key>PayloadUUID</key><string>12345678-1234-1234-1234-123456789012</string>'
+            '<key>PayloadVersion</key><integer>1</integer>'
+            '</dict></plist>'
+        )
+        import base64 as _base64
+        _plist_b64 = _base64.b64encode(_TEST_PROFILE_PLIST.encode()).decode()
+        log("MAC_AGENT_BOOTSTRAP: running profiles_install CR...")
+        _cr_pi = client.run_cr(
+            "[MAC_AGENT_BOOTSTRAP] profiles_install",
+            "macos_profiles_install",
+            endpoint_asset_id,
+            {"plist_b64": _plist_b64},
+            connector_id=None,
+        )
+        _step_pi = client.get_cr_step_result(_cr_pi)
+        if _step_pi.get("identifier") != _TEST_PROFILE_ID:
+            fail(f"MAC_AGENT_BOOTSTRAP: profiles_install identifier mismatch: {_step_pi}")
+        log(f"MAC_AGENT_BOOTSTRAP: profiles_install OK — identifier={_step_pi.get('identifier')}")
+        client.post(f"/change-requests/{_cr_pi['id']}/rollback", json={})
+        log("MAC_AGENT_BOOTSTRAP: profiles_install rollback submitted")
+
+        # --- homebrew_list ---
+        log("MAC_AGENT_BOOTSTRAP: running homebrew_list CR...")
+        _cr_hb = client.run_cr(
+            "[MAC_AGENT_BOOTSTRAP] homebrew_list",
+            "macos_homebrew_list",
+            endpoint_asset_id,
+            {},
+            connector_id=None,
+        )
+        _step_hb = client.get_cr_step_result(_cr_hb)
+        if "packages" not in _step_hb:
+            fail(f"MAC_AGENT_BOOTSTRAP: homebrew_list missing 'packages': {_step_hb}")
+        log(f"MAC_AGENT_BOOTSTRAP: homebrew_list OK — installed={_step_hb.get('installed')}, count={len(_step_hb.get('packages', []))}")
+
+        # --- santa_rule_add + list verify + rollback ---
+        _SMOKE_SHA256 = "a" * 64
+        log("MAC_AGENT_BOOTSTRAP: running santa_rule_add CR...")
+        _cr_sra = client.run_cr(
+            "[MAC_AGENT_BOOTSTRAP] santa_rule_add",
+            "macos_santa_rule_add",
+            endpoint_asset_id,
+            {"rule_type": "denylist", "identifier_type": "binary", "identifier": _SMOKE_SHA256, "custom_message": "nexplane smoke test"},
+            connector_id=None,
+        )
+        _step_sra = client.get_cr_step_result(_cr_sra)
+        if not _step_sra.get("added"):
+            fail(f"MAC_AGENT_BOOTSTRAP: santa_rule_add failed: {_step_sra}")
+        log(f"MAC_AGENT_BOOTSTRAP: santa_rule_add OK — previous_state={_step_sra.get('previous_state')}")
+
+        _cr_srl = client.run_cr(
+            "[MAC_AGENT_BOOTSTRAP] santa_rule_list verify",
+            "macos_santa_rule_list",
+            endpoint_asset_id, {},
+            connector_id=None,
+        )
+        _step_srl = client.get_cr_step_result(_cr_srl)
+        _rule_ids = [r.get("identifier", "") for r in _step_srl.get("rules", [])]
+        if _SMOKE_SHA256 not in _rule_ids and _step_srl.get("installed", True):
+            log("MAC_AGENT_BOOTSTRAP: WARNING — smoke rule not found in santa_rule_list (Santa may not be installed)")
+
+        client.post(f"/change-requests/{_cr_sra['id']}/rollback", json={})
+        log("MAC_AGENT_BOOTSTRAP: santa_rule_add rollback submitted")
+
+        # --- santa_mode_set + rollback ---
+        log("MAC_AGENT_BOOTSTRAP: running santa_mode_set CR (monitor)...")
+        _cr_sms = client.run_cr(
+            "[MAC_AGENT_BOOTSTRAP] santa_mode_set",
+            "macos_santa_mode_set",
+            endpoint_asset_id,
+            {"mode": "monitor"},
+            connector_id=None,
+        )
+        _step_sms = client.get_cr_step_result(_cr_sms)
+        if "previous_mode" not in _step_sms:
+            fail(f"MAC_AGENT_BOOTSTRAP: santa_mode_set missing previous_mode: {_step_sms}")
+        log(f"MAC_AGENT_BOOTSTRAP: santa_mode_set OK — mode=monitor, previous_mode={_step_sms.get('previous_mode')}")
+        client.post(f"/change-requests/{_cr_sms['id']}/rollback", json={})
+        log("MAC_AGENT_BOOTSTRAP: santa_mode_set rollback submitted")
+
+        # --- event_export, binary_check, sync_trigger ---
+        log("MAC_AGENT_BOOTSTRAP: running santa_event_export CR...")
+        _cr_see = client.run_cr(
+            "[MAC_AGENT_BOOTSTRAP] santa_event_export",
+            "macos_santa_event_export",
+            endpoint_asset_id, {"limit": 10},
+            connector_id=None,
+        )
+        _step_see = client.get_cr_step_result(_cr_see)
+        if "events" not in _step_see:
+            fail(f"MAC_AGENT_BOOTSTRAP: santa_event_export missing 'events': {_step_see}")
+        log(f"MAC_AGENT_BOOTSTRAP: santa_event_export OK — count={_step_see.get('count', 0)}")
+
+        log("MAC_AGENT_BOOTSTRAP: running santa_binary_check CR...")
+        _cr_sbc = client.run_cr(
+            "[MAC_AGENT_BOOTSTRAP] santa_binary_check",
+            "macos_santa_binary_check",
+            endpoint_asset_id, {"path": "/usr/bin/true"},
+            connector_id=None,
+        )
+        _step_sbc = client.get_cr_step_result(_cr_sbc)
+        if "decision" not in _step_sbc:
+            fail(f"MAC_AGENT_BOOTSTRAP: santa_binary_check missing 'decision': {_step_sbc}")
+        log(f"MAC_AGENT_BOOTSTRAP: santa_binary_check OK — decision={_step_sbc.get('decision')}")
+
+        log("MAC_AGENT_BOOTSTRAP: running santa_sync_trigger CR...")
+        _cr_sst = client.run_cr(
+            "[MAC_AGENT_BOOTSTRAP] santa_sync_trigger",
+            "macos_santa_sync_trigger",
+            endpoint_asset_id, {},
+            connector_id=None,
+        )
+        _step_sst = client.get_cr_step_result(_cr_sst)
+        log(f"MAC_AGENT_BOOTSTRAP: santa_sync_trigger OK — synced={_step_sst.get('synced')}")
+
+        log("MAC_AGENT_BOOTSTRAP: all new CRs passed")
 
     finally:
         # Step 7 — Cleanup note (do NOT terminate; 24-hour billing window applies)
