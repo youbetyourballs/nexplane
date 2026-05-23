@@ -54,10 +54,28 @@ Write-Output "IFM_EXTRACTED"
 """
 
 _PS_SET_DNS = r"""
-param([string]$DnsServerIp)
+param([string]$DnsServerIp, [string]$DomainName)
 $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
 foreach ($adapter in $adapters) {
     Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses $DnsServerIp
+}
+ipconfig /flushdns | Out-Null
+# Verify source DC is reachable on LDAP (389) before promotion
+$tcpTest = Test-NetConnection -ComputerName $DnsServerIp -Port 389 -InformationLevel Quiet
+if (-not $tcpTest) {
+    throw "Source DC at $DnsServerIp is not reachable on port 389 (LDAP) — check security groups"
+}
+# Wait for DNS resolution to work (source DC DNS must be serving the domain)
+$deadline = (Get-Date).AddSeconds(90)
+$resolved = $false
+while ((Get-Date) -lt $deadline) {
+    try {
+        $r = Resolve-DnsName $DomainName -Server $DnsServerIp -Type A -ErrorAction Stop
+        if ($r) { $resolved = $true; break }
+    } catch { Start-Sleep -Seconds 5 }
+}
+if (-not $resolved) {
+    throw "DNS for $DomainName did not resolve via $DnsServerIp within 90s — DNS server may not be running on source DC"
 }
 Write-Output "DNS_SET"
 """
@@ -313,7 +331,7 @@ def _do_restore(
     # Step 5b — Point target's DNS at the source DC so Install-ADDSDomainController can resolve the domain
     if source_dc_ip:
         logger.info("Step 5b: setting DNS on target to source DC IP %s", source_dc_ip)
-        out, err, rc = _run_ps_params(proto, _PS_SET_DNS, {"DnsServerIp": source_dc_ip})
+        out, err, rc = _run_ps_params(proto, _PS_SET_DNS, {"DnsServerIp": source_dc_ip, "DomainName": domain_name})
         if rc != 0 or "DNS_SET" not in out:
             raise RuntimeError(f"DNS configuration failed: {err or out}")
 
