@@ -310,15 +310,29 @@ def _do_restore(
             f"Target {target_hostname} did not return via WinRM within 15 min after promotion"
         )
 
-    # Step 7 — Post-reboot verification
-    logger.info("Step 7: post-reboot verification")
+    # Step 7 — Post-reboot verification (NTDS may take up to 3 min after WinRM comes up)
+    logger.info("Step 7: post-reboot verification — polling for NTDS")
     proto = _winrm_client(target_hostname, winrm_username, winrm_password, winrm_port, winrm_use_ssl)
-    out, err, rc = _run_ps_params(proto, _PS_VERIFY_DC, {"DomainName": domain_name})
-    if rc != 0 or "DC_VERIFIED" not in out:
+    ntds_deadline = time.monotonic() + 180
+    out = err = ""
+    rc = -1
+    v: dict = {}
+    while time.monotonic() < ntds_deadline:
+        try:
+            out, err, rc = _run_ps_params(proto, _PS_VERIFY_DC, {"DomainName": domain_name})
+        except Exception:
+            time.sleep(15)
+            continue
+        v = {line.split("=", 1)[0]: line.split("=", 1)[1]
+             for line in out.splitlines() if "=" in line}
+        if v.get("NTDS_STATUS", "").lower() == "running":
+            break
+        logger.info("NTDS not yet running (status=%s), retrying...", v.get("NTDS_STATUS"))
+        time.sleep(15)
+
+    if "DC_VERIFIED" not in out:
         raise RuntimeError(f"Post-reboot DC verification failed: {err or out}")
 
-    v = {line.split("=", 1)[0]: line.split("=", 1)[1]
-         for line in out.splitlines() if "=" in line}
     ntds_status = v.get("NTDS_STATUS", "unknown")
     dns_root = v.get("DNS_ROOT", "unknown")
     new_dc_ip = v.get("DC_IP", "unknown")
