@@ -22,21 +22,17 @@ async def _discover_users(connector, action: str, params: dict) -> dict:
     return await execute_action(connector, action, params)
 
 
-def _s3_put(bucket: str, key: str, body: str) -> None:
+def _s3_put(bucket: str, key: str, body: str, creds: dict | None = None) -> None:
     import boto3
-    s3 = boto3.client("s3")
+    kwargs: dict = {}
+    if creds:
+        if creds.get("aws_access_key_id"):
+            kwargs["aws_access_key_id"] = creds["aws_access_key_id"]
+            kwargs["aws_secret_access_key"] = creds["aws_secret_access_key"]
+        if creds.get("region"):
+            kwargs["region_name"] = creds["region"]
+    s3 = boto3.client("s3", **kwargs)
     s3.put_object(Bucket=bucket, Key=key, Body=body.encode())
-
-
-def _s3_client(creds: dict):
-    import boto3
-    kwargs = {}
-    if creds.get("aws_access_key_id"):
-        kwargs["aws_access_key_id"] = creds["aws_access_key_id"]
-        kwargs["aws_secret_access_key"] = creds["aws_secret_access_key"]
-    if creds.get("region"):
-        kwargs["region_name"] = creds["region"]
-    return boto3.client("s3", **kwargs)
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
@@ -79,9 +75,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     }
 
     try:
-        _s3_put(bucket, f"{connector_prefix}/users.json", json.dumps(users, default=str))
-        _s3_put(bucket, f"{connector_prefix}/groups.json", json.dumps(groups, default=str))
-        _s3_put(bucket, f"{base_key}/manifest.json", json.dumps(manifest, default=str))
+        _s3_put(bucket, f"{connector_prefix}/users.json", json.dumps(users, default=str), creds=creds)
+        _s3_put(bucket, f"{connector_prefix}/groups.json", json.dumps(groups, default=str), creds=creds)
+        _s3_put(bucket, f"{base_key}/manifest.json", json.dumps(manifest, default=str), creds=creds)
     except Exception as exc:
         return {"status": "failed", "reason": f"S3 upload failed: {exc}"}
 
