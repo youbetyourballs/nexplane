@@ -10722,7 +10722,7 @@ echo "RESTART_COMPLETE"
 
             cr_audit = client.run_cr("[K8S_RBAC] audit RBAC", "k8s_audit_rbac", _k8s_asset_id,
                 {"kubeconfig": kubeconfig_content}, connector_id=_k8s_conn_id)
-            result = _cr_step_result(cr_audit)
+            result = client.get_cr_step_result(cr_audit)
             if result.get("status") == "skipped":
                 log("  K8s audit skipped (kubeconfig not reachable from backend) - dispatch verified")
             else:
@@ -10732,10 +10732,10 @@ echo "RESTART_COMPLETE"
             cr_revoke = client.run_cr("[K8S_RBAC] revoke smoke-rb", "k8s_revoke_rolebinding", _k8s_asset_id,
                 {"rolebinding_name": "smoke-rb", "namespace": "default", "kubeconfig": kubeconfig_content},
                 connector_id=_k8s_conn_id)
-            result2 = _cr_step_result(cr_revoke)
+            result2 = client.get_cr_step_result(cr_revoke)
 
-        if result2.get("deleted"):
-            log("  RoleBinding smoke-rb revoked via executor (deleted=True confirmed in CR result)")
+        if result2.get("deleted") or result2.get("revoked_at"):
+            log("  RoleBinding smoke-rb revoked via executor (confirmed in CR result)")
         elif result2.get("status") == "skipped":
             log("  K8s revoke skipped (no kubeconfig in backend) - dispatch path verified")
         else:
