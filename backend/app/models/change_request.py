@@ -382,6 +382,7 @@ class ChangeType(str, enum.Enum):
     dc_integrity_check = "dc_integrity_check"
     ad_forest_snapshot = "ad_forest_snapshot"
     ad_forest_restore = "ad_forest_restore"
+    ad_dc_decommission = "ad_dc_decommission"
     ad_tiered_backup = "ad_tiered_backup"
     discover_ad_snapshots = "discover_ad_snapshots"
     # AD DNS management

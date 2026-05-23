@@ -174,3 +174,13 @@ async def test_decommission_rollback_is_not_reversible():
     result = await ad_dc_decommission.rollback({}, {}, _MockConnector())
     assert result["rolled_back"] is False
     assert "not reversible" in result["reason"]
+
+
+# ---------------------------------------------------------------------------
+# Registration
+# ---------------------------------------------------------------------------
+
+def test_ad_dc_decommission_in_change_type_enum():
+    from app.models.change_request import ChangeType
+    assert "ad_dc_decommission" in ChangeType.__members__, \
+        "ChangeType.ad_dc_decommission is missing — add it to change_request.py"
