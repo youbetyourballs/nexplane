@@ -37,7 +37,7 @@
         {"name": "mode", "type": "string", "required": false, "default": "merge", "description": "merge or replace"}
       ],
       "executor": "santa_sync_server.santa_push_rules",
-      "rollback_action": "santa_push_rules",
+      "supports_rollback": true,
       "estimated_duration_seconds": 30
     },
     {
@@ -67,7 +67,7 @@
         {"name": "target_group", "type": "string", "required": true}
       ],
       "executor": "santa_sync_server.santa_machine_group_assign",
-      "rollback_action": "santa_machine_group_assign",
+      "supports_rollback": true,
       "estimated_duration_seconds": 10
     },
     {
@@ -88,7 +88,7 @@
         {"name": "verify_timeout_seconds", "type": "integer", "required": false, "default": 300}
       ],
       "executor": "santa_sync_server.santa_rule_deploy",
-      "rollback_action": "santa_rule_deploy",
+      "supports_rollback": true,
       "estimated_duration_seconds": 60
     }
   ]
