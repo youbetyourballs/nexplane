@@ -10365,6 +10365,7 @@ nodes:
 - role: control-plane
   kubeadmConfigPatches:
   - |
+    apiVersion: kubeadm.k8s.io/v1beta3
     kind: ClusterConfiguration
     apiServer:
       certSANs:
@@ -10384,7 +10385,7 @@ kubectl create rolebinding smoke-rb \\
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 echo "K8S_RBAC_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-port6443-certSANs-v5-medium").hexdigest()
+    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-port6443-certSANs-v6-apiVersion").hexdigest()
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
