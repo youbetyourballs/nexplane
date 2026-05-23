@@ -108,3 +108,69 @@ async def test_restore_rollback_no_hostname_returns_gracefully():
     )
     assert result["rolled_back"] is False
     assert "target_hostname" in result["reason"]
+
+
+# ---------------------------------------------------------------------------
+# ad_dc_decommission
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_decommission_empty_list_fails():
+    from app.connectors.executors.active_directory import ad_dc_decommission
+    result = await ad_dc_decommission.execute(
+        {"compromised_dcs": []},
+        [],
+        _MockConnector(),
+    )
+    assert result["status"] == "failed"
+    assert result["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_decommission_ilodrac_stub_returns_not_implemented():
+    from app.connectors.executors.active_directory import ad_dc_decommission
+    result = await ad_dc_decommission.execute(
+        {"compromised_dcs": [
+            {"type": "ilodrac", "hostname": "dc3.corp.local", "name": "dc3",
+             "pam_path": "secret/dc-hw/dc3"}
+        ]},
+        [],
+        _MockConnector(),
+    )
+    assert result["status"] == "failed"
+    dc = result["results"][0]
+    assert dc["status"] == "not_implemented"
+    assert dc["pam_path"] == "secret/dc-hw/dc3"
+
+
+@pytest.mark.asyncio
+async def test_decommission_ec2_terminates(monkeypatch):
+    from app.connectors.executors.active_directory import ad_dc_decommission
+
+    terminated = []
+
+    class _FakeEC2:
+        def terminate_instances(self, InstanceIds):
+            terminated.extend(InstanceIds)
+            return {}
+
+    monkeypatch.setattr(ad_dc_decommission, "_ec2_client", lambda creds: _FakeEC2())
+
+    result = await ad_dc_decommission.execute(
+        {"compromised_dcs": [
+            {"type": "ec2", "instance_id": "i-0abc123", "name": "dc1"}
+        ]},
+        [],
+        _MockConnector(),
+    )
+    assert result["status"] == "completed"
+    assert "i-0abc123" in terminated
+    assert result["results"][0]["status"] == "terminated"
+
+
+@pytest.mark.asyncio
+async def test_decommission_rollback_is_not_reversible():
+    from app.connectors.executors.active_directory import ad_dc_decommission
+    result = await ad_dc_decommission.rollback({}, {}, _MockConnector())
+    assert result["rolled_back"] is False
+    assert "not reversible" in result["reason"]
