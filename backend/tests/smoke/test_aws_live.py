@@ -10812,7 +10812,7 @@ ipa-server-install --unattended \
   --ip-address=${PRIVATE_IP}
 echo "FREEIPA_INSTALL_COMPLETE"
 # Create test user (ipa commands need kerberos)
-echo "Admin1234" | kinit admin@SMOKE.TEST
+echo "Admin1234" | kinit admin@SMOKE.TEST || sleep 30 && echo "Admin1234" | kinit admin@SMOKE.TEST || true
 ipa user-add testuser --first=Test --last=User --password <<< $'Password123\nPassword123' 2>/dev/null || true
 echo "FREEIPA_SETUP_COMPLETE"
 """
@@ -10916,12 +10916,16 @@ fi
                     out_s = ssm_client.get_command_invocation(
                         CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
                     if out_s["Status"] in ("Success", "Failed", "TimedOut", "Cancelled"):
-                        if "FREEIPA_SETUP_COMPLETE" in out_s.get("StandardOutputContent", ""):
+                        _setup_out = out_s.get("StandardOutputContent", "")
+                        if "FREEIPA_SETUP_COMPLETE" in _setup_out:
                             log("FreeIPA installed and test user created")
+                        elif "FREEIPA_INSTALL_COMPLETE" in _setup_out:
+                            log("FreeIPA installed (test user creation may have failed — caching AMI anyway)")
+                        else:
+                            log(f"  WARNING: FreeIPA setup output: {_setup_out[:200]}")
+                        if "FREEIPA_INSTALL_COMPLETE" in _setup_out or "FREEIPA_SETUP_COMPLETE" in _setup_out:
                             if get_or_create_smoke_ami:
                                 get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "freeipa", setup_hash)
-                        else:
-                            log(f"  WARNING: FreeIPA setup output: {out_s.get('StandardOutputContent', '')[:200]}")
                         break
                 except Exception:
                     pass
