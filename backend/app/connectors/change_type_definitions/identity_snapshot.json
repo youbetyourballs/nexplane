@@ -1,0 +1,15 @@
+{
+  "change_type": "identity_snapshot",
+  "display_name": "Identity Snapshot",
+  "steps": [
+    {"generic_action": "identity_snapshot", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "parameters": {
+    "s3_bucket": {"type": "string", "required": false, "description": "S3 bucket name. Falls back to connector credential s3_bucket."},
+    "s3_prefix": {"type": "string", "required": false, "description": "S3 key prefix for snapshot artifacts."}
+  },
+  "rollback_action": "identity_snapshot",
+  "rollback_connector_type": "nexplane_agent"
+}
