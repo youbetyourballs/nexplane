@@ -18541,8 +18541,9 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
             {"machine_group": "default"},
             connector_id=santa_connector_id,
         )
-        rule_count = cr.get("execution_result", {}).get("rule_count", -1)
-        assert rule_count == 0, f"[SANTA_SYNC] Expected rule_count=0, got {rule_count}"
+        _step = NexplaneClient.get_cr_step_result(cr)
+        rule_count = _step.get("rule_count", -1)
+        assert rule_count == 0, f"[SANTA_SYNC] Expected rule_count=0, got {rule_count} (step={_step})"
         print(f"  [SANTA_SYNC] Initial audit OK: rule_count={rule_count}")
 
         # Step 5: santa_push_rules — push 2 rules
@@ -18561,8 +18562,9 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
             push_rules_payload,
             connector_id=santa_connector_id,
         )
-        pushed = cr_push.get("execution_result", {}).get("pushed", -1)
-        assert pushed == 2, f"[SANTA_SYNC] Expected pushed=2, got {pushed}"
+        _push_step = NexplaneClient.get_cr_step_result(cr_push)
+        pushed = _push_step.get("pushed", -1)
+        assert pushed == 2, f"[SANTA_SYNC] Expected pushed=2, got {pushed} (step={_push_step})"
         push_cr_id = cr_push["id"]
         print(f"  [SANTA_SYNC] Push OK: pushed={pushed}, cr_id={push_cr_id}")
 
@@ -18575,8 +18577,9 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
             {"machine_group": "default"},
             connector_id=santa_connector_id,
         )
-        rule_count = cr.get("execution_result", {}).get("rule_count", -1)
-        assert rule_count == 2, f"[SANTA_SYNC] Expected rule_count=2, got {rule_count}"
+        _step2 = NexplaneClient.get_cr_step_result(cr)
+        rule_count = _step2.get("rule_count", -1)
+        assert rule_count == 2, f"[SANTA_SYNC] Expected rule_count=2, got {rule_count} (step={_step2})"
         print(f"  [SANTA_SYNC] Post-push audit OK: rule_count={rule_count}")
 
         # Step 7: Rollback the push CR
@@ -18593,8 +18596,9 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
             {"machine_group": "default"},
             connector_id=santa_connector_id,
         )
-        rule_count = cr.get("execution_result", {}).get("rule_count", -1)
-        assert rule_count == 0, f"[SANTA_SYNC] Expected rule_count=0 after rollback, got {rule_count}"
+        _step3 = NexplaneClient.get_cr_step_result(cr)
+        rule_count = _step3.get("rule_count", -1)
+        assert rule_count == 0, f"[SANTA_SYNC] Expected rule_count=0 after rollback, got {rule_count} (step={_step3})"
         print(f"  [SANTA_SYNC] Post-rollback audit OK: rule_count={rule_count}")
 
         # Step 9: santa_machine_list
@@ -18606,9 +18610,9 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
             {},
             connector_id=santa_connector_id,
         )
-        assert "machines" in cr.get("execution_result", {}), \
-            f"[SANTA_SYNC] 'machines' key missing from execution_result: {cr.get('execution_result')}"
-        print(f"  [SANTA_SYNC] Machine list OK: {len(cr['execution_result']['machines'])} machine(s)")
+        _step4 = NexplaneClient.get_cr_step_result(cr)
+        assert "machines" in _step4, f"[SANTA_SYNC] 'machines' key missing from step result: {_step4}"
+        print(f"  [SANTA_SYNC] Machine list OK: {len(_step4['machines'])} machine(s)")
 
         print("\n  [SANTA_SYNC] ✅ All assertions passed")
 
