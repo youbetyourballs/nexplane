@@ -121,6 +121,23 @@ func RollbackSantaRuleRemove(params map[string]any) (map[string]any, error) {
 	return map[string]any{"rolled_back": true, "output": out}, nil
 }
 
+func RollbackSantaModeSet(params map[string]any) (map[string]any, error) {
+	previousMode, _ := params["previous_mode"].(string)
+	if previousMode == "" {
+		return nil, fmt.Errorf("santa_mode_set rollback requires previous_mode in params")
+	}
+	modeInt := "1"
+	if previousMode == "lockdown" {
+		modeInt = "2"
+	}
+	out, err := run("defaults", "write", "/Library/Preferences/com.google.santa", "ClientMode", "-int", modeInt)
+	if err != nil {
+		return nil, fmt.Errorf("santa_mode_set rollback defaults write: %s: %w", out, err)
+	}
+	run("santactl", "sync", "--clean")
+	return map[string]any{"rolled_back": true, "mode": previousMode, "output": out}, nil
+}
+
 func RollbackProfilesRemove(params map[string]any) (map[string]any, error) {
 	plistB64, _ := params["previous_plist_b64"].(string)
 	if plistB64 == "" {

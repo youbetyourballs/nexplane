@@ -75,3 +75,19 @@ func santaRuleRemove(_ map[string]any) (map[string]any, error) {
 func santaRuleList(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("santa_rule_list is only supported on macOS")
 }
+
+func santaModeSet(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_mode_set is only supported on macOS")
+}
+
+func santaSyncTrigger(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_sync_trigger is only supported on macOS")
+}
+
+func santaEventExport(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_event_export is only supported on macOS")
+}
+
+func santaBinaryCheck(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_binary_check is only supported on macOS")
+}

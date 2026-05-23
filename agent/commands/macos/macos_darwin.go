@@ -475,6 +475,114 @@ func santaRuleList(_ map[string]any) (map[string]any, error) {
 	return map[string]any{"installed": true, "rules": rules, "rule_count": len(rules)}, nil
 }
 
+func santaModeSet(params map[string]any) (map[string]any, error) {
+	mode, _ := params["mode"].(string)
+	if mode != "monitor" && mode != "lockdown" {
+		return nil, fmt.Errorf("santa_mode_set: mode must be 'monitor' or 'lockdown'")
+	}
+
+	statusOut, _ := run("santactl", "status")
+	previousMode := "monitor"
+	for _, line := range strings.Split(statusOut, "\n") {
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) == "Mode" {
+			v := strings.ToLower(strings.TrimSpace(parts[1]))
+			if strings.Contains(v, "lockdown") {
+				previousMode = "lockdown"
+			}
+		}
+	}
+
+	modeInt := "1"
+	if mode == "lockdown" {
+		modeInt = "2"
+	}
+	out, err := run("defaults", "write", "/Library/Preferences/com.google.santa", "ClientMode", "-int", modeInt)
+	if err != nil {
+		return nil, fmt.Errorf("santa_mode_set defaults write: %s: %w", out, err)
+	}
+	run("santactl", "sync", "--clean")
+
+	return map[string]any{"mode": mode, "previous_mode": previousMode, "output": out}, nil
+}
+
+func santaSyncTrigger(_ map[string]any) (map[string]any, error) {
+	out, err := run("santactl", "sync")
+	if err != nil {
+		return map[string]any{"synced": false, "error": out}, nil
+	}
+	return map[string]any{"synced": true, "output": out}, nil
+}
+
+func santaEventExport(params map[string]any) (map[string]any, error) {
+	limit := 100
+	if l, ok := params["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	out, err := run("santactl", "log")
+	if err != nil {
+		logPath := "/var/db/santa/santa.log"
+		data, ferr := os.ReadFile(logPath)
+		if ferr != nil {
+			return map[string]any{"events": []map[string]any{}, "error": "santactl log not available"}, nil
+		}
+		out = string(data)
+	}
+
+	var events []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if len(events) >= limit {
+			break
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		event := map[string]any{"raw": line}
+		if strings.Contains(line, "DENY") {
+			event["decision"] = "DENY"
+		} else if strings.Contains(line, "ALLOW") {
+			event["decision"] = "ALLOW"
+		}
+		events = append(events, event)
+	}
+	if events == nil {
+		events = []map[string]any{}
+	}
+	return map[string]any{"events": events, "count": len(events)}, nil
+}
+
+func santaBinaryCheck(params map[string]any) (map[string]any, error) {
+	path, _ := params["path"].(string)
+	if path == "" {
+		return nil, fmt.Errorf("santa_binary_check requires path")
+	}
+	out, err := run("santactl", "check", "--path", path)
+	if err != nil {
+		return map[string]any{"path": path, "decision": "UNKNOWN", "error": out}, nil
+	}
+
+	result := map[string]any{"path": path, "decision": "UNKNOWN", "sha256": "", "rule_type": ""}
+	for _, line := range strings.Split(out, "\n") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		k := strings.TrimSpace(parts[0])
+		v := strings.TrimSpace(parts[1])
+		switch k {
+		case "Decision":
+			result["decision"] = strings.ToUpper(v)
+		case "SHA-256":
+			result["sha256"] = v
+		case "Rule":
+			result["rule_type"] = v
+		}
+	}
+	return result, nil
+}
+
 // macosSysinfo returns macOS version and hardware info.
 func macosSysinfo(_ map[string]any) (map[string]any, error) {
 	swVers, err := run("sw_vers")

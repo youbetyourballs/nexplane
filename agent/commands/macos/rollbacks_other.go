@@ -39,3 +39,7 @@ func RollbackSantaRuleAdd(_ map[string]any) (map[string]any, error) {
 func RollbackSantaRuleRemove(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("santa_rule_remove rollback is only supported on macOS")
 }
+
+func RollbackSantaModeSet(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_mode_set rollback is only supported on macOS")
+}
