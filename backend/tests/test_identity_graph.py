@@ -188,3 +188,42 @@ async def test_fan_out_executor_spawns_child_crs(monkeypatch):
     assert len(spawned) == 2
     assert any(s["connector_type"] == "active_directory" for s in spawned)
     assert any(s["connector_type"] == "okta" for s in spawned)
+
+
+@pytest.mark.asyncio
+async def test_identity_snapshot_produces_manifest(monkeypatch):
+    from app.connectors.executors.identity import identity_snapshot
+
+    mock_accounts = [
+        {"external_id": "alice", "username": "alice", "raw_attributes": {"enabled": True}},
+        {"external_id": "bob", "username": "bob", "raw_attributes": {"enabled": True}},
+    ]
+
+    async def mock_discover(connector, action, params):
+        return {"users": mock_accounts}
+
+    uploaded = {}
+
+    def mock_upload(bucket, key, body):
+        uploaded[key] = body
+
+    monkeypatch.setattr(identity_snapshot, "_discover_users", mock_discover)
+    monkeypatch.setattr(identity_snapshot, "_s3_put", mock_upload)
+
+    connector = MagicMock()
+    connector.id = uuid.uuid4()
+    connector.connector_type = "active_directory"
+    connector.credentials = {"bucket": "test-bucket", "prefix": "test/"}
+
+    result = await identity_snapshot.execute(
+        parameters={"s3_prefix": "test/snapshots/"},
+        asset_ids=[],
+        connector=connector,
+    )
+
+    assert result["status"] == "completed"
+    assert "snapshot_id" in result
+    manifest_keys = [k for k in uploaded if "manifest.json" in k]
+    assert len(manifest_keys) == 1
+    manifest = json.loads(uploaded[manifest_keys[0]])
+    assert manifest["format"] == "identity_snapshot_v1"
