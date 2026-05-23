@@ -83,7 +83,7 @@ async def trigger_sync(
 ):
     from app.services import identity_sync_service
     try:
-        stats = await identity_sync_service.sync_all(db)
+        stats = await identity_sync_service.sync_all(db, organization_id=user.organization_id)
         await db.commit()
         return {"status": "ok", "stats": stats}
     except Exception as exc:

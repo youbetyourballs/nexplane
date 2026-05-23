@@ -179,11 +179,12 @@ async def sync_connector_accounts(
     }
 
 
-async def sync_all(db: AsyncSession) -> dict:
-    """Sync all identity connectors. Called by APScheduler every 4h."""
-    connector_result = await db.execute(
-        select(Connector).where(Connector.status == ConnectorStatus.active)
-    )
+async def sync_all(db: AsyncSession, organization_id=None) -> dict:
+    """Sync identity connectors. Called by APScheduler every 4h or on demand."""
+    q = select(Connector).where(Connector.status == ConnectorStatus.active)
+    if organization_id is not None:
+        q = q.where(Connector.organization_id == organization_id)
+    connector_result = await db.execute(q)
     connectors = list(connector_result.scalars())
     total = {"created_profiles": 0, "upserted_accounts": 0, "connectors_synced": 0}
 
