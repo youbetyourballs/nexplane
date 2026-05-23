@@ -106,30 +106,43 @@ Write-Output "DNS_SET"
 
 _PS_PRE_PROMOTE_DNS = r"""
 param([string]$SourceDcIp, [string]$DomainName)
+# Set DNS on all active adapters
 $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
 foreach ($a in $adapters) {
     Set-DnsClientServerAddress -InterfaceIndex $a.InterfaceIndex -ServerAddresses $SourceDcIp
+    $guid = $a.InterfaceGuid
+    $rp = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\$guid"
+    if (Test-Path $rp) {
+        Set-ItemProperty $rp -Name NameServer -Value $SourceDcIp -Force
+    }
 }
+# NRPT rule for domain (removes old, adds new)
 $ns = ".${DomainName}"
-# Remove any existing NRPT rule for this namespace (pipe syntax — -Namespace param not available on 2022)
 Get-DnsClientNrptRule | Where-Object { $_.Namespace -eq $ns } | ForEach-Object {
     Remove-DnsClientNrptRule -Name $_.Name -Force -ErrorAction SilentlyContinue
 }
 Add-DnsClientNrptRule -Namespace $ns -NameServers $SourceDcIp -ErrorAction SilentlyContinue
+# Block VPC resolver so DC Locator cannot fall back to it
+netsh advfirewall firewall add rule name="BlockVPCDNS_UDP" dir=out protocol=udp remoteport=53 remoteip=169.254.169.253 action=block | Out-Null
+netsh advfirewall firewall add rule name="BlockVPCDNS_TCP" dir=out protocol=tcp remoteport=53 remoteip=169.254.169.253 action=block | Out-Null
 ipconfig /flushdns | Out-Null
-# Wait for SRV records — confirms Netlogon has registered on source DC
-$deadline = (Get-Date).AddSeconds(300)
-$srvFound = $false
+# Diagnostics
+$nrpt = (Get-DnsClientNrptRule | Where-Object { $_.Namespace -like "*$DomainName*" } | Measure-Object).Count
+Write-Output "DIAG_NRPT_COUNT=$nrpt"
+$srvDirect = Resolve-DnsName "_ldap._tcp.$DomainName" -Type SRV -Server $SourceDcIp -ErrorAction SilentlyContinue
+Write-Output "DIAG_SRV_DIRECT=$($null -ne $srvDirect)"
+# Wait up to 3 min for system DNS (with NRPT) to resolve SRV records
+$deadline = (Get-Date).AddSeconds(180)
+$srvSystem = $null
 while ((Get-Date) -lt $deadline) {
-    $srv = Resolve-DnsName "_ldap._tcp.$DomainName" -Type SRV -Server $SourceDcIp -ErrorAction SilentlyContinue
-    if ($srv) { $srvFound = $true; break }
+    $srvSystem = Resolve-DnsName "_ldap._tcp.$DomainName" -Type SRV -ErrorAction SilentlyContinue
+    if ($srvSystem) { break }
     Start-Sleep -Seconds 15
 }
-Write-Output "DIAG_SRV_FOUND=$srvFound"
-if (-not $srvFound) {
-    throw "SRV records for $DomainName not found on $SourceDcIp after 5min - Netlogon may not have registered"
+Write-Output "DIAG_SRV_SYSTEM=$($null -ne $srvSystem)"
+if (-not $srvSystem) {
+    throw "System DNS cannot resolve SRV for $DomainName after 3min — NRPT=$nrpt SRVdirect=$($null -ne $srvDirect)"
 }
-# nltest skipped — UDP DC locator blocked in VPC; Install-ADDSDomainController uses -ReplicationSourceDC instead
 Write-Output "PRE_PROMOTE_OK"
 """
 
