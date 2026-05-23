@@ -246,7 +246,7 @@ async def trigger_run(
     phases = body.get("phases") or suite["default_phases"]
     base_url = "http://localhost:8000"
     cmd = [
-        sys.executable, str(script),
+        sys.executable, "-u", str(script),
         "--base-url", base_url,
         "--email", body.get("email", "admin@acme.example"),
         "--password", body.get("password", "admin123"),
