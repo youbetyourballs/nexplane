@@ -100,3 +100,43 @@ func ProfilesRemoveRollback(params map[string]any) (map[string]any, error) {
 func HomebrewListExecute(params map[string]any) (map[string]any, error) {
 	return homebrewList(params)
 }
+
+func SantaRuleAddExecute(params map[string]any) (map[string]any, error) {
+	return santaRuleAdd(params)
+}
+
+func SantaRuleRemoveExecute(params map[string]any) (map[string]any, error) {
+	return santaRuleRemove(params)
+}
+
+func SantaRuleListExecute(params map[string]any) (map[string]any, error) {
+	return santaRuleList(params)
+}
+
+func SantaRuleAddRollback(params map[string]any) (map[string]any, error) {
+	return RollbackSantaRuleAdd(params)
+}
+
+func SantaRuleRemoveRollback(params map[string]any) (map[string]any, error) {
+	return RollbackSantaRuleRemove(params)
+}
+
+func SantaModeSetExecute(params map[string]any) (map[string]any, error) {
+	return santaModeSet(params)
+}
+
+func SantaSyncTriggerExecute(params map[string]any) (map[string]any, error) {
+	return santaSyncTrigger(params)
+}
+
+func SantaEventExportExecute(params map[string]any) (map[string]any, error) {
+	return santaEventExport(params)
+}
+
+func SantaBinaryCheckExecute(params map[string]any) (map[string]any, error) {
+	return santaBinaryCheck(params)
+}
+
+func SantaModeSetRollback(params map[string]any) (map[string]any, error) {
+	return RollbackSantaModeSet(params)
+}

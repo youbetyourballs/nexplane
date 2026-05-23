@@ -146,6 +146,9 @@ var commands = map[string]CommandFunc{
 	"profiles_install":       macos.ProfilesInstallExecute,
 	"profiles_remove":        macos.ProfilesRemoveExecute,
 	"homebrew_list":          macos.HomebrewListExecute,
+	"santa_rule_add":         macos.SantaRuleAddExecute,
+	"santa_rule_remove":      macos.SantaRuleRemoveExecute,
+	"santa_rule_list":        macos.SantaRuleListExecute,
 	// Credential rotation
 	"rotate_ssh_keys":        credrotation.SSHKeyExecute,
 	"rotate_db_creds":        credrotation.DBRotateExecute,
@@ -218,6 +221,8 @@ var rollbacks = map[string]CommandFunc{
 	"gatekeeper_disable": macos.GatekeeperDisableRollback,
 	"profiles_install":   macos.ProfilesInstallRollback,
 	"profiles_remove":    macos.ProfilesRemoveRollback,
+	"santa_rule_add":     macos.SantaRuleAddRollback,
+	"santa_rule_remove":  macos.SantaRuleRemoveRollback,
 	// Credential rotation rollback
 	"rotate_ssh_keys":        credrotation.SSHKeyRollback,
 	"rotate_db_creds":        credrotation.DBRotateRollback,
