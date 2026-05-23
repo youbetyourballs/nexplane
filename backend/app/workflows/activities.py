@@ -111,6 +111,25 @@ async def activity_execute_change(
     asset_ids: list[str],
 ) -> dict:
     from app.services.connector_service import execute_action
+    from app.connectors.executors.identity.fan_out_registry import is_fan_out_change_type
+
+    # Fan-out branch: bypass step-loop for identity fan-out change types
+    async with AsyncSessionLocal() as _fan_db:
+        _cr_r = await _fan_db.execute(
+            select(ChangeRequest).where(ChangeRequest.id == uuid.UUID(change_request_id))
+        )
+        _cr = _cr_r.scalar_one_or_none()
+        if _cr and is_fan_out_change_type(_cr.change_type.value):
+            from app.connectors.executors.identity import fan_out_executor
+            _result = await fan_out_executor.execute(
+                parameters=_cr.desired_outcome or {},
+                asset_ids=[str(a) for a in (_cr.target_asset_ids or [])],
+                connector=None,
+                change_request_id=_cr.id,
+                change_type=_cr.change_type.value,
+                db=_fan_db,
+            )
+            return _result
 
     step_results = []
     # Carries resolved values forward from steps like resolve_launch_config
@@ -219,6 +238,21 @@ async def activity_execute_rollback(
     execution_result: dict,
 ) -> dict:
     from app.services.connector_service import execute_action
+    from app.connectors.executors.identity.fan_out_registry import is_fan_out_change_type
+
+    # Fan-out rollback branch
+    async with AsyncSessionLocal() as _fan_db:
+        _cr_r = await _fan_db.execute(
+            select(ChangeRequest).where(ChangeRequest.id == uuid.UUID(change_request_id))
+        )
+        _cr = _cr_r.scalar_one_or_none()
+        if _cr and is_fan_out_change_type(_cr.change_type.value):
+            from app.connectors.executors.identity import fan_out_executor
+            return await fan_out_executor.rollback(
+                parameters=_cr.desired_outcome or {},
+                execution_result=execution_result,
+                connector=None,
+            )
 
     rollback_results = []
 
