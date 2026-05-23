@@ -106,7 +106,8 @@ Write-Output "DNS_SET"
 
 _PS_PROMOTE_IFM = r"""
 param([string]$DomainName, [string]$IFMPath, [string]$SafeModePassword,
-      [string]$DomainAdminUser, [string]$DomainAdminPassword, [string]$SourceDcIp)
+      [string]$DomainAdminUser, [string]$DomainAdminPassword, [string]$SourceDcIp,
+      [string]$SourceDcFqdn)
 # Re-apply DNS to source DC right before dcpromo — DHCP can overwrite between WinRM sessions
 if ($SourceDcIp) {
     $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
@@ -144,9 +145,7 @@ if ($SourceDcIp) {
     # Sync time to reduce Kerberos clock skew risk
     try { w32tm /resync /force 2>&1 | Out-Null } catch {}
     # If nltest can't find a DC, fail early with diagnostics rather than waiting for dcpromo timeout
-    if ($nltest -notmatch 'DC:') {
-        throw "DIAG: nltest /dsgetdc cannot find a DC — dcpromo will fail. nltest=$nltest port88=$portTest resolved=$resolved"
-    }
+    Write-Output "DIAG_NLTEST_RESULT=$($nltest -match 'DC:')"
 }
 Import-Module ADDSDeployment
 $secPwd = ConvertTo-SecureString $SafeModePassword -AsPlainText -Force
@@ -155,6 +154,10 @@ if ($DomainAdminUser -and $DomainAdminPassword) {
     $domainSecPwd = ConvertTo-SecureString $DomainAdminPassword -AsPlainText -Force
     $credParams["Credential"] = New-Object System.Management.Automation.PSCredential($DomainAdminUser, $domainSecPwd)
 }
+# Use -ReplicationSourceDC to bypass DC locator — target can reach source via TCP but
+# the DC locator uses UDP LDAP pings which may fail in AWS between VPC instances
+$srcDcParam = @{}
+if ($SourceDcFqdn) { $srcDcParam["ReplicationSourceDC"] = $SourceDcFqdn }
 $result = Install-ADDSDomainController `
     -DomainName $DomainName `
     -InstallationMediaPath $IFMPath `
@@ -162,7 +165,8 @@ $result = Install-ADDSDomainController `
     -InstallDns:$true `
     -NoRebootOnCompletion:$true `
     -Force:$true `
-    @credParams
+    @credParams `
+    @srcDcParam
 if ($result.Status -ne "Success") {
     throw "DC promotion failed: $($result.Status) — $($result.Message)"
 }
@@ -340,6 +344,7 @@ def _do_restore(
     domain_admin_username: str = "",
     domain_admin_password: str = "",
     source_dc_ip: str = "",
+    source_dc_fqdn: str = "",
 ) -> dict:
 
     s3 = _s3_client(aws_region)
@@ -453,6 +458,7 @@ Write-Output "PRE_DIAG_DONE"
         "DomainAdminUser": domain_admin_username,
         "DomainAdminPassword": domain_admin_password,
         "SourceDcIp": source_dc_ip,
+        "SourceDcFqdn": source_dc_fqdn,
     })
     logger.info("Promote stdout (first 500): %s", out[:500])
     for _diag_line in out.splitlines():
@@ -601,6 +607,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     domain_admin_username = parameters.get("domain_admin_username", "")
     domain_admin_password = parameters.get("domain_admin_password", "")
     source_dc_ip          = parameters.get("source_dc_ip", "")
+    source_dc_fqdn        = parameters.get("source_dc_fqdn", "")
 
     if dns_update_mode not in ("route53", "azure", "manual"):
         raise ValueError(f"dns_update_mode must be route53 | azure | manual — got {dns_update_mode!r}")
@@ -628,6 +635,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             domain_admin_username=domain_admin_username,
             domain_admin_password=domain_admin_password,
             source_dc_ip=source_dc_ip,
+            source_dc_fqdn=source_dc_fqdn,
         ),
     )
 
