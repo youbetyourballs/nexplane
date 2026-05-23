@@ -10369,7 +10369,7 @@ kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
 # Add private IP as SAN by renewing the API server cert with a patched ClusterConfiguration.
 # Extract current config, inject certSANs, renew inside the kind node container.
 docker exec smoke-test-control-plane bash -c "
-  kubectl -n kube-system get cm kubeadm-config -o jsonpath='{.data.ClusterConfiguration}' > /tmp/cc.yaml 2>/dev/null
+  kubectl -n kube-system get cm kubeadm-config -o jsonpath='{{.data.ClusterConfiguration}}' > /tmp/cc.yaml 2>/dev/null
   # Append certSANs block (kubeadm merges with existing config)
   cat >> /tmp/cc.yaml <<EOF
 apiServer:
