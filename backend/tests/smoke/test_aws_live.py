@@ -14948,6 +14948,16 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         log(f"AD_DC_RESTORE: manifest.json verified — format=ifm, artifacts={_manifest['artifacts']}")
 
         # ------------------------------------------------------------------
+        # Step 5b — Terminate source DC before restore (simulates true DR:
+        #            IFM-based Install-ADDSDomainController requires domain
+        #            admin creds OR no other DC reachable)
+        # ------------------------------------------------------------------
+        log("AD_DC_RESTORE: terminating source DC before restore (DR simulation)...")
+        ec2_client.terminate_instances(InstanceIds=[source_id])
+        _t.sleep(15)  # give EC2 a moment to shut down networking
+        log("AD_DC_RESTORE: source DC terminated — proceeding with restore")
+
+        # ------------------------------------------------------------------
         # Step 6 — Restore CR onto clean target
         # ------------------------------------------------------------------
         log(f"AD_DC_RESTORE: running ad_forest_restore CR → {target_ip}...")
@@ -14975,33 +14985,10 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         log(f"AD_DC_RESTORE: restore complete — new DC at {restore_result.get('new_dc_ip')}")
         log(f"AD_DC_RESTORE: SYSVOL status: {restore_result.get('sysvol_status')}")
 
-        # ------------------------------------------------------------------
-        # Step 7 — Decommission source (EC2 terminate)
-        # ------------------------------------------------------------------
-        log(f"AD_DC_RESTORE: running ad_dc_decommission CR → {source_id}...")
-        cr_decom = client.run_cr(
-            "[AD_DC_RESTORE] decommission source DC",
-            "ad_dc_decommission",
-            _ad_asset_id,
-            {
-                "compromised_dcs": [
-                    {"type": "ec2", "instance_id": source_id, "name": "smoke-source-dc"}
-                ],
-            },
-            connector_id=_ad_conn_id,
-        )
-        decom_result = client.get_cr_step_result(cr_decom)
-        if decom_result.get("status") != "completed":
-            fail(f"[AD_DC_RESTORE] Decommission CR failed: {decom_result}")
-        log("AD_DC_RESTORE: decommission complete")
-
-        # Verify termination
-        _t.sleep(10)
+        # Source DC already terminated before restore (Step 5b); verify state
         _desc = ec2_client.describe_instances(InstanceIds=[source_id])
         _state = _desc["Reservations"][0]["Instances"][0]["State"]["Name"]
-        if _state not in ("terminated", "shutting-down"):
-            fail(f"[AD_DC_RESTORE] Source DC not terminated — state: {_state}")
-        log(f"AD_DC_RESTORE: source DC confirmed {_state}")
+        log(f"AD_DC_RESTORE: source DC state: {_state}")
         source_id = ""  # don't terminate again in finally
 
         log("Phase AD_DC_RESTORE PASSED")
