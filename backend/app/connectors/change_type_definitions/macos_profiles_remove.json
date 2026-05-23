@@ -1,0 +1,16 @@
+{
+  "change_type": "macos_profiles_remove",
+  "display_name": "Remove Configuration Profile",
+  "description": "Removes a macOS configuration profile by its PayloadIdentifier. Captures the profile plist for rollback reinstallation.",
+  "steps": [
+    {
+      "generic_action": "macos_profiles_remove",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "macos_profiles_remove",
+  "rollback_connector_type": "macos"
+}

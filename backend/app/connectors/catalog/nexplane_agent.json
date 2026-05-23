@@ -2054,5 +2054,33 @@
                       "estimated_duration_seconds": 10,
                       "execution_tier": 1
                     }
+                    ,{
+                      "action_id": "macos_profiles_install",
+                      "generic_action": "macos_profiles_install",
+                      "display_name": "Install Configuration Profile",
+                      "description": "Installs a macOS configuration profile from a base64-encoded .mobileconfig. Rolls back by removing the profile.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                        {"name": "plist_b64", "type": "string", "required": true, "description": "Base64-encoded .mobileconfig plist content"}
+                      ],
+                      "action_type": "change",
+                      "executor": "nexplane_agent.macos_profiles_install",
+                      "estimated_duration_seconds": 30,
+                      "execution_tier": 2
+                    }
+                    ,{
+                      "action_id": "macos_profiles_remove",
+                      "generic_action": "macos_profiles_remove",
+                      "display_name": "Remove Configuration Profile",
+                      "description": "Removes a macOS configuration profile by its PayloadIdentifier. Captures plist for rollback.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                        {"name": "identifier", "type": "string", "required": true, "description": "Profile PayloadIdentifier string"}
+                      ],
+                      "action_type": "change",
+                      "executor": "nexplane_agent.macos_profiles_remove",
+                      "estimated_duration_seconds": 30,
+                      "execution_tier": 3
+                    }
                 ]
 }
