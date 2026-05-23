@@ -7,6 +7,7 @@ _ZENTRAL_POLICY_MAP = {"ALLOWLIST": "allowlist", "BLOCKLIST": "denylist", "SILEN
 _TO_MOROZ_POLICY = {"allowlist": 1, "denylist": 2, "silent_blocklist": 3}
 _TO_ZENTRAL_POLICY = {"allowlist": "ALLOWLIST", "denylist": "BLOCKLIST", "silent_blocklist": "SILENT_BLOCKLIST"}
 _ZENTRAL_TARGET_TYPE_MAP = {"binary": "BINARY", "certificate": "CERTIFICATE", "teamid": "TEAM_ID", "signingid": "SIGNING_ID"}
+_ZENTRAL_FIELD_NAME = {"binary": "sha256", "certificate": "sha256", "teamid": "team_id", "signingid": "signing_id"}
 
 
 class SantaSyncClient:
@@ -46,10 +47,11 @@ class SantaSyncClient:
         if self._is_zentral:
             pushed = 0
             for rule in rules:
+                field_name = _ZENTRAL_FIELD_NAME.get(rule["identifier_type"], "sha256")
                 payload = {
                     "target": {
                         "type": _ZENTRAL_TARGET_TYPE_MAP.get(rule["identifier_type"], "BINARY"),
-                        "sha256" if rule["identifier_type"] == "binary" else rule["identifier_type"]: rule["identifier"],
+                        field_name: rule["identifier"],
                     },
                     "policy": _TO_ZENTRAL_POLICY.get(rule["rule_type"], "BLOCKLIST"),
                 }
@@ -130,6 +132,7 @@ class SantaSyncClient:
             "santa_version": m.get("santa_version", ""),
             "last_sync": m.get("last_preflight_at", ""),
             "rule_count": m.get("rule_count", 0),
+            "machine_group": m.get("machine_group", ""),
         }
 
     def _normalize_zentral_machine(self, m: dict) -> dict:
@@ -140,4 +143,5 @@ class SantaSyncClient:
             "santa_version": m.get("client_version", ""),
             "last_sync": m.get("last_seen", ""),
             "rule_count": m.get("rule_count", 0),
+            "machine_group": m.get("configuration", ""),
         }
