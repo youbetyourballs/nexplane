@@ -626,12 +626,19 @@ async def manual_rollback(
                     if _asset_connector_type:
                         _conn_types_to_try.append(_asset_connector_type)
                     _conn_types_to_try.extend(t for t in ("nexplane_agent", "aws", "azure_ad", "okta") if t != _asset_connector_type)
+                    _exec_errors = []
                     for _conn_type in _conn_types_to_try:
                         try:
                             _mod = _catalog.get_executor(_conn_type, _ct)
                             break
-                        except Exception:
+                        except Exception as _ee:
+                            _exec_errors.append(f"{_conn_type}: {_ee}")
                             continue
+                    import logging as _logging
+                    _logging.getLogger(__name__).info(
+                        "Rollback executor lookup: ct=%s, connector_type=%s, mod=%s, errors=%s",
+                        _ct, _asset_connector_type, _mod, _exec_errors
+                    )
                     if _mod and hasattr(_mod, "rollback"):
                         # Extract step 1 result from nested execution structure so
                         # rollback() receives the actual step result dict, not the
