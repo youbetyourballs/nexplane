@@ -14968,6 +14968,11 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 "safe_mode_password": "DSRM@Smoke2024!",
                 "require_dc_isolation": False,
                 "dns_update_mode": "manual",
+                # Domain admin creds needed for Install-ADDSDomainController -Credential
+                # The forest was created with SafeMode password NexplaneSmoke2024!
+                # which also becomes the built-in domain Administrator password.
+                "domain_admin_username": "SMOKE\\Administrator",
+                "domain_admin_password": "NexplaneSmoke2024!",
             },
             connector_id=_ad_conn_id,
             timeout=2400,  # 40 min: AD DS install + IFM download + promote + reboot + NTDS wait
