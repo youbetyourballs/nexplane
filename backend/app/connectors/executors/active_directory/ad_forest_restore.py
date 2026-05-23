@@ -53,6 +53,15 @@ if (!(Test-Path "$Dest\Active Directory\ntds.dit")) {
 Write-Output "IFM_EXTRACTED"
 """
 
+_PS_SET_DNS = r"""
+param([string]$DnsServerIp)
+$adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
+foreach ($adapter in $adapters) {
+    Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses $DnsServerIp
+}
+Write-Output "DNS_SET"
+"""
+
 _PS_PROMOTE_IFM = r"""
 param([string]$DomainName, [string]$IFMPath, [string]$SafeModePassword,
       [string]$DomainAdminUser, [string]$DomainAdminPassword)
@@ -229,6 +238,7 @@ def _do_restore(
     aws_region: str,
     domain_admin_username: str = "",
     domain_admin_password: str = "",
+    source_dc_ip: str = "",
 ) -> dict:
 
     s3 = _s3_client(aws_region)
@@ -299,6 +309,13 @@ def _do_restore(
                                    {"ZipPath": ifm_zip_path, "Dest": ifm_dir_path})
     if rc != 0 or "IFM_EXTRACTED" not in out:
         raise RuntimeError(f"IFM extraction failed: {err or out}")
+
+    # Step 5b — Point target's DNS at the source DC so Install-ADDSDomainController can resolve the domain
+    if source_dc_ip:
+        logger.info("Step 5b: setting DNS on target to source DC IP %s", source_dc_ip)
+        out, err, rc = _run_ps_params(proto, _PS_SET_DNS, {"DnsServerIp": source_dc_ip})
+        if rc != 0 or "DNS_SET" not in out:
+            raise RuntimeError(f"DNS configuration failed: {err or out}")
 
     # Step 6 — Promote via IFM (NoRebootOnCompletion so we can verify before reboot)
     logger.info("Step 6: promoting target as DC via IFM")
@@ -451,6 +468,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     aws_region           = parameters.get("aws_region", "us-east-1")
     domain_admin_username = parameters.get("domain_admin_username", "")
     domain_admin_password = parameters.get("domain_admin_password", "")
+    source_dc_ip          = parameters.get("source_dc_ip", "")
 
     if dns_update_mode not in ("route53", "azure", "manual"):
         raise ValueError(f"dns_update_mode must be route53 | azure | manual — got {dns_update_mode!r}")
@@ -477,6 +495,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             aws_region=aws_region,
             domain_admin_username=domain_admin_username,
             domain_admin_password=domain_admin_password,
+            source_dc_ip=source_dc_ip,
         ),
     )
 
