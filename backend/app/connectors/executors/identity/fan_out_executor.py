@@ -43,7 +43,6 @@ async def _spawn_child_cr(
     action: str,
     parameters: dict,
     organization_id: Optional[uuid.UUID] = None,
-    parent_change_type: str = "emergency_user_lockout",
 ):
     """Create and auto-approve a child ChangeRequest."""
     from app.database import db_factory
@@ -63,8 +62,9 @@ async def _spawn_child_cr(
             if system_user:
                 requester_id = system_user.id
 
-        # Resolve change_type: use the parent's change_type if it maps to a valid enum value,
+        # Resolve change_type: use _parent_change_type from parameters if provided,
         # otherwise fall back to emergency_user_lockout
+        parent_change_type = parameters.get("_parent_change_type", "emergency_user_lockout")
         try:
             cr_change_type = ChangeType(parent_change_type)
         except ValueError:
@@ -142,9 +142,8 @@ async def execute(
                 connector_type=account.connector_type,
                 external_id=account.external_id,
                 action=action,
-                parameters=parameters,
+                parameters={**parameters, "_parent_change_type": change_type},
                 organization_id=organization_id,
-                parent_change_type=change_type,
             )
             child_results.append({
                 "child_cr_id": str(child.id),
