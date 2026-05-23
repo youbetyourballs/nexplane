@@ -1,0 +1,21 @@
+from ._client import SantaSyncClient
+
+
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    creds = getattr(connector, "credentials", {})
+    if not creds:
+        return {"action": "santa_policy_audit", "rules": [], "machine_group": "default", "rule_count": 0}
+
+    machine_group = parameters.get("machine_group") or creds.get("default_machine_group")
+    client = SantaSyncClient(creds)
+    try:
+        rules = await client.get_rules(machine_group)
+    finally:
+        await client.aclose()
+
+    return {
+        "action": "santa_policy_audit",
+        "rules": rules,
+        "machine_group": machine_group or "default",
+        "rule_count": len(rules),
+    }
