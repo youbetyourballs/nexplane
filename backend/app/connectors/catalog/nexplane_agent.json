@@ -2082,5 +2082,17 @@
                       "estimated_duration_seconds": 30,
                       "execution_tier": 3
                     }
+                    ,{
+                      "action_id": "macos_homebrew_list",
+                      "generic_action": "macos_homebrew_list",
+                      "display_name": "Homebrew Package Inventory",
+                      "description": "Lists all installed Homebrew packages and versions. Returns installed:false if Homebrew is not present.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [],
+                      "action_type": "read",
+                      "executor": "nexplane_agent.macos_homebrew_list",
+                      "estimated_duration_seconds": 30,
+                      "execution_tier": 1
+                    }
                 ]
 }

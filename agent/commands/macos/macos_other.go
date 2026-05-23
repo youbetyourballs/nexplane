@@ -59,3 +59,7 @@ func profilesInstall(_ map[string]any) (map[string]any, error) {
 func profilesRemove(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("profiles_remove is only supported on macOS")
 }
+
+func homebrewList(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("homebrew_list is only supported on macOS")
+}

@@ -1,0 +1,14 @@
+{
+  "change_type": "macos_homebrew_list",
+  "display_name": "Homebrew Package Inventory",
+  "description": "Lists all installed Homebrew packages and versions on macOS.",
+  "steps": [
+    {
+      "generic_action": "macos_homebrew_list",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

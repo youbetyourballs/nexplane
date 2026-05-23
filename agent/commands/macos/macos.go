@@ -95,3 +95,8 @@ func ProfilesInstallRollback(params map[string]any) (map[string]any, error) {
 func ProfilesRemoveRollback(params map[string]any) (map[string]any, error) {
 	return RollbackProfilesRemove(params)
 }
+
+// HomebrewListExecute lists all installed Homebrew packages and versions.
+func HomebrewListExecute(params map[string]any) (map[string]any, error) {
+	return homebrewList(params)
+}
