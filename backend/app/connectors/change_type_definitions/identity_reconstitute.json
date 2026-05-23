@@ -1,0 +1,30 @@
+{
+  "change_type": "identity_reconstitute",
+  "display_name": "Identity Reconstitution",
+  "steps": [
+    {"generic_action": "identity_reconstitute", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "risk_level": "critical",
+  "requires_approval": true,
+  "parameters": {
+    "s3_bucket": {"type": "string", "required": true, "description": "S3 bucket containing the identity snapshot artifacts."},
+    "s3_prefix": {"type": "string", "required": true, "description": "S3 key prefix for the target snapshot (e.g. snapshots/identity-snapshot-20260523T120000Z)."},
+    "dry_run": {"type": "boolean", "required": false, "default": true, "description": "When true, analyse divergence and return a report without making changes. Always run dry_run first."},
+    "max_batch": {"type": "integer", "required": false, "default": 100, "description": "Maximum number of accounts to reconstitute in a single execution. Enforces a safety cap."}
+  },
+  "applicable_connector_types": [
+    "active_directory",
+    "okta",
+    "entra_id",
+    "github",
+    "gitlab",
+    "ldap",
+    "freeipa",
+    "keycloak",
+    "gitea"
+  ],
+  "rollback_action": "identity_reconstitute",
+  "rollback_connector_type": "nexplane_agent"
+}
