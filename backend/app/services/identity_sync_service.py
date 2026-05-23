@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
 from app.models.identity_profile import IdentityProfile, IdentityAccount
-from app.models.connector import Connector
+from app.models.connector import Connector, ConnectorStatus
 
 logger = logging.getLogger(__name__)
 
@@ -74,34 +74,6 @@ def _extract_idp_cross_refs(connector_type: str, raw: dict) -> dict:
                 break
     return result
 
-
-def _upsert_account(
-    accounts_by_connector_external: dict[tuple, IdentityAccount],
-    profile: IdentityProfile,
-    connector_id,
-    connector_type: str,
-    external_id: str,
-    username: str,
-    email: Optional[str],
-    raw: dict,
-    now: datetime,
-) -> IdentityAccount:
-    key = (str(connector_id), external_id)
-    account = accounts_by_connector_external.get(key)
-    if account is None:
-        account = IdentityAccount(
-            identity_profile_id=profile.id,
-            connector_id=connector_id,
-            connector_type=connector_type,
-            external_id=external_id,
-        )
-        accounts_by_connector_external[key] = account
-    account.username = username
-    account.email = email
-    account.raw_attributes = raw
-    account.last_synced_at = now
-    account.is_stale = False
-    return account
 
 
 async def sync_connector_accounts(
@@ -210,7 +182,7 @@ async def sync_connector_accounts(
 async def sync_all(db: AsyncSession) -> dict:
     """Sync all identity connectors. Called by APScheduler every 4h."""
     connector_result = await db.execute(
-        select(Connector).where(Connector.enabled == True)
+        select(Connector).where(Connector.status == ConnectorStatus.active)
     )
     connectors = list(connector_result.scalars())
     total = {"created_profiles": 0, "upserted_accounts": 0, "connectors_synced": 0}
