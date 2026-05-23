@@ -236,17 +236,20 @@ class NexplaneClient:
         return self.post("/change-requests", json=body)["id"]
 
     def run_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict,
-               connector_id: str | None = None) -> dict:
+               connector_id: str | None = None, timeout: int = TIMEOUT_SECONDS) -> dict:
         print(f"  → {title}")
         cr_id = self.create_cr(title, change_type, asset_id, desired_outcome, connector_id=connector_id)
         self.post(f"/change-requests/{cr_id}/plan")
         self.post(f"/change-requests/{cr_id}/submit-for-approval")
         self.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "smoke test"})
         self.post(f"/change-requests/{cr_id}/execute")
-        return self._wait(cr_id, title)
+        return self._wait_timeout(cr_id, title, timeout)
 
     def _wait(self, cr_id: str, label: str) -> dict:
-        deadline = time.time() + TIMEOUT_SECONDS
+        return self._wait_timeout(cr_id, label, TIMEOUT_SECONDS)
+
+    def _wait_timeout(self, cr_id: str, label: str, timeout: int) -> dict:
+        deadline = time.time() + timeout
         while time.time() < deadline:
             cr = self.get(f"/change-requests/{cr_id}")
             if cr["status"] == "completed":
@@ -255,7 +258,7 @@ class NexplaneClient:
             if cr["status"] in ("failed", "rolled_back", "rejected"):
                 fail(f"{label} — CR ended with status '{cr['status']}' (id: {cr_id})")
             time.sleep(5)
-        fail(f"{label} — timed out after {TIMEOUT_SECONDS}s")
+        fail(f"{label} — timed out after {timeout}s")
 
     def _wait_rollback(self, cr_id: str, label: str) -> None:
         deadline = time.time() + TIMEOUT_SECONDS
