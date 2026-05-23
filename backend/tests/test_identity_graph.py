@@ -1,5 +1,6 @@
 import pytest
 import uuid
+import json
 from unittest.mock import AsyncMock, patch, MagicMock
 from app.models.identity_profile import IdentityProfile, IdentityAccount
 from app.connectors.executors.identity.fan_out_registry import (
