@@ -313,7 +313,7 @@ def _do_restore(
     # Step 7 — Post-reboot verification (NTDS may take up to 3 min after WinRM comes up)
     logger.info("Step 7: post-reboot verification — polling for NTDS")
     proto = _winrm_client(target_hostname, winrm_username, winrm_password, winrm_port, winrm_use_ssl)
-    ntds_deadline = time.monotonic() + 180
+    ntds_deadline = time.monotonic() + 600  # DC can take up to 10 min to fully initialize NTDS after promotion reboot
     out = err = ""
     rc = -1
     v: dict = {}
