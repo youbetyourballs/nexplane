@@ -14832,22 +14832,15 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
 
         # ------------------------------------------------------------------
         # Step 2b — Enable WinRM basic auth on source DC via SSM
-        # The source DC boots from an AMI; basic auth is not enabled by default
-        # on domain controllers. Reset the built-in Administrator password to a
-        # known value so the connectivity check below can use basic auth (domain
-        # users like smokeuser cannot use basic auth because the local SAM is
-        # replaced by AD on a DC).
+        # The executor later connects to the target (not the source) via WinRM.
+        # We still enable basic auth on the source for any diagnostic use, and
+        # unlock smokeuser in case it was locked by a previous failed run.
         # ------------------------------------------------------------------
-        _src_admin_pass = "SmokeRestore@2024!"
         log("AD_DC_RESTORE: enabling WinRM basic auth on source DC...")
         _src_winrm_cmd = ssm_client.send_command(
             InstanceIds=[source_id],
             DocumentName="AWS-RunPowerShellScript",
             Parameters={"commands": [
-                # Reset built-in Administrator to known password before enabling WinRM
-                f"$pw = ConvertTo-SecureString '{_src_admin_pass}' -AsPlainText -Force; "
-                "Set-LocalUser -Name Administrator -Password $pw",
-                "net user Administrator /active:yes",
                 "Enable-PSRemoting -Force",
                 "Set-Item wsman:\\localhost\\service\\auth\\Basic -Value $true",
                 "Set-Item wsman:\\localhost\\service\\AllowUnencrypted -Value $true",
@@ -15072,44 +15065,46 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         _winrm_pass = "UserPass123!"  # matches AD_DC_INTEGRITY smoke DC setup
 
         # ------------------------------------------------------------------
-        # Step 3c — Wait for WinRM on source DC to accept Administrator credentials
-        # The source DC boots from AMI; AD domain services (NTDS, KDC) need time
-        # to start. We check using the built-in Administrator account with basic
-        # auth — domain users cannot use basic auth on a DC because there is no
-        # local SAM. The Administrator password was reset to _src_admin_pass in
-        # Step 2b, so it is known regardless of AMI state.
+        # Step 3c — Wait for AD services to be ready on source DC via SSM
+        # SSM already works (confirmed above) and doesn't require password auth.
+        # We poll via SSM until NTDS and Netlogon are running and LDAP port 389
+        # is locally reachable — that confirms the DC is ready for replication.
+        # WinRM-based checks are unreliable on DCs (local SAM replaced by AD,
+        # Set-LocalUser fails, GPO may block basic auth).
         # ------------------------------------------------------------------
-        log("AD_DC_RESTORE: waiting for WinRM on source DC to accept Administrator credentials...")
-        import socket as _sock
-        _src_winrm_deadline = _t.time() + 600
-        _src_winrm_ok = False
-        while _t.time() < _src_winrm_deadline:
-            try:
-                _s = _sock.create_connection((source_ip, 5985), timeout=10)
-                _s.close()
-                # TCP open — try basic auth with Administrator (local account, works on DC)
-                import winrm as _winrm
-                _src_proto = _winrm.Protocol(
-                    endpoint=f"http://{source_ip}:5985/wsman",
-                    transport="basic",
-                    username="Administrator",
-                    password=_src_admin_pass,
-                    server_cert_validation="ignore",
-                )
-                _sh = _src_proto.open_shell()
-                _cid = _src_proto.run_command(_sh, "powershell", ["-Command", "Write-Output PING"])
-                _so, _se, _rc = _src_proto.get_command_output(_sh, _cid)
-                _src_proto.cleanup_command(_sh, _cid)
-                _src_proto.close_shell(_sh)
-                if b"PING" in _so:
-                    _src_winrm_ok = True
-                    break
-            except Exception:
-                pass
+        log("AD_DC_RESTORE: waiting for NTDS/Netlogon to be ready on source DC...")
+        _src_ready_deadline = _t.time() + 600
+        _src_ready_ok = False
+        while _t.time() < _src_ready_deadline:
             _t.sleep(15)
-        if not _src_winrm_ok:
-            fail("[AD_DC_RESTORE] Source DC WinRM never accepted Administrator credentials within 10 min")
-        log("AD_DC_RESTORE: source DC WinRM ready")
+            try:
+                _src_ready_cmd = ssm_client.send_command(
+                    InstanceIds=[source_id],
+                    DocumentName="AWS-RunPowerShellScript",
+                    Parameters={"commands": [
+                        "$ntds = (Get-Service NTDS -ErrorAction SilentlyContinue).Status; "
+                        "$nl = (Get-Service Netlogon -ErrorAction SilentlyContinue).Status; "
+                        "$ldap = (Test-NetConnection -ComputerName 127.0.0.1 -Port 389 -InformationLevel Quiet -WarningAction SilentlyContinue); "
+                        "Write-Output \"NTDS=$ntds NL=$nl LDAP=$ldap\"; "
+                        "if ($ntds -eq 'Running' -and $nl -eq 'Running' -and $ldap) { Write-Output 'DC_READY' }",
+                    ]},
+                    TimeoutSeconds=30,
+                )
+                _t.sleep(10)
+                _src_inv = ssm_client.get_command_invocation(
+                    CommandId=_src_ready_cmd["Command"]["CommandId"],
+                    InstanceId=source_id,
+                )
+                _src_out = _src_inv.get("StandardOutputContent", "")
+                log(f"AD_DC_RESTORE: source DC status: {_src_out.strip()[:120]}")
+                if "DC_READY" in _src_out:
+                    _src_ready_ok = True
+                    break
+            except Exception as _ex:
+                log(f"AD_DC_RESTORE: source DC SSM poll error: {_ex}")
+        if not _src_ready_ok:
+            fail("[AD_DC_RESTORE] Source DC NTDS/Netlogon never became ready within 10 min")
+        log("AD_DC_RESTORE: source DC AD services ready")
 
         # ------------------------------------------------------------------
         # Step 4 — Register AD connector + asset for source DC
