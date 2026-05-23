@@ -10392,7 +10392,7 @@ kubectl create rolebinding smoke-rb \\
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 echo "K8S_RBAC_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-socat16443-v8").hexdigest()
+    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-py-proxy16443-v9").hexdigest()
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
@@ -10548,12 +10548,39 @@ kind create cluster --name smoke-test --wait 300s \
   && echo "KIND_CLUSTER_READY" \
   || {{ echo "KIND_FAILED"; tail -20 /tmp/kind-out.txt; exit 1; }}
 
-# kind binds API server on 127.0.0.1:6443 only. Use socat to proxy from all interfaces
-# on port 16443 so the platform backend can reach it from the VPC.
-dnf install -y socat -q >/dev/null 2>&1 || true
+# kind binds API server on 127.0.0.1:6443 only. Use Python TCP proxy on port 16443
+# so the platform backend can reach it from the VPC. Python stdlib, no extra installs.
 PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
-nohup socat TCP-LISTEN:16443,fork,bind=0.0.0.0 TCP:127.0.0.1:6443 >/tmp/socat.log 2>&1 &
-echo "socat proxy: $PRIVATE_IP:16443 -> 127.0.0.1:6443 (PID: $!)"
+python3 -c "
+import socket, threading
+def _fwd(a, b):
+    try:
+        while True:
+            d = a.recv(65536)
+            if not d: break
+            b.sendall(d)
+    except Exception: pass
+    finally:
+        try: a.close()
+        except: pass
+        try: b.close()
+        except: pass
+def _handle(client):
+    try:
+        backend = socket.create_connection(('127.0.0.1', 6443), timeout=30)
+        threading.Thread(target=_fwd, args=(client, backend), daemon=True).start()
+        threading.Thread(target=_fwd, args=(backend, client), daemon=True).start()
+    except Exception: client.close()
+srv = socket.socket()
+srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(('0.0.0.0', 16443))
+srv.listen(20)
+print('proxy 0.0.0.0:16443 -> 127.0.0.1:6443 ready')
+while True:
+    c, _ = srv.accept()
+    threading.Thread(target=_handle, args=(c,), daemon=True).start()
+" >/tmp/proxy.log 2>&1 &
+echo "K8s proxy started (PID: $!) on $PRIVATE_IP:16443"
 kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml 2>/dev/null
 mkdir -p /root/.kube && cp /tmp/smoke-kubeconfig.yaml /root/.kube/config
 export KUBECONFIG=/tmp/smoke-kubeconfig.yaml
