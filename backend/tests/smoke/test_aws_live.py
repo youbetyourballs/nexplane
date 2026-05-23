@@ -14682,6 +14682,350 @@ echo "EVENT_INDEXED"
             pass
 
 
+def run_phase_ad_dc_restore(client, cloud_account_id):
+    """Phase AD_DC_RESTORE: Full round-trip — snapshot a source DC, restore onto a clean target,
+    decommission source. Proves ad_forest_snapshot (IFM) + ad_forest_restore + ad_dc_decommission
+    work end-to-end against real Windows Server 2022 instances.
+
+    Cost: ~$0.12/run (two t3.small Windows instances, ~18 min)
+    Source DC: launched from the cached AD_DC AMI (fast)
+    Target: base Windows Server 2022 AMI + WinRM bootstrap via SSM
+    """
+    import hashlib as _hl
+    import time as _t
+
+    print("\n[Phase AD_DC_RESTORE] AD forest restore round-trip smoke test")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_client:
+        fail("[AD_DC_RESTORE] AWS clients not available")
+
+    source_id = ""
+    target_id = ""
+    s3_bucket = "nexplane-agent-downloads"  # reuse existing bucket
+    s3_prefix = f"smoke-ad-restore-{int(_t.time())}"
+    _ad_asset_id = None
+    _ad_conn_id = None
+
+    try:
+        # ------------------------------------------------------------------
+        # Step 1 — Launch source DC from cached AMI
+        # ------------------------------------------------------------------
+        _setup_key = (
+            "ad-ds-v6-fw-disabled-winrm-basic-"
+            "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
+        )
+        setup_hash = _hl.md5(_setup_key.encode()).hexdigest()
+        cached_ami = _check_smoke_ami_cache(ssm_client, ec2_client, "dc-smoke", setup_hash)
+        if not cached_ami:
+            fail("[AD_DC_RESTORE] No cached AD DC AMI — run AD_DC_INTEGRITY first to build the AMI cache")
+
+        log(f"AD_DC_RESTORE: launching source DC from cached AMI {cached_ami}")
+        _vpcs = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+        _vpc_id = _vpcs[0]["VpcId"]
+        _subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [_vpc_id]}])["Subnets"]
+        _subnet_id = _subnets[0]["SubnetId"]
+
+        _dc_sg_resp = ec2_client.describe_security_groups(
+            Filters=[{"Name": "group-name", "Values": ["nexplane-smoke-dc"]}]
+        )
+        _dc_sg_id = _dc_sg_resp["SecurityGroups"][0]["GroupId"] if _dc_sg_resp["SecurityGroups"] else None
+
+        _iam = _get_aws_boto3_client("iam")
+        _profile = None
+        if _iam:
+            for _pname in ("NexplaneEC2TestProfile", "NexplaneSmokeProfile", "EC2InstanceProfileForSSM"):
+                try:
+                    _iam.get_instance_profile(InstanceProfileName=_pname)
+                    _profile = _pname
+                    break
+                except Exception:
+                    pass
+
+        _launch_kwargs: dict = dict(
+            ImageId=cached_ami, InstanceType="t3.small", MinCount=1, MaxCount=1,
+            TagSpecifications=[{"ResourceType": "instance", "Tags": [
+                {"Key": "Name", "Value": "nexplane-smoke-dc-restore-source"},
+                {"Key": "nexplane-smoke", "Value": "true"},
+            ]}],
+            NetworkInterfaces=[{
+                "DeviceIndex": 0, "SubnetId": _subnet_id,
+                "AssociatePublicIpAddress": False,
+                **( {"Groups": [_dc_sg_id]} if _dc_sg_id else {}),
+            }],
+        )
+        if _profile:
+            _launch_kwargs["IamInstanceProfile"] = {"Name": _profile}
+        _src_resp = ec2_client.run_instances(**_launch_kwargs)
+        source_id = _src_resp["Instances"][0]["InstanceId"]
+        log(f"AD_DC_RESTORE: source DC launched: {source_id}")
+
+        # ------------------------------------------------------------------
+        # Step 2 — Launch clean target (base Windows Server 2022)
+        # ------------------------------------------------------------------
+        log("AD_DC_RESTORE: finding base Windows Server 2022 AMI for target...")
+        _win_imgs = ec2_client.describe_images(
+            Owners=["amazon"],
+            Filters=[
+                {"Name": "name", "Values": ["Windows_Server-2022-English-Full-Base-*"]},
+                {"Name": "state", "Values": ["available"]},
+            ],
+        )["Images"]
+        _win_ami = sorted(_win_imgs, key=lambda x: x["CreationDate"], reverse=True)[0]["ImageId"]
+        log(f"AD_DC_RESTORE: target AMI: {_win_ami}")
+
+        _tgt_kwargs = dict(
+            ImageId=_win_ami, InstanceType="t3.small", MinCount=1, MaxCount=1,
+            TagSpecifications=[{"ResourceType": "instance", "Tags": [
+                {"Key": "Name", "Value": "nexplane-smoke-dc-restore-target"},
+                {"Key": "nexplane-smoke", "Value": "true"},
+            ]}],
+            NetworkInterfaces=[{
+                "DeviceIndex": 0, "SubnetId": _subnet_id,
+                "AssociatePublicIpAddress": False,
+                **( {"Groups": [_dc_sg_id]} if _dc_sg_id else {}),
+            }],
+        )
+        if _profile:
+            _tgt_kwargs["IamInstanceProfile"] = {"Name": _profile}
+        _tgt_resp = ec2_client.run_instances(**_tgt_kwargs)
+        target_id = _tgt_resp["Instances"][0]["InstanceId"]
+        log(f"AD_DC_RESTORE: target launched: {target_id}")
+
+        # Wait for both instances to reach running state
+        for iid, label in ((source_id, "source"), (target_id, "target")):
+            _deadline = _t.time() + 300
+            _private_ip = ""
+            while _t.time() < _deadline:
+                _desc = ec2_client.describe_instances(InstanceIds=[iid])
+                _inst = _desc["Reservations"][0]["Instances"][0]
+                if _inst["State"]["Name"] == "running":
+                    _private_ip = _inst.get("PrivateIpAddress", "")
+                    log(f"AD_DC_RESTORE: {label} running — {_private_ip}")
+                    break
+                _t.sleep(8)
+            else:
+                fail(f"[AD_DC_RESTORE] {label} never reached running state")
+
+        # Get IPs
+        source_ip = ec2_client.describe_instances(InstanceIds=[source_id])[
+            "Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+        target_ip = ec2_client.describe_instances(InstanceIds=[target_id])[
+            "Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+
+        # Wait for SSM on both
+        for iid, label in ((source_id, "source"), (target_id, "target")):
+            log(f"AD_DC_RESTORE: waiting for SSM on {label}...")
+            _ssm_deadline = _t.time() + 600
+            while _t.time() < _ssm_deadline:
+                _info = ssm_client.describe_instance_information(
+                    Filters=[{"Key": "InstanceIds", "Values": [iid]}]
+                )
+                if (_info["InstanceInformationList"] and
+                        _info["InstanceInformationList"][0]["PingStatus"] == "Online"):
+                    log(f"AD_DC_RESTORE: SSM ready on {label}")
+                    break
+                _t.sleep(15)
+            else:
+                fail(f"[AD_DC_RESTORE] SSM never came online on {label}")
+
+        # ------------------------------------------------------------------
+        # Step 3 — Enable WinRM on target via SSM
+        # ------------------------------------------------------------------
+        log("AD_DC_RESTORE: enabling WinRM on target via SSM...")
+        _winrm_cmd = ssm_client.send_command(
+            InstanceIds=[target_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": [
+                "Enable-PSRemoting -Force",
+                "Set-Item wsman:\\localhost\\service\\auth\\Basic -Value $true",
+                "Set-Item wsman:\\localhost\\service\\AllowUnencrypted -Value $true",
+                "New-NetFirewallRule -DisplayName 'WinRM-NexplaneSmoke' -Direction Inbound "
+                "-Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue",
+                "Restart-Service WinRM",
+                "Write-Output 'WINRM_ENABLED'",
+            ]},
+            TimeoutSeconds=120,
+        )
+        _winrm_cmd_id = _winrm_cmd["Command"]["CommandId"]
+        _t.sleep(5)
+        _winrm_deadline = _t.time() + 180
+        _winrm_out = ""
+        while _t.time() < _winrm_deadline:
+            _t.sleep(8)
+            try:
+                _inv = ssm_client.get_command_invocation(
+                    CommandId=_winrm_cmd_id, InstanceId=target_id
+                )
+                _status = _inv["Status"]
+                if _status in ("Success", "Failed", "TimedOut", "Cancelled"):
+                    _winrm_out = _inv.get("StandardOutputContent", "")
+                    if _status != "Success":
+                        fail(f"[AD_DC_RESTORE] WinRM bootstrap SSM command {_status}: {_winrm_out[-300:]}")
+                    break
+            except Exception:
+                pass
+        if "WINRM_ENABLED" not in _winrm_out:
+            fail(f"[AD_DC_RESTORE] WinRM bootstrap failed on target: {_winrm_out[-300:]}")
+        log("AD_DC_RESTORE: WinRM enabled on target")
+
+        # Reuse existing smoke DC credentials
+        _winrm_user = "smokeuser"
+        _winrm_pass = "Smoke@2024!"  # matches AD_DC_INTEGRITY smoke DC setup
+
+        # ------------------------------------------------------------------
+        # Step 4 — Register AD connector + asset for source DC
+        # ------------------------------------------------------------------
+        log("AD_DC_RESTORE: registering AD connector pointing at source DC...")
+        _conn_resp = client.post("/connectors", json={
+            "name": f"nexplane-smoke-ad-restore-{source_id}",
+            "connector_type": "active_directory",
+            "credentials": {
+                "winrm_hostname": source_ip,
+                "winrm_username": _winrm_user,
+                "winrm_password": _winrm_pass,
+                "winrm_port": "5985",
+                "domain_name": "smoke.nexplane.local",
+                "server": source_ip,
+                "bind_dn": f"CN={_winrm_user},CN=Users,DC=smoke,DC=nexplane,DC=local",
+                "bind_password": _winrm_pass,
+            },
+        })
+        _ad_conn_id = _conn_resp["id"]
+
+        _asset_resp = client.post("/assets", json={
+            "name": f"nexplane-smoke-restore-dc-{source_id}",
+            "asset_type": "server",
+            "environment": "staging",
+            "criticality": "high",
+            "connector_id": _ad_conn_id,
+            "metadata": {"private_ip": source_ip},
+        })
+        _ad_asset_id = _asset_resp["id"]
+        log(f"AD_DC_RESTORE: connector={_ad_conn_id}, asset={_ad_asset_id}")
+
+        # ------------------------------------------------------------------
+        # Step 5 — Snapshot CR (IFM)
+        # ------------------------------------------------------------------
+        log("AD_DC_RESTORE: running ad_forest_snapshot CR...")
+        cr_snap = client.run_cr(
+            "[AD_DC_RESTORE] snapshot source DC",
+            "ad_forest_snapshot",
+            _ad_asset_id,
+            {
+                "s3_bucket": s3_bucket,
+                "s3_prefix": s3_prefix,
+                "dc_hostname": source_ip,
+                "domain_name": "smoke.nexplane.local",
+            },
+            connector_id=_ad_conn_id,
+        )
+        snap_result = client.get_cr_step_result(cr_snap)
+        if not snap_result.get("snapshot_id"):
+            fail(f"[AD_DC_RESTORE] Snapshot CR failed: {snap_result}")
+        snapshot_id = snap_result["snapshot_id"]
+        snap_prefix = snap_result.get("s3_prefix", s3_prefix)
+        log(f"AD_DC_RESTORE: snapshot complete — {snapshot_id}, prefix={snap_prefix}")
+
+        # Verify manifest format
+        import boto3 as _boto3, json as _json
+        _s3 = _boto3.client("s3", region_name="us-east-1")
+        _manifest = _json.loads(
+            _s3.get_object(Bucket=s3_bucket, Key=f"{snap_prefix}/manifest.json")["Body"].read()
+        )
+        assert _manifest.get("format") == "ifm", f"manifest format wrong: {_manifest.get('format')}"
+        log(f"AD_DC_RESTORE: manifest.json verified — format=ifm, artifacts={_manifest['artifacts']}")
+
+        # ------------------------------------------------------------------
+        # Step 6 — Restore CR onto clean target
+        # ------------------------------------------------------------------
+        log(f"AD_DC_RESTORE: running ad_forest_restore CR → {target_ip}...")
+        cr_restore = client.run_cr(
+            "[AD_DC_RESTORE] restore onto clean target",
+            "ad_forest_restore",
+            _ad_asset_id,
+            {
+                "target_hostname": target_ip,
+                "winrm_username": "Administrator",
+                "winrm_password": "PLACEHOLDER",  # Windows base AMI uses EC2-generated password
+                "snapshot_s3_prefix": snap_prefix,
+                "s3_bucket": s3_bucket,
+                "domain_name": "smoke.nexplane.local",
+                "safe_mode_password": "DSRM@Smoke2024!",
+                "require_dc_isolation": False,
+                "dns_update_mode": "manual",
+            },
+            connector_id=_ad_conn_id,
+        )
+        restore_result = client.get_cr_step_result(cr_restore)
+        if restore_result.get("dc_verification") != "passed":
+            fail(f"[AD_DC_RESTORE] Restore CR verification failed: {restore_result}")
+        log(f"AD_DC_RESTORE: restore complete — new DC at {restore_result.get('new_dc_ip')}")
+        log(f"AD_DC_RESTORE: SYSVOL status: {restore_result.get('sysvol_status')}")
+
+        # ------------------------------------------------------------------
+        # Step 7 — Decommission source (EC2 terminate)
+        # ------------------------------------------------------------------
+        log(f"AD_DC_RESTORE: running ad_dc_decommission CR → {source_id}...")
+        cr_decom = client.run_cr(
+            "[AD_DC_RESTORE] decommission source DC",
+            "ad_dc_decommission",
+            _ad_asset_id,
+            {
+                "compromised_dcs": [
+                    {"type": "ec2", "instance_id": source_id, "name": "smoke-source-dc"}
+                ],
+            },
+            connector_id=_ad_conn_id,
+        )
+        decom_result = client.get_cr_step_result(cr_decom)
+        if decom_result.get("status") != "completed":
+            fail(f"[AD_DC_RESTORE] Decommission CR failed: {decom_result}")
+        log("AD_DC_RESTORE: decommission complete")
+
+        # Verify termination
+        _t.sleep(10)
+        _desc = ec2_client.describe_instances(InstanceIds=[source_id])
+        _state = _desc["Reservations"][0]["Instances"][0]["State"]["Name"]
+        if _state not in ("terminated", "shutting-down"):
+            fail(f"[AD_DC_RESTORE] Source DC not terminated — state: {_state}")
+        log(f"AD_DC_RESTORE: source DC confirmed {_state}")
+        source_id = ""  # don't terminate again in finally
+
+        log("Phase AD_DC_RESTORE PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase AD_DC_RESTORE failed: {e}")
+        raise
+
+    finally:
+        # Cleanup connector and asset
+        if _ad_conn_id:
+            try:
+                client.delete(f"/connectors/{_ad_conn_id}")
+            except Exception:
+                pass
+        # Terminate surviving instances
+        for iid, label in ((source_id, "source"), (target_id, "target")):
+            if iid:
+                try:
+                    ec2_client.terminate_instances(InstanceIds=[iid])
+                    log(f"AD_DC_RESTORE: {label} {iid} terminated")
+                except Exception:
+                    pass
+        # Cleanup S3 smoke artifacts
+        try:
+            _s3c = _get_aws_boto3_client("s3")
+            if _s3c:
+                _paginator = _s3c.get_paginator("list_objects_v2")
+                for _page in _paginator.paginate(Bucket=s3_bucket, Prefix=s3_prefix):
+                    for _obj in _page.get("Contents", []):
+                        _s3c.delete_object(Bucket=s3_bucket, Key=_obj["Key"])
+        except Exception:
+            pass
+
+
 def main():
     parser = make_base_parser("Nexplane AWS live smoke test")
     parser.add_argument(
@@ -15163,6 +15507,8 @@ def main():
                 client, cloud_account_id,
                 tailscale_auth_key=getattr(args, "tailscale_auth_key", ""),
             )
+        if "AD_DC_RESTORE" in phases:
+            run_phase_ad_dc_restore(client, cloud_account_id)
         if "BIND_DNS" in phases:
             run_phase_bind_dns(
                 client, cloud_account_id,
