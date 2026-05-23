@@ -130,7 +130,7 @@ def _run_ps(proto, script: str) -> tuple[str, str, int]:
 
 
 def _run_ps_params(proto, script: str, params: dict) -> tuple[str, str, int]:
-    prefix = "\n".join(f"${k} = @\"\n{v}\n\"@" for k, v in params.items())
+    prefix = "\n".join(f"${k} = '{str(v).replace(chr(39), chr(39) * 2)}'" for k, v in params.items())
     body = script.strip()
     if body.startswith("param("):
         depth = 0
