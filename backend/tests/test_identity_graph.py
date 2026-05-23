@@ -9,7 +9,11 @@ from app.connectors.executors.identity.fan_out_registry import (
 from app.services.identity_sync_service import (
     _extract_idp_cross_refs,
     _correlate_by_email,
-    _upsert_account,
+)
+from app.connectors.executors.identity.get_account_state import build_pre_state_from_raw
+from app.connectors.executors.identity.restore_account_state import (
+    compute_restore_ops,
+    RESTORABLE_CONNECTOR_TYPES,
 )
 
 
@@ -93,3 +97,45 @@ def test_correlate_by_email_fallback_fields():
 
     raw2 = {"userPrincipalName": "dan@example.com"}
     assert _correlate_by_email("active_directory", raw2) == "dan@example.com"
+
+
+def test_build_pre_state_active_directory():
+    raw = {
+        "enabled": True,
+        "locked": False,
+        "group_memberships": ["Domain Users", "VPN"],
+        "mfa_enforced": False,
+    }
+    state = build_pre_state_from_raw("active_directory", raw)
+    assert state["enabled"] is True
+    assert state["group_memberships"] == ["Domain Users", "VPN"]
+
+
+def test_build_pre_state_okta():
+    raw = {
+        "status": "ACTIVE",
+        "mfa_enrolled_factors": ["totp"],
+        "app_assignments": ["slack", "github"],
+    }
+    state = build_pre_state_from_raw("okta", raw)
+    assert state["status"] == "ACTIVE"
+    assert "mfa_enrolled_factors" in state
+
+
+def test_build_pre_state_unknown_connector():
+    raw = {"foo": "bar"}
+    state = build_pre_state_from_raw("unknown_system", raw)
+    assert state == {}
+
+
+def test_compute_restore_ops_disable_to_enabled():
+    pre_state = {"enabled": True, "locked": False, "group_memberships": []}
+    post_state = {"enabled": False, "locked": False, "group_memberships": []}
+    ops = compute_restore_ops("active_directory", pre_state, post_state)
+    assert any(op["action"] == "enable_account" for op in ops)
+
+
+def test_restorable_connector_types_includes_common():
+    assert "active_directory" in RESTORABLE_CONNECTOR_TYPES
+    assert "okta" in RESTORABLE_CONNECTOR_TYPES
+    assert "freeipa" in RESTORABLE_CONNECTOR_TYPES
