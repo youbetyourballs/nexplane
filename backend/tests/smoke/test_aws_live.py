@@ -14878,6 +14878,45 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
             fail(f"[AD_DC_RESTORE] WinRM bootstrap failed on target: {_winrm_out[-300:]}")
         log("AD_DC_RESTORE: WinRM enabled on target")
 
+        # ------------------------------------------------------------------
+        # Step 3b — Open DNS port 53 on source DC Windows Firewall
+        # The DC may boot with Public firewall profile, blocking inbound DNS
+        # from the target. The target needs to query the source DC's DNS to
+        # resolve smoke.nexplane.local for dcpromo.
+        # ------------------------------------------------------------------
+        log("AD_DC_RESTORE: opening DNS port 53 on source DC firewall...")
+        _fw_cmd = ssm_client.send_command(
+            InstanceIds=[source_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": [
+                # Open all ports required for dcpromo from target to source DC
+                "foreach ($port in @(53,88,135,389,445,464,636,3268,3269,49152)) {"
+                "  New-NetFirewallRule -DisplayName \"DC-Restore-UDP-$port\" -Direction Inbound "
+                "  -Protocol UDP -LocalPort $port -Action Allow -Profile Any "
+                "  -ErrorAction SilentlyContinue | Out-Null;"
+                "  New-NetFirewallRule -DisplayName \"DC-Restore-TCP-$port\" -Direction Inbound "
+                "  -Protocol TCP -LocalPort $port -Action Allow -Profile Any "
+                "  -ErrorAction SilentlyContinue | Out-Null"
+                "};"
+                "Write-Output 'FW_DONE'",
+            ]},
+            TimeoutSeconds=60,
+        )
+        _fw_cmd_id = _fw_cmd["Command"]["CommandId"]
+        _t.sleep(5)
+        _fw_deadline = _t.time() + 90
+        while _t.time() < _fw_deadline:
+            _t.sleep(5)
+            try:
+                _inv = ssm_client.get_command_invocation(
+                    CommandId=_fw_cmd_id, InstanceId=source_id
+                )
+                if _inv["Status"] in ("Success", "Failed", "TimedOut", "Cancelled"):
+                    break
+            except Exception:
+                pass
+        log("AD_DC_RESTORE: DNS firewall rule added on source DC")
+
         # Reuse existing smoke DC credentials
         _winrm_user = "smokeuser"
         _winrm_pass = "UserPass123!"  # matches AD_DC_INTEGRITY smoke DC setup
