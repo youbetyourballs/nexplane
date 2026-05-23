@@ -89,6 +89,8 @@ class ConnectorType(str, enum.Enum):
     jfrog = "jfrog"
     # Email
     smtp = "smtp"
+    # macOS endpoint management
+    santa_sync_server = "santa_sync_server"
 
 
 class ConnectorStatus(str, enum.Enum):
