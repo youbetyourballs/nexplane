@@ -59,3 +59,4 @@ async def test_snapshot_rollback_with_artifacts_deletes(monkeypatch):
     assert result["rolled_back"] is True
     assert "ad-snapshots/20260523T120000Z/IFM.zip" in deleted
     assert "ad-snapshots/20260523T120000Z/GPO-backup.zip" in deleted
+    assert "ad-snapshots/20260523T120000Z/manifest.json" in deleted
