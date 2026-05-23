@@ -15140,6 +15140,46 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         log(f"AD_DC_RESTORE: connector={_ad_conn_id}, asset={_ad_asset_id}")
 
         # ------------------------------------------------------------------
+        # Step 4b — Normalize domain Administrator password on source DC
+        # The source DC AMI was created from an EC2 instance whose Administrator
+        # password is the EC2-generated random value (unknown). IFM restore
+        # copies the AD database including that password; after restoration the
+        # target DC's domain Administrator password would be unknown and WinRM
+        # post-reboot verification would fail. Reset it to a known value NOW,
+        # before taking the IFM snapshot, so the restored DC has a known password.
+        # ------------------------------------------------------------------
+        _domain_admin_pass_known = "SmokeRestore@2024!"
+        log("AD_DC_RESTORE: normalizing domain Administrator password on source DC...")
+        _admin_pass_cmd = ssm_client.send_command(
+            InstanceIds=[source_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": [
+                f"$pw = ConvertTo-SecureString '{_domain_admin_pass_known}' -AsPlainText -Force; "
+                "Set-ADAccountPassword -Identity Administrator -NewPassword $pw -Reset; "
+                "Write-Output 'ADMIN_PASS_SET'",
+            ]},
+            TimeoutSeconds=60,
+        )
+        _t.sleep(5)
+        _admin_pass_deadline = _t.time() + 90
+        _admin_pass_out = ""
+        while _t.time() < _admin_pass_deadline:
+            _t.sleep(5)
+            try:
+                _inv = ssm_client.get_command_invocation(
+                    CommandId=_admin_pass_cmd["Command"]["CommandId"], InstanceId=source_id
+                )
+                if _inv["Status"] in ("Success", "Failed", "TimedOut", "Cancelled"):
+                    _admin_pass_out = _inv.get("StandardOutputContent", "")
+                    if "ADMIN_PASS_SET" not in _admin_pass_out:
+                        log(f"AD_DC_RESTORE: WARNING — admin password reset may have failed: {_admin_pass_out[-200:]}")
+                    else:
+                        log("AD_DC_RESTORE: domain Administrator password normalized")
+                    break
+            except Exception:
+                pass
+
+        # ------------------------------------------------------------------
         # Step 5 — Snapshot CR (IFM)
         # ------------------------------------------------------------------
         log("AD_DC_RESTORE: running ad_forest_snapshot CR...")
@@ -15282,8 +15322,11 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
             _ad_asset_id,
             {
                 "target_hostname": target_ip,
-                "winrm_username": _target_winrm_user,
-                "winrm_password": _target_admin_pass,
+                # After IFM restore the domain Administrator password is the one
+                # from the source DC's AD database (normalized to _domain_admin_pass_known
+                # in Step 4b before snapshot). Use that for post-reboot WinRM.
+                "winrm_username": "Administrator",
+                "winrm_password": _domain_admin_pass_known,
                 "snapshot_s3_prefix": snap_prefix,
                 "s3_bucket": s3_bucket,
                 "domain_name": "smoke.nexplane.local",
@@ -15291,10 +15334,8 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 "require_dc_isolation": False,
                 "dns_update_mode": "manual",
                 # Domain admin creds for Install-ADDSDomainController -Credential
-                # smokeuser is created with Domain Admins membership during AMI setup.
-                # The built-in Administrator password is EC2-generated (unknown); use smokeuser.
-                "domain_admin_username": "SMOKE\\smokeuser",
-                "domain_admin_password": "UserPass123!",
+                "domain_admin_username": "Administrator",
+                "domain_admin_password": _domain_admin_pass_known,
                 "source_dc_ip": source_ip,
                 # Bypass UDP-based DC locator (nltest fails in VPC) by pointing
                 # Install-ADDSDomainController at the source DC FQDN directly
