@@ -475,13 +475,13 @@ def _do_restore(
     except Exception:
         pass  # connection drops immediately on reboot
 
-    _wait_offline(target_hostname, port=winrm_port, timeout_min=5)
-    logger.info("Step 7: waiting for target to come back online (up to 15 min)")
+    _wait_offline(target_hostname, port=winrm_port, timeout_min=10)
+    logger.info("Step 7: waiting for target to come back online (up to 30 min)")
     came_back = _wait_online(target_hostname, winrm_username, winrm_password,
-                              winrm_port, winrm_use_ssl, timeout_min=15)
+                              winrm_port, winrm_use_ssl, timeout_min=30)
     if not came_back:
         raise RuntimeError(
-            f"Target {target_hostname} did not return via WinRM within 15 min after promotion"
+            f"Target {target_hostname} did not return via WinRM within 30 min after promotion"
         )
 
     # Step 7 — Post-reboot verification (NTDS may take up to 3 min after WinRM comes up)
