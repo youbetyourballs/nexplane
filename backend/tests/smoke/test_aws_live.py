@@ -10288,7 +10288,7 @@ def run_phase_k8s_rbac(client, cloud_account_id):
         fail("[K8S_RBAC] AWS clients not available")
 
     AL2023_AMI = "ami-0953476d60561c955"
-    KUBE_API_PORT = 16443  # socat proxy port (kind API server is on 127.0.0.1:6443 only)
+    KUBE_API_PORT = 6443
     S3_TOOLS_BUCKET = "nexplane-agent-downloads"
     KUBECTL_VERSION = "v1.29.0"
     KIND_VERSION = "v0.24.0"
@@ -10354,7 +10354,12 @@ chmod +x /usr/local/bin/kind
 # Pre-load kindest/node image from S3 (runner has no internet; image staged by platform)
 aws s3 cp s3://{S3_TOOLS_BUCKET}/smoke-tools/kindest-node-v1.30.0.tar.gz - | docker load
 
-# Create kind cluster: bind on 0.0.0.0 + add private IP as SAN for proper TLS
+# Enable IP forwarding — required for Docker port-forwarding PREROUTING DNAT to reach
+# containers from other VPC hosts. Docker should enable this, but set explicitly to be safe.
+sysctl -w net.ipv4.ip_forward=1
+
+# Create kind cluster with API server bound on all interfaces so Docker creates
+# a 0.0.0.0:6443 port mapping accessible from the VPC.
 cat > /tmp/kind-config.yaml <<KINDEOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -10363,25 +10368,24 @@ networking:
   apiServerPort: 6443
 KINDEOF
 
-# Redirect all verbose output to files to stay within SSM's 24KB stdout limit.
 echo "Creating kind cluster..."
 kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s \
   --image kindest/node:v1.30.0 >/tmp/kind-out.txt 2>&1 \
   && echo "KIND_CLUSTER_READY" \
   || {{ echo "KIND_FAILED"; tail -30 /tmp/kind-out.txt; exit 1; }}
 
+# Verify Docker port binding is on 0.0.0.0 (not 127.0.0.1)
+echo "Docker port bindings:"
+docker port smoke-test-control-plane 6443/tcp || true
+echo "ip_forward: $(cat /proc/sys/net/ipv4/ip_forward)"
+
+# Allow inbound on port 6443 from VPC
+iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
+
 kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml 2>/dev/null
 mkdir -p /root/.kube && cp /tmp/smoke-kubeconfig.yaml /root/.kube/config
 export KUBECONFIG=/tmp/smoke-kubeconfig.yaml
 echo "kubeconfig ready"
-
-# Renew API server cert with private IP SAN (best-effort; redirect verbose output to file).
-docker exec -e "PRIV_IP=$PRIVATE_IP" smoke-test-control-plane bash -c '
-  KUBECONFIG=/etc/kubernetes/admin.conf kubectl -n kube-system get cm kubeadm-config \
-    -o jsonpath="{{.data.ClusterConfiguration}}" > /tmp/cc.yaml 2>/dev/null
-  printf "\napiServer:\n  certSANs:\n  - 127.0.0.1\n  - %s\n" "$PRIV_IP" >> /tmp/cc.yaml
-  kubeadm certs renew apiserver --config /tmp/cc.yaml
-' >/tmp/cert-renewal.txt 2>&1 && echo "SAN_RENEWED" || echo "SAN_RENEWAL_SKIPPED"
 
 kubectl create serviceaccount smoke-sa --namespace default || true
 kubectl create rolebinding smoke-rb \\
@@ -10389,10 +10393,9 @@ kubectl create rolebinding smoke-rb \\
   --serviceaccount=default:smoke-sa \\
   --namespace=default || true
 
-iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 echo "K8S_RBAC_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-py-proxy16443-v9").hexdigest()
+    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-ipforward-v10").hexdigest()
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
@@ -10538,62 +10541,30 @@ echo "K8S_RBAC_SETUP_COMPLETE"
             log("  Starting docker and kind cluster from cached AMI...")
             restart_script = f"""
 set -e
+sysctl -w net.ipv4.ip_forward=1
 systemctl start docker
 for i in $(seq 1 20); do docker info >/dev/null 2>&1 && break || sleep 3; done
 kind delete cluster --name smoke-test 2>/dev/null || true
-PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+cat > /tmp/kind-config.yaml <<KINDEOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  apiServerAddress: "0.0.0.0"
+  apiServerPort: 6443
+KINDEOF
 echo "Creating kind cluster..."
-kind create cluster --name smoke-test --wait 300s \
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s \
   --image kindest/node:v1.30.0 >/tmp/kind-out.txt 2>&1 \
   && echo "KIND_CLUSTER_READY" \
   || {{ echo "KIND_FAILED"; tail -20 /tmp/kind-out.txt; exit 1; }}
-
-# kind binds API server on 127.0.0.1:6443 only. Use Python TCP proxy on port 16443
-# so the platform backend can reach it from the VPC. Python stdlib, no extra installs.
-PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
-python3 -c "
-import socket, threading
-def _fwd(a, b):
-    try:
-        while True:
-            d = a.recv(65536)
-            if not d: break
-            b.sendall(d)
-    except Exception: pass
-    finally:
-        try: a.close()
-        except: pass
-        try: b.close()
-        except: pass
-def _handle(client):
-    try:
-        backend = socket.create_connection(('127.0.0.1', 6443), timeout=30)
-        threading.Thread(target=_fwd, args=(client, backend), daemon=True).start()
-        threading.Thread(target=_fwd, args=(backend, client), daemon=True).start()
-    except Exception: client.close()
-srv = socket.socket()
-srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-srv.bind(('0.0.0.0', 16443))
-srv.listen(20)
-print('proxy 0.0.0.0:16443 -> 127.0.0.1:6443 ready')
-while True:
-    c, _ = srv.accept()
-    threading.Thread(target=_handle, args=(c,), daemon=True).start()
-" >/tmp/proxy.log 2>&1 &
-echo "K8s proxy started (PID: $!) on $PRIVATE_IP:16443"
+echo "Docker port bindings:"; docker port smoke-test-control-plane 6443/tcp || true
+iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml 2>/dev/null
 mkdir -p /root/.kube && cp /tmp/smoke-kubeconfig.yaml /root/.kube/config
 export KUBECONFIG=/tmp/smoke-kubeconfig.yaml
-docker exec -e "PRIV_IP=$PRIVATE_IP" smoke-test-control-plane bash -c '
-  KUBECONFIG=/etc/kubernetes/admin.conf kubectl -n kube-system get cm kubeadm-config \
-    -o jsonpath="{{{{.data.ClusterConfiguration}}}}" > /tmp/cc.yaml 2>/dev/null
-  printf "\napiServer:\n  certSANs:\n  - 127.0.0.1\n  - %s\n" "$PRIV_IP" >> /tmp/cc.yaml
-  kubeadm certs renew apiserver --config /tmp/cc.yaml
-' >/tmp/cert-renewal.txt 2>&1 && echo "SAN_RENEWED" || echo "SAN_RENEWAL_SKIPPED"
 kubectl create serviceaccount smoke-sa --namespace default 2>/dev/null || true
 kubectl get rolebinding smoke-rb -n default 2>/dev/null || \
   kubectl create rolebinding smoke-rb --clusterrole=view --serviceaccount=default:smoke-sa --namespace=default || true
-iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 echo "RESTART_COMPLETE"
 """
             restart_out = _ssm_run_poll(ssm_client, instance_id, restart_script, timeout=900, label="k8s-restart")
@@ -10612,9 +10583,10 @@ echo "RESTART_COMPLETE"
             raise RuntimeError("Could not retrieve kubeconfig from kind cluster")
         log("  kubeconfig fetched (" + str(len(kubeconfig_content)) + " bytes)")
 
-        # Rewrite server URL to EC2 private IP (kind writes 127.0.0.1 by default).
-        # If the post-creation SAN renewal worked, the cert covers the private IP and
-        # TLS verifies cleanly. If not, fall back to insecure-skip-tls-verify.
+        # Rewrite server URL from 0.0.0.0 (kind's placeholder) to the actual private IP.
+        # The cert is signed for 0.0.0.0/127.0.0.1 by kind; use insecure-skip-tls-verify
+        # since this is a smoke test cluster (not a customer cluster — in production the
+        # customer supplies a kubeconfig whose cert already covers their endpoint).
         _kube_server_pat = r"server: https://(?:127\.0\.0\.1|0\.0\.0\.0):(\d+)"
         if private_ip and re.search(_kube_server_pat, kubeconfig_content):
             log("  Rewriting kubeconfig server -> " + private_ip + ":" + str(KUBE_API_PORT))
@@ -10623,9 +10595,6 @@ echo "RESTART_COMPLETE"
                 "server: https://" + private_ip + ":" + str(KUBE_API_PORT),
                 kubeconfig_content,
             )
-            # Use insecure TLS as fallback — cert renewal may not have covered the private IP.
-            # In production, the customer supplies a kubeconfig whose cert already covers
-            # their endpoint IP/hostname; this workaround is smoke-test-only.
             kubeconfig_content = re.sub(
                 r"    certificate-authority-data: [^\n]+\n",
                 "    insecure-skip-tls-verify: true\n",
