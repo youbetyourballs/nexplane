@@ -111,10 +111,13 @@ foreach ($a in $adapters) {
     Set-DnsClientServerAddress -InterfaceIndex $a.InterfaceIndex -ServerAddresses $SourceDcIp
 }
 $ns = ".${DomainName}"
-Remove-DnsClientNrptRule -Namespace $ns -Force -ErrorAction SilentlyContinue
+# Remove any existing NRPT rule for this namespace (pipe syntax — -Namespace param not available on 2022)
+Get-DnsClientNrptRule | Where-Object { $_.Namespace -eq $ns } | ForEach-Object {
+    Remove-DnsClientNrptRule -Name $_.Name -Force -ErrorAction SilentlyContinue
+}
 Add-DnsClientNrptRule -Namespace $ns -NameServers $SourceDcIp -ErrorAction SilentlyContinue
 ipconfig /flushdns | Out-Null
-# Wait for Netlogon to register SRV records on source DC (takes up to several minutes after boot)
+# Wait for SRV records — confirms Netlogon has registered on source DC
 $deadline = (Get-Date).AddSeconds(300)
 $srvFound = $false
 while ((Get-Date) -lt $deadline) {
@@ -126,18 +129,7 @@ Write-Output "DIAG_SRV_FOUND=$srvFound"
 if (-not $srvFound) {
     throw "SRV records for $DomainName not found on $SourceDcIp after 5min - Netlogon may not have registered"
 }
-# Wait for nltest DC discovery (uses SRV records internally)
-$nlDeadline = (Get-Date).AddSeconds(120)
-$nlOk = $false
-$nlOut = ""
-while ((Get-Date) -lt $nlDeadline) {
-    $nlOut = (nltest /dsgetdc:$DomainName /force 2>&1) -join " "
-    if ($nlOut -match 'DC:') { $nlOk = $true; break }
-    Start-Sleep -Seconds 15
-}
-Write-Output "DIAG_NLTEST=$nlOut"
-try { w32tm /resync /force 2>&1 | Out-Null } catch {}
-if (-not $nlOk) { throw "nltest failed after SRV found: $nlOut" }
+# nltest skipped — UDP DC locator blocked in VPC; Install-ADDSDomainController uses -ReplicationSourceDC instead
 Write-Output "PRE_PROMOTE_OK"
 """
 
