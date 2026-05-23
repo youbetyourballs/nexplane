@@ -15111,6 +15111,53 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         log("AD_DC_RESTORE: source DC DNS is serving smoke.nexplane.local")
 
         # ------------------------------------------------------------------
+        # Step 5c — Wait for KDC (Kerberos) service on source DC
+        # Netlogon registers SRV records before KDC is fully initialized.
+        # Install-ADDSDomainController uses port 88 for credential verification.
+        # ------------------------------------------------------------------
+        log("AD_DC_RESTORE: waiting for KDC service on source DC...")
+        _kdc_cmd = ssm_client.send_command(
+            InstanceIds=[source_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": [
+                "$deadline = (Get-Date).AddSeconds(300);"
+                "while ((Get-Date) -lt $deadline) {"
+                "  $kdc = Get-Service kdc -ErrorAction SilentlyContinue;"
+                "  if ($kdc -and $kdc.Status -eq 'Running') { break };"
+                "  Start-Sleep 15"
+                "};"
+                "$kdc = Get-Service kdc -ErrorAction SilentlyContinue;"
+                "if (-not $kdc -or $kdc.Status -ne 'Running') {"
+                "  throw 'KDC service not running after 5 min'"
+                "};"
+                "$p = netstat -an | Select-String ':88 ';"
+                "Write-Output \"KDC_READY:$($kdc.Status):port88=$($p -ne $null)\"",
+            ]},
+            TimeoutSeconds=360,
+        )
+        _kdc_cmd_id = _kdc_cmd["Command"]["CommandId"]
+        _t.sleep(10)
+        _kdc_deadline = _t.time() + 360
+        _kdc_out = ""
+        while _t.time() < _kdc_deadline:
+            _t.sleep(15)
+            try:
+                _inv = ssm_client.get_command_invocation(
+                    CommandId=_kdc_cmd_id, InstanceId=source_id
+                )
+                if _inv["Status"] in ("Success", "Failed", "TimedOut", "Cancelled"):
+                    _kdc_out = _inv.get("StandardOutputContent", "")
+                    _kdc_err = _inv.get("StandardErrorContent", "")
+                    if _inv["Status"] != "Success":
+                        fail(f"[AD_DC_RESTORE] KDC wait {_inv['Status']}: {_kdc_err[-300:]}")
+                    break
+            except Exception:
+                pass
+        if "KDC_READY" not in _kdc_out:
+            fail(f"[AD_DC_RESTORE] KDC not ready after 5 min: {_kdc_out[-300:]}")
+        log(f"AD_DC_RESTORE: KDC ready — {_kdc_out.strip()}")
+
+        # ------------------------------------------------------------------
         # Step 6 — Restore CR onto clean target
         # Note: source DC stays alive during promotion so dcpromo can
         # authenticate against the domain. It is terminated via the
