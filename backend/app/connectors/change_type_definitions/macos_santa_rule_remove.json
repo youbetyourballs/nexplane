@@ -1,0 +1,10 @@
+{
+  "change_type": "macos_santa_rule_remove",
+  "display_name": "Remove Santa Rule",
+  "description": "Removes a Santa rule by identifier. Captures previous state for rollback restoration.",
+  "steps": [{"generic_action": "macos_santa_rule_remove", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "macos_santa_rule_remove",
+  "rollback_connector_type": "macos"
+}

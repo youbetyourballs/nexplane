@@ -1,0 +1,10 @@
+{
+  "change_type": "macos_santa_mode_set",
+  "display_name": "Set Santa Mode",
+  "description": "Sets Santa operating mode to MONITOR or LOCKDOWN. Captures previous mode for rollback.",
+  "steps": [{"generic_action": "macos_santa_mode_set", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "macos_santa_mode_set",
+  "rollback_connector_type": "macos"
+}

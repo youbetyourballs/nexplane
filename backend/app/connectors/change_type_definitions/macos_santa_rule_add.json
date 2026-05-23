@@ -1,0 +1,10 @@
+{
+  "change_type": "macos_santa_rule_add",
+  "display_name": "Add Santa Rule",
+  "description": "Adds an allowlist or denylist rule to Google Santa. Captures previous rule state for rollback.",
+  "steps": [{"generic_action": "macos_santa_rule_add", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "macos_santa_rule_add",
+  "rollback_connector_type": "macos"
+}

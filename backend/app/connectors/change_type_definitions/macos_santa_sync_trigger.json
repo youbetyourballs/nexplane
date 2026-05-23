@@ -1,0 +1,8 @@
+{
+  "change_type": "macos_santa_sync_trigger",
+  "display_name": "Trigger Santa Sync",
+  "description": "Triggers a Santa sync with the configured sync server. No-op if no sync server configured.",
+  "steps": [{"generic_action": "macos_santa_sync_trigger", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
