@@ -10536,37 +10536,37 @@ echo "K8S_RBAC_SETUP_COMPLETE"
                 raise RuntimeError("k8s setup did not complete:\n" + setup_out[-500:])
         else:
             log("  Starting docker and kind cluster from cached AMI...")
-            restart_script = """
+            restart_script = f"""
 set -e
 systemctl start docker
 for i in $(seq 1 20); do docker info >/dev/null 2>&1 && break || sleep 3; done
-# Always recreate the cluster so the API server binds to the current instance's IP.
-# Reusing a cached cluster risks the API server being bound to the old AMI instance's IP.
 kind delete cluster --name smoke-test 2>/dev/null || true
 PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
-# Bind on 0.0.0.0 so Docker maps port 6443 on all interfaces (VPC-reachable).
-# Add private IP as a SAN so the API server cert covers it — no TLS workarounds needed.
 cat > /tmp/kind-config.yaml <<KINDEOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:
   apiServerAddress: "0.0.0.0"
   apiServerPort: 6443
-kubeadmConfigPatches:
-- |
-  kind: ClusterConfiguration
-  apiServer:
-    certSANs:
-    - "127.0.0.1"
-    - "$PRIVATE_IP"
 KINDEOF
-kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0
+echo "Creating kind cluster..."
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s \
+  --image kindest/node:v1.30.0 >/tmp/kind-out.txt 2>&1 \
+  && echo "KIND_CLUSTER_READY" \
+  || {{ echo "KIND_FAILED"; tail -20 /tmp/kind-out.txt; exit 1; }}
+kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml 2>/dev/null
+mkdir -p /root/.kube && cp /tmp/smoke-kubeconfig.yaml /root/.kube/config
+export KUBECONFIG=/tmp/smoke-kubeconfig.yaml
+docker exec -e "PRIV_IP=$PRIVATE_IP" smoke-test-control-plane bash -c '
+  KUBECONFIG=/etc/kubernetes/admin.conf kubectl -n kube-system get cm kubeadm-config \
+    -o jsonpath="{{{{.data.ClusterConfiguration}}}}" > /tmp/cc.yaml 2>/dev/null
+  printf "\napiServer:\n  certSANs:\n  - 127.0.0.1\n  - %s\n" "$PRIV_IP" >> /tmp/cc.yaml
+  kubeadm certs renew apiserver --config /tmp/cc.yaml
+' >/tmp/cert-renewal.txt 2>&1 && echo "SAN_RENEWED" || echo "SAN_RENEWAL_SKIPPED"
 kubectl create serviceaccount smoke-sa --namespace default 2>/dev/null || true
-kubectl get rolebinding smoke-rb -n default 2>/dev/null || \\
+kubectl get rolebinding smoke-rb -n default 2>/dev/null || \
   kubectl create rolebinding smoke-rb --clusterrole=view --serviceaccount=default:smoke-sa --namespace=default || true
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
-# Print private IP so the test can inject it into the kubeconfig
-echo "PRIVATE_IP_IS:$PRIVATE_IP"
 echo "RESTART_COMPLETE"
 """
             restart_out = _ssm_run_poll(ssm_client, instance_id, restart_script, timeout=900, label="k8s-restart")
