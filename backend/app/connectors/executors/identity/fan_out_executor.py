@@ -43,22 +43,51 @@ async def _spawn_child_cr(
     action: str,
     parameters: dict,
     organization_id: Optional[uuid.UUID] = None,
+    parent_change_type: str = "emergency_user_lockout",
 ):
     """Create and auto-approve a child ChangeRequest."""
     from app.database import db_factory
-    from app.models.change_request import ChangeRequest, ChangeRequestStatus
+    from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType
+    from app.models.user import User
+    from sqlalchemy import select
     from datetime import datetime, timezone
 
     async with db_factory() as db:
+        # Resolve requester_id: pick any user in the org (system/automation user pattern)
+        requester_id = None
+        if organization_id:
+            user_r = await db.execute(
+                select(User).where(User.organization_id == organization_id).limit(1)
+            )
+            system_user = user_r.scalars().first()
+            if system_user:
+                requester_id = system_user.id
+
+        # Resolve change_type: use the parent's change_type if it maps to a valid enum value,
+        # otherwise fall back to emergency_user_lockout
+        try:
+            cr_change_type = ChangeType(parent_change_type)
+        except ValueError:
+            cr_change_type = ChangeType.emergency_user_lockout
+
         child = ChangeRequest(
             id=uuid.uuid4(),
-            change_type=action,
+            title=f"Fan-out: {action} on {connector_type} ({external_id})",
+            description=f"Auto-spawned child CR for {action} on {connector_type} account {external_id}",
+            change_type=cr_change_type,
             status=ChangeRequestStatus.approved,
-            connector_id=connector_id,
-            parameters={**parameters, "external_id": external_id},
+            target_asset_ids=[],
+            desired_outcome={
+                **parameters,
+                "external_id": external_id,
+                "connector_id": str(connector_id),
+                "connector_type": connector_type,
+                "fan_out_action": action,
+            },
             parent_change_request_id=parent_cr_id,
             stateful_approved_at=datetime.now(timezone.utc),
             organization_id=organization_id,
+            requester_id=requester_id,
         )
         db.add(child)
         await db.commit()
@@ -115,6 +144,7 @@ async def execute(
                 action=action,
                 parameters=parameters,
                 organization_id=organization_id,
+                parent_change_type=change_type,
             )
             child_results.append({
                 "child_cr_id": str(child.id),
