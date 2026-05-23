@@ -14833,21 +14833,24 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         # ------------------------------------------------------------------
         # Step 3 — Enable WinRM on target via SSM
         # ------------------------------------------------------------------
-        log("AD_DC_RESTORE: enabling WinRM on target via SSM...")
-        _target_winrm_user = "smokeadmin"
+        log("AD_DC_RESTORE: enabling WinRM on target via SSM (reset Administrator password)...")
+        # Use Administrator with a known password — SSM resets it so we don't need get_password_data()
+        # or a key pair. Administrator is required for dcpromo during DC restoration.
+        _target_winrm_user = "Administrator"
         _target_admin_pass = "SmokeRestore@2024!"
         _winrm_cmd = ssm_client.send_command(
             InstanceIds=[target_id],
             DocumentName="AWS-RunPowerShellScript",
             Parameters={"commands": [
+                # Reset Administrator to a known password before enabling WinRM
+                f"$pw = ConvertTo-SecureString '{_target_admin_pass}' -AsPlainText -Force; "
+                "Set-LocalUser -Name Administrator -Password $pw",
+                "net user Administrator /active:yes",
                 "Enable-PSRemoting -Force",
                 "Set-Item wsman:\\localhost\\service\\auth\\Basic -Value $true",
                 "Set-Item wsman:\\localhost\\service\\AllowUnencrypted -Value $true",
                 "New-NetFirewallRule -DisplayName 'WinRM-NexplaneSmoke' -Direction Inbound "
                 "-Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue",
-                f"$pw = ConvertTo-SecureString '{_target_admin_pass}' -AsPlainText -Force; "
-                f"New-LocalUser -Name '{_target_winrm_user}' -Password $pw -PasswordNeverExpires -ErrorAction SilentlyContinue; "
-                f"Add-LocalGroupMember -Group Administrators -Member '{_target_winrm_user}' -ErrorAction SilentlyContinue",
                 "Restart-Service WinRM",
                 "Write-Output 'WINRM_ENABLED'",
             ]},
