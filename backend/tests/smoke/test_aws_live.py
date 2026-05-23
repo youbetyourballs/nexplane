@@ -10288,7 +10288,7 @@ def run_phase_k8s_rbac(client, cloud_account_id):
         fail("[K8S_RBAC] AWS clients not available")
 
     AL2023_AMI = "ami-0953476d60561c955"
-    KUBE_API_PORT = 6443
+    KUBE_API_PORT = 16443  # socat proxy port (kind API server is on 127.0.0.1:6443 only)
     S3_TOOLS_BUCKET = "nexplane-agent-downloads"
     KUBECTL_VERSION = "v1.29.0"
     KIND_VERSION = "v0.24.0"
@@ -10392,7 +10392,7 @@ kubectl create rolebinding smoke-rb \\
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 echo "K8S_RBAC_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-port6443-certSANs-v7-postcreate").hexdigest()
+    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-socat16443-v8").hexdigest()
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
@@ -10542,18 +10542,18 @@ systemctl start docker
 for i in $(seq 1 20); do docker info >/dev/null 2>&1 && break || sleep 3; done
 kind delete cluster --name smoke-test 2>/dev/null || true
 PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
-cat > /tmp/kind-config.yaml <<KINDEOF
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-networking:
-  apiServerAddress: "0.0.0.0"
-  apiServerPort: 6443
-KINDEOF
 echo "Creating kind cluster..."
-kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s \
+kind create cluster --name smoke-test --wait 300s \
   --image kindest/node:v1.30.0 >/tmp/kind-out.txt 2>&1 \
   && echo "KIND_CLUSTER_READY" \
   || {{ echo "KIND_FAILED"; tail -20 /tmp/kind-out.txt; exit 1; }}
+
+# kind binds API server on 127.0.0.1:6443 only. Use socat to proxy from all interfaces
+# on port 16443 so the platform backend can reach it from the VPC.
+dnf install -y socat -q >/dev/null 2>&1 || true
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+nohup socat TCP-LISTEN:16443,fork,bind=0.0.0.0 TCP:127.0.0.1:6443 >/tmp/socat.log 2>&1 &
+echo "socat proxy: $PRIVATE_IP:16443 -> 127.0.0.1:6443 (PID: $!)"
 kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml 2>/dev/null
 mkdir -p /root/.kube && cp /tmp/smoke-kubeconfig.yaml /root/.kube/config
 export KUBECONFIG=/tmp/smoke-kubeconfig.yaml
