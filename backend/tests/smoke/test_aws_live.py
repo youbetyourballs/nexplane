@@ -15656,6 +15656,11 @@ def main():
                 dedicated_host_id=getattr(args, "dedicated_host_id", ""),
                 ssh_key_path=getattr(args, "ssh_key_path", ""),
             )
+        if "SANTA_SYNC" in phases:
+            _santa_ssm = _get_aws_boto3_client("ssm")
+            if not _santa_ssm:
+                fail("SANTA_SYNC requires AWS credentials (ssm)")
+            run_phase_santa_sync(client, cloud_account_id, _santa_ssm)
         if "AD_DC_INTEGRITY" in phases:
             run_phase_ad_dc_integrity(
                 client, cloud_account_id,
@@ -18356,6 +18361,211 @@ ipa user-del snapshot-smoke 2>/dev/null || true
             ec2_client.terminate_instances(InstanceIds=[instance_id])
         except Exception:
             pass
+
+
+def run_phase_santa_sync(client: "NexplaneClient", cloud_account_id: str, ssm_boto) -> None:
+    """Phase SANTA_SYNC: Provision Moroz (Santa sync server) in Docker on the backend EC2,
+    register a santa_sync_server connector + macos_fleet virtual asset, then exercise
+    santa_policy_audit / santa_push_rules / santa_machine_list CRs with rollback verification.
+    """
+    import time as _time
+    print("\n[Phase SANTA_SYNC] Santa sync server smoke test (Moroz in Docker)")
+
+    BACKEND_INSTANCE_ID = "i-050bab85006f0b73c"
+
+    moroz_setup_script = r"""#!/bin/bash
+set -e
+docker rm -f moroz-smoke 2>/dev/null || true
+cat > /tmp/moroz-config.toml <<'TOMLEOF'
+[server]
+listen = ":8080"
+[[configs]]
+name = "default"
+client_mode = "MONITOR"
+TOMLEOF
+docker pull ghcr.io/groob/moroz:latest 2>&1 | tail -3
+docker run -d --name moroz-smoke \
+  -p 8080:8080 \
+  -v /tmp/moroz-config.toml:/etc/moroz/config.toml \
+  ghcr.io/groob/moroz:latest \
+  -config /etc/moroz/config.toml
+sleep 5
+docker ps | grep moroz-smoke
+echo "MOROZ_READY"
+"""
+
+    moroz_teardown_script = """#!/bin/bash
+docker rm -f moroz-smoke 2>/dev/null || true
+echo "MOROZ_TORN_DOWN"
+"""
+
+    santa_connector_id = None
+    santa_asset_id = None
+
+    def _ssm_run(script: str, timeout: int = 120, marker: str = "") -> str:
+        resp = ssm_boto.send_command(
+            InstanceIds=[BACKEND_INSTANCE_ID],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [script]},
+            TimeoutSeconds=timeout,
+        )
+        cmd_id = resp["Command"]["CommandId"]
+        deadline = _time.time() + timeout
+        while _time.time() < deadline:
+            _time.sleep(5)
+            inv = ssm_boto.get_command_invocation(CommandId=cmd_id, InstanceId=BACKEND_INSTANCE_ID)
+            status = inv.get("Status", "")
+            if status == "Success":
+                stdout = inv.get("StandardOutputContent", "")
+                if marker and marker not in stdout:
+                    raise RuntimeError(f"SSM command missing marker {marker!r}. stdout: {stdout[:500]}")
+                return stdout
+            if status in ("Failed", "Cancelled", "TimedOut"):
+                stderr = inv.get("StandardErrorContent", "")
+                stdout = inv.get("StandardOutputContent", "")
+                raise RuntimeError(f"SSM command {status}. stderr: {stderr[:300]} stdout: {stdout[:300]}")
+        raise RuntimeError(f"SSM command timed out (cmd_id={cmd_id})")
+
+    try:
+        # Step 1: Start Moroz on the backend EC2
+        print("  [SANTA_SYNC] Starting Moroz Docker container on backend EC2...")
+        _ssm_run(moroz_setup_script, timeout=180, marker="MOROZ_READY")
+        print("  [SANTA_SYNC] Moroz is ready on :8080")
+
+        # Step 2: Register santa_sync_server connector
+        print("  [SANTA_SYNC] Registering santa_sync_server connector...")
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "santa_sync_server",
+            "name": "nexplane-smoke-santa-sync",
+            "display_name": "nexplane-smoke-santa-sync",
+            "credentials": {
+                "sync_server_url": "http://localhost:8080",
+                "auth_token": "smoke-santa-token",
+            },
+        })
+        santa_connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
+        if not santa_connector_id:
+            fail(f"[SANTA_SYNC] Failed to create santa_sync_server connector: {conn_resp}")
+        print(f"  [SANTA_SYNC] Connector registered: {santa_connector_id}")
+
+        # Step 3: Create macos_fleet virtual asset
+        print("  [SANTA_SYNC] Creating macos_fleet virtual asset...")
+        asset_resp = client.post("/assets", json={
+            "name": "nexplane-smoke-macos-fleet",
+            "asset_type": "macos_fleet",
+            "environment": "staging",
+            "criticality": "medium",
+            "connector_id": santa_connector_id,
+        })
+        santa_asset_id = asset_resp.get("id") or asset_resp.get("asset_id", "")
+        if not santa_asset_id:
+            fail(f"[SANTA_SYNC] Failed to create macos_fleet asset: {asset_resp}")
+        print(f"  [SANTA_SYNC] Virtual asset created: {santa_asset_id}")
+
+        # Step 4: santa_policy_audit — expect 0 rules initially
+        print("  [SANTA_SYNC] Running santa_policy_audit (expect 0 rules)...")
+        cr = client.run_cr(
+            "[SANTA_SYNC] policy audit (initial)",
+            "santa_policy_audit",
+            santa_asset_id,
+            {"machine_group": "default"},
+            connector_id=santa_connector_id,
+        )
+        rule_count = cr.get("execution_result", {}).get("rule_count", -1)
+        assert rule_count == 0, f"[SANTA_SYNC] Expected rule_count=0, got {rule_count}"
+        print(f"  [SANTA_SYNC] Initial audit OK: rule_count={rule_count}")
+
+        # Step 5: santa_push_rules — push 2 rules
+        print("  [SANTA_SYNC] Pushing 2 rules (1 allowlist, 1 denylist)...")
+        push_rules_payload = {
+            "rules": [
+                {"rule_type": "allowlist", "identifier_type": "binary", "identifier": "a" * 64},
+                {"rule_type": "denylist", "identifier_type": "binary", "identifier": "b" * 64},
+            ],
+            "mode": "merge",
+        }
+        cr_push = client.run_cr(
+            "[SANTA_SYNC] push rules",
+            "santa_push_rules",
+            santa_asset_id,
+            push_rules_payload,
+            connector_id=santa_connector_id,
+        )
+        pushed = cr_push.get("execution_result", {}).get("pushed", -1)
+        assert pushed == 2, f"[SANTA_SYNC] Expected pushed=2, got {pushed}"
+        push_cr_id = cr_push["id"]
+        print(f"  [SANTA_SYNC] Push OK: pushed={pushed}, cr_id={push_cr_id}")
+
+        # Step 6: santa_policy_audit — expect 2 rules
+        print("  [SANTA_SYNC] Running santa_policy_audit (expect 2 rules)...")
+        cr = client.run_cr(
+            "[SANTA_SYNC] policy audit (post-push)",
+            "santa_policy_audit",
+            santa_asset_id,
+            {"machine_group": "default"},
+            connector_id=santa_connector_id,
+        )
+        rule_count = cr.get("execution_result", {}).get("rule_count", -1)
+        assert rule_count == 2, f"[SANTA_SYNC] Expected rule_count=2, got {rule_count}"
+        print(f"  [SANTA_SYNC] Post-push audit OK: rule_count={rule_count}")
+
+        # Step 7: Rollback the push CR
+        print(f"  [SANTA_SYNC] Rolling back push CR {push_cr_id}...")
+        client.rollback_cr(push_cr_id, "SANTA_SYNC rollback push rules")
+        print("  [SANTA_SYNC] Rollback initiated")
+
+        # Step 8: santa_policy_audit — expect 0 rules again
+        print("  [SANTA_SYNC] Running santa_policy_audit (expect 0 rules after rollback)...")
+        cr = client.run_cr(
+            "[SANTA_SYNC] policy audit (post-rollback)",
+            "santa_policy_audit",
+            santa_asset_id,
+            {"machine_group": "default"},
+            connector_id=santa_connector_id,
+        )
+        rule_count = cr.get("execution_result", {}).get("rule_count", -1)
+        assert rule_count == 0, f"[SANTA_SYNC] Expected rule_count=0 after rollback, got {rule_count}"
+        print(f"  [SANTA_SYNC] Post-rollback audit OK: rule_count={rule_count}")
+
+        # Step 9: santa_machine_list
+        print("  [SANTA_SYNC] Running santa_machine_list...")
+        cr = client.run_cr(
+            "[SANTA_SYNC] machine list",
+            "santa_machine_list",
+            santa_asset_id,
+            {},
+            connector_id=santa_connector_id,
+        )
+        assert "machines" in cr.get("execution_result", {}), \
+            f"[SANTA_SYNC] 'machines' key missing from execution_result: {cr.get('execution_result')}"
+        print(f"  [SANTA_SYNC] Machine list OK: {len(cr['execution_result']['machines'])} machine(s)")
+
+        print("\n  [SANTA_SYNC] ✅ All assertions passed")
+
+    finally:
+        # Teardown Moroz
+        print("  [SANTA_SYNC] Tearing down Moroz container...")
+        try:
+            _ssm_run(moroz_teardown_script, timeout=60, marker="MOROZ_TORN_DOWN")
+            print("  [SANTA_SYNC] Moroz torn down")
+        except Exception as _te:
+            print(f"  [SANTA_SYNC] WARNING: Moroz teardown failed (non-fatal): {_te}")
+
+        # Delete virtual asset
+        if santa_asset_id:
+            try:
+                client.client.delete(f"{client.base}/assets/{santa_asset_id}")
+                print(f"  [SANTA_SYNC] Asset {santa_asset_id} deleted")
+            except Exception as _ae:
+                print(f"  [SANTA_SYNC] WARNING: Asset deletion failed: {_ae}")
+
+        # Delete connector
+        if santa_connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{santa_connector_id}")
+                print(f"  [SANTA_SYNC] Connector {santa_connector_id} deleted")
+            except Exception as _ce:
+                print(f"  [SANTA_SYNC] WARNING: Connector deletion failed: {_ce}")
 
 
 if __name__ == "__main__":
