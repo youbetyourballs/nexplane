@@ -15,6 +15,8 @@ depends_on = None
 def upgrade():
     op.execute("ALTER TYPE connector_type ADD VALUE IF NOT EXISTS 'santa_sync_server'")
     op.execute("ALTER TYPE asset_type ADD VALUE IF NOT EXISTS 'macos_fleet'")
+    for val in ['santa_policy_audit', 'santa_push_rules', 'santa_machine_list', 'santa_machine_group_assign', 'santa_rule_deploy']:
+        op.execute(f"ALTER TYPE change_type ADD VALUE IF NOT EXISTS '{val}'")
 
 
 def downgrade():

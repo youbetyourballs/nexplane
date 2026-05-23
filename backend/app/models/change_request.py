@@ -411,6 +411,13 @@ class ChangeType(str, enum.Enum):
     identity_snapshot = "identity_snapshot"
     identity_reconstitute = "identity_reconstitute"
 
+    # Santa sync server connector
+    santa_policy_audit = "santa_policy_audit"
+    santa_push_rules = "santa_push_rules"
+    santa_machine_list = "santa_machine_list"
+    santa_machine_group_assign = "santa_machine_group_assign"
+    santa_rule_deploy = "santa_rule_deploy"
+
 
 class RiskLevel(str, enum.Enum):
     low = "low"
