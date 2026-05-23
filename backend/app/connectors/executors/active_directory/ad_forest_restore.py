@@ -104,49 +104,46 @@ if ($srvRecords) {
 Write-Output "DNS_SET"
 """
 
+_PS_PRE_PROMOTE_DNS = r"""
+param([string]$SourceDcIp, [string]$DomainName)
+$adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
+foreach ($a in $adapters) {
+    Set-DnsClientServerAddress -InterfaceIndex $a.InterfaceIndex -ServerAddresses $SourceDcIp
+}
+$ns = ".${DomainName}"
+Remove-DnsClientNrptRule -Namespace $ns -Force -ErrorAction SilentlyContinue
+Add-DnsClientNrptRule -Namespace $ns -NameServers $SourceDcIp -ErrorAction SilentlyContinue
+ipconfig /flushdns | Out-Null
+# Wait for Netlogon to register SRV records on source DC (takes up to several minutes after boot)
+$deadline = (Get-Date).AddSeconds(300)
+$srvFound = $false
+while ((Get-Date) -lt $deadline) {
+    $srv = Resolve-DnsName "_ldap._tcp.$DomainName" -Type SRV -Server $SourceDcIp -ErrorAction SilentlyContinue
+    if ($srv) { $srvFound = $true; break }
+    Start-Sleep -Seconds 15
+}
+Write-Output "DIAG_SRV_FOUND=$srvFound"
+if (-not $srvFound) {
+    throw "SRV records for $DomainName not found on $SourceDcIp after 5min - Netlogon may not have registered"
+}
+# Wait for nltest DC discovery (uses SRV records internally)
+$nlDeadline = (Get-Date).AddSeconds(120)
+$nlOk = $false
+$nlOut = ""
+while ((Get-Date) -lt $nlDeadline) {
+    $nlOut = (nltest /dsgetdc:$DomainName /force 2>&1) -join " "
+    if ($nlOut -match 'DC:') { $nlOk = $true; break }
+    Start-Sleep -Seconds 15
+}
+Write-Output "DIAG_NLTEST=$nlOut"
+try { w32tm /resync /force 2>&1 | Out-Null } catch {}
+if (-not $nlOk) { throw "nltest failed after SRV found: $nlOut" }
+Write-Output "PRE_PROMOTE_OK"
+"""
+
 _PS_PROMOTE_IFM = r"""
 param([string]$DomainName, [string]$IFMPath, [string]$SafeModePassword,
-      [string]$DomainAdminUser, [string]$DomainAdminPassword, [string]$SourceDcIp,
-      [string]$SourceDcFqdn)
-# Re-apply DNS to source DC right before dcpromo — DHCP can overwrite between WinRM sessions
-if ($SourceDcIp) {
-    $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
-    foreach ($adapter in $adapters) {
-        Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses $SourceDcIp
-    }
-    ipconfig /flushdns | Out-Null
-    # Wait up to 2 min for domain to be resolvable from the source DC's DNS
-    $deadline = (Get-Date).AddSeconds(120)
-    $resolved = $false
-    while ((Get-Date) -lt $deadline) {
-        try {
-            $r = Resolve-DnsName $DomainName -Server $SourceDcIp -Type A -ErrorAction Stop
-            if ($r) { $resolved = $true; break }
-        } catch { Start-Sleep -Seconds 5 }
-    }
-    Write-Output "DNS_REAPPLIED=$resolved"
-    # Re-apply NRPT rule — ensures domain queries go to source DC even if DHCP reset DNS client
-    $nrptNs = ".${DomainName}"
-    Remove-DnsClientNrptRule -Namespace $nrptNs -Force -ErrorAction SilentlyContinue
-    Add-DnsClientNrptRule -Namespace $nrptNs -NameServers $SourceDcIp -ErrorAction SilentlyContinue
-    ipconfig /flushdns | Out-Null
-    # Diagnostic: show actual DNS being used
-    $actualDns = (Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Select-Object -First 1).ServerAddresses -join ","
-    Write-Output "DIAG_ACTUAL_DNS=$actualDns"
-    # Diagnostic: port 88 reachable by IP
-    $portTest = Test-NetConnection -ComputerName $SourceDcIp -Port 88 -InformationLevel Quiet -WarningAction SilentlyContinue
-    Write-Output "DIAG_PORT88=$portTest"
-    # Diagnostic: nltest DC discovery (what dcpromo will see)
-    $nltest = (nltest /dsgetdc:$DomainName /force 2>&1) -join " "
-    Write-Output "DIAG_NLTEST=$nltest"
-    # Diagnostic: time sync status
-    $timeStat = (w32tm /query /status 2>&1) -join " "
-    Write-Output "DIAG_TIME=$timeStat"
-    # Sync time to reduce Kerberos clock skew risk
-    try { w32tm /resync /force 2>&1 | Out-Null } catch {}
-    # If nltest can't find a DC, fail early with diagnostics rather than waiting for dcpromo timeout
-    Write-Output "DIAG_NLTEST_RESULT=$($nltest -match 'DC:')"
-}
+      [string]$DomainAdminUser, [string]$DomainAdminPassword, [string]$SourceDcIp)
 Import-Module ADDSDeployment
 $secPwd = ConvertTo-SecureString $SafeModePassword -AsPlainText -Force
 $credParams = @{}
@@ -154,10 +151,8 @@ if ($DomainAdminUser -and $DomainAdminPassword) {
     $domainSecPwd = ConvertTo-SecureString $DomainAdminPassword -AsPlainText -Force
     $credParams["Credential"] = New-Object System.Management.Automation.PSCredential($DomainAdminUser, $domainSecPwd)
 }
-# Use -ReplicationSourceDC to bypass DC locator — target can reach source via TCP but
-# the DC locator uses UDP LDAP pings which may fail in AWS between VPC instances
-$srcDcParam = @{}
-if ($SourceDcFqdn) { $srcDcParam["ReplicationSourceDC"] = $SourceDcFqdn }
+$srcParam = @{}
+if ($SourceDcIp) { $srcParam["ReplicationSourceDC"] = $SourceDcIp }
 $result = Install-ADDSDomainController `
     -DomainName $DomainName `
     -InstallationMediaPath $IFMPath `
@@ -166,9 +161,9 @@ $result = Install-ADDSDomainController `
     -NoRebootOnCompletion:$true `
     -Force:$true `
     @credParams `
-    @srcDcParam
+    @srcParam
 if ($result.Status -ne "Success") {
-    throw "DC promotion failed: $($result.Status) — $($result.Message)"
+    throw "DC promotion failed: $($result.Status) - $($result.Message)"
 }
 Write-Output "DC_PROMOTED"
 """
@@ -430,24 +425,18 @@ def _do_restore(
         if rc != 0 or "DNS_SET" not in out:
             raise RuntimeError(f"DNS configuration failed: {err or out}")
 
-    # Step 5c — Pre-promote diagnostic: verify DC reachability from target
+    # Step 5c — Re-apply DNS/NRPT, wait for SRV records, verify DC locator works
     if source_dc_ip:
-        _diag_script = f"""
-$ip = '{source_dc_ip}'
-$dom = '{domain_name}'
-$p88 = Test-NetConnection -ComputerName $ip -Port 88 -InformationLevel Quiet -WarningAction SilentlyContinue
-$p389 = Test-NetConnection -ComputerName $ip -Port 389 -InformationLevel Quiet -WarningAction SilentlyContinue
-$nl = (nltest /dsgetdc:$dom /force 2>&1) -join "; "
-Write-Output "PRE_PORT88=$p88"
-Write-Output "PRE_PORT389=$p389"
-Write-Output "PRE_NLTEST=$nl"
-Write-Output "PRE_DIAG_DONE"
-"""
-        try:
-            _dout, _derr, _drc = _run_ps(proto, _diag_script)
-            logger.info("Pre-promote diag: %s | err: %s", _dout[:400], _derr[:200])
-        except Exception as _de:
-            logger.warning("Pre-promote diag failed (non-fatal): %s", _de)
+        logger.info("Step 5c: waiting for DC locator to be ready on target")
+        out_dns, err_dns, rc_dns = _run_ps_params(proto, _PS_PRE_PROMOTE_DNS, {
+            "SourceDcIp": source_dc_ip,
+            "DomainName": domain_name,
+        })
+        for _line in out_dns.splitlines():
+            if _line.startswith("DIAG_") or _line.startswith("PRE_"):
+                logger.info("Pre-promote: %s", _line)
+        if rc_dns != 0 or "PRE_PROMOTE_OK" not in out_dns:
+            raise RuntimeError(f"Pre-promote DNS check failed: {err_dns or out_dns}")
 
     # Step 6 — Promote via IFM (NoRebootOnCompletion so we can verify before reboot)
     logger.info("Step 6: promoting target as DC via IFM")
@@ -458,7 +447,6 @@ Write-Output "PRE_DIAG_DONE"
         "DomainAdminUser": domain_admin_username,
         "DomainAdminPassword": domain_admin_password,
         "SourceDcIp": source_dc_ip,
-        "SourceDcFqdn": source_dc_fqdn,
     })
     logger.info("Promote stdout (first 500): %s", out[:500])
     for _diag_line in out.splitlines():
