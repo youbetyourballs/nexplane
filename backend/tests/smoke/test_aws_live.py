@@ -10374,7 +10374,7 @@ export KUBECONFIG=/tmp/smoke-kubeconfig.yaml
 # Add private IP as SAN — pass PRIVATE_IP explicitly into docker exec via -e flag
 docker exec -e "PRIV_IP=$PRIVATE_IP" smoke-test-control-plane bash -c '
   KUBECONFIG=/etc/kubernetes/admin.conf kubectl -n kube-system get cm kubeadm-config \
-    -o jsonpath="{.data.ClusterConfiguration}" > /tmp/cc.yaml 2>/dev/null
+    -o jsonpath="{{.data.ClusterConfiguration}}" > /tmp/cc.yaml 2>/dev/null
   printf "\napiServer:\n  certSANs:\n  - 127.0.0.1\n  - %s\n" "$PRIV_IP" >> /tmp/cc.yaml
   kubeadm certs renew apiserver --config /tmp/cc.yaml 2>&1
   pkill -f kube-apiserver 2>/dev/null || true
