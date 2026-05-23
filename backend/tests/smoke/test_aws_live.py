@@ -15245,6 +15245,9 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 "domain_admin_username": "SMOKE\\smokeuser",
                 "domain_admin_password": "UserPass123!",
                 "source_dc_ip": source_ip,
+                # Bypass UDP-based DC locator (nltest fails in VPC) by pointing
+                # Install-ADDSDomainController at the source DC FQDN directly
+                "source_dc_fqdn": f"{_dc_hostname}.smoke.nexplane.local" if _dc_hostname else "",
             },
             connector_id=_ad_conn_id,
             timeout=2400,  # 40 min: AD DS install + IFM download + promote + reboot + NTDS wait
