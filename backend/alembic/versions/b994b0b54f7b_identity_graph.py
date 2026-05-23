@@ -21,6 +21,8 @@ def upgrade() -> None:
     op.create_table(
         'identity_profiles',
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column('organization_id', postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey('organizations.id'), nullable=False),
         sa.Column('display_name', sa.String(), nullable=False, server_default=''),
         sa.Column('primary_email', sa.String(), nullable=False),
         sa.Column('source_idp_connector_id', postgresql.UUID(as_uuid=True),
@@ -35,6 +37,8 @@ def upgrade() -> None:
     op.create_table(
         'identity_accounts',
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column('organization_id', postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey('organizations.id'), nullable=False),
         sa.Column('identity_profile_id', postgresql.UUID(as_uuid=True),
                   sa.ForeignKey('identity_profiles.id'), nullable=False),
         sa.Column('connector_id', postgresql.UUID(as_uuid=True),
@@ -46,6 +50,12 @@ def upgrade() -> None:
         sa.Column('raw_attributes', postgresql.JSONB(), nullable=True),
         sa.Column('last_synced_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('is_stale', sa.Boolean(), nullable=False, server_default='false'),
+    )
+    op.create_index("ix_identity_accounts_identity_profile_id", "identity_accounts", ["identity_profile_id"])
+    op.create_unique_constraint(
+        "uq_identity_accounts_connector_external",
+        "identity_accounts",
+        ["connector_id", "external_id"],
     )
 
     # Add parent_change_request_id to change_requests (self-referential FK)
@@ -66,6 +76,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_constraint('fk_change_requests_parent_cr_id', 'change_requests', type_='foreignkey')
     op.drop_column('change_requests', 'parent_change_request_id')
+    op.drop_constraint("uq_identity_accounts_connector_external", "identity_accounts", type_='unique')
+    op.drop_index("ix_identity_accounts_identity_profile_id", table_name="identity_accounts")
     op.drop_index('ix_identity_profiles_primary_email', table_name='identity_profiles')
     op.drop_table('identity_accounts')
     op.drop_table('identity_profiles')

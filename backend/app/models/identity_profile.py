@@ -2,7 +2,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, func
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, func, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from app.database import Base
@@ -13,6 +13,9 @@ class IdentityProfile(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
     )
     display_name: Mapped[str] = mapped_column(String, nullable=False, default="")
     primary_email: Mapped[str] = mapped_column(String, nullable=False, index=True)
@@ -33,11 +36,18 @@ class IdentityProfile(Base):
 class IdentityAccount(Base):
     __tablename__ = "identity_accounts"
 
+    __table_args__ = (
+        UniqueConstraint("connector_id", "external_id", name="uq_identity_accounts_connector_external"),
+    )
+
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
+    )
     identity_profile_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("identity_profiles.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("identity_profiles.id"), nullable=False, index=True
     )
     connector_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("connectors.id"), nullable=False
