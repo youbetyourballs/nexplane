@@ -14948,6 +14948,52 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         log(f"AD_DC_RESTORE: manifest.json verified — format=ifm, artifacts={_manifest['artifacts']}")
 
         # ------------------------------------------------------------------
+        # Step 5b — Wait for source DC DNS to be serving smoke.nexplane.local
+        # The AD-integrated DNS zone can take several minutes to load after
+        # NTDS starts. Verify from the source DC itself via SSM before
+        # submitting the restore CR (which needs DNS reachable from target).
+        # ------------------------------------------------------------------
+        log("AD_DC_RESTORE: waiting for source DC DNS to serve smoke.nexplane.local...")
+        _dns_cmd = ssm_client.send_command(
+            InstanceIds=[source_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": [
+                "$deadline = (Get-Date).AddSeconds(600);"
+                "$ok = $false;"
+                "while ((Get-Date) -lt $deadline) {"
+                "  try {"
+                "    $r = Resolve-DnsName 'smoke.nexplane.local' -Type A -ErrorAction Stop;"
+                "    if ($r) { $ok = $true; break }"
+                "  } catch { Start-Sleep 15 }"
+                "};"
+                "if (-not $ok) { throw 'DNS zone smoke.nexplane.local not ready on source DC after 10 min' };"
+                "Write-Output 'DNS_READY'",
+            ]},
+            TimeoutSeconds=660,
+        )
+        _dns_cmd_id = _dns_cmd["Command"]["CommandId"]
+        _t.sleep(10)
+        _dns_deadline = _t.time() + 660
+        _dns_out = ""
+        while _t.time() < _dns_deadline:
+            _t.sleep(15)
+            try:
+                _inv = ssm_client.get_command_invocation(
+                    CommandId=_dns_cmd_id, InstanceId=source_id
+                )
+                _status = _inv["Status"]
+                if _status in ("Success", "Failed", "TimedOut", "Cancelled"):
+                    _dns_out = _inv.get("StandardOutputContent", "")
+                    if _status != "Success":
+                        fail(f"[AD_DC_RESTORE] Source DC DNS readiness check {_status}: {_inv.get('StandardErrorContent','')[-300:]}")
+                    break
+            except Exception:
+                pass
+        if "DNS_READY" not in _dns_out:
+            fail(f"[AD_DC_RESTORE] Source DC DNS not ready after 10 min: {_dns_out[-300:]}")
+        log("AD_DC_RESTORE: source DC DNS is serving smoke.nexplane.local")
+
+        # ------------------------------------------------------------------
         # Step 6 — Restore CR onto clean target
         # Note: source DC stays alive during promotion so dcpromo can
         # authenticate against the domain. It is terminated via the
