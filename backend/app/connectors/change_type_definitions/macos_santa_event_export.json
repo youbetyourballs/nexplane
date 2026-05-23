@@ -1,0 +1,8 @@
+{
+  "change_type": "macos_santa_event_export",
+  "display_name": "Export Santa Events",
+  "description": "Exports recent Santa block/allow events from the local Santa log.",
+  "steps": [{"generic_action": "macos_santa_event_export", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

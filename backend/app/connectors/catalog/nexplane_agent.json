@@ -2093,6 +2093,104 @@
                       "executor": "nexplane_agent.macos_homebrew_list",
                       "estimated_duration_seconds": 30,
                       "execution_tier": 1
+                    },
+                    {
+                      "action_id": "macos_santa_rule_add",
+                      "generic_action": "macos_santa_rule_add",
+                      "display_name": "Add Santa Rule",
+                      "description": "Adds an allowlist or denylist rule to Google Santa. Captures previous state for rollback.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                          {"name": "rule_type", "type": "string", "required": true, "description": "allowlist, denylist, or silent_blocklist"},
+                          {"name": "identifier_type", "type": "string", "required": true, "description": "binary, certificate, teamid, or signingid"},
+                          {"name": "identifier", "type": "string", "required": true, "description": "SHA-256 hash or cert/team/signing ID"},
+                          {"name": "custom_message", "type": "string", "required": false, "description": "Message shown when binary is blocked"}
+                      ],
+                      "action_type": "change",
+                      "executor": "nexplane_agent.macos_santa_rule_add",
+                      "estimated_duration_seconds": 10,
+                      "execution_tier": 2
+                    },
+                    {
+                      "action_id": "macos_santa_rule_remove",
+                      "generic_action": "macos_santa_rule_remove",
+                      "display_name": "Remove Santa Rule",
+                      "description": "Removes a Santa rule by identifier. Captures previous state for rollback.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                          {"name": "identifier_type", "type": "string", "required": true, "description": "binary, certificate, teamid, or signingid"},
+                          {"name": "identifier", "type": "string", "required": true, "description": "SHA-256 hash or cert/team/signing ID"}
+                      ],
+                      "action_type": "change",
+                      "executor": "nexplane_agent.macos_santa_rule_remove",
+                      "estimated_duration_seconds": 10,
+                      "execution_tier": 3
+                    },
+                    {
+                      "action_id": "macos_santa_rule_list",
+                      "generic_action": "macos_santa_rule_list",
+                      "display_name": "List Santa Rules",
+                      "description": "Lists all current Google Santa allow/deny rules on the device.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [],
+                      "action_type": "read",
+                      "executor": "nexplane_agent.macos_santa_rule_list",
+                      "estimated_duration_seconds": 10,
+                      "execution_tier": 1
+                    },
+                    {
+                      "action_id": "macos_santa_mode_set",
+                      "generic_action": "macos_santa_mode_set",
+                      "display_name": "Set Santa Mode",
+                      "description": "Sets Santa to MONITOR (allow with logging) or LOCKDOWN (block unknowns). Captures previous mode for rollback.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                          {"name": "mode", "type": "string", "required": true, "description": "monitor or lockdown"}
+                      ],
+                      "action_type": "change",
+                      "executor": "nexplane_agent.macos_santa_mode_set",
+                      "estimated_duration_seconds": 15,
+                      "execution_tier": 3
+                    },
+                    {
+                      "action_id": "macos_santa_sync_trigger",
+                      "generic_action": "macos_santa_sync_trigger",
+                      "display_name": "Trigger Santa Sync",
+                      "description": "Triggers a Santa sync with the configured sync server. Graceful if no server configured.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [],
+                      "action_type": "change",
+                      "executor": "nexplane_agent.macos_santa_sync_trigger",
+                      "estimated_duration_seconds": 60,
+                      "execution_tier": 1
+                    },
+                    {
+                      "action_id": "macos_santa_event_export",
+                      "generic_action": "macos_santa_event_export",
+                      "display_name": "Export Santa Events",
+                      "description": "Exports recent Santa block/allow events from the device log.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                          {"name": "limit", "type": "integer", "required": false, "description": "Max events to return (default 100)"}
+                      ],
+                      "action_type": "read",
+                      "executor": "nexplane_agent.macos_santa_event_export",
+                      "estimated_duration_seconds": 15,
+                      "execution_tier": 1
+                    },
+                    {
+                      "action_id": "macos_santa_binary_check",
+                      "generic_action": "macos_santa_binary_check",
+                      "display_name": "Santa Binary Check",
+                      "description": "Checks whether a binary path is allowed or denied by Santa.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                          {"name": "path", "type": "string", "required": true, "description": "Full path to the binary, e.g. /usr/bin/curl"}
+                      ],
+                      "action_type": "read",
+                      "executor": "nexplane_agent.macos_santa_binary_check",
+                      "estimated_duration_seconds": 10,
+                      "execution_tier": 1
                     }
                 ]
 }

@@ -1,0 +1,8 @@
+{
+  "change_type": "macos_santa_rule_list",
+  "display_name": "List Santa Rules",
+  "description": "Lists all current Google Santa rules on the device.",
+  "steps": [{"generic_action": "macos_santa_rule_list", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
