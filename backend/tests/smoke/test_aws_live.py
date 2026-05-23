@@ -14891,6 +14891,7 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
             "winrm_port": "5985",
             "domain_name": "smoke.nexplane.local",
             "server": source_ip,
+            "base_dn": "DC=smoke,DC=nexplane,DC=local",
             "bind_dn": f"CN={_winrm_user},CN=Users,DC=smoke,DC=nexplane,DC=local",
             "bind_password": _winrm_pass,
         }})
