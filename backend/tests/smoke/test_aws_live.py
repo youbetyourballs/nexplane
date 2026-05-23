@@ -14879,12 +14879,14 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         log("AD_DC_RESTORE: WinRM enabled on target")
 
         # ------------------------------------------------------------------
-        # Step 3b — Open DNS port 53 on source DC Windows Firewall
-        # The DC may boot with Public firewall profile, blocking inbound DNS
-        # from the target. The target needs to query the source DC's DNS to
-        # resolve smoke.nexplane.local for dcpromo.
+        # Step 3b — Open DC ports, fix DNS A record, re-register Netlogon records
+        # The DC boots from AMI with a new IP. The DNS A record for the DC hostname
+        # and Netlogon SRV records are stale (old IP). Fix explicitly:
+        # 1. Open all dcpromo ports on Windows Firewall (DC may be in Public profile)
+        # 2. Delete+recreate the DC's A record with the current IP (synchronous)
+        # 3. Re-register Netlogon SRV records
         # ------------------------------------------------------------------
-        log("AD_DC_RESTORE: opening DNS port 53 on source DC firewall...")
+        log("AD_DC_RESTORE: opening DC ports and fixing DNS records on source DC...")
         _fw_cmd = ssm_client.send_command(
             InstanceIds=[source_id],
             DocumentName="AWS-RunPowerShellScript",
@@ -14898,17 +14900,27 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 "  -Protocol TCP -LocalPort $port -Action Allow -Profile Any "
                 "  -ErrorAction SilentlyContinue | Out-Null"
                 "};"
-                # Force Netlogon to re-register DNS SRV records with current IP
-                # (AMI boots with new IP; old SRV records become stale otherwise)
-                "ipconfig /registerdns | Out-Null;"
+                # Determine current IP and DC hostname
+                "$currentIp = (Get-NetIPAddress -AddressFamily IPv4 "
+                "  | Where-Object {$_.PrefixOrigin -eq 'Dhcp' -or ($_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.*')} "
+                "  | Select-Object -First 1).IPAddress;"
+                "$dcName = $env:COMPUTERNAME;"
+                "$zone = 'smoke.nexplane.local';"
+                # Remove stale A record and add current IP (synchronous)
+                "try { Remove-DnsServerResourceRecord -ZoneName $zone -Name $dcName -RRType A -Force -ErrorAction SilentlyContinue } catch {};"
+                "Add-DnsServerResourceRecord -ZoneName $zone -A -Name $dcName -IPv4Address $currentIp -ErrorAction SilentlyContinue;"
+                # Re-register Netlogon SRV and other DC records
                 "nltest /dsregdns 2>&1 | Out-Null;"
-                "Write-Output 'FW_DONE'",
+                "ipconfig /registerdns | Out-Null;"
+                "Start-Sleep -Seconds 15;"
+                "Write-Output \"FW_DONE:$currentIp:$dcName\"",
             ]},
-            TimeoutSeconds=60,
+            TimeoutSeconds=120,
         )
         _fw_cmd_id = _fw_cmd["Command"]["CommandId"]
         _t.sleep(5)
-        _fw_deadline = _t.time() + 90
+        _fw_deadline = _t.time() + 150
+        _fw_out = ""
         while _t.time() < _fw_deadline:
             _t.sleep(5)
             try:
@@ -14916,10 +14928,49 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                     CommandId=_fw_cmd_id, InstanceId=source_id
                 )
                 if _inv["Status"] in ("Success", "Failed", "TimedOut", "Cancelled"):
+                    _fw_out = _inv.get("StandardOutputContent", "")
                     break
             except Exception:
                 pass
-        log("AD_DC_RESTORE: DNS firewall rule added on source DC")
+        # Extract DC hostname and current IP for hosts file setup on target
+        _dc_current_ip = source_ip
+        _dc_hostname = ""
+        for _line in _fw_out.splitlines():
+            if _line.startswith("FW_DONE:"):
+                _parts = _line.split(":")
+                if len(_parts) >= 3:
+                    _dc_current_ip = _parts[1]
+                    _dc_hostname = _parts[2]
+        log(f"AD_DC_RESTORE: DC firewall/DNS fixed — dc={_dc_hostname} ip={_dc_current_ip}")
+
+        # Add hosts file entry on target so dcpromo can resolve the DC hostname
+        # even if the DNS dynamic update hasn't fully propagated yet.
+        if _dc_hostname and _dc_current_ip:
+            _fqdn = f"{_dc_hostname}.smoke.nexplane.local"
+            _hosts_entry = f"{_dc_current_ip} {_fqdn} {_dc_hostname}"
+            _hosts_cmd = ssm_client.send_command(
+                InstanceIds=[target_id],
+                DocumentName="AWS-RunPowerShellScript",
+                Parameters={"commands": [
+                    f"Add-Content -Path 'C:\\Windows\\System32\\drivers\\etc\\hosts' "
+                    f"-Value '{_hosts_entry}';"
+                    "Write-Output 'HOSTS_DONE'",
+                ]},
+                TimeoutSeconds=30,
+            )
+            _t.sleep(5)
+            _hosts_deadline = _t.time() + 45
+            while _t.time() < _hosts_deadline:
+                _t.sleep(5)
+                try:
+                    _inv = ssm_client.get_command_invocation(
+                        CommandId=_hosts_cmd["Command"]["CommandId"], InstanceId=target_id
+                    )
+                    if _inv["Status"] in ("Success", "Failed", "TimedOut", "Cancelled"):
+                        break
+                except Exception:
+                    pass
+            log(f"AD_DC_RESTORE: hosts entry added on target: {_hosts_entry}")
 
         # Reuse existing smoke DC credentials
         _winrm_user = "smokeuser"
