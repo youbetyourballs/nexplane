@@ -407,6 +407,9 @@ class ChangeType(str, enum.Enum):
     # Runbook change types — fleet operations (read-only)
     check_fleet_health = "check_fleet_health"
     check_compliance = "check_compliance"
+    # Identity graph — Phase 5
+    identity_snapshot = "identity_snapshot"
+    identity_reconstitute = "identity_reconstitute"
 
 
 class RiskLevel(str, enum.Enum):
@@ -441,6 +444,9 @@ class ChangeRequest(Base):
     __tablename__ = "change_requests"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    parent_change_request_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("change_requests.id"), nullable=True
+    )
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
     requester_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
