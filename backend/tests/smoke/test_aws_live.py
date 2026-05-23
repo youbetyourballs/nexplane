@@ -18469,7 +18469,6 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
             "sync_server_url": f"http://localhost:{MOCK_PORT}",
             "auth_token": "smoke-santa-token",
             "default_machine_group": "default",
-            "tls_verify": False,
         }})
 
         # Step 3: Create macos_fleet virtual asset
