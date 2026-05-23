@@ -10361,16 +10361,18 @@ apiVersion: kind.x-k8s.io/v1alpha4
 networking:
   apiServerAddress: "0.0.0.0"
   apiServerPort: 6443
-kubeadmConfigPatches:
-- |
-  kind: ClusterConfiguration
-  apiServer:
-    certSANs:
-    - "127.0.0.1"
-    - "$PRIVATE_IP"
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: ClusterConfiguration
+    apiServer:
+      certSANs:
+        - "127.0.0.1"
+        - "$PRIVATE_IP"
 KINDEOF
 
-kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0 --verbosity=6 2>&1 | tail -30
 
 kubectl create serviceaccount smoke-sa --namespace default || true
 kubectl create rolebinding smoke-rb \\
@@ -10381,7 +10383,7 @@ kubectl create rolebinding smoke-rb \\
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 echo "K8S_RBAC_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-port6443-certSANs-v4").hexdigest()
+    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-port6443-certSANs-v5-medium").hexdigest()
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
@@ -10456,7 +10458,7 @@ echo "K8S_RBAC_SETUP_COMPLETE"
         pass
 
     launch_kwargs = dict(
-        ImageId=cached_ami or AL2023_AMI, InstanceType="t3.small",
+        ImageId=cached_ami or AL2023_AMI, InstanceType="t3.medium",  # kind needs 4GB RAM
         MinCount=1, MaxCount=1,
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name", "Value": "nexplane-smoke-k8s"},
