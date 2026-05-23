@@ -18364,73 +18364,99 @@ ipa user-del snapshot-smoke 2>/dev/null || true
 
 
 def run_phase_santa_sync(client: "NexplaneClient", cloud_account_id: str, ssm_boto) -> None:
-    """Phase SANTA_SYNC: Provision Moroz (Santa sync server) in Docker on the backend EC2,
-    register a santa_sync_server connector + macos_fleet virtual asset, then exercise
+    """Phase SANTA_SYNC: Start a minimal Python mock Santa sync server inside the backend
+    container, register a santa_sync_server connector + macos_fleet virtual asset, then exercise
     santa_policy_audit / santa_push_rules / santa_machine_list CRs with rollback verification.
     """
     import time as _time
-    print("\n[Phase SANTA_SYNC] Santa sync server smoke test (Moroz in Docker)")
+    import subprocess as _subprocess
+    print("\n[Phase SANTA_SYNC] Santa sync server smoke test (Python mock sync server)")
 
-    BACKEND_INSTANCE_ID = "i-050bab85006f0b73c"
+    # Minimal mock Santa sync server — implements /rules (GET/POST) and /machines (GET)
+    # Runs inside the backend container on port 8899 (unused by the platform)
+    MOCK_PORT = 8899
+    _MOCK_SERVER_SCRIPT = r"""
+import json, threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
-    moroz_setup_script = r"""#!/bin/bash
-set -e
-docker rm -f moroz-smoke 2>/dev/null || true
-cat > /tmp/moroz-config.toml <<'TOMLEOF'
-[server]
-listen = ":8080"
-[[configs]]
-name = "default"
-client_mode = "MONITOR"
-TOMLEOF
-docker pull ghcr.io/groob/moroz:latest 2>&1 | tail -3
-docker run -d --name moroz-smoke \
-  -p 8080:8080 \
-  -v /tmp/moroz-config.toml:/etc/moroz/config.toml \
-  ghcr.io/groob/moroz:latest \
-  -config /etc/moroz/config.toml
-sleep 5
-docker ps | grep moroz-smoke
-echo "MOROZ_READY"
-"""
+_rules = []
 
-    moroz_teardown_script = """#!/bin/bash
-docker rm -f moroz-smoke 2>/dev/null || true
-echo "MOROZ_TORN_DOWN"
-"""
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.rstrip('/') == '/rules':
+            body = json.dumps(_rules).encode()
+        elif self.path.rstrip('/') == '/machines':
+            body = json.dumps([]).encode()
+        else:
+            self.send_response(404); self.end_headers(); return
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(body)
+    def do_POST(self):
+        global _rules
+        if self.path.rstrip('/') == '/rules':
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length))
+            new_rules = body.get('rules', [])
+            if body.get('clean_sync'):
+                _rules = list(new_rules)
+            else:
+                _rules.extend(new_rules)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{}')
+        else:
+            self.send_response(404); self.end_headers()
+    def log_message(self, *a): pass
+
+HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
+""".replace("MOCK_PORT", str(MOCK_PORT))
 
     santa_connector_id = None
     santa_asset_id = None
+    _mock_proc = None
 
-    def _ssm_run(script: str, timeout: int = 120, marker: str = "") -> str:
-        resp = ssm_boto.send_command(
-            InstanceIds=[BACKEND_INSTANCE_ID],
-            DocumentName="AWS-RunShellScript",
-            Parameters={"commands": [script]},
-            TimeoutSeconds=timeout,
-        )
-        cmd_id = resp["Command"]["CommandId"]
-        deadline = _time.time() + timeout
+    def _start_mock_server():
+        nonlocal _mock_proc
+        if _IN_CONTAINER:
+            _mock_proc = _subprocess.Popen(
+                ["python3", "-c", _MOCK_SERVER_SCRIPT],
+                stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL,
+            )
+        else:
+            _mock_proc = _subprocess.Popen(
+                ["docker", "compose", "exec", "-T", "backend", "python3", "-c", _MOCK_SERVER_SCRIPT],
+                stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL,
+            )
+        # Wait for server to be ready
+        import socket as _socket
+        deadline = _time.time() + 15
         while _time.time() < deadline:
-            _time.sleep(5)
-            inv = ssm_boto.get_command_invocation(CommandId=cmd_id, InstanceId=BACKEND_INSTANCE_ID)
-            status = inv.get("Status", "")
-            if status == "Success":
-                stdout = inv.get("StandardOutputContent", "")
-                if marker and marker not in stdout:
-                    raise RuntimeError(f"SSM command missing marker {marker!r}. stdout: {stdout[:500]}")
-                return stdout
-            if status in ("Failed", "Cancelled", "TimedOut"):
-                stderr = inv.get("StandardErrorContent", "")
-                stdout = inv.get("StandardOutputContent", "")
-                raise RuntimeError(f"SSM command {status}. stderr: {stderr[:300]} stdout: {stdout[:300]}")
-        raise RuntimeError(f"SSM command timed out (cmd_id={cmd_id})")
+            try:
+                s = _socket.create_connection(("127.0.0.1", MOCK_PORT), timeout=1)
+                s.close()
+                return
+            except OSError:
+                _time.sleep(0.5)
+        raise RuntimeError(f"Mock sync server did not start on port {MOCK_PORT} within 15s")
+
+    def _stop_mock_server():
+        nonlocal _mock_proc
+        if _mock_proc:
+            try:
+                _mock_proc.terminate()
+                _mock_proc.wait(timeout=5)
+            except Exception:
+                pass
+            _mock_proc = None
 
     try:
-        # Step 1: Start Moroz on the backend EC2
-        print("  [SANTA_SYNC] Starting Moroz Docker container on backend EC2...")
-        _ssm_run(moroz_setup_script, timeout=180, marker="MOROZ_READY")
-        print("  [SANTA_SYNC] Moroz is ready on :8080")
+        # Step 1: Start mock sync server
+        print(f"  [SANTA_SYNC] Starting Python mock sync server on :{MOCK_PORT}...")
+        _start_mock_server()
+        print(f"  [SANTA_SYNC] Mock sync server ready on :{MOCK_PORT}")
 
         # Step 2: Register santa_sync_server connector
         print("  [SANTA_SYNC] Registering santa_sync_server connector...")
@@ -18438,15 +18464,19 @@ echo "MOROZ_TORN_DOWN"
             "connector_type": "santa_sync_server",
             "name": "nexplane-smoke-santa-sync",
             "display_name": "nexplane-smoke-santa-sync",
-            "credentials": {
-                "sync_server_url": "http://localhost:8080",
-                "auth_token": "smoke-santa-token",
-            },
         })
         santa_connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
         if not santa_connector_id:
             fail(f"[SANTA_SYNC] Failed to create santa_sync_server connector: {conn_resp}")
         print(f"  [SANTA_SYNC] Connector registered: {santa_connector_id}")
+
+        # Update credentials to point at mock server
+        client.post(f"/connectors/{santa_connector_id}/credentials", json={"credentials": {
+            "sync_server_url": f"http://localhost:{MOCK_PORT}",
+            "auth_token": "smoke-santa-token",
+            "default_machine_group": "default",
+            "tls_verify": False,
+        }})
 
         # Step 3: Create macos_fleet virtual asset
         print("  [SANTA_SYNC] Creating macos_fleet virtual asset...")
@@ -18543,18 +18573,18 @@ echo "MOROZ_TORN_DOWN"
         print("\n  [SANTA_SYNC] ✅ All assertions passed")
 
     finally:
-        # Teardown Moroz
-        print("  [SANTA_SYNC] Tearing down Moroz container...")
+        # Stop mock sync server
+        print("  [SANTA_SYNC] Stopping mock sync server...")
         try:
-            _ssm_run(moroz_teardown_script, timeout=60, marker="MOROZ_TORN_DOWN")
-            print("  [SANTA_SYNC] Moroz torn down")
+            _stop_mock_server()
+            print("  [SANTA_SYNC] Mock server stopped")
         except Exception as _te:
-            print(f"  [SANTA_SYNC] WARNING: Moroz teardown failed (non-fatal): {_te}")
+            print(f"  [SANTA_SYNC] WARNING: Mock server stop failed (non-fatal): {_te}")
 
         # Delete virtual asset
         if santa_asset_id:
             try:
-                client.client.delete(f"{client.base}/assets/{santa_asset_id}")
+                client.delete(f"/assets/{santa_asset_id}")
                 print(f"  [SANTA_SYNC] Asset {santa_asset_id} deleted")
             except Exception as _ae:
                 print(f"  [SANTA_SYNC] WARNING: Asset deletion failed: {_ae}")
@@ -18562,7 +18592,7 @@ echo "MOROZ_TORN_DOWN"
         # Delete connector
         if santa_connector_id:
             try:
-                client.client.delete(f"{client.base}/connectors/{santa_connector_id}")
+                client.delete(f"/connectors/{santa_connector_id}")
                 print(f"  [SANTA_SYNC] Connector {santa_connector_id} deleted")
             except Exception as _ce:
                 print(f"  [SANTA_SYNC] WARNING: Connector deletion failed: {_ce}")
