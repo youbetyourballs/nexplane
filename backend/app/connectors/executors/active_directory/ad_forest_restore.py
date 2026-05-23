@@ -172,8 +172,19 @@ def _winrm_client(hostname: str, username: str, password: str,
 
 def _run_ps(proto, script: str) -> tuple[str, str, int]:
     import base64
+    import time as _time
     encoded = base64.b64encode(script.strip().encode("utf-16-le")).decode("ascii")
-    shell_id = proto.open_shell()
+    # Retry open_shell on 500 errors — WinRM may be settling after initial config
+    for _attempt in range(6):
+        try:
+            shell_id = proto.open_shell()
+            break
+        except Exception as _e:
+            _emsg = str(_e)
+            if _attempt < 5 and ("500" in _emsg or "registry key" in _emsg.lower() or "InternalError" in _emsg):
+                _time.sleep(20)
+                continue
+            raise
     try:
         cmd_id = proto.run_command(
             shell_id, "powershell",
