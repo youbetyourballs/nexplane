@@ -18464,8 +18464,8 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
             fail(f"[SANTA_SYNC] Failed to create santa_sync_server connector: {conn_resp}")
         print(f"  [SANTA_SYNC] Connector registered: {santa_connector_id}")
 
-        # Update credentials to point at mock server
-        client.post(f"/connectors/{santa_connector_id}/credentials", json={"credentials": {
+        # Store credentials (POST /connectors ignores credentials in body — store separately)
+        client.put(f"/connectors/{santa_connector_id}/credentials", json={"credentials": {
             "sync_server_url": f"http://localhost:{MOCK_PORT}",
             "auth_token": "smoke-santa-token",
             "default_machine_group": "default",
@@ -18578,7 +18578,7 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
         # Delete virtual asset
         if santa_asset_id:
             try:
-                client.delete(f"/assets/{santa_asset_id}")
+                client.client.delete(f"{client.base}/assets/{santa_asset_id}")
                 print(f"  [SANTA_SYNC] Asset {santa_asset_id} deleted")
             except Exception as _ae:
                 print(f"  [SANTA_SYNC] WARNING: Asset deletion failed: {_ae}")
@@ -18586,7 +18586,7 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
         # Delete connector
         if santa_connector_id:
             try:
-                client.delete(f"/connectors/{santa_connector_id}")
+                client.client.delete(f"{client.base}/connectors/{santa_connector_id}")
                 print(f"  [SANTA_SYNC] Connector {santa_connector_id} deleted")
             except Exception as _ce:
                 print(f"  [SANTA_SYNC] WARNING: Connector deletion failed: {_ce}")
