@@ -334,6 +334,38 @@ func extractPlistKey(plist, key string) string {
 	return ""
 }
 
+// homebrewList lists all installed Homebrew packages and versions.
+func homebrewList(_ map[string]any) (map[string]any, error) {
+	brewPath, err := exec.LookPath("brew")
+	if err != nil {
+		return map[string]any{"installed": false, "packages": []map[string]any{}}, nil
+	}
+
+	out, err := run(brewPath, "list", "--versions")
+	if err != nil {
+		return nil, fmt.Errorf("brew list --versions: %s: %w", out, err)
+	}
+
+	var packages []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		name := parts[0]
+		version := ""
+		if len(parts) > 1 {
+			version = parts[len(parts)-1]
+		}
+		packages = append(packages, map[string]any{"name": name, "version": version})
+	}
+	if packages == nil {
+		packages = []map[string]any{}
+	}
+	return map[string]any{"installed": true, "packages": packages}, nil
+}
+
 // macosSysinfo returns macOS version and hardware info.
 func macosSysinfo(_ map[string]any) (map[string]any, error) {
 	swVers, err := run("sw_vers")

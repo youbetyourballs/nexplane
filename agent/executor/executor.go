@@ -145,6 +145,7 @@ var commands = map[string]CommandFunc{
 	"santa_check":            macos.SantaCheckExecute,
 	"profiles_install":       macos.ProfilesInstallExecute,
 	"profiles_remove":        macos.ProfilesRemoveExecute,
+	"homebrew_list":          macos.HomebrewListExecute,
 	// Credential rotation
 	"rotate_ssh_keys":        credrotation.SSHKeyExecute,
 	"rotate_db_creds":        credrotation.DBRotateExecute,
