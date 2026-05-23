@@ -10361,20 +10361,18 @@ apiVersion: kind.x-k8s.io/v1alpha4
 networking:
   apiServerAddress: "0.0.0.0"
   apiServerPort: 6443
-nodes:
-- role: control-plane
-  kubeadmConfigPatches:
-  - |
-    apiVersion: kubeadm.k8s.io/v1beta3
-    kind: ClusterConfiguration
-    apiServer:
-      certSANs:
-        - "127.0.0.1"
-        - "$PRIVATE_IP"
 KINDEOF
 
 set -o pipefail
-kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0 2>&1 || {{ echo "KIND_FAILED"; kind export logs /tmp/kind-logs 2>/dev/null; tail -50 /tmp/kind-logs/smoke-test-control-plane/journal.log 2>/dev/null; exit 1; }}
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0 2>&1 || {{ echo "KIND_FAILED"; exit 1; }}
+
+# Add private IP as SAN by renewing the API server cert post-creation.
+# This avoids kubeadmConfigPatches YAML parsing issues entirely.
+docker exec smoke-test-control-plane kubeadm certs renew apiserver --apiserver-cert-extra-sans 127.0.0.1,$PRIVATE_IP 2>&1
+# Restart the API server pod to pick up the new cert
+docker exec smoke-test-control-plane kill -s SIGHUP 1 2>/dev/null || true
+sleep 10
+kubectl --kubeconfig /root/.kube/config get nodes 2>&1 | head -3
 
 kubectl create serviceaccount smoke-sa --namespace default || true
 kubectl create rolebinding smoke-rb \\
@@ -10385,7 +10383,7 @@ kubectl create rolebinding smoke-rb \\
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 echo "K8S_RBAC_SETUP_COMPLETE"
 """
-    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-port6443-certSANs-v6-apiVersion").hexdigest()
+    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-port6443-certSANs-v7-postcreate").hexdigest()
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
