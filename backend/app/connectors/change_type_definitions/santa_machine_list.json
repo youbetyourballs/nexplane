@@ -1,0 +1,14 @@
+{
+  "change_type": "santa_machine_list",
+  "display_name": "Santa Machine List",
+  "description": "Lists machines enrolled in the sync server and their last sync state.",
+  "steps": [
+    {
+      "generic_action": "santa_machine_list",
+      "purpose": "read",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

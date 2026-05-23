@@ -1,0 +1,16 @@
+{
+  "change_type": "santa_rule_deploy",
+  "display_name": "Santa Rule Deploy",
+  "description": "Adds a single rule to a group's policy and polls enrolled machines to verify receipt.",
+  "steps": [
+    {
+      "generic_action": "santa_rule_deploy",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "santa_rule_deploy",
+  "rollback_connector_type": "santa_sync_server"
+}
