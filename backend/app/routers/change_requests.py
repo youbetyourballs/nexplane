@@ -595,38 +595,44 @@ async def manual_rollback(
             if not _has_rollback_steps:
                 try:
                     from app.connectors.catalog_service import get_catalog_service
+                    from app.models.asset import Asset as _Asset
+                    from app.models.connector import Connector as _Connector
+                    from app.services.connector_service import _attach_credentials
                     _ct = cr.change_type.value if hasattr(cr.change_type, "value") else str(cr.change_type)
                     _catalog = get_catalog_service()
-                    # Try nexplane_agent connector first, then fall through connectors
+                    # Resolve connector from the CR's target assets first so we know
+                    # the correct connector type (avoids hardcoding connector types here).
+                    _connector = None
+                    _asset_connector_type = None
+                    try:
+                        async with AsyncSessionLocal() as _rdb:
+                            for _aid in (cr.target_asset_ids or [])[:1]:
+                                try:
+                                    _asset = await _rdb.get(_Asset, uuid.UUID(str(_aid)))
+                                    if _asset and _asset.connector_id:
+                                        _conn_obj = await _rdb.get(_Connector, _asset.connector_id)
+                                        if _conn_obj:
+                                            await _attach_credentials(_conn_obj, _rdb)
+                                            _connector = _conn_obj
+                                            _asset_connector_type = _conn_obj.connector_type.value if hasattr(_conn_obj.connector_type, "value") else str(_conn_obj.connector_type)
+                                        break
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                    # Try the asset's connector type first, then fall back to common types
                     _mod = None
-                    for _conn_type in ("nexplane_agent", "aws", "azure_ad", "okta"):
+                    _conn_types_to_try = []
+                    if _asset_connector_type:
+                        _conn_types_to_try.append(_asset_connector_type)
+                    _conn_types_to_try.extend(t for t in ("nexplane_agent", "aws", "azure_ad", "okta") if t != _asset_connector_type)
+                    for _conn_type in _conn_types_to_try:
                         try:
                             _mod = _catalog.get_executor(_conn_type, _ct)
                             break
                         except Exception:
                             continue
                     if _mod and hasattr(_mod, "rollback"):
-                        # Resolve connector from the CR's target assets so the rollback
-                        # executor has real credentials (backend container has no AWS env vars)
-                        _connector = None
-                        try:
-                            from app.models.asset import Asset as _Asset
-                            from app.models.connector import Connector as _Connector
-                            from app.services.connector_service import _attach_credentials
-                            async with AsyncSessionLocal() as _rdb:
-                                for _aid in (cr.target_asset_ids or [])[:1]:
-                                    try:
-                                        _asset = await _rdb.get(_Asset, uuid.UUID(str(_aid)))
-                                        if _asset and _asset.connector_id:
-                                            _conn_obj = await _rdb.get(_Connector, _asset.connector_id)
-                                            if _conn_obj:
-                                                await _attach_credentials(_conn_obj, _rdb)
-                                                _connector = _conn_obj
-                                            break
-                                    except Exception:
-                                        pass
-                        except Exception:
-                            pass
                         rollback_result = await _mod.rollback(
                             cr.desired_outcome or {}, execution_result, _connector
                         )
