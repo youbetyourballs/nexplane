@@ -14995,6 +14995,43 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         _winrm_pass = "UserPass123!"  # matches AD_DC_INTEGRITY smoke DC setup
 
         # ------------------------------------------------------------------
+        # Step 3c — Wait for WinRM on source DC to accept smokeuser credentials
+        # The source DC boots from AMI; domain services (KDC, NTDS) need time to
+        # initialize before domain user WinRM auth works.
+        # ------------------------------------------------------------------
+        log("AD_DC_RESTORE: waiting for WinRM on source DC to accept smokeuser credentials...")
+        import socket as _sock
+        _src_winrm_deadline = _t.time() + 600
+        _src_winrm_ok = False
+        while _t.time() < _src_winrm_deadline:
+            try:
+                _s = _sock.create_connection((source_ip, 5985), timeout=10)
+                _s.close()
+                # TCP open — try basic auth
+                import winrm as _winrm
+                _src_proto = _winrm.Protocol(
+                    endpoint=f"http://{source_ip}:5985/wsman",
+                    transport="basic",
+                    username=_winrm_user,
+                    password=_winrm_pass,
+                    server_cert_validation="ignore",
+                )
+                _sh = _src_proto.open_shell()
+                _cid = _src_proto.run_command(_sh, "powershell", ["-Command", "Write-Output PING"])
+                _so, _se, _rc = _src_proto.get_command_output(_sh, _cid)
+                _src_proto.cleanup_command(_sh, _cid)
+                _src_proto.close_shell(_sh)
+                if b"PING" in _so:
+                    _src_winrm_ok = True
+                    break
+            except Exception:
+                pass
+            _t.sleep(15)
+        if not _src_winrm_ok:
+            fail("[AD_DC_RESTORE] Source DC WinRM never accepted smokeuser credentials within 10 min")
+        log("AD_DC_RESTORE: source DC WinRM ready for smokeuser")
+
+        # ------------------------------------------------------------------
         # Step 4 — Register AD connector + asset for source DC
         # ------------------------------------------------------------------
         log("AD_DC_RESTORE: registering AD connector pointing at source DC...")
