@@ -1,0 +1,14 @@
+{
+  "change_type": "santa_policy_audit",
+  "display_name": "Santa Policy Audit",
+  "description": "Reads the current Santa rule set for a machine group from the sync server.",
+  "steps": [
+    {
+      "generic_action": "santa_policy_audit",
+      "purpose": "read",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}

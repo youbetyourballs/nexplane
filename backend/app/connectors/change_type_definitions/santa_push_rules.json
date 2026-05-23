@@ -1,0 +1,16 @@
+{
+  "change_type": "santa_push_rules",
+  "display_name": "Santa Push Rules",
+  "description": "Pushes a rule set to a machine group. Machines receive the new rules on next sync.",
+  "steps": [
+    {
+      "generic_action": "santa_push_rules",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "santa_push_rules",
+  "rollback_connector_type": "santa_sync_server"
+}
