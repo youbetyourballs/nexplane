@@ -4,11 +4,14 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 def _make_connector(creds=None):
     mock_conn = MagicMock()
-    mock_conn.credentials = creds or {
-        "sync_server_url": "http://moroz.test",
-        "auth_token": "tok",
-        "default_machine_group": "default",
-    }
+    if creds is None:
+        mock_conn.credentials = {
+            "sync_server_url": "http://moroz.test",
+            "auth_token": "tok",
+            "default_machine_group": "default",
+        }
+    else:
+        mock_conn.credentials = creds
     return mock_conn
 
 
@@ -51,7 +54,7 @@ async def test_rollback_restores_snapshot():
     assert result["rolled_back"] is True
     mock_instance.push_rules.assert_called_once()
     call_kwargs = mock_instance.push_rules.call_args
-    assert call_kwargs[0][2] == "replace"
+    assert call_kwargs.kwargs.get("mode") == "replace" or call_kwargs.args[2] == "replace"
 
 
 @pytest.mark.asyncio
