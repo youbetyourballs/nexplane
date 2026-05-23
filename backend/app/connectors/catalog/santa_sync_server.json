@@ -1,0 +1,95 @@
+{
+  "connector_type": "santa_sync_server",
+  "display_name": "Santa Sync Server",
+  "credential_fields": [
+    {"name": "sync_server_url", "label": "Sync Server URL", "type": "string", "required": true},
+    {"name": "auth_token", "label": "Auth Token", "type": "password", "required": true},
+    {"name": "default_machine_group", "label": "Default Machine Group", "type": "string", "required": false},
+    {"name": "machine_id_field", "label": "Machine ID Field (hardware_uuid or serial)", "type": "string", "required": false, "default": "hardware_uuid"},
+    {"name": "tls_verify", "label": "Verify TLS", "type": "boolean", "required": false, "default": true}
+  ],
+  "actions": [
+    {
+      "action_id": "santa_policy_audit",
+      "generic_action": "santa_policy_audit",
+      "action_type": "read",
+      "execution_tier": 1,
+      "display_name": "Santa Policy Audit",
+      "description": "Reads the current Santa rule set for a machine group from the sync server.",
+      "applicable_asset_types": ["macos_fleet"],
+      "parameters": [
+        {"name": "machine_group", "type": "string", "required": false, "description": "Machine group name; defaults to default_machine_group credential"}
+      ],
+      "executor": "santa_sync_server.santa_policy_audit",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "santa_push_rules",
+      "generic_action": "santa_push_rules",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Santa Push Rules",
+      "description": "Pushes a rule set to a machine group. Machines receive the new rules on next sync.",
+      "applicable_asset_types": ["macos_fleet"],
+      "parameters": [
+        {"name": "rules", "type": "array", "required": true, "description": "List of rule objects: {rule_type, identifier_type, identifier, custom_message (optional)}"},
+        {"name": "machine_group", "type": "string", "required": false},
+        {"name": "mode", "type": "string", "required": false, "default": "merge", "description": "merge or replace"}
+      ],
+      "executor": "santa_sync_server.santa_push_rules",
+      "rollback_action": "santa_push_rules",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "santa_machine_list",
+      "generic_action": "santa_machine_list",
+      "action_type": "read",
+      "execution_tier": 1,
+      "display_name": "Santa Machine List",
+      "description": "Lists machines enrolled in the sync server and their last sync state.",
+      "applicable_asset_types": ["macos_fleet"],
+      "parameters": [
+        {"name": "machine_group", "type": "string", "required": false}
+      ],
+      "executor": "santa_sync_server.santa_machine_list",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "santa_machine_group_assign",
+      "generic_action": "santa_machine_group_assign",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Santa Machine Group Assign",
+      "description": "Assigns a machine to a rule group on the sync server. Captures previous group for rollback.",
+      "applicable_asset_types": ["macos_fleet"],
+      "parameters": [
+        {"name": "machine_id", "type": "string", "required": true},
+        {"name": "target_group", "type": "string", "required": true}
+      ],
+      "executor": "santa_sync_server.santa_machine_group_assign",
+      "rollback_action": "santa_machine_group_assign",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "santa_rule_deploy",
+      "generic_action": "santa_rule_deploy",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "Santa Rule Deploy",
+      "description": "Adds a single rule to a group's policy and polls enrolled machines to verify receipt.",
+      "applicable_asset_types": ["macos_fleet"],
+      "parameters": [
+        {"name": "rule_type", "type": "string", "required": true, "description": "allowlist, denylist, or silent_blocklist"},
+        {"name": "identifier_type", "type": "string", "required": true, "description": "binary, certificate, teamid, or signingid"},
+        {"name": "identifier", "type": "string", "required": true, "description": "SHA-256 or cert/team/signing ID"},
+        {"name": "machine_group", "type": "string", "required": false},
+        {"name": "custom_message", "type": "string", "required": false},
+        {"name": "verify_machines", "type": "array", "required": false, "description": "Machine IDs to verify; default: all"},
+        {"name": "verify_timeout_seconds", "type": "integer", "required": false, "default": 300}
+      ],
+      "executor": "santa_sync_server.santa_rule_deploy",
+      "rollback_action": "santa_rule_deploy",
+      "estimated_duration_seconds": 60
+    }
+  ]
+}
