@@ -60,15 +60,19 @@ foreach ($adapter in $adapters) {
     Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses $DnsServerIp
 }
 ipconfig /flushdns | Out-Null
-# Verify source DC is reachable on LDAP (389) before promotion
-$tcpTest = Test-NetConnection -ComputerName $DnsServerIp -Port 389 -InformationLevel Quiet
-if (-not $tcpTest) {
+# Verify source DC reachable on LDAP (389) and Kerberos (88)
+$ldapTest = Test-NetConnection -ComputerName $DnsServerIp -Port 389 -InformationLevel Quiet -WarningAction SilentlyContinue
+if (-not $ldapTest) {
     throw "Source DC at $DnsServerIp is not reachable on port 389 (LDAP) — check security groups"
 }
-# Give the AD DNS zone time to fully load after DC boot (AD DNS zone loads after NTDS starts)
+$krbTest = Test-NetConnection -ComputerName $DnsServerIp -Port 88 -InformationLevel Quiet -WarningAction SilentlyContinue
+if (-not $krbTest) {
+    throw "Source DC at $DnsServerIp is not reachable on port 88 (Kerberos) — dcpromo cannot verify credentials"
+}
+# Give the AD DNS zone time to fully load after DC boot
 Start-Sleep -Seconds 30
 ipconfig /flushdns | Out-Null
-# Wait up to 5 minutes for DNS resolution (AD DNS zone may take a few minutes to be available)
+# Wait up to 5 minutes for DNS resolution
 $deadline = (Get-Date).AddSeconds(300)
 $resolved = $false
 while ((Get-Date) -lt $deadline) {
@@ -79,6 +83,19 @@ while ((Get-Date) -lt $deadline) {
 }
 if (-not $resolved) {
     throw "DNS for $DomainName did not resolve via $DnsServerIp within 5 min — DNS server may not be running on source DC"
+}
+# Verify DC hostname A record resolves correctly (dcpromo uses this for Kerberos)
+$srvRecords = Resolve-DnsName "_ldap._tcp.$DomainName" -Server $DnsServerIp -Type SRV -ErrorAction SilentlyContinue
+if ($srvRecords) {
+    $dcHostname = ($srvRecords | Select-Object -First 1).NameTarget
+    $aRecord = Resolve-DnsName $dcHostname -Server $DnsServerIp -Type A -ErrorAction SilentlyContinue
+    Write-Output "DIAG_DC_HOSTNAME=$dcHostname"
+    Write-Output "DIAG_DC_A_RECORD=$($aRecord.IPAddress -join ',')"
+    # Verify Kerberos reachable via hostname (dcpromo uses hostname, not IP)
+    $krbHostTest = Test-NetConnection -ComputerName $dcHostname -Port 88 -InformationLevel Quiet -WarningAction SilentlyContinue
+    Write-Output "DIAG_KRB88_VIA_HOSTNAME=$krbHostTest"
+} else {
+    Write-Output "DIAG_SRV_RECORDS=none"
 }
 Write-Output "DNS_SET"
 """
@@ -335,6 +352,10 @@ def _do_restore(
     if source_dc_ip:
         logger.info("Step 5b: setting DNS on target to source DC IP %s", source_dc_ip)
         out, err, rc = _run_ps_params(proto, _PS_SET_DNS, {"DnsServerIp": source_dc_ip, "DomainName": domain_name})
+        # Log diagnostic lines so we can debug dcpromo failures
+        for _diag_line in out.splitlines():
+            if _diag_line.startswith("DIAG_"):
+                logger.info("DNS diag: %s", _diag_line)
         if rc != 0 or "DNS_SET" not in out:
             raise RuntimeError(f"DNS configuration failed: {err or out}")
 
