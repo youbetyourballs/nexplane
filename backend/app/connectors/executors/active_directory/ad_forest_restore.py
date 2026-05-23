@@ -116,7 +116,7 @@ def _run_ps(proto, script: str) -> tuple[str, str, int]:
     try:
         cmd_id = proto.run_command(
             shell_id, "powershell",
-            ["-NonInteractive", "-NoProfile", "-Command", script],
+            ["-NonInteractive", "-NoProfile", "-Command", script.strip()],
         )
         stdout, stderr, rc = proto.get_command_output(shell_id, cmd_id)
         proto.cleanup_command(shell_id, cmd_id)
