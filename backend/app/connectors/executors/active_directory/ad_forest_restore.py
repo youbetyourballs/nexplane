@@ -57,15 +57,20 @@ _PS_PROMOTE_IFM = r"""
 param([string]$DomainName, [string]$IFMPath, [string]$SafeModePassword)
 Import-Module ADDSDeployment
 $secPwd = ConvertTo-SecureString $SafeModePassword -AsPlainText -Force
-Install-ADDSDomainController `
+$result = Install-ADDSDomainController `
     -DomainName $DomainName `
     -InstallationMediaPath $IFMPath `
     -SafeModeAdministratorPassword $secPwd `
     -InstallDns:$true `
-    -NoRebootOnCompletion:$false `
+    -NoRebootOnCompletion:$true `
     -Force:$true
+if ($result.Status -ne "Success") {
+    throw "DC promotion failed: $($result.Status) — $($result.Message)"
+}
 Write-Output "DC_PROMOTED"
 """
+
+_PS_REBOOT = "Restart-Computer -Force"
 
 _PS_VERIFY_DC = r"""
 param([string]$DomainName)
@@ -286,20 +291,20 @@ def _do_restore(
     if rc != 0 or "IFM_EXTRACTED" not in out:
         raise RuntimeError(f"IFM extraction failed: {err or out}")
 
-    # Step 6 — Promote via IFM (WinRM drops on reboot — expected)
+    # Step 6 — Promote via IFM (NoRebootOnCompletion so we can verify before reboot)
     logger.info("Step 6: promoting target as DC via IFM")
+    out, err, rc = _run_ps_params(proto, _PS_PROMOTE_IFM, {
+        "DomainName": domain_name,
+        "IFMPath": ifm_dir_path,
+        "SafeModePassword": safe_mode_password,
+    })
+    if rc != 0 or "DC_PROMOTED" not in out:
+        raise RuntimeError(f"DC promotion failed (rc={rc}): {err or out}")
+    logger.info("Promotion succeeded — triggering reboot")
     try:
-        _run_ps_params(proto, _PS_PROMOTE_IFM, {
-            "DomainName": domain_name,
-            "IFMPath": ifm_dir_path,
-            "SafeModePassword": safe_mode_password,
-        })
-    except Exception as exc:
-        exc_s = str(exc)
-        if any(k in exc_s.lower() for k in ("connection", "timeout", "reset", "eof", "winrm")):
-            logger.info("WinRM dropped (expected — server rebooting): %s", exc_s[:120])
-        else:
-            raise
+        _run_ps(proto, _PS_REBOOT)
+    except Exception:
+        pass  # connection drops immediately on reboot
 
     _wait_offline(target_hostname, port=winrm_port, timeout_min=5)
     logger.info("Step 7: waiting for target to come back online (up to 15 min)")
