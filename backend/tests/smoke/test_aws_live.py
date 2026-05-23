@@ -10372,7 +10372,8 @@ nodes:
         - "$PRIVATE_IP"
 KINDEOF
 
-kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0 --verbosity=6 2>&1 | tail -30
+set -o pipefail
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0 2>&1 || { echo "KIND_FAILED"; kind export logs /tmp/kind-logs 2>/dev/null; tail -50 /tmp/kind-logs/smoke-test-control-plane/journal.log 2>/dev/null; exit 1; }
 
 kubectl create serviceaccount smoke-sa --namespace default || true
 kubectl create rolebinding smoke-rb \\
@@ -10568,7 +10569,7 @@ echo "RESTART_COMPLETE"
         log("  Fetching kubeconfig...")
         kubeconfig_content = _ssm_run_poll(
             ssm_client, instance_id,
-            "kind get kubeconfig --name smoke-test 2>/dev/null || cat ~/.kube/config",
+            "kind get kubeconfig --name smoke-test || cat /root/.kube/config",
             timeout=30, label="get-kubeconfig",
         ).strip()
 
