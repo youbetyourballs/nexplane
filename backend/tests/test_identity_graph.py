@@ -1,5 +1,6 @@
 import pytest
 import uuid
+from unittest.mock import AsyncMock, patch, MagicMock
 from app.models.identity_profile import IdentityProfile, IdentityAccount
 from app.connectors.executors.identity.fan_out_registry import (
     FAN_OUT_ACTIONS,
@@ -139,3 +140,51 @@ def test_restorable_connector_types_includes_common():
     assert "active_directory" in RESTORABLE_CONNECTOR_TYPES
     assert "okta" in RESTORABLE_CONNECTOR_TYPES
     assert "freeipa" in RESTORABLE_CONNECTOR_TYPES
+
+
+@pytest.mark.asyncio
+async def test_fan_out_executor_spawns_child_crs(monkeypatch):
+    from app.connectors.executors.identity import fan_out_executor
+
+    mock_profile = MagicMock()
+    mock_profile.id = uuid.uuid4()
+    mock_profile.primary_email = "alice@corp.com"
+
+    mock_account_ad = MagicMock()
+    mock_account_ad.connector_id = uuid.uuid4()
+    mock_account_ad.connector_type = "active_directory"
+    mock_account_ad.external_id = "alice-ad"
+    mock_account_ad.is_stale = False
+
+    mock_account_okta = MagicMock()
+    mock_account_okta.connector_id = uuid.uuid4()
+    mock_account_okta.connector_type = "okta"
+    mock_account_okta.external_id = "00u123"
+    mock_account_okta.is_stale = False
+
+    mock_profile.accounts = [mock_account_ad, mock_account_okta]
+
+    spawned = []
+
+    async def mock_spawn(parent_cr_id, connector_id, connector_type, external_id, action, parameters, organization_id=None):
+        spawned.append({"connector_type": connector_type, "action": action})
+        return MagicMock(id=uuid.uuid4())
+
+    monkeypatch.setattr(fan_out_executor, "_spawn_child_cr", mock_spawn)
+    monkeypatch.setattr(fan_out_executor, "_lookup_profile", AsyncMock(return_value=mock_profile))
+
+    connector = MagicMock()
+    connector.id = uuid.uuid4()
+
+    result = await fan_out_executor.execute(
+        parameters={"identity_profile_id": str(mock_profile.id)},
+        asset_ids=[],
+        connector=connector,
+        change_request_id=uuid.uuid4(),
+        change_type="emergency_user_lockout",
+    )
+
+    assert result["status"] == "completed"
+    assert len(spawned) == 2
+    assert any(s["connector_type"] == "active_directory" for s in spawned)
+    assert any(s["connector_type"] == "okta" for s in spawned)
