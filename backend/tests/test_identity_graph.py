@@ -228,3 +228,69 @@ async def test_identity_snapshot_produces_manifest(monkeypatch):
     assert len(manifest_keys) == 1
     manifest = json.loads(uploaded[manifest_keys[0]])
     assert manifest["format"] == "identity_snapshot_v1"
+
+
+@pytest.mark.asyncio
+async def test_identity_reconstitute_dry_run_detects_missing(monkeypatch):
+    from app.connectors.executors.identity import identity_reconstitute
+
+    snapshot_users = [
+        {"external_id": "alice", "username": "alice", "raw_attributes": {"enabled": True}},
+        {"external_id": "bob", "username": "bob", "raw_attributes": {"enabled": True}},
+    ]
+
+    async def mock_load_snapshot(s3_bucket, s3_prefix, creds):
+        return {
+            "manifest": {"format": "identity_snapshot_v1", "connector_ids": ["conn1"]},
+            "users_by_connector": {"conn1": snapshot_users},
+        }
+
+    async def mock_current_users(connector, action, params):
+        # Only alice exists currently; bob is missing
+        return {"users": [snapshot_users[0]]}
+
+    monkeypatch.setattr(identity_reconstitute, "_load_snapshot", mock_load_snapshot)
+    monkeypatch.setattr(identity_reconstitute, "_discover_users", mock_current_users)
+
+    connector = MagicMock()
+    connector.id = MagicMock()
+    connector.id.__str__ = lambda self: "conn1"
+    connector.credentials = {}
+
+    result = await identity_reconstitute.execute(
+        parameters={
+            "s3_bucket": "test-bucket",
+            "s3_prefix": "test/snapshots/identity-snapshot-20260523T120000Z",
+            "dry_run": True,
+        },
+        asset_ids=[],
+        connector=connector,
+    )
+
+    assert result["status"] == "dry_run_complete"
+    missing = [a for a in result["analysis"] if a["classification"] == "missing"]
+    assert any(a["external_id"] == "bob" for a in missing)
+
+
+@pytest.mark.asyncio
+async def test_identity_reconstitute_rejects_invalid_manifest(monkeypatch):
+    from app.connectors.executors.identity import identity_reconstitute
+
+    async def mock_load_bad(s3_bucket, s3_prefix, creds):
+        return {
+            "manifest": {"format": "wrong_format"},
+            "users_by_connector": {},
+        }
+
+    monkeypatch.setattr(identity_reconstitute, "_load_snapshot", mock_load_bad)
+
+    connector = MagicMock()
+    connector.credentials = {}
+
+    result = await identity_reconstitute.execute(
+        parameters={"s3_bucket": "b", "s3_prefix": "p", "dry_run": True},
+        asset_ids=[],
+        connector=connector,
+    )
+    assert result["status"] == "failed"
+    assert "format" in result["reason"]
