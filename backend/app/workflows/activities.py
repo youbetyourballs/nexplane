@@ -205,7 +205,7 @@ async def activity_execute_change(
                 "generic_action": step.get("generic_action"),
                 "action_id": action_id,
                 "connector_type": connector_type,
-                "connector_id": step_connector_id,
+                "connector_id": str(connector.id) if connector else step_connector_id,
                 "result": result,
             })
             # Propagate any step's scalar outputs into subsequent steps' parameters.
