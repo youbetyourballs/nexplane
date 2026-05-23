@@ -1,0 +1,8 @@
+{
+  "change_type": "macos_santa_binary_check",
+  "display_name": "Santa Binary Check",
+  "description": "Checks whether a binary at a given path is allowed or denied by Santa.",
+  "steps": [{"generic_action": "macos_santa_binary_check", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
