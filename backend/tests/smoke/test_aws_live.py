@@ -10366,23 +10366,21 @@ KINDEOF
 set -o pipefail
 kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0 2>&1 || {{ echo "KIND_FAILED"; exit 1; }}
 
-# Add private IP as SAN by renewing the API server cert with a patched ClusterConfiguration.
-# Extract current config, inject certSANs, renew inside the kind node container.
-docker exec smoke-test-control-plane bash -c "
-  kubectl -n kube-system get cm kubeadm-config -o jsonpath='{{.data.ClusterConfiguration}}' > /tmp/cc.yaml 2>/dev/null
-  # Append certSANs block (kubeadm merges with existing config)
-  cat >> /tmp/cc.yaml <<EOF
-apiServer:
-  certSANs:
-  - 127.0.0.1
-  - $PRIVATE_IP
-EOF
+# Explicitly export kubeconfig so we know where it is regardless of SSM home dir
+kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml
+mkdir -p /root/.kube && cp /tmp/smoke-kubeconfig.yaml /root/.kube/config
+export KUBECONFIG=/tmp/smoke-kubeconfig.yaml
+
+# Add private IP as SAN — pass PRIVATE_IP explicitly into docker exec via -e flag
+docker exec -e "PRIV_IP=$PRIVATE_IP" smoke-test-control-plane bash -c '
+  KUBECONFIG=/etc/kubernetes/admin.conf kubectl -n kube-system get cm kubeadm-config \
+    -o jsonpath="{.data.ClusterConfiguration}" > /tmp/cc.yaml 2>/dev/null
+  printf "\napiServer:\n  certSANs:\n  - 127.0.0.1\n  - %s\n" "$PRIV_IP" >> /tmp/cc.yaml
   kubeadm certs renew apiserver --config /tmp/cc.yaml 2>&1
-  # SIGHUP PID 1 (containerd-shim) won't work; kill the apiserver process to force restart
   pkill -f kube-apiserver 2>/dev/null || true
   sleep 5
-" 2>&1 || echo "SAN_RENEWAL_FAILED (will use existing cert)"
-kubectl --kubeconfig /root/.kube/config get nodes 2>&1 | head -3
+' 2>&1 || echo "SAN_RENEWAL_FAILED (smoke test uses insecure-skip-tls-verify fallback)"
+kubectl --kubeconfig /tmp/smoke-kubeconfig.yaml get nodes 2>&1 | head -3
 
 kubectl create serviceaccount smoke-sa --namespace default || true
 kubectl create rolebinding smoke-rb \\
@@ -10578,7 +10576,7 @@ echo "RESTART_COMPLETE"
         log("  Fetching kubeconfig...")
         kubeconfig_content = _ssm_run_poll(
             ssm_client, instance_id,
-            "kind get kubeconfig --name smoke-test || cat /root/.kube/config",
+            "kind get kubeconfig --name smoke-test 2>/dev/null || cat /tmp/smoke-kubeconfig.yaml 2>/dev/null || cat /root/.kube/config",
             timeout=30, label="get-kubeconfig",
         ).strip()
 
