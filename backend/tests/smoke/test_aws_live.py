@@ -18420,16 +18420,10 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
 
     def _start_mock_server():
         nonlocal _mock_proc
-        if _IN_CONTAINER:
-            _mock_proc = _subprocess.Popen(
-                ["python3", "-c", _MOCK_SERVER_SCRIPT],
-                stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL,
-            )
-        else:
-            _mock_proc = _subprocess.Popen(
-                ["docker", "compose", "exec", "-T", "backend", "python3", "-c", _MOCK_SERVER_SCRIPT],
-                stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL,
-            )
+        _mock_proc = _subprocess.Popen(
+            ["python3", "-c", _MOCK_SERVER_SCRIPT],
+            stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL,
+        )
         # Wait for server to be ready
         import socket as _socket
         deadline = _time.time() + 15
