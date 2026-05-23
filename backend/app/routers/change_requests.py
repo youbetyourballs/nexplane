@@ -609,6 +609,8 @@ async def manual_rollback(
                             for _aid in (cr.target_asset_ids or [])[:1]:
                                 try:
                                     _asset = await _rdb.get(_Asset, uuid.UUID(str(_aid)))
+                                    import sys as _sys2
+                                    print(f"[ROLLBACK_DEBUG2] aid={_aid} asset={_asset} connector_id={getattr(_asset,'connector_id',None)}", file=_sys2.stderr, flush=True)
                                     if _asset and _asset.connector_id:
                                         _conn_obj = await _rdb.get(_Connector, _asset.connector_id)
                                         if _conn_obj:
@@ -616,8 +618,9 @@ async def manual_rollback(
                                             _connector = _conn_obj
                                             _asset_connector_type = _conn_obj.connector_type.value if hasattr(_conn_obj.connector_type, "value") else str(_conn_obj.connector_type)
                                         break
-                                except Exception:
-                                    pass
+                                except Exception as _e2:
+                                    import sys as _sys3
+                                    print(f"[ROLLBACK_DEBUG2_ERR] {_e2}", file=_sys3.stderr, flush=True)
                     except Exception:
                         pass
                     # Try the asset's connector type first, then fall back to common types
