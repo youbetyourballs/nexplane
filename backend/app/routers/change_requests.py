@@ -595,50 +595,62 @@ async def manual_rollback(
             if not _has_rollback_steps:
                 try:
                     from app.connectors.catalog_service import get_catalog_service
-                    from app.models.asset import Asset as _Asset
                     from app.models.connector import Connector as _Connector
                     from app.services.connector_service import _attach_credentials
                     _ct = cr.change_type.value if hasattr(cr.change_type, "value") else str(cr.change_type)
                     _catalog = get_catalog_service()
-                    # Resolve connector from the CR's target assets first so we know
-                    # the correct connector type (avoids hardcoding connector types here).
+                    # Derive connector_type from the execution_result steps (stored at execute time).
+                    # This avoids relying on asset.connector_id which is not always set.
+                    _exec_steps_for_ct = (
+                        execution_result.get("execution", {}).get("steps")
+                        or execution_result.get("steps")
+                        or []
+                    )
+                    _connector_type_from_result = next(
+                        (s.get("connector_type") for s in _exec_steps_for_ct if s.get("connector_type")),
+                        None,
+                    )
                     _connector = None
-                    _asset_connector_type = None
+                    # Resolve connector object for credentials if a connector_id is in the step
+                    _step_connector_id = next(
+                        (s.get("connector_id") for s in _exec_steps_for_ct if s.get("connector_id")),
+                        None,
+                    )
                     try:
+                        from sqlalchemy import select as _sa_select
                         async with AsyncSessionLocal() as _rdb:
-                            for _aid in (cr.target_asset_ids or [])[:1]:
-                                try:
-                                    _asset = await _rdb.get(_Asset, uuid.UUID(str(_aid)))
-                                    import sys as _sys2
-                                    print(f"[ROLLBACK_DEBUG2] aid={_aid} asset={_asset} connector_id={getattr(_asset,'connector_id',None)}", file=_sys2.stderr, flush=True)
-                                    if _asset and _asset.connector_id:
-                                        _conn_obj = await _rdb.get(_Connector, _asset.connector_id)
-                                        if _conn_obj:
-                                            await _attach_credentials(_conn_obj, _rdb)
-                                            _connector = _conn_obj
-                                            _asset_connector_type = _conn_obj.connector_type.value if hasattr(_conn_obj.connector_type, "value") else str(_conn_obj.connector_type)
-                                        break
-                                except Exception as _e2:
-                                    import sys as _sys3
-                                    print(f"[ROLLBACK_DEBUG2_ERR] {_e2}", file=_sys3.stderr, flush=True)
+                            if _step_connector_id:
+                                _conn_obj = await _rdb.get(_Connector, uuid.UUID(str(_step_connector_id)))
+                                if _conn_obj:
+                                    await _attach_credentials(_conn_obj, _rdb)
+                                    _connector = _conn_obj
+                            # If no connector found via step_id, find one by type in the org
+                            if not _connector and _connector_type_from_result:
+                                from app.models.connector import ConnectorType as _ConnectorType
+                                _res = await _rdb.execute(
+                                    _sa_select(_Connector).where(
+                                        _Connector.organization_id == cr.organization_id,
+                                        _Connector.connector_type == _ConnectorType(_connector_type_from_result),
+                                    ).limit(1)
+                                )
+                                _conn_obj = _res.scalar_one_or_none()
+                                if _conn_obj:
+                                    await _attach_credentials(_conn_obj, _rdb)
+                                    _connector = _conn_obj
                     except Exception:
                         pass
-                    # Try the asset's connector type first, then fall back to common types
+                    # Try connector type from result first, then fall back to common types
                     _mod = None
                     _conn_types_to_try = []
-                    if _asset_connector_type:
-                        _conn_types_to_try.append(_asset_connector_type)
-                    _conn_types_to_try.extend(t for t in ("nexplane_agent", "aws", "azure_ad", "okta") if t != _asset_connector_type)
-                    _exec_errors = []
+                    if _connector_type_from_result:
+                        _conn_types_to_try.append(_connector_type_from_result)
+                    _conn_types_to_try.extend(t for t in ("nexplane_agent", "aws", "azure_ad", "okta") if t != _connector_type_from_result)
                     for _conn_type in _conn_types_to_try:
                         try:
                             _mod = _catalog.get_executor(_conn_type, _ct)
                             break
-                        except Exception as _ee:
-                            _exec_errors.append(f"{_conn_type}: {_ee}")
+                        except Exception:
                             continue
-                    import sys as _sys
-                    print(f"[ROLLBACK_DEBUG] ct={_ct} asset_conn={_asset_connector_type} mod={_mod} errors={_exec_errors}", file=_sys.stderr, flush=True)
                     if _mod and hasattr(_mod, "rollback"):
                         # Extract step 1 result from nested execution structure so
                         # rollback() receives the actual step result dict, not the
