@@ -10686,8 +10686,23 @@ echo "RESTART_COMPLETE"
                 """Extract the first step's result from a completed CR response."""
                 return (cr.get("result") or {}).get("execution", {}).get("steps", [{}])[0].get("result", {})
 
+            # Clean up kubernetes connectors from previous smoke runs to avoid execution engine
+            # picking a stale connector (connector_id=None means it queries DB and finds any match).
+            try:
+                all_conns = client.get("/connectors")
+                stale_k8s = [c for c in all_conns
+                             if c.get("connector_type") == "kubernetes"
+                             and c.get("id") != _k8s_conn_id]
+                for sc in stale_k8s:
+                    try:
+                        client.client.delete(f"{client.base}/connectors/{sc['id']}")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             cr_audit = client.run_cr("[K8S_RBAC] audit RBAC", "k8s_audit_rbac", _k8s_asset_id,
-                {"kubeconfig": kubeconfig_content})
+                {"kubeconfig": kubeconfig_content}, connector_id=_k8s_conn_id)
             result = _cr_step_result(cr_audit)
             if result.get("status") == "skipped":
                 log("  K8s audit skipped (kubeconfig not reachable from backend) - dispatch verified")
@@ -10696,7 +10711,8 @@ echo "RESTART_COMPLETE"
                     + str(len(result.get("findings", []))) + " findings")
 
             cr_revoke = client.run_cr("[K8S_RBAC] revoke smoke-rb", "k8s_revoke_rolebinding", _k8s_asset_id,
-                {"rolebinding_name": "smoke-rb", "namespace": "default", "kubeconfig": kubeconfig_content})
+                {"rolebinding_name": "smoke-rb", "namespace": "default", "kubeconfig": kubeconfig_content},
+                connector_id=_k8s_conn_id)
             result2 = _cr_step_result(cr_revoke)
 
         if result2.get("deleted"):

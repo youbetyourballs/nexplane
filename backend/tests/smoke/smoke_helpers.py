@@ -220,20 +220,25 @@ class NexplaneClient:
         })
         return asset["id"]
 
-    def create_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> str:
+    def create_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict,
+                  connector_id: str | None = None) -> str:
         # Always include rollback_strategy so the safety engine passes on production-tagged assets
         outcome = {"rollback_strategy": "snapshot_restore", "_smoke_test": True, **desired_outcome}
-        return self.post("/change-requests", json={
+        body = {
             "title": title,
             "description": f"Smoke test: {title}",
             "change_type": change_type,
             "target_asset_ids": [asset_id],
             "desired_outcome": outcome,
-        })["id"]
+        }
+        if connector_id:
+            body["connector_id"] = connector_id
+        return self.post("/change-requests", json=body)["id"]
 
-    def run_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> dict:
+    def run_cr(self, title: str, change_type: str, asset_id: str, desired_outcome: dict,
+               connector_id: str | None = None) -> dict:
         print(f"  → {title}")
-        cr_id = self.create_cr(title, change_type, asset_id, desired_outcome)
+        cr_id = self.create_cr(title, change_type, asset_id, desired_outcome, connector_id=connector_id)
         self.post(f"/change-requests/{cr_id}/plan")
         self.post(f"/change-requests/{cr_id}/submit-for-approval")
         self.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "smoke test"})
