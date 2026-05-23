@@ -6,6 +6,11 @@ from app.connectors.executors.identity.fan_out_registry import (
     get_fan_out_action,
     is_fan_out_change_type,
 )
+from app.services.identity_sync_service import (
+    _extract_idp_cross_refs,
+    _correlate_by_email,
+    _upsert_account,
+)
 
 
 def test_identity_profile_fields():
@@ -51,3 +56,40 @@ def test_is_fan_out_change_type():
     assert is_fan_out_change_type("emergency_user_lockout") is True
     assert is_fan_out_change_type("identity_snapshot") is False
     assert is_fan_out_change_type("deploy_agent") is False
+
+
+def test_extract_idp_cross_refs_okta():
+    raw = {
+        "profile": {
+            "login": "alice@corp.com",
+            "email": "alice@corp.com",
+            "samAccountName": "alice",
+            "githubUsername": "alice-gh",
+        }
+    }
+    refs = _extract_idp_cross_refs("okta", raw)
+    assert refs.get("primary_email") == "alice@corp.com"
+
+
+def test_extract_idp_cross_refs_entra_id():
+    raw = {
+        "userPrincipalName": "alice@corp.onmicrosoft.com",
+        "mail": "alice@corp.com",
+        "onPremisesSamAccountName": "alice",
+    }
+    refs = _extract_idp_cross_refs("entra_id", raw)
+    assert refs.get("primary_email") == "alice@corp.com"
+
+
+def test_correlate_by_email_returns_email_key():
+    raw = {"mail": "bob@example.com", "uid": "bob"}
+    result = _correlate_by_email("freeipa", raw)
+    assert result == "bob@example.com"
+
+
+def test_correlate_by_email_fallback_fields():
+    raw = {"email": "carol@example.com"}
+    assert _correlate_by_email("ldap", raw) == "carol@example.com"
+
+    raw2 = {"userPrincipalName": "dan@example.com"}
+    assert _correlate_by_email("active_directory", raw2) == "dan@example.com"
