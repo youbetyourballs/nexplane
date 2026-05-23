@@ -139,9 +139,10 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
     locked_connector_id = None
     if len(connector_ids) == 1:
         asset_with_connector = next(a for a in assets if a.connector_id is not None)
+        # Use the FK value directly — connector relationship may not be loaded in async context
+        locked_connector_id = str(asset_with_connector.connector_id)
         if asset_with_connector.connector is not None:
             locked_connector_type = asset_with_connector.connector.connector_type.value
-            locked_connector_id = str(asset_with_connector.connector_id)
 
     options = catalog.get_options_for_action(generic_action, asset_types=asset_types)
     if not options:
