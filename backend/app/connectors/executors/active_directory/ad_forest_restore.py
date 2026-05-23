@@ -174,31 +174,38 @@ def _run_ps(proto, script: str) -> tuple[str, str, int]:
     import base64
     import time as _time
     encoded = base64.b64encode(script.strip().encode("utf-16-le")).decode("ascii")
-    # Retry open_shell on 500 errors — WinRM may be settling after initial config
+
+    def _is_transient_winrm_error(msg: str) -> bool:
+        return any(k in msg for k in ("500", "registry key", "InternalError", "key.*delet", "ERROR_KEY_DELETED"))
+
+    # Retry the entire WinRM invocation on transient 500/registry-key errors.
+    # These occur after Windows feature installs (AD DS) while registry is settling.
     for _attempt in range(6):
         try:
             shell_id = proto.open_shell()
-            break
+            try:
+                cmd_id = proto.run_command(
+                    shell_id, "powershell",
+                    ["-NonInteractive", "-NoProfile", "-EncodedCommand", encoded],
+                )
+                stdout, stderr, rc = proto.get_command_output(shell_id, cmd_id)
+                proto.cleanup_command(shell_id, cmd_id)
+                return (
+                    stdout.decode("utf-8", errors="replace").strip(),
+                    stderr.decode("utf-8", errors="replace").strip(),
+                    rc,
+                )
+            finally:
+                try:
+                    proto.close_shell(shell_id)
+                except Exception:
+                    pass
         except Exception as _e:
             _emsg = str(_e)
-            if _attempt < 5 and ("500" in _emsg or "registry key" in _emsg.lower() or "InternalError" in _emsg):
-                _time.sleep(20)
+            if _attempt < 5 and _is_transient_winrm_error(_emsg):
+                _time.sleep(25)
                 continue
             raise
-    try:
-        cmd_id = proto.run_command(
-            shell_id, "powershell",
-            ["-NonInteractive", "-NoProfile", "-EncodedCommand", encoded],
-        )
-        stdout, stderr, rc = proto.get_command_output(shell_id, cmd_id)
-        proto.cleanup_command(shell_id, cmd_id)
-        return (
-            stdout.decode("utf-8", errors="replace").strip(),
-            stderr.decode("utf-8", errors="replace").strip(),
-            rc,
-        )
-    finally:
-        proto.close_shell(shell_id)
 
 
 def _run_ps_params(proto, script: str, params: dict) -> tuple[str, str, int]:
@@ -337,6 +344,9 @@ def _do_restore(
     out, err, rc = _run_ps(proto, _PS_INSTALL_ADDS)
     if rc != 0 or "ADDS_INSTALLED" not in out:
         raise RuntimeError(f"AD DS role installation failed: {err or out}")
+    # Allow Windows to finish registry mutations triggered by the AD DS feature install
+    # before issuing the next WinRM command (avoids ERROR_KEY_DELETED / HTTP 500)
+    import time as _t; _t.sleep(15)
 
     # Step 5 — Download IFM.zip and extract
     logger.info("Step 5: downloading IFM.zip from S3")
