@@ -15062,11 +15062,11 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 "safe_mode_password": "DSRM@Smoke2024!",
                 "require_dc_isolation": False,
                 "dns_update_mode": "manual",
-                # Domain admin creds needed for Install-ADDSDomainController -Credential
-                # The forest was created with SafeMode password NexplaneSmoke2024!
-                # which also becomes the built-in domain Administrator password.
-                "domain_admin_username": "SMOKE\\Administrator",
-                "domain_admin_password": "NexplaneSmoke2024!",
+                # Domain admin creds for Install-ADDSDomainController -Credential
+                # smokeuser is created with Domain Admins membership during AMI setup.
+                # The built-in Administrator password is EC2-generated (unknown); use smokeuser.
+                "domain_admin_username": "SMOKE\\smokeuser",
+                "domain_admin_password": "UserPass123!",
                 "source_dc_ip": source_ip,
             },
             connector_id=_ad_conn_id,
