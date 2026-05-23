@@ -14834,6 +14834,7 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         # Step 3 — Enable WinRM on target via SSM
         # ------------------------------------------------------------------
         log("AD_DC_RESTORE: enabling WinRM on target via SSM...")
+        _target_winrm_user = "smokeadmin"
         _target_admin_pass = "SmokeRestore@2024!"
         _winrm_cmd = ssm_client.send_command(
             InstanceIds=[target_id],
@@ -14845,8 +14846,8 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 "New-NetFirewallRule -DisplayName 'WinRM-NexplaneSmoke' -Direction Inbound "
                 "-Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue",
                 f"$pw = ConvertTo-SecureString '{_target_admin_pass}' -AsPlainText -Force; "
-                "Set-LocalUser -Name Administrator -Password $pw -PasswordNeverExpires $true",
-                "net user Administrator /active:yes",
+                f"New-LocalUser -Name '{_target_winrm_user}' -Password $pw -PasswordNeverExpires -ErrorAction SilentlyContinue; "
+                f"Add-LocalGroupMember -Group Administrators -Member '{_target_winrm_user}' -ErrorAction SilentlyContinue",
                 "Restart-Service WinRM",
                 "Write-Output 'WINRM_ENABLED'",
             ]},
@@ -14953,7 +14954,7 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
             _ad_asset_id,
             {
                 "target_hostname": target_ip,
-                "winrm_username": "Administrator",
+                "winrm_username": _target_winrm_user,
                 "winrm_password": _target_admin_pass,
                 "snapshot_s3_prefix": snap_prefix,
                 "s3_bucket": s3_bucket,
