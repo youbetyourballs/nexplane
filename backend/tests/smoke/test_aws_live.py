@@ -10558,7 +10558,12 @@ kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s
   && echo "KIND_CLUSTER_READY" \
   || {{ echo "KIND_FAILED"; tail -20 /tmp/kind-out.txt; exit 1; }}
 echo "Docker port bindings:"; docker port smoke-test-control-plane 6443/tcp || true
+echo "Port 6443 listen:"; ss -tlnp 'sport = :6443' 2>/dev/null || ss -tlnp | grep ':6443' || echo 'not listening'
+# Allow FORWARD chain for Docker DNAT to work (AL2023 nftables compat may not auto-allow)
+iptables -I FORWARD -i eth0 -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
+iptables -I FORWARD -o eth0 -p tcp --sport 6443 -j ACCEPT 2>/dev/null || true
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
+echo "iptables nat DOCKER:"; iptables -t nat -L DOCKER -n 2>/dev/null | grep 6443 || echo 'no DNAT rule'
 kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml 2>/dev/null
 mkdir -p /root/.kube && cp /tmp/smoke-kubeconfig.yaml /root/.kube/config
 export KUBECONFIG=/tmp/smoke-kubeconfig.yaml
@@ -10568,6 +10573,10 @@ kubectl get rolebinding smoke-rb -n default 2>/dev/null || \
 echo "RESTART_COMPLETE"
 """
             restart_out = _ssm_run_poll(ssm_client, instance_id, restart_script, timeout=900, label="k8s-restart")
+            # Log key diagnostic lines from restart output
+            for _diag_line in restart_out.splitlines():
+                if any(k in _diag_line for k in ("Port 6443", "port bindings", "DNAT", "nat DOCKER", "listen", "KIND_CLUSTER_READY", "KIND_FAILED", "RESTART_COMPLETE")):
+                    log("  [k8s-diag] " + _diag_line.strip())
             if "RESTART_COMPLETE" not in restart_out:
                 log("  Warning: restart may not have completed: " + restart_out[-300:])
 
@@ -10681,6 +10690,20 @@ echo "RESTART_COMPLETE"
             def _cr_step_result(cr: dict) -> dict:
                 """Extract the first step's result from a completed CR response."""
                 return (cr.get("result") or {}).get("execution", {}).get("steps", [{}])[0].get("result", {})
+
+            # Direct connectivity test before creating CRs
+            import base64 as _b64_test
+            import sys as _sys_test
+            if "/app" not in _sys_test.path:
+                _sys_test.path.insert(0, "/app")
+            try:
+                from app.connectors.executors.kubernetes._client import get_k8s_clients as _get_k8s_clients
+                _test_clients = _get_k8s_clients({"kubeconfig": _b64_test.b64encode(kubeconfig_content.encode()).decode()})
+                _test_crbs = _test_clients["rbac"].list_cluster_role_binding()
+                log(f"Direct k8s connectivity: {len(_test_crbs.items)} cluster role bindings")
+            except Exception as _e:
+                log(f"Direct k8s connectivity FAILED: {_e}", ok=False)
+                raise RuntimeError(f"[K8S_RBAC] Cannot reach kubernetes API at {private_ip}:{KUBE_API_PORT}: {_e}")
 
             # Clean up kubernetes connectors from previous smoke runs to avoid execution engine
             # picking a stale connector (connector_id=None means it queries DB and finds any match).
