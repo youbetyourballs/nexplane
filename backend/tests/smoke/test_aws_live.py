@@ -14831,6 +14831,54 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 fail(f"[AD_DC_RESTORE] SSM never came online on {label}")
 
         # ------------------------------------------------------------------
+        # Step 2b — Enable WinRM basic auth on source DC via SSM
+        # The source DC boots from an AMI; basic auth is not enabled by default
+        # on domain controllers. Enable it so the smoke test can connect with
+        # smokeuser credentials.
+        # ------------------------------------------------------------------
+        log("AD_DC_RESTORE: enabling WinRM basic auth on source DC...")
+        _src_winrm_cmd = ssm_client.send_command(
+            InstanceIds=[source_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": [
+                "Enable-PSRemoting -Force",
+                "Set-Item wsman:\\localhost\\service\\auth\\Basic -Value $true",
+                "Set-Item wsman:\\localhost\\service\\AllowUnencrypted -Value $true",
+                "New-NetFirewallRule -DisplayName 'WinRM-NexplaneSmoke' -Direction Inbound "
+                "-Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue",
+                # Ensure smokeuser account is unlocked and password is known
+                "$smokePass = ConvertTo-SecureString 'UserPass123!' -AsPlainText -Force; "
+                "try { Set-ADAccountPassword -Identity smokeuser -NewPassword $smokePass -Reset -ErrorAction SilentlyContinue } catch {}; "
+                "try { Unlock-ADAccount -Identity smokeuser -ErrorAction SilentlyContinue } catch {}",
+                "Restart-Service WinRM",
+                "Write-Output 'SRC_WINRM_ENABLED'",
+            ]},
+            TimeoutSeconds=120,
+        )
+        _src_winrm_cmd_id = _src_winrm_cmd["Command"]["CommandId"]
+        _t.sleep(5)
+        _src_winrm_setup_deadline = _t.time() + 180
+        _src_winrm_setup_out = ""
+        while _t.time() < _src_winrm_setup_deadline:
+            _t.sleep(8)
+            try:
+                _inv = ssm_client.get_command_invocation(
+                    CommandId=_src_winrm_cmd_id, InstanceId=source_id
+                )
+                _status = _inv["Status"]
+                if _status in ("Success", "Failed", "TimedOut", "Cancelled"):
+                    _src_winrm_setup_out = _inv.get("StandardOutputContent", "")
+                    if _status != "Success":
+                        log(f"AD_DC_RESTORE: source WinRM SSM {_status}: {_src_winrm_setup_out[-300:]}")
+                    break
+            except Exception:
+                pass
+        if "SRC_WINRM_ENABLED" not in _src_winrm_setup_out:
+            log(f"AD_DC_RESTORE: WARNING — source WinRM SSM may not have completed: {_src_winrm_setup_out[-200:]}")
+        else:
+            log("AD_DC_RESTORE: source DC WinRM basic auth enabled")
+
+        # ------------------------------------------------------------------
         # Step 3 — Enable WinRM on target via SSM
         # ------------------------------------------------------------------
         log("AD_DC_RESTORE: enabling WinRM on target via SSM (reset Administrator password)...")
