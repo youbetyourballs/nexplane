@@ -54,16 +54,23 @@ Write-Output "IFM_EXTRACTED"
 """
 
 _PS_PROMOTE_IFM = r"""
-param([string]$DomainName, [string]$IFMPath, [string]$SafeModePassword)
+param([string]$DomainName, [string]$IFMPath, [string]$SafeModePassword,
+      [string]$DomainAdminUser, [string]$DomainAdminPassword)
 Import-Module ADDSDeployment
 $secPwd = ConvertTo-SecureString $SafeModePassword -AsPlainText -Force
+$credParams = @{}
+if ($DomainAdminUser -and $DomainAdminPassword) {
+    $domainSecPwd = ConvertTo-SecureString $DomainAdminPassword -AsPlainText -Force
+    $credParams["Credential"] = New-Object System.Management.Automation.PSCredential($DomainAdminUser, $domainSecPwd)
+}
 $result = Install-ADDSDomainController `
     -DomainName $DomainName `
     -InstallationMediaPath $IFMPath `
     -SafeModeAdministratorPassword $secPwd `
     -InstallDns:$true `
     -NoRebootOnCompletion:$true `
-    -Force:$true
+    -Force:$true `
+    @credParams
 if ($result.Status -ne "Success") {
     throw "DC promotion failed: $($result.Status) — $($result.Message)"
 }
@@ -220,6 +227,8 @@ def _do_restore(
     azure_zone_name: str | None,
     azure_resource_group: str | None,
     aws_region: str,
+    domain_admin_username: str = "",
+    domain_admin_password: str = "",
 ) -> dict:
 
     s3 = _s3_client(aws_region)
@@ -297,6 +306,8 @@ def _do_restore(
         "DomainName": domain_name,
         "IFMPath": ifm_dir_path,
         "SafeModePassword": safe_mode_password,
+        "DomainAdminUser": domain_admin_username,
+        "DomainAdminPassword": domain_admin_password,
     })
     if rc != 0 or "DC_PROMOTED" not in out:
         raise RuntimeError(f"DC promotion failed (rc={rc}): {err or out}")
@@ -438,6 +449,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     azure_zone_name      = parameters.get("azure_zone_name")
     azure_resource_group = parameters.get("azure_resource_group")
     aws_region           = parameters.get("aws_region", "us-east-1")
+    domain_admin_username = parameters.get("domain_admin_username", "")
+    domain_admin_password = parameters.get("domain_admin_password", "")
 
     if dns_update_mode not in ("route53", "azure", "manual"):
         raise ValueError(f"dns_update_mode must be route53 | azure | manual — got {dns_update_mode!r}")
@@ -462,6 +475,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             azure_zone_name=azure_zone_name,
             azure_resource_group=azure_resource_group,
             aws_region=aws_region,
+            domain_admin_username=domain_admin_username,
+            domain_admin_password=domain_admin_password,
         ),
     )
 
