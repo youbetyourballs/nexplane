@@ -14833,22 +14833,27 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         # ------------------------------------------------------------------
         # Step 2b — Enable WinRM basic auth on source DC via SSM
         # The source DC boots from an AMI; basic auth is not enabled by default
-        # on domain controllers. Enable it so the smoke test can connect with
-        # smokeuser credentials.
+        # on domain controllers. Reset the built-in Administrator password to a
+        # known value so the connectivity check below can use basic auth (domain
+        # users like smokeuser cannot use basic auth because the local SAM is
+        # replaced by AD on a DC).
         # ------------------------------------------------------------------
+        _src_admin_pass = "SmokeRestore@2024!"
         log("AD_DC_RESTORE: enabling WinRM basic auth on source DC...")
         _src_winrm_cmd = ssm_client.send_command(
             InstanceIds=[source_id],
             DocumentName="AWS-RunPowerShellScript",
             Parameters={"commands": [
+                # Reset built-in Administrator to known password before enabling WinRM
+                f"$pw = ConvertTo-SecureString '{_src_admin_pass}' -AsPlainText -Force; "
+                "Set-LocalUser -Name Administrator -Password $pw",
+                "net user Administrator /active:yes",
                 "Enable-PSRemoting -Force",
                 "Set-Item wsman:\\localhost\\service\\auth\\Basic -Value $true",
                 "Set-Item wsman:\\localhost\\service\\AllowUnencrypted -Value $true",
                 "New-NetFirewallRule -DisplayName 'WinRM-NexplaneSmoke' -Direction Inbound "
                 "-Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue",
-                # Ensure smokeuser account is unlocked and password is known
-                "$smokePass = ConvertTo-SecureString 'UserPass123!' -AsPlainText -Force; "
-                "try { Set-ADAccountPassword -Identity smokeuser -NewPassword $smokePass -Reset -ErrorAction SilentlyContinue } catch {}; "
+                # Ensure smokeuser account is unlocked (password set during AMI creation)
                 "try { Unlock-ADAccount -Identity smokeuser -ErrorAction SilentlyContinue } catch {}",
                 "Restart-Service WinRM",
                 "Write-Output 'SRC_WINRM_ENABLED'",
@@ -15062,16 +15067,19 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         else:
             log("AD_DC_RESTORE: WARNING — could not get DC hostname, skipping hosts file entry")
 
-        # Reuse existing smoke DC credentials
+        # Credentials for subsequent executor steps (smokeuser is domain user set up in AMI)
         _winrm_user = "smokeuser"
         _winrm_pass = "UserPass123!"  # matches AD_DC_INTEGRITY smoke DC setup
 
         # ------------------------------------------------------------------
-        # Step 3c — Wait for WinRM on source DC to accept smokeuser credentials
-        # The source DC boots from AMI; domain services (KDC, NTDS) need time to
-        # initialize before domain user WinRM auth works.
+        # Step 3c — Wait for WinRM on source DC to accept Administrator credentials
+        # The source DC boots from AMI; AD domain services (NTDS, KDC) need time
+        # to start. We check using the built-in Administrator account with basic
+        # auth — domain users cannot use basic auth on a DC because there is no
+        # local SAM. The Administrator password was reset to _src_admin_pass in
+        # Step 2b, so it is known regardless of AMI state.
         # ------------------------------------------------------------------
-        log("AD_DC_RESTORE: waiting for WinRM on source DC to accept smokeuser credentials...")
+        log("AD_DC_RESTORE: waiting for WinRM on source DC to accept Administrator credentials...")
         import socket as _sock
         _src_winrm_deadline = _t.time() + 600
         _src_winrm_ok = False
@@ -15079,13 +15087,13 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
             try:
                 _s = _sock.create_connection((source_ip, 5985), timeout=10)
                 _s.close()
-                # TCP open — try basic auth
+                # TCP open — try basic auth with Administrator (local account, works on DC)
                 import winrm as _winrm
                 _src_proto = _winrm.Protocol(
                     endpoint=f"http://{source_ip}:5985/wsman",
                     transport="basic",
-                    username=_winrm_user,
-                    password=_winrm_pass,
+                    username="Administrator",
+                    password=_src_admin_pass,
                     server_cert_validation="ignore",
                 )
                 _sh = _src_proto.open_shell()
@@ -15100,8 +15108,8 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 pass
             _t.sleep(15)
         if not _src_winrm_ok:
-            fail("[AD_DC_RESTORE] Source DC WinRM never accepted smokeuser credentials within 10 min")
-        log("AD_DC_RESTORE: source DC WinRM ready for smokeuser")
+            fail("[AD_DC_RESTORE] Source DC WinRM never accepted Administrator credentials within 10 min")
+        log("AD_DC_RESTORE: source DC WinRM ready")
 
         # ------------------------------------------------------------------
         # Step 4 — Register AD connector + asset for source DC
