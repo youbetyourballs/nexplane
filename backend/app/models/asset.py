@@ -20,6 +20,7 @@ class AssetType(str, enum.Enum):
     database = "database"
     storage_bucket = "storage_bucket"
     load_balancer = "load_balancer"
+    macos_fleet = "macos_fleet"
     endpoint = "endpoint"
     container_cluster = "container_cluster"
     key_pair = "key_pair"
