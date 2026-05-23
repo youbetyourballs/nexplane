@@ -312,6 +312,35 @@
       ]
     },
     {
+      "action_id": "ad_dc_decommission",
+      "generic_action": "ad_dc_decommission",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "AD DC Decommission",
+      "description": "Terminate or shut down compromised DCs after a forest restore. EC2 instances terminated via AWS API; WinRM hosts isolated and shut down; iLO/iDRAC hosts stubbed pending oob_management connector.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {
+          "name": "compromised_dcs",
+          "type": "array",
+          "required": true,
+          "description": "List of DCs to decommission. Each entry: {type: ec2|winrm|ilodrac, instance_id|winrm_hostname|hostname, name, pam_path (ilodrac only)}"
+        },
+        {"name": "winrm_username", "type": "string", "required": false, "description": "Falls back to connector credentials"},
+        {"name": "winrm_password", "type": "password", "required": false},
+        {"name": "winrm_port", "type": "integer", "required": false, "default": 5985}
+      ],
+      "executor": "active_directory.ad_dc_decommission",
+      "rollback_action": null,
+      "estimated_duration_seconds": 120,
+      "blast_radius_hint": "infrastructure_termination",
+      "safety_notes": [
+        "DESTRUCTIVE AND NOT REVERSIBLE — EC2 instances are permanently terminated",
+        "Run only after ad_forest_restore is verified and the new DC is confirmed healthy",
+        "For iLO/iDRAC entries: manually power off the host and update pam_path for future runs"
+      ]
+    },
+    {
       "action_id": "ad_tiered_backup",
       "generic_action": "ad_tiered_backup",
       "action_type": "change",
