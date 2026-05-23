@@ -418,11 +418,12 @@ def _do_restore(
         "DomainAdminPassword": domain_admin_password,
         "SourceDcIp": source_dc_ip,
     })
+    logger.info("Promote stdout (first 500): %s", out[:500])
     for _diag_line in out.splitlines():
-        if _diag_line.startswith("DIAG_"):
+        if _diag_line.startswith("DIAG_") or _diag_line.startswith("DNS_"):
             logger.info("Promote diag: %s", _diag_line)
     if rc != 0 or "DC_PROMOTED" not in out:
-        raise RuntimeError(f"DC promotion failed (rc={rc}): {err or out}")
+        raise RuntimeError(f"DC promotion failed (rc={rc}): stdout={out[:300]} err={err[:300]}")
     logger.info("Promotion succeeded — triggering reboot")
     try:
         _run_ps(proto, _PS_REBOOT)
