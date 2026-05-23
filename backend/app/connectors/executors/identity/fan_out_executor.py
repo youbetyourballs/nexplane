@@ -15,7 +15,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-async def _lookup_profile(profile_id: uuid.UUID, db=None):
+async def _lookup_profile(profile_id: uuid.UUID, organization_id=None, db=None):
     from app.database import db_factory
     from app.models.identity_profile import IdentityProfile
     from sqlalchemy import select
@@ -24,11 +24,11 @@ async def _lookup_profile(profile_id: uuid.UUID, db=None):
     ctx = db_factory() if db is None else None
     _db = await ctx.__aenter__() if ctx else db
     try:
-        result = await _db.execute(
-            select(IdentityProfile)
-            .where(IdentityProfile.id == profile_id)
-            .options(selectinload(IdentityProfile.accounts))
-        )
+        q = select(IdentityProfile).where(IdentityProfile.id == profile_id)
+        if organization_id is not None:
+            q = q.where(IdentityProfile.organization_id == organization_id)
+        q = q.options(selectinload(IdentityProfile.accounts))
+        result = await _db.execute(q)
         return result.scalar_one_or_none()
     finally:
         if ctx:
@@ -43,25 +43,14 @@ async def _spawn_child_cr(
     action: str,
     parameters: dict,
     organization_id: Optional[uuid.UUID] = None,
+    requester_id: Optional[uuid.UUID] = None,
 ):
     """Create and auto-approve a child ChangeRequest."""
     from app.database import db_factory
     from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType
-    from app.models.user import User
-    from sqlalchemy import select
     from datetime import datetime, timezone
 
     async with db_factory() as db:
-        # Resolve requester_id: pick any user in the org (system/automation user pattern)
-        requester_id = None
-        if organization_id:
-            user_r = await db.execute(
-                select(User).where(User.organization_id == organization_id).limit(1)
-            )
-            system_user = user_r.scalars().first()
-            if system_user:
-                requester_id = system_user.id
-
         # Resolve change_type: use _parent_change_type from parameters if provided,
         # otherwise fall back to emergency_user_lockout
         parent_change_type = parameters.get("_parent_change_type", "emergency_user_lockout")
@@ -114,15 +103,30 @@ async def execute(
     except ValueError:
         return {"status": "failed", "reason": f"invalid identity_profile_id: {profile_id_str}"}
 
-    profile = await _lookup_profile(profile_id, db=db)
+    # organization_id and requester_id: prefer from the parent CR (connector may be None)
+    organization_id = getattr(connector, "organization_id", None)
+    requester_id = None
+    if change_request_id is not None:
+        from app.database import db_factory
+        from app.models.change_request import ChangeRequest
+        from sqlalchemy import select as _select
+        async with db_factory() as _cr_db:
+            _cr_r = await _cr_db.execute(
+                _select(ChangeRequest).where(ChangeRequest.id == change_request_id)
+            )
+            _parent_cr = _cr_r.scalar_one_or_none()
+            if _parent_cr is not None:
+                if organization_id is None:
+                    organization_id = _parent_cr.organization_id
+                requester_id = _parent_cr.requester_id
+
+    profile = await _lookup_profile(profile_id, organization_id=organization_id, db=db)
     if profile is None:
         return {"status": "failed", "reason": f"IdentityProfile {profile_id} not found"}
 
     accounts = [a for a in profile.accounts if not a.is_stale]
     if not accounts:
         return {"status": "failed", "reason": "no non-stale accounts found for this profile"}
-
-    organization_id = getattr(connector, "organization_id", None)
 
     tasks = []
     skipped = []
@@ -144,6 +148,7 @@ async def execute(
                 action=action,
                 parameters={**parameters, "_parent_change_type": change_type},
                 organization_id=organization_id,
+                requester_id=requester_id,
             )
             child_results.append({
                 "child_cr_id": str(child.id),
