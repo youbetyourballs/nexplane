@@ -14967,6 +14967,7 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                 "dns_update_mode": "manual",
             },
             connector_id=_ad_conn_id,
+            timeout=1800,  # 30 min: AD DS install + IFM download + promote + reboot + NTDS wait
         )
         restore_result = client.get_cr_step_result(cr_restore)
         if restore_result.get("dc_verification") != "passed":
