@@ -135,29 +135,40 @@ Write-Output "PRE_PROMOTE_OK"
 
 _PS_PROMOTE_IFM = r"""
 param([string]$DomainName, [string]$IFMPath, [string]$SafeModePassword,
-      [string]$DomainAdminUser, [string]$DomainAdminPassword, [string]$SourceDcIp)
-Import-Module ADDSDeployment
-$secPwd = ConvertTo-SecureString $SafeModePassword -AsPlainText -Force
-$credParams = @{}
-if ($DomainAdminUser -and $DomainAdminPassword) {
-    $domainSecPwd = ConvertTo-SecureString $DomainAdminPassword -AsPlainText -Force
-    $credParams["Credential"] = New-Object System.Management.Automation.PSCredential($DomainAdminUser, $domainSecPwd)
+      [string]$DomainAdminUser, [string]$DomainAdminPassword, [string]$SourceDcIp,
+      [string]$SourceDcFqdn)
+try {
+    Import-Module ADDSDeployment -ErrorAction Stop
+    $secPwd = ConvertTo-SecureString $SafeModePassword -AsPlainText -Force
+    $credParams = @{}
+    if ($DomainAdminUser -and $DomainAdminPassword) {
+        $domainSecPwd = ConvertTo-SecureString $DomainAdminPassword -AsPlainText -Force
+        $credParams["Credential"] = New-Object System.Management.Automation.PSCredential($DomainAdminUser, $domainSecPwd)
+    }
+    $srcParam = @{}
+    $srcDc = if ($SourceDcFqdn) { $SourceDcFqdn } elseif ($SourceDcIp) { $SourceDcIp } else { $null }
+    if ($srcDc) { $srcParam["ReplicationSourceDC"] = $srcDc }
+    Write-Output "PROMOTE_STARTING: domain=$DomainName ifm=$IFMPath srcDC=$srcDc"
+    $result = Install-ADDSDomainController `
+        -DomainName $DomainName `
+        -InstallationMediaPath $IFMPath `
+        -SafeModeAdministratorPassword $secPwd `
+        -InstallDns:$true `
+        -NoRebootOnCompletion:$true `
+        -Force:$true `
+        @credParams `
+        @srcParam
+    Write-Output "PROMOTE_RESULT: status=$($result.Status) msg=$($result.Message)"
+    if ($result.Status -ne "Success") {
+        throw "DC promotion failed: $($result.Status) - $($result.Message)"
+    }
+    Write-Output "DC_PROMOTED"
+} catch {
+    Write-Output "PROMOTE_EXCEPTION: $($_.Exception.Message)"
+    Write-Output "PROMOTE_INNER: $($_.Exception.InnerException.Message)"
+    Write-Output "PROMOTE_CATEGORY: $($_.CategoryInfo)"
+    exit 1
 }
-$srcParam = @{}
-if ($SourceDcIp) { $srcParam["ReplicationSourceDC"] = $SourceDcIp }
-$result = Install-ADDSDomainController `
-    -DomainName $DomainName `
-    -InstallationMediaPath $IFMPath `
-    -SafeModeAdministratorPassword $secPwd `
-    -InstallDns:$true `
-    -NoRebootOnCompletion:$true `
-    -Force:$true `
-    @credParams `
-    @srcParam
-if ($result.Status -ne "Success") {
-    throw "DC promotion failed: $($result.Status) - $($result.Message)"
-}
-Write-Output "DC_PROMOTED"
 """
 
 _PS_REBOOT = "Restart-Computer -Force"
@@ -439,13 +450,12 @@ def _do_restore(
         "DomainAdminUser": domain_admin_username,
         "DomainAdminPassword": domain_admin_password,
         "SourceDcIp": source_dc_ip,
+        "SourceDcFqdn": source_dc_fqdn,
     })
-    logger.info("Promote stdout (first 500): %s", out[:500])
     for _diag_line in out.splitlines():
-        if _diag_line.startswith("DIAG_") or _diag_line.startswith("DNS_"):
-            logger.info("Promote diag: %s", _diag_line)
+        logger.info("Promote: %s", _diag_line)
     if rc != 0 or "DC_PROMOTED" not in out:
-        raise RuntimeError(f"DC promotion failed (rc={rc}): stdout={out[:300]} err={err[:300]}")
+        raise RuntimeError(f"DC promotion failed (rc={rc}): stdout={out[:2000]} err={err[:500]}")
     logger.info("Promotion succeeded — triggering reboot")
     try:
         _run_ps(proto, _PS_REBOOT)
