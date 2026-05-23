@@ -56,6 +56,13 @@ async def start():
         id="smoke_reaper",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _run_identity_sync,
+        trigger="interval",
+        hours=4,
+        id="identity_sync",
+        replace_existing=True,
+    )
 
     if _db_factory is None:
         return
@@ -173,6 +180,19 @@ async def _run_scanner_poll():
     for org_id in org_ids:
         async with _db_factory() as db:
             await poll_crowdstrike(db, org_id)
+
+
+async def _run_identity_sync():
+    if _db_factory is None:
+        return
+    async with _db_factory() as db:
+        try:
+            from app.services.identity_sync_service import sync_all
+            stats = await sync_all(db)
+            await db.commit()
+            logger.info("Identity sync completed: %s", stats)
+        except Exception as exc:
+            logger.error("Identity sync failed: %s", exc)
 
 
 async def _run_smoke_reaper():
