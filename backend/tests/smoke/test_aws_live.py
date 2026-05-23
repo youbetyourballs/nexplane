@@ -14878,6 +14878,30 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
             fail(f"[AD_DC_RESTORE] WinRM bootstrap failed on target: {_winrm_out[-300:]}")
         log("AD_DC_RESTORE: WinRM enabled on target")
 
+        # Disable Windows Firewall on target — avoids outbound Kerberos/LDAP blocks
+        log("AD_DC_RESTORE: disabling Windows Firewall on target DC...")
+        _tfw_cmd = ssm_client.send_command(
+            InstanceIds=[target_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": [
+                "Set-NetFirewallProfile -Profile Any -Enabled False -ErrorAction SilentlyContinue;"
+                "Write-Output 'FW_DONE'",
+            ]},
+            TimeoutSeconds=30,
+        )
+        _tfw_cmd_id = _tfw_cmd["Command"]["CommandId"]
+        _t.sleep(10)
+        _tfw_deadline = _t.time() + 60
+        while _t.time() < _tfw_deadline:
+            _t.sleep(8)
+            try:
+                _inv = ssm_client.get_command_invocation(CommandId=_tfw_cmd_id, InstanceId=target_id)
+                if _inv["Status"] in ("Success", "Failed", "TimedOut", "Cancelled"):
+                    log(f"AD_DC_RESTORE: target firewall disabled: {'FW_DONE' in _inv.get('StandardOutputContent', '')}")
+                    break
+            except Exception:
+                pass
+
         # ------------------------------------------------------------------
         # Step 3b — Open DC ports, fix DNS A record, re-register Netlogon records
         # The DC boots from AMI with a new IP. The DNS A record for the DC hostname

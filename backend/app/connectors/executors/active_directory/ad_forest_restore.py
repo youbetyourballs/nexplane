@@ -59,6 +59,10 @@ $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
 foreach ($adapter in $adapters) {
     Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses $DnsServerIp
 }
+# Also add NRPT rule so smoke.nexplane.local queries always go to source DC even if DHCP resets DNS
+$nrptNs = ".${DomainName}"
+Remove-DnsClientNrptRule -Namespace $nrptNs -Force -ErrorAction SilentlyContinue
+Add-DnsClientNrptRule -Namespace $nrptNs -NameServers $DnsServerIp -ErrorAction SilentlyContinue
 ipconfig /flushdns | Out-Null
 # Verify source DC reachable on LDAP (389) and Kerberos (88)
 $ldapTest = Test-NetConnection -ComputerName $DnsServerIp -Port 389 -InformationLevel Quiet -WarningAction SilentlyContinue
@@ -120,8 +124,29 @@ if ($SourceDcIp) {
         } catch { Start-Sleep -Seconds 5 }
     }
     Write-Output "DNS_REAPPLIED=$resolved"
+    # Re-apply NRPT rule — ensures domain queries go to source DC even if DHCP reset DNS client
+    $nrptNs = ".${DomainName}"
+    Remove-DnsClientNrptRule -Namespace $nrptNs -Force -ErrorAction SilentlyContinue
+    Add-DnsClientNrptRule -Namespace $nrptNs -NameServers $SourceDcIp -ErrorAction SilentlyContinue
+    ipconfig /flushdns | Out-Null
+    # Diagnostic: show actual DNS being used
+    $actualDns = (Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Select-Object -First 1).ServerAddresses -join ","
+    Write-Output "DIAG_ACTUAL_DNS=$actualDns"
+    # Diagnostic: port 88 reachable by IP
+    $portTest = Test-NetConnection -ComputerName $SourceDcIp -Port 88 -InformationLevel Quiet -WarningAction SilentlyContinue
+    Write-Output "DIAG_PORT88=$portTest"
+    # Diagnostic: nltest DC discovery (what dcpromo will see)
+    $nltest = (nltest /dsgetdc:$DomainName /force 2>&1) -join " "
+    Write-Output "DIAG_NLTEST=$nltest"
+    # Diagnostic: time sync status
+    $timeStat = (w32tm /query /status 2>&1) -join " "
+    Write-Output "DIAG_TIME=$timeStat"
     # Sync time to reduce Kerberos clock skew risk
     try { w32tm /resync /force 2>&1 | Out-Null } catch {}
+    # If nltest can't find a DC, fail early with diagnostics rather than waiting for dcpromo timeout
+    if ($nltest -notmatch 'DC:') {
+        throw "DIAG: nltest /dsgetdc cannot find a DC — dcpromo will fail. nltest=$nltest port88=$portTest resolved=$resolved"
+    }
 }
 Import-Module ADDSDeployment
 $secPwd = ConvertTo-SecureString $SafeModePassword -AsPlainText -Force
