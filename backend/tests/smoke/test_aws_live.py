@@ -10363,23 +10363,25 @@ networking:
   apiServerPort: 6443
 KINDEOF
 
-set -o pipefail
-kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0 2>&1 || {{ echo "KIND_FAILED"; exit 1; }}
+# Redirect all verbose output to files to stay within SSM's 24KB stdout limit.
+echo "Creating kind cluster..."
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s \
+  --image kindest/node:v1.30.0 >/tmp/kind-out.txt 2>&1 \
+  && echo "KIND_CLUSTER_READY" \
+  || {{ echo "KIND_FAILED"; tail -30 /tmp/kind-out.txt; exit 1; }}
 
-# Explicitly export kubeconfig so we know where it is regardless of SSM home dir
-kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml
+kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml 2>/dev/null
 mkdir -p /root/.kube && cp /tmp/smoke-kubeconfig.yaml /root/.kube/config
 export KUBECONFIG=/tmp/smoke-kubeconfig.yaml
+echo "kubeconfig ready"
 
-# Add private IP as SAN — pass PRIVATE_IP explicitly into docker exec via -e flag
-# Renew API server cert with private IP SAN (best-effort; uses insecure fallback if it fails).
-# No apiserver restart needed — the connector kubeconfig uses insecure-skip-tls-verify anyway.
+# Renew API server cert with private IP SAN (best-effort; redirect verbose output to file).
 docker exec -e "PRIV_IP=$PRIVATE_IP" smoke-test-control-plane bash -c '
   KUBECONFIG=/etc/kubernetes/admin.conf kubectl -n kube-system get cm kubeadm-config \
     -o jsonpath="{{.data.ClusterConfiguration}}" > /tmp/cc.yaml 2>/dev/null
   printf "\napiServer:\n  certSANs:\n  - 127.0.0.1\n  - %s\n" "$PRIV_IP" >> /tmp/cc.yaml
-  kubeadm certs renew apiserver --config /tmp/cc.yaml 2>&1
-' 2>&1 || echo "SAN_RENEWAL_SKIPPED"
+  kubeadm certs renew apiserver --config /tmp/cc.yaml
+' >/tmp/cert-renewal.txt 2>&1 && echo "SAN_RENEWED" || echo "SAN_RENEWAL_SKIPPED"
 
 kubectl create serviceaccount smoke-sa --namespace default || true
 kubectl create rolebinding smoke-rb \\
