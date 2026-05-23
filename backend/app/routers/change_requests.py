@@ -634,11 +634,8 @@ async def manual_rollback(
                         except Exception as _ee:
                             _exec_errors.append(f"{_conn_type}: {_ee}")
                             continue
-                    import logging as _logging
-                    _logging.getLogger(__name__).info(
-                        "Rollback executor lookup: ct=%s, connector_type=%s, mod=%s, errors=%s",
-                        _ct, _asset_connector_type, _mod, _exec_errors
-                    )
+                    import sys as _sys
+                    print(f"[ROLLBACK_DEBUG] ct={_ct} asset_conn={_asset_connector_type} mod={_mod} errors={_exec_errors}", file=_sys.stderr, flush=True)
                     if _mod and hasattr(_mod, "rollback"):
                         # Extract step 1 result from nested execution structure so
                         # rollback() receives the actual step result dict, not the
