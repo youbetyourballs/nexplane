@@ -127,7 +127,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"status": "failed", "reason": "compromised_dcs list is empty",
                 "total": 0, "results": []}
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     async def _dispatch(entry: dict) -> dict:
         entry_type = entry.get("type", "")
