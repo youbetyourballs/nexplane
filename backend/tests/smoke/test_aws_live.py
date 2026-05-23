@@ -10373,7 +10373,7 @@ nodes:
 KINDEOF
 
 set -o pipefail
-kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0 2>&1 || { echo "KIND_FAILED"; kind export logs /tmp/kind-logs 2>/dev/null; tail -50 /tmp/kind-logs/smoke-test-control-plane/journal.log 2>/dev/null; exit 1; }
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s --image kindest/node:v1.30.0 2>&1 || {{ echo "KIND_FAILED"; kind export logs /tmp/kind-logs 2>/dev/null; tail -50 /tmp/kind-logs/smoke-test-control-plane/journal.log 2>/dev/null; exit 1; }}
 
 kubectl create serviceaccount smoke-sa --namespace default || true
 kubectl create rolebinding smoke-rb \\
