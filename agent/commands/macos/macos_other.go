@@ -51,3 +51,11 @@ func defaultsWrite(_ map[string]any) (map[string]any, error) {
 func santaCheck(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("santa_check is only supported on macOS")
 }
+
+func profilesInstall(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("profiles_install is only supported on macOS")
+}
+
+func profilesRemove(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("profiles_remove is only supported on macOS")
+}
