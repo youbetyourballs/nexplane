@@ -17625,10 +17625,19 @@ def run_phase_identity_sync(client, cloud_account_id):
     try:
         p = ssm_client.get_parameter(Name=f"/nexplane/smoke-amis/freeipa/{setup_hash[:8]}")
         candidate = p["Parameter"]["Value"]
-        imgs = ec2_client.describe_images(ImageIds=[candidate])["Images"]
-        if imgs and imgs[0]["State"] == "available":
-            cached_ami = candidate
-            log(f"IDENTITY_SYNC: using cached FreeIPA AMI {cached_ami}")
+        # Wait up to 15 min for AMI to become available (create_image is async)
+        _ami_deadline = time.time() + 900
+        while time.time() < _ami_deadline:
+            imgs = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+            if imgs and imgs[0]["State"] == "available":
+                cached_ami = candidate
+                log(f"IDENTITY_SYNC: using cached FreeIPA AMI {cached_ami}")
+                break
+            elif imgs and imgs[0]["State"] == "pending":
+                log(f"IDENTITY_SYNC: FreeIPA AMI {candidate} still pending — waiting...")
+                time.sleep(30)
+            else:
+                break  # failed/deregistered
     except Exception:
         pass
 
@@ -17854,9 +17863,17 @@ def run_phase_identity_fanout(client, cloud_account_id):
     try:
         p = ssm_client.get_parameter(Name=f"/nexplane/smoke-amis/freeipa/{freeipa_setup_hash[:8]}")
         candidate = p["Parameter"]["Value"]
-        imgs = ec2_client.describe_images(ImageIds=[candidate])["Images"]
-        if imgs and imgs[0]["State"] == "available":
-            freeipa_cached_ami = candidate
+        _ami_deadline = time.time() + 900
+        while time.time() < _ami_deadline:
+            imgs = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+            if imgs and imgs[0]["State"] == "available":
+                freeipa_cached_ami = candidate
+                break
+            elif imgs and imgs[0]["State"] == "pending":
+                log(f"IDENTITY_FANOUT: FreeIPA AMI {candidate} still pending — waiting...")
+                time.sleep(30)
+            else:
+                break
     except Exception:
         pass
     if not freeipa_cached_ami:
@@ -18287,10 +18304,18 @@ def run_phase_identity_snapshot(client, cloud_account_id):
     try:
         p = ssm_client.get_parameter(Name=f"/nexplane/smoke-amis/freeipa/{setup_hash[:8]}")
         candidate = p["Parameter"]["Value"]
-        imgs = ec2_client.describe_images(ImageIds=[candidate])["Images"]
-        if imgs and imgs[0]["State"] == "available":
-            cached_ami = candidate
-            log(f"IDENTITY_SNAPSHOT: using cached FreeIPA AMI {cached_ami}")
+        _ami_deadline = time.time() + 900
+        while time.time() < _ami_deadline:
+            imgs = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+            if imgs and imgs[0]["State"] == "available":
+                cached_ami = candidate
+                log(f"IDENTITY_SNAPSHOT: using cached FreeIPA AMI {cached_ami}")
+                break
+            elif imgs and imgs[0]["State"] == "pending":
+                log(f"IDENTITY_SNAPSHOT: FreeIPA AMI {candidate} still pending — waiting...")
+                time.sleep(30)
+            else:
+                break
     except Exception:
         pass
     if not cached_ami:
