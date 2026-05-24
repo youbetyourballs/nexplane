@@ -13095,20 +13095,26 @@ def run_phase_servicenow_incident(client: NexplaneClient) -> dict:
         try:
             ssm = boto3.client("ssm", region_name="us-east-1")
             if not sn_instance:
-                try:
-                    sn_instance = ssm.get_parameter(Name="/nexplane/smoke/servicenow/instance", WithDecryption=True)["Parameter"]["Value"]
-                except ssm.exceptions.ParameterNotFound:
-                    pass
+                for _pname in ("/nexplane/smoke/servicenow/instance", "/nexplane/smoke/servicenow/instance_url"):
+                    try:
+                        sn_instance = ssm.get_parameter(Name=_pname, WithDecryption=True)["Parameter"]["Value"]
+                        break
+                    except Exception:
+                        pass
             if not sn_user:
-                try:
-                    sn_user = ssm.get_parameter(Name="/nexplane/smoke/servicenow/user", WithDecryption=True)["Parameter"]["Value"]
-                except ssm.exceptions.ParameterNotFound:
-                    pass
+                for _pname in ("/nexplane/smoke/servicenow/user", "/nexplane/smoke/servicenow/username"):
+                    try:
+                        sn_user = ssm.get_parameter(Name=_pname, WithDecryption=True)["Parameter"]["Value"]
+                        break
+                    except Exception:
+                        pass
             if not sn_pass:
-                try:
-                    sn_pass = ssm.get_parameter(Name="/nexplane/smoke/servicenow/pass", WithDecryption=True)["Parameter"]["Value"]
-                except ssm.exceptions.ParameterNotFound:
-                    pass
+                for _pname in ("/nexplane/smoke/servicenow/pass", "/nexplane/smoke/servicenow/password"):
+                    try:
+                        sn_pass = ssm.get_parameter(Name=_pname, WithDecryption=True)["Parameter"]["Value"]
+                        break
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"  SSM lookup failed: {e}")
 
@@ -13179,10 +13185,12 @@ def run_phase_pagerduty_incident(client: NexplaneClient) -> dict:
         try:
             ssm = boto3.client("ssm", region_name="us-east-1")
             if not pd_token:
-                try:
-                    pd_token = ssm.get_parameter(Name="/nexplane/smoke/pagerduty/api_token", WithDecryption=True)["Parameter"]["Value"]
-                except ssm.exceptions.ParameterNotFound:
-                    pass
+                for _pname in ("/nexplane/smoke/pagerduty/api_token", "/nexplane/smoke/pagerduty/api_key"):
+                    try:
+                        pd_token = ssm.get_parameter(Name=_pname, WithDecryption=True)["Parameter"]["Value"]
+                        break
+                    except Exception:
+                        pass
             if not pd_service_id:
                 try:
                     pd_service_id = ssm.get_parameter(Name="/nexplane/smoke/pagerduty/service_id", WithDecryption=True)["Parameter"]["Value"]
@@ -13324,11 +13332,11 @@ def run_phase_github(client: NexplaneClient) -> dict:
             default_branch = repo_info.json().get("default_branch", "main")
             log(f"[GITHUB] default branch: {default_branch}")
 
-            # Enable branch protection
+            # Enable branch protection (enforce_admins only — PR review rules require Pro plan)
             protection = {
                 "required_status_checks": None,
                 "enforce_admins": True,
-                "required_pull_request_reviews": {"required_approving_review_count": 1},
+                "required_pull_request_reviews": None,
                 "restrictions": None,
             }
             prot_resp = http.put(
