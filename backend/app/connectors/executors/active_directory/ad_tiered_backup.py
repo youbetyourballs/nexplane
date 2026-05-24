@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _PS_ENUM_DCS = r"""
-$dcs = Get-ADDomainController -Filter * | Select-Object -ExpandProperty HostName
-$dcs -join "`n"
+Get-ADDomainController -Filter * | ForEach-Object {
+    "$($_.HostName)|$($_.IPv4Address)"
+}
 Write-Output "DC_ENUM_DONE"
 """
 
@@ -97,21 +98,35 @@ def _s3_client(creds: dict):
 # Tier 0 — Domain Controllers
 # ---------------------------------------------------------------------------
 
-def _enumerate_dcs(creds: dict) -> list[str]:
-    """Return list of DC hostnames via Get-ADDomainController."""
+def _enumerate_dcs(creds: dict) -> list[dict]:
+    """Return list of DC dicts with 'hostname' (FQDN) and 'ip' (IPv4) via Get-ADDomainController."""
     out, err, rc = _run_ps(creds, _PS_ENUM_DCS)
     if rc != 0 or "DC_ENUM_DONE" not in out:
         raise RuntimeError(f"DC enumeration failed (rc={rc}): {err or out}")
-    lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
-    return [ln for ln in lines if ln != "DC_ENUM_DONE"]
+    dcs = []
+    for ln in out.splitlines():
+        ln = ln.strip()
+        if not ln or ln == "DC_ENUM_DONE":
+            continue
+        if "|" in ln:
+            hostname, ip = ln.split("|", 1)
+            dcs.append({"hostname": hostname.strip(), "ip": ip.strip()})
+        else:
+            dcs.append({"hostname": ln, "ip": ln})
+    return dcs
 
 
-def _snapshot_dc(creds: dict, dc_hostname: str, s3_bucket: str,
+def _snapshot_dc(creds: dict, dc_hostname: str, dc_ip: str, s3_bucket: str,
                  s3_prefix: str) -> dict:
-    """Run ad_forest_snapshot logic against a single DC."""
+    """Run ad_forest_snapshot logic against a single DC.
+
+    Uses dc_ip for WinRM connectivity (resolves across VPC without domain DNS)
+    and dc_hostname (FQDN) for manifest identification only.
+    """
     from .ad_forest_snapshot import _do_snapshot
     dc_prefix = f"{s3_prefix}/{dc_hostname}"
-    snap = _do_snapshot({**creds, "winrm_hostname": dc_hostname}, s3_bucket, dc_prefix)
+    # Use IP for WinRM — FQDN may not resolve from the platform container
+    snap = _do_snapshot({**creds, "winrm_hostname": dc_ip}, s3_bucket, dc_prefix)
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     manifest = {
@@ -181,14 +196,14 @@ def _backup_ca(creds: dict, ca_hostname: str, s3_bucket: str,
 
 def _do_tier0(creds: dict, s3_bucket: str, s3_prefix: str,
               ca_servers: list[str], dry_run: bool) -> dict:
-    dc_hostnames = _enumerate_dcs(creds)
+    dc_list = _enumerate_dcs(creds)
 
     if dry_run:
         return {
             "status": "dry_run_complete",
             "tier": "0",
             "targets": {
-                "domain_controllers": dc_hostnames,
+                "domain_controllers": [dc["hostname"] for dc in dc_list],
                 "ca_servers": ca_servers,
             },
             "message": "dry_run=True — no backups executed",
@@ -196,14 +211,14 @@ def _do_tier0(creds: dict, s3_bucket: str, s3_prefix: str,
 
     dc_results = []
     dc_errors = []
-    for dc in dc_hostnames:
+    for dc in dc_list:
         try:
-            result = _snapshot_dc(creds, dc, s3_bucket, s3_prefix)
+            result = _snapshot_dc(creds, dc["hostname"], dc["ip"], s3_bucket, s3_prefix)
             dc_results.append(result)
-            logger.info("Tier 0: snapshotted DC %s → %s", dc, result["s3_prefix"])
+            logger.info("Tier 0: snapshotted DC %s → %s", dc["hostname"], result["s3_prefix"])
         except Exception as exc:
-            logger.error("Tier 0: DC %s snapshot failed: %s", dc, exc)
-            dc_errors.append({"dc_hostname": dc, "error": str(exc)})
+            logger.error("Tier 0: DC %s snapshot failed: %s", dc["hostname"], exc)
+            dc_errors.append({"dc_hostname": dc["hostname"], "error": str(exc)})
 
     ca_results = []
     for ca in ca_servers:
