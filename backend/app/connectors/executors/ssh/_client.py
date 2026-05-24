@@ -50,6 +50,11 @@ WRITE_ALLOWED_PREFIXES = (
     "chmod +x",
     "mkdir -p",
     "sudo mkdir -p",
+    "sudo semodule -r",
+    "sudo rm -f /tmp/nexplane-agent",
+    "sudo rm -f /usr/local/bin/nexplane-agent",
+    "sudo rm -f /etc/systemd/system/nexplane-agent.service",
+    "sudo systemctl daemon-reload",
 )
 
 
