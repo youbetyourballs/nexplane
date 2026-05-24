@@ -14927,21 +14927,29 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         log(f"AD_DC_RESTORE: source DC launched: {source_id}")
 
         # ------------------------------------------------------------------
-        # Step 2 — Launch clean target (base Windows Server 2022)
+        # Step 2 — Launch clean target (cached WinRM-bootstrapped Win2022 or fresh)
         # ------------------------------------------------------------------
-        log("AD_DC_RESTORE: finding base Windows Server 2022 AMI for target...")
-        _win_imgs = ec2_client.describe_images(
-            Owners=["amazon"],
-            Filters=[
-                {"Name": "name", "Values": ["Windows_Server-2022-English-Full-Base-*"]},
-                {"Name": "state", "Values": ["available"]},
-            ],
-        )["Images"]
-        _win_ami = sorted(_win_imgs, key=lambda x: x["CreationDate"], reverse=True)[0]["ImageId"]
-        log(f"AD_DC_RESTORE: target AMI: {_win_ami}")
+        _win_target_key = "win2022-winrm-basic-admin-smoke-nexplane"
+        _win_target_hash = _hl.md5(_win_target_key.encode()).hexdigest()
+        _win_cached_ami = _check_smoke_ami_cache(ssm_client, ec2_client, "win2022-winrm", _win_target_hash)
+
+        if _win_cached_ami:
+            log(f"AD_DC_RESTORE: using cached WinRM target AMI {_win_cached_ami}")
+            _tgt_launch_ami = _win_cached_ami
+        else:
+            log("AD_DC_RESTORE: no cached target AMI — finding base Windows Server 2022 AMI...")
+            _win_imgs = ec2_client.describe_images(
+                Owners=["amazon"],
+                Filters=[
+                    {"Name": "name", "Values": ["Windows_Server-2022-English-Full-Base-*"]},
+                    {"Name": "state", "Values": ["available"]},
+                ],
+            )["Images"]
+            _tgt_launch_ami = sorted(_win_imgs, key=lambda x: x["CreationDate"], reverse=True)[0]["ImageId"]
+        log(f"AD_DC_RESTORE: target AMI: {_tgt_launch_ami}")
 
         _tgt_kwargs = dict(
-            ImageId=_win_ami, InstanceType="t3.small", MinCount=1, MaxCount=1,
+            ImageId=_tgt_launch_ami, InstanceType="t3.small", MinCount=1, MaxCount=1,
             TagSpecifications=[{"ResourceType": "instance", "Tags": [
                 {"Key": "Name", "Value": "nexplane-smoke-dc-restore-target"},
                 {"Key": "nexplane-smoke", "Value": "true"},
@@ -15112,6 +15120,24 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
                     break
             except Exception:
                 pass
+
+        # Cache WinRM-bootstrapped target AMI for future runs (only if we launched from base)
+        if not _win_cached_ami:
+            log("AD_DC_RESTORE: snapshotting WinRM-bootstrapped target for AMI cache...")
+            try:
+                _snap_img = ec2_client.create_image(
+                    InstanceId=target_id,
+                    Name=f"nexplane-smoke-win2022-winrm-{_win_target_hash[:8]}",
+                    NoReboot=True,
+                )
+                _snap_ami_id = _snap_img["ImageId"]
+                ssm_client.put_parameter(
+                    Name=f"/nexplane/smoke-amis/win2022-winrm/{_win_target_hash[:8]}",
+                    Value=_snap_ami_id, Type="String", Overwrite=True,
+                )
+                log(f"AD_DC_RESTORE: win2022-winrm AMI snapshot started: {_snap_ami_id} (async — available next run)")
+            except Exception as _snap_e:
+                log(f"AD_DC_RESTORE: WARNING — could not snapshot target AMI: {_snap_e}")
 
         # ------------------------------------------------------------------
         # Step 3b — Open DC ports, fix DNS A record, re-register Netlogon records
