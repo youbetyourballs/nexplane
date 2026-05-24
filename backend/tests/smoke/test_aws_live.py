@@ -17791,22 +17791,11 @@ echo "BIND_READY"
         fail("[BIND_DNS] Could not get private IP of BIND instance")
     log(f"BIND_DNS: BIND9 running at {private_ip}:53")
 
-    # Read TSIG secret from key file via SSM
+    # Read TSIG secret from key file via SSM — cat the raw file, parse in Python
     read_key_resp = ssm_boto.send_command(
         InstanceIds=[instance_id],
         DocumentName="AWS-RunShellScript",
-        Parameters={"commands": [
-            # Try multiple extraction methods — tsig-keygen format: `\tsecret "base64==";`
-            # sed is most portable; python3 as final fallback
-            "KEY=/etc/named/nexplane-smoke.key; "
-            "sed -n 's/.*secret[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' \"$KEY\" | grep -v '^$' || "
-            "python3 -c \""
-            "import re,sys; "
-            "txt=open('/etc/named/nexplane-smoke.key').read(); "
-            "m=re.search(r'secret\\s+\\\"([^\\\"]+)\\\"', txt); "
-            "print(m.group(1) if m else '')"
-            "\""
-        ]},
+        Parameters={"commands": ["cat /etc/named/nexplane-smoke.key"]},
         TimeoutSeconds=30,
     )
     read_cmd_id = read_key_resp["Command"]["CommandId"]
@@ -17818,8 +17807,12 @@ echo "BIND_READY"
             CommandId=read_cmd_id, InstanceId=instance_id
         )
         if key_inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
-            tsig_secret_b64 = key_inv.get("StandardOutputContent", "").strip()
-            log(f"BIND_DNS: key read status={key_inv['Status']} output_len={len(tsig_secret_b64)} err={key_inv.get('StandardErrorContent','')[:200]}")
+            key_content = key_inv.get("StandardOutputContent", "")
+            log(f"BIND_DNS: key read status={key_inv['Status']} content_len={len(key_content)} err={key_inv.get('StandardErrorContent','')[:200]}")
+            import re as _re
+            m = _re.search(r'secret\s+"([^"]+)"', key_content)
+            if m:
+                tsig_secret_b64 = m.group(1).strip()
             break
     if not tsig_secret_b64:
         try:
