@@ -17624,13 +17624,14 @@ echo "BIND_READY"
         InstanceIds=[instance_id],
         DocumentName="AWS-RunShellScript",
         Parameters={"commands": [
+            "grep -oP '(?<=secret \")[^\"]+' /etc/named/nexplane-smoke.key || "
             "awk '/secret/ {gsub(/[\";\\ ]/,\"\",$2); print $2}' /etc/named/nexplane-smoke.key"
         ]},
         TimeoutSeconds=30,
     )
     read_cmd_id = read_key_resp["Command"]["CommandId"]
     tsig_secret_b64 = ""
-    deadline3 = _time.time() + 60
+    deadline3 = _time.time() + 90
     while _time.time() < deadline3:
         _time.sleep(5)
         key_inv = ssm_boto.get_command_invocation(
@@ -17638,6 +17639,7 @@ echo "BIND_READY"
         )
         if key_inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
             tsig_secret_b64 = key_inv.get("StandardOutputContent", "").strip()
+            log(f"BIND_DNS: key read status={key_inv['Status']} output_len={len(tsig_secret_b64)} err={key_inv.get('StandardErrorContent','')[:200]}")
             break
     if not tsig_secret_b64:
         try:
