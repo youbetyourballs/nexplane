@@ -17662,6 +17662,14 @@ def run_phase_identity_sync(client, cloud_account_id):
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        _offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}])["InstanceTypeOfferings"]
+        _azs = {o["Location"] for o in _offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in _azs] or subnets
+    except Exception:
+        pass
     subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
 
     freeipa_userdata = """#!/bin/bash
@@ -17883,6 +17891,14 @@ def run_phase_identity_fanout(client, cloud_account_id):
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        _offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}])["InstanceTypeOfferings"]
+        _azs = {o["Location"] for o in _offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in _azs] or subnets
+    except Exception:
+        pass
     subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
     subnet_id = subnets[0]["SubnetId"]
 
@@ -18341,6 +18357,14 @@ def run_phase_identity_snapshot(client, cloud_account_id):
 
     vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
     subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        _offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.small"]}])["InstanceTypeOfferings"]
+        _azs = {o["Location"] for o in _offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in _azs] or subnets
+    except Exception:
+        pass
     subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
 
     freeipa_userdata = """#!/bin/bash
