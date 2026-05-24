@@ -8720,15 +8720,28 @@ def run_phase_nessus_scan(client: NexplaneClient, cloud_account_id: str) -> None
                 log("Scan completed. Status: {} | Findings: {}".format(
                     result.get("status"), result.get("finding_count", 0)))
         else:
-            # Backend mode: register connector and run via Nexplane CRs
+            # Backend mode: register connector and run via Nexplane CRs.
+            # Upsert: reuse existing connector if already registered so activation
+            # code and credentials persist between smoke runs. The base_url is
+            # updated to the current instance IP each run; it goes stale after
+            # the instance terminates, which is intentional — launch from AMI to
+            # run scans on demand, terminate when done.
+            existing = [c for c in (client.get("/connectors") or [])
+                        if c.get("connector_type") == "nessus" and c.get("name") == "Nessus Essentials"]
+            if existing:
+                # Delete stale record and recreate with fresh IP — keeps credentials current
+                try:
+                    client.client.delete("{}/connectors/{}".format(client.base, existing[0]["id"]))
+                except Exception:
+                    pass
             conn_resp = client.post("/connectors", json={
                 "connector_type": "nessus",
-                "name": "nexplane-smoke-nessus",
-                "display_name": "nexplane-smoke-nessus",
-                "credentials": nessus_creds,
+                "name": "Nessus Essentials",
+                "display_name": "Nessus Essentials",
+                "credentials": {**nessus_creds, "activation_code": _activation_code},
             })
             nessus_connector_id = conn_resp.get("id")
-            log("Nessus connector registered: {}".format(nessus_connector_id))
+            log("Nessus connector upserted (id={}): base_url={}".format(nessus_connector_id, nessus_url))
 
             asset_resp = client.post("/assets", json={
                 "name": "nexplane-smoke-nessus-target",
@@ -8763,13 +8776,12 @@ def run_phase_nessus_scan(client: NexplaneClient, cloud_account_id: str) -> None
         print("\n[FAIL] Phase NESSUS_SCAN failed: {}".format(e))
         raise
     finally:
-        if nessus_connector_id:
-            try:
-                client.client.delete("{}/connectors/{}".format(client.base, nessus_connector_id))
-            except Exception:
-                pass
+        # Keep the connector record — it holds the activation code and credentials
+        # for on-demand use. Launch from cached AMI when a scan is needed, terminate
+        # when done. The stale base_url is expected between runs.
         try:
             ec2_client.terminate_instances(InstanceIds=[instance_id])
+            log("Nessus instance {} terminated".format(instance_id))
         except Exception:
             pass
 
