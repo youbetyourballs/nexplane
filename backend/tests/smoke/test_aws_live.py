@@ -19327,17 +19327,28 @@ def run_phase_ssh_advanced(client, cloud_account_id):
     _setup_script = "#!/bin/bash\napt-get update -y && apt-get install -y openssh-server cron && systemctl enable ssh && systemctl start ssh\necho SSH_ADVANCED_READY"
     _setup_hash = _hl.md5(_setup_script.encode()).hexdigest()[:8]
 
-    from run_on_ec2 import get_or_create_smoke_ami, _check_smoke_ami_cache
+    from run_on_ec2 import get_or_create_smoke_ami
     instance_id = ""
     connector_id = ""
     asset_id = ""
     private_ip = ""
 
+    def _read_ami_cache(ssm, name, setup_hash):
+        param_path = f"/nexplane/smoke-amis/{name}/{setup_hash[:8]}"
+        try:
+            val = ssm.get_parameter(Name=param_path)["Parameter"]["Value"]
+            imgs = ec2_client.describe_images(ImageIds=[val])
+            if imgs["Images"] and imgs["Images"][0]["State"] == "available":
+                return val
+        except Exception:
+            pass
+        return None
+
     try:
         # ------------------------------------------------------------------
         # Step 1 — Find or launch Ubuntu instance (AMI cached)
         # ------------------------------------------------------------------
-        cached_ami = _check_smoke_ami_cache(ssm_boto, "ssh-advanced", _setup_hash)
+        cached_ami = _read_ami_cache(ssm_boto, "ssh-advanced", _setup_hash)
         if cached_ami:
             log(f"SSH_ADVANCED: using cached AMI {cached_ami}")
             # Find latest Ubuntu 22.04 AMI to ensure the cached one is still launchable
