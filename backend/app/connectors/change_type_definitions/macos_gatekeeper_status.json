@@ -1,0 +1,20 @@
+{
+  "change_type": "macos_gatekeeper_status",
+  "display_name": "Macos Gatekeeper Status",
+  "description": "Returns current Gatekeeper enforcement status on a macOS endpoint.",
+  "steps": [
+    {
+      "generic_action": "macos_gatekeeper_status",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": null,
+  "rollback_connector_type": null
+}

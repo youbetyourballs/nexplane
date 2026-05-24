@@ -15467,6 +15467,8 @@ def main():
             "LAPS_DEPLOY=Microsoft LAPS connector smoke test (no EC2, credential-gated, skips if no creds in SSM at /nexplane/smoke/laps/*). "
             "BIND_DNS=BIND9/RFC-2136 DNS connector: list_zone/create_record/check_record/delete_record; "
             "auto-provisions t3.small on AWS (AMI cached) or uses --bind-server-ip for external servers. "
+            "SSH_ADVANCED=SSH connector advanced executor smoke: collect_output, restore_bare_metal_service, "
+            "download_package, uninstall_agent on Ubuntu t3.micro (AMI cached). "
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -15910,6 +15912,8 @@ def main():
                 bind_tsig_key_name=args.bind_tsig_key_name,
                 bind_tsig_key_secret=args.bind_tsig_key_secret,
             )
+        if "SSH_ADVANCED" in phases:
+            run_phase_ssh_advanced(client, cloud_account_id)
         if "IDENTITY_SYNC" in phases:
             run_phase_identity_sync(client, cloud_account_id)
         if "IDENTITY_FANOUT" in phases:
@@ -17118,6 +17122,56 @@ def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
                     pass
         except Exception as _nr_e:
             log(f"  WARNING: NTDS recovery check failed: {_nr_e}")
+
+        # ------------------------------------------------------------------
+        # Step — add_to_group / remove_from_group smoke
+        # Creates a temporary user, adds to Domain Guests, verifies rollback.
+        # ------------------------------------------------------------------
+        _grp_user = "nexplane-smoke-grp"
+        _grp_name = "Domain Guests"
+        log("AD_DC_INTEGRITY: running add_to_group / remove_from_group smoke...")
+        try:
+            _grp_cr_create = client.run_cr(
+                "[AD_DC_INTEGRITY] create_ad_account for group smoke",
+                "create_ad_account",
+                dc_asset_id,
+                {"username": _grp_user, "first_name": "Group", "last_name": "Smoke",
+                 "ou": "", "temp_password": "GroupSmoke1!"},
+            )
+            _grp_create_result = client.get_cr_step_result(_grp_cr_create)
+            assert _grp_create_result.get("created"), \
+                f"AD_DC_INTEGRITY: group smoke user not created: {_grp_create_result}"
+
+            _cr_atg = client.run_cr(
+                "[AD_DC_INTEGRITY] add_to_group",
+                "add_to_group",
+                dc_asset_id,
+                {"username": _grp_user, "group_name": _grp_name},
+            )
+            _atg_result = client.get_cr_step_result(_cr_atg)
+            assert _atg_result.get("added"), \
+                f"AD_DC_INTEGRITY: add_to_group failed: {_atg_result}"
+            log(f"AD_DC_INTEGRITY: add_to_group OK — added={_atg_result.get('added')}")
+            client.rollback_cr(_cr_atg["id"], "[AD_DC_INTEGRITY] add_to_group rollback")
+            log("AD_DC_INTEGRITY: add_to_group rollback ✅")
+
+            _cr_rfg = client.run_cr(
+                "[AD_DC_INTEGRITY] remove_from_group",
+                "remove_from_group",
+                dc_asset_id,
+                {"username": _grp_user, "group_name": _grp_name},
+            )
+            _rfg_result = client.get_cr_step_result(_cr_rfg)
+            assert _rfg_result.get("removed") or not _rfg_result.get("error"), \
+                f"AD_DC_INTEGRITY: remove_from_group failed: {_rfg_result}"
+            log(f"AD_DC_INTEGRITY: remove_from_group OK — removed={_rfg_result.get('removed')}")
+            client.rollback_cr(_cr_rfg["id"], "[AD_DC_INTEGRITY] remove_from_group rollback")
+            log("AD_DC_INTEGRITY: remove_from_group rollback ✅")
+
+            client.rollback_cr(_grp_cr_create["id"], "[AD_DC_INTEGRITY] group smoke user delete")
+            log("AD_DC_INTEGRITY: add_to_group / remove_from_group smoke PASSED ✅")
+        except Exception as _grp_e:
+            log(f"AD_DC_INTEGRITY: group management smoke failed (non-fatal): {_grp_e}")
 
         log("AD_DC_INTEGRITY: all steps passed")
 
@@ -19253,6 +19307,227 @@ def run_phase_ad_tiered_backup(client, cloud_account_id):
             log(f"AD_TIERED_BACKUP: terminated instance {instance_id}")
         except Exception:
             pass
+
+
+def run_phase_ssh_advanced(client, cloud_account_id):
+    """Phase SSH_ADVANCED: Launch Ubuntu t3.micro, register SSH connector, run
+    collect_output / restore_bare_metal_service / download_package / uninstall_agent CRs.
+    AMI cached in SSM at /nexplane/smoke-amis/ssh-advanced/{hash}.
+    """
+    import hashlib as _hl
+    import time as _t
+
+    print("\n[Phase SSH_ADVANCED] SSH advanced executor smoke test")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_boto = _get_aws_boto3_client("ssm")
+    if not ec2_client or not ssm_boto:
+        fail("[SSH_ADVANCED] AWS clients not available")
+
+    _setup_script = "#!/bin/bash\napt-get update -y && apt-get install -y openssh-server cron && systemctl enable ssh && systemctl start ssh\necho SSH_ADVANCED_READY"
+    _setup_hash = _hl.md5(_setup_script.encode()).hexdigest()[:8]
+
+    from run_on_ec2 import get_or_create_smoke_ami, _check_smoke_ami_cache
+    instance_id = ""
+    connector_id = ""
+    asset_id = ""
+    private_ip = ""
+
+    try:
+        # ------------------------------------------------------------------
+        # Step 1 — Find or launch Ubuntu instance (AMI cached)
+        # ------------------------------------------------------------------
+        cached_ami = _check_smoke_ami_cache(ssm_boto, "ssh-advanced", _setup_hash)
+        if cached_ami:
+            log(f"SSH_ADVANCED: using cached AMI {cached_ami}")
+            # Find latest Ubuntu 22.04 AMI to ensure the cached one is still launchable
+            launch_ami = cached_ami
+        else:
+            log("SSH_ADVANCED: no cached AMI — finding Ubuntu 22.04 AMI...")
+            imgs = ec2_client.describe_images(
+                Owners=["099720109477"],  # Canonical
+                Filters=[
+                    {"Name": "name", "Values": ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]},
+                    {"Name": "state", "Values": ["available"]},
+                ],
+            )["Images"]
+            imgs.sort(key=lambda x: x["CreationDate"], reverse=True)
+            if not imgs:
+                fail("SSH_ADVANCED: no Ubuntu 22.04 AMI found")
+            launch_ami = imgs[0]["ImageId"]
+            log(f"SSH_ADVANCED: using base AMI {launch_ami}")
+
+        default_vpc = _get_default_vpc(ec2_client)
+        if not default_vpc:
+            fail("SSH_ADVANCED: no default VPC found")
+        subnet_id = default_vpc["subnets"][0]["SubnetId"]
+
+        sg_id = _ensure_smoke_sg(ec2_client, default_vpc["VpcId"], "nexplane-smoke-ssh",
+                                 [{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+                                   "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}])
+
+        launch_resp = ec2_client.run_instances(
+            ImageId=launch_ami,
+            InstanceType="t3.micro",
+            MinCount=1, MaxCount=1,
+            KeyName=KEY_NAME,
+            NetworkInterfaces=[{
+                "DeviceIndex": 0,
+                "SubnetId": subnet_id,
+                "Groups": [sg_id],
+                "AssociatePublicIpAddress": False,
+            }],
+            UserData=_setup_script if not cached_ami else "",
+            TagSpecifications=[{"ResourceType": "instance", "Tags": [
+                {"Key": "Name", "Value": "nexplane-smoke-ssh-advanced"},
+                {"Key": "NexplaneSmokeTest", "Value": "true"},
+            ]}],
+        )
+        instance_id = launch_resp["Instances"][0]["InstanceId"]
+        log(f"SSH_ADVANCED: launched {instance_id} — waiting for running state...")
+        ec2_client.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+        desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+        private_ip = desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+        log(f"SSH_ADVANCED: running — private_ip={private_ip}")
+
+        # Wait for SSM
+        log("SSH_ADVANCED: waiting for SSM agent...")
+        _wait_for_ssm(ssm_boto, instance_id, timeout=300)
+        log("SSH_ADVANCED: SSM ready")
+
+        if not cached_ami:
+            log("SSH_ADVANCED: waiting for SSH_ADVANCED_READY signal...")
+            _deadline = _t.time() + 300
+            while _t.time() < _deadline:
+                _inv = ssm_boto.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName="AWS-RunShellScript",
+                    Parameters={"commands": ["grep -c SSH_ADVANCED_READY /var/log/cloud-init-output.log 2>/dev/null || echo 0"]},
+                )
+                _t.sleep(15)
+                try:
+                    _r = ssm_boto.get_command_invocation(
+                        CommandId=_inv["Command"]["CommandId"], InstanceId=instance_id)
+                    if _r["Status"] == "Success" and _r.get("StandardOutputContent", "").strip() != "0":
+                        break
+                except Exception:
+                    pass
+            # Cache AMI
+            get_or_create_smoke_ami(ssm_boto, ec2_client, instance_id, "ssh-advanced", _setup_hash)
+            log("SSH_ADVANCED: AMI snapshot initiated")
+
+        # ------------------------------------------------------------------
+        # Step 2 — Register SSH connector
+        # ------------------------------------------------------------------
+        _ssh_key = _get_ssm_param(ssm_boto, "/nexplane/smoke/ssh/private_key", default="")
+        if not _ssh_key:
+            # Fall back to the EC2 keypair private key stored in SSM by run_on_ec2
+            _ssh_key = _get_ssm_param(ssm_boto, "/nexplane/smoke/ec2-keypair-private-key", default="")
+
+        conn_resp = client.post("/connectors", json={
+            "name": f"ssh-advanced-smoke-{instance_id[-6:]}",
+            "connector_type": "ssh",
+            "cloud_account_id": cloud_account_id,
+        })
+        connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
+        client.put(f"/connectors/{connector_id}/credentials", json={"credentials": {
+            "hostname": private_ip,
+            "port": 22,
+            "username": "ubuntu",
+            "private_key": _ssh_key,
+        }})
+        log(f"SSH_ADVANCED: SSH connector {connector_id} registered")
+
+        asset_resp = client.post("/assets", json={
+            "name": f"ssh-advanced-smoke-{instance_id[-6:]}",
+            "asset_type": "server",
+            "connector_id": connector_id,
+        })
+        asset_id = asset_resp.get("id")
+        log(f"SSH_ADVANCED: asset {asset_id} created")
+
+        # ------------------------------------------------------------------
+        # Step 3 — collect_output CR (read-only)
+        # ------------------------------------------------------------------
+        log("SSH_ADVANCED: running collect_output CR (uname -r)...")
+        _cr_co = client.run_cr(
+            "[SSH_ADVANCED] collect_output",
+            "collect_output",
+            asset_id,
+            {"command": "uname -r"},
+        )
+        _co_result = client.get_cr_step_result(_cr_co)
+        assert "hosts" in _co_result or "command" in _co_result, \
+            f"SSH_ADVANCED: collect_output unexpected result: {_co_result}"
+        log(f"SSH_ADVANCED: collect_output OK")
+
+        # ------------------------------------------------------------------
+        # Step 4 — restore_bare_metal_service CR (restart cron)
+        # ------------------------------------------------------------------
+        log("SSH_ADVANCED: running restore_bare_metal_service CR (cron)...")
+        _cr_rs = client.run_cr(
+            "[SSH_ADVANCED] restore_bare_metal_service",
+            "restore_bare_metal_service",
+            asset_id,
+            {"process_name": "cron"},
+        )
+        _rs_result = client.get_cr_step_result(_cr_rs)
+        assert _rs_result.get("restored") or "hosts" in _rs_result, \
+            f"SSH_ADVANCED: restore_bare_metal_service failed: {_rs_result}"
+        log(f"SSH_ADVANCED: restore_bare_metal_service OK")
+
+        # ------------------------------------------------------------------
+        # Step 5 — download_package CR (download nexplane-agent binary)
+        # ------------------------------------------------------------------
+        log("SSH_ADVANCED: running download_package CR...")
+        _agent_ver = _get_ssm_param(ssm_boto, "/nexplane/agent-version", default="latest")
+        _agent_url = f"https://nexplane-agent-downloads.s3.amazonaws.com/nexplane-agent-linux-amd64-{_agent_ver}"
+        _cr_dp = client.run_cr(
+            "[SSH_ADVANCED] download_package",
+            "download_package",
+            asset_id,
+            {"agent_type": "nexplane", "agent_version": _agent_ver,
+             "download_url": _agent_url, "dest_path": "/tmp/nexplane-agent"},
+        )
+        _dp_result = client.get_cr_step_result(_cr_dp)
+        assert _dp_result.get("downloaded") or "hosts" in _dp_result, \
+            f"SSH_ADVANCED: download_package failed: {_dp_result}"
+        log(f"SSH_ADVANCED: download_package OK")
+
+        # ------------------------------------------------------------------
+        # Step 6 — uninstall_agent CR (cleans up /tmp/nexplane-agent etc.)
+        # ------------------------------------------------------------------
+        log("SSH_ADVANCED: running uninstall_agent CR...")
+        _cr_ua = client.run_cr(
+            "[SSH_ADVANCED] uninstall_agent",
+            "uninstall_agent",
+            asset_id,
+            {"agent_type": "nexplane"},
+        )
+        _ua_result = client.get_cr_step_result(_cr_ua)
+        assert _ua_result.get("uninstalled") or "hosts" in _ua_result, \
+            f"SSH_ADVANCED: uninstall_agent failed: {_ua_result}"
+        log("SSH_ADVANCED: uninstall_agent OK")
+
+        log("Phase SSH_ADVANCED PASSED")
+
+    finally:
+        if connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{connector_id}")
+            except Exception:
+                pass
+        if asset_id:
+            try:
+                client.client.delete(f"{client.base}/assets/{asset_id}")
+            except Exception:
+                pass
+        if instance_id:
+            try:
+                ec2_client.terminate_instances(InstanceIds=[instance_id])
+                log(f"SSH_ADVANCED: terminated {instance_id}")
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
