@@ -17762,8 +17762,16 @@ echo "BIND_READY"
         InstanceIds=[instance_id],
         DocumentName="AWS-RunShellScript",
         Parameters={"commands": [
-            "grep -oP '(?<=secret \")[^\"]+' /etc/named/nexplane-smoke.key || "
-            "awk '/secret/ {gsub(/[\";\\ ]/,\"\",$2); print $2}' /etc/named/nexplane-smoke.key"
+            # Try multiple extraction methods — tsig-keygen format: `\tsecret "base64==";`
+            # sed is most portable; python3 as final fallback
+            "KEY=/etc/named/nexplane-smoke.key; "
+            "sed -n 's/.*secret[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' \"$KEY\" | grep -v '^$' || "
+            "python3 -c \""
+            "import re,sys; "
+            "txt=open('/etc/named/nexplane-smoke.key').read(); "
+            "m=re.search(r'secret\\s+\\\"([^\\\"]+)\\\"', txt); "
+            "print(m.group(1) if m else '')"
+            "\""
         ]},
         TimeoutSeconds=30,
     )
