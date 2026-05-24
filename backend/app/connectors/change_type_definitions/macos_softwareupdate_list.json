@@ -15,6 +15,6 @@
   "verification_methods": [
     "api_check"
   ],
-  "rollback_action": "macos_softwareupdate_list",
-  "rollback_connector_type": "macos"
+  "rollback_action": null,
+  "rollback_connector_type": null
 }
