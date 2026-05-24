@@ -19507,7 +19507,7 @@ def _ensure_smoke_sg(ec2_client, vpc_id: str, sg_name: str, ingress_rules: list)
     except Exception:
         pass
     create_resp = ec2_client.create_security_group(
-        GroupName=sg_name, Description=f"Nexplane smoke test — {sg_name}", VpcId=vpc_id
+        GroupName=sg_name, Description=f"Nexplane smoke test: {sg_name}", VpcId=vpc_id
     )
     sg_id = create_resp["GroupId"]
     ec2_client.authorize_security_group_ingress(GroupId=sg_id, IpPermissions=ingress_rules)
