@@ -13252,6 +13252,120 @@ def run_phase_pagerduty_incident(client: NexplaneClient) -> dict:
                 pass
 
 
+# ---------------------------------------------------------------------------
+# Phase GITHUB — GitHub API: create repo, enable branch protection, verify, delete
+# ---------------------------------------------------------------------------
+
+def run_phase_github(client: NexplaneClient) -> dict:
+    """Phase GITHUB: create a private test repo, enable branch protection on main,
+    verify the rule is active, then delete the repo. Skips if token not in SSM."""
+    import httpx, os, boto3, time as _time, random, string
+
+    print("\n[Phase GITHUB] GitHub create repo + branch protection + rollback")
+
+    gh_token = os.environ.get("GITHUB_TOKEN", "")
+    gh_org = os.environ.get("GITHUB_ORG", "")
+    if not gh_token:
+        try:
+            ssm = boto3.client("ssm", region_name="us-east-1")
+            try:
+                gh_token = ssm.get_parameter(Name="/nexplane/smoke/github/token", WithDecryption=True)["Parameter"]["Value"]
+            except ssm.exceptions.ParameterNotFound:
+                pass
+            try:
+                gh_org = ssm.get_parameter(Name="/nexplane/smoke/github/org", WithDecryption=True)["Parameter"]["Value"]
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"  SSM lookup failed: {e}")
+
+    if not gh_token:
+        print("SKIP: GITHUB token not in SSM, skipping GITHUB phase")
+        return {"status": "skipped", "reason": "no credentials"}
+
+    headers = {
+        "Authorization": f"Bearer {gh_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    base = "https://api.github.com"
+
+    # Determine owner — prefer org, fall back to authenticated user
+    with httpx.Client(headers=headers, timeout=30) as http:
+        if not gh_org:
+            me = http.get(f"{base}/user")
+            me.raise_for_status()
+            gh_org = me.json()["login"]
+        log(f"[GITHUB] using owner={gh_org}")
+
+    rand_suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    repo_name = f"nexplane-smoke-{rand_suffix}"
+    repo_deleted = False
+
+    try:
+        with httpx.Client(headers=headers, timeout=30) as http:
+            # Create private repo
+            create_resp = http.post(f"{base}/user/repos", json={
+                "name": repo_name,
+                "private": True,
+                "auto_init": True,
+                "description": "Nexplane smoke test — safe to delete",
+            })
+            create_resp.raise_for_status()
+            repo_full = create_resp.json()["full_name"]
+            log(f"[GITHUB] created repo {repo_full}")
+
+            # Wait briefly for default branch to be ready
+            _time.sleep(3)
+
+            # Determine default branch
+            repo_info = http.get(f"{base}/repos/{repo_full}")
+            repo_info.raise_for_status()
+            default_branch = repo_info.json().get("default_branch", "main")
+            log(f"[GITHUB] default branch: {default_branch}")
+
+            # Enable branch protection
+            protection = {
+                "required_status_checks": None,
+                "enforce_admins": True,
+                "required_pull_request_reviews": {"required_approving_review_count": 1},
+                "restrictions": None,
+            }
+            prot_resp = http.put(
+                f"{base}/repos/{repo_full}/branches/{default_branch}/protection",
+                json=protection,
+            )
+            prot_resp.raise_for_status()
+            log(f"[GITHUB] branch protection enabled on {default_branch}")
+
+            # Verify protection is active
+            check = http.get(f"{base}/repos/{repo_full}/branches/{default_branch}/protection")
+            check.raise_for_status()
+            prot_data = check.json()
+            assert prot_data.get("enforce_admins", {}).get("enabled") is True, \
+                f"enforce_admins not enabled: {prot_data}"
+            log("[GITHUB] branch protection verified active")
+
+            # Rollback: delete the repo
+            del_resp = http.delete(f"{base}/repos/{repo_full}")
+            assert del_resp.status_code == 204, f"delete returned {del_resp.status_code}"
+            repo_deleted = True
+            log(f"[GITHUB] repo {repo_full} deleted (rollback complete)")
+
+        log("Phase GITHUB PASSED")
+        return {"status": "passed", "repo": repo_full}
+    except Exception as e:
+        print(f"\n[FAIL] Phase GITHUB failed: {e}")
+        raise
+    finally:
+        if not repo_deleted:
+            try:
+                with httpx.Client(headers=headers, timeout=30) as http:
+                    http.delete(f"{base}/repos/{gh_org}/{repo_name}")
+            except Exception:
+                pass
+
+
 # Phase SCCM_BOOTSTRAP — One-time AMI pair builder (DC + SCCM site server)
 # ---------------------------------------------------------------------------
 # COST: ~$2.30 one-time (2x t3.xlarge Windows × 4 hr) + ~$5/month AMI storage
@@ -15877,6 +15991,8 @@ def main():
             run_phase_servicenow_incident(client)
         if "PAGERDUTY_INCIDENT" in phases:
             run_phase_pagerduty_incident(client)
+        if "GITHUB" in phases:
+            run_phase_github(client)
         if "OPENVAS_SCAN" in phases:
             run_phase_openvas_scan(client, cloud_account_id)
         if "NESSUS_SCAN" in phases:
