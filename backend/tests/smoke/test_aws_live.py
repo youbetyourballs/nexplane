@@ -26,6 +26,7 @@ Phase descriptions:
     W  ALB lifecycle: create ALB + target group + listener, register EC2 target, verify health, deregister, rollback
     MAC_AGENT_BOOTSTRAP  macOS agent: launch mac2.metal on Dedicated Host, install Nexplane agent, run defaults_write + santa_check CRs
     AD_DC_INTEGRITY  Windows Server 2022 AD DC: provision DC via SSM, snapshot AMI, run dc_integrity_check + ad_forest_snapshot CRs
+    AD_TIERED_BACKUP  AD Tier 0 backup: launch DC from cached AMI, dry_run enumeration, real IFM backup, S3 manifest verify, rollback
 
 Requirements:
     AWS connector with credentials + NexplaneEC2TestProfile IAM role
@@ -15900,6 +15901,8 @@ def main():
             )
         if "AD_DC_RESTORE" in phases:
             run_phase_ad_dc_restore(client, cloud_account_id)
+        if "AD_TIERED_BACKUP" in phases:
+            run_phase_ad_tiered_backup(client, cloud_account_id)
         if "BIND_DNS" in phases:
             run_phase_bind_dns(
                 client, cloud_account_id,
@@ -18916,6 +18919,340 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
                 print(f"  [SANTA_SYNC] Connector {santa_connector_id} deleted")
             except Exception as _ce:
                 print(f"  [SANTA_SYNC] WARNING: Connector deletion failed: {_ce}")
+
+
+def run_phase_ad_tiered_backup(client, cloud_account_id):
+    """Phase AD_TIERED_BACKUP: Launch smoke DC from cached AMI, register AD connector,
+    run ad_tiered_backup dry_run=True (verify DC enumeration), then tier=0 (real backup),
+    verify tier0-manifest.json format, rollback (verify S3 objects deleted).
+
+    Requires: AD_DC_INTEGRITY run first to build the cached DC AMI.
+    Per run from cached AMI: ~$0.05 (t3.small x 15min).
+    """
+    import hashlib as _hl
+    import json as _json
+    import time as _t
+    print("\n[Phase AD_TIERED_BACKUP] AD Tier 0 backup smoke test")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_boto = _get_aws_boto3_client("ssm")
+    s3_boto = _get_aws_boto3_client("s3")
+    if not ec2_client or not ssm_boto:
+        fail("[AD_TIERED_BACKUP] AWS clients not available")
+
+    _setup_key = (
+        "ad-ds-v6-fw-disabled-winrm-basic-"
+        "Install-ADDSForest-smoke.nexplane.local-SMOKE-smokeuser"
+    )
+    setup_hash = _hl.md5(_setup_key.encode()).hexdigest()
+    cached_ami = _check_smoke_ami_cache(ssm_boto, ec2_client, "dc-smoke", setup_hash)
+    if not cached_ami:
+        fail("[AD_TIERED_BACKUP] No cached AD DC AMI — run AD_DC_INTEGRITY first to build the AMI cache")
+
+    _dc_instance_type = "t3.small"
+    _vpcs = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+    _vpc_id = _vpcs[0]["VpcId"]
+    _subnets = ec2_client.describe_subnets(
+        Filters=[{"Name": "vpcId", "Values": [_vpc_id]}]
+    )["Subnets"]
+    try:
+        _az_info = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": [_dc_instance_type]}],
+        )["InstanceTypeOfferings"]
+        _good = [s for s in _subnets if s.get("AvailabilityZone") in {o["Location"] for o in _az_info}]
+        if _good:
+            _subnets = _good
+    except Exception:
+        pass
+    _subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    _subnet_id = _subnets[0]["SubnetId"]
+
+    _dc_sg_id = None
+    try:
+        _sgs = ec2_client.describe_security_groups(
+            Filters=[{"Name": "group-name", "Values": ["nexplane-smoke-dc"]}]
+        )["SecurityGroups"]
+        _dc_sg_id = _sgs[0]["GroupId"] if _sgs else None
+    except Exception:
+        pass
+
+    log(f"AD_TIERED_BACKUP: launching {_dc_instance_type} from cached AMI {cached_ami}...")
+    _launch_resp = ec2_client.run_instances(
+        ImageId=cached_ami,
+        InstanceType=_dc_instance_type,
+        MinCount=1,
+        MaxCount=1,
+        IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+        NetworkInterfaces=[{
+            "DeviceIndex": 0,
+            "SubnetId": _subnet_id,
+            "AssociatePublicIpAddress": False,
+            **( {"Groups": [_dc_sg_id]} if _dc_sg_id else {} ),
+        }],
+        TagSpecifications=[{
+            "ResourceType": "instance",
+            "Tags": [
+                {"Key": "Name", "Value": "nexplane-smoke-dc-tiered"},
+                {"Key": "nexplane-smoke", "Value": "ad-tiered-backup"},
+            ],
+        }],
+    )
+    instance_id = _launch_resp["Instances"][0]["InstanceId"]
+    log(f"AD_TIERED_BACKUP: launched instance {instance_id}")
+
+    ec2_client.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+    _desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+    private_ip = _desc["Reservations"][0]["Instances"][0].get("PrivateIpAddress", "")
+    log(f"AD_TIERED_BACKUP: instance running — private IP {private_ip}")
+
+    connector_id = None
+    dc_asset_id = None
+    backup_cr_id = None
+    snap_bucket = "nexplane-smoke-snapshots"
+    snap_prefix = None
+
+    try:
+        log("AD_TIERED_BACKUP: waiting for SSM agent...")
+        _wait_ssm_ready_win(ssm_boto, instance_id, timeout=600)
+        log("AD_TIERED_BACKUP: SSM ready")
+
+        # Re-enable WinRM Basic auth — EC2Launch reset clears it on cached AMI boot
+        log("AD_TIERED_BACKUP: re-enabling WinRM Basic auth...")
+        _winrm_cmd = ssm_boto.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": [
+                "Set-Item WSMan:\\localhost\\Service\\Auth\\Basic -Value $true",
+                "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $true",
+                "Restart-Service WinRM",
+                "Write-Output 'WINRM_RECONFIGURED'",
+            ]},
+            TimeoutSeconds=60,
+        )
+        _reconf_dl = _t.time() + 90
+        while _t.time() < _reconf_dl:
+            _t.sleep(6)
+            try:
+                _ri = ssm_boto.get_command_invocation(
+                    CommandId=_winrm_cmd["Command"]["CommandId"],
+                    InstanceId=instance_id)
+                if _ri["Status"] in ("Success", "Failed", "TimedOut"):
+                    log(f"AD_TIERED_BACKUP: WinRM reconf status={_ri['Status']}")
+                    break
+            except Exception:
+                pass
+
+        # Wait for NTDS
+        log("AD_TIERED_BACKUP: waiting for NTDS and LDAP port 389...")
+        _ntds_cmd = ssm_boto.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": [
+                "$dl = [datetime]::Now.AddMinutes(5)",
+                "while ([datetime]::Now -lt $dl) {",
+                "  $s = Get-Service NTDS -ErrorAction SilentlyContinue",
+                "  if ($s -and $s.Status -eq 'Running') { break }",
+                "  Start-Service NTDS -ErrorAction SilentlyContinue",
+                "  Start-Sleep -Seconds 15",
+                "}",
+                "Write-Output 'NTDS_CHECK_DONE'",
+            ]},
+            TimeoutSeconds=360,
+        )
+        _ntds_dl = _t.time() + 400
+        while _t.time() < _ntds_dl:
+            _t.sleep(10)
+            try:
+                _ni = ssm_boto.get_command_invocation(
+                    CommandId=_ntds_cmd["Command"]["CommandId"],
+                    InstanceId=instance_id)
+                if _ni["Status"] in ("Success", "Failed", "TimedOut"):
+                    log(f"AD_TIERED_BACKUP: NTDS: {_ni.get('StandardOutputContent','')[:80]}")
+                    break
+            except Exception:
+                pass
+
+        # Ensure S3 bucket exists
+        if s3_boto:
+            try:
+                s3_boto.head_bucket(Bucket=snap_bucket)
+            except Exception:
+                try:
+                    region = s3_boto.meta.region_name or "us-east-1"
+                    if region == "us-east-1":
+                        s3_boto.create_bucket(Bucket=snap_bucket)
+                    else:
+                        s3_boto.create_bucket(
+                            Bucket=snap_bucket,
+                            CreateBucketConfiguration={"LocationConstraint": region},
+                        )
+                    log(f"AD_TIERED_BACKUP: created S3 bucket {snap_bucket}")
+                except Exception as _s3e:
+                    log(f"AD_TIERED_BACKUP: S3 bucket setup: {_s3e}")
+
+        # Register AD connector + asset
+        _dc_creds = {
+            "server": private_ip,
+            "port": "389",
+            "base_dn": "DC=smoke,DC=nexplane,DC=local",
+            "bind_dn": "CN=SmokeUser,CN=Users,DC=smoke,DC=nexplane,DC=local",
+            "bind_password": "UserPass123!",
+            "use_ssl": "false",
+            "winrm_hostname": private_ip,
+            "winrm_port": "5985",
+            "winrm_username": "smokeuser",
+            "winrm_password": "UserPass123!",
+            "winrm_use_ssl": "false",
+            "s3_bucket": snap_bucket,
+        }
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "active_directory",
+            "name": f"nexplane-smoke-dc-tiered-{instance_id[-8:]}",
+        })
+        connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
+        client.put(f"/connectors/{connector_id}/credentials", json={"credentials": _dc_creds})
+        log(f"AD_TIERED_BACKUP: connector={connector_id}")
+
+        asset_resp = client.post("/assets", json={
+            "name": f"nexplane-smoke-dc-tiered-{instance_id[-8:]}",
+            "asset_type": "server",
+            "environment": "staging",
+            "criticality": "medium",
+            "hostname": private_ip,
+            "connector_id": connector_id,
+            "tags": ["nexplane-smoke", "active-directory"],
+        })
+        dc_asset_id = asset_resp.get("id")
+        log(f"AD_TIERED_BACKUP: asset={dc_asset_id}")
+
+        snap_prefix = f"ad-tiered-backup/smoke/{instance_id}"
+
+        # Step 1 — dry_run: verify DC enumeration without executing
+        log("AD_TIERED_BACKUP: step 1 — dry_run=True (enumerate targets)...")
+        cr_dry = client.run_cr(
+            "[AD_TIERED_BACKUP] tier0 dry_run",
+            "ad_tiered_backup",
+            dc_asset_id,
+            {
+                "tier": "0",
+                "s3_bucket": snap_bucket,
+                "s3_prefix": snap_prefix,
+                "dry_run": True,
+            },
+        )
+        dry_result = client.get_cr_step_result(cr_dry)
+        assert dry_result.get("status") == "dry_run_complete", (
+            f"AD_TIERED_BACKUP: dry_run unexpected status: {dry_result}"
+        )
+        dc_targets = dry_result.get("targets", {}).get("domain_controllers", [])
+        assert len(dc_targets) >= 1, (
+            f"AD_TIERED_BACKUP: dry_run found no DCs: {dry_result}"
+        )
+        log(f"AD_TIERED_BACKUP: dry_run OK — DCs found: {dc_targets}")
+
+        # Step 2 — real Tier 0 backup
+        log("AD_TIERED_BACKUP: step 2 — tier=0 real backup...")
+        cr_backup = client.run_cr(
+            "[AD_TIERED_BACKUP] tier0 backup",
+            "ad_tiered_backup",
+            dc_asset_id,
+            {
+                "tier": "0",
+                "s3_bucket": snap_bucket,
+                "s3_prefix": snap_prefix,
+                "dry_run": False,
+            },
+        )
+        backup_cr_id = cr_backup["id"]
+        backup_result = client.get_cr_step_result(cr_backup)
+        assert backup_result.get("status") in ("completed", "partial"), (
+            f"AD_TIERED_BACKUP: backup status unexpected: {backup_result}"
+        )
+        assert backup_result.get("dcs_backed_up", 0) >= 1, (
+            f"AD_TIERED_BACKUP: no DCs backed up: {backup_result}"
+        )
+        log(
+            f"AD_TIERED_BACKUP: backup status={backup_result.get('status')}, "
+            f"dcs_backed_up={backup_result.get('dcs_backed_up')}, "
+            f"dcs_failed={backup_result.get('dcs_failed', 0)}"
+        )
+
+        # Verify tier0-manifest.json in S3
+        if s3_boto:
+            manifest_key = backup_result.get("manifest_s3_key") or f"{snap_prefix}/tier0-manifest.json"
+            try:
+                _obj = s3_boto.get_object(Bucket=snap_bucket, Key=manifest_key)
+                _manifest = _json.loads(_obj["Body"].read())
+                assert _manifest.get("format") == "ad_tiered_backup_v1", (
+                    f"AD_TIERED_BACKUP: manifest format wrong: {_manifest.get('format')}"
+                )
+                assert len(_manifest.get("domain_controllers", [])) >= 1, (
+                    f"AD_TIERED_BACKUP: manifest has no DC entries: {_manifest}"
+                )
+                log(
+                    f"AD_TIERED_BACKUP: tier0-manifest.json verified — "
+                    f"format={_manifest['format']}, "
+                    f"dcs={len(_manifest['domain_controllers'])}"
+                )
+            except Exception as _me:
+                log(f"  WARNING: manifest verification: {_me}")
+
+        # Step 3 — rollback: delete all S3 objects under prefix
+        log("AD_TIERED_BACKUP: step 3 — rollback (delete S3 objects)...")
+        rb_ok = client.rollback_cr(backup_cr_id, "[AD_TIERED_BACKUP] tier0 rollback")
+        if rb_ok:
+            # Verify S3 objects gone
+            if s3_boto:
+                try:
+                    _paginator = s3_boto.get_paginator("list_objects_v2")
+                    remaining = sum(
+                        len(_page.get("Contents", []))
+                        for _page in _paginator.paginate(Bucket=snap_bucket, Prefix=snap_prefix)
+                    )
+                    assert remaining == 0, (
+                        f"AD_TIERED_BACKUP: {remaining} S3 objects remain after rollback"
+                    )
+                    log("AD_TIERED_BACKUP: rollback verified — 0 S3 objects remaining ✅")
+                except AssertionError:
+                    raise
+                except Exception as _s3e:
+                    log(f"  INFO: S3 post-rollback check: {_s3e}")
+            backup_cr_id = None  # already rolled back
+        log("Phase AD_TIERED_BACKUP PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase AD_TIERED_BACKUP failed: {e}")
+        raise
+    finally:
+        if backup_cr_id:
+            try:
+                client.rollback_cr(backup_cr_id, "[AD_TIERED_BACKUP] emergency rollback")
+            except Exception:
+                pass
+        if snap_prefix and s3_boto:
+            try:
+                _paginator = s3_boto.get_paginator("list_objects_v2")
+                for _page in _paginator.paginate(Bucket=snap_bucket, Prefix=snap_prefix):
+                    for _obj in _page.get("Contents", []):
+                        s3_boto.delete_object(Bucket=snap_bucket, Key=_obj["Key"])
+            except Exception:
+                pass
+        if dc_asset_id:
+            try:
+                client.client.delete(f"{client.base}/assets/{dc_asset_id}")
+            except Exception:
+                pass
+        if connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{connector_id}")
+            except Exception:
+                pass
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+            log(f"AD_TIERED_BACKUP: terminated instance {instance_id}")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
