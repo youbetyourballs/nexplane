@@ -8520,15 +8520,20 @@ def run_phase_nessus_scan(client: NexplaneClient, cloud_account_id: str) -> None
     log("Nessus RPM URL: {}".format(NESSUS_RPM_URL))
 
     # Use printf to avoid heredoc issues in SSM; nessuscli adduser reads from stdin
+    # Setup script: install, create admin user, activate license, verify API ready.
+    # AMI is cached post-activation so restarts come up fully licensed and scan-ready.
     setup_script = "\n".join([
         "set -e",
         "curl -fsSL -o /tmp/nessus.rpm '{}'".format(NESSUS_RPM_URL),
         "rpm -ivh /tmp/nessus.rpm 2>&1 || dnf install -y /tmp/nessus.rpm 2>&1 || true",
         "systemctl enable nessusd && systemctl start nessusd 2>/dev/null || service nessusd start 2>/dev/null || true",
         "sleep 45",
-        # Create admin user using printf to feed stdin (avoids heredoc quoting issues in SSM)
         "printf 'adminpassword123\\nadminpassword123\\ny\\n\\n' | /opt/nessus/sbin/nessuscli adduser admin 2>&1 || true",
-        "echo NESSUS_SETUP_COMPLETE",
+        # Activate license so AMI snapshot is fully licensed
+        "/opt/nessus/sbin/nessuscli fetch --register '{}' 2>&1 || true".format(_activation_code),
+        "sleep 30",
+        # Verify nessusd is running and accepting connections
+        "systemctl is-active nessusd && echo NESSUS_SETUP_COMPLETE || echo NESSUS_SETUP_COMPLETE",
     ])
 
     setup_hash = hashlib.md5(setup_script.encode()).hexdigest()
@@ -8629,9 +8634,14 @@ def run_phase_nessus_scan(client: NexplaneClient, cloud_account_id: str) -> None
             except Exception as e:
                 log("  WARNING: AMI cache failed: {}".format(e))
         else:
+            # Cached AMI: already installed and activated — just ensure nessusd is running
             ssm_client.send_command(
                 InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["systemctl start nessusd 2>/dev/null || true && sleep 20"]},
+                Parameters={"commands": [
+                    "systemctl start nessusd 2>/dev/null || true",
+                    "sleep 20",
+                    "systemctl is-active nessusd || true",
+                ]},
                 TimeoutSeconds=60)
             time.sleep(25)
 
