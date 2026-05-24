@@ -15526,7 +15526,7 @@ def run_phase_ad_dc_restore(client, cloud_account_id):
         # Cleanup connector and asset
         if _ad_conn_id:
             try:
-                client.delete(f"/connectors/{_ad_conn_id}")
+                client.client.delete(f"{client.base}/connectors/{_ad_conn_id}")
             except Exception:
                 pass
         # Terminate surviving instances
