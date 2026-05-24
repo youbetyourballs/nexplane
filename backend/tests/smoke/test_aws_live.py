@@ -19457,6 +19457,36 @@ def run_phase_ad_tiered_backup(client, cloud_account_id):
             pass
 
 
+def _get_default_vpc(ec2_client):
+    """Return {"VpcId": ..., "subnets": [...]} for the default VPC, or None."""
+    vpcs = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+    if not vpcs:
+        return None
+    vpc_id = vpcs[0]["VpcId"]
+    subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    return {"VpcId": vpc_id, "subnets": subnets}
+
+
+def _ensure_smoke_sg(ec2_client, vpc_id: str, sg_name: str, ingress_rules: list) -> str:
+    """Get or create a named security group with the given ingress rules."""
+    try:
+        resp = ec2_client.describe_security_groups(
+            Filters=[{"Name": "group-name", "Values": [sg_name]},
+                     {"Name": "vpc-id", "Values": [vpc_id]}]
+        )
+        if resp["SecurityGroups"]:
+            return resp["SecurityGroups"][0]["GroupId"]
+    except Exception:
+        pass
+    create_resp = ec2_client.create_security_group(
+        GroupName=sg_name, Description=f"Nexplane smoke test — {sg_name}", VpcId=vpc_id
+    )
+    sg_id = create_resp["GroupId"]
+    ec2_client.authorize_security_group_ingress(GroupId=sg_id, IpPermissions=ingress_rules)
+    return sg_id
+
+
 def run_phase_ssh_advanced(client, cloud_account_id):
     """Phase SSH_ADVANCED: Launch Ubuntu t3.micro, register SSH connector, run
     collect_output / restore_bare_metal_service / download_package / uninstall_agent CRs.
