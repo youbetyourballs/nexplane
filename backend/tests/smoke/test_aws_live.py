@@ -17623,8 +17623,15 @@ dnf install -y bind bind-utils --setopt=obsoletes=0 2>/dev/null || \
 
 # named group is created by bind package install
 mkdir -p /etc/named
-tsig-keygen nexplane-smoke-key > /etc/named/nexplane-smoke.key || \
-    { ddns-confgen -q -k nexplane-smoke-key > /etc/named/nexplane-smoke.key; }
+tsig-keygen nexplane-smoke-key > /tmp/nexplane-smoke-key.tmp || true
+if [ ! -s /tmp/nexplane-smoke-key.tmp ]; then
+    ddns-confgen -q -k nexplane-smoke-key > /tmp/nexplane-smoke-key.tmp || true
+fi
+if [ ! -s /tmp/nexplane-smoke-key.tmp ]; then
+    SECRET=$(python3 -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())")
+    printf 'key "nexplane-smoke-key" {\n    algorithm hmac-sha256;\n    secret "%s";\n};\n' "$SECRET" > /tmp/nexplane-smoke-key.tmp
+fi
+cp /tmp/nexplane-smoke-key.tmp /etc/named/nexplane-smoke.key
 chmod 640 /etc/named/nexplane-smoke.key
 chown root:named /etc/named/nexplane-smoke.key 2>/dev/null || \
     chown root:bind /etc/named/nexplane-smoke.key 2>/dev/null || true
@@ -17837,6 +17844,34 @@ echo "BIND_READY"
             if m:
                 tsig_secret_b64 = m.group(1).strip()
             break
+    if not tsig_secret_b64:
+        # Key file may be empty in cached AMI — regenerate and reload
+        log("BIND_DNS: key file empty, regenerating TSIG key and reloading named")
+        regen_resp = ssm_boto.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [
+                "SECRET=$(python3 -c \"import os,base64; print(base64.b64encode(os.urandom(32)).decode())\")\n"
+                "printf 'key \"nexplane-smoke-key\" {\\n    algorithm hmac-sha256;\\n    secret \"%s\";\\n};\\n' \"$SECRET\" > /etc/named/nexplane-smoke.key\n"
+                "chmod 640 /etc/named/nexplane-smoke.key\n"
+                "systemctl reload named || systemctl restart named\n"
+                "sleep 2\n"
+                "cat /etc/named/nexplane-smoke.key"
+            ]},
+            TimeoutSeconds=60,
+        )
+        regen_cmd_id = regen_resp["Command"]["CommandId"]
+        deadline4 = _time.time() + 90
+        while _time.time() < deadline4:
+            _time.sleep(5)
+            regen_inv = ssm_boto.get_command_invocation(CommandId=regen_cmd_id, InstanceId=instance_id)
+            if regen_inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+                regen_content = regen_inv.get("StandardOutputContent", "")
+                log(f"BIND_DNS: regen status={regen_inv['Status']} content_len={len(regen_content)}")
+                m2 = _re.search(r'secret\s+"([^"]+)"', regen_content)
+                if m2:
+                    tsig_secret_b64 = m2.group(1).strip()
+                break
     if not tsig_secret_b64:
         try:
             ec2_client.terminate_instances(InstanceIds=[instance_id])
