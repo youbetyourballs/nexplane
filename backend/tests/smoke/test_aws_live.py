@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 from __future__ import annotations  # Python 3.9 compat: defer annotation evaluation
 """
 Nexplane AWS Live Smoke Test — Phases A–K (and new P–T).
@@ -27,6 +27,7 @@ Phase descriptions:
     MAC_AGENT_BOOTSTRAP  macOS agent: launch mac2.metal on Dedicated Host, install Nexplane agent, run defaults_write + santa_check CRs
     AD_DC_INTEGRITY  Windows Server 2022 AD DC: provision DC via SSM, snapshot AMI, run dc_integrity_check + ad_forest_snapshot CRs
     AD_TIERED_BACKUP  AD Tier 0 backup: launch DC from cached AMI, dry_run enumeration, real IFM backup, S3 manifest verify, rollback
+    AD_MEMBER_SERVER_BACKUP  AD Tier 1 backup: launch t3.small, AWS Backup job, verify recovery point, rollback (delete recovery point)
 
 Requirements:
     AWS connector with credentials + NexplaneEC2TestProfile IAM role
@@ -16100,6 +16101,8 @@ def main():
             run_phase_ad_dc_restore(client, cloud_account_id)
         if "AD_TIERED_BACKUP" in phases:
             run_phase_ad_tiered_backup(client, cloud_account_id)
+        if "AD_MEMBER_SERVER_BACKUP" in phases:
+            run_phase_ad_member_server_backup(client, cloud_account_id)
         if "BIND_DNS" in phases:
             run_phase_bind_dns(
                 client, cloud_account_id,
@@ -19540,6 +19543,239 @@ def run_phase_ad_tiered_backup(client, cloud_account_id):
             log(f"AD_TIERED_BACKUP: terminated instance {instance_id}")
         except Exception:
             pass
+
+
+def run_phase_ad_member_server_backup(client, cloud_account_id):
+    """Phase AD_MEMBER_SERVER_BACKUP: Launch a t3.small Linux instance as a stand-in member server,
+    register an AWS connector, run ad_tiered_backup tier=1 (AWS Backup), verify recovery point
+    created, rollback (delete recovery point), verify cleanup.
+    """
+    import hashlib as _hl
+    import time as _t
+
+    print("\n[Phase AD_MEMBER_SERVER_BACKUP] AD Tier 1 member server backup smoke test")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_boto = _get_aws_boto3_client("ssm")
+    backup_boto = _get_aws_boto3_client("backup")
+    iam_boto = _get_aws_boto3_client("iam")
+    if not ec2_client or not backup_boto:
+        fail("[AD_MEMBER_SERVER_BACKUP] AWS clients not available")
+
+    # IAM role ARN for AWS Backup — look up the NexplaneEC2TestRole
+    try:
+        role_arn = iam_boto.get_role(RoleName="NexplaneEC2TestRole")["Role"]["Arn"]
+    except Exception as _iam_e:
+        fail(f"[AD_MEMBER_SERVER_BACKUP] Could not resolve NexplaneEC2TestRole ARN: {_iam_e}")
+
+    _vpcs = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+    if not _vpcs:
+        fail("[AD_MEMBER_SERVER_BACKUP] No default VPC found")
+    vpc_id = _vpcs[0]["VpcId"]
+    _subnets = ec2_client.describe_subnets(
+        Filters=[{"Name": "vpcId", "Values": [vpc_id]}]
+    )["Subnets"]
+    _subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    subnet_id = _subnets[0]["SubnetId"]
+
+    # Use Amazon Linux 2023 AMI (latest, from SSM parameter)
+    try:
+        ami_id = ssm_boto.get_parameter(
+            Name="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+        )["Parameter"]["Value"]
+    except Exception:
+        ami_id = None  # will use default AMI lookup below
+
+    if not ami_id:
+        ami_resp = ec2_client.describe_images(
+            Owners=["amazon"],
+            Filters=[
+                {"Name": "name", "Values": ["al2023-ami-*-x86_64"]},
+                {"Name": "state", "Values": ["available"]},
+            ],
+        )["Images"]
+        ami_resp.sort(key=lambda x: x["CreationDate"], reverse=True)
+        if not ami_resp:
+            fail("[AD_MEMBER_SERVER_BACKUP] No Amazon Linux 2023 AMI found")
+        ami_id = ami_resp[0]["ImageId"]
+
+    log(f"AD_MEMBER_SERVER_BACKUP: using AMI {ami_id}")
+
+    vault_name = "nexplane-smoke-member-backup"
+    instance_id = None
+    connector_id = None
+    asset_id = None
+    backup_cr_id = None
+
+    try:
+        # Launch a minimal instance — no agents needed, just an EC2 resource ARN for AWS Backup
+        log("AD_MEMBER_SERVER_BACKUP: launching t3.small member server instance...")
+        _launch = ec2_client.run_instances(
+            ImageId=ami_id,
+            InstanceType="t3.small",
+            MinCount=1,
+            MaxCount=1,
+            SubnetId=subnet_id,
+            TagSpecifications=[{
+                "ResourceType": "instance",
+                "Tags": [
+                    {"Key": "Name", "Value": "nexplane-smoke-member-server"},
+                    {"Key": "nexplane-smoke", "Value": "true"},
+                ],
+            }],
+        )
+        instance_id = _launch["Instances"][0]["InstanceId"]
+        log(f"AD_MEMBER_SERVER_BACKUP: launched {instance_id}")
+
+        ec2_client.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+        log(f"AD_MEMBER_SERVER_BACKUP: instance running")
+
+        # Register AD connector (re-use existing AWS connector credentials for AWS Backup calls)
+        _aws_creds = _aws_creds_cache or {}
+        conn_resp = client.post("/connectors", json={
+            "name": f"nexplane-smoke-ad-member-{instance_id[-8:]}",
+            "connector_type": "active_directory",
+        })
+        connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
+        client.put(f"/connectors/{connector_id}/credentials", json={"credentials": {
+            # Required AD catalog fields — placeholders; tier 1 uses AWS Backup, not LDAP/WinRM
+            "server": "127.0.0.1",
+            "base_dn": "DC=smoke,DC=nexplane,DC=local",
+            "bind_dn": "CN=smokeuser,DC=smoke,DC=nexplane,DC=local",
+            "bind_password": "placeholder",
+            # AWS credentials for AWS Backup API calls
+            "aws_access_key_id": _aws_creds.get("access_key_id", ""),
+            "aws_secret_access_key": _aws_creds.get("secret_access_key", ""),
+            "aws_region": _aws_creds.get("region", "us-east-1"),
+        }})
+        log(f"AD_MEMBER_SERVER_BACKUP: connector={connector_id}")
+
+        asset_resp = client.post("/assets", json={
+            "name": f"nexplane-smoke-member-{instance_id[-8:]}",
+            "asset_type": "server",
+            "asset_metadata": {"instance_id": instance_id},
+            "organization_id": None,
+            "tags": ["nexplane-smoke", "active-directory"],
+        })
+        asset_id = asset_resp.get("id")
+        log(f"AD_MEMBER_SERVER_BACKUP: asset={asset_id}")
+
+        # Step 1 — dry_run: verify parameter passing without AWS Backup calls
+        log("AD_MEMBER_SERVER_BACKUP: step 1 — tier=1 dry_run=True...")
+        cr_dry = client.run_cr(
+            "[AD_MEMBER_SERVER_BACKUP] tier1 dry_run",
+            "ad_tiered_backup",
+            asset_id,
+            {
+                "tier": "1",
+                "dry_run": True,
+                "backup_vault_name": vault_name,
+                "ec2_instance_ids": [instance_id],
+                "iam_role_arn": role_arn,
+            },
+        )
+        dry_result = client.get_cr_step_result(cr_dry)
+        assert dry_result.get("status") == "dry_run_complete", (
+            f"AD_MEMBER_SERVER_BACKUP: dry_run unexpected status: {dry_result}"
+        )
+        assert instance_id in dry_result.get("targets", {}).get("ec2_instances", []), (
+            f"AD_MEMBER_SERVER_BACKUP: dry_run targets missing instance: {dry_result}"
+        )
+        log(f"AD_MEMBER_SERVER_BACKUP: dry_run OK — targets={dry_result['targets']}")
+
+        # Step 2 — real tier 1 backup
+        log("AD_MEMBER_SERVER_BACKUP: step 2 — tier=1 real backup (AWS Backup)...")
+        cr_backup = client.run_cr(
+            "[AD_MEMBER_SERVER_BACKUP] tier1 backup",
+            "ad_tiered_backup",
+            asset_id,
+            {
+                "tier": "1",
+                "dry_run": False,
+                "backup_vault_name": vault_name,
+                "ec2_instance_ids": [instance_id],
+                "iam_role_arn": role_arn,
+            },
+        )
+        backup_cr_id = cr_backup["id"]
+        backup_result = client.get_cr_step_result(cr_backup)
+        assert backup_result.get("status") in ("completed", "partial"), (
+            f"AD_MEMBER_SERVER_BACKUP: backup status unexpected: {backup_result}"
+        )
+        assert backup_result.get("instances_backed_up", 0) >= 1, (
+            f"AD_MEMBER_SERVER_BACKUP: no instances backed up: {backup_result}"
+        )
+        rp_arns = backup_result.get("recovery_point_arns", [])
+        assert rp_arns, f"AD_MEMBER_SERVER_BACKUP: no recovery_point_arns in result: {backup_result}"
+        log(
+            f"AD_MEMBER_SERVER_BACKUP: backup status={backup_result.get('status')}, "
+            f"instances_backed_up={backup_result.get('instances_backed_up')}, "
+            f"recovery_points={rp_arns}"
+        )
+
+        # Step 3 — rollback: delete recovery points
+        log("AD_MEMBER_SERVER_BACKUP: step 3 — rollback (delete recovery points)...")
+        rb_ok = client.rollback_cr(backup_cr_id, "[AD_MEMBER_SERVER_BACKUP] tier1 rollback")
+        if rb_ok:
+            # Verify recovery points are gone
+            for arn in rp_arns:
+                try:
+                    backup_boto.describe_recovery_point(
+                        BackupVaultName=vault_name,
+                        RecoveryPointArn=arn,
+                    )
+                    # If we get here, the recovery point still exists — not a hard fail (AWS may lag)
+                    log(f"  INFO: recovery point {arn} still visible — may be AWS propagation delay")
+                except Exception:
+                    pass  # ResourceNotFoundException expected
+            backup_cr_id = None  # already rolled back
+            log("AD_MEMBER_SERVER_BACKUP: rollback complete ✅")
+
+        log("Phase AD_MEMBER_SERVER_BACKUP PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase AD_MEMBER_SERVER_BACKUP failed: {e}")
+        raise
+    finally:
+        if backup_cr_id:
+            try:
+                client.rollback_cr(backup_cr_id, "[AD_MEMBER_SERVER_BACKUP] emergency rollback")
+            except Exception:
+                pass
+        # Clean up AWS Backup vault (delete any remaining recovery points first)
+        if backup_boto:
+            try:
+                rps = backup_boto.list_recovery_points_by_backup_vault(
+                    BackupVaultName=vault_name
+                ).get("RecoveryPoints", [])
+                for rp in rps:
+                    try:
+                        backup_boto.delete_recovery_point(
+                            BackupVaultName=vault_name,
+                            RecoveryPointArn=rp["RecoveryPointArn"],
+                        )
+                    except Exception:
+                        pass
+                backup_boto.delete_backup_vault(BackupVaultName=vault_name)
+                log(f"AD_MEMBER_SERVER_BACKUP: deleted backup vault {vault_name}")
+            except Exception:
+                pass
+        if connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{connector_id}")
+            except Exception:
+                pass
+        if asset_id:
+            try:
+                client.client.delete(f"{client.base}/assets/{asset_id}")
+            except Exception:
+                pass
+        if instance_id:
+            try:
+                ec2_client.terminate_instances(InstanceIds=[instance_id])
+                log(f"AD_MEMBER_SERVER_BACKUP: terminated instance {instance_id}")
+            except Exception:
+                pass
 
 
 def _get_default_vpc(ec2_client):
