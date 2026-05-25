@@ -64,5 +64,9 @@ def create_mcp_app():
     # Import tool modules so their @mcp.tool() decorators register
     import app.mcp_tools.findings  # noqa: F401
     import app.mcp_tools.change_requests  # noqa: F401
+    import app.mcp_tools.assets  # noqa: F401
+    import app.mcp_tools.connectors  # noqa: F401
+    import app.mcp_tools.identity  # noqa: F401
+    import app.mcp_tools.runbooks  # noqa: F401
 
     return mcp.sse_app()
