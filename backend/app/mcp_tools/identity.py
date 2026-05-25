@@ -25,8 +25,8 @@ async def _auth(token: str):
 @mcp.tool()
 async def list_identities(
     token: str,
-    source_connector_id: Optional[str] = None,
-    is_stale: Optional[bool] = None,
+    source_connector_id: str = None,
+    is_stale: bool = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
@@ -115,7 +115,7 @@ async def get_identity(token: str, identity_id: str) -> dict[str, Any]:
 async def list_identity_findings(
     token: str,
     identity_id: str,
-    status: Optional[str] = None,
+    status: str = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
@@ -222,7 +222,7 @@ async def get_identity_graph(token: str, identity_id: str) -> dict[str, Any]:
 @mcp.tool()
 async def list_access_reviews(
     token: str,
-    status: Optional[str] = None,
+    status: str = None,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     """

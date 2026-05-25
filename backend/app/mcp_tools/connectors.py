@@ -25,7 +25,7 @@ async def _auth(token: str):
 @mcp.tool()
 async def list_connectors(
     token: str,
-    connector_type: Optional[str] = None,
+    connector_type: str = None,
     enabled_only: bool = False,
 ) -> list[dict[str, Any]]:
     """

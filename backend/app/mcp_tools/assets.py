@@ -25,10 +25,10 @@ async def _auth(token: str):
 @mcp.tool()
 async def list_assets(
     token: str,
-    asset_type: Optional[str] = None,
-    environment: Optional[str] = None,
-    criticality: Optional[str] = None,
-    connector_id: Optional[str] = None,
+    asset_type: str = None,
+    environment: str = None,
+    criticality: str = None,
+    connector_id: str = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
@@ -131,8 +131,8 @@ async def get_asset_context(token: str, asset_id: str) -> dict[str, Any]:
 async def list_asset_findings(
     token: str,
     asset_id: str,
-    status: Optional[str] = None,
-    severity: Optional[str] = None,
+    status: str = None,
+    severity: str = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """

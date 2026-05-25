@@ -25,7 +25,7 @@ async def _auth(token: str):
 @mcp.tool()
 async def list_runbooks(
     token: str,
-    tag: Optional[str] = None,
+    tag: str = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
@@ -117,7 +117,7 @@ async def execute_runbook(
     token: str,
     runbook_id: str,
     target_asset_ids: list[str],
-    context: Optional[dict[str, Any]] = None,
+    context: dict = None,
 ) -> dict[str, Any]:
     """
     Execute a runbook against specified target assets. Creates a RunbookExecution record and
