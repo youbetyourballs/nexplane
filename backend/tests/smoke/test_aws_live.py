@@ -17469,7 +17469,7 @@ def _run_bind_dns_tests(
         # ------------------------------------------------------------------
         log("BIND_DNS: step 1 — list_zone")
         cr = client.run_cr(
-            "[BIND_DNS] list_zone", "list_zone", connector_id,
+            "[BIND_DNS] list_zone", "bind_list_zone", connector_id,
             {"zone": "smoke.nexplane.local"},
         )
         result = client.get_cr_step_result(cr)
@@ -17483,7 +17483,7 @@ def _run_bind_dns_tests(
         # ------------------------------------------------------------------
         log("BIND_DNS: step 2 — create_record nexplane-test A 10.0.0.42")
         cr2 = client.run_cr(
-            "[BIND_DNS] create_record", "create_record", connector_id,
+            "[BIND_DNS] create_record", "bind_create_record", connector_id,
             {
                 "record_name": "nexplane-test",
                 "record_type": "A",
@@ -17503,7 +17503,7 @@ def _run_bind_dns_tests(
         # ------------------------------------------------------------------
         log("BIND_DNS: step 3 — check_record (expect 10.0.0.42)")
         cr3 = client.run_cr(
-            "[BIND_DNS] check_record (after create)", "check_record", connector_id,
+            "[BIND_DNS] check_record (after create)", "bind_check_record", connector_id,
             {"record_name": "nexplane-test", "record_type": "A"},
         )
         result3 = client.get_cr_step_result(cr3)
@@ -17520,7 +17520,7 @@ def _run_bind_dns_tests(
         # ------------------------------------------------------------------
         log("BIND_DNS: step 4 — delete_record nexplane-test A")
         cr4 = client.run_cr(
-            "[BIND_DNS] delete_record", "delete_record", connector_id,
+            "[BIND_DNS] delete_record", "bind_delete_record", connector_id,
             {
                 "record_name": "nexplane-test",
                 "record_type": "A",
@@ -17538,7 +17538,7 @@ def _run_bind_dns_tests(
         # ------------------------------------------------------------------
         log("BIND_DNS: step 5 — check_record (expect exists: False)")
         cr5 = client.run_cr(
-            "[BIND_DNS] check_record (after delete)", "check_record", connector_id,
+            "[BIND_DNS] check_record (after delete)", "bind_check_record", connector_id,
             {"record_name": "nexplane-test", "record_type": "A"},
         )
         result5 = client.get_cr_step_result(cr5)
