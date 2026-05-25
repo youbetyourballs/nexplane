@@ -62,10 +62,7 @@ async def resolve_mcp_token(raw_token: str, db) -> User:
 def create_mcp_app():
     """Return the Starlette app to mount at /mcp."""
     # Import tool modules so their @mcp.tool() decorators register
-    try:
-        import app.mcp_tools.findings  # noqa: F401
-    except Exception:
-        pass  # findings tools depend on vuln_poc_service — loaded when available
+    import app.mcp_tools.findings  # noqa: F401
     import app.mcp_tools.change_requests  # noqa: F401
 
     return mcp.sse_app()
