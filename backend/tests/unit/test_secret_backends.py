@@ -160,3 +160,35 @@ def test_asm_backend_decrypt_json_reads_secret():
     result = backend.decrypt_json(name)
     assert result == data
     mock_client.get_secret_value.assert_called_once_with(SecretId=name)
+
+
+def test_factory_returns_fernet_by_default(monkeypatch):
+    import importlib
+    import app.services.secret_backend_factory as mod
+    monkeypatch.delenv("SECRET_BACKEND", raising=False)
+    monkeypatch.setenv("SECRET_KEY", "test-key")
+    mod.get_secret_backend.cache_clear()
+    backend = mod.get_secret_backend()
+    from app.services.backends.fernet_backend import FernetBackend
+    assert isinstance(backend, FernetBackend)
+    mod.get_secret_backend.cache_clear()
+
+
+def test_factory_returns_fernet_when_explicit(monkeypatch):
+    import app.services.secret_backend_factory as mod
+    monkeypatch.setenv("SECRET_BACKEND", "fernet")
+    monkeypatch.setenv("SECRET_KEY", "test-key")
+    mod.get_secret_backend.cache_clear()
+    backend = mod.get_secret_backend()
+    from app.services.backends.fernet_backend import FernetBackend
+    assert isinstance(backend, FernetBackend)
+    mod.get_secret_backend.cache_clear()
+
+
+def test_factory_raises_on_unknown_backend(monkeypatch):
+    import app.services.secret_backend_factory as mod
+    monkeypatch.setenv("SECRET_BACKEND", "cyberark-not-yet")
+    mod.get_secret_backend.cache_clear()
+    with pytest.raises(ValueError, match="Unknown SECRET_BACKEND"):
+        mod.get_secret_backend()
+    mod.get_secret_backend.cache_clear()
