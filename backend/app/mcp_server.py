@@ -12,12 +12,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from mcp.server import Server
-from mcp.server.sse import SseServerTransport
+from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select
-from starlette.applications import Starlette
-from starlette.requests import Request
-from starlette.routing import Mount, Route
 
 from app.database import AsyncSessionLocal
 from app.models.api_token import ApiToken
@@ -27,8 +23,7 @@ logger = logging.getLogger(__name__)
 
 # ── MCP server singleton ─────────────────────────────────────────────────────
 
-mcp = Server("nexplane")
-sse = SseServerTransport("/mcp/messages")
+mcp = FastMCP("nexplane")
 
 
 # ── Token auth ───────────────────────────────────────────────────────────────
@@ -62,42 +57,9 @@ async def resolve_mcp_token(raw_token: str, db) -> User:
     return user
 
 
-async def _get_user_from_request(request: Request) -> tuple[User, Any]:
-    """Extract Bearer token from request headers, validate, return (user, db)."""
-    auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    raw_token = auth[len("Bearer "):]
-    async with AsyncSessionLocal() as db:
-        user = await resolve_mcp_token(raw_token, db)
-        await db.commit()
-        return user, db
-
-
-# ── SSE endpoint handlers ─────────────────────────────────────────────────────
-
-async def handle_sse(request: Request):
-    try:
-        user, _ = await _get_user_from_request(request)
-    except HTTPException as e:
-        from starlette.responses import Response
-        return Response(str(e.detail), status_code=e.status_code)
-
-    async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
-        await mcp.run(
-            streams[0],
-            streams[1],
-            mcp.create_initialization_options(),
-        )
-
-
-async def handle_messages(request: Request):
-    await sse.handle_post_message(request.scope, request.receive, request._send)
-
-
 # ── Starlette sub-app (mounted at /mcp in main.py) ──────────────────────────
 
-def create_mcp_app() -> Starlette:
+def create_mcp_app():
     """Return the Starlette app to mount at /mcp."""
     # Import tool modules so their @mcp.tool() decorators register
     try:
@@ -106,7 +68,4 @@ def create_mcp_app() -> Starlette:
         pass  # findings tools depend on vuln_poc_service — loaded when available
     import app.mcp_tools.change_requests  # noqa: F401
 
-    return Starlette(routes=[
-        Route("/sse", endpoint=handle_sse),
-        Route("/messages", endpoint=handle_messages, methods=["POST"]),
-    ])
+    return mcp.sse_app()
