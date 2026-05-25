@@ -170,8 +170,7 @@ async def upsert_credentials(
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
 
-    from app.services.secrets_service import SecretsService
-    from app import config as app_config
+    from app.services.secret_backend_factory import get_secret_backend
 
     catalog_svc = get_catalog_service()
     catalog = catalog_svc.get_connector_catalog(connector.connector_type.value)
@@ -180,8 +179,9 @@ async def upsert_credentials(
     if missing:
         raise HTTPException(status_code=422, detail=f"Missing required credential fields: {missing}")
 
-    svc = SecretsService(app_config.settings.SECRET_KEY)
-    encrypted = svc.encrypt_json(body.credentials)
+    backend = get_secret_backend()
+    connector_id_str = str(connector_id)
+    encrypted = backend.encrypt_json(body.credentials, connector_id=connector_id_str)
 
     cred_result = await db.execute(
         select(ConnectorCredential).where(ConnectorCredential.connector_id == connector.id)
