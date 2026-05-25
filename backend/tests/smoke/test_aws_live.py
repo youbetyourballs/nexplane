@@ -13172,15 +13172,12 @@ def run_phase_servicenow_incident(client: NexplaneClient) -> dict:
             # try PUT (full update) if PATCH returns 403 on developer instances
             close_payload = {
                 "state": "6",
-                "resolved_by": sn_user,
-                "resolution_code": "Solved (Permanently)",
-                "resolution_notes": "Nexplane smoke test - closing",
                 "close_code": "Solved (Permanently)",
                 "close_notes": "Nexplane smoke test - closing",
+                "resolved_by": sn_user,
+                "caller_id": sn_user,
             }
             close_resp = http.patch(f"{base_url}/incident/{sys_id}", json=close_payload)
-            if close_resp.status_code == 403:
-                close_resp = http.put(f"{base_url}/incident/{sys_id}", json=close_payload)
             close_resp.raise_for_status()
             closed = close_resp.json()["result"]
             assert str(closed.get("state")) in ("6", "7", "closed", "Closed", "Resolved"), f"unexpected state: {closed.get('state')}"
