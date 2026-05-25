@@ -13321,9 +13321,9 @@ def run_phase_github(client: NexplaneClient) -> dict:
             # Create private repo
             create_resp = http.post(f"{base}/user/repos", json={
                 "name": repo_name,
-                "private": True,
+                "private": False,
                 "auto_init": True,
-                "description": "Nexplane smoke test — safe to delete",
+                "description": "Nexplane smoke test - safe to delete",
             })
             create_resp.raise_for_status()
             repo_full = create_resp.json()["full_name"]
