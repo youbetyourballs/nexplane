@@ -124,3 +124,44 @@ async def generate_change_request_for_finding(
 
     logger.info(f"Generated DRAFT CR {cr.id} for finding {getattr(finding, 'id', '?')} (action={action_type})")
     return cr
+
+
+async def link_cr_to_finding(
+    db: AsyncSession,
+    finding_id,
+    cr_id,
+    role: str,
+) -> None:
+    """Create a FindingChangeRequest row linking a CR back to its originating finding."""
+    from app.models.vulnerability import FindingChangeRequest
+    fcr = FindingChangeRequest(finding_id=finding_id, cr_id=cr_id, role=role)
+    db.add(fcr)
+    await db.flush()
+
+
+async def escalate_finding_sla(
+    db: AsyncSession,
+    finding,
+    tier: str,
+) -> None:
+    """
+    Override finding SLA to the given tier immediately.
+
+    tier: "emergency" | "escalated" | "warning"
+    Updates the RemediationSLA row for this finding.
+    """
+    from app.models.vulnerability import RemediationSLA
+    from sqlalchemy import select
+    from datetime import datetime, timezone, timedelta
+
+    tier_hours = {"warning": 168, "escalated": 72, "emergency": 24}
+    hours = tier_hours.get(tier, 24)
+
+    result = await db.execute(
+        select(RemediationSLA).where(RemediationSLA.finding_id == finding.id)
+    )
+    sla = result.scalar_one_or_none()
+    if sla:
+        sla.sla_hours = hours
+        sla.due_at = datetime.now(timezone.utc) + timedelta(hours=hours)
+        sla.breached = False
