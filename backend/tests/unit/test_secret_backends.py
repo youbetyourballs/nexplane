@@ -98,3 +98,65 @@ def test_vault_backend_encrypt_decrypt_single_value():
     path = backend.encrypt("my-secret-value", connector_id="test-id")
     result = backend.decrypt(path)
     assert result == "my-secret-value"
+
+
+def test_asm_backend_satisfies_protocol():
+    from unittest.mock import MagicMock
+    from app.services.secret_backend import SecretBackend
+    from app.services.backends.aws_secrets_manager_backend import AWSSecretsManagerBackend
+    mock_client = MagicMock()
+    backend = AWSSecretsManagerBackend(region="us-east-1", _client=mock_client)
+    assert isinstance(backend, SecretBackend)
+
+
+def test_asm_backend_encrypt_json_creates_secret():
+    from unittest.mock import MagicMock
+    import json
+    from app.services.backends.aws_secrets_manager_backend import AWSSecretsManagerBackend
+    mock_client = MagicMock()
+    mock_client.exceptions.ResourceExistsException = Exception
+    backend = AWSSecretsManagerBackend(region="us-east-1", _client=mock_client)
+    connector_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    data = {"username": "admin", "password": "s3cr3t"}
+    name = backend.encrypt_json(data, connector_id=connector_id)
+    expected_name = f"nexplane/connectors/{connector_id}"
+    assert name == expected_name
+    mock_client.create_secret.assert_called_once_with(
+        Name=expected_name,
+        SecretString=json.dumps(data),
+    )
+
+
+def test_asm_backend_encrypt_json_updates_existing_secret():
+    from unittest.mock import MagicMock, call
+    import json
+    from app.services.backends.aws_secrets_manager_backend import AWSSecretsManagerBackend
+
+    class FakeResourceExists(Exception):
+        pass
+
+    mock_client = MagicMock()
+    mock_client.exceptions.ResourceExistsException = FakeResourceExists
+    mock_client.create_secret.side_effect = FakeResourceExists("already exists")
+    backend = AWSSecretsManagerBackend(region="us-east-1", _client=mock_client)
+    connector_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    data = {"username": "admin", "password": "s3cr3t"}
+    name = backend.encrypt_json(data, connector_id=connector_id)
+    mock_client.put_secret_value.assert_called_once_with(
+        SecretId=f"nexplane/connectors/{connector_id}",
+        SecretString=json.dumps(data),
+    )
+
+
+def test_asm_backend_decrypt_json_reads_secret():
+    from unittest.mock import MagicMock
+    import json
+    from app.services.backends.aws_secrets_manager_backend import AWSSecretsManagerBackend
+    mock_client = MagicMock()
+    data = {"username": "admin", "password": "s3cr3t"}
+    mock_client.get_secret_value.return_value = {"SecretString": json.dumps(data)}
+    backend = AWSSecretsManagerBackend(region="us-east-1", _client=mock_client)
+    name = "nexplane/connectors/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    result = backend.decrypt_json(name)
+    assert result == data
+    mock_client.get_secret_value.assert_called_once_with(SecretId=name)
