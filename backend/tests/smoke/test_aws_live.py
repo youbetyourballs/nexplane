@@ -13168,17 +13168,23 @@ def run_phase_servicenow_incident(client: NexplaneClient) -> dict:
             assert get_resp.json()["result"]["sys_id"] == sys_id
             log("[SERVICENOW_INCIDENT] incident verified via GET")
 
-            # Close the incident
+            # Close the incident — state 6=Resolved requires resolution fields;
+            # try PUT (full update) if PATCH returns 403 on developer instances
             close_payload = {
-                "state": "7",
+                "state": "6",
+                "resolved_by": sn_user,
+                "resolution_code": "Solved (Permanently)",
+                "resolution_notes": "Nexplane smoke test - closing",
                 "close_code": "Solved (Permanently)",
-                "close_notes": "Nexplane smoke test — closing",
+                "close_notes": "Nexplane smoke test - closing",
             }
             close_resp = http.patch(f"{base_url}/incident/{sys_id}", json=close_payload)
+            if close_resp.status_code == 403:
+                close_resp = http.put(f"{base_url}/incident/{sys_id}", json=close_payload)
             close_resp.raise_for_status()
             closed = close_resp.json()["result"]
-            assert str(closed.get("state")) in ("7", "closed", "Closed"), f"unexpected state: {closed.get('state')}"
-            log("[SERVICENOW_INCIDENT] incident closed (state=7)")
+            assert str(closed.get("state")) in ("6", "7", "closed", "Closed", "Resolved"), f"unexpected state: {closed.get('state')}"
+            log(f"[SERVICENOW_INCIDENT] incident closed (state={closed.get('state')})")
 
         log("Phase SERVICENOW_INCIDENT PASSED")
         return {"status": "passed", "sys_id": sys_id}
