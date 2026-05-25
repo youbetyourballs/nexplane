@@ -77,9 +77,9 @@ async def get_change_type(token: str, change_type: str) -> dict[str, Any]:
 @mcp.tool()
 async def list_change_requests(
     token: str,
-    status: Optional[str] = None,
-    change_type: Optional[str] = None,
-    asset_id: Optional[str] = None,
+    status: str = None,
+    change_type: str = None,
+    asset_id: str = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
@@ -276,7 +276,7 @@ async def create_change_request(
 
 
 @mcp.tool()
-async def approve_change_request(token: str, cr_id: str, comment: Optional[str] = None) -> dict[str, Any]:
+async def approve_change_request(token: str, cr_id: str, comment: str = None) -> dict[str, Any]:
     """
     Approve a Change Request. Respects the authenticated user's role — tokens without approval
     permission will be rejected. A user cannot approve a CR they created (platform-enforced).
