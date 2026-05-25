@@ -43,3 +43,58 @@ def test_fernet_backend_encrypt_json_decrypt_json_roundtrip():
     assert isinstance(encrypted, str)
     result = backend.decrypt_json(encrypted)
     assert result == data
+
+
+def test_vault_backend_satisfies_protocol():
+    from unittest.mock import MagicMock
+    from app.services.secret_backend import SecretBackend
+    from app.services.backends.vault_kv_backend import VaultKVBackend
+    mock_client = MagicMock()
+    backend = VaultKVBackend(addr="http://localhost:8200", token="root", _client=mock_client)
+    assert isinstance(backend, SecretBackend)
+
+
+def test_vault_backend_encrypt_json_writes_to_vault():
+    from unittest.mock import MagicMock
+    from app.services.backends.vault_kv_backend import VaultKVBackend
+    mock_client = MagicMock()
+    backend = VaultKVBackend(addr="http://localhost:8200", token="root", _client=mock_client)
+    connector_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    data = {"username": "admin", "password": "s3cr3t"}
+    path = backend.encrypt_json(data, connector_id=connector_id)
+    mock_client.secrets.kv.v2.create_or_update_secret.assert_called_once_with(
+        path=f"nexplane/connectors/{connector_id}",
+        secret=data,
+        mount_point="secret",
+    )
+    assert path == f"secret/data/nexplane/connectors/{connector_id}"
+
+
+def test_vault_backend_decrypt_json_reads_from_vault():
+    from unittest.mock import MagicMock
+    from app.services.backends.vault_kv_backend import VaultKVBackend
+    mock_client = MagicMock()
+    mock_client.secrets.kv.v2.read_secret_version.return_value = {
+        "data": {"data": {"username": "admin", "password": "s3cr3t"}}
+    }
+    backend = VaultKVBackend(addr="http://localhost:8200", token="root", _client=mock_client)
+    path = "secret/data/nexplane/connectors/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    result = backend.decrypt_json(path)
+    assert result == {"username": "admin", "password": "s3cr3t"}
+    mock_client.secrets.kv.v2.read_secret_version.assert_called_once_with(
+        path="nexplane/connectors/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        mount_point="secret",
+    )
+
+
+def test_vault_backend_encrypt_decrypt_single_value():
+    from unittest.mock import MagicMock
+    from app.services.backends.vault_kv_backend import VaultKVBackend
+    mock_client = MagicMock()
+    mock_client.secrets.kv.v2.read_secret_version.return_value = {
+        "data": {"data": {"v": "my-secret-value"}}
+    }
+    backend = VaultKVBackend(addr="http://localhost:8200", token="root", _client=mock_client)
+    path = backend.encrypt("my-secret-value", connector_id="test-id")
+    result = backend.decrypt(path)
+    assert result == "my-secret-value"
