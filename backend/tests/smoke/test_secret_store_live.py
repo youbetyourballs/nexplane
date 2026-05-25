@@ -14,11 +14,9 @@ import os
 import time
 import uuid
 import boto3
-import pytest
 
 
 SMOKE_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
-SMOKE_CONNECTOR_ID = f"smoke-{uuid.uuid4()}"
 SMOKE_DATA = {"username": "smokeuser", "password": "smoke-secret-value-12345", "host": "10.0.0.1"}
 
 
@@ -136,9 +134,18 @@ def _launch_vault_instance(ec2_client, ssm_client, iam_client):
         resp_s = ssm_client.send_command(
             InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
             Parameters={"commands": [VAULT_SETUP_SCRIPT]}, TimeoutSeconds=120)
-        time.sleep(35)
-        out_s = ssm_client.get_command_invocation(
-            CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+        # Poll until command completes (up to 180s)
+        deadline_setup = time.time() + 180
+        out_s = {}
+        while time.time() < deadline_setup:
+            try:
+                out_s = ssm_client.get_command_invocation(
+                    CommandId=resp_s["Command"]["CommandId"], InstanceId=instance_id)
+                if out_s.get("Status") in ("Success", "Failed", "TimedOut", "Cancelled"):
+                    break
+            except Exception:
+                pass
+            time.sleep(10)
         if "VAULT_SETUP_COMPLETE" in out_s.get("StandardOutputContent", ""):
             print("  Vault setup complete, caching AMI", flush=True)
             _get_or_create_smoke_ami_safe(ssm_client, ec2_client, instance_id, "vault-dev", VAULT_SETUP_HASH)
@@ -154,7 +161,20 @@ def _launch_vault_instance(ec2_client, ssm_client, iam_client):
         r2 = ssm_client.send_command(
             InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
             Parameters={"commands": [start_cmd]}, TimeoutSeconds=60)
-        time.sleep(15)
+        # Poll for restart completion
+        deadline_restart = time.time() + 60
+        out_r = {}
+        while time.time() < deadline_restart:
+            try:
+                out_r = ssm_client.get_command_invocation(
+                    CommandId=r2["Command"]["CommandId"], InstanceId=instance_id)
+                if out_r.get("Status") in ("Success", "Failed", "TimedOut", "Cancelled"):
+                    break
+            except Exception:
+                pass
+            time.sleep(5)
+        if "VAULT_RESTARTED" not in out_r.get("StandardOutputContent", ""):
+            print(f"  WARNING: Vault restart output: {out_r.get('StandardOutputContent', '')[:100]}", flush=True)
 
     return instance_id, private_ip
 
@@ -226,7 +246,7 @@ def test_asm_backend_live():
     print("  [ASM] Direct Secrets Manager read OK", flush=True)
 
     updated_data = {**SMOKE_DATA, "password": "updated-smoke-value-99999"}
-    backend.encrypt_json(updated_data, connector_id=connector_id)
+    stored_name = backend.encrypt_json(updated_data, connector_id=connector_id)
     assert backend.decrypt_json(stored_name) == updated_data
     print("  [ASM] Update roundtrip OK", flush=True)
 
