@@ -1,10 +1,10 @@
 {
   "change_type": "bind_check_record",
   "display_name": "Bind Check Record",
-  "description": "Executes Bind Check Record operation.",
+  "description": "Queries a specific DNS record from a BIND9 zone and returns its current value.",
   "steps": [
     {
-      "generic_action": "bind_check_record",
+      "generic_action": "check_dns_record",
       "purpose": "execute",
       "required": true
     }
@@ -15,6 +15,6 @@
   "verification_methods": [
     "api_check"
   ],
-  "rollback_action": "bind_check_record",
+  "rollback_action": null,
   "rollback_connector_type": "bind_dns"
 }

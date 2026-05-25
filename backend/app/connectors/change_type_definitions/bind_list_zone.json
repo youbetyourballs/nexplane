@@ -1,10 +1,10 @@
 {
   "change_type": "bind_list_zone",
   "display_name": "Bind List Zone",
-  "description": "Executes Bind List Zone operation.",
+  "description": "Lists all records in a BIND9 DNS zone via AXFR transfer.",
   "steps": [
     {
-      "generic_action": "bind_list_zone",
+      "generic_action": "list_dns_records",
       "purpose": "execute",
       "required": true
     }
@@ -15,6 +15,6 @@
   "verification_methods": [
     "api_check"
   ],
-  "rollback_action": "bind_list_zone",
+  "rollback_action": null,
   "rollback_connector_type": "bind_dns"
 }
