@@ -13128,6 +13128,12 @@ def run_phase_servicenow_incident(client: NexplaneClient) -> dict:
     sys_id = None
     try:
         with httpx.Client(auth=auth, headers={"Content-Type": "application/json", "Accept": "application/json"}) as http:
+            # Check for hibernating instance (developer instances auto-hibernate)
+            _ping = http.get(f"{sn_instance.rstrip('/')}/api/now/table/incident?sysparm_limit=1")
+            if "hibernat" in _ping.text.lower() or "Instance Hibernating" in _ping.text:
+                print("SKIP: SERVICENOW instance is hibernating — wake it at developer.servicenow.com first")
+                return {"status": "skipped", "reason": "instance hibernating"}
+
             # Create incident
             payload = {
                 "short_description": "Nexplane smoke test incident",
