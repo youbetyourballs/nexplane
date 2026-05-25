@@ -58,3 +58,4 @@ redis>=5.0.0
 psycopg2-binary>=2.9.0
 pywinrm>=0.4.3
 requests-ntlm>=1.2.0
+mcp[cli]>=1.0.0
