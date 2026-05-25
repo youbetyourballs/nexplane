@@ -63,6 +63,13 @@ async def start():
         id="identity_sync",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _run_kev_refresh,
+        trigger="interval",
+        hours=24,
+        id="cisa_kev_refresh",
+        replace_existing=True,
+    )
 
     if _db_factory is None:
         return
@@ -193,6 +200,14 @@ async def _run_identity_sync():
             logger.info("Identity sync completed: %s", stats)
         except Exception as exc:
             logger.error("Identity sync failed: %s", exc)
+
+
+async def _run_kev_refresh():
+    from app.services.vuln_poc_service import refresh_kev_cache
+    try:
+        await refresh_kev_cache()
+    except Exception as exc:
+        logger.warning("CISA KEV refresh job failed: %s", exc)
 
 
 async def _run_smoke_reaper():
