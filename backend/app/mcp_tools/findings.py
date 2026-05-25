@@ -30,10 +30,10 @@ async def _auth(token: str):
 @mcp.tool()
 async def list_findings(
     token: str,
-    status: Optional[str] = None,
-    severity: Optional[str] = None,
-    cve_id: Optional[str] = None,
-    asset_id: Optional[str] = None,
+    status: str = None,
+    severity: str = None,
+    cve_id: str = None,
+    asset_id: str = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
@@ -266,7 +266,7 @@ async def mark_false_positive(token: str, finding_id: str) -> dict[str, Any]:
 async def trigger_poc_validation(
     token: str,
     finding_id: str,
-    asset_id: Optional[str] = None,
+    asset_id: str = None,
 ) -> dict[str, Any]:
     """
     Trigger a PoC validation run for this finding. If the CVE is on the CISA KEV catalog,
