@@ -29,6 +29,7 @@ from app.routers.credential_discovery import router as credential_discovery_rout
 from app.routers.smoke_test_runs import router as smoke_test_runs_router
 from app.routers.identity import router as identity_router
 from app.routers.api_tokens import router as api_tokens_router
+from app.mcp_server import create_mcp_app
 from app.services import scheduler_service
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.workers.escalation_worker import check_emergency_escalations
@@ -164,6 +165,7 @@ app.include_router(credential_discovery_router)
 app.include_router(smoke_test_runs_router)
 app.include_router(identity_router)
 app.include_router(api_tokens_router)
+app.mount("/mcp", create_mcp_app())
 
 
 @app.get("/change-requests/{cr_id}/audit-events", tags=["Audit"])
