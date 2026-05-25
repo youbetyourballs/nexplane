@@ -116,7 +116,7 @@ async def get_runbook(token: str, runbook_id: str) -> dict[str, Any]:
 async def execute_runbook(
     token: str,
     runbook_id: str,
-    target_asset_ids: list[str],
+    target_asset_ids: list,
     context: dict = None,
 ) -> dict[str, Any]:
     """
