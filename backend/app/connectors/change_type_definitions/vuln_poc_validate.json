@@ -1,0 +1,16 @@
+{
+  "change_type": "vuln_poc_validate",
+  "display_name": "Vulnerability PoC Validation",
+  "description": "Read-only probe that tests whether a CVE is actively exploitable against a target asset using a credentialed Nessus plugin check or Metasploit check mode. Never modifies the target. Rollback: N/A.",
+  "steps": [
+    {"generic_action": "run_poc_check", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["asset_exists"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "cve_id":     {"type": "string", "required": true},
+    "asset_id":   {"type": "string", "required": true},
+    "poc_source": {"type": "string", "enum": ["metasploit_module", "nessus_plugin", "exploitdb_ref"], "required": true},
+    "poc_ref":    {"type": "string", "required": false}
+  }
+}
