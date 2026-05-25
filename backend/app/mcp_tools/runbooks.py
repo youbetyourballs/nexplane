@@ -1,7 +1,6 @@
 """
 Nexplane MCP tools — Runbooks domain (4 tools).
 """
-from __future__ import annotations
 import uuid as _uuid
 from typing import Any, Optional
 

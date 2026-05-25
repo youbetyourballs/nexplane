@@ -1,7 +1,6 @@
 """
 Nexplane MCP tools — Assets domain (5 tools).
 """
-from __future__ import annotations
 import uuid as _uuid
 from typing import Any, Optional
 

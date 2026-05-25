@@ -4,7 +4,6 @@ Nexplane MCP tools — Change Requests domain (10 tools).
 All infrastructure-touching write tools produce CRs in draft state.
 The caller must separately approve and execute.
 """
-from __future__ import annotations
 import uuid as _uuid
 from typing import Any, Optional
 

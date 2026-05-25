@@ -1,5 +1,4 @@
 """Asset context bundle — assembled automatically for planning-adjacent MCP tools."""
-from __future__ import annotations
 import uuid
 from typing import Any
 
