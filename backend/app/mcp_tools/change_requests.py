@@ -231,7 +231,7 @@ async def create_change_request(
     change_type: str,
     asset_id: str,
     title: str,
-    parameters: dict[str, Any],
+    parameters: dict,
 ) -> dict[str, Any]:
     """
     Create a draft Change Request for a specific change_type against a target asset.
