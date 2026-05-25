@@ -95,6 +95,13 @@ export default function MitigationPanel({ findingId, onApplied }: Props) {
                   Recommended · {Math.round(s.confidence * 100)}%
                 </span>
               )}
+              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                s.impact === "high" ? "bg-red-100 text-red-700" :
+                s.impact === "medium" ? "bg-yellow-100 text-yellow-700" :
+                "bg-green-100 text-green-600"
+              }`}>
+                {s.impact} impact
+              </span>
               {s.impact === "high" && (
                 <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">⚠ High impact</span>
               )}
@@ -111,7 +118,7 @@ export default function MitigationPanel({ findingId, onApplied }: Props) {
           disabled={selected.size === 0 || applyMutation.isPending}
           className="px-3 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 disabled:opacity-50"
         >
-          {applyMutation.isPending ? "Applying…" : `Apply ${selected.size} mitigation${selected.size !== 1 ? "s" : ""}`}
+          {applyMutation.isPending ? "Applying…" : `Apply ${selected.size} mitigations (defense in depth)`}
         </button>
         <span className="text-xs text-slate-400">All mitigations are reversible. Finding stays open until patched.</span>
       </div>
