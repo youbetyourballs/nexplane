@@ -5,7 +5,6 @@ All tools authenticate via API token passed as the `token` argument.
 Write operations that touch external systems produce CRs in draft state.
 Direct status updates (assign, accept_risk, etc.) modify Nexplane metadata only.
 """
-from __future__ import annotations
 import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
