@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 
 const MitigationPanel = React.lazy(() => import("./MitigationPanel"));
@@ -17,6 +17,21 @@ interface Finding {
   severity: string;
   status: string;
   assigned_to_user_id: string | null;
+  exploitability_result: string | null;
+  poc_source: string | null;
+  poc_ref: string | null;
+  verification_result: string | null;
+  verified_at: string | null;
+  verification_failed: boolean;
+}
+
+interface FindingCR {
+  id: string;
+  cr_id: string;
+  role: string;
+  created_at: string;
+  cr_status: string;
+  cr_title: string;
 }
 
 interface Props {
@@ -55,6 +70,46 @@ export default function FindingActionPanel({ finding, onClose, onUpdated }: Prop
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["findings"] }); onUpdated(); },
   });
 
+  const { data: crList } = useQuery<FindingCR[]>({
+    queryKey: ["finding-crs", finding.id],
+    queryFn: () =>
+      apiClient
+        .get<FindingCR[]>(`/api/v1/vulnerability/findings/${finding.id}/change-requests`)
+        .then((r) => r.data),
+    refetchInterval: 10000,
+  });
+
+  const pocMutation = useMutation({
+    mutationFn: () =>
+      apiClient.post(`/api/v1/vulnerability/findings/${finding.id}/poc-validate`, {
+        asset_id: finding.asset_id,
+      }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["findings"] }); onUpdated(); },
+  });
+
+  const challengeMutation = useMutation({
+    mutationFn: (reason: string) =>
+      apiClient.post(`/api/v1/vulnerability/findings/${finding.id}/challenge`, { reason }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["findings"] }); onUpdated(); },
+  });
+
+  const verifyMutation = useMutation({
+    mutationFn: () =>
+      apiClient.post(`/api/v1/vulnerability/findings/${finding.id}/verify`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["findings"] }); onUpdated(); },
+  });
+
+  const [challengeReason, setChallengeReason] = useState("");
+  const [showChallengeInput, setShowChallengeInput] = useState(false);
+
+  function pocBadge() {
+    if (finding.poc_source === "cisa_kev") return <span className="badge-red">KEV confirmed</span>;
+    if (finding.exploitability_result === "exploited") return <span className="badge-red">PoC — exploited</span>;
+    if (finding.exploitability_result === "not_exploited") return <span className="badge-green">PoC — not exploited</span>;
+    if (finding.exploitability_result === "inconclusive") return <span className="badge-yellow">PoC — inconclusive</span>;
+    return <span className="badge-gray">No PoC run</span>;
+  }
+
   return (
     <div className="bg-slate-50 border-t border-slate-200 px-4 py-4 space-y-3">
       {/* CVE summary */}
@@ -67,6 +122,90 @@ export default function FindingActionPanel({ finding, onClose, onUpdated }: Prop
           </p>
         )}
       </div>
+
+      {/* Exploitability bar */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {finding.cve_id && <span className="font-mono text-sm text-slate-600">{finding.cve_id}</span>}
+        {pocBadge()}
+        {finding.poc_source !== "cisa_kev" && (
+          <button
+            className="text-xs text-blue-600 underline disabled:opacity-40"
+            disabled={finding.status === "challenged" || pocMutation.isPending}
+            onClick={() => setShowChallengeInput(true)}
+          >
+            Challenge exploitability
+          </button>
+        )}
+        {pocMutation.isPending && <span className="text-xs text-slate-400">Running PoC…</span>}
+        {!finding.exploitability_result && (
+          <button
+            className="text-xs text-blue-600 underline disabled:opacity-40"
+            disabled={pocMutation.isPending}
+            onClick={() => pocMutation.mutate()}
+          >
+            Run PoC validation
+          </button>
+        )}
+      </div>
+
+      {showChallengeInput && (
+        <div className="flex gap-2 items-start">
+          <textarea
+            className="flex-1 border rounded p-1 text-sm"
+            rows={2}
+            placeholder="Reason this finding is not exploitable in your environment…"
+            value={challengeReason}
+            onChange={(e) => setChallengeReason(e.target.value)}
+          />
+          <button
+            className="text-sm bg-orange-500 text-white px-2 py-1 rounded disabled:opacity-40"
+            disabled={!challengeReason.trim() || challengeMutation.isPending}
+            onClick={() => {
+              challengeMutation.mutate(challengeReason);
+              setShowChallengeInput(false);
+            }}
+          >
+            Submit
+          </button>
+        </div>
+      )}
+
+      {/* Active CR tracker */}
+      {crList && crList.length > 0 && (
+        <div className="border rounded p-2 space-y-1">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Active Remediation CRs</p>
+          {crList.map((cr) => (
+            <div key={cr.id} className="flex items-center justify-between text-sm">
+              <span className="text-slate-700">
+                <span className="capitalize text-xs bg-slate-100 px-1 rounded mr-1">{cr.role}</span>
+                {cr.cr_title}
+              </span>
+              <span className={`text-xs font-mono ${cr.cr_status === "executed" ? "text-green-600" : "text-slate-400"}`}>
+                {cr.cr_status}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Verification result */}
+      {finding.verification_result && (
+        <div className={`text-sm px-3 py-2 rounded ${finding.verification_result === "resolved" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+          {finding.verification_result === "resolved" && "Scanner confirmed resolved"}
+          {finding.verification_result === "still_vulnerable" && "Scanner: still vulnerable — add mitigations or escalate"}
+          {finding.verification_result === "inconclusive" && "Verification inconclusive — re-run manually"}
+          {finding.verified_at && (
+            <span className="text-xs ml-2 opacity-60">{new Date(finding.verified_at).toLocaleString()}</span>
+          )}
+          <button
+            className="ml-3 text-xs underline"
+            disabled={verifyMutation.isPending}
+            onClick={() => verifyMutation.mutate()}
+          >
+            Re-verify now
+          </button>
+        </div>
+      )}
 
       {/* Action buttons */}
       <div className="flex flex-wrap gap-2">
