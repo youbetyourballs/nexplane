@@ -41,16 +41,15 @@ async def _attach_credentials(connector, db) -> None:
     """Decrypt and attach credentials dict to connector object."""
     from sqlalchemy import select
     from app.models.connector_credential import ConnectorCredential
-    from app.services.secrets_service import SecretsService
-    from app import config as app_config
+    from app.services.secret_backend_factory import get_secret_backend
 
     result = await db.execute(
         select(ConnectorCredential).where(ConnectorCredential.connector_id == connector.id)
     )
     cred_row = result.scalar_one_or_none()
     if cred_row:
-        svc = SecretsService(app_config.settings.SECRET_KEY)
-        connector.credentials = svc.decrypt_json(cred_row.credentials_encrypted)
+        backend = get_secret_backend()
+        connector.credentials = backend.decrypt_json(cred_row.credentials_encrypted)
     else:
         connector.credentials = {}
 
