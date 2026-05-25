@@ -6993,6 +6993,20 @@ def run_phase_snyk_scan(client: NexplaneClient, cloud_account_id: str) -> dict:
         print("SKIP: Snyk credentials not in SSM (/nexplane/smoke/snyk/api_token and /nexplane/smoke/snyk/org_id)")
         return {"status": "skipped"}
 
+    # Check API entitlement before attempting scan — free plan blocks API access
+    try:
+        import httpx as _httpx
+        _chk = _httpx.get(
+            f"https://api.snyk.io/v1/org/{org_id}",
+            headers={"Authorization": f"token {api_token}"},
+            timeout=10,
+        )
+        if _chk.status_code == 403 or "not entitled" in _chk.text.lower():
+            print("SKIP: Snyk org not entitled for API access (free plan) — upgrade to use SNYK_SCAN phase")
+            return {"status": "skipped", "reason": "plan not entitled"}
+    except Exception:
+        pass
+
     # Import SnykClient from the bundled connector package
     try:
         import sys as _sys
