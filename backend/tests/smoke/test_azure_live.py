@@ -1005,7 +1005,8 @@ def main():
         help=(
             "Comma-separated phases to run. "
             "N-O: VM lifecycle. P=NSG, Q=Storage, R=Tagging, S=Terraform, T=Ansible. "
-            "U=VNet, V=Storage-CRUD, W=IAM-RBAC, X=DNS, Y=SQL, Z=Monitor. Default: N,O."
+            "U=VNet, V=Storage-CRUD, W=IAM-RBAC, X=DNS, Y=SQL, Z=Monitor. "
+            "BICEP=ARM/Bicep deployment lifecycle (create→discover→delete). Default: N,O."
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key")
@@ -1056,6 +1057,8 @@ def main():
             run_phase_y(client, cloud_account_id, args.azure_resource_group)
         if "Z" in phases:
             run_phase_z(client, cloud_account_id, args.azure_resource_group, azure_phase_result)
+        if "BICEP" in phases:
+            run_phase_bicep(client, cloud_account_id, args.azure_resource_group)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
@@ -1074,6 +1077,99 @@ def main():
             print("\n❌ SMOKE TEST FAILED")
             import sys as _sys
             _sys.exit(1)
+
+
+def run_phase_bicep(client, cloud_account_id: str, azure_resource_group: str) -> None:
+    import secrets
+    print("\n" + "=" * 60)
+    print("Phase BICEP: ARM/Bicep deployment lifecycle (create→discover→delete)")
+    print("=" * 60)
+
+    suffix = secrets.token_hex(3)  # 6-char hex
+    deployment_name = f"nexplane-smoke-bicep-{suffix}"
+    storage_suffix = secrets.token_hex(4)  # 8-char hex
+    storage_account_name = f"nexsmk{storage_suffix}"
+
+    arm_template = {
+        "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+        "contentVersion": "1.0.0.0",
+        "parameters": {
+            "storageAccountName": {"type": "string"}
+        },
+        "resources": [
+            {
+                "type": "Microsoft.Storage/storageAccounts",
+                "apiVersion": "2022-09-01",
+                "name": "[parameters('storageAccountName')]",
+                "location": "[resourceGroup().location]",
+                "sku": {"name": "Standard_LRS"},
+                "kind": "StorageV2",
+            }
+        ],
+    }
+
+    parameters = {"storageAccountName": {"value": storage_account_name}}
+
+    log(f"Creating ARM deployment: {deployment_name} (storage: {storage_account_name})")
+    result = client.run_cr(
+        f"Smoke BICEP create_deployment {deployment_name}",
+        "create_deployment",
+        cloud_account_id,
+        {
+            "resource_group": azure_resource_group,
+            "deployment_name": deployment_name,
+            "template": arm_template,
+            "parameters": parameters,
+        },
+    )
+    if result.get("status") != "Succeeded":
+        fail(f"create_deployment did not succeed: {result}")
+    log(f"Deployment created with status: {result.get('status')}")
+
+    log("Discovering deployments to verify our deployment appears")
+    result = client.run_cr(
+        "Smoke BICEP discover_deployments",
+        "discover_deployments",
+        cloud_account_id,
+        {"resource_group": azure_resource_group},
+    )
+    deployments = result.get("deployments", [])
+    names = [d["name"] for d in deployments]
+    if deployment_name not in names:
+        fail(f"Deployment {deployment_name} not found in discover_deployments result: {names}")
+    our = next(d for d in deployments if d["name"] == deployment_name)
+    if our.get("status") != "Succeeded":
+        fail(f"Deployment status expected Succeeded, got: {our.get('status')}")
+    log(f"Deployment {deployment_name} found with status Succeeded")
+
+    log(f"Deleting deployment: {deployment_name}")
+    client.run_cr(
+        f"Smoke BICEP delete_deployment {deployment_name}",
+        "delete_deployment",
+        cloud_account_id,
+        {
+            "resource_group": azure_resource_group,
+            "deployment_name": deployment_name,
+        },
+    )
+    log("delete_deployment CR complete; verifying via Azure SDK")
+
+    from azure.mgmt.resources import ResourceManagementClient
+    from azure.identity import ClientSecretCredential
+
+    creds_dict = _get_azure_creds()
+    credential = ClientSecretCredential(
+        tenant_id=creds_dict["tenant_id"],
+        client_id=creds_dict["client_id"],
+        client_secret=creds_dict["client_secret"],
+    )
+    rm_client = ResourceManagementClient(credential, creds_dict["subscription_id"])
+    remaining = list(rm_client.deployments.list_by_resource_group(azure_resource_group))
+    remaining_names = [d.name for d in remaining]
+    if deployment_name in remaining_names:
+        fail(f"Deployment {deployment_name} still present after delete_deployment CR")
+    log(f"Confirmed deployment {deployment_name} is gone")
+    print("Phase BICEP PASSED")
 
 
 if __name__ == "__main__":
