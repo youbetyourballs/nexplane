@@ -63,6 +63,11 @@ class ChangeType(str, enum.Enum):
     azure_run_command = "azure_run_command"
     # Patch management
     patch_packages = "patch_packages"
+    apply_protocol_control = "apply_protocol_control"
+    disable_kernel_feature = "disable_kernel_feature"
+    apply_registry_fix = "apply_registry_fix"
+    remove_vulnerable_package = "remove_vulnerable_package"
+    revoke_exposed_credential = "revoke_exposed_credential"
     patch_campaign = "patch_campaign"
     # Vulnerability remediation
     s3_block_public_access = "s3_block_public_access"
