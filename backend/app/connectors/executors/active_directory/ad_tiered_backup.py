@@ -275,12 +275,27 @@ _BACKUP_JOB_TIMEOUT = 7200       # 2 hours max per job
 
 
 def _ensure_backup_vault(backup_client, vault_name: str) -> None:
-    """Create the AWS Backup vault if it doesn't exist."""
+    """Create the AWS Backup vault if it doesn't exist.
+
+    DescribeBackupVault may return AccessDeniedException for certain vaults (e.g. the
+    managed Default vault) even when the caller has full Backup permissions. We therefore
+    treat any non-AlreadyExists error from create_backup_vault as the source of truth
+    rather than relying on describe succeeding.
+    """
     try:
         backup_client.describe_backup_vault(BackupVaultName=vault_name)
-    except backup_client.exceptions.ResourceNotFoundException:
+        return  # vault exists and is readable
+    except Exception:
+        pass  # fall through and try creating
+
+    try:
         backup_client.create_backup_vault(BackupVaultName=vault_name)
         logger.info("Tier 1: created backup vault %s", vault_name)
+    except Exception as exc:
+        if "AlreadyExists" in type(exc).__name__ or "AlreadyExists" in str(exc):
+            logger.info("Tier 1: backup vault %s already exists", vault_name)
+        else:
+            raise
 
 
 def _start_backup_job(backup_client, vault_name: str, instance_id: str,
