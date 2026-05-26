@@ -95,7 +95,7 @@ async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dic
             password=creds["bind_password"],
             auto_bind=True,
         ) as conn:
-            conn.modify(credential_id, {"userAccountControl": [(MODIFY_REPLACE, 514)]})
+            conn.modify(credential_id, {"userAccountControl": [(MODIFY_REPLACE, [514])]})
         logger.info("Disabled LDAP account %s", credential_id)
         return {"success": True, "rolled_back_available": False}
 
