@@ -53,3 +53,119 @@ async def test_apply_protocol_control_rollback_no_pre_state():
         connector,
     )
     assert result["rolled_back"] is True
+
+
+@pytest.mark.asyncio
+async def test_disable_kernel_feature_execute():
+    from app.connectors.executors.ssh.disable_kernel_feature import execute
+    connector = MagicMock()
+    connector.run_command = AsyncMock(return_value="")
+    result = await execute({"feature": "usb_storage"}, ["asset-1"], connector)
+    assert result["success"] is True
+    assert result["feature"] == "usb_storage"
+    calls = [str(c) for c in connector.run_command.call_args_list]
+    assert any("blacklist usb_storage" in c for c in calls)
+    assert any("rmmod" in c for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_disable_kernel_feature_rollback():
+    from app.connectors.executors.ssh.disable_kernel_feature import rollback
+    connector = MagicMock()
+    connector.run_command = AsyncMock(return_value="")
+    result = await rollback({"feature": "usb_storage"}, {}, connector)
+    assert result["rolled_back"] is True
+    calls = [str(c) for c in connector.run_command.call_args_list]
+    assert any("sed" in c for c in calls)
+    assert any("modprobe" in c for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_apply_registry_fix_execute_new_key():
+    from app.connectors.executors.ssh.apply_registry_fix import execute
+    connector = MagicMock()
+    connector.run_command = AsyncMock(return_value="")
+    result = await execute(
+        {
+            "key_path": r"HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services",
+            "value_name": "fDenyTSConnections",
+            "value_data": "1",
+            "value_type": "DWORD",
+        },
+        ["asset-win-1"],
+        connector,
+    )
+    assert result["success"] is True
+    assert result["pre_state"]["existed"] is False
+
+
+@pytest.mark.asyncio
+async def test_apply_registry_fix_rollback_new_key():
+    from app.connectors.executors.ssh.apply_registry_fix import rollback
+    connector = MagicMock()
+    connector.run_command = AsyncMock(return_value="")
+    result = await rollback(
+        {"key_path": r"HKLM:\TEST", "value_name": "MyVal", "value_data": "1", "value_type": "DWORD"},
+        {"pre_state": {"existed": False, "original_value": None}},
+        connector,
+    )
+    assert result["rolled_back"] is True
+    calls = [str(c) for c in connector.run_command.call_args_list]
+    assert any("Remove-ItemProperty" in c for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_apply_registry_fix_rollback_existing_key():
+    from app.connectors.executors.ssh.apply_registry_fix import rollback
+    connector = MagicMock()
+    connector.run_command = AsyncMock(return_value="")
+    result = await rollback(
+        {"key_path": r"HKLM:\TEST", "value_name": "MyVal", "value_data": "1", "value_type": "DWORD"},
+        {"pre_state": {"existed": True, "original_value": "0"}},
+        connector,
+    )
+    assert result["rolled_back"] is True
+    calls = [str(c) for c in connector.run_command.call_args_list]
+    assert any("New-ItemProperty" in c for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_remove_vulnerable_package_execute():
+    from app.connectors.executors.ssh.remove_vulnerable_package import execute
+    connector = MagicMock()
+    connector.run_command = AsyncMock(side_effect=[
+        "telnet-0.17-65.el8.x86_64\n",
+        "",
+    ])
+    result = await execute({"package_name": "telnet", "target_os": "linux"}, ["a1"], connector)
+    assert result["success"] is True
+    assert "telnet" in result["pre_state"]["installed_version"]
+
+
+@pytest.mark.asyncio
+async def test_remove_vulnerable_package_rollback_with_version():
+    from app.connectors.executors.ssh.remove_vulnerable_package import rollback
+    connector = MagicMock()
+    connector.run_command = AsyncMock(return_value="")
+    result = await rollback(
+        {"package_name": "telnet", "target_os": "linux"},
+        {"pre_state": {"installed_version": "telnet-0.17-65.el8.x86_64"}},
+        connector,
+    )
+    assert result["rolled_back"] is True
+    calls = [str(c) for c in connector.run_command.call_args_list]
+    assert any("install" in c for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_remove_vulnerable_package_rollback_no_version():
+    from app.connectors.executors.ssh.remove_vulnerable_package import rollback
+    connector = MagicMock()
+    connector.run_command = AsyncMock(return_value="")
+    result = await rollback(
+        {"package_name": "telnet", "target_os": "linux"},
+        {"pre_state": {"installed_version": None}},
+        connector,
+    )
+    assert result["rolled_back"] is False
+    assert "version" in result["reason"]
