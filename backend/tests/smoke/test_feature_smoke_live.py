@@ -333,18 +333,10 @@ def phase_credential_expiry(client: NexplaneClient) -> None:
         # Enable a database secrets engine and create a short-lived lease
         # Use the generic KV lease path for a simpler test: just write a token with short TTL
         # Instead: enable token role with short TTL and issue a token
-        vclient.auth.token.create_or_update_role(
-            role_name="smoke-short-ttl",
-            token_ttl="60s",   # 60-second TTL
-            token_max_ttl="120s",
-            token_renewable=True,
-        )
-        short_token = vclient.auth.token.create(
-            role="smoke-short-ttl",
-            ttl="60s",
-        )
+        # Create a child token with short TTL directly (no role needed)
+        short_token = vclient.auth.token.create(ttl="60s", renewable=True)
         short_token_id = short_token["auth"]["client_token"]
-        log(f"Created short-TTL Vault token (60s TTL)")
+        log(f"Created short-TTL Vault token (60s TTL): {short_token_id[:8]}...")
 
         # 3. Run check_credential_expiry directly inside the container
         import asyncio
