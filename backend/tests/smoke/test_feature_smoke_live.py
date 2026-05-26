@@ -189,34 +189,35 @@ def _launch_vault_instance(ec2_client, ssm_client, iam_client):
 
 # ── Phase: VULN_MITIGATION ────────────────────────────────────────────────────
 
+_VULN_PREFIX = "/api/v1/vulnerability"
+
+
 def phase_vuln_mitigation(client: NexplaneClient) -> None:
     print("\n[VULN_MITIGATION] Verifying new mitigation CR types dispatch", flush=True)
 
     # 1. Find or create a finding to mitigate
-    findings = client.get("/vulnerability/findings", params={"limit": 1})
+    findings = client.get(f"{_VULN_PREFIX}/findings", params={"limit": 1})
     if isinstance(findings, dict):
         items = findings.get("items", [])
     else:
-        items = findings
+        items = findings if isinstance(findings, list) else []
 
     if not items:
-        # Create a minimal finding via the scanner endpoint if none exist
-        # Use a cloud_account asset as the target
+        # Create a minimal finding — use a cloud_account asset as the target
         assets = client.get("/assets", params={"limit": 50})
-        cloud_assets = [a for a in (assets if isinstance(assets, list) else assets.get("items", []))
+        asset_list = assets if isinstance(assets, list) else assets.get("items", [])
+        cloud_assets = [a for a in asset_list
                         if a.get("asset_type") == "cloud_account" and a.get("connector_id")]
         if not cloud_assets:
-            fail("VULN_MITIGATION: No cloud_account assets found to create a finding against")
+            fail("VULN_MITIGATION: No linked cloud_account assets found")
         asset_id = cloud_assets[0]["id"]
 
-        # Create a finding directly via API
-        finding = client.post("/vulnerability/findings", json={
+        finding = client.post(f"{_VULN_PREFIX}/findings", json={
             "title": "Smoke test finding — TLS 1.0 enabled",
             "description": "Smoke test finding for mitigation CR type verification",
             "severity": "medium",
             "asset_id": asset_id,
             "cve_id": "CVE-2011-3389",
-            "mitigation_type": "protocol_control",
         })
         finding_id = finding["id"]
         log("Created smoke finding")
@@ -224,51 +225,47 @@ def phase_vuln_mitigation(client: NexplaneClient) -> None:
         finding_id = items[0]["id"]
         log(f"Using existing finding {finding_id}")
 
-    # 2. Call /mitigate with protocol_control — expect a CR in draft state
+    def _cr_id(r: dict) -> str:
+        return r.get("cr_id") or r.get("id") or r.get("change_request_id") or ""
+
+    # 2. protocol_control → apply_protocol_control
     print("  → mitigate with protocol_control", flush=True)
-    result = client.post(f"/vulnerability/findings/{finding_id}/mitigate", json={
+    r = client.post(f"{_VULN_PREFIX}/findings/{finding_id}/mitigate", json={
         "mitigation_type": "protocol_control",
         "mitigation_parameters": {"protocol": "tls10", "target_os": "linux"},
     })
-    assert "cr_id" in result or "id" in result or "change_request_id" in result, \
-        f"Expected a CR reference in mitigate response, got: {result}"
-    cr_id = result.get("cr_id") or result.get("id") or result.get("change_request_id")
-    log(f"protocol_control mitigate → CR {cr_id}")
-
+    cr_id = _cr_id(r)
+    assert cr_id, f"Expected CR reference in mitigate response, got: {r}"
     cr = client.get(f"/change-requests/{cr_id}")
     assert cr["change_type"] == "apply_protocol_control", \
-        f"Expected change_type=apply_protocol_control, got {cr['change_type']}"
-    assert cr["status"] == "draft", f"Expected CR in draft, got {cr['status']}"
-    log("protocol_control CR has correct change_type and draft status")
+        f"Expected apply_protocol_control, got {cr['change_type']}"
+    assert cr["status"] == "draft"
+    log("protocol_control → apply_protocol_control CR (draft)")
 
-    # 3. Also verify kernel_feature dispatches correctly
+    # 3. kernel_feature → disable_kernel_feature
     print("  → mitigate with kernel_feature", flush=True)
-    result2 = client.post(f"/vulnerability/findings/{finding_id}/mitigate", json={
+    r2 = client.post(f"{_VULN_PREFIX}/findings/{finding_id}/mitigate", json={
         "mitigation_type": "kernel_feature",
         "mitigation_parameters": {"feature": "usb_storage"},
     })
-    cr_id2 = result2.get("cr_id") or result2.get("id") or result2.get("change_request_id")
-    cr2 = client.get(f"/change-requests/{cr_id2}")
+    cr2 = client.get(f"/change-requests/{_cr_id(r2)}")
     assert cr2["change_type"] == "disable_kernel_feature", \
         f"Expected disable_kernel_feature, got {cr2['change_type']}"
-    log("kernel_feature CR has correct change_type")
+    log("kernel_feature → disable_kernel_feature CR")
 
-    # 4. Verify package_remove and credential_revoke dispatch
-    for mt, expected_ct in [
-        ("package_remove", "remove_vulnerable_package"),
-        ("credential_revoke", "revoke_exposed_credential"),
+    # 4. package_remove and credential_revoke
+    for mt, expected_ct, params in [
+        ("package_remove", "remove_vulnerable_package", {"package_name": "telnet"}),
+        ("credential_revoke", "revoke_exposed_credential",
+         {"credential_type": "aws_iam_key", "credential_id": "AKIASMOKE123"}),
     ]:
-        params = {"package_name": "telnet"} if mt == "package_remove" else \
-                 {"credential_type": "aws_iam_key", "credential_id": "AKIASMOKE123"}
-        r = client.post(f"/vulnerability/findings/{finding_id}/mitigate", json={
-            "mitigation_type": mt,
-            "mitigation_parameters": params,
+        rx = client.post(f"{_VULN_PREFIX}/findings/{finding_id}/mitigate", json={
+            "mitigation_type": mt, "mitigation_parameters": params,
         })
-        cr_x_id = r.get("cr_id") or r.get("id") or r.get("change_request_id")
-        cr_x = client.get(f"/change-requests/{cr_x_id}")
-        assert cr_x["change_type"] == expected_ct, \
-            f"Expected {expected_ct}, got {cr_x['change_type']}"
-        log(f"{mt} → {expected_ct} CR dispatched correctly")
+        crx = client.get(f"/change-requests/{_cr_id(rx)}")
+        assert crx["change_type"] == expected_ct, \
+            f"Expected {expected_ct}, got {crx['change_type']}"
+        log(f"{mt} → {expected_ct} CR")
 
     print("[VULN_MITIGATION] PASSED", flush=True)
 
@@ -399,66 +396,102 @@ def phase_mcp_agent_tokens(client: NexplaneClient) -> None:
     assert matching[0]["allowed_cr_types"] == ["patch_packages"]
     log("Token visible in list with correct scope")
 
-    # 3. Use agent token to call an MCP read tool (list assets — requires read role)
-    import httpx
-    agent_client = httpx.Client(timeout=30)
-    agent_client.headers["Authorization"] = f"Bearer {raw_token}"
+    # 3. Test scope enforcement in-process (MCP tools use SSE transport, not REST)
+    #    Call resolve_mcp_token + _enforce_agent_scope directly to verify auth layer
+    import asyncio, threading
 
-    # MCP tools are at /mcp/* — list_assets is a read tool
-    mcp_read_resp = agent_client.post(
-        f"{client.base}/mcp/list_assets",
-        json={"token": raw_token, "limit": 5},
-    )
-    assert mcp_read_resp.status_code == 200, \
-        f"MCP read (list_assets) with agent token failed: {mcp_read_resp.status_code} {mcp_read_resp.text[:200]}"
-    log("MCP read tool (list_assets) allowed with agent token")
+    scope_results = []
 
-    # 4. Verify scope blocks disallowed cr_type: try create_change_request with ssm_command
-    # (not in allowed_cr_types which is ["patch_packages"])
-    # Get a valid asset_id first
-    assets = client.get("/assets", params={"limit": 1})
-    asset_list = assets if isinstance(assets, list) else assets.get("items", [])
-    if asset_list:
-        asset_id = asset_list[0]["id"]
-        mcp_blocked_resp = agent_client.post(
-            f"{client.base}/mcp/create_change_request",
-            json={
-                "token": raw_token,
-                "title": "Smoke test — should be blocked",
-                "change_type": "ssm_command",
-                "asset_id": asset_id,
-                "desired_outcome": {"command": "echo hi"},
-            },
-        )
-        assert mcp_blocked_resp.status_code == 403, \
-            f"Expected 403 for out-of-scope cr_type, got {mcp_blocked_resp.status_code}: {mcp_blocked_resp.text[:200]}"
-        log("Scope enforcement blocks ssm_command (not in allowed_cr_types)")
+    def _run_scope_tests():
+        async def _inner():
+            from app.database import AsyncSessionLocal
+            from app.mcp_server import resolve_mcp_token
+            from app.mcp_tools.context import _enforce_agent_scope
+            from fastapi import HTTPException
 
-    # 5. Revoke the token
+            async with AsyncSessionLocal() as db:
+                # Resolve the agent token
+                user, agent_token = await resolve_mcp_token(raw_token, db)
+                assert user is None, "Expected user=None for agent token"
+                assert agent_token is not None, "Expected agent_token to be resolved"
+                assert agent_token.allowed_cr_types == ["patch_packages"]
+                scope_results.append("resolved_ok")
+
+                # Allowed: read role, patch_packages cr_type
+                _enforce_agent_scope(agent_token, cr_type="patch_packages", required_role="read")
+                scope_results.append("allowed_ok")
+
+                # Blocked: ssm_command is not in allowed_cr_types
+                try:
+                    _enforce_agent_scope(agent_token, cr_type="ssm_command", required_role="write")
+                    scope_results.append("scope_not_blocked")  # should not reach here
+                except HTTPException as e:
+                    assert e.status_code == 403
+                    scope_results.append("blocked_ok")
+
+                # Blocked: approve role not in allowed_roles
+                try:
+                    _enforce_agent_scope(agent_token, required_role="approve")
+                    scope_results.append("role_not_blocked")
+                except HTTPException as e:
+                    assert e.status_code == 403
+                    scope_results.append("role_blocked_ok")
+
+        asyncio.run(_inner())
+
+    t = threading.Thread(target=_run_scope_tests)
+    t.start()
+    t.join(timeout=30)
+
+    assert "resolved_ok" in scope_results, f"Token resolution failed: {scope_results}"
+    assert "allowed_ok" in scope_results, "In-scope call should pass"
+    assert "blocked_ok" in scope_results, "Out-of-scope cr_type should be blocked with 403"
+    assert "role_blocked_ok" in scope_results, "Missing role should be blocked with 403"
+    assert "scope_not_blocked" not in scope_results
+    assert "role_not_blocked" not in scope_results
+    log("Scope enforcement: allowed pass, out-of-scope cr_type and missing role both 403")
+
+    # 4. Revoke the token
     revoke_resp = client.client.delete(f"{client.base}/auth/agent-tokens/{token_id}")
     assert revoke_resp.status_code == 204, \
         f"Expected 204 on revoke, got {revoke_resp.status_code}"
     log("Token revoked (204)")
 
-    # 6. Verify revoked token is rejected (401) on next MCP call
-    time.sleep(1)
-    post_revoke_resp = agent_client.post(
-        f"{client.base}/mcp/list_assets",
-        json={"token": raw_token, "limit": 1},
-    )
-    assert post_revoke_resp.status_code == 401, \
-        f"Expected 401 after revocation, got {post_revoke_resp.status_code}: {post_revoke_resp.text[:200]}"
-    log("Revoked token correctly rejected with 401")
+    # 5. Verify revoked token is rejected (401) by resolve_mcp_token
+    revoked_results = []
 
-    # 7. Verify token appears as revoked in list
+    def _run_revoke_test():
+        async def _inner():
+            from app.database import AsyncSessionLocal
+            from app.mcp_server import resolve_mcp_token
+            from fastapi import HTTPException
+
+            # Need a fresh DB session to see the revoked=True state
+            async with AsyncSessionLocal() as db:
+                try:
+                    user, agent_token = await resolve_mcp_token(raw_token, db)
+                    revoked_results.append(f"not_rejected: user={user} agent={agent_token}")
+                except HTTPException as e:
+                    revoked_results.append(f"rejected_{e.status_code}")
+
+        asyncio.run(_inner())
+
+    t2 = threading.Thread(target=_run_revoke_test)
+    t2.start()
+    t2.join(timeout=15)
+
+    assert revoked_results and revoked_results[0] == "rejected_401", \
+        f"Expected revoked token to raise 401, got: {revoked_results}"
+    log("Revoked token correctly rejected with 401 by resolve_mcp_token")
+
+    # 6. Verify token appears as revoked in list
     tokens_after = client.get("/auth/agent-tokens")
     after_match = [t for t in tokens_after if t["id"] == token_id]
-    # Revoked tokens may be filtered out or shown as revoked — either is correct
     if after_match:
-        assert after_match[0]["revoked"] is True, "Token should be marked revoked"
+        assert after_match[0]["revoked"] is True
         log("Revoked token shows revoked=True in list")
     else:
-        log("Revoked token filtered from list (also correct)")
+        log("Revoked token filtered from list")
 
     print("[MCP_AGENT_TOKENS] PASSED", flush=True)
 
