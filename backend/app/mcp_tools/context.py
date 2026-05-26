@@ -122,3 +122,28 @@ async def build_asset_context(asset_id: uuid.UUID, db: AsyncSession) -> dict[str
         "connected_connectors": connector_list,
         "installed_software": installed_software,
     }
+
+
+def _enforce_agent_scope(
+    agent_token,
+    *,
+    connector_type: str | None = None,
+    asset_tags: list[str] | None = None,
+    cr_type: str | None = None,
+    required_role: str = "read",
+) -> None:
+    """Enforce AgentToken scope constraints. No-op if agent_token is None (ApiToken path)."""
+    if agent_token is None:
+        return
+    from fastapi import HTTPException
+    if required_role not in (agent_token.allowed_roles or []):
+        raise HTTPException(403, f"Agent token does not have '{required_role}' permission")
+    if connector_type and agent_token.allowed_connector_types:
+        if connector_type not in agent_token.allowed_connector_types:
+            raise HTTPException(403, f"Agent token not authorized for connector type '{connector_type}'")
+    if asset_tags and agent_token.allowed_asset_tags:
+        if not any(t in agent_token.allowed_asset_tags for t in asset_tags):
+            raise HTTPException(403, "Agent token not authorized for any of the asset's tags")
+    if cr_type and agent_token.allowed_cr_types:
+        if cr_type not in agent_token.allowed_cr_types:
+            raise HTTPException(403, f"Agent token not authorized for CR type '{cr_type}'")

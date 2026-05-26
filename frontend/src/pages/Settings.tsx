@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Key, Terminal, Copy } from "lucide-react";
 import { ApiTokenManager } from "../components/ApiTokenManager";
+import { AgentTokenManager } from "../components/AgentTokenManager";
 import { settingsApi } from "../api/endpoints";
 import { apiClient } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
@@ -420,6 +421,8 @@ export function Settings() {
       </div>
 
       <ApiTokenManager />
+
+      <AgentTokenManager />
 
     </div>
   );

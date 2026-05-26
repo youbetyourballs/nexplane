@@ -14,7 +14,7 @@ async def _auth(token: str):
     db_cm = AsyncSessionLocal()
     db = await db_cm.__aenter__()
     try:
-        user = await resolve_mcp_token(token, db)
+        user, agent_token = await resolve_mcp_token(token, db)
         return user, db, db_cm
     except HTTPException:
         await db_cm.__aexit__(None, None, None)
