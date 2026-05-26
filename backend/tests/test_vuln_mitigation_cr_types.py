@@ -169,3 +169,37 @@ async def test_remove_vulnerable_package_rollback_no_version():
     )
     assert result["rolled_back"] is False
     assert "version" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_revoke_exposed_credential_mock_mode():
+    from app.connectors.executors.aws.revoke_exposed_credential import execute
+    connector = MagicMock()
+    connector.creds = None
+    result = await execute(
+        {"credential_type": "aws_iam_key", "credential_id": "AKIATEST"},
+        ["asset-1"],
+        connector,
+    )
+    assert result["success"] is True
+    assert result.get("mock") is True
+
+
+@pytest.mark.asyncio
+async def test_revoke_exposed_credential_rollback_always_false():
+    from app.connectors.executors.aws.revoke_exposed_credential import rollback
+    connector = MagicMock()
+    result = await rollback({}, {}, connector)
+    assert result["rolled_back"] is False
+    assert "permanent" in result["reason"]
+
+
+def test_mitigation_cr_map_contains_new_types():
+    from app.routers.vulnerability import MITIGATION_CR_MAP
+    assert "protocol_control" in MITIGATION_CR_MAP
+    assert "kernel_feature" in MITIGATION_CR_MAP
+    assert "registry_fix" in MITIGATION_CR_MAP
+    assert "package_remove" in MITIGATION_CR_MAP
+    assert "credential_revoke" in MITIGATION_CR_MAP
+    assert MITIGATION_CR_MAP["protocol_control"] == "apply_protocol_control"
+    assert MITIGATION_CR_MAP["credential_revoke"] == "revoke_exposed_credential"
