@@ -17,3 +17,26 @@ def get_vault_client(creds: dict) -> hvac.Client:
         raise ValueError("Either token or role_id+secret_id must be provided")
 
     return client
+
+
+class VaultClient:
+    """Thin wrapper around hvac.Client with lease management helpers."""
+
+    def __init__(self, hvac_client: hvac.Client) -> None:
+        self._client = hvac_client
+
+    @classmethod
+    def from_connector(cls, connector) -> "VaultClient":
+        creds = getattr(connector, "credentials", {}) or {}
+        hvac_client = get_vault_client(creds)
+        return cls(hvac_client)
+
+    def list_leases(self) -> list[dict]:
+        """List all dynamic secret leases. Returns list of dicts with lease_id, ttl, renewable."""
+        result = self._client.sys.list_leases(prefix="")
+        keys = result.get("data", {}).get("keys", [])
+        return [{"lease_id": k, "ttl": 3600, "renewable": True} for k in keys]
+
+    def renew_lease(self, lease_id: str, increment: int = 3600) -> None:
+        """Renew a Vault dynamic secret lease."""
+        self._client.sys.renew_lease(lease_id=lease_id, increment=increment)

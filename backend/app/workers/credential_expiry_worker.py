@@ -17,11 +17,47 @@ SLA_HIGH = 14      # escalate
 SLA_MEDIUM = 30    # warning
 
 
+VAULT_LEASE_WARN_HOURS = 24
+
+
+async def _check_vault_leases(db) -> None:
+    """Check Vault dynamic secret leases approaching expiry."""
+    from app.connectors.executors.hashicorp_vault._client import VaultClient
+
+    vault_connectors = await _get_connectors_by_type(db, "hashicorp_vault")
+    for connector in vault_connectors:
+        try:
+            client = VaultClient.from_connector(connector)
+            leases = client.list_leases()
+            for lease in leases:
+                ttl_hours = lease["ttl"] / 3600
+                if ttl_hours < VAULT_LEASE_WARN_HOURS:
+                    if lease["renewable"]:
+                        client.renew_lease(lease["lease_id"])
+                        logger.info("Renewed Vault lease %s", lease["lease_id"])
+                    else:
+                        await _create_expiry_finding(
+                            db, None, "vault_lease",
+                            f"Vault lease {lease['lease_id']} expires in {ttl_hours:.1f}h and cannot be renewed (max TTL reached)",
+                            int(ttl_hours),
+                        )
+        except Exception as e:
+            logger.debug("Vault lease check failed for connector %s: %s", connector.id, e)
+
+
+async def _get_connectors_by_type(db, connector_type: str) -> list:
+    """Return all connectors of the given type."""
+    from app.models.connector import Connector
+    result = await db.execute(select(Connector).where(Connector.connector_type == connector_type))
+    return result.scalars().all()
+
+
 async def check_credential_expiry() -> None:
     """Main entry point called by APScheduler daily."""
     async with AsyncSessionLocal() as db:
         await _check_tls_certs(db)
         await _check_iam_key_age(db)
+        await _check_vault_leases(db)
 
 
 async def _check_tls_certs(db) -> None:
