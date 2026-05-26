@@ -475,7 +475,7 @@ PHASE_FNS = {
 
 
 def main() -> None:
-    parser = make_base_parser()
+    parser = make_base_parser("Feature smoke tests: VULN_MITIGATION, CREDENTIAL_EXPIRY, MCP_AGENT_TOKENS")
     parser.add_argument(
         "--phases",
         default=",".join(ALL_PHASES),
