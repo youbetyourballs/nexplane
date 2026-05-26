@@ -52,12 +52,84 @@ async def _get_connectors_by_type(db, connector_type: str) -> list:
     return result.scalars().all()
 
 
+SSH_KEY_MAX_AGE_DAYS = 365
+ACME_RENEW_DAYS = 30
+
+
+def _key_age_days(added_date_str) -> int | None:
+    if not added_date_str:
+        return None
+    try:
+        added = datetime.strptime(added_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - added).days
+    except ValueError:
+        return None
+
+
+async def _run_ssh_authorized_keys_audit(asset) -> list[dict]:
+    """Stub: call SSH connector's authorized_keys_audit command."""
+    logger.debug(
+        "SSH authorized_keys audit not yet wired to connector for asset %s", asset.id
+    )
+    return []
+
+
+async def _check_ssh_key_age(db) -> None:
+    """Probe SSH authorized_keys age on all SSH-managed assets."""
+    result = await db.execute(
+        select(Asset).where(Asset.asset_type.in_(["server", "ec2_instance"]))
+    )
+    assets = result.scalars().all()
+
+    for asset in assets:
+        keys = await _run_ssh_authorized_keys_audit(asset)
+        for key in keys:
+            age_days = _key_age_days(key.get("added_date"))
+            if age_days and age_days >= SSH_KEY_MAX_AGE_DAYS:
+                label = key.get("comment") or key["key_fingerprint"][:16]
+                await _create_expiry_finding(
+                    db, asset, "ssh_authorized_key",
+                    f"SSH authorized key '{label}' on {asset.name} is {age_days} days old",
+                    SSH_KEY_MAX_AGE_DAYS - age_days,
+                )
+
+
+async def _check_step_ca_certs(db) -> None:
+    """Auto-renew step-CA certs via ACME before they expire."""
+    step_ca_connectors = await _get_connectors_by_type(db, "step_ca")
+    for connector in step_ca_connectors:
+        try:
+            from app.connectors.executors.step_ca._client import StepCAClient
+            client = StepCAClient.from_connector(connector)
+            certs = client.list_certificates()
+            for cert in certs:
+                if not cert["expiry"]:
+                    continue
+                days_left = (cert["expiry"] - datetime.now(timezone.utc)).days
+                if days_left <= ACME_RENEW_DAYS:
+                    try:
+                        client.renew_certificate(cert["serial"])
+                        logger.info(
+                            "Auto-renewed step-CA cert %s (was %dd from expiry)", cert["serial"], days_left
+                        )
+                    except Exception as renew_err:
+                        await _create_expiry_finding(
+                            db, None, "tls_certificate",
+                            f"step-CA cert {cert['serial']} ({cert.get('subject', '')}) expires in {days_left}d — auto-renewal failed: {renew_err}",
+                            days_left,
+                        )
+        except Exception as e:
+            logger.debug("step-CA cert check failed for connector %s: %s", connector.id, e)
+
+
 async def check_credential_expiry() -> None:
     """Main entry point called by APScheduler daily."""
     async with AsyncSessionLocal() as db:
         await _check_tls_certs(db)
         await _check_iam_key_age(db)
         await _check_vault_leases(db)
+        await _check_ssh_key_age(db)
+        await _check_step_ca_certs(db)
 
 
 async def _check_tls_certs(db) -> None:
