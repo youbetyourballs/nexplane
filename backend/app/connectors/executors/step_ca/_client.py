@@ -115,6 +115,64 @@ class StepCAClient:
                 args += ["--provisioner-password-file", f.name]
         return self._run(args)
 
+    def list_certificates(self) -> list[dict]:
+        """List certificates issued by this step-CA. Returns list with serial, subject, expiry (datetime)."""
+        from datetime import datetime, timezone
+        out = self._run([
+            "ca", "admin", "list",
+            "--ca-url", self.ca_url,
+            "--root", "/etc/step/certs/root_ca.crt",
+            "--format", "json",
+        ])
+        try:
+            raw = json.loads(out)
+        except json.JSONDecodeError:
+            raw = []
+        if not isinstance(raw, list):
+            raw = [raw] if raw else []
+        certs = []
+        for item in raw:
+            expiry_str = item.get("expiry") or item.get("not_after")
+            expiry_dt = None
+            if expiry_str:
+                try:
+                    expiry_dt = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
+                except ValueError:
+                    pass
+            certs.append({
+                "serial": item.get("serial", ""),
+                "subject": item.get("subject", ""),
+                "expiry": expiry_dt,
+            })
+        return certs
+
+    def renew_certificate(self, serial: str) -> None:
+        """Trigger ACME renewal for a certificate by serial number."""
+        args = [
+            "ca", "renew",
+            "--ca-url", self.ca_url,
+            "--root", "/etc/step/certs/root_ca.crt",
+            "--serial", serial,
+        ]
+        if self.provisioner_password:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+                f.write(self.provisioner_password)
+                args += ["--provisioner-password-file", f.name]
+        self._run(args)
+
+    @classmethod
+    def from_connector(cls, connector) -> "StepCAClient":
+        """Construct a StepCAClient from a Connector ORM object."""
+        creds = getattr(connector, "credentials", None) or {}
+        ca_url = creds.get("ca_url") or creds.get("url", "")
+        return cls(
+            ca_url=ca_url,
+            fingerprint=creds.get("fingerprint", ""),
+            provisioner=creds.get("provisioner", "admin"),
+            provisioner_password=creds.get("provisioner_password") or creds.get("password"),
+            step_cli=creds.get("step_cli", "step"),
+        )
+
 
 def get_step_ca_client(connector) -> Optional[StepCAClient]:
     creds = getattr(connector, "credentials", None) or {}
