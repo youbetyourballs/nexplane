@@ -27,7 +27,7 @@ python3 -c "
 import asyncio, sys
 sys.path.insert(0,'/app')
 from app.config import settings
-from app.services.secrets_service import SecretsService
+from app.services.secret_backend_factory import get_secret_backend
 from app.models.connector import Connector
 from app.models.connector_credential import ConnectorCredential
 from sqlalchemy import select
@@ -38,17 +38,17 @@ async def get():
     e = create_async_engine(settings.DATABASE_URL, pool_pre_ping=False)
     S = sessionmaker(e, class_=AsyncSession, expire_on_commit=False)
     async with S() as db:
-        svc = SecretsService(settings.SECRET_KEY)
+        backend = get_secret_backend()
         r = await db.execute(select(Connector).where(Connector.connector_type == 'aws'))
         c = r.scalar_one_or_none()
         cr = await db.execute(select(ConnectorCredential).where(ConnectorCredential.connector_id == c.id))
         cc = cr.scalar_one_or_none()
-        aws = svc.decrypt_json(cc.credentials_encrypted)
+        aws = backend.decrypt_json(cc.credentials_encrypted)
         r2 = await db.execute(select(Connector).where(Connector.connector_type == 'tailscale'))
         c2 = r2.scalar_one_or_none()
         cr2 = await db.execute(select(ConnectorCredential).where(ConnectorCredential.connector_id == c2.id))
         cc2 = cr2.scalar_one_or_none()
-        ts = svc.decrypt_json(cc2.credentials_encrypted)
+        ts = backend.decrypt_json(cc2.credentials_encrypted)
         await e.dispose()
         return aws, ts
 

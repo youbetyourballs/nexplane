@@ -14,7 +14,7 @@ class AWSSecretsManagerBackend:
     def _secret_name(self, connector_id: str) -> str:
         return f"nexplane/connectors/{connector_id}"
 
-    def encrypt_json(self, data: dict, connector_id: str = "") -> str:
+    def encrypt_json(self, data: dict, *, connector_id: str = "") -> str:
         name = self._secret_name(connector_id)
         payload = json.dumps(data)
         try:
@@ -27,7 +27,7 @@ class AWSSecretsManagerBackend:
         resp = self._client.get_secret_value(SecretId=stored)
         return json.loads(resp["SecretString"])
 
-    def encrypt(self, value: str, connector_id: str = "") -> str:
+    def encrypt(self, value: str, *, connector_id: str = "") -> str:
         return self.encrypt_json({"v": value}, connector_id=connector_id)
 
     def decrypt(self, stored: str) -> str:

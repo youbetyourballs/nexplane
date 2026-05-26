@@ -291,5 +291,7 @@ async def delete_credentials(
     )
     cred_row = cred_result.scalar_one_or_none()
     if cred_row:
+        from app.services.secret_backend_factory import get_secret_backend
+        get_secret_backend().delete_secret(cred_row.credentials_encrypted)
         await db.delete(cred_row)
         await db.commit()

@@ -10,13 +10,13 @@ def test_secret_backend_is_a_protocol():
 
 
 def test_secret_backend_protocol_methods():
-    # Verify the protocol surface matches what callers expect
     import inspect
     methods = {name for name, _ in inspect.getmembers(SecretBackend, predicate=inspect.isfunction)}
     assert "encrypt" in methods
     assert "decrypt" in methods
     assert "encrypt_json" in methods
     assert "decrypt_json" in methods
+    assert "delete_secret" in methods
 
 
 def test_fernet_backend_satisfies_protocol():
@@ -160,6 +160,38 @@ def test_asm_backend_decrypt_json_reads_secret():
     result = backend.decrypt_json(name)
     assert result == data
     mock_client.get_secret_value.assert_called_once_with(SecretId=name)
+
+
+def test_fernet_backend_delete_secret_is_noop():
+    from app.services.backends.fernet_backend import FernetBackend
+    backend = FernetBackend(secret_key="test-key-for-testing-only")
+    backend.delete_secret("any-stored-value")  # must not raise
+
+
+def test_vault_backend_delete_secret_calls_delete_metadata():
+    from unittest.mock import MagicMock
+    from app.services.backends.vault_kv_backend import VaultKVBackend
+    mock_client = MagicMock()
+    backend = VaultKVBackend(addr="http://localhost:8200", token="root", _client=mock_client)
+    stored = "secret/data/nexplane/connectors/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    backend.delete_secret(stored)
+    mock_client.secrets.kv.v2.delete_metadata_and_all_versions.assert_called_once_with(
+        path="nexplane/connectors/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        mount_point="secret",
+    )
+
+
+def test_asm_backend_delete_secret_calls_delete():
+    from unittest.mock import MagicMock
+    from app.services.backends.aws_secrets_manager_backend import AWSSecretsManagerBackend
+    mock_client = MagicMock()
+    backend = AWSSecretsManagerBackend(region="us-east-1", _client=mock_client)
+    stored = "nexplane/connectors/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    backend.delete_secret(stored)
+    mock_client.delete_secret.assert_called_once_with(
+        SecretId=stored,
+        ForceDeleteWithoutRecovery=True,
+    )
 
 
 def test_factory_returns_fernet_by_default(monkeypatch):
