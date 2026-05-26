@@ -40,3 +40,47 @@ async def test_discover_api_key_consumers_no_match():
 
     consumers = await _discover_api_key_consumers(db, "AKIAIOSFODNN7EXAMPLE", "aws_iam_key")
     assert consumers == []
+
+
+@pytest.mark.asyncio
+async def test_check_vault_leases_renews_renewable():
+    from app.workers.credential_expiry_worker import _check_vault_leases
+
+    connector = MagicMock()
+    connector.id = "vault-conn-1"
+    db = AsyncMock(spec=AsyncSession)
+
+    short_ttl_lease = {"lease_id": "database/creds/my-role/abc", "ttl": 3600, "renewable": True}
+
+    with patch("app.workers.credential_expiry_worker._get_connectors_by_type", new=AsyncMock(return_value=[connector])), \
+         patch("app.connectors.executors.hashicorp_vault._client.VaultClient") as mock_cls:
+
+        mock_client = MagicMock()
+        mock_client.list_leases.return_value = [short_ttl_lease]
+        mock_cls.from_connector.return_value = mock_client
+
+        await _check_vault_leases(db)
+        mock_client.renew_lease.assert_called_once_with(short_ttl_lease["lease_id"])
+
+
+@pytest.mark.asyncio
+async def test_check_vault_leases_creates_finding_when_not_renewable():
+    from app.workers.credential_expiry_worker import _check_vault_leases
+
+    connector = MagicMock()
+    connector.id = "vault-conn-1"
+    db = AsyncMock(spec=AsyncSession)
+
+    expired_lease = {"lease_id": "pki/issue/my-role/xyz", "ttl": 3600, "renewable": False}
+
+    with patch("app.workers.credential_expiry_worker._get_connectors_by_type", new=AsyncMock(return_value=[connector])), \
+         patch("app.connectors.executors.hashicorp_vault._client.VaultClient") as mock_cls, \
+         patch("app.workers.credential_expiry_worker._create_expiry_finding") as mock_finding:
+
+        mock_client = MagicMock()
+        mock_client.list_leases.return_value = [expired_lease]
+        mock_cls.from_connector.return_value = mock_client
+
+        await _check_vault_leases(db)
+        mock_client.renew_lease.assert_not_called()
+        mock_finding.assert_called_once()
