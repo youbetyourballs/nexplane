@@ -1,0 +1,15 @@
+{
+  "name": "disable_kernel_feature",
+  "display_name": "Disable Kernel Feature",
+  "description": "Blacklist and unload a vulnerable Linux kernel module (e.g. usb_storage, cramfs, hfs).",
+  "connector_type": "ssh",
+  "risk_score": 4,
+  "requires_approval": true,
+  "rollback_available": true,
+  "parameters": {
+    "feature": {
+      "type": "string",
+      "description": "Kernel module name to blacklist (e.g. 'usb_storage', 'cramfs')."
+    }
+  }
+}
