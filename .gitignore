@@ -7,3 +7,8 @@ __pycache__/
 .env
 node_modules/
 dist/
+# One-off debug/provisioning scripts (not part of the codebase)
+check_*.py
+provision_*.py
+register_*.py
+validate_impl.py
