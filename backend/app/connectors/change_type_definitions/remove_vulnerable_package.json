@@ -1,0 +1,20 @@
+{
+  "name": "remove_vulnerable_package",
+  "display_name": "Remove Vulnerable Package",
+  "description": "Remove a package that has no available patch and poses unacceptable risk (e.g. telnet, xinetd, rsh-server).",
+  "connector_type": "ssh",
+  "risk_score": 6,
+  "requires_approval": true,
+  "rollback_available": true,
+  "parameters": {
+    "package_name": {
+      "type": "string",
+      "description": "Package name to remove (e.g. 'telnet')."
+    },
+    "target_os": {
+      "type": "string",
+      "enum": ["linux"],
+      "default": "linux"
+    }
+  }
+}

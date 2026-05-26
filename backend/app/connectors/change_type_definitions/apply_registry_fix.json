@@ -1,0 +1,21 @@
+{
+  "name": "apply_registry_fix",
+  "display_name": "Apply Registry Fix",
+  "description": "Set a Windows registry value to mitigate a CVE (e.g. disable HTTP/2, enforce screen saver lock).",
+  "connector_type": "winrm",
+  "risk_score": 5,
+  "requires_approval": true,
+  "rollback_available": true,
+  "parameters": {
+    "key_path": {
+      "type": "string",
+      "description": "Full registry path, e.g. HKLM:\\SOFTWARE\\Policies\\..."
+    },
+    "value_name": {"type": "string"},
+    "value_data": {"type": "string"},
+    "value_type": {
+      "type": "string",
+      "enum": ["String", "DWORD", "ExpandString"]
+    }
+  }
+}
