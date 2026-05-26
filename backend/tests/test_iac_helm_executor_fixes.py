@@ -49,3 +49,66 @@ async def test_create_change_set_default_type_is_update():
         )
     call_kwargs = mock_cf.create_change_set.call_args[1]
     assert call_kwargs["ChangeSetType"] == "UPDATE"
+
+
+def _make_helm_connector(kubeconfig_b64="dGVzdA=="):  # base64("test")
+    c = MagicMock()
+    c.credentials = {"kubeconfig": kubeconfig_b64}
+    return c
+
+
+@pytest.mark.asyncio
+async def test_rollback_release_passes_kubeconfig():
+    """rollback_release passes --kubeconfig to the helm subprocess."""
+    import base64
+    kubeconfig_b64 = base64.b64encode(b"apiVersion: v1\nclusters: []").decode()
+    connector = _make_helm_connector(kubeconfig_b64)
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        r = MagicMock()
+        r.returncode = 0
+        r.stdout = ""
+        r.stderr = ""
+        return r
+
+    with patch("subprocess.run", side_effect=fake_run):
+        from app.connectors.executors.helm.rollback_release import execute
+        result = await execute(
+            {"release_name": "smoke-nginx", "namespace": "default", "revision": 0},
+            [],
+            connector,
+        )
+    assert result.get("rolled_back") is True
+    assert "--kubeconfig" in captured["cmd"]
+    kubeconfig_arg_idx = captured["cmd"].index("--kubeconfig")
+    kubeconfig_path = captured["cmd"][kubeconfig_arg_idx + 1]
+    assert kubeconfig_path.endswith(".yaml")
+
+
+@pytest.mark.asyncio
+async def test_uninstall_release_passes_kubeconfig():
+    """uninstall_release passes --kubeconfig to the helm subprocess."""
+    import base64
+    kubeconfig_b64 = base64.b64encode(b"apiVersion: v1\nclusters: []").decode()
+    connector = _make_helm_connector(kubeconfig_b64)
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        r = MagicMock()
+        r.returncode = 0
+        r.stdout = ""
+        r.stderr = ""
+        return r
+
+    with patch("subprocess.run", side_effect=fake_run):
+        from app.connectors.executors.helm.uninstall_release import execute
+        result = await execute(
+            {"release_name": "smoke-nginx", "namespace": "default"},
+            [],
+            connector,
+        )
+    assert result.get("uninstalled") is True
+    assert "--kubeconfig" in captured["cmd"]
