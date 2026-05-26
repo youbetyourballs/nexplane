@@ -346,9 +346,30 @@ def phase_credential_expiry(client: NexplaneClient) -> None:
 
         def _run_worker():
             async def _inner():
-                from app.workers.credential_expiry_worker import check_credential_expiry
-                await check_credential_expiry()
-                result_holder.append("ok")
+                import os
+                from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+                # Import sub-checks directly to run them with a fresh engine
+                # (check_credential_expiry uses AsyncSessionLocal tied to uvicorn loop)
+                from app.workers.credential_expiry_worker import (
+                    _check_tls_certs, _check_iam_key_age,
+                    _check_vault_leases, _check_ssh_key_age, _check_step_ca_certs,
+                )
+
+                db_url = os.environ["DATABASE_URL"]
+                engine = create_async_engine(db_url, pool_size=1, max_overflow=0)
+                factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+                try:
+                    async with factory() as db:
+                        await _check_tls_certs(db)
+                        await _check_iam_key_age(db)
+                        await _check_vault_leases(db)
+                        await _check_ssh_key_age(db)
+                        await _check_step_ca_certs(db)
+                    result_holder.append("ok")
+                except Exception as exc:
+                    result_holder.append(f"error: {exc}")
+                finally:
+                    await engine.dispose()
 
             asyncio.run(_inner())
 
@@ -357,7 +378,9 @@ def phase_credential_expiry(client: NexplaneClient) -> None:
         t.join(timeout=60)
 
         if not result_holder:
-            fail("CREDENTIAL_EXPIRY: check_credential_expiry timed out or crashed")
+            fail("CREDENTIAL_EXPIRY: worker timed out (> 60s with no response)")
+        if result_holder[0] != "ok":
+            fail(f"CREDENTIAL_EXPIRY: worker failed: {result_holder[0]}")
         log("check_credential_expiry completed without crash")
 
         # 4. The _check_vault_leases path requires a registered connector with Vault
