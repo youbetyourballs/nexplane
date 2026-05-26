@@ -19999,7 +19999,7 @@ def run_phase_ssh_advanced(client, cloud_account_id):
 
         # Wait for SSM
         log("SSH_ADVANCED: waiting for SSM agent...")
-        _wait_for_ssm(ssm_boto, instance_id, timeout=300)
+        _wait_ssm_ready_win(ssm_boto, instance_id, timeout=300)
         log("SSH_ADVANCED: SSM ready")
 
         if not cached_ami:
