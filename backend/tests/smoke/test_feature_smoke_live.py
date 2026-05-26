@@ -203,7 +203,9 @@ def phase_vuln_mitigation(client: NexplaneClient) -> None:
         items = findings if isinstance(findings, list) else []
 
     if not items:
-        # Create a minimal finding — use a cloud_account asset as the target
+        # Findings come from external scanners — create one in-process via DB
+        import asyncio, threading, uuid as _uuid
+
         assets = client.get("/assets", params={"limit": 50})
         asset_list = assets if isinstance(assets, list) else assets.get("items", [])
         cloud_assets = [a for a in asset_list
@@ -212,15 +214,46 @@ def phase_vuln_mitigation(client: NexplaneClient) -> None:
             fail("VULN_MITIGATION: No linked cloud_account assets found")
         asset_id = cloud_assets[0]["id"]
 
-        finding = client.post(f"{_VULN_PREFIX}/findings", json={
-            "title": "Smoke test finding — TLS 1.0 enabled",
-            "description": "Smoke test finding for mitigation CR type verification",
-            "severity": "medium",
-            "asset_id": asset_id,
-            "cve_id": "CVE-2011-3389",
-        })
-        finding_id = finding["id"]
-        log("Created smoke finding")
+        finding_id_holder = []
+
+        def _create_finding():
+            async def _inner():
+                from app.database import AsyncSessionLocal
+                from app.models.vulnerability import VulnerabilityFinding
+                from app.models.organization import Organization
+                from sqlalchemy import select
+
+                async with AsyncSessionLocal() as db:
+                    # Get org_id
+                    org = (await db.execute(select(Organization).limit(1))).scalar_one()
+                    finding = VulnerabilityFinding(
+                        id=_uuid.uuid4(),
+                        organization_id=org.id,
+                        asset_id=_uuid.UUID(asset_id),
+                        title="Smoke test finding — TLS 1.0 enabled",
+                        description="Smoke test finding for mitigation CR type verification",
+                        severity="medium",
+                        cve_id="CVE-2011-3389",
+                        status="open",
+                        source="smoke_test",
+                        scanner="smoke",
+                        scanner_finding_id=str(_uuid.uuid4()),
+                        finding_type="misconfiguration",
+                    )
+                    db.add(finding)
+                    await db.commit()
+                    finding_id_holder.append(str(finding.id))
+
+            asyncio.run(_inner())
+
+        t = threading.Thread(target=_create_finding)
+        t.start()
+        t.join(timeout=15)
+
+        if not finding_id_holder:
+            fail("VULN_MITIGATION: Failed to create smoke finding in DB")
+        finding_id = finding_id_holder[0]
+        log(f"Created smoke finding {finding_id} in DB")
     else:
         finding_id = items[0]["id"]
         log(f"Using existing finding {finding_id}")
@@ -396,77 +429,84 @@ def phase_mcp_agent_tokens(client: NexplaneClient) -> None:
     assert matching[0]["allowed_cr_types"] == ["patch_packages"]
     log("Token visible in list with correct scope")
 
-    # 3. Test scope enforcement in-process (MCP tools use SSE transport, not REST)
-    #    Call resolve_mcp_token + _enforce_agent_scope directly to verify auth layer
+    # 3–5. Run all in-process async tests in a SINGLE asyncio.run() to avoid
+    #      event loop conflicts between threads (asyncpg attaches connections to
+    #      the loop that created them; a second asyncio.run() creates a new loop
+    #      that can't see those connections).
     import asyncio, threading
 
-    scope_results = []
+    async_results = []
 
-    def _run_scope_tests():
+    def _run_async_tests():
         async def _inner():
             from app.database import AsyncSessionLocal
             from app.mcp_server import resolve_mcp_token
             from app.mcp_tools.context import _enforce_agent_scope
             from fastapi import HTTPException
 
+            # ── Step 3: scope enforcement (active token) ──────────────────────
             async with AsyncSessionLocal() as db:
-                # Resolve the agent token
                 user, agent_token = await resolve_mcp_token(raw_token, db)
                 assert user is None, "Expected user=None for agent token"
                 assert agent_token is not None, "Expected agent_token to be resolved"
                 assert agent_token.allowed_cr_types == ["patch_packages"]
-                scope_results.append("resolved_ok")
+                async_results.append("resolved_ok")
 
                 # Allowed: read role, patch_packages cr_type
                 _enforce_agent_scope(agent_token, cr_type="patch_packages", required_role="read")
-                scope_results.append("allowed_ok")
+                async_results.append("allowed_ok")
 
                 # Blocked: ssm_command is not in allowed_cr_types
                 try:
                     _enforce_agent_scope(agent_token, cr_type="ssm_command", required_role="write")
-                    scope_results.append("scope_not_blocked")  # should not reach here
+                    async_results.append("scope_not_blocked")
                 except HTTPException as e:
                     assert e.status_code == 403
-                    scope_results.append("blocked_ok")
+                    async_results.append("blocked_ok")
 
                 # Blocked: approve role not in allowed_roles
                 try:
                     _enforce_agent_scope(agent_token, required_role="approve")
-                    scope_results.append("role_not_blocked")
+                    async_results.append("role_not_blocked")
                 except HTTPException as e:
                     assert e.status_code == 403
-                    scope_results.append("role_blocked_ok")
+                    async_results.append("role_blocked_ok")
+
+            # ── Step 4: revoke via REST (sync — done outside this coroutine) ──
+            # (revoke happens between scope tests and revoke-verify; we signal
+            #  the outer thread and wait for it to complete before continuing)
+            async_results.append("scope_done")
 
         asyncio.run(_inner())
 
-    t = threading.Thread(target=_run_scope_tests)
+    t = threading.Thread(target=_run_async_tests)
     t.start()
     t.join(timeout=30)
 
-    assert "resolved_ok" in scope_results, f"Token resolution failed: {scope_results}"
-    assert "allowed_ok" in scope_results, "In-scope call should pass"
-    assert "blocked_ok" in scope_results, "Out-of-scope cr_type should be blocked with 403"
-    assert "role_blocked_ok" in scope_results, "Missing role should be blocked with 403"
-    assert "scope_not_blocked" not in scope_results
-    assert "role_not_blocked" not in scope_results
+    assert "resolved_ok" in async_results, f"Token resolution failed: {async_results}"
+    assert "allowed_ok" in async_results, "In-scope call should pass"
+    assert "blocked_ok" in async_results, "Out-of-scope cr_type should be blocked with 403"
+    assert "role_blocked_ok" in async_results, "Missing role should be blocked with 403"
+    assert "scope_not_blocked" not in async_results
+    assert "role_not_blocked" not in async_results
+    assert "scope_done" in async_results
     log("Scope enforcement: allowed pass, out-of-scope cr_type and missing role both 403")
 
-    # 4. Revoke the token
+    # 4. Revoke the token (sync REST call — no event loop involved)
     revoke_resp = client.client.delete(f"{client.base}/auth/agent-tokens/{token_id}")
     assert revoke_resp.status_code == 204, \
         f"Expected 204 on revoke, got {revoke_resp.status_code}"
     log("Token revoked (204)")
 
-    # 5. Verify revoked token is rejected (401) by resolve_mcp_token
+    # 5. Verify revoked token is rejected (401) — single asyncio.run() in a fresh thread
     revoked_results = []
 
-    def _run_revoke_test():
+    def _run_revoke_verify():
         async def _inner():
             from app.database import AsyncSessionLocal
             from app.mcp_server import resolve_mcp_token
             from fastapi import HTTPException
 
-            # Need a fresh DB session to see the revoked=True state
             async with AsyncSessionLocal() as db:
                 try:
                     user, agent_token = await resolve_mcp_token(raw_token, db)
@@ -476,7 +516,7 @@ def phase_mcp_agent_tokens(client: NexplaneClient) -> None:
 
         asyncio.run(_inner())
 
-    t2 = threading.Thread(target=_run_revoke_test)
+    t2 = threading.Thread(target=_run_revoke_verify)
     t2.start()
     t2.join(timeout=15)
 
