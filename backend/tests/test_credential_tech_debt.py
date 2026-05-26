@@ -317,7 +317,7 @@ async def test_revoke_ldap_password():
     assert call_args.args[0] == credential_id
     changes = call_args.args[1]
     assert "userAccountControl" in changes
-    assert 514 in changes["userAccountControl"][0]
+    assert 514 in changes["userAccountControl"][0][1]  # (MODIFY_REPLACE, [514])
     assert result["success"] is True
 
 
