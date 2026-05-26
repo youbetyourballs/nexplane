@@ -39,6 +39,66 @@ async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dic
             resp.raise_for_status()
         return {"success": True, "rolled_back_available": False}
 
+    if credential_type == "gcp_service_account_key":
+        import json
+        import googleapiclient.discovery
+        from google.oauth2 import service_account
+
+        sa_info = json.loads(creds["service_account_key_json"])
+        gcp_creds = service_account.Credentials.from_service_account_info(
+            sa_info,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        service = googleapiclient.discovery.build("iam", "v1", credentials=gcp_creds)
+        service.projects().serviceAccounts().keys().delete(
+            name=f"projects/-/serviceAccounts/-/keys/{credential_id}"
+        ).execute()
+        logger.info("Revoked GCP service account key %s", credential_id)
+        return {"success": True, "rolled_back_available": False}
+
+    if credential_type == "azure_client_secret":
+        import httpx
+        parts = credential_id.split("/", 1)
+        if len(parts) != 2:
+            raise ValueError(
+                "azure_client_secret credential_id must be '{app_object_id}/{key_id}'"
+            )
+        app_id, key_id = parts
+        async with httpx.AsyncClient() as client:
+            token_resp = await client.post(
+                f"https://login.microsoftonline.com/{creds['tenant_id']}/oauth2/v2.0/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": creds["client_id"],
+                    "client_secret": creds["client_secret"],
+                    "scope": "https://graph.microsoft.com/.default",
+                },
+            )
+            token_resp.raise_for_status()
+            token = token_resp.json()["access_token"]
+            remove_resp = await client.post(
+                f"https://graph.microsoft.com/v1.0/applications/{app_id}/removePassword",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"keyId": key_id},
+            )
+            remove_resp.raise_for_status()
+        logger.info("Revoked Azure client secret key %s from app %s", key_id, app_id)
+        return {"success": True, "rolled_back_available": False}
+
+    if credential_type == "ldap_password":
+        import ldap3
+        from ldap3 import MODIFY_REPLACE
+        server = ldap3.Server(creds["server"])
+        with ldap3.Connection(
+            server,
+            user=creds["bind_dn"],
+            password=creds["bind_password"],
+            auto_bind=True,
+        ) as conn:
+            conn.modify(credential_id, {"userAccountControl": [(MODIFY_REPLACE, 514)]})
+        logger.info("Disabled LDAP account %s", credential_id)
+        return {"success": True, "rolled_back_available": False}
+
     raise ValueError(f"Unsupported credential_type: {credential_type}")
 
 

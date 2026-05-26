@@ -213,3 +213,124 @@ async def test_check_iam_key_age_uses_connector_creds():
 
     assert captured_creds.get("aws_access_key_id") == "AKIATEST"
     assert captured_creds.get("aws_secret_access_key") == "SECRET"
+
+
+# ── A3: revoke_exposed_credential new types ───────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_revoke_gcp_service_account_key():
+    """GCP path calls google IAM delete with correct key resource name."""
+    from app.connectors.executors.aws.revoke_exposed_credential import execute
+
+    connector = MagicMock()
+    connector.creds = {
+        "service_account_key_json": '{"type": "service_account", "project_id": "my-proj"}'
+    }
+
+    mock_service = MagicMock()
+    mock_keys = MagicMock()
+    mock_service.projects.return_value.serviceAccounts.return_value.keys.return_value = mock_keys
+    mock_delete = MagicMock()
+    mock_keys.delete.return_value = mock_delete
+
+    with patch("googleapiclient.discovery.build", return_value=mock_service), \
+         patch("google.oauth2.service_account.Credentials.from_service_account_info",
+               return_value=MagicMock()):
+        result = await execute(
+            {"credential_type": "gcp_service_account_key", "credential_id": "abc123key"},
+            [], connector,
+        )
+
+    mock_keys.delete.assert_called_once_with(
+        name="projects/-/serviceAccounts/-/keys/abc123key"
+    )
+    mock_delete.execute.assert_called_once()
+    assert result["success"] is True
+    assert result["rolled_back_available"] is False
+
+
+@pytest.mark.asyncio
+async def test_revoke_azure_client_secret():
+    """Azure path calls Graph removePassword with correct app_id and key_id."""
+    from app.connectors.executors.aws.revoke_exposed_credential import execute
+
+    connector = MagicMock()
+    connector.creds = {
+        "tenant_id": "tenant-1",
+        "client_id": "client-1",
+        "client_secret": "secret-1",
+    }
+
+    credential_id = "app-object-id/key-guid-1234"
+
+    mock_token_resp = MagicMock()
+    mock_token_resp.json.return_value = {"access_token": "tok123"}
+    mock_token_resp.raise_for_status = MagicMock()
+
+    mock_remove_resp = MagicMock()
+    mock_remove_resp.raise_for_status = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(side_effect=[mock_token_resp, mock_remove_resp])
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await execute(
+            {"credential_type": "azure_client_secret", "credential_id": credential_id},
+            [], connector,
+        )
+
+    remove_call = mock_client.post.call_args_list[1]
+    assert "removePassword" in remove_call.args[0]
+    assert remove_call.kwargs["json"]["keyId"] == "key-guid-1234"
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_revoke_ldap_password():
+    """LDAP path calls modify with userAccountControl=514 (disabled)."""
+    from app.connectors.executors.aws.revoke_exposed_credential import execute
+
+    connector = MagicMock()
+    connector.creds = {
+        "server": "ldap://dc.corp.example",
+        "bind_dn": "cn=svc,dc=corp,dc=example",
+        "bind_password": "pass",
+    }
+    credential_id = "cn=jdoe,ou=users,dc=corp,dc=example"
+
+    mock_conn = MagicMock()
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    mock_conn.modify = MagicMock(return_value=True)
+
+    with patch("ldap3.Server", return_value=MagicMock()), \
+         patch("ldap3.Connection", return_value=mock_conn):
+        result = await execute(
+            {"credential_type": "ldap_password", "credential_id": credential_id},
+            [], connector,
+        )
+
+    mock_conn.modify.assert_called_once()
+    call_args = mock_conn.modify.call_args
+    assert call_args.args[0] == credential_id
+    changes = call_args.args[1]
+    assert "userAccountControl" in changes
+    assert 514 in changes["userAccountControl"][0]
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_revoke_unsupported_type_still_raises():
+    """ValueError still raised for unknown credential types."""
+    from app.connectors.executors.aws.revoke_exposed_credential import execute
+
+    connector = MagicMock()
+    connector.creds = {"something": "here"}
+
+    with pytest.raises(ValueError, match="Unsupported credential_type"):
+        await execute(
+            {"credential_type": "foobar_token", "credential_id": "xyz"},
+            [], connector,
+        )
