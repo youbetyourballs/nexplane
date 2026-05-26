@@ -377,6 +377,88 @@ def phase_credential_expiry(client: NexplaneClient) -> None:
             fail(f"CREDENTIAL_EXPIRY: _check_vault_leases failed: {result_holder[0]}")
         log("_check_vault_leases completed: scanned registered Vault connector for expiring leases")
 
+        # A1 smoke: _run_ssh_authorized_keys_audit no-crash on asset with no SSH connector
+        def _run_a1_smoke():
+            async def _inner():
+                import os
+                from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+                from app.workers.credential_expiry_worker import _run_ssh_authorized_keys_audit
+
+                db_url = os.environ["DATABASE_URL"]
+                engine = create_async_engine(db_url, pool_size=1, max_overflow=0)
+                factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+                try:
+                    async with factory() as db:
+                        asset = type("FakeAsset", (), {"id": "smoke-test", "connector_id": None})()
+                        result = await _run_ssh_authorized_keys_audit(asset, db)
+                        assert isinstance(result, list)
+                        a1_results.append("ok")
+                finally:
+                    await engine.dispose()
+            asyncio.run(_inner())
+
+        a1_results = []
+        t_a1 = threading.Thread(target=_run_a1_smoke)
+        t_a1.start()
+        t_a1.join(timeout=15)
+        assert a1_results and a1_results[0] == "ok", f"A1 SSH audit smoke failed: {a1_results}"
+        log("A1: _run_ssh_authorized_keys_audit no-crash (no connector → [])")
+
+        # A2 smoke: _check_iam_key_age runs in < 30s with the live AWS connector
+        def _run_a2_smoke():
+            async def _inner():
+                import os
+                from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+                from app.workers.credential_expiry_worker import _check_iam_key_age
+
+                db_url = os.environ["DATABASE_URL"]
+                engine = create_async_engine(db_url, pool_size=1, max_overflow=0)
+                factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+                try:
+                    async with factory() as db:
+                        await _check_iam_key_age(db)
+                    a2_results.append("ok")
+                except Exception as exc:
+                    a2_results.append(f"error: {exc}")
+                finally:
+                    await engine.dispose()
+            asyncio.run(_inner())
+
+        a2_results = []
+        a2_start = time.time()
+        t_a2 = threading.Thread(target=_run_a2_smoke)
+        t_a2.start()
+        t_a2.join(timeout=30)
+        assert a2_results and a2_results[0] == "ok", f"A2 IAM check failed: {a2_results}"
+        elapsed = time.time() - a2_start
+        assert elapsed < 30, f"A2 IAM check blocked event loop (took {elapsed:.1f}s)"
+        log(f"A2: _check_iam_key_age completed in {elapsed:.1f}s (non-blocking)")
+
+        # A3 smoke: new revoke types don't raise ValueError in mock mode (no creds)
+        import asyncio as _asyncio
+
+        async def _a3_mock_revoke():
+            from app.connectors.executors.aws.revoke_exposed_credential import execute
+
+            class _MockConnector:
+                creds = None  # triggers mock path
+
+            for cred_type, cred_id in [
+                ("gcp_service_account_key", "fake-key-id"),
+                ("azure_client_secret", "fake-app-id/fake-key-id"),
+                ("ldap_password", "cn=test,dc=corp,dc=example"),
+            ]:
+                result = await execute(
+                    {"credential_type": cred_type, "credential_id": cred_id},
+                    [], _MockConnector(),
+                )
+                assert result.get("mock") is True, f"{cred_type} mock path not hit"
+            return "ok"
+
+        a3_result = _asyncio.run(_a3_mock_revoke())
+        assert a3_result == "ok"
+        log("A3: GCP/Azure/LDAP revoke types return mock=True when no creds (no ValueError)")
+
         # 7. Cleanup: delete the smoke connector
         client.client.delete(f"{client.base}/connectors/{connector_id}")
         log(f"Deleted smoke Vault connector")
