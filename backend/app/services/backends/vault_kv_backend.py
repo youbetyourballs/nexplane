@@ -18,7 +18,7 @@ class VaultKVBackend:
         parts = stored.split("/data/", 1)
         return parts[1] if len(parts) == 2 else stored
 
-    def encrypt_json(self, data: dict, connector_id: str = "") -> str:
+    def encrypt_json(self, data: dict, *, connector_id: str = "") -> str:
         path = f"nexplane/connectors/{connector_id}"
         self._client.secrets.kv.v2.create_or_update_secret(
             path=path,
@@ -35,8 +35,15 @@ class VaultKVBackend:
         )
         return resp["data"]["data"]
 
-    def encrypt(self, value: str, connector_id: str = "") -> str:
+    def encrypt(self, value: str, *, connector_id: str = "") -> str:
         return self.encrypt_json({"v": value}, connector_id=connector_id)
 
     def decrypt(self, stored: str) -> str:
         return self.decrypt_json(stored)["v"]
+
+    def delete_secret(self, stored: str) -> None:
+        path = self._kv_path(stored)
+        self._client.secrets.kv.v2.delete_metadata_and_all_versions(
+            path=path,
+            mount_point=self._MOUNT,
+        )

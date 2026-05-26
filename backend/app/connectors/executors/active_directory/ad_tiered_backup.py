@@ -8,8 +8,11 @@ Tier 0 (IMPLEMENTED): Domain Controllers, PKI/CA servers.
   - Writes a tier manifest to S3 linking all per-DC snapshot prefixes
   - dry_run=True returns enumerated targets without executing
 
-Tier 1 (STUB): Member servers — requires AWS Backup vault/plan configured in
-  customer environment. Set up via AD_MEMBER_SERVER_BACKUP smoke phase.
+Tier 1 (IMPLEMENTED): Member servers — EC2 instances backed up via AWS Backup.
+  - Parameters: backup_vault_name, ec2_instance_ids (list), iam_role_arn
+  - Creates the vault if it doesn't exist
+  - Starts a backup job per instance and polls until all complete
+  - Returns recovery_point_arns for rollback (delete_recovery_point)
 
 Tier 2 (STUB): Workstations — requires Tier 1 environment plus WinRM access
   to workstations, which is typically blocked in production environments.
@@ -83,7 +86,7 @@ def _run_ps_params(creds: dict, script: str, params: dict,
     return _run_ps(creds, prefix + "\n" + body, hostname)
 
 
-def _s3_client(creds: dict):
+def _boto_client(creds: dict, service: str):
     import boto3
     kwargs: dict = {}
     if creds.get("aws_access_key_id"):
@@ -91,7 +94,11 @@ def _s3_client(creds: dict):
         kwargs["aws_secret_access_key"] = creds["aws_secret_access_key"]
     if creds.get("aws_region"):
         kwargs["region_name"] = creds["aws_region"]
-    return boto3.client("s3", **kwargs)
+    return boto3.client(service, **kwargs)
+
+
+def _s3_client(creds: dict):
+    return _boto_client(creds, "s3")
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +267,135 @@ def _do_tier0(creds: dict, s3_bucket: str, s3_prefix: str,
 
 
 # ---------------------------------------------------------------------------
+# Tier 1 — Member servers via AWS Backup
+# ---------------------------------------------------------------------------
+
+_BACKUP_JOB_POLL_INTERVAL = 30   # seconds between polls
+_BACKUP_JOB_TIMEOUT = 7200       # 2 hours max per job
+
+
+def _ensure_backup_vault(backup_client, vault_name: str) -> None:
+    """Create the AWS Backup vault if it doesn't exist.
+
+    DescribeBackupVault may return AccessDeniedException for certain vaults (e.g. the
+    managed Default vault) even when the caller has full Backup permissions. We therefore
+    treat any non-AlreadyExists error from create_backup_vault as the source of truth
+    rather than relying on describe succeeding.
+    """
+    try:
+        backup_client.describe_backup_vault(BackupVaultName=vault_name)
+        return  # vault exists and is readable
+    except Exception:
+        pass  # fall through and try creating
+
+    try:
+        backup_client.create_backup_vault(BackupVaultName=vault_name)
+        logger.info("Tier 1: created backup vault %s", vault_name)
+    except Exception as exc:
+        if "AlreadyExists" in type(exc).__name__ or "AlreadyExists" in str(exc):
+            logger.info("Tier 1: backup vault %s already exists", vault_name)
+        else:
+            raise
+
+
+def _start_backup_job(backup_client, vault_name: str, instance_id: str,
+                      iam_role_arn: str, region: str, account_id: str) -> str:
+    """Start an AWS Backup job for an EC2 instance and return the job ID."""
+    resource_arn = f"arn:aws:ec2:{region}:{account_id}:instance/{instance_id}"
+    resp = backup_client.start_backup_job(
+        BackupVaultName=vault_name,
+        ResourceArn=resource_arn,
+        IamRoleArn=iam_role_arn,
+    )
+    return resp["BackupJobId"]
+
+
+def _wait_backup_job(backup_client, job_id: str, instance_id: str) -> dict:
+    """Poll until the backup job completes. Returns the final job description."""
+    import time as _time
+    deadline = _time.time() + _BACKUP_JOB_TIMEOUT
+    while _time.time() < deadline:
+        desc = backup_client.describe_backup_job(BackupJobId=job_id)
+        state = desc.get("State", "")
+        if state == "COMPLETED":
+            return desc
+        if state in ("FAILED", "ABORTED", "EXPIRED"):
+            raise RuntimeError(
+                f"Backup job {job_id} for {instance_id} ended in state {state}: "
+                f"{desc.get('StatusMessage', '')}"
+            )
+        _time.sleep(_BACKUP_JOB_POLL_INTERVAL)
+    raise TimeoutError(f"Backup job {job_id} for {instance_id} did not complete within {_BACKUP_JOB_TIMEOUT}s")
+
+
+def _do_tier1(creds: dict, vault_name: str, ec2_instance_ids: list[str],
+               iam_role_arn: str, dry_run: bool) -> dict:
+    if dry_run:
+        return {
+            "status": "dry_run_complete",
+            "tier": "1",
+            "targets": {"ec2_instances": ec2_instance_ids},
+            "message": "dry_run=True — no backups executed",
+        }
+
+    if not ec2_instance_ids:
+        return {"status": "error", "tier": "1", "message": "ec2_instance_ids is required for tier 1"}
+
+    backup_client = _boto_client(creds, "backup")
+    _ensure_backup_vault(backup_client, vault_name)
+
+    # Resolve region and account ID for resource ARNs
+    sts_client = _boto_client(creds, "sts")
+    identity = sts_client.get_caller_identity()
+    account_id = identity["Account"]
+    region = creds.get("aws_region") or "us-east-1"
+
+    # Start all jobs
+    jobs: list[dict] = []
+    for iid in ec2_instance_ids:
+        try:
+            job_id = _start_backup_job(backup_client, vault_name, iid, iam_role_arn, region, account_id)
+            jobs.append({"instance_id": iid, "job_id": job_id})
+            logger.info("Tier 1: started backup job %s for instance %s", job_id, iid)
+        except Exception as exc:
+            logger.error("Tier 1: failed to start job for %s: %s", iid, exc)
+            jobs.append({"instance_id": iid, "job_id": None, "error": str(exc)})
+
+    # Wait for all started jobs
+    results = []
+    errors = []
+    for job in jobs:
+        if not job.get("job_id"):
+            errors.append(job)
+            continue
+        try:
+            desc = _wait_backup_job(backup_client, job["job_id"], job["instance_id"])
+            rp_arn = desc.get("RecoveryPointArn", "")
+            results.append({
+                "instance_id": job["instance_id"],
+                "job_id": job["job_id"],
+                "recovery_point_arn": rp_arn,
+                "backup_size_bytes": desc.get("BackupSizeInBytes", 0),
+            })
+            logger.info("Tier 1: backup complete for %s → %s", job["instance_id"], rp_arn)
+        except Exception as exc:
+            logger.error("Tier 1: job %s for %s failed: %s", job["job_id"], job["instance_id"], exc)
+            errors.append({"instance_id": job["instance_id"], "job_id": job["job_id"], "error": str(exc)})
+
+    status = "completed" if not errors else ("partial" if results else "failed")
+    return {
+        "status": status,
+        "tier": "1",
+        "backup_vault_name": vault_name,
+        "instances_backed_up": len(results),
+        "instances_failed": len(errors),
+        "recovery_point_arns": [r["recovery_point_arn"] for r in results],
+        "results": results,
+        "errors": errors,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Executor entry points
 # ---------------------------------------------------------------------------
 
@@ -272,17 +408,30 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if tier not in ("0", "1", "2"):
         return {"status": "error", "message": f"Invalid tier '{tier}' — must be '0', '1', or '2'"}
 
-    if tier in ("1", "2"):
+    if tier == "2":
         return {
             "status": "not_implemented",
-            "tier": tier,
+            "tier": "2",
             "message": (
-                f"Tier {tier} requires an AWS Backup vault and plan pre-configured in the "
-                "customer environment. Set up test infrastructure using the "
-                "AD_MEMBER_SERVER_BACKUP smoke phase, then implement Tier 1/2 here."
+                "Tier 2 (workstations) requires WinRM access to workstations, "
+                "which is typically blocked in production environments."
             ),
         }
 
+    loop = asyncio.get_event_loop()
+
+    if tier == "1":
+        vault_name = parameters.get("backup_vault_name") or "nexplane-member-server-backup"
+        ec2_instance_ids = parameters.get("ec2_instance_ids") or []
+        iam_role_arn = parameters.get("iam_role_arn") or creds.get("iam_role_arn", "")
+        if not iam_role_arn:
+            return {"status": "error", "message": "iam_role_arn is required for tier 1 (AWS Backup)"}
+        return await loop.run_in_executor(
+            None,
+            lambda: _do_tier1(creds, vault_name, ec2_instance_ids, iam_role_arn, dry_run),
+        )
+
+    # Tier 0
     if not s3_bucket:
         return {"status": "error", "message": "s3_bucket is required"}
 
@@ -297,7 +446,6 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     s3_prefix = parameters.get("s3_prefix") or f"ad-tiered-backup/tier0/{ts}"
     ca_servers = parameters.get("ca_servers") or []
 
-    loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None,
         lambda: _do_tier0(creds, s3_bucket, s3_prefix, ca_servers, dry_run),
@@ -305,8 +453,40 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    """Delete all S3 objects written under the tier0 backup prefix."""
+    """Roll back a tiered backup.
+
+    Tier 0: delete all S3 objects under the backup prefix.
+    Tier 1: delete each AWS Backup recovery point recorded in execution_result.
+    """
     creds = getattr(connector, "credentials", {}) or {}
+    tier = execution_result.get("tier", "0")
+
+    if tier == "1":
+        rp_arns = execution_result.get("recovery_point_arns") or []
+        vault_name = execution_result.get("backup_vault_name", "")
+        if not rp_arns:
+            return {"rolled_back": True, "reason": "No recovery points recorded — nothing to delete"}
+        backup_client = _boto_client(creds, "backup")
+        deleted = []
+        errors = []
+        for arn in rp_arns:
+            try:
+                backup_client.delete_recovery_point(
+                    BackupVaultName=vault_name,
+                    RecoveryPointArn=arn,
+                )
+                deleted.append(arn)
+                logger.info("Tier 1 rollback: deleted recovery point %s", arn)
+            except Exception as exc:
+                logger.error("Tier 1 rollback: failed to delete %s: %s", arn, exc)
+                errors.append({"arn": arn, "error": str(exc)})
+        return {
+            "rolled_back": not errors,
+            "deleted_count": len(deleted),
+            "errors": errors,
+        }
+
+    # Tier 0 — delete S3 objects
     bucket = execution_result.get("s3_bucket")
     prefix = execution_result.get("s3_prefix")
 
