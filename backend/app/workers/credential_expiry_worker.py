@@ -66,12 +66,21 @@ def _key_age_days(added_date_str) -> int | None:
         return None
 
 
-async def _run_ssh_authorized_keys_audit(asset) -> list[dict]:
-    """Stub: call SSH connector's authorized_keys_audit command."""
-    logger.debug(
-        "SSH authorized_keys audit not yet wired to connector for asset %s", asset.id
-    )
-    return []
+async def _run_ssh_authorized_keys_audit(asset, db) -> list[dict]:
+    """Call the SSH authorized_keys_audit executor for this asset."""
+    if not asset.connector_id:
+        return []
+    from app.models.connector import Connector
+    connector = await db.get(Connector, asset.connector_id)
+    if not connector or connector.connector_type != "ssh":
+        return []
+    from app.connectors.executors.ssh.authorized_keys_audit import execute as audit_execute
+    try:
+        result = await audit_execute({}, [str(asset.id)], connector)
+        return result.get("keys", [])
+    except Exception as e:
+        logger.debug("SSH authorized_keys audit failed for asset %s: %s", asset.id, e)
+        return []
 
 
 async def _check_ssh_key_age(db) -> None:
@@ -82,7 +91,7 @@ async def _check_ssh_key_age(db) -> None:
     assets = result.scalars().all()
 
     for asset in assets:
-        keys = await _run_ssh_authorized_keys_audit(asset)
+        keys = await _run_ssh_authorized_keys_audit(asset, db)
         for key in keys:
             age_days = _key_age_days(key.get("added_date"))
             if age_days and age_days >= SSH_KEY_MAX_AGE_DAYS:
