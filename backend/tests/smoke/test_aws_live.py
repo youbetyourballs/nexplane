@@ -19576,7 +19576,7 @@ def run_phase_ad_member_server_backup(client, cloud_account_id):
         Filters=[{"Name": "vpcId", "Values": [vpc_id]}]
     )["Subnets"]
     _subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
-    subnet_id = _subnets[0]["SubnetId"]
+    # subnet_id is resolved later after AZ validation (t3.small not in all AZs)
 
     # Use Amazon Linux 2023 AMI (latest, from SSM parameter)
     try:
@@ -19609,21 +19609,33 @@ def run_phase_ad_member_server_backup(client, cloud_account_id):
 
     try:
         # Launch a minimal instance — no agents needed, just an EC2 resource ARN for AWS Backup
+        # Try each subnet in order — t3.small is not supported in all AZs (e.g. us-east-1e)
         log("AD_MEMBER_SERVER_BACKUP: launching t3.small member server instance...")
-        _launch = ec2_client.run_instances(
-            ImageId=ami_id,
-            InstanceType="t3.small",
-            MinCount=1,
-            MaxCount=1,
-            SubnetId=subnet_id,
-            TagSpecifications=[{
-                "ResourceType": "instance",
-                "Tags": [
-                    {"Key": "Name", "Value": "nexplane-smoke-member-server"},
-                    {"Key": "nexplane-smoke", "Value": "true"},
-                ],
-            }],
-        )
+        _launch = None
+        for _sn in _subnets:
+            try:
+                _launch = ec2_client.run_instances(
+                    ImageId=ami_id,
+                    InstanceType="t3.small",
+                    MinCount=1,
+                    MaxCount=1,
+                    SubnetId=_sn["SubnetId"],
+                    TagSpecifications=[{
+                        "ResourceType": "instance",
+                        "Tags": [
+                            {"Key": "Name", "Value": "nexplane-smoke-member-server"},
+                            {"Key": "nexplane-smoke", "Value": "true"},
+                        ],
+                    }],
+                )
+                break
+            except Exception as _ce:
+                if "Unsupported" in str(_ce):
+                    log(f"AD_MEMBER_SERVER_BACKUP: AZ {_sn.get('AvailabilityZone')} unsupported for t3.small, trying next")
+                    continue
+                raise
+        if not _launch:
+            fail("[AD_MEMBER_SERVER_BACKUP] Could not launch t3.small in any available AZ")
         instance_id = _launch["Instances"][0]["InstanceId"]
         log(f"AD_MEMBER_SERVER_BACKUP: launched {instance_id}")
 
@@ -19631,7 +19643,10 @@ def run_phase_ad_member_server_backup(client, cloud_account_id):
         log(f"AD_MEMBER_SERVER_BACKUP: instance running")
 
         # Register AD connector (re-use existing AWS connector credentials for AWS Backup calls)
-        _aws_creds = _aws_creds_cache or {}
+        # Access smoke_helpers module directly — the imported _aws_creds_cache name is stale
+        # after smoke_helpers reassigns the dict (Python name rebinding, not mutation).
+        import smoke_helpers as _shl
+        _aws_creds = _shl._aws_creds_cache or {}
         conn_resp = client.post("/connectors", json={
             "name": f"nexplane-smoke-ad-member-{instance_id[-8:]}",
             "connector_type": "active_directory",
@@ -19653,8 +19668,9 @@ def run_phase_ad_member_server_backup(client, cloud_account_id):
         asset_resp = client.post("/assets", json={
             "name": f"nexplane-smoke-member-{instance_id[-8:]}",
             "asset_type": "server",
+            "environment": "staging",
+            "criticality": "medium",
             "asset_metadata": {"instance_id": instance_id},
-            "organization_id": None,
             "tags": ["nexplane-smoke", "active-directory"],
         })
         asset_id = asset_resp.get("id")
@@ -19673,6 +19689,7 @@ def run_phase_ad_member_server_backup(client, cloud_account_id):
                 "ec2_instance_ids": [instance_id],
                 "iam_role_arn": role_arn,
             },
+            connector_id=connector_id,
         )
         dry_result = client.get_cr_step_result(cr_dry)
         assert dry_result.get("status") == "dry_run_complete", (
@@ -19696,6 +19713,7 @@ def run_phase_ad_member_server_backup(client, cloud_account_id):
                 "ec2_instance_ids": [instance_id],
                 "iam_role_arn": role_arn,
             },
+            connector_id=connector_id,
         )
         backup_cr_id = cr_backup["id"]
         backup_result = client.get_cr_step_result(cr_backup)
