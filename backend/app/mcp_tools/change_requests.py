@@ -17,7 +17,7 @@ async def _auth(token: str):
     db_cm = AsyncSessionLocal()
     db = await db_cm.__aenter__()
     try:
-        user = await resolve_mcp_token(token, db)
+        user, agent_token = await resolve_mcp_token(token, db)
         return user, db, db_cm
     except HTTPException:
         await db_cm.__aexit__(None, None, None)
@@ -416,5 +416,82 @@ async def rollback_change_request(token: str, cr_id: str) -> dict[str, Any]:
         import asyncio
         asyncio.create_task(workflow_runner.rollback(str(cr.id), AsyncSessionLocal))
         return {"id": str(cr.id), "status": "rolling_back", "message": "Rollback started; poll get_change_request for status updates"}
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def submit_for_approval(token: str, cr_id: str) -> dict:
+    """
+    Move a CR from Draft to Awaiting Approval so approvers are notified.
+    Use after create_change_request and reviewing get_change_request_plan.
+    Returns updated CR status.
+    """
+    from sqlalchemy import select
+    from app.models.change_request import ChangeRequest, ChangeRequestStatus
+
+    user, db, db_cm = await _auth(token)
+    try:
+        result = await db.execute(
+            select(ChangeRequest).where(
+                ChangeRequest.id == _uuid.UUID(cr_id),
+                ChangeRequest.organization_id == user.organization_id,
+            )
+        )
+        cr = result.scalar_one_or_none()
+        if cr is None:
+            return {"error": "Change request not found"}
+        if cr.status != ChangeRequestStatus.draft:
+            return {"error": f"CR must be in draft state to submit for approval; current status: {cr.status}"}
+
+        cr.status = ChangeRequestStatus.awaiting_approval
+        await db.commit()
+        return {
+            "id": str(cr.id),
+            "status": cr.status.value if hasattr(cr.status, "value") else str(cr.status),
+            "message": "CR submitted for approval; approvers have been notified.",
+        }
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def get_execution_progress(token: str, cr_id: str) -> dict:
+    """
+    Poll execution progress for a CR currently in Executing state.
+    Returns completed_steps, total_steps, current_step, percent_complete, and any error messages.
+    Call repeatedly until status is 'completed' or 'failed'.
+    """
+    from sqlalchemy import select
+    from app.models.change_request import ChangeRequest
+
+    user, db, db_cm = await _auth(token)
+    try:
+        result = await db.execute(
+            select(ChangeRequest).where(
+                ChangeRequest.id == _uuid.UUID(cr_id),
+                ChangeRequest.organization_id == user.organization_id,
+            )
+        )
+        cr = result.scalar_one_or_none()
+        if cr is None:
+            return {"error": "Change request not found"}
+
+        exec_result = cr.execution_result or {}
+        completed = exec_result.get("completed_steps", 0)
+        total = exec_result.get("total_steps", 0)
+        percent = int(completed / total * 100) if total else 0
+        current_step = exec_result.get("current_step", None)
+        errors = exec_result.get("errors", [])
+
+        return {
+            "cr_id": str(cr.id),
+            "status": cr.status.value if hasattr(cr.status, "value") else str(cr.status),
+            "completed_steps": completed,
+            "total_steps": total,
+            "current_step": current_step,
+            "percent_complete": percent,
+            "errors": errors,
+        }
     finally:
         await db_cm.__aexit__(None, None, None)

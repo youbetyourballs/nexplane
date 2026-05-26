@@ -28,33 +28,58 @@ mcp = FastMCP("nexplane")
 
 # ── Token auth ───────────────────────────────────────────────────────────────
 
-async def resolve_mcp_token(raw_token: str, db) -> User:
-    """
-    Validate a raw API token and return the linked User.
-    Raises HTTPException(401) if invalid, revoked, or expired.
-    """
-    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+async def _lookup_api_token(db, token_hash: str):
     result = await db.execute(
         select(ApiToken).where(
             ApiToken.token_hash == token_hash,
             ApiToken.revoked == False,
         )
     )
-    api_token = result.scalar_one_or_none()
-    if api_token is None:
-        raise HTTPException(status_code=401, detail="Invalid or revoked API token")
-    if api_token.expires_at and api_token.expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=401, detail="API token expired")
+    return result.scalar_one_or_none()
 
-    user_result = await db.execute(select(User).where(User.id == api_token.user_id))
-    user = user_result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=401, detail="Token user not found")
 
-    # Update last_used_at without blocking the request
-    api_token.last_used_at = datetime.now(timezone.utc)
+async def _lookup_agent_token(db, token_hash: str):
+    from app.models.agent_token import AgentToken
 
-    return user
+    result = await db.execute(
+        select(AgentToken).where(AgentToken.token_hash == token_hash)
+    )
+    token = result.scalar_one_or_none()
+    if not token:
+        return None
+    if token.revoked:
+        return None
+    if token.expires_at and token.expires_at < datetime.now(timezone.utc):
+        return None
+    return token
+
+
+async def resolve_mcp_token(raw_token: str, db) -> tuple:
+    """
+    Validate a raw API or Agent token.
+    Returns (user, None) for ApiToken or (None, agent_token) for AgentToken.
+    Raises HTTPException(401) if invalid, revoked, or expired.
+    """
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+    api_token = await _lookup_api_token(db, token_hash)
+    if api_token is not None:
+        if api_token.expires_at and api_token.expires_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=401, detail="API token expired")
+
+        user_result = await db.execute(select(User).where(User.id == api_token.user_id))
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=401, detail="Token user not found")
+
+        api_token.last_used_at = datetime.now(timezone.utc)
+        return user, None
+
+    agent_token = await _lookup_agent_token(db, token_hash)
+    if agent_token:
+        return None, agent_token
+
+    raise HTTPException(status_code=401, detail="Invalid or revoked API token")
 
 
 # ── Starlette sub-app (mounted at /mcp in main.py) ──────────────────────────
