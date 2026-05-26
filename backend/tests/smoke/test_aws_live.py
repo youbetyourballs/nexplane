@@ -19900,7 +19900,17 @@ def run_phase_ssh_advanced(client, cloud_account_id):
     if not ec2_client or not ssm_boto:
         fail("[SSH_ADVANCED] AWS clients not available")
 
-    _setup_script = "#!/bin/bash\napt-get update -y && apt-get install -y openssh-server cron && systemctl enable ssh && systemctl start ssh\necho SSH_ADVANCED_READY"
+    _setup_script = (
+        "#!/bin/bash\n"
+        "apt-get update -y\n"
+        "apt-get install -y openssh-server cron\n"
+        "systemctl enable ssh && systemctl start ssh\n"
+        # Install SSM agent (Ubuntu doesn't ship with it)
+        "snap install amazon-ssm-agent --classic\n"
+        "systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent\n"
+        "systemctl start snap.amazon-ssm-agent.amazon-ssm-agent\n"
+        "echo SSH_ADVANCED_READY\n"
+    )
     _setup_hash = _hl.md5(_setup_script.encode()).hexdigest()[:8]
 
     from run_on_ec2 import get_or_create_smoke_ami
@@ -19999,7 +20009,7 @@ def run_phase_ssh_advanced(client, cloud_account_id):
 
         # Wait for SSM
         log("SSH_ADVANCED: waiting for SSM agent...")
-        _wait_ssm_ready_win(ssm_boto, instance_id, timeout=300)
+        _wait_ssm_ready_win(ssm_boto, instance_id, timeout=600)
         log("SSH_ADVANCED: SSM ready")
 
         if not cached_ami:
