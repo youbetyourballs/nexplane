@@ -15663,6 +15663,7 @@ def main():
             "auto-provisions t3.small on AWS (AMI cached) or uses --bind-server-ip for external servers. "
             "SSH_ADVANCED=SSH connector advanced executor smoke: collect_output, restore_bare_metal_service, "
             "download_package, uninstall_agent on Ubuntu t3.micro (AMI cached). "
+            "CF=cloudformation-lifecycle (create_change_set→execute→discover→delete). "
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -16112,6 +16113,8 @@ def main():
             )
         if "SSH_ADVANCED" in phases:
             run_phase_ssh_advanced(client, cloud_account_id)
+        if "CF" in phases:
+            run_phase_cf(client, cloud_account_id)
         if "IDENTITY_SYNC" in phases:
             run_phase_identity_sync(client, cloud_account_id)
         if "IDENTITY_FANOUT" in phases:
@@ -20145,6 +20148,142 @@ def run_phase_ssh_advanced(client, cloud_account_id):
                 log(f"SSH_ADVANCED: terminated {instance_id}")
             except Exception:
                 pass
+
+
+def run_phase_cf(client, cloud_account_id: str) -> None:
+    """Phase CF: CloudFormation full lifecycle via Nexplane CR pipeline.
+
+    Steps:
+      1. create_change_set CR (CREATE) — provisions SNS topic stack
+      2. execute_change_set CR — executes the change set
+      3. Poll boto3 for CREATE_COMPLETE (max 90s)
+      4. discover_stacks CR — assert stack appears in results
+      5. delete_stack CR — cleanup
+      6. Verify stack deleted via boto3
+    """
+    import time as _time
+    import json as _json
+    import uuid as _uuid
+
+    print("\n[Phase CF] CloudFormation lifecycle")
+
+    cf_boto = _get_aws_boto3_client("cloudformation")
+    if cf_boto is None:
+        print("  SKIP: no AWS credentials")
+        return
+
+    suffix = _uuid.uuid4().hex[:6]
+    stack_name = f"nexplane-smoke-cf-{suffix}"
+    template_body = _json.dumps({
+        "AWSTemplateFormatVersion": "2010-09-09",
+        "Resources": {
+            "SmokeTopic": {
+                "Type": "AWS::SNS::Topic",
+                "Properties": {"TopicName": f"{stack_name}-topic"},
+            }
+        },
+    })
+
+    log(f"CF: stack_name={stack_name}")
+
+    # Step 1 — create_change_set CR
+    log("CF: creating change set via CR...")
+    cr_cs = client.run_cr(
+        "[Phase CF] create_change_set",
+        "create_change_set",
+        cloud_account_id,
+        {
+            "stack_name": stack_name,
+            "change_set_type": "CREATE",
+            "template_body": template_body,
+        },
+    )
+    cs_result = client.get_cr_step_result(cr_cs)
+    change_set_name = cs_result.get("change_set_name")
+    if not change_set_name:
+        fail(f"CF: create_change_set CR did not return change_set_name; got: {cs_result}")
+    log(f"CF: change_set_name={change_set_name}")
+
+    # Step 2 — execute_change_set CR
+    log("CF: executing change set via CR...")
+    client.run_cr(
+        "[Phase CF] execute_change_set",
+        "execute_change_set",
+        cloud_account_id,
+        {
+            "stack_name": stack_name,
+            "change_set_name": change_set_name,
+        },
+    )
+    log("CF: execute_change_set CR complete")
+
+    # Step 3 — poll boto3 for CREATE_COMPLETE
+    log("CF: polling for CREATE_COMPLETE (max 90s)...")
+    _deadline = _time.time() + 90
+    _status = None
+    while _time.time() < _deadline:
+        try:
+            _resp = cf_boto.describe_stacks(StackName=stack_name)
+            _status = _resp["Stacks"][0]["StackStatus"]
+            if _status == "CREATE_COMPLETE":
+                break
+            if _status in ("CREATE_FAILED", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED"):
+                fail(f"CF: stack entered terminal failure state: {_status}")
+        except Exception as _e:
+            if "does not exist" in str(_e):
+                fail(f"CF: stack disappeared while waiting for CREATE_COMPLETE")
+        _time.sleep(5)
+    else:
+        fail(f"CF: timed out waiting for CREATE_COMPLETE; last status={_status}")
+    log(f"CF: stack status={_status}")
+
+    # Step 4 — discover_stacks CR
+    log("CF: running discover_stacks CR...")
+    cr_disc = client.run_cr(
+        "[Phase CF] discover_stacks",
+        "discover_stacks",
+        cloud_account_id,
+        {},
+    )
+    disc_result = client.get_cr_step_result(cr_disc)
+    stacks = disc_result.get("stacks", [])
+    stack_names = [s.get("StackName") for s in stacks]
+    if stack_name not in stack_names:
+        fail(f"CF: stack {stack_name!r} not found in discover_stacks result; got: {stack_names[:20]}")
+    log(f"CF: discover_stacks confirmed stack present")
+
+    # Step 5 — delete_stack CR
+    log("CF: deleting stack via CR...")
+    client.run_cr(
+        "[Phase CF] delete_stack",
+        "delete_stack",
+        cloud_account_id,
+        {"stack_name": stack_name},
+    )
+    log("CF: delete_stack CR complete")
+
+    # Step 6 — verify stack gone via boto3
+    log("CF: verifying stack is deleted...")
+    try:
+        _check = cf_boto.describe_stacks(StackName=stack_name)
+        # Stack may linger briefly as DELETE_IN_PROGRESS; wait for it to disappear
+        _dl2 = _time.time() + 60
+        while _time.time() < _dl2:
+            try:
+                _s = cf_boto.describe_stacks(StackName=stack_name)["Stacks"]
+                if not _s or _s[0]["StackStatus"] == "DELETE_COMPLETE":
+                    break
+            except Exception as _de:
+                if "does not exist" in str(_de):
+                    break
+            _time.sleep(5)
+        else:
+            fail(f"CF: stack {stack_name!r} still exists after delete_stack CR")
+    except Exception as _ex:
+        if "does not exist" not in str(_ex):
+            raise
+    log("CF: stack confirmed deleted")
+    log("Phase CF PASSED")
 
 
 if __name__ == "__main__":
