@@ -346,19 +346,9 @@ def phase_credential_expiry(client: NexplaneClient) -> None:
 
         def _run_worker():
             async def _inner():
-                import os
-                from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
                 from app.workers.credential_expiry_worker import check_credential_expiry
-
-                db_url = os.environ.get("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nexplane")
-                engine = create_async_engine(db_url, pool_size=1, max_overflow=0)
-                factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-                try:
-                    async with factory() as db:
-                        await check_credential_expiry(db)
-                    result_holder.append("ok")
-                finally:
-                    await engine.dispose()
+                await check_credential_expiry()
+                result_holder.append("ok")
 
             asyncio.run(_inner())
 
