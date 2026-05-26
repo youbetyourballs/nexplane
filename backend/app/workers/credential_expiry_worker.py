@@ -77,7 +77,7 @@ async def _run_ssh_authorized_keys_audit(asset) -> list[dict]:
 async def _check_ssh_key_age(db) -> None:
     """Probe SSH authorized_keys age on all SSH-managed assets."""
     result = await db.execute(
-        select(Asset).where(Asset.asset_type.in_(["server", "ec2_instance"]))
+        select(Asset).where(Asset.asset_type.in_(["server"]))
     )
     assets = result.scalars().all()
 
@@ -135,7 +135,7 @@ async def check_credential_expiry() -> None:
 async def _check_tls_certs(db) -> None:
     """Probe TLS on port 443 for all known server/load_balancer assets."""
     result = await db.execute(
-        select(Asset).where(Asset.asset_type.in_(["server", "ec2_instance", "load_balancer"]))
+        select(Asset).where(Asset.asset_type.in_(["server", "load_balancer"]))
     )
     assets = result.scalars().all()
 
