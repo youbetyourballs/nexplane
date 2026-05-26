@@ -64,6 +64,19 @@ async def delete_connector(
     connector = result.scalar_one_or_none()
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
+
+    # Clean up stored secret before cascade-deleting the credential row
+    from app.services.secret_backend import get_secret_backend
+    cred_result = await db.execute(
+        select(ConnectorCredential).where(ConnectorCredential.connector_id == connector_id)
+    )
+    cred_row = cred_result.scalar_one_or_none()
+    if cred_row:
+        try:
+            get_secret_backend().delete_secret(cred_row.credentials_encrypted)
+        except Exception:
+            pass  # Non-fatal: DB row still removed; secret may need manual cleanup
+
     await db.delete(connector)
     await db.flush()
     await record_event(
