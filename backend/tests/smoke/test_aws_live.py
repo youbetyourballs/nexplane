@@ -19947,7 +19947,19 @@ def run_phase_ssh_advanced(client, cloud_account_id):
         default_vpc = _get_default_vpc(ec2_client)
         if not default_vpc:
             fail("SSH_ADVANCED: no default VPC found")
-        subnet_id = default_vpc["subnets"][0]["SubnetId"]
+        # Filter subnets to AZs that support t3.micro (not all AZs do, e.g. us-east-1e)
+        subnets = default_vpc["subnets"]
+        try:
+            _offerings = ec2_client.describe_instance_type_offerings(
+                LocationType="availability-zone",
+                Filters=[{"Name": "instance-type", "Values": ["t3.micro"]}],
+            )["InstanceTypeOfferings"]
+            _supported_azs = {o["Location"] for o in _offerings}
+            subnets = [s for s in subnets if s.get("AvailabilityZone") in _supported_azs] or subnets
+        except Exception:
+            pass
+        subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+        subnet_id = subnets[0]["SubnetId"]
 
         sg_id = _ensure_smoke_sg(ec2_client, default_vpc["VpcId"], "nexplane-smoke-ssh",
                                  [{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
