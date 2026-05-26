@@ -207,29 +207,52 @@ async def _discover_api_key_consumers(db, key_id: str, key_type: str) -> list[di
     return consumers
 
 
+def _list_old_keys(creds: dict) -> list[tuple[str, str, int]]:
+    """Sync: return (username, key_id, age_days) for IAM keys >= 90 days old.
+
+    Runs in an executor so it does not block the async event loop.
+    Uses connector credentials, not ambient boto3 environment.
+    """
+    import boto3
+    iam = boto3.client(
+        "iam",
+        aws_access_key_id=creds["aws_access_key_id"],
+        aws_secret_access_key=creds["aws_secret_access_key"],
+        region_name=creds.get("region", "us-east-1"),
+    )
+    results = []
+    for page in iam.get_paginator("list_users").paginate():
+        for user in page["Users"]:
+            for key in iam.list_access_keys(UserName=user["UserName"])["AccessKeyMetadata"]:
+                if key["Status"] != "Active":
+                    continue
+                age = (datetime.now(timezone.utc) - key["CreateDate"]).days
+                if age >= 90:
+                    results.append((user["UserName"], key["AccessKeyId"], age))
+    return results
+
+
 async def _check_iam_key_age(db) -> None:
-    """Check IAM access keys older than 90 days."""
-    try:
-        import boto3
-        iam = boto3.client("iam")
-        paginator = iam.get_paginator("list_users")
-        for page in paginator.paginate():
-            for user in page["Users"]:
-                keys = iam.list_access_keys(UserName=user["UserName"])["AccessKeyMetadata"]
-                for key in keys:
-                    if key["Status"] != "Active":
-                        continue
-                    age_days = (datetime.now(timezone.utc) - key["CreateDate"]).days
-                    if age_days >= 90:
-                        consumers = await _discover_api_key_consumers(db, key["AccessKeyId"], "aws_iam_key")
-                        await _create_expiry_finding(
-                            db, None, "iam_access_key",
-                            f"IAM key {key['AccessKeyId'][:8]}... for {user['UserName']} is {age_days} days old (policy: rotate every 90 days)",
-                            90 - age_days,  # negative = overdue
-                            consumers=consumers,
-                        )
-    except Exception as e:
-        logger.debug(f"IAM key age check failed: {e}")
+    """Check IAM access keys older than 90 days, per registered AWS connector."""
+    loop = asyncio.get_event_loop()
+    aws_connectors = await _get_connectors_by_type(db, "aws")
+    for connector in aws_connectors:
+        try:
+            creds = connector.credentials or {}
+            if not creds.get("aws_access_key_id"):
+                continue
+            old_keys = await loop.run_in_executor(None, _list_old_keys, creds)
+            for username, key_id, age_days in old_keys:
+                consumers = await _discover_api_key_consumers(db, key_id, "aws_iam_key")
+                await _create_expiry_finding(
+                    db, None, "iam_access_key",
+                    f"IAM key {key_id[:8]}... for {username} is {age_days} days old"
+                    f" (policy: rotate every 90 days)",
+                    90 - age_days,
+                    consumers=consumers,
+                )
+        except Exception as e:
+            logger.debug("IAM key age check failed for connector %s: %s", connector.id, e)
 
 
 async def _create_expiry_finding(db, asset, credential_type: str, message: str, days_left: int, *, consumers: list[dict] | None = None) -> None:

@@ -124,3 +124,92 @@ async def test_check_ssh_key_age_passes_db():
         await _check_ssh_key_age(db)
 
     assert captured.get("db") is db
+
+
+# ── A2: IAM key age check ─────────────────────────────────────────────────────
+
+def test_list_old_keys_filters_inactive():
+    """_list_old_keys skips keys with Status != Active."""
+    from app.workers.credential_expiry_worker import _list_old_keys
+    from datetime import datetime, timezone, timedelta
+    from unittest.mock import MagicMock, patch
+
+    fake_keys = [
+        {"AccessKeyId": "AKIA1", "Status": "Inactive",
+         "CreateDate": datetime.now(timezone.utc) - timedelta(days=100)},
+        {"AccessKeyId": "AKIA2", "Status": "Active",
+         "CreateDate": datetime.now(timezone.utc) - timedelta(days=5)},
+    ]
+    fake_users = [{"UserName": "alice"}]
+
+    mock_iam = MagicMock()
+    mock_iam.get_paginator.return_value.paginate.return_value = [{"Users": fake_users}]
+    mock_iam.list_access_keys.return_value = {"AccessKeyMetadata": fake_keys}
+
+    creds = {"aws_access_key_id": "K", "aws_secret_access_key": "S", "region": "us-east-1"}
+
+    with patch("boto3.client", return_value=mock_iam):
+        result = _list_old_keys(creds)
+
+    assert result == []  # inactive filtered, active key < 90 days
+
+
+def test_list_old_keys_age_threshold():
+    """_list_old_keys returns keys >= 90 days old."""
+    from app.workers.credential_expiry_worker import _list_old_keys
+    from datetime import datetime, timezone, timedelta
+    from unittest.mock import MagicMock, patch
+
+    old_key = {
+        "AccessKeyId": "AKIAOLD1234567",
+        "Status": "Active",
+        "CreateDate": datetime.now(timezone.utc) - timedelta(days=95),
+    }
+    new_key = {
+        "AccessKeyId": "AKIANEW1234567",
+        "Status": "Active",
+        "CreateDate": datetime.now(timezone.utc) - timedelta(days=30),
+    }
+    mock_iam = MagicMock()
+    mock_iam.get_paginator.return_value.paginate.return_value = [{"Users": [{"UserName": "bob"}]}]
+    mock_iam.list_access_keys.return_value = {"AccessKeyMetadata": [old_key, new_key]}
+
+    creds = {"aws_access_key_id": "K", "aws_secret_access_key": "S"}
+
+    with patch("boto3.client", return_value=mock_iam):
+        result = _list_old_keys(creds)
+
+    assert len(result) == 1
+    username, key_id, age_days = result[0]
+    assert username == "bob"
+    assert key_id == "AKIAOLD1234567"
+    assert age_days >= 95
+
+
+@pytest.mark.asyncio
+async def test_check_iam_key_age_uses_connector_creds():
+    """_check_iam_key_age queries AWS connectors and uses their credentials."""
+    from app.workers.credential_expiry_worker import _check_iam_key_age
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    connector = MagicMock()
+    connector.credentials = {
+        "aws_access_key_id": "AKIATEST",
+        "aws_secret_access_key": "SECRET",
+        "region": "us-east-1",
+    }
+
+    db = AsyncMock()
+    captured_creds = {}
+
+    def fake_list_old_keys(creds):
+        captured_creds.update(creds)
+        return []  # no old keys
+
+    with patch("app.workers.credential_expiry_worker._get_connectors_by_type",
+               new=AsyncMock(return_value=[connector])), \
+         patch("app.workers.credential_expiry_worker._list_old_keys", fake_list_old_keys):
+        await _check_iam_key_age(db)
+
+    assert captured_creds.get("aws_access_key_id") == "AKIATEST"
+    assert captured_creds.get("aws_secret_access_key") == "SECRET"
