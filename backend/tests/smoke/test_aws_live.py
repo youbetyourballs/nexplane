@@ -19953,6 +19953,14 @@ def run_phase_ssh_advanced(client, cloud_account_id):
                                  [{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
                                    "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}])
 
+        # Ensure key pair exists (Phase A normally creates it; SSH_ADVANCED may run standalone)
+        try:
+            ec2_client.describe_key_pairs(KeyNames=[KEY_NAME])
+        except Exception:
+            log(f"SSH_ADVANCED: key pair {KEY_NAME!r} not found — creating...")
+            ec2_client.create_key_pair(KeyName=KEY_NAME)
+            log(f"SSH_ADVANCED: key pair {KEY_NAME!r} created")
+
         launch_resp = ec2_client.run_instances(
             ImageId=launch_ami,
             InstanceType="t3.micro",
