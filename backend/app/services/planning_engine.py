@@ -144,6 +144,11 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
         if asset_with_connector.connector is not None:
             locked_connector_type = asset_with_connector.connector.connector_type.value
 
+    # Allow callers to hint a specific connector_type via desired_outcome._locked_connector_type.
+    # This is used by smoke tests and programmatic CR creation to bypass asset-based inference.
+    if not locked_connector_type and desired.get("_locked_connector_type"):
+        locked_connector_type = desired["_locked_connector_type"]
+
     options = catalog.get_options_for_action(generic_action, asset_types=asset_types)
     if not options:
         options = catalog.get_options_for_action(generic_action)

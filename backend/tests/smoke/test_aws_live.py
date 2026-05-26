@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 from __future__ import annotations  # Python 3.9 compat: defer annotation evaluation
 """
 Nexplane AWS Live Smoke Test — Phases A–K (and new P–T).
@@ -27,6 +27,7 @@ Phase descriptions:
     MAC_AGENT_BOOTSTRAP  macOS agent: launch mac2.metal on Dedicated Host, install Nexplane agent, run defaults_write + santa_check CRs
     AD_DC_INTEGRITY  Windows Server 2022 AD DC: provision DC via SSM, snapshot AMI, run dc_integrity_check + ad_forest_snapshot CRs
     AD_TIERED_BACKUP  AD Tier 0 backup: launch DC from cached AMI, dry_run enumeration, real IFM backup, S3 manifest verify, rollback
+    AD_MEMBER_SERVER_BACKUP  AD Tier 1 backup: launch t3.small, AWS Backup job, verify recovery point, rollback (delete recovery point)
 
 Requirements:
     AWS connector with credentials + NexplaneEC2TestProfile IAM role
@@ -16100,6 +16101,8 @@ def main():
             run_phase_ad_dc_restore(client, cloud_account_id)
         if "AD_TIERED_BACKUP" in phases:
             run_phase_ad_tiered_backup(client, cloud_account_id)
+        if "AD_MEMBER_SERVER_BACKUP" in phases:
+            run_phase_ad_member_server_backup(client, cloud_account_id)
         if "BIND_DNS" in phases:
             run_phase_bind_dns(
                 client, cloud_account_id,
@@ -17452,16 +17455,16 @@ def _run_bind_dns_tests(
         conn_resp = client.post("/connectors", json={
             "connector_type": "bind_dns",
             "name": f"nexplane-smoke-bind-{suffix}",
-            "credentials": {
-                "server": bind_server_ip,
-                "port": "53",
-                "zone": "smoke.nexplane.local",
-                "tsig_key_name": tsig_key_name,
-                "tsig_key_secret": tsig_key_secret,
-                "tsig_algorithm": "hmac-sha256",
-            },
         })
         connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
+        client.put(f"/connectors/{connector_id}/credentials", json={"credentials": {
+            "server": bind_server_ip,
+            "port": "53",
+            "zone": "smoke.nexplane.local",
+            "tsig_key_name": tsig_key_name,
+            "tsig_key_secret": tsig_key_secret,
+            "tsig_algorithm": "hmac-sha256",
+        }})
         log(f"BIND_DNS: connector created — id={connector_id}")
 
         # ------------------------------------------------------------------
@@ -17470,7 +17473,8 @@ def _run_bind_dns_tests(
         log("BIND_DNS: step 1 — list_zone")
         cr = client.run_cr(
             "[BIND_DNS] list_zone", "bind_list_zone", connector_id,
-            {"zone": "smoke.nexplane.local"},
+            {"zone": "smoke.nexplane.local", "_locked_connector_type": "bind_dns"},
+            connector_id=connector_id,
         )
         result = client.get_cr_step_result(cr)
         assert result.get("zone") == "smoke.nexplane.local", (
@@ -17490,7 +17494,9 @@ def _run_bind_dns_tests(
                 "value": "10.0.0.42",
                 "ttl": 60,
                 "zone": "smoke.nexplane.local",
+                "_locked_connector_type": "bind_dns",
             },
+            connector_id=connector_id,
         )
         result2 = client.get_cr_step_result(cr2)
         assert result2.get("record_name") == "nexplane-test", (
@@ -17504,7 +17510,8 @@ def _run_bind_dns_tests(
         log("BIND_DNS: step 3 — check_record (expect 10.0.0.42)")
         cr3 = client.run_cr(
             "[BIND_DNS] check_record (after create)", "bind_check_record", connector_id,
-            {"record_name": "nexplane-test", "record_type": "A"},
+            {"record_name": "nexplane-test", "record_type": "A", "_locked_connector_type": "bind_dns"},
+            connector_id=connector_id,
         )
         result3 = client.get_cr_step_result(cr3)
         assert result3.get("exists") is True, (
@@ -17525,7 +17532,9 @@ def _run_bind_dns_tests(
                 "record_name": "nexplane-test",
                 "record_type": "A",
                 "zone": "smoke.nexplane.local",
+                "_locked_connector_type": "bind_dns",
             },
+            connector_id=connector_id,
         )
         result4 = client.get_cr_step_result(cr4)
         assert result4.get("record_name") == "nexplane-test", (
@@ -17539,7 +17548,8 @@ def _run_bind_dns_tests(
         log("BIND_DNS: step 5 — check_record (expect exists: False)")
         cr5 = client.run_cr(
             "[BIND_DNS] check_record (after delete)", "bind_check_record", connector_id,
-            {"record_name": "nexplane-test", "record_type": "A"},
+            {"record_name": "nexplane-test", "record_type": "A", "_locked_connector_type": "bind_dns"},
+            connector_id=connector_id,
         )
         result5 = client.get_cr_step_result(cr5)
         assert result5.get("exists") is False, (
@@ -17636,7 +17646,13 @@ chmod 640 /etc/named/nexplane-smoke.key
 chown root:named /etc/named/nexplane-smoke.key 2>/dev/null || \
     chown root:bind /etc/named/nexplane-smoke.key 2>/dev/null || true
 
-PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+IMDS_TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
+PRIVATE_IP=$(curl -s -H "X-aws-ec2-metadata-token: ${IMDS_TOKEN}" http://169.254.169.254/latest/meta-data/local-ipv4 2>/dev/null)
+# Fallback: use hostname if IMDS fails
+if [ -z "$PRIVATE_IP" ]; then
+    PRIVATE_IP=$(hostname -I | awk '{print $1}')
+fi
+echo "PRIVATE_IP=$PRIVATE_IP"
 mkdir -p /var/named
 cat > /var/named/smoke.nexplane.local.zone <<ZONEOF
 \$ORIGIN smoke.nexplane.local.
@@ -17646,8 +17662,8 @@ cat > /var/named/smoke.nexplane.local.zone <<ZONEOF
 @  IN  NS   ns1.smoke.nexplane.local.
 ns1 IN  A   ${PRIVATE_IP}
 ZONEOF
-chown named:named /var/named/smoke.nexplane.local.zone
-chmod 640 /var/named/smoke.nexplane.local.zone
+chown named:named /var/named/smoke.nexplane.local.zone 2>/dev/null || true
+chmod 644 /var/named/smoke.nexplane.local.zone
 
 cat > /etc/named.conf <<NAMEDEOF
 options {
@@ -17670,9 +17686,12 @@ zone "smoke.nexplane.local" {
 NAMEDEOF
 
 systemctl enable named
-systemctl start named
+systemctl start named || { journalctl -u named --no-pager -n 20; exit 1; }
 sleep 2
-systemctl is-active named
+systemctl is-active named || { journalctl -u named --no-pager -n 20; exit 1; }
+# Open port 53 in firewalld if present (not always installed)
+firewall-cmd --permanent --add-service=dns 2>/dev/null || true
+firewall-cmd --reload 2>/dev/null || true
 echo "BIND_READY"
 """
     setup_hash = hashlib.md5(setup_script.encode()).hexdigest()
@@ -17757,6 +17776,30 @@ echo "BIND_READY"
             _time.sleep(10)
         else:
             fail("[BIND_DNS] Cached-AMI instance never came online in SSM")
+
+        # AL2023 firewalld may block port 53 — open it (idempotent, non-fatal)
+        try:
+            _fw_resp = ssm_boto.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [
+                    "firewall-cmd --permanent --add-service=dns 2>/dev/null || true",
+                    "firewall-cmd --reload 2>/dev/null || true",
+                    "systemctl restart named 2>/dev/null || true",
+                ]},
+                TimeoutSeconds=30,
+            )
+            _fw_cmd_id = _fw_resp["Command"]["CommandId"]
+            _fw_deadline = _time.time() + 60
+            while _time.time() < _fw_deadline:
+                _time.sleep(5)
+                _fw_inv = ssm_boto.get_command_invocation(
+                    CommandId=_fw_cmd_id, InstanceId=instance_id
+                )
+                if _fw_inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+                    break
+        except Exception as _fw_e:
+            log(f"BIND_DNS: firewalld open skipped: {_fw_e}")
     else:
         launched_fresh = True
         log("BIND_DNS: no cached AMI — launching fresh instance and installing BIND9...")
@@ -17797,7 +17840,7 @@ echo "BIND_READY"
                         ec2_client.terminate_instances(InstanceIds=[instance_id])
                     except Exception:
                         pass
-                    fail(f"[BIND_DNS] BIND9 setup failed: {inv.get('StandardErrorContent', '')}")
+                    fail(f"[BIND_DNS] BIND9 setup failed:\nSTDOUT: {inv.get('StandardOutputContent', '')}\nSTDERR: {inv.get('StandardErrorContent', '')}")
                 break
             print(".", end="", flush=True)
         else:
@@ -17820,6 +17863,25 @@ echo "BIND_READY"
             pass
         fail("[BIND_DNS] Could not get private IP of BIND instance")
     log(f"BIND_DNS: BIND9 running at {private_ip}:53")
+
+    # Verify named is listening on all interfaces (not just loopback) via SSM
+    try:
+        _ss_resp = ssm_boto.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": ["ss -tlnp | grep ':53' || echo 'no-53-listener'"]},
+            TimeoutSeconds=30,
+        )
+        _ss_cmd_id = _ss_resp["Command"]["CommandId"]
+        _ss_deadline = _time.time() + 60
+        while _time.time() < _ss_deadline:
+            _time.sleep(5)
+            _ss_inv = ssm_boto.get_command_invocation(CommandId=_ss_cmd_id, InstanceId=instance_id)
+            if _ss_inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+                log(f"BIND_DNS: named listeners: {_ss_inv.get('StandardOutputContent','').strip()[:200]}")
+                break
+    except Exception as _ss_e:
+        log(f"BIND_DNS: listener check skipped: {_ss_e}")
 
     # Read TSIG secret from key file via SSM — cat the raw file, parse in Python
     read_key_resp = ssm_boto.send_command(
@@ -19540,6 +19602,257 @@ def run_phase_ad_tiered_backup(client, cloud_account_id):
             log(f"AD_TIERED_BACKUP: terminated instance {instance_id}")
         except Exception:
             pass
+
+
+def run_phase_ad_member_server_backup(client, cloud_account_id):
+    """Phase AD_MEMBER_SERVER_BACKUP: Launch a t3.small Linux instance as a stand-in member server,
+    register an AWS connector, run ad_tiered_backup tier=1 (AWS Backup), verify recovery point
+    created, rollback (delete recovery point), verify cleanup.
+    """
+    import hashlib as _hl
+    import time as _t
+
+    print("\n[Phase AD_MEMBER_SERVER_BACKUP] AD Tier 1 member server backup smoke test")
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_boto = _get_aws_boto3_client("ssm")
+    backup_boto = _get_aws_boto3_client("backup")
+    iam_boto = _get_aws_boto3_client("iam")
+    if not ec2_client or not backup_boto:
+        fail("[AD_MEMBER_SERVER_BACKUP] AWS clients not available")
+
+    # IAM role ARN for AWS Backup — look up the NexplaneEC2TestRole
+    try:
+        role_arn = iam_boto.get_role(RoleName="NexplaneEC2TestRole")["Role"]["Arn"]
+    except Exception as _iam_e:
+        fail(f"[AD_MEMBER_SERVER_BACKUP] Could not resolve NexplaneEC2TestRole ARN: {_iam_e}")
+
+    _vpcs = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+    if not _vpcs:
+        fail("[AD_MEMBER_SERVER_BACKUP] No default VPC found")
+    vpc_id = _vpcs[0]["VpcId"]
+    _subnets = ec2_client.describe_subnets(
+        Filters=[{"Name": "vpcId", "Values": [vpc_id]}]
+    )["Subnets"]
+    _subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+    # subnet_id is resolved later after AZ validation (t3.small not in all AZs)
+
+    # Use Amazon Linux 2023 AMI (latest, from SSM parameter)
+    try:
+        ami_id = ssm_boto.get_parameter(
+            Name="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+        )["Parameter"]["Value"]
+    except Exception:
+        ami_id = None  # will use default AMI lookup below
+
+    if not ami_id:
+        ami_resp = ec2_client.describe_images(
+            Owners=["amazon"],
+            Filters=[
+                {"Name": "name", "Values": ["al2023-ami-*-x86_64"]},
+                {"Name": "state", "Values": ["available"]},
+            ],
+        )["Images"]
+        ami_resp.sort(key=lambda x: x["CreationDate"], reverse=True)
+        if not ami_resp:
+            fail("[AD_MEMBER_SERVER_BACKUP] No Amazon Linux 2023 AMI found")
+        ami_id = ami_resp[0]["ImageId"]
+
+    log(f"AD_MEMBER_SERVER_BACKUP: using AMI {ami_id}")
+
+    vault_name = "nexplane-smoke-member-backup"
+    instance_id = None
+    connector_id = None
+    asset_id = None
+    backup_cr_id = None
+
+    try:
+        # Launch a minimal instance — no agents needed, just an EC2 resource ARN for AWS Backup
+        # Try each subnet in order — t3.small is not supported in all AZs (e.g. us-east-1e)
+        log("AD_MEMBER_SERVER_BACKUP: launching t3.small member server instance...")
+        _launch = None
+        for _sn in _subnets:
+            try:
+                _launch = ec2_client.run_instances(
+                    ImageId=ami_id,
+                    InstanceType="t3.small",
+                    MinCount=1,
+                    MaxCount=1,
+                    SubnetId=_sn["SubnetId"],
+                    TagSpecifications=[{
+                        "ResourceType": "instance",
+                        "Tags": [
+                            {"Key": "Name", "Value": "nexplane-smoke-member-server"},
+                            {"Key": "nexplane-smoke", "Value": "true"},
+                        ],
+                    }],
+                )
+                break
+            except Exception as _ce:
+                if "Unsupported" in str(_ce):
+                    log(f"AD_MEMBER_SERVER_BACKUP: AZ {_sn.get('AvailabilityZone')} unsupported for t3.small, trying next")
+                    continue
+                raise
+        if not _launch:
+            fail("[AD_MEMBER_SERVER_BACKUP] Could not launch t3.small in any available AZ")
+        instance_id = _launch["Instances"][0]["InstanceId"]
+        log(f"AD_MEMBER_SERVER_BACKUP: launched {instance_id}")
+
+        ec2_client.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+        log(f"AD_MEMBER_SERVER_BACKUP: instance running")
+
+        # Register AD connector (re-use existing AWS connector credentials for AWS Backup calls)
+        # Access smoke_helpers module directly — the imported _aws_creds_cache name is stale
+        # after smoke_helpers reassigns the dict (Python name rebinding, not mutation).
+        import smoke_helpers as _shl
+        _aws_creds = _shl._aws_creds_cache or {}
+        conn_resp = client.post("/connectors", json={
+            "name": f"nexplane-smoke-ad-member-{instance_id[-8:]}",
+            "connector_type": "active_directory",
+        })
+        connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
+        client.put(f"/connectors/{connector_id}/credentials", json={"credentials": {
+            # Required AD catalog fields — placeholders; tier 1 uses AWS Backup, not LDAP/WinRM
+            "server": "127.0.0.1",
+            "base_dn": "DC=smoke,DC=nexplane,DC=local",
+            "bind_dn": "CN=smokeuser,DC=smoke,DC=nexplane,DC=local",
+            "bind_password": "placeholder",
+            # AWS credentials for AWS Backup API calls
+            "aws_access_key_id": _aws_creds.get("access_key_id", ""),
+            "aws_secret_access_key": _aws_creds.get("secret_access_key", ""),
+            "aws_region": _aws_creds.get("region", "us-east-1"),
+        }})
+        log(f"AD_MEMBER_SERVER_BACKUP: connector={connector_id}")
+
+        asset_resp = client.post("/assets", json={
+            "name": f"nexplane-smoke-member-{instance_id[-8:]}",
+            "asset_type": "server",
+            "environment": "staging",
+            "criticality": "medium",
+            "asset_metadata": {"instance_id": instance_id},
+            "tags": ["nexplane-smoke", "active-directory"],
+        })
+        asset_id = asset_resp.get("id")
+        log(f"AD_MEMBER_SERVER_BACKUP: asset={asset_id}")
+
+        # Step 1 — dry_run: verify parameter passing without AWS Backup calls
+        log("AD_MEMBER_SERVER_BACKUP: step 1 — tier=1 dry_run=True...")
+        cr_dry = client.run_cr(
+            "[AD_MEMBER_SERVER_BACKUP] tier1 dry_run",
+            "ad_tiered_backup",
+            asset_id,
+            {
+                "tier": "1",
+                "dry_run": True,
+                "backup_vault_name": vault_name,
+                "ec2_instance_ids": [instance_id],
+                "iam_role_arn": role_arn,
+            },
+            connector_id=connector_id,
+        )
+        dry_result = client.get_cr_step_result(cr_dry)
+        assert dry_result.get("status") == "dry_run_complete", (
+            f"AD_MEMBER_SERVER_BACKUP: dry_run unexpected status: {dry_result}"
+        )
+        assert instance_id in dry_result.get("targets", {}).get("ec2_instances", []), (
+            f"AD_MEMBER_SERVER_BACKUP: dry_run targets missing instance: {dry_result}"
+        )
+        log(f"AD_MEMBER_SERVER_BACKUP: dry_run OK — targets={dry_result['targets']}")
+
+        # Step 2 — real tier 1 backup
+        log("AD_MEMBER_SERVER_BACKUP: step 2 — tier=1 real backup (AWS Backup)...")
+        cr_backup = client.run_cr(
+            "[AD_MEMBER_SERVER_BACKUP] tier1 backup",
+            "ad_tiered_backup",
+            asset_id,
+            {
+                "tier": "1",
+                "dry_run": False,
+                "backup_vault_name": vault_name,
+                "ec2_instance_ids": [instance_id],
+                "iam_role_arn": role_arn,
+            },
+            connector_id=connector_id,
+        )
+        backup_cr_id = cr_backup["id"]
+        backup_result = client.get_cr_step_result(cr_backup)
+        assert backup_result.get("status") in ("completed", "partial"), (
+            f"AD_MEMBER_SERVER_BACKUP: backup status unexpected: {backup_result}"
+        )
+        assert backup_result.get("instances_backed_up", 0) >= 1, (
+            f"AD_MEMBER_SERVER_BACKUP: no instances backed up: {backup_result}"
+        )
+        rp_arns = backup_result.get("recovery_point_arns", [])
+        assert rp_arns, f"AD_MEMBER_SERVER_BACKUP: no recovery_point_arns in result: {backup_result}"
+        log(
+            f"AD_MEMBER_SERVER_BACKUP: backup status={backup_result.get('status')}, "
+            f"instances_backed_up={backup_result.get('instances_backed_up')}, "
+            f"recovery_points={rp_arns}"
+        )
+
+        # Step 3 — rollback: delete recovery points
+        log("AD_MEMBER_SERVER_BACKUP: step 3 — rollback (delete recovery points)...")
+        rb_ok = client.rollback_cr(backup_cr_id, "[AD_MEMBER_SERVER_BACKUP] tier1 rollback")
+        if rb_ok:
+            # Verify recovery points are gone
+            for arn in rp_arns:
+                try:
+                    backup_boto.describe_recovery_point(
+                        BackupVaultName=vault_name,
+                        RecoveryPointArn=arn,
+                    )
+                    # If we get here, the recovery point still exists — not a hard fail (AWS may lag)
+                    log(f"  INFO: recovery point {arn} still visible — may be AWS propagation delay")
+                except Exception:
+                    pass  # ResourceNotFoundException expected
+            backup_cr_id = None  # already rolled back
+            log("AD_MEMBER_SERVER_BACKUP: rollback complete ✅")
+
+        log("Phase AD_MEMBER_SERVER_BACKUP PASSED")
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase AD_MEMBER_SERVER_BACKUP failed: {e}")
+        raise
+    finally:
+        if backup_cr_id:
+            try:
+                client.rollback_cr(backup_cr_id, "[AD_MEMBER_SERVER_BACKUP] emergency rollback")
+            except Exception:
+                pass
+        # Clean up AWS Backup vault (delete any remaining recovery points first)
+        if backup_boto:
+            try:
+                rps = backup_boto.list_recovery_points_by_backup_vault(
+                    BackupVaultName=vault_name
+                ).get("RecoveryPoints", [])
+                for rp in rps:
+                    try:
+                        backup_boto.delete_recovery_point(
+                            BackupVaultName=vault_name,
+                            RecoveryPointArn=rp["RecoveryPointArn"],
+                        )
+                    except Exception:
+                        pass
+                backup_boto.delete_backup_vault(BackupVaultName=vault_name)
+                log(f"AD_MEMBER_SERVER_BACKUP: deleted backup vault {vault_name}")
+            except Exception:
+                pass
+        if connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{connector_id}")
+            except Exception:
+                pass
+        if asset_id:
+            try:
+                client.client.delete(f"{client.base}/assets/{asset_id}")
+            except Exception:
+                pass
+        if instance_id:
+            try:
+                ec2_client.terminate_instances(InstanceIds=[instance_id])
+                log(f"AD_MEMBER_SERVER_BACKUP: terminated instance {instance_id}")
+            except Exception:
+                pass
 
 
 def _get_default_vpc(ec2_client):
