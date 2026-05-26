@@ -1,0 +1,21 @@
+{
+  "name": "apply_protocol_control",
+  "display_name": "Apply Protocol Control",
+  "description": "Disable a vulnerable network protocol on a Linux host (TLS 1.0, TLS 1.1, SSLv3, SMBv1, NTLMv1).",
+  "connector_type": "ssh",
+  "risk_score": 5,
+  "requires_approval": true,
+  "rollback_available": true,
+  "parameters": {
+    "protocol": {
+      "type": "string",
+      "enum": ["tls10", "tls11", "sslv3", "smbv1", "ntlmv1"],
+      "description": "The protocol to disable."
+    },
+    "target_os": {
+      "type": "string",
+      "enum": ["linux"],
+      "default": "linux"
+    }
+  }
+}
