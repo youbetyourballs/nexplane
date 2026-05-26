@@ -89,12 +89,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         logger.error(f"OS upgrade failed for {asset_id}: {e}")
         if snapshot_id:
             logger.info(f"Auto-rolling back to snapshot {snapshot_id}")
-            await _restore_snapshot(asset_id, snapshot_id, connector)
+            restore_status = await _restore_snapshot(asset_id, snapshot_id, connector)
             return {
                 "status": "failed_and_rolled_back",
                 "error": str(e),
                 "snapshot_id": snapshot_id,
-                "rollback_status": "restored_from_snapshot",
+                "rollback_status": restore_status,
             }
         raise
 
@@ -119,12 +119,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not verify_result.get("verified", True):
         if snapshot_id:
             logger.warning(f"Verification failed — restoring snapshot {snapshot_id}")
-            await _restore_snapshot(asset_id, snapshot_id, connector)
+            restore_status = await _restore_snapshot(asset_id, snapshot_id, connector)
             return {
                 "status": "failed_and_rolled_back",
                 "verify_result": verify_result,
                 "snapshot_id": snapshot_id,
-                "rollback_status": "restored_from_snapshot",
+                "rollback_status": restore_status,
             }
 
     # Update asset metadata with new OS version
@@ -191,15 +191,20 @@ async def _take_snapshot(asset_id: str, instance_id: str, connector) -> str:
     return snap["SnapshotId"]
 
 
-async def _restore_snapshot(asset_id: str, snapshot_id: str, connector) -> None:
-    """Log snapshot restore — actual restore requires stopping instance and restoring volume."""
+async def _restore_snapshot(asset_id: str, snapshot_id: str, connector) -> str:
+    """Surface manual restore instructions.
+
+    Automated EBS restore (stop → detach → create-volume → attach → start) is
+    deliberately not implemented here because it requires stopping the instance
+    and is risky to automate without quorum. The snapshot exists and is safe;
+    a human must perform the restore using the steps in the CR result.
+    """
     logger.warning(
-        f"MANUAL ACTION REQUIRED: Restore asset {asset_id} from snapshot {snapshot_id}. "
-        f"Stop the instance, detach root volume, create volume from snapshot, attach, start."
+        "MANUAL ACTION REQUIRED: Restore asset %s from snapshot %s. "
+        "Stop the instance, detach root volume, create volume from snapshot, attach, start.",
+        asset_id, snapshot_id,
     )
-    # Full automated restore is complex (requires stop -> detach -> create volume -> attach -> start)
-    # For now, log clearly and surface in the CR result for human action
-    # TODO: implement automated EBS restore workflow
+    return "manual_action_required"
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:

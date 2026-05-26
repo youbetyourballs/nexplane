@@ -35,6 +35,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     except Exception as exc:
         raise ValueError(f"kubeconfig_b64 is not valid base64: {exc}") from exc
 
+    # Verify the cluster is reachable before writing anything to the DB.
+    await _verify_cluster_reachable(kubeconfig_str)
+
     asset_id = asset_ids[0] if asset_ids else None
 
     from app.database import AsyncSessionLocal
@@ -130,6 +133,35 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "endpoint": endpoint,
         "_auto_asset": auto_asset,
     }
+
+
+async def _verify_cluster_reachable(kubeconfig_str: str) -> None:
+    """Make a lightweight k8s API call to confirm the cluster is reachable.
+
+    Raises RuntimeError if the cluster cannot be contacted so that callers
+    fail before writing any DB records.
+    """
+    import asyncio
+    import yaml
+    from kubernetes import client as k8s_client
+    from kubernetes.config.kube_config import KubeConfigLoader
+
+    def _check() -> None:
+        config_dict = yaml.safe_load(kubeconfig_str)
+        loader = KubeConfigLoader(config_dict=config_dict)
+        configuration = k8s_client.Configuration()
+        loader.load_and_set(configuration)
+        api_client = k8s_client.ApiClient(configuration=configuration)
+        try:
+            k8s_client.CoreV1Api(api_client=api_client).list_namespace(limit=1, timeout_seconds=10)
+        finally:
+            api_client.rest_client.pool_manager.clear()
+
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, _check)
+    except Exception as exc:
+        raise RuntimeError(f"Kubernetes cluster unreachable: {exc}") from exc
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
