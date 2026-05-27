@@ -447,6 +447,10 @@ class ChangeType(str, enum.Enum):
     santa_machine_list = "santa_machine_list"
     santa_machine_group_assign = "santa_machine_group_assign"
     santa_rule_deploy = "santa_rule_deploy"
+    # Microsoft Defender for Endpoint
+    discover_machines = "discover_machines"
+    isolate_machine = "isolate_machine"
+    unisolate_machine = "unisolate_machine"
 
     # Chef InSpec compliance connector
     discover_nodes = "discover_nodes"
