@@ -21372,7 +21372,7 @@ def run_phase_oci(client, cloud_account_id: str) -> None:
         log("  OCI: create_bucket bucket_name=" + bucket_name + " ✓")
 
         # CR 4: rollback create_bucket (exercises oci_bucket_delete path)
-        client.post(f"/change-requests/{cr_bucket}/rollback", json={})
+        client.post(f"/change-requests/{cr_bucket['id']}/rollback", json={})
         log("  OCI: rollback create_bucket (delete_bucket) ✓")
         cr_bucket = None  # rolled back — skip finally cleanup attempt
 
@@ -21385,7 +21385,7 @@ def run_phase_oci(client, cloud_account_id: str) -> None:
         # If bucket CR not rolled back, attempt rollback to delete the bucket
         if cr_bucket:
             try:
-                client.post(f"/change-requests/{cr_bucket}/rollback", json={})
+                client.post(f"/change-requests/{cr_bucket['id']}/rollback", json={})
                 log("  OCI: create_bucket CR rollback attempted in cleanup")
             except Exception as _cleanup_e:
                 log("  OCI: cleanup warning: " + str(_cleanup_e))
