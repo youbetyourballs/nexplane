@@ -28,12 +28,13 @@ function wrap(ui: React.ReactElement) {
   );
 }
 
-test("shows Operations section with Runbooks, Scheduled Ops, Maintenance Windows", () => {
+test("shows Operations section with Runbooks, Scheduled Ops, Maintenance Windows, Backup & Recovery", () => {
   wrap(<Sidebar />);
   expect(screen.getByText("Operations")).toBeInTheDocument();
   expect(screen.getByText("Runbooks")).toBeInTheDocument();
   expect(screen.getByText("Scheduled Ops")).toBeInTheDocument();
   expect(screen.getByText("Maintenance Windows")).toBeInTheDocument();
+  expect(screen.getByText("Backup & Recovery")).toBeInTheDocument();
 });
 
 test("does not show Vuln Remediation as a top-level nav item", () => {
