@@ -16124,6 +16124,8 @@ def main():
             run_phase_chef_inspec(client, cloud_account_id)
         if "AZURE_AD" in phases:
             run_phase_azure_ad(client, cloud_account_id)
+        if "DEFENDER_ENDPOINT" in phases:
+            run_phase_defender_endpoint(client, cloud_account_id)
         if "IDENTITY_SYNC" in phases:
             run_phase_identity_sync(client, cloud_account_id)
         if "IDENTITY_FANOUT" in phases:
@@ -21150,6 +21152,100 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
                 client.client.delete(f"{client.base}/connectors/{azure_conn_id}")
             except Exception as _cleanup_e:
                 log("  AZURE_AD: cleanup warning: " + str(_cleanup_e))
+
+
+def run_phase_defender_endpoint(client, cloud_account_id: str) -> None:
+    """Phase DEFENDER_ENDPOINT: discover_machines → isolate_machine → unisolate_machine via CR pipeline."""
+    import secrets as _sec
+    print("\n[Phase DEFENDER_ENDPOINT] Defender lifecycle (discover_machines→isolate→unisolate)")
+    suffix = _sec.token_hex(4)
+    defender_conn_id = None
+    defender_asset_id = None
+    machine_id = None
+
+    # Fetch live credentials from platform DB
+    all_conns = client.get("/connectors")
+    source = next((c for c in all_conns if c.get("connector_type") == "defender_endpoint"), None)
+    if not source:
+        fail("[DEFENDER] No defender_endpoint connector found in platform DB — register one with live credentials first")
+    source_creds_resp = client.get(f"/connectors/{source['id']}/credentials")
+    live_creds = source_creds_resp.get("credentials", {})
+    if not live_creds.get("tenant_id"):
+        fail("[DEFENDER] defender_endpoint connector has no credentials stored")
+
+    try:
+        # Register smoke connector
+        defender_conn = client.post("/connectors", json={
+            "connector_type": "defender_endpoint",
+            "name": f"nexplane-smoke-defender-{suffix}",
+            "display_name": f"nexplane-smoke-defender-{suffix}",
+        })
+        defender_conn_id = defender_conn.get("id")
+        client.put(f"/connectors/{defender_conn_id}/credentials", json={"credentials": live_creds})
+        log("DEFENDER connector registered: " + str(defender_conn_id))
+        defender_asset_id = client.register_asset_for_connector(
+            f"nexplane-smoke-defender-{suffix}", defender_conn_id, asset_type="server"
+        )
+        log("DEFENDER asset registered: " + str(defender_asset_id))
+
+        _hint = {"_locked_connector_type": "defender_endpoint"}
+
+        # CR 1: discover_machines
+        cr_discover = client.run_cr(
+            "[DEFENDER] discover_machines", "discover_machines", defender_asset_id,
+            {**_hint}, connector_id=defender_conn_id,
+        )
+        result_discover = client.get_cr_step_result(cr_discover)
+        machines = result_discover.get("machines", [])
+        log("  DEFENDER: discover_machines count=" + str(len(machines)))
+        if not machines:
+            fail("[DEFENDER] discover_machines returned empty list — no enrolled machines in tenant")
+        machine_id = machines[0]["id"]
+        log("  DEFENDER: discovered machine_id=" + str(machine_id) + " ✓")
+
+        # CR 2: isolate_machine — unisolate runs unconditionally in finally
+        cr_iso = client.run_cr(
+            "[DEFENDER] isolate_machine", "isolate_machine", defender_asset_id,
+            {**_hint, "machine_id": machine_id,
+             "comment": "Nexplane smoke test — unisolate follows immediately"},
+            connector_id=defender_conn_id,
+        )
+        result_iso = client.get_cr_step_result(cr_iso)
+        iso_status = result_iso.get("status", "")
+        log("  DEFENDER: isolate_machine status=" + iso_status)
+        if iso_status not in ("Pending", "Succeeded"):
+            fail("[DEFENDER] isolate_machine unexpected status: " + str(result_iso))
+        log("  DEFENDER: isolate_machine ✓")
+
+        log("Phase DEFENDER_ENDPOINT PASSED")
+
+    except Exception as e:
+        print("\n[FAIL] Phase DEFENDER_ENDPOINT failed: " + str(e))
+        raise
+    finally:
+        # Always unisolate if we got a machine_id (machine may be isolated)
+        if machine_id and defender_conn_id and defender_asset_id:
+            try:
+                _hint2 = {"_locked_connector_type": "defender_endpoint"}
+                cr_uniso = client.run_cr(
+                    "[DEFENDER] unisolate_machine", "unisolate_machine", defender_asset_id,
+                    {**_hint2, "machine_id": machine_id},
+                    connector_id=defender_conn_id,
+                )
+                result_uniso = client.get_cr_step_result(cr_uniso)
+                uniso_status = result_uniso.get("status", "")
+                if uniso_status not in ("Pending", "Succeeded"):
+                    log("  DEFENDER: warning — unisolate_machine status=" + uniso_status)
+                else:
+                    log("  DEFENDER: unisolate_machine ✓")
+            except Exception as _uniso_e:
+                log("  DEFENDER: unisolate_machine error (machine may still be isolated!): " + str(_uniso_e))
+        # Delete smoke connector
+        if defender_conn_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{defender_conn_id}")
+            except Exception as _cleanup_e:
+                log("  DEFENDER: cleanup warning: " + str(_cleanup_e))
 
 
 if __name__ == "__main__":
