@@ -23,19 +23,19 @@ function wrap(ui: React.ReactElement) {
   return render(<QueryClientProvider client={qc}><MemoryRouter>{ui}</MemoryRouter></QueryClientProvider>);
 }
 
-test("shows Unmitigated Criticals preset button", () => {
+test("shows Unmitigated Criticals preset button", async () => {
   wrap(<Assets />);
-  expect(screen.getByText("Unmitigated Criticals")).toBeInTheDocument();
+  expect(await screen.findByText("Unmitigated Criticals")).toBeInTheDocument();
 });
 
-test("shows Public-Facing High+ preset button", () => {
+test("shows Public-Facing High+ preset button", async () => {
   wrap(<Assets />);
-  expect(screen.getByText("Public-Facing High+")).toBeInTheDocument();
+  expect(await screen.findByText("Public-Facing High+")).toBeInTheDocument();
 });
 
-test("clicking Unmitigated Criticals applies criticality filter", () => {
+test("clicking Unmitigated Criticals applies criticality filter", async () => {
   wrap(<Assets />);
-  const btn = screen.getByText("Unmitigated Criticals");
+  const btn = await screen.findByText("Unmitigated Criticals");
   fireEvent.click(btn);
   const input = screen.getByPlaceholderText(/search assets/i) as HTMLInputElement;
   expect(input.value).toContain("critical");
