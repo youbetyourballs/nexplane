@@ -336,6 +336,10 @@ class ChangeType(str, enum.Enum):
     sudoers_audit = "sudoers_audit"
     suid_scan = "suid_scan"
     ssl_cert_inspect = "ssl_cert_inspect"
+    # Checkov IaC scanning
+    scan_iac = "scan_iac"
+    scan_secrets = "scan_secrets"
+    get_compliance_summary = "get_compliance_summary"
     # Keycloak identity
     keycloak_disable_user = "keycloak_disable_user"
     # Kubernetes RBAC management
