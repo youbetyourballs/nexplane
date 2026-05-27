@@ -1,13 +1,13 @@
 """add oci_discover and azure_ad change_types to pg enum
 
-Revision ID: 062_add_oci_discover_change_types
+Revision ID: 062_oci_discover_types
 Revises: 061_agent_tokens
 Create Date: 2026-05-27
 """
 from alembic import op
 
 
-revision = "062_add_oci_discover_change_types"
+revision = "062_oci_discover_types"
 down_revision = "061_agent_tokens"
 branch_labels = None
 depends_on = None
