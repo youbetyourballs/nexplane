@@ -452,6 +452,8 @@ class ChangeType(str, enum.Enum):
     discover_nodes = "discover_nodes"
     run_compliance_scan = "run_compliance_scan"
     discover_compliance_results = "discover_compliance_results"
+    discover_users = "discover_users"
+    get_group_membership = "get_group_membership"
 
 
 class RiskLevel(str, enum.Enum):
