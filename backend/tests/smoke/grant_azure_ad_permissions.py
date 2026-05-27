@@ -45,13 +45,13 @@ if not sp_list:
 our_sp_id = sp_list[0]["id"]
 print(f"Our SP id: {our_sp_id}")
 
-# Step 3: Find Microsoft Graph service principal
+# Step 3: Find Microsoft Graph service principal via direct appId lookup
 graph_sp_resp = httpx.get(
-    "https://graph.microsoft.com/v1.0/servicePrincipals?$filter=appId eq '00000003-0000-0000-c000-000000000000'",
+    "https://graph.microsoft.com/v1.0/servicePrincipals(appId='00000003-0000-0000-c000-000000000000')",
     headers=headers,
 )
 graph_sp_resp.raise_for_status()
-graph_sp = graph_sp_resp.json()["value"][0]
+graph_sp = graph_sp_resp.json()
 graph_sp_id = graph_sp["id"]
 print(f"Microsoft Graph SP id: {graph_sp_id}")
 
