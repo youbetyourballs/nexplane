@@ -1,0 +1,9 @@
+{
+  "change_type": "get_group_membership",
+  "display_name": "Get Azure AD Group Membership",
+  "steps": [
+    {"generic_action": "get_group_membership", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": []
+}
