@@ -1,0 +1,9 @@
+{
+  "change_type": "get_compliance_summary",
+  "display_name": "Get Compliance Summary from Checkov",
+  "steps": [
+    {"generic_action": "compliance_check", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": []
+}
