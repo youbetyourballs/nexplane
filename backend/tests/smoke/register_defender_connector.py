@@ -47,9 +47,8 @@ async def main():
 
         # Create connector
         await conn.execute(text(
-            "INSERT INTO connectors (id, organization_id, connector_type, name, display_name, created_at, updated_at) "
-            "VALUES (:id, :org, 'defender_endpoint', 'Microsoft Defender for Endpoint', "
-            "'Microsoft Defender for Endpoint', :now, :now)"
+            "INSERT INTO connectors (id, organization_id, connector_type, name, created_at) "
+            "VALUES (:id, :org, 'defender_endpoint', 'Microsoft Defender for Endpoint', :now)"
         ), {"id": str(defender_conn_id), "org": org_id, "now": datetime.now(timezone.utc)})
 
         # Store credentials
