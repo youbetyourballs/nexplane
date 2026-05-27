@@ -122,7 +122,7 @@ export function Sidebar() {
   });
 
   const showOnboarding = checklist != null && checklist.connector_count === 0;
-  const incompleteSteps = checklist?.steps.filter((s) => !s.complete) ?? [];
+  const incompleteSteps = checklist?.steps?.filter((s) => !s.complete) ?? [];
 
   return (
     <aside className="fixed inset-y-0 left-0 w-60 bg-navy flex flex-col z-10">
