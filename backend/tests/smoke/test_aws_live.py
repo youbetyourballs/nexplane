@@ -6991,7 +6991,20 @@ def run_phase_snyk_scan(client: NexplaneClient, cloud_account_id: str) -> dict:
     org_id = _get_ssm_param("/nexplane/smoke/snyk/org_id")
 
     if not api_token or not org_id:
-        print("SKIP: Snyk credentials not in SSM (/nexplane/smoke/snyk/api_token and /nexplane/smoke/snyk/org_id)")
+        # Fall back to platform DB
+        try:
+            _sk_conns = client.get("/connectors")
+            _sk_src = next((c for c in _sk_conns if c.get("connector_type") == "snyk"), None)
+            if _sk_src:
+                _sk_creds_resp = client.get(f"/connectors/{_sk_src['id']}/credentials")
+                _sk_live = _sk_creds_resp.get("credentials", {})
+                api_token = api_token or _sk_live.get("api_token", "")
+                org_id = org_id or _sk_live.get("org_id", "")
+        except Exception as _sk_e:
+            print(f"  Platform DB cred fetch failed: {_sk_e}")
+
+    if not api_token or not org_id:
+        print("SKIP: Snyk credentials not in SSM or platform DB")
         return {"status": "skipped"}
 
     # Check API entitlement before attempting scan — free plan blocks API access
@@ -13011,7 +13024,20 @@ def run_phase_okta_disable(client: NexplaneClient) -> dict:
             print(f"  SSM lookup failed: {e}")
 
     if not okta_domain or not okta_api_token:
-        print("SKIP: OKTA credentials not in SSM, skipping OKTA_DISABLE phase")
+        # Fall back to platform DB
+        try:
+            _ok_conns = client.get("/connectors")
+            _ok_src = next((c for c in _ok_conns if c.get("connector_type") == "okta"), None)
+            if _ok_src:
+                _ok_creds_resp = client.get(f"/connectors/{_ok_src['id']}/credentials")
+                _ok_live = _ok_creds_resp.get("credentials", {})
+                okta_domain = okta_domain or _ok_live.get("org_url", "")
+                okta_api_token = okta_api_token or _ok_live.get("api_token", "")
+        except Exception as _ok_e:
+            print(f"  Platform DB cred fetch failed: {_ok_e}")
+
+    if not okta_domain or not okta_api_token:
+        print("SKIP: OKTA credentials not in SSM or platform DB, skipping OKTA_DISABLE phase")
         return {"status": "skipped", "reason": "no credentials"}
 
     # Ensure domain has https:// prefix — SSM value stored without protocol
@@ -13134,7 +13160,21 @@ def run_phase_servicenow_incident(client: NexplaneClient) -> dict:
             print(f"  SSM lookup failed: {e}")
 
     if not sn_instance or not sn_user or not sn_pass:
-        print("SKIP: SERVICENOW credentials not in SSM, skipping SERVICENOW_INCIDENT phase")
+        # Fall back to platform DB
+        try:
+            _sn_conns = client.get("/connectors")
+            _sn_src = next((c for c in _sn_conns if c.get("connector_type") == "servicenow"), None)
+            if _sn_src:
+                _sn_creds_resp = client.get(f"/connectors/{_sn_src['id']}/credentials")
+                _sn_live = _sn_creds_resp.get("credentials", {})
+                sn_instance = sn_instance or _sn_live.get("instance_url", "")
+                sn_user = sn_user or _sn_live.get("username", "")
+                sn_pass = sn_pass or _sn_live.get("password", "")
+        except Exception as _sn_e:
+            print(f"  Platform DB cred fetch failed: {_sn_e}")
+
+    if not sn_instance or not sn_user or not sn_pass:
+        print("SKIP: SERVICENOW credentials not in SSM or platform DB, skipping SERVICENOW_INCIDENT phase")
         return {"status": "skipped", "reason": "no credentials"}
 
     base_url = sn_instance.rstrip("/") + "/api/now/table"
@@ -13228,7 +13268,20 @@ def run_phase_pagerduty_incident(client: NexplaneClient) -> dict:
             print(f"  SSM lookup failed: {e}")
 
     if not pd_token or not pd_service_id:
-        print("SKIP: PAGERDUTY credentials not in SSM, skipping PAGERDUTY_INCIDENT phase")
+        # Fall back to platform DB
+        try:
+            _pd_conns = client.get("/connectors")
+            _pd_src = next((c for c in _pd_conns if c.get("connector_type") == "pagerduty"), None)
+            if _pd_src:
+                _pd_creds_resp = client.get(f"/connectors/{_pd_src['id']}/credentials")
+                _pd_live = _pd_creds_resp.get("credentials", {})
+                pd_token = pd_token or _pd_live.get("api_key", "")
+                pd_service_id = pd_service_id or _pd_live.get("service_id", "")
+        except Exception as _pd_e:
+            print(f"  Platform DB cred fetch failed: {_pd_e}")
+
+    if not pd_token or not pd_service_id:
+        print("SKIP: PAGERDUTY credentials not in SSM or platform DB, skipping PAGERDUTY_INCIDENT phase")
         return {"status": "skipped", "reason": "no credentials"}
 
     pd_headers = {
