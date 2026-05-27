@@ -16120,6 +16120,8 @@ def main():
             run_phase_helm(client, cloud_account_id)
         if "CHECKOV" in phases:
             run_phase_checkov(client, cloud_account_id)
+        if "CHEF_INSPEC" in phases:
+            run_phase_chef_inspec(client, cloud_account_id)
         if "IDENTITY_SYNC" in phases:
             run_phase_identity_sync(client, cloud_account_id)
         if "IDENTITY_FANOUT" in phases:
@@ -20838,6 +20840,147 @@ def run_phase_checkov(client, cloud_account_id: str) -> None:
             log("  CHECKOV: temp dir cleaned up")
         except Exception:
             pass
+
+
+def run_phase_chef_inspec(client, cloud_account_id: str) -> None:
+    """Phase CHEF_INSPEC: discover_nodes → run_compliance_scan → discover_compliance_results
+    via CR pipeline against a minimal local HTTP mock of Chef Automate's API."""
+    import threading as _th, http.server as _hs, json as _json, time as _time
+    import secrets as _sec, socket as _socket
+    print("\n[Phase CHEF_INSPEC] Chef InSpec compliance lifecycle (discover_nodes→scan→results)")
+
+    suffix = _sec.token_hex(4)
+    chef_conn_id = None
+    chef_asset_id = None
+    mock_server = None
+    mock_thread = None
+
+    # --- Find a free local port ---
+    with _socket.socket() as _s:
+        _s.bind(("127.0.0.1", 0))
+        mock_port = _s.getsockname()[1]
+
+    NODE_ID = f"smoke-node-{suffix}"
+    JOB_ID = f"smoke-job-{suffix}"
+    job_started_at = [0.0]  # mutable ref for state machine
+
+    class _Handler(_hs.BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            pass  # suppress default access log
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            self.rfile.read(length)  # consume body
+
+            if self.path.startswith("/api/v0/nodes/search"):
+                body = _json.dumps({
+                    "nodes": [{"id": NODE_ID, "name": "smoke-self", "platform": "linux"}],
+                    "total": 1,
+                })
+            elif self.path.startswith("/api/v0/compliance/scanner/jobs"):
+                job_started_at[0] = _time.time()
+                body = _json.dumps({"id": JOB_ID})
+            elif self.path.startswith("/api/v0/compliance/reporting/nodes/search"):
+                # Return "passed" status once job has been running for >=2s, else "unknown"
+                elapsed = _time.time() - job_started_at[0] if job_started_at[0] else 0
+                status = "passed" if elapsed >= 2 else "unknown"
+                body = _json.dumps({
+                    "nodes": [{"id": NODE_ID, "name": "smoke-self", "status": status}],
+                    "total": 1,
+                })
+            else:
+                self.send_response(404)
+                self.end_headers()
+                return
+
+            encoded = body.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+    try:
+        # --- Start mock server ---
+        mock_server = _hs.HTTPServer(("127.0.0.1", mock_port), _Handler)
+        mock_thread = _th.Thread(target=mock_server.serve_forever, daemon=True)
+        mock_thread.start()
+        log(f"CHEF_INSPEC: mock Chef Automate server running on port {mock_port}")
+
+        automate_url = f"http://127.0.0.1:{mock_port}"
+
+        # --- Register chef_inspec connector ---
+        chef_conn = client.post("/connectors", json={
+            "connector_type": "chef_inspec",
+            "name": f"nexplane-smoke-chef-{suffix}",
+            "display_name": f"nexplane-smoke-chef-{suffix}",
+        })
+        chef_conn_id = chef_conn.get("id")
+        client.client.put(
+            f"{client.base}/connectors/{chef_conn_id}/credentials",
+            json={"credentials": {"automate_url": automate_url, "api_token": "smoke-token"}},
+        )
+        log("CHEF_INSPEC connector registered: " + str(chef_conn_id))
+
+        chef_asset_id = client.register_asset_for_connector(
+            f"nexplane-smoke-chef-{suffix}", chef_conn_id, asset_type="server"
+        )
+        log("CHEF_INSPEC asset registered: " + str(chef_asset_id))
+
+        _chef_hint = {"_locked_connector_type": "chef_inspec"}
+
+        # --- CR 1: discover_nodes ---
+        cr_nodes = client.run_cr(
+            "[CHEF_INSPEC] discover_nodes", "discover_nodes", chef_asset_id,
+            {**_chef_hint}, connector_id=chef_conn_id,
+        )
+        result_nodes = client.get_cr_step_result(cr_nodes)
+        nodes = result_nodes.get("nodes", [])
+        log("  CHEF_INSPEC: discover_nodes result: " + str([n.get("name") for n in nodes]))
+        if not any(n.get("id") == NODE_ID for n in nodes):
+            fail(f"[CHEF_INSPEC] expected node {NODE_ID} not found in discover_nodes: {nodes}")
+        log("  CHEF_INSPEC: smoke-self node discovered ✓")
+
+        # --- CR 2: run_compliance_scan ---
+        cr_scan = client.run_cr(
+            "[CHEF_INSPEC] run_compliance_scan", "run_compliance_scan", chef_asset_id,
+            {**_chef_hint, "node_id": NODE_ID, "profile_id": "admin/nexplane-smoke"},
+            connector_id=chef_conn_id,
+        )
+        result_scan = client.get_cr_step_result(cr_scan)
+        log("  CHEF_INSPEC: run_compliance_scan result: " + str(result_scan))
+        if not result_scan.get("scan_triggered"):
+            fail(f"[CHEF_INSPEC] run_compliance_scan did not return scan_triggered=True: {result_scan}")
+        if result_scan.get("job_id") != JOB_ID:
+            fail(f"[CHEF_INSPEC] unexpected job_id: expected {JOB_ID}, got {result_scan.get('job_id')}")
+        log("  CHEF_INSPEC: scan triggered, job_id=" + str(result_scan.get("job_id")) + " ✓")
+
+        # --- Wait 3s for mock to transition scan to completed ---
+        _time.sleep(3)
+
+        # --- CR 3: discover_compliance_results ---
+        cr_results = client.run_cr(
+            "[CHEF_INSPEC] discover_compliance_results", "discover_compliance_results", chef_asset_id,
+            {**_chef_hint}, connector_id=chef_conn_id,
+        )
+        result_results = client.get_cr_step_result(cr_results)
+        compliance_nodes = result_results.get("results", [])
+        log("  CHEF_INSPEC: discover_compliance_results: " + str(compliance_nodes))
+        if not compliance_nodes:
+            fail(f"[CHEF_INSPEC] discover_compliance_results returned no results: {result_results}")
+        node_status = compliance_nodes[0].get("status", "unknown")
+        if node_status == "unknown":
+            fail(f"[CHEF_INSPEC] compliance result status is 'unknown' — scan results not reflected: {compliance_nodes}")
+        log("  CHEF_INSPEC: node compliance status=" + node_status + " ✓")
+
+        log("Phase CHEF_INSPEC PASSED")
+
+    except Exception as e:
+        print("\n[FAIL] Phase CHEF_INSPEC failed: " + str(e))
+        raise
+    finally:
+        if mock_server:
+            mock_server.shutdown()
 
 
 if __name__ == "__main__":
