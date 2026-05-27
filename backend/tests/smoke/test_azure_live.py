@@ -1110,30 +1110,58 @@ def run_phase_bicep(client, cloud_account_id: str, azure_resource_group: str) ->
 
     parameters = {"storageAccountName": {"value": storage_account_name}}
 
+    # Register a dedicated bicep connector + asset so the planning engine picks
+    # the bicep connector (not the azure connector already on cloud_account asset).
+    az_creds = _get_azure_creds()
+    bicep_conn = client.post("/connectors", json={
+        "connector_type": "bicep",
+        "name": f"nexplane-smoke-bicep-{suffix}",
+        "display_name": f"nexplane-smoke-bicep-{suffix}",
+    })
+    bicep_conn_id = bicep_conn.get("id")
+    log(f"Bicep connector registered: {bicep_conn_id}")
+    client.client.put(
+        f"{client.base}/connectors/{bicep_conn_id}/credentials",
+        json={"credentials": {
+            "tenant_id": az_creds.get("tenant_id", ""),
+            "client_id": az_creds.get("client_id", ""),
+            "client_secret": az_creds.get("client_secret", ""),
+            "subscription_id": az_creds.get("subscription_id", ""),
+        }},
+    )
+    bicep_asset_id = client.register_asset_for_connector(
+        f"nexplane-smoke-bicep-acct-{suffix}", bicep_conn_id, asset_type="cloud_account"
+    )
+    log(f"Bicep asset registered: {bicep_asset_id}")
+    _bicep_hint = {"_locked_connector_type": "bicep"}
+
     log(f"Creating ARM deployment: {deployment_name} (storage: {storage_account_name})")
     result = client.run_cr(
         f"Smoke BICEP create_deployment {deployment_name}",
         "create_deployment",
-        cloud_account_id,
+        bicep_asset_id,
         {
+            **_bicep_hint,
             "resource_group": azure_resource_group,
             "deployment_name": deployment_name,
             "template": arm_template,
             "parameters": parameters,
         },
     )
-    if result.get("status") != "Succeeded":
-        fail(f"create_deployment did not succeed: {result}")
-    log(f"Deployment created with status: {result.get('status')}")
+    step_result = client.get_cr_step_result(result)
+    if step_result.get("status") != "Succeeded":
+        fail(f"create_deployment did not succeed: {step_result}")
+    log(f"Deployment created with status: {step_result.get('status')}")
 
     log("Discovering deployments to verify our deployment appears")
-    result = client.run_cr(
+    disc_result = client.run_cr(
         "Smoke BICEP discover_deployments",
         "discover_deployments",
-        cloud_account_id,
-        {"resource_group": azure_resource_group},
+        bicep_asset_id,
+        {**_bicep_hint, "resource_group": azure_resource_group},
     )
-    deployments = result.get("deployments", [])
+    disc_step = client.get_cr_step_result(disc_result)
+    deployments = disc_step.get("deployments", [])
     names = [d["name"] for d in deployments]
     if deployment_name not in names:
         fail(f"Deployment {deployment_name} not found in discover_deployments result: {names}")
@@ -1146,26 +1174,22 @@ def run_phase_bicep(client, cloud_account_id: str, azure_resource_group: str) ->
     client.run_cr(
         f"Smoke BICEP delete_deployment {deployment_name}",
         "delete_deployment",
-        cloud_account_id,
+        bicep_asset_id,
         {
+            **_bicep_hint,
             "resource_group": azure_resource_group,
             "deployment_name": deployment_name,
         },
     )
-    log("delete_deployment CR complete; verifying via Azure SDK")
+    log("delete_deployment CR complete; verifying via ARM REST API")
 
-    from azure.mgmt.resources import ResourceManagementClient
-    from azure.identity import ClientSecretCredential
-
+    import sys as _sys
+    _sys.path.insert(0, "/app")
+    from app.connectors.executors.bicep._client import arm_get
     creds_dict = _get_azure_creds()
-    credential = ClientSecretCredential(
-        tenant_id=creds_dict["tenant_id"],
-        client_id=creds_dict["client_id"],
-        client_secret=creds_dict["client_secret"],
-    )
-    rm_client = ResourceManagementClient(credential, creds_dict["subscription_id"])
-    remaining = list(rm_client.deployments.list_by_resource_group(azure_resource_group))
-    remaining_names = [d.name for d in remaining]
+    sub = creds_dict["subscription_id"]
+    data = arm_get(creds_dict, f"/subscriptions/{sub}/resourceGroups/{azure_resource_group}/providers/Microsoft.Resources/deployments")
+    remaining_names = [d.get("name") for d in data.get("value", [])]
     if deployment_name in remaining_names:
         fail(f"Deployment {deployment_name} still present after delete_deployment CR")
     log(f"Confirmed deployment {deployment_name} is gone")
