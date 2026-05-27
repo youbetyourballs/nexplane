@@ -44,3 +44,23 @@ test("shows Change Requests nav item", () => {
   wrap(<Sidebar />);
   expect(screen.getByText("Change Requests")).toBeInTheDocument();
 });
+
+test("shows pending approval count badge on Change Requests when there are pending approvals", async () => {
+  const { apiClient } = require("../../api/client");
+  apiClient.get.mockImplementation((url: string) => {
+    if (url.includes("change-requests")) {
+      return Promise.resolve({ data: [{ id: "cr1" }, { id: "cr2" }, { id: "cr3" }] });
+    }
+    return Promise.resolve({ data: [] });
+  });
+  wrap(<Sidebar />);
+  expect(await screen.findByText("3")).toBeInTheDocument();
+});
+
+test("Operations section items are hidden when section is collapsed", () => {
+  const { fireEvent } = require("@testing-library/react");
+  wrap(<Sidebar />);
+  const opsButton = screen.getByRole("button", { name: /operations/i });
+  fireEvent.click(opsButton);
+  expect(screen.queryByText("Runbooks")).not.toBeInTheDocument();
+});
