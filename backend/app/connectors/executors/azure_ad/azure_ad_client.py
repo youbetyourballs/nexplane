@@ -103,6 +103,39 @@ class AzureADClient:
             resp.raise_for_status()
             return {"user": user_id_or_upn, "action": "sessions_revoked"}
 
+    async def list_users(self, top: int = 999) -> list[dict]:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.GRAPH_BASE}/users",
+                headers=await self._headers(),
+                params={"$top": top, "$select": "id,displayName,userPrincipalName,accountEnabled"},
+            )
+            resp.raise_for_status()
+            return resp.json().get("value", [])
+
+    async def get_group_membership(self, user_id: str) -> list[dict]:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.GRAPH_BASE}/users/{user_id}/memberOf",
+                headers=await self._headers(),
+                params={"$select": "id,displayName"},
+            )
+            resp.raise_for_status()
+            return resp.json().get("value", [])
+
+    async def get_primary_domain(self) -> str:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.GRAPH_BASE}/domains",
+                headers=await self._headers(),
+            )
+            resp.raise_for_status()
+            domains = resp.json().get("value", [])
+        for d in domains:
+            if d.get("id", "").endswith(".onmicrosoft.com"):
+                return d["id"]
+        raise RuntimeError("No .onmicrosoft.com domain found in tenant")
+
 
 def get_azure_ad_client(connector) -> AzureADClient | None:
     creds = getattr(connector, "credentials", None) or {}
