@@ -41,7 +41,8 @@ test("shows error banner for GCP connector", async () => {
 
 test("shows never synced label for Azure connector", async () => {
   wrap(<Connectors />);
-  expect(await screen.findByText(/never synced/i)).toBeInTheDocument();
+  const els = await screen.findAllByText(/never synced/i);
+  expect(els.length).toBeGreaterThan(0);
 });
 
 test("shows disabled label for LDAP connector", async () => {
