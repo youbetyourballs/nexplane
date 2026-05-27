@@ -52,6 +52,6 @@ test("AI panel is open when URL has showAI=1", async () => {
 
 test("AI panel is closed when URL has no showAI param", async () => {
   wrap("/projects/proj1");
-  expect(await screen.findByText("Harden prod servers")).toBeInTheDocument();
+  expect(await screen.findByDisplayValue("Harden prod servers")).toBeInTheDocument();
   expect(screen.queryByText("✦ AI Assistant")).not.toBeInTheDocument();
 });
