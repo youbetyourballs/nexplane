@@ -16122,6 +16122,8 @@ def main():
             run_phase_checkov(client, cloud_account_id)
         if "CHEF_INSPEC" in phases:
             run_phase_chef_inspec(client, cloud_account_id)
+        if "AZURE_AD" in phases:
+            run_phase_azure_ad(client, cloud_account_id)
         if "IDENTITY_SYNC" in phases:
             run_phase_identity_sync(client, cloud_account_id)
         if "IDENTITY_FANOUT" in phases:
@@ -20981,6 +20983,156 @@ def run_phase_chef_inspec(client, cloud_account_id: str) -> None:
     finally:
         if mock_server:
             mock_server.shutdown()
+
+
+def run_phase_azure_ad(client, cloud_account_id: str) -> None:
+    """Phase AZURE_AD: discover_users → get_group_membership → create_user → disable_user → rollback via CR pipeline."""
+    import secrets as _sec
+    import httpx as _httpx
+    print("\n[Phase AZURE_AD] Azure AD lifecycle (discover_users→get_group_membership→create→disable→rollback)")
+    suffix = _sec.token_hex(4)
+    azure_conn_id = None
+    azure_asset_id = None
+    smoke_upn = None
+    live_creds = {}
+
+    # Fetch live credentials from platform DB
+    all_conns = client.get("/connectors")
+    source = next((c for c in all_conns if c.get("connector_type") == "azure_ad"), None)
+    if not source:
+        fail("[AZURE_AD] No azure_ad connector found in platform DB — register one with live credentials first")
+    source_creds_resp = client.get(f"/connectors/{source['id']}/credentials")
+    live_creds = source_creds_resp.get("credentials", {})
+    if not live_creds.get("tenant_id"):
+        fail("[AZURE_AD] azure_ad connector has no credentials stored")
+
+    try:
+        # Register smoke connector
+        azure_conn = client.post("/connectors", json={
+            "connector_type": "azure_ad",
+            "name": f"nexplane-smoke-azure-ad-{suffix}",
+            "display_name": f"nexplane-smoke-azure-ad-{suffix}",
+        })
+        azure_conn_id = azure_conn.get("id")
+        client.put(f"/connectors/{azure_conn_id}/credentials", json={"credentials": live_creds})
+        log("AZURE_AD connector registered: " + str(azure_conn_id))
+        azure_asset_id = client.register_asset_for_connector(
+            f"nexplane-smoke-azure-ad-{suffix}", azure_conn_id, asset_type="identity"
+        )
+        log("AZURE_AD asset registered: " + str(azure_asset_id))
+
+        _hint = {"_locked_connector_type": "azure_ad"}
+
+        # CR 1: discover_users
+        cr_discover = client.run_cr(
+            "[AZURE_AD] discover_users", "discover_users", azure_asset_id,
+            {**_hint}, connector_id=azure_conn_id,
+        )
+        result_discover = client.get_cr_step_result(cr_discover)
+        users = result_discover.get("users", [])
+        log("  AZURE_AD: discover_users count=" + str(len(users)))
+        if not users:
+            fail("[AZURE_AD] discover_users returned empty list — expected at least one user in tenant")
+        target_user_id = users[0]["id"]
+        log("  AZURE_AD: discover_users ✓ (first user id=" + target_user_id + ")")
+
+        # CR 2: get_group_membership for first user
+        cr_groups = client.run_cr(
+            "[AZURE_AD] get_group_membership", "get_group_membership", azure_asset_id,
+            {**_hint, "user_id": target_user_id}, connector_id=azure_conn_id,
+        )
+        result_groups = client.get_cr_step_result(cr_groups)
+        if "groups" not in result_groups:
+            fail("[AZURE_AD] get_group_membership result missing 'groups' key: " + str(result_groups))
+        log("  AZURE_AD: get_group_membership groups=" + str(result_groups.get("count")) + " ✓")
+
+        # Derive onmicrosoft.com domain for smoke UPN
+        _token_resp = _httpx.post(
+            f"https://login.microsoftonline.com/{live_creds['tenant_id']}/oauth2/v2.0/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": live_creds["client_id"],
+                "client_secret": live_creds["client_secret"],
+                "scope": "https://graph.microsoft.com/.default",
+            },
+        )
+        _token_resp.raise_for_status()
+        _token = _token_resp.json()["access_token"]
+        _domains_resp = _httpx.get(
+            "https://graph.microsoft.com/v1.0/domains",
+            headers={"Authorization": f"Bearer {_token}"},
+        )
+        _domains_resp.raise_for_status()
+        _primary_domain = next(
+            (d["id"] for d in _domains_resp.json().get("value", []) if d["id"].endswith(".onmicrosoft.com")),
+            None,
+        )
+        if not _primary_domain:
+            fail("[AZURE_AD] Could not derive .onmicrosoft.com domain from tenant")
+        smoke_upn = f"nexplane-smoke-{suffix}@{_primary_domain}"
+        log("  AZURE_AD: smoke UPN will be " + smoke_upn)
+
+        # CR 3: create_user
+        cr_create = client.run_cr(
+            "[AZURE_AD] create_user", "create_user", azure_asset_id,
+            {**_hint, "user_principal_name": smoke_upn, "display_name": f"Nexplane Smoke {suffix}"},
+            connector_id=azure_conn_id,
+        )
+        result_create = client.get_cr_step_result(cr_create)
+        if not result_create.get("id"):
+            fail("[AZURE_AD] create_user did not return user id: " + str(result_create))
+        log("  AZURE_AD: create_user id=" + str(result_create.get("id")) + " ✓")
+
+        # CR 4: disable_user
+        cr_disable = client.run_cr(
+            "[AZURE_AD] disable_user", "disable_user", azure_asset_id,
+            {**_hint, "user_identifier": smoke_upn}, connector_id=azure_conn_id,
+        )
+        result_disable = client.get_cr_step_result(cr_disable)
+        if result_disable.get("accountEnabled") is not False:
+            fail("[AZURE_AD] disable_user did not return accountEnabled=false: " + str(result_disable))
+        log("  AZURE_AD: disable_user accountEnabled=false ✓")
+
+        # CR 5: rollback disable_user (re-enables user)
+        client.post(f"/change-requests/{cr_disable}/rollback", json={})
+        log("  AZURE_AD: rollback disable_user (re-enabled) ✓")
+
+        log("Phase AZURE_AD PASSED")
+
+    except Exception as e:
+        print("\n[FAIL] Phase AZURE_AD failed: " + str(e))
+        raise
+    finally:
+        # Always delete smoke user
+        if smoke_upn and live_creds.get("tenant_id"):
+            try:
+                _token_resp2 = _httpx.post(
+                    f"https://login.microsoftonline.com/{live_creds['tenant_id']}/oauth2/v2.0/token",
+                    data={
+                        "grant_type": "client_credentials",
+                        "client_id": live_creds["client_id"],
+                        "client_secret": live_creds["client_secret"],
+                        "scope": "https://graph.microsoft.com/.default",
+                    },
+                )
+                _token_resp2.raise_for_status()
+                _token2 = _token_resp2.json()["access_token"]
+                _del_resp = _httpx.delete(
+                    f"https://graph.microsoft.com/v1.0/users/{smoke_upn}",
+                    headers={"Authorization": f"Bearer {_token2}"},
+                )
+                if _del_resp.status_code not in (200, 204, 404):
+                    log("  AZURE_AD: warning — smoke user delete returned " + str(_del_resp.status_code))
+                else:
+                    log("  AZURE_AD: smoke user deleted")
+            except Exception:
+                pass
+        # Delete smoke connector
+        if azure_conn_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{azure_conn_id}")
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
