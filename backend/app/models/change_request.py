@@ -460,6 +460,8 @@ class ChangeType(str, enum.Enum):
     get_group_membership = "get_group_membership"
     oci_discover_compartments = "oci_discover_compartments"
     oci_discover_instances = "oci_discover_instances"
+    # Vulnerability PoC validation
+    vuln_poc_validate = "vuln_poc_validate"
 
 
 class RiskLevel(str, enum.Enum):
