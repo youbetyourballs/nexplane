@@ -1,0 +1,1 @@
+{"change_type": "oci_discover_compartments", "display_name": "Discover OCI Compartments", "steps": [{"generic_action": "oci_discover_compartments", "purpose": "execute", "required": true}], "preflight_checks": ["connector_reachable", "asset_exists"], "verification_methods": [], "rollback_connector_type": "oci"}

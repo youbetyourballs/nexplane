@@ -454,6 +454,8 @@ class ChangeType(str, enum.Enum):
     discover_compliance_results = "discover_compliance_results"
     discover_users = "discover_users"
     get_group_membership = "get_group_membership"
+    oci_discover_compartments = "oci_discover_compartments"
+    oci_discover_instances = "oci_discover_instances"
 
 
 class RiskLevel(str, enum.Enum):

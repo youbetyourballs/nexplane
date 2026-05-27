@@ -16126,6 +16126,8 @@ def main():
             run_phase_azure_ad(client, cloud_account_id)
         if "DEFENDER_ENDPOINT" in phases:
             run_phase_defender_endpoint(client, cloud_account_id)
+        if "OCI" in phases:
+            run_phase_oci(client, cloud_account_id)
         if "IDENTITY_SYNC" in phases:
             run_phase_identity_sync(client, cloud_account_id)
         if "IDENTITY_FANOUT" in phases:
@@ -21246,6 +21248,102 @@ def run_phase_defender_endpoint(client, cloud_account_id: str) -> None:
                 client.client.delete(f"{client.base}/connectors/{defender_conn_id}")
             except Exception as _cleanup_e:
                 log("  DEFENDER: cleanup warning: " + str(_cleanup_e))
+
+
+def run_phase_oci(client, cloud_account_id: str) -> None:
+    """Phase OCI: discover_compartments → discover_instances → create_bucket → rollback via CR pipeline."""
+    import secrets as _sec
+    print("\n[Phase OCI] OCI lifecycle (discover_compartments→discover_instances→create_bucket→rollback)")
+    suffix = _sec.token_hex(4)
+    oci_conn_id = None
+    oci_asset_id = None
+    cr_bucket = None
+
+    # Fetch live credentials from platform DB
+    all_conns = client.get("/connectors")
+    source = next((c for c in all_conns if c.get("connector_type") == "oci"), None)
+    if not source:
+        fail("[OCI] No oci connector found in platform DB — register one with live credentials first")
+    source_creds_resp = client.get(f"/connectors/{source['id']}/credentials")
+    live_creds = source_creds_resp.get("credentials", {})
+    if not live_creds.get("tenancy"):
+        fail("[OCI] oci connector has no credentials stored")
+
+    try:
+        # Register smoke connector
+        oci_conn = client.post("/connectors", json={
+            "connector_type": "oci",
+            "name": f"nexplane-smoke-oci-{suffix}",
+            "display_name": f"nexplane-smoke-oci-{suffix}",
+        })
+        oci_conn_id = oci_conn.get("id")
+        client.put(f"/connectors/{oci_conn_id}/credentials", json={"credentials": live_creds})
+        log("OCI connector registered: " + str(oci_conn_id))
+        oci_asset_id = client.register_asset_for_connector(
+            f"nexplane-smoke-oci-{suffix}", oci_conn_id, asset_type="cloud_account"
+        )
+        log("OCI asset registered: " + str(oci_asset_id))
+
+        _hint = {"_locked_connector_type": "oci"}
+        # Root compartment OCID == tenancy OCID (avoids discover CR routing complexity)
+        compartment_id = live_creds["tenancy"]
+
+        # CR 1: discover_compartments
+        cr_discover = client.run_cr(
+            "[OCI] discover_compartments", "oci_discover_compartments", oci_asset_id,
+            {**_hint}, connector_id=oci_conn_id,
+        )
+        result_discover = client.get_cr_step_result(cr_discover)
+        assets = result_discover.get("assets", [])
+        log("  OCI: discover_compartments count=" + str(len(assets)))
+        if not assets:
+            fail("[OCI] discover_compartments returned empty assets list")
+        log("  OCI: discover_compartments ✓")
+
+        # CR 2: discover_instances (read-only; empty list is OK for a fresh tenancy)
+        cr_instances = client.run_cr(
+            "[OCI] discover_instances", "oci_discover_instances", oci_asset_id,
+            {**_hint, "compartment_id": compartment_id}, connector_id=oci_conn_id,
+        )
+        result_instances = client.get_cr_step_result(cr_instances)
+        log("  OCI: discover_instances count=" + str(len(result_instances.get("assets", []))) + " ✓")
+
+        # CR 3: create_bucket — full lifecycle with rollback
+        bucket_name = f"nexplane-smoke-{suffix}"
+        cr_bucket = client.run_cr(
+            "[OCI] create_bucket", "oci_bucket_create", oci_asset_id,
+            {**_hint, "compartment_id": compartment_id, "name": bucket_name},
+            connector_id=oci_conn_id,
+        )
+        result_bucket = client.get_cr_step_result(cr_bucket)
+        if result_bucket.get("bucket_name") != bucket_name:
+            fail("[OCI] create_bucket did not return expected bucket_name: " + str(result_bucket))
+        log("  OCI: create_bucket bucket_name=" + bucket_name + " ✓")
+
+        # CR 4: rollback create_bucket (exercises oci_bucket_delete path)
+        client.post(f"/change-requests/{cr_bucket}/rollback", json={})
+        log("  OCI: rollback create_bucket (delete_bucket) ✓")
+        cr_bucket = None  # rolled back — skip finally cleanup attempt
+
+        log("Phase OCI PASSED")
+
+    except Exception as e:
+        print("\n[FAIL] Phase OCI failed: " + str(e))
+        raise
+    finally:
+        # If bucket CR not rolled back, attempt rollback to delete the bucket
+        if cr_bucket:
+            try:
+                client.post(f"/change-requests/{cr_bucket}/rollback", json={})
+                log("  OCI: create_bucket CR rollback attempted in cleanup")
+            except Exception as _cleanup_e:
+                log("  OCI: cleanup warning: " + str(_cleanup_e))
+        # Delete smoke connector
+        if oci_conn_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{oci_conn_id}")
+            except Exception as _cleanup_e:
+                log("  OCI: cleanup warning: " + str(_cleanup_e))
 
 
 if __name__ == "__main__":
