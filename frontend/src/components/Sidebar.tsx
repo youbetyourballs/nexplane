@@ -36,12 +36,12 @@ const operationsNavItems = [
   { to: "/runbooks", label: "Runbooks", icon: BookOpen },
   { to: "/scheduled-operations", label: "Scheduled Ops", icon: CalendarClock },
   { to: "/maintenance-windows", label: "Maintenance Windows", icon: Clock },
+  { to: "/backup-recovery", label: "Backup & Recovery", icon: HardDrive },
 ];
 
 const bottomNavItems = [
   { to: "/access-reviews", label: "Access Reviews", icon: ShieldCheck },
   { to: "/compliance", label: "Compliance", icon: ClipboardList },
-  { to: "/backup-recovery", label: "Backup & Recovery", icon: HardDrive },
   { to: "/smoke-tests", label: "Smoke Tests", icon: FlaskConical },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
