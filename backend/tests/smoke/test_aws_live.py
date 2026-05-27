@@ -20584,10 +20584,6 @@ iptables -I FORWARD -o eth0 -p tcp --sport 6443 -j ACCEPT 2>/dev/null || true
 iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
 kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml 2>/dev/null
 mkdir -p /root/.kube && cp /tmp/smoke-kubeconfig.yaml /root/.kube/config
-helm version 2>/dev/null || (curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash 2>&1 || true)
-helm repo add bitnami https://charts.bitnami.com/bitnami 2>&1 || true
-helm repo update 2>&1 || true
-KUBECONFIG=/tmp/smoke-kubeconfig.yaml helm install smoke-nginx bitnami/nginx --namespace default --wait --timeout 120s
 echo "HELM_SETUP_COMPLETE"
 """
             restart_out = _ssm_run_poll(ssm_client, instance_id, restart_script, timeout=900, label="helm-restart")
@@ -20626,6 +20622,43 @@ echo "HELM_SETUP_COMPLETE"
 
         kubeconfig_b64 = base64.b64encode(kubeconfig_content.encode()).decode()
 
+        # --- Install smoke-nginx using a minimal local chart (pause image already in kind node) ---
+        import subprocess as _sp, tempfile as _tf, os as _os
+        log("  HELM: Installing smoke-nginx via local helm chart (uses pause image already in kind)...")
+        _chart_dir = _tf.mkdtemp()
+        _kube_tmp = None
+        try:
+            # Create minimal helm chart structure
+            _os.makedirs(f"{_chart_dir}/smoke-nginx/templates")
+            with open(f"{_chart_dir}/smoke-nginx/Chart.yaml", "w") as _f:
+                _f.write("apiVersion: v2\nname: smoke-nginx\nversion: 0.1.0\n")
+            with open(f"{_chart_dir}/smoke-nginx/templates/configmap.yaml", "w") as _f:
+                _f.write("""apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smoke-nginx-config
+  labels:
+    app: smoke-nginx
+data:
+  smoke: "true"
+""")
+            with _tf.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as _kf:
+                _kf.write(kubeconfig_content)
+                _kube_tmp = _kf.name
+            _sp.run(
+                ["helm", "--kubeconfig", _kube_tmp, "install", "smoke-nginx",
+                 f"{_chart_dir}/smoke-nginx", "--namespace", "default"],
+                check=True, capture_output=True, text=True, timeout=60,
+            )
+            log("  HELM: smoke-nginx installed successfully")
+        except _sp.CalledProcessError as _e:
+            raise RuntimeError(f"helm install smoke-nginx failed: {_e.stderr}") from _e
+        finally:
+            if _kube_tmp:
+                _os.unlink(_kube_tmp)
+            import shutil as _shutil
+            _shutil.rmtree(_chart_dir, ignore_errors=True)
+
         # --- Register helm connector ---
         helm_conn = client.post("/connectors", json={
             "connector_type": "helm",
@@ -20635,6 +20668,10 @@ echo "HELM_SETUP_COMPLETE"
         })
         helm_conn_id = helm_conn.get("id")
         log("HELM connector registered: " + str(helm_conn_id))
+        client.client.put(
+            f"{client.base}/connectors/{helm_conn_id}/credentials",
+            json={"credentials": {"kubeconfig": kubeconfig_b64}},
+        )
 
         helm_asset_id = client.register_asset_for_connector(
             f"nexplane-smoke-helm-{instance_id}", helm_conn_id, asset_type="server")
@@ -20654,8 +20691,11 @@ echo "HELM_SETUP_COMPLETE"
         except Exception:
             pass
 
+        _helm_hint = {"_locked_connector_type": "helm"}
+
         # --- CR 1: discover_releases (assert smoke-nginx present) ---
-        cr_discover1 = client.run_cr("[HELM] discover releases", "discover_releases", helm_asset_id, {}, connector_id=helm_conn_id)
+        cr_discover1 = client.run_cr("[HELM] discover releases", "discover_releases", helm_asset_id,
+            {**_helm_hint}, connector_id=helm_conn_id)
         result1 = client.get_cr_step_result(cr_discover1)
         releases = result1.get("releases", [])
         release_names = [r.get("name") for r in releases]
@@ -20671,25 +20711,24 @@ echo "HELM_SETUP_COMPLETE"
         else:
             log("  HELM: smoke-nginx is deployed ✓")
 
-        # --- CR 2: rollback_release (revision=0 → no-op reinstall; just assert no error) ---
+        # --- CR 2: rollback_release (revision=1 → roll back to initial install) ---
         cr_rollback = client.run_cr("[HELM] rollback release", "rollback_release", helm_asset_id,
-            {"release_name": "smoke-nginx", "namespace": "default", "revision": 0},
+            {**_helm_hint, "release_name": "smoke-nginx", "namespace": "default", "revision": 1},
             connector_id=helm_conn_id)
         result_rb = client.get_cr_step_result(cr_rollback)
-        log("  HELM: rollback_release result: " + str(result_rb.get("status", result_rb)))
-        # rollback with revision=0 is a no-op on a single-revision release; just verify no hard failure
-        if result_rb.get("error") and "not found" not in str(result_rb.get("error", "")).lower():
-            fail(f"[HELM] rollback_release returned unexpected error: {result_rb}")
+        log("  HELM: rollback_release result: " + str(result_rb))
+        if result_rb.get("error"):
+            fail(f"[HELM] rollback_release returned error: {result_rb}")
 
         # --- CR 3: uninstall_release ---
         cr_uninstall = client.run_cr("[HELM] uninstall release", "uninstall_release", helm_asset_id,
-            {"release_name": "smoke-nginx", "namespace": "default"},
+            {**_helm_hint, "release_name": "smoke-nginx", "namespace": "default"},
             connector_id=helm_conn_id)
         result_ui = client.get_cr_step_result(cr_uninstall)
         log("  HELM: uninstall_release result: " + str(result_ui.get("status", result_ui)))
 
         # --- CR 4: discover_releases again (assert smoke-nginx gone) ---
-        cr_discover2 = client.run_cr("[HELM] discover releases (post-uninstall)", "discover_releases", helm_asset_id, {}, connector_id=helm_conn_id)
+        cr_discover2 = client.run_cr("[HELM] discover releases (post-uninstall)", "discover_releases", helm_asset_id, {**_helm_hint}, connector_id=helm_conn_id)
         result2 = client.get_cr_step_result(cr_discover2)
         releases2 = result2.get("releases", [])
         release_names2 = [r.get("name") for r in releases2]
