@@ -15,13 +15,13 @@ function wrap(ui: React.ReactElement) {
   return render(<QueryClientProvider client={qc}><MemoryRouter>{ui}</MemoryRouter></QueryClientProvider>);
 }
 
-test("shows vuln class dropdown", () => {
+test("shows vuln class dropdown", async () => {
   wrap(<Assets />);
-  expect(screen.getByRole("combobox", { name: /vuln class/i })).toBeInTheDocument();
+  expect(await screen.findByRole("combobox", { name: /vuln class/i })).toBeInTheDocument();
 });
 
-test("vuln class dropdown has RCE option", () => {
+test("vuln class dropdown has RCE option", async () => {
   wrap(<Assets />);
-  const select = screen.getByRole("combobox", { name: /vuln class/i });
+  const select = await screen.findByRole("combobox", { name: /vuln class/i });
   expect(select).toContainHTML("rce");
 });
