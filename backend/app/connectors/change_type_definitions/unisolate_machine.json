@@ -1,0 +1,20 @@
+{
+  "change_type": "unisolate_machine",
+  "display_name": "Unisolate Machine",
+  "description": "Remove network isolation from a machine via Microsoft Defender for Endpoint.",
+  "steps": [
+    {
+      "generic_action": "reconnect_endpoint",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": null,
+  "rollback_connector_type": "defender_endpoint"
+}
