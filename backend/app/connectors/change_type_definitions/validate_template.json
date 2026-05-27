@@ -1,0 +1,1 @@
+{"change_type":"validate_template","display_name":"validate_template","steps":[{"generic_action":"validate_template","purpose":"execute","required":true}],"preflight_checks":["connector_reachable"],"verification_methods":["api_check"],"rollback_connector_type":"bicep"}

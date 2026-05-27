@@ -1,0 +1,1 @@
+{"change_type":"detect_stack_drift","display_name":"Detect Stack Drift","steps":[{"generic_action":"scan","purpose":"execute","required":true}],"preflight_checks":["connector_reachable"],"verification_methods":["api_check"],"rollback_connector_type":"cloudformation"}

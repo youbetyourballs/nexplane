@@ -1,0 +1,1 @@
+{"change_type":"create_change_set","display_name":"Create Change Set","steps":[{"generic_action":"plan","purpose":"execute","required":true}],"preflight_checks":["connector_reachable"],"verification_methods":["api_check"],"rollback_connector_type":"cloudformation"}

@@ -1,0 +1,1 @@
+{"change_type":"rollback_release","display_name":"Rollback Release","steps":[{"generic_action":"rollback","purpose":"execute","required":true}],"preflight_checks":["connector_reachable"],"verification_methods":["api_check"],"rollback_connector_type":"helm"}

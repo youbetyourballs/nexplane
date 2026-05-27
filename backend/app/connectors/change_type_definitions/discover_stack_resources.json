@@ -1,0 +1,1 @@
+{"change_type":"discover_stack_resources","display_name":"discover_stack_resources","steps":[{"generic_action":"discover_stack_resources","purpose":"execute","required":true}],"preflight_checks":["connector_reachable"],"verification_methods":["api_check"],"rollback_connector_type":"cloudformation"}

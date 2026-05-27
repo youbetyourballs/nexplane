@@ -20189,13 +20189,49 @@ def run_phase_cf(client, cloud_account_id: str) -> None:
 
     log(f"CF: stack_name={stack_name}")
 
+    # Register a cloudformation connector so the execution engine can resolve CF actions.
+    # The CF connector uses the same AWS credentials as the AWS connector.
+    log("CF: registering cloudformation connector...")
+    from smoke_helpers import _aws_creds_cache as _cf_creds
+    if not _cf_creds:
+        _get_aws_boto3_client("cloudformation")  # side-effect: populates cache
+        from smoke_helpers import _aws_creds_cache as _cf_creds2
+        _cf_creds = _cf_creds2
+    cf_conn = client.post("/connectors", json={
+        "connector_type": "cloudformation",
+        "name": f"nexplane-smoke-cf-{suffix}",
+    })
+    cf_conn_id = cf_conn.get("id")
+    # Store credentials via the dedicated endpoint (ConnectorCreate doesn't accept credentials).
+    client.client.put(
+        f"{client.base}/connectors/{cf_conn_id}/credentials",
+        json={"credentials": {
+            "access_key_id": _cf_creds.get("access_key_id", ""),
+            "secret_access_key": _cf_creds.get("secret_access_key", ""),
+            "region": _cf_creds.get("region", "us-east-1"),
+        }},
+    )
+    log(f"CF: cloudformation connector registered: {cf_conn_id}")
+
+    # Register a cloud_account asset for the CF connector so the planning engine
+    # resolves to the cloudformation connector (not the AWS connector).
+    cf_asset_id = client.register_asset_for_connector(
+        f"nexplane-smoke-cf-acct-{suffix}", cf_conn_id, asset_type="cloud_account"
+    )
+    log(f"CF: cloud_account asset registered: {cf_asset_id}")
+
     # Step 1 — create_change_set CR
     log("CF: creating change set via CR...")
+    # _locked_connector_type forces the planning engine to pick the cloudformation
+    # connector over other connectors that also handle generic "plan"/"apply"/"destroy" actions.
+    _cf_hint = {"_locked_connector_type": "cloudformation"}
+
     cr_cs = client.run_cr(
         "[Phase CF] create_change_set",
         "create_change_set",
-        cloud_account_id,
+        cf_asset_id,
         {
+            **_cf_hint,
             "stack_name": stack_name,
             "change_set_type": "CREATE",
             "template_body": template_body,
@@ -20212,11 +20248,8 @@ def run_phase_cf(client, cloud_account_id: str) -> None:
     client.run_cr(
         "[Phase CF] execute_change_set",
         "execute_change_set",
-        cloud_account_id,
-        {
-            "stack_name": stack_name,
-            "change_set_name": change_set_name,
-        },
+        cf_asset_id,
+        {**_cf_hint, "stack_name": stack_name, "change_set_name": change_set_name},
     )
     log("CF: execute_change_set CR complete")
 
@@ -20245,12 +20278,12 @@ def run_phase_cf(client, cloud_account_id: str) -> None:
     cr_disc = client.run_cr(
         "[Phase CF] discover_stacks",
         "discover_stacks",
-        cloud_account_id,
-        {},
+        cf_asset_id,
+        {**_cf_hint},
     )
     disc_result = client.get_cr_step_result(cr_disc)
     stacks = disc_result.get("stacks", [])
-    stack_names = [s.get("StackName") for s in stacks]
+    stack_names = [s.get("name") for s in stacks]
     if stack_name not in stack_names:
         fail(f"CF: stack {stack_name!r} not found in discover_stacks result; got: {stack_names[:20]}")
     log(f"CF: discover_stacks confirmed stack present")
@@ -20260,8 +20293,8 @@ def run_phase_cf(client, cloud_account_id: str) -> None:
     client.run_cr(
         "[Phase CF] delete_stack",
         "delete_stack",
-        cloud_account_id,
-        {"stack_name": stack_name},
+        cf_asset_id,
+        {**_cf_hint, "stack_name": stack_name},
     )
     log("CF: delete_stack CR complete")
 

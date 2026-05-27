@@ -1,0 +1,1 @@
+{"change_type":"update_termination_protection","display_name":"Update Termination Protection","steps":[{"generic_action":"update_policy","purpose":"execute","required":true}],"preflight_checks":["connector_reachable"],"verification_methods":["api_check"],"rollback_connector_type":"cloudformation"}
