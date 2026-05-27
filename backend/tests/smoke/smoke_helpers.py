@@ -502,6 +502,62 @@ def _get_gcp_compute_client():
     return compute_v1.InstancesClient(credentials=credentials)
 
 # ---------------------------------------------------------------------------
+# Generic connector credentials helper (reads from platform DB directly)
+# ---------------------------------------------------------------------------
+
+_connector_creds_cache: dict = {}
+
+
+def get_connector_creds_from_db(connector_type_str: str) -> dict:
+    """Return decrypted credentials dict for the first connector of connector_type_str.
+
+    Uses _attach_credentials to decrypt — bypasses the REST API (which returns schema only).
+    Returns {} if no connector or no credentials are found.
+    """
+    import threading
+    global _connector_creds_cache
+    if connector_type_str in _connector_creds_cache:
+        return _connector_creds_cache[connector_type_str]
+
+    from app.config import settings
+    from app.models.connector import Connector
+    from app.services.connector_service import _attach_credentials
+    import asyncio, sqlalchemy as sa
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+
+    result_holder: list = [None]
+
+    async def _get():
+        engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=False)
+        async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        try:
+            async with async_session() as db:
+                result = await db.execute(
+                    sa.select(Connector).where(
+                        Connector.connector_type == connector_type_str
+                    )
+                )
+                conn = result.scalars().first()
+                if not conn:
+                    return {}
+                await _attach_credentials(conn, db)
+                return getattr(conn, "credentials", {}) or {}
+        finally:
+            await engine.dispose()
+
+    def _run_in_thread():
+        result_holder[0] = asyncio.run(_get())
+
+    t = threading.Thread(target=_run_in_thread)
+    t.start()
+    t.join()
+    creds = result_holder[0] or {}
+    _connector_creds_cache[connector_type_str] = creds
+    return creds
+
+
+# ---------------------------------------------------------------------------
 # Azure cloud SDK helpers
 # ---------------------------------------------------------------------------
 
