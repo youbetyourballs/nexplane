@@ -64,3 +64,28 @@ test("Operations section items are hidden when section is collapsed", () => {
   fireEvent.click(opsButton);
   expect(screen.queryByText("Runbooks")).not.toBeInTheDocument();
 });
+
+test("shows onboarding strip when no connectors are configured", async () => {
+  const { apiClient } = require("../../api/client");
+  apiClient.get.mockImplementation((url: string) => {
+    if (url.includes("onboarding")) return Promise.resolve({
+      data: { steps: [{ id: "connect", label: "Connect a data source", complete: false, detail: "" }], connector_count: 0, asset_count: 0 },
+    });
+    return Promise.resolve({ data: [] });
+  });
+  wrap(<Sidebar />);
+  expect(await screen.findByText(/connect a data source/i)).toBeInTheDocument();
+});
+
+test("hides onboarding strip when connectors are configured", async () => {
+  const { apiClient } = require("../../api/client");
+  apiClient.get.mockImplementation((url: string) => {
+    if (url.includes("onboarding")) return Promise.resolve({
+      data: { steps: [], connector_count: 1, asset_count: 10 },
+    });
+    return Promise.resolve({ data: [] });
+  });
+  wrap(<Sidebar />);
+  await new Promise((r) => setTimeout(r, 50));
+  expect(screen.queryByText(/connect a data source/i)).not.toBeInTheDocument();
+});
