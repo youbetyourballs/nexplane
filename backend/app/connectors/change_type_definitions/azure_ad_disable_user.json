@@ -1,10 +1,20 @@
 {
-  "name": "azure_ad_disable_user",
+  "change_type": "azure_ad_disable_user",
   "display_name": "Disable Azure AD User",
   "description": "Disables an Azure AD / Entra ID user account and revokes all active sessions via Microsoft Graph API.",
-  "category": "identity",
-  "agent_required": false,
-  "parameters": {
-    "user_identifier": {"type": "string", "description": "User Principal Name (UPN) or object ID", "required": true}
-  }
+  "steps": [
+    {
+      "generic_action": "azure_ad_disable_user",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "azure_ad_disable_user",
+  "rollback_connector_type": "azure_ad"
 }
