@@ -15,5 +15,5 @@ function wrap(ui: React.ReactElement) {
 
 test("empty state mentions AI assistance", async () => {
   wrap(<Projects />);
-  expect(await screen.findByText(/AI/i)).toBeInTheDocument();
+  expect(await screen.findByText(/Start with AI/i)).toBeInTheDocument();
 });

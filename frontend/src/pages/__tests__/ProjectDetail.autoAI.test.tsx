@@ -27,6 +27,9 @@ jest.mock("../../api/endpoints", () => ({
   assetsApi: { list: jest.fn().mockResolvedValue([]) },
 }));
 
+// jsdom doesn't implement scrollIntoView
+window.HTMLElement.prototype.scrollIntoView = jest.fn();
+
 import { ProjectDetail } from "../ProjectDetail";
 
 function wrap(path: string) {
