@@ -36,6 +36,8 @@ function parseSearch(input: string): { q: string; filters: Record<string, string
     criticality: "criticality",
     tag: "tag",
     connector_id: "connector_id",
+    vuln_class: "vuln_class",
+    exploit: "exploit",
   };
   const filters: Record<string, string> = {};
   let remaining = input;
@@ -58,6 +60,8 @@ function buildSearchString(q: string, filters: Record<string, string>): string {
     criticality: "criticality",
     tag: "tag",
     connector_id: "connector_id",
+    vuln_class: "vuln_class",
+    exploit: "exploit",
   };
   const tokens = Object.entries(filters)
     .filter(([, v]) => v)
@@ -363,6 +367,32 @@ export function Assets() {
           <option value="">All Criticalities</option>
           {["low", "medium", "high", "critical"].map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
+        <select
+          aria-label="Vuln class"
+          value={filters.vuln_class ?? ""}
+          onChange={(e) => setFilter("vuln_class", e.target.value)}
+          className="text-sm border border-slate-200 rounded-md px-2 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+        >
+          <option value="">All Vuln Classes</option>
+          <option value="rce">Remote Code Execution</option>
+          <option value="cmd_injection">Command Injection</option>
+          <option value="lpe">Local Privilege Escalation</option>
+          <option value="auth_bypass">Auth Bypass</option>
+          <option value="info_disclosure">Info Disclosure</option>
+          <option value="dos">Denial of Service</option>
+        </select>
+        <button
+          aria-label={filters.exploit === "true" ? "Public exploit filter active, click to clear" : "Filter by public exploit available"}
+          onClick={() => setFilter("exploit", filters.exploit === "true" ? "" : "true")}
+          title="Filter to assets with known public exploits (requires scanner data)"
+          className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border transition-colors ${
+            filters.exploit === "true"
+              ? "bg-red-600 text-white border-red-600"
+              : "border-slate-200 text-slate-600 hover:border-red-300 hover:text-red-600"
+          }`}
+        >
+          <span className="text-xs font-medium">⚡ Public Exploit</span>
+        </button>
         <select
           value={filters.connector_id ?? ""}
           onChange={(e) => setFilter("connector_id", e.target.value)}
