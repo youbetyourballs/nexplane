@@ -10269,10 +10269,21 @@ def run_phase_gcp_key_rotate(client: NexplaneClient, cloud_account_id: str) -> N
             ).execute()
             log(f"Created test SA: {test_sa_email}")
 
-            # Create initial key
-            initial_key = iam_svc.projects().serviceAccounts().keys().create(
-                name=f"projects/{project_id}/serviceAccounts/{test_sa_email}", body={}
-            ).execute()
+            # Create initial key — GCP SA creation has eventual consistency, retry for up to 30s
+            initial_key = None
+            for _retry in range(6):
+                try:
+                    initial_key = iam_svc.projects().serviceAccounts().keys().create(
+                        name=f"projects/{project_id}/serviceAccounts/{test_sa_email}", body={}
+                    ).execute()
+                    break
+                except Exception as _ke:
+                    if "does not exist" in str(_ke) and _retry < 5:
+                        time.sleep(5)
+                    else:
+                        raise
+            if not initial_key:
+                fail("[GCP_KEY_ROTATE] could not create initial key after retries")
             initial_key_id = initial_key["name"].split("/")[-1]
             log(f"Initial key: {initial_key_id[:12]}...")
 
