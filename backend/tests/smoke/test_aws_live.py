@@ -21170,14 +21170,15 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
             connector_id=azure_conn_id,
         )
         result_create = client.get_cr_step_result(cr_create)
-        if not result_create.get("id"):
+        created_user_id = result_create.get("id")
+        if not created_user_id:
             fail("[AZURE_AD] create_user did not return user id: " + str(result_create))
-        log("  AZURE_AD: create_user id=" + str(result_create.get("id")) + " ✓")
+        log("  AZURE_AD: create_user id=" + str(created_user_id) + " ✓")
 
-        # CR 4: disable_user
+        # CR 4: disable_user — use object ID (not UPN) to avoid Azure AD propagation delay
         cr_disable = client.run_cr(
             "[AZURE_AD] disable_user", "azure_ad_disable_user", azure_asset_id,
-            {**_hint, "user_identifier": smoke_upn}, connector_id=azure_conn_id,
+            {**_hint, "user_identifier": created_user_id}, connector_id=azure_conn_id,
         )
         result_disable = client.get_cr_step_result(cr_disable)
         if result_disable.get("accountEnabled") is not False:
@@ -21185,7 +21186,7 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
         log("  AZURE_AD: disable_user accountEnabled=false ✓")
 
         # CR 5: rollback disable_user (re-enables user)
-        client.post(f"/change-requests/{cr_disable}/rollback", json={})
+        client.post(f"/change-requests/{cr_disable['id']}/rollback", json={})
         # Verify rollback actually re-enabled in Azure
         _verify_resp = _httpx.get(
             f"https://graph.microsoft.com/v1.0/users/{smoke_upn}",
@@ -21208,7 +21209,7 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
             # Attempt CR rollback of create_user (exercises the rollback path)
             if cr_create:
                 try:
-                    client.post(f"/change-requests/{cr_create}/rollback", json={})
+                    client.post(f"/change-requests/{cr_create['id']}/rollback", json={})
                     log("  AZURE_AD: create_user CR rollback attempted")
                 except Exception as _cleanup_e:
                     log("  AZURE_AD: cleanup warning: " + str(_cleanup_e))
