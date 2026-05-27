@@ -21092,9 +21092,10 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
     cr_create = None
 
     # Fetch live credentials directly from platform DB (REST endpoint returns schema only)
-    live_creds = get_connector_creds_from_db("azure_ad")
+    # The platform registers Azure as connector_type "azure" (not "azure_ad")
+    live_creds = get_connector_creds_from_db("azure_ad") or get_connector_creds_from_db("azure")
     if not live_creds.get("tenant_id"):
-        fail("[AZURE_AD] No azure_ad connector with credentials found in platform DB — register one with live credentials first")
+        fail("[AZURE_AD] No azure/azure_ad connector with credentials found in platform DB — register one with live credentials first")
 
     try:
         # Register smoke connector
