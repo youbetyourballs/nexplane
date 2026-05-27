@@ -20916,8 +20916,8 @@ def run_phase_chef_inspec(client, cloud_account_id: str) -> None:
             "display_name": f"nexplane-smoke-chef-{suffix}",
         })
         chef_conn_id = chef_conn.get("id")
-        client.client.put(
-            f"{client.base}/connectors/{chef_conn_id}/credentials",
+        client.put(
+            f"/connectors/{chef_conn_id}/credentials",
             json={"credentials": {"automate_url": automate_url, "api_token": "smoke-token"}},
         )
         log("CHEF_INSPEC connector registered: " + str(chef_conn_id))
