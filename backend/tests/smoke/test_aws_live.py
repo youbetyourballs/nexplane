@@ -20754,7 +20754,7 @@ data:
 
 def run_phase_checkov(client, cloud_account_id: str) -> None:
     """Phase CHECKOV: scan a local Terraform file with known misconfigs via CR pipeline."""
-    import os as _os, secrets as _sec, subprocess as _sp, shutil as _sh
+    import os as _os, secrets as _sec, shutil as _sh
     print("\n[Phase CHECKOV] Checkov IaC scan lifecycle (scan_iac→get_compliance_summary→scan_secrets)")
 
     suffix = _sec.token_hex(4)
@@ -20794,24 +20794,10 @@ def run_phase_checkov(client, cloud_account_id: str) -> None:
         _checkov_hint = {"_locked_connector_type": "checkov"}
 
         # --- CR 1: scan_iac ---
-        # Note: scan-type CRs may complete with soft_failure=true (not an error, just findings reported)
-        cr_scan_id = client.create_cr("[CHECKOV] scan_iac", "scan_iac", checkov_asset_id, {**_checkov_hint}, connector_id=checkov_conn_id)
-        print(f"  → [CHECKOV] scan_iac")
-        client.post(f"/change-requests/{cr_scan_id}/plan")
-        client.post(f"/change-requests/{cr_scan_id}/submit-for-approval")
-        client.post(f"/change-requests/{cr_scan_id}/approve", json={"decision": "approved", "comment": "smoke test"})
-        client.post(f"/change-requests/{cr_scan_id}/execute")
-        # Wait for completion or soft failure
-        import time as _time
-        deadline = _time.time() + 60
-        while _time.time() < deadline:
-            cr_scan = client.get(f"/change-requests/{cr_scan_id}")
-            if cr_scan["status"] in ("completed", "failed"):
-                break
-            _time.sleep(2)
-        if cr_scan.get("status") not in ("completed", "failed"):
-            fail("[CHECKOV] scan_iac CR timed out")
-        log("[CHECKOV] scan_iac CR executed with status=" + cr_scan.get("status"))
+        cr_scan = client.run_cr(
+            "[CHECKOV] scan_iac", "scan_iac", checkov_asset_id,
+            {**_checkov_hint}, connector_id=checkov_conn_id,
+        )
         result_scan = client.get_cr_step_result(cr_scan)
         log("  CHECKOV: scan_iac result: passed=" + str(result_scan.get("passed")) +
             " failed=" + str(result_scan.get("failed")))
@@ -20820,54 +20806,26 @@ def run_phase_checkov(client, cloud_account_id: str) -> None:
         log("  CHECKOV: scan_iac found " + str(result_scan.get("failed")) + " failures ✓")
 
         # --- CR 2: get_compliance_summary ---
-        cr_summary_id = client.create_cr("[CHECKOV] get_compliance_summary", "get_compliance_summary", checkov_asset_id, {**_checkov_hint}, connector_id=checkov_conn_id)
-        print(f"  → [CHECKOV] get_compliance_summary")
-        client.post(f"/change-requests/{cr_summary_id}/plan")
-        client.post(f"/change-requests/{cr_summary_id}/submit-for-approval")
-        client.post(f"/change-requests/{cr_summary_id}/approve", json={"decision": "approved", "comment": "smoke test"})
-        client.post(f"/change-requests/{cr_summary_id}/execute")
-        deadline = _time.time() + 60
-        while _time.time() < deadline:
-            cr_summary = client.get(f"/change-requests/{cr_summary_id}")
-            if cr_summary["status"] in ("completed", "failed"):
-                break
-            _time.sleep(2)
-        if cr_summary.get("status") not in ("completed", "failed"):
-            fail("[CHECKOV] get_compliance_summary CR timed out")
-        log("[CHECKOV] get_compliance_summary CR executed with status=" + cr_summary.get("status"))
+        cr_summary = client.run_cr(
+            "[CHECKOV] get_compliance_summary", "get_compliance_summary", checkov_asset_id,
+            {**_checkov_hint}, connector_id=checkov_conn_id,
+        )
         result_summary = client.get_cr_step_result(cr_summary)
         log("  CHECKOV: compliance summary: " + str(result_summary))
-        if "passed" not in result_summary and "summary" not in result_summary:
+        if "passed" not in result_summary or "summary" not in result_summary:
             fail("[CHECKOV] get_compliance_summary result missing 'passed' and 'summary' keys: " + str(result_summary))
         log("  CHECKOV: get_compliance_summary returned data ✓")
 
         # --- CR 3: scan_secrets ---
-        cr_secrets_id = client.create_cr("[CHECKOV] scan_secrets", "scan_secrets", checkov_asset_id, {**_checkov_hint}, connector_id=checkov_conn_id)
-        print(f"  → [CHECKOV] scan_secrets")
-        client.post(f"/change-requests/{cr_secrets_id}/plan")
-        client.post(f"/change-requests/{cr_secrets_id}/submit-for-approval")
-        client.post(f"/change-requests/{cr_secrets_id}/approve", json={"decision": "approved", "comment": "smoke test"})
-        client.post(f"/change-requests/{cr_secrets_id}/execute")
-        deadline = _time.time() + 60
-        while _time.time() < deadline:
-            cr_secrets = client.get(f"/change-requests/{cr_secrets_id}")
-            if cr_secrets["status"] in ("completed", "failed"):
-                break
-            _time.sleep(2)
-        if cr_secrets.get("status") not in ("completed", "failed"):
-            fail("[CHECKOV] scan_secrets CR timed out")
-        log("[CHECKOV] scan_secrets CR executed with status=" + cr_secrets.get("status"))
+        cr_secrets = client.run_cr(
+            "[CHECKOV] scan_secrets", "scan_secrets", checkov_asset_id,
+            {**_checkov_hint}, connector_id=checkov_conn_id,
+        )
         result_secrets = client.get_cr_step_result(cr_secrets)
         log("  CHECKOV: scan_secrets result: " + str(result_secrets))
-        # scan_secrets should return either {"count": N} or {"secrets_found": [...], "count": N}
-        secrets_count = result_secrets.get("count")
-        if secrets_count is None:
-            # Fallback: check if it returned findings (from scan_iac fallback)
-            if "findings" in result_secrets:
-                secrets_count = len(result_secrets.get("findings", []))
-            else:
-                fail("[CHECKOV] scan_secrets result missing 'count' key: " + str(result_secrets))
-        log("  CHECKOV: scan_secrets count=" + str(secrets_count) + " ✓")
+        if "count" not in result_secrets:
+            fail("[CHECKOV] scan_secrets result missing 'count' key: " + str(result_secrets))
+        log("  CHECKOV: scan_secrets count=" + str(result_secrets.get("count")) + " ✓")
 
         log("Phase CHECKOV PASSED")
 
