@@ -120,7 +120,6 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "new_key_id": new_key_id,
         "deactivated_key_ids": deactivated,
         "rotated_at": datetime.now(timezone.utc).isoformat(),
-        "_gcp_creds": creds_data,  # stored for rollback
         "_asset_ids": [str(a) for a in asset_ids],
     }
 
