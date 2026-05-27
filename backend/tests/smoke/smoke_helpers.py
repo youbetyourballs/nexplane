@@ -511,13 +511,27 @@ _connector_creds_cache: dict = {}
 def get_connector_creds_from_db(connector_type_str: str) -> dict:
     """Return decrypted credentials dict for the first connector of connector_type_str.
 
-    Uses _attach_credentials to decrypt — bypasses the REST API (which returns schema only).
-    Returns {} if no connector or no credentials are found.
+    On the runner EC2 (where app/ is unavailable), credentials are injected as
+    NEXPLANE_CREDS_{TYPE} env vars (base64-encoded JSON) by run_on_ec2.py.
+    Falls back to direct DB access when running inside the platform container.
+    Returns {} if no credentials are found.
     """
     import threading
     global _connector_creds_cache
     if connector_type_str in _connector_creds_cache:
         return _connector_creds_cache[connector_type_str]
+
+    # Check env var first (runner EC2 path — app module not available)
+    import base64 as _b64, json as _json_c, os as _os_c
+    _env_key = f"NEXPLANE_CREDS_{connector_type_str.upper().replace('-', '_')}"
+    _encoded = _os_c.environ.get(_env_key, "")
+    if _encoded:
+        try:
+            creds = _json_c.loads(_b64.b64decode(_encoded).decode())
+            _connector_creds_cache[connector_type_str] = creds
+            return creds
+        except Exception:
+            pass
 
     from app.config import settings
     from app.models.connector import Connector
