@@ -6914,11 +6914,14 @@ echo "ROTATE_OK"
             step_ca_connector_id = conn_resp.get("id")
             log(f"step-ca connector registered: {step_ca_connector_id}")
 
+            _step_ca_hint = {"_locked_connector_type": "step_ca"}
+
             cr_check = client.run_cr(
                 "[STEP_CA_ROTATE] check cert expiry on CA port",
                 "step_ca_check_expiry",
                 cloud_account_id,
-                {"host": private_ip, "port": 9000, "warning_threshold_days": 30},
+                {**_step_ca_hint, "host": private_ip, "port": 9000, "warning_threshold_days": 30},
+                connector_id=step_ca_connector_id,
             )
             exec_runs = cr_check.get("execution_runs") or []
             result_check = exec_runs[0].get("result") if exec_runs else {}
@@ -6932,11 +6935,13 @@ echo "ROTATE_OK"
                 "step_ca_rotate_cert",
                 cloud_account_id,
                 {
+                    **_step_ca_hint,
                     "subject": "localhost",
                     "san": "localhost",
                     "not_after": "48h",
                     "deploy_via_ssm": False,
                 },
+                connector_id=step_ca_connector_id,
             )
             exec_runs2 = cr_rotate.get("execution_runs") or []
             result_rotate = exec_runs2[0].get("result") if exec_runs2 else {}
