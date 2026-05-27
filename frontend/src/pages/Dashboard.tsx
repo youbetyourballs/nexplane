@@ -84,6 +84,12 @@ export function Dashboard() {
     }),
   });
 
+  const { data: allAssets } = useQuery<{ id: string; name: string; criticality: string; environment: string; asset_type: string }[]>({
+    queryKey: ["assets", {}],
+    queryFn: () => apiClient.get("/assets").then((r) => r.data),
+    staleTime: 120_000,
+  });
+
   if (isLoading) return <PageLoading />;
 
   const crs = all ?? [];
@@ -110,6 +116,8 @@ export function Dashboard() {
           Governed infrastructure change — real-time status
         </p>
       </div>
+
+      <ConnectorHealthBanner connectors={connectors ?? []} />
 
       {/* Onboarding checklist — shown until all steps complete */}
       {!allChecklistDone && checklist && (
@@ -179,6 +187,10 @@ export function Dashboard() {
         />
       </div>
 
+      <InFlightPanel crs={executing} />
+      <ExposureSummary assets={allAssets ?? []} />
+      <TopRisksPanel assets={allAssets ?? []} />
+
       {/* Connector Status Widget */}
       <div className="bg-white rounded-lg border border-slate-200 mb-6">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -233,6 +245,164 @@ export function Dashboard() {
             <ChangeRequestRow key={cr.id} cr={cr} />
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ConnectorHealthBanner({ connectors }: { connectors: ConnectorRead[] }) {
+  const failing = connectors.filter(
+    (c) => c.status === "error" || c.status === "credential_expired"
+  );
+  if (failing.length === 0) return null;
+  return (
+    <div className="mb-6 flex items-start gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
+      <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-amber-900">
+          {failing.length} connector {failing.length === 1 ? "issue" : "issues"} detected
+        </p>
+        <p className="text-xs text-amber-700 mt-0.5">
+          {failing.map((c) => c.name).join(", ")} —{" "}
+          {failing.some((c) => c.status === "credential_expired")
+            ? "credentials expired or auth failure"
+            : "last sync failed"}
+        </p>
+      </div>
+      <Link to="/connectors" className="text-xs font-medium text-amber-800 hover:text-amber-900 shrink-0 underline">
+        Fix now →
+      </Link>
+    </div>
+  );
+}
+
+function InFlightPanel({ crs }: { crs: ChangeRequestSummary[] }) {
+  if (crs.length === 0) return null;
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 mb-6">
+      <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+        <Play className="w-4 h-4 text-blue-500" />
+        <h2 className="text-sm font-semibold text-slate-900">In-Flight Changes</h2>
+        <span className="text-xs text-slate-400">({crs.length})</span>
+      </div>
+      <div className="divide-y divide-slate-50">
+        {crs.map((cr) => (
+          <Link
+            key={cr.id}
+            to={`/change-requests/${cr.id}`}
+            className="flex items-center gap-4 px-5 py-3 hover:bg-slate-50 transition-colors"
+          >
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-slate-900 truncate">{cr.title}</div>
+              <div className="text-xs text-slate-400 mt-0.5">
+                {cr.change_type.replace(/_/g, " ")} · {cr.requester.name}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <StatusBadge status={cr.status} size="sm" />
+              {(cr as any).rollback_available ? (
+                <span className="inline-flex items-center gap-1 text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  <CheckCircle2 className="w-3 h-3" />
+                  rollback available
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full border border-slate-200">
+                  no rollback
+                </span>
+              )}
+            </div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ExposureSummary({
+  assets,
+}: {
+  assets: { id: string; criticality: string; environment: string }[];
+}) {
+  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const a of assets) {
+    if (a.criticality in counts) counts[a.criticality as keyof typeof counts]++;
+  }
+  const tiers: { key: keyof typeof counts; label: string; color: string; bg: string }[] = [
+    { key: "critical", label: "Critical", color: "text-red-700", bg: "bg-red-50 border-red-200" },
+    { key: "high", label: "High", color: "text-orange-700", bg: "bg-orange-50 border-orange-200" },
+    { key: "medium", label: "Medium", color: "text-amber-700", bg: "bg-amber-50 border-amber-200" },
+    { key: "low", label: "Low", color: "text-slate-600", bg: "bg-slate-50 border-slate-200" },
+  ];
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 mb-6">
+      <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-slate-400" />
+          <h2 className="text-sm font-semibold text-slate-900">Exposure Summary</h2>
+        </div>
+        <Link to="/assets?preset=unmitigated_criticals" className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+          View critical assets →
+        </Link>
+      </div>
+      <div className="px-5 py-4 grid grid-cols-4 gap-3">
+        {tiers.map(({ key, label, color, bg }) => (
+          <Link
+            key={key}
+            to={`/assets?search=criticality:${key}`}
+            className={`flex flex-col items-center p-3 rounded-lg border ${bg} hover:opacity-80 transition-opacity`}
+          >
+            <span className={`text-2xl font-bold ${color}`}>{counts[key]}</span>
+            <span className={`text-xs font-medium ${color} mt-0.5`}>{label}</span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const CRITICALITY_ORDER: Record<string, number> = {
+  critical: 0, high: 1, medium: 2, low: 3,
+};
+
+function TopRisksPanel({
+  assets,
+}: {
+  assets: { id: string; name: string; criticality: string; environment: string; asset_type: string }[];
+}) {
+  const top5 = [...assets]
+    .sort((a, b) => (CRITICALITY_ORDER[a.criticality] ?? 9) - (CRITICALITY_ORDER[b.criticality] ?? 9))
+    .slice(0, 5)
+    .filter((a) => ["critical", "high"].includes(a.criticality));
+
+  if (top5.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 mb-6">
+      <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-500" />
+          <h2 className="text-sm font-semibold text-slate-900">Top At-Risk Assets</h2>
+        </div>
+        <Link to="/assets?preset=unmitigated_criticals" className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+          View all →
+        </Link>
+      </div>
+      <div className="divide-y divide-slate-50">
+        {top5.map((asset) => (
+          <Link
+            key={asset.id}
+            to={`/assets/${asset.id}`}
+            className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 transition-colors"
+          >
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-slate-900 truncate">{asset.name}</div>
+              <div className="text-xs text-slate-400 mt-0.5">
+                {asset.asset_type.replace(/_/g, " ")} · {asset.environment}
+              </div>
+            </div>
+            <RiskBadge level={asset.criticality as any} size="sm" />
+          </Link>
+        ))}
       </div>
     </div>
   );
