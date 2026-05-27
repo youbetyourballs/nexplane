@@ -1,0 +1,1 @@
+{"change_type":"get_drift_results","display_name":"Get Drift Results","steps":[{"generic_action":"get_status","purpose":"execute","required":true}],"preflight_checks":["connector_reachable"],"verification_methods":["api_check"],"rollback_connector_type":"cloudformation"}
