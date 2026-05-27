@@ -65,6 +65,30 @@ function buildSearchString(q: string, filters: Record<string, string>): string {
   return [q, ...tokens].filter(Boolean).join(" ");
 }
 
+interface FilterPreset {
+  label: string;
+  search: string;
+  description: string;
+}
+
+const PRESET_FILTERS: FilterPreset[] = [
+  {
+    label: "Unmitigated Criticals",
+    search: "criticality:critical",
+    description: "Critical severity assets",
+  },
+  {
+    label: "Public-Facing High+",
+    search: "env:prod criticality:high",
+    description: "Production assets rated high or critical",
+  },
+  {
+    label: "Public Exploit Available",
+    search: "exploit:true",
+    description: "Assets with known public exploits (requires scanner data)",
+  },
+];
+
 export function Assets() {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -113,6 +137,18 @@ export function Assets() {
     }, 300);
     return () => clearTimeout(timer);
   }, [inputValue]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Consume ?preset= param once on mount — apply filter and remove param from URL
+  useEffect(() => {
+    const preset = searchParams.get("preset");
+    if (preset) {
+      const found = PRESET_FILTERS.find((p) => p.label.toLowerCase().replace(/\s+/g, "_") === preset || p.search === preset);
+      if (found) {
+        setInputValue(found.search);
+        setSearchParams({ search: found.search }, { replace: true });
+      }
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Derive filter params from URL
   const rawSearch = searchParams.get("search") ?? "";
@@ -261,6 +297,28 @@ export function Assets() {
           </button>
         }
       />
+
+      {/* Filter presets */}
+      <div className="mb-3 flex flex-wrap gap-2">
+        {PRESET_FILTERS.map((preset) => {
+          const isActive = rawSearch === preset.search;
+          return (
+            <button
+              key={preset.label}
+              onClick={() => setInputValue(isActive ? "" : preset.search)}
+              title={preset.description}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${
+                isActive
+                  ? "bg-brand-600 text-white border-brand-600"
+                  : "bg-white text-slate-600 border-slate-300 hover:border-brand-400 hover:text-brand-700"
+              }`}
+            >
+              {preset.label}
+              {isActive && <span className="ml-1">×</span>}
+            </button>
+          );
+        })}
+      </div>
 
       {/* Search bar + filter dropdowns */}
       <div className="mb-4 flex flex-wrap gap-2 items-center">
