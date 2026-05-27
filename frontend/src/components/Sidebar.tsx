@@ -110,11 +110,45 @@ export function Sidebar() {
   const unreadCount = unreadNotifications.length;
   const pendingCount = pendingApprovals.length;
 
+  const { data: checklist } = useQuery<{
+    steps: { id: string; label: string; complete: boolean; detail: string }[];
+    connector_count: number;
+    asset_count: number;
+  }>({
+    queryKey: ["onboarding-checklist"],
+    queryFn: () => apiClient.get("/onboarding/checklist").then((r) => r.data),
+    staleTime: 60_000,
+    enabled: !!user,
+  });
+
+  const showOnboarding = checklist != null && checklist.connector_count === 0;
+  const incompleteSteps = checklist?.steps.filter((s) => !s.complete) ?? [];
+
   return (
     <aside className="fixed inset-y-0 left-0 w-60 bg-navy flex flex-col z-10">
       <div className="flex items-center px-5 py-4 border-b border-navy-border">
         <img src="/title_white.png" alt="Nexplane" className="h-8 w-auto" />
       </div>
+
+      {showOnboarding && incompleteSteps.length > 0 && (
+        <div className="px-3 py-3 border-b border-navy-border bg-indigo-900/30">
+          <p className="text-xs font-semibold text-indigo-300 mb-2 uppercase tracking-wide">Get started</p>
+          <div className="space-y-1.5">
+            {incompleteSteps.slice(0, 3).map((step) => (
+              <div key={step.id} className="flex items-start gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
+                <span className="text-xs text-indigo-200 leading-tight">{step.label}</span>
+              </div>
+            ))}
+          </div>
+          <NavLink
+            to="/connectors"
+            className="mt-2 block text-xs font-medium text-indigo-300 hover:text-white transition-colors"
+          >
+            Configure connectors →
+          </NavLink>
+        </div>
+      )}
 
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
         {mainNavItems.map(({ to, label, icon, exact }) => (
