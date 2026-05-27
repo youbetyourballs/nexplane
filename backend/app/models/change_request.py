@@ -448,6 +448,11 @@ class ChangeType(str, enum.Enum):
     santa_machine_group_assign = "santa_machine_group_assign"
     santa_rule_deploy = "santa_rule_deploy"
 
+    # Chef InSpec compliance connector
+    discover_nodes = "discover_nodes"
+    run_compliance_scan = "run_compliance_scan"
+    discover_compliance_results = "discover_compliance_results"
+
 
 class RiskLevel(str, enum.Enum):
     low = "low"

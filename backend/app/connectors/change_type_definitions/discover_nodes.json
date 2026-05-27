@@ -1,0 +1,9 @@
+{
+  "change_type": "discover_nodes",
+  "display_name": "Discover nodes",
+  "steps": [
+    {"generic_action": "discover", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": []
+}
