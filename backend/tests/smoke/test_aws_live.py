@@ -21165,7 +21165,7 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
 
         # CR 3: create_user
         cr_create = client.run_cr(
-            "[AZURE_AD] create_user", "create_user", azure_asset_id,
+            "[AZURE_AD] create_user", "azure_ad_create_user", azure_asset_id,
             {**_hint, "user_principal_name": smoke_upn, "display_name": f"Nexplane Smoke {suffix}"},
             connector_id=azure_conn_id,
         )
@@ -21176,7 +21176,7 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
 
         # CR 4: disable_user
         cr_disable = client.run_cr(
-            "[AZURE_AD] disable_user", "disable_user", azure_asset_id,
+            "[AZURE_AD] disable_user", "azure_ad_disable_user", azure_asset_id,
             {**_hint, "user_identifier": smoke_upn}, connector_id=azure_conn_id,
         )
         result_disable = client.get_cr_step_result(cr_disable)
