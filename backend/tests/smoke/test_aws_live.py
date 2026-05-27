@@ -21187,14 +21187,21 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
 
         # CR 5: rollback disable_user (re-enables user) — wait for completion before verifying
         client.rollback_cr(cr_disable['id'], "[AZURE_AD] rollback disable_user")
-        # Verify rollback actually re-enabled in Azure
-        _verify_resp = _httpx.get(
-            f"https://graph.microsoft.com/v1.0/users/{smoke_upn}",
-            headers={"Authorization": f"Bearer {_token}"},
-            params={"$select": "accountEnabled"},
-        )
-        _verify_resp.raise_for_status()
-        if _verify_resp.json().get("accountEnabled") is not True:
+        # Verify rollback re-enabled in Azure — retry up to 30s for AD propagation delay
+        _verify_deadline = time.time() + 30
+        _re_enabled = False
+        while time.time() < _verify_deadline:
+            _verify_resp = _httpx.get(
+                f"https://graph.microsoft.com/v1.0/users/{smoke_upn}",
+                headers={"Authorization": f"Bearer {_token}"},
+                params={"$select": "accountEnabled"},
+            )
+            _verify_resp.raise_for_status()
+            if _verify_resp.json().get("accountEnabled") is True:
+                _re_enabled = True
+                break
+            time.sleep(3)
+        if not _re_enabled:
             fail("[AZURE_AD] rollback did not re-enable user in Azure: " + str(_verify_resp.json()))
         log("  AZURE_AD: rollback disable_user verified (accountEnabled=true) ✓")
 
