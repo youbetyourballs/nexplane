@@ -13,6 +13,12 @@ jest.mock("../../api/client", () => ({
   apiClient: { get: jest.fn().mockResolvedValue({ data: [] }) },
 }));
 
+afterEach(() => {
+  const { apiClient } = require("../../api/client");
+  apiClient.get.mockReset();
+  apiClient.get.mockResolvedValue({ data: [] });
+});
+
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
