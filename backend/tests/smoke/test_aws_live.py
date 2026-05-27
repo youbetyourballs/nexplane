@@ -15664,6 +15664,7 @@ def main():
             "SSH_ADVANCED=SSH connector advanced executor smoke: collect_output, restore_bare_metal_service, "
             "download_package, uninstall_agent on Ubuntu t3.micro (AMI cached). "
             "CF=cloudformation-lifecycle (create_change_set→execute→discover→delete). "
+            "HELM=helm-releases lifecycle (discover→rollback→uninstall) on kind cluster AMI. "
         ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
@@ -16115,6 +16116,8 @@ def main():
             run_phase_ssh_advanced(client, cloud_account_id)
         if "CF" in phases:
             run_phase_cf(client, cloud_account_id)
+        if "HELM" in phases:
+            run_phase_helm(client, cloud_account_id)
         if "IDENTITY_SYNC" in phases:
             run_phase_identity_sync(client, cloud_account_id)
         if "IDENTITY_FANOUT" in phases:
@@ -20284,6 +20287,395 @@ def run_phase_cf(client, cloud_account_id: str) -> None:
             raise
     log("CF: stack confirmed deleted")
     log("Phase CF PASSED")
+
+
+def run_phase_helm(client, cloud_account_id: str) -> None:
+    """Phase HELM: boot kind EC2 (cached AMI), install bitnami/nginx via helm,
+    run discover_releases → rollback_release → uninstall_release CRs, verify lifecycle."""
+    import time, hashlib, re, base64
+    print("\n[Phase HELM] Helm releases lifecycle (discover→rollback→uninstall) on kind cluster")
+
+    try:
+        from run_on_ec2 import get_or_create_smoke_ami, get_ssm_instance_profile
+    except ImportError:
+        get_or_create_smoke_ami = None
+        get_ssm_instance_profile = None
+
+    ec2_client = _get_aws_boto3_client("ec2")
+    ssm_client = _get_aws_boto3_client("ssm")
+    iam_client = _get_aws_boto3_client("iam")
+    if not ec2_client or not ssm_client:
+        fail("[HELM] AWS clients not available — skipping")
+        return
+
+    AL2023_AMI = "ami-0953476d60561c955"
+    KUBE_API_PORT = 6443
+    S3_TOOLS_BUCKET = "nexplane-agent-downloads"
+    KUBECTL_VERSION = "v1.29.0"
+    KIND_VERSION = "v0.24.0"
+
+    # Re-use the same AMI cache key as K8S_RBAC — same docker+kind setup
+    setup_hash = hashlib.md5(b"kind-0.24.0-k8s-rbac-ipforward-v10").hexdigest()
+
+    # --- look up cached AMI ---
+    cached_ami = None
+    try:
+        p = ssm_client.get_parameter(Name="/nexplane/smoke-amis/k8s-kind/" + setup_hash[:8])
+        candidate = p["Parameter"]["Value"]
+        imgs = ec2_client.describe_images(ImageIds=[candidate])["Images"]
+        if imgs and imgs[0]["State"] == "available":
+            cached_ami = candidate
+            log("HELM: Using cached k8s AMI: " + cached_ami)
+    except Exception:
+        pass
+
+    # --- VPC / subnet selection ---
+    vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
+    subnets = ec2_client.describe_subnets(Filters=[{"Name": "vpcId", "Values": [vpc_id]}])["Subnets"]
+    try:
+        offs = ec2_client.describe_instance_type_offerings(
+            LocationType="availability-zone",
+            Filters=[{"Name": "instance-type", "Values": ["t3.large"]}])["InstanceTypeOfferings"]
+        azs = {o["Location"] for o in offs}
+        subnets = [s for s in subnets if s.get("AvailabilityZone") in azs] or subnets
+    except Exception:
+        pass
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+
+    # --- ensure port 6443 open in default SG ---
+    try:
+        sgs = ec2_client.describe_security_groups(
+            Filters=[{"Name": "vpc-id", "Values": [vpc_id]},
+                     {"Name": "group-name", "Values": ["default"]}])["SecurityGroups"]
+        if sgs:
+            sg_id = sgs[0]["GroupId"]
+            port_open = any(
+                p.get("FromPort") == KUBE_API_PORT and p.get("ToPort") == KUBE_API_PORT
+                for p in sgs[0].get("IpPermissions", [])
+            )
+            if not port_open:
+                ec2_client.authorize_security_group_ingress(
+                    GroupId=sg_id,
+                    IpPermissions=[{
+                        "IpProtocol": "tcp",
+                        "FromPort": KUBE_API_PORT,
+                        "ToPort": KUBE_API_PORT,
+                        "IpRanges": [{"CidrIp": "10.0.0.0/8", "Description": "helm smoke VPC"}],
+                        "Ipv6Ranges": [],
+                    }],
+                )
+                log("HELM: Opened port 6443 in default SG " + sg_id)
+    except Exception as e:
+        log("  HELM Warning: could not open port in SG: " + str(e))
+
+    # --- IAM instance profile ---
+    instance_profile_name = None
+    if get_ssm_instance_profile and iam_client:
+        instance_profile_name = get_ssm_instance_profile(iam_client)
+    if not instance_profile_name:
+        for name in ("NexplaneEC2TestProfile", "NexplaneSmokeProfile", "EC2InstanceProfileForSSM"):
+            try:
+                iam_client.get_instance_profile(InstanceProfileName=name)
+                instance_profile_name = name
+                break
+            except Exception:
+                pass
+
+    # --- look up nexplane-smoke-k8s SG if present ---
+    _k8s_sg_id = None
+    try:
+        _sgs = ec2_client.describe_security_groups(
+            Filters=[{"Name": "group-name", "Values": ["nexplane-smoke-k8s"]}]
+        )["SecurityGroups"]
+        _k8s_sg_id = _sgs[0]["GroupId"] if _sgs else None
+    except Exception:
+        pass
+
+    # --- launch EC2 ---
+    launch_kwargs = dict(
+        ImageId=cached_ami or AL2023_AMI, InstanceType="t3.large",
+        MinCount=1, MaxCount=1,
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-helm"},
+            {"Key": "nexplane-smoke", "Value": "true"},
+        ]}],
+        NetworkInterfaces=[{
+            "DeviceIndex": 0,
+            "SubnetId": subnets[0]["SubnetId"],
+            "AssociatePublicIpAddress": False,
+            **( {"Groups": [_k8s_sg_id]} if _k8s_sg_id else {} ),
+        }],
+    )
+    if instance_profile_name:
+        launch_kwargs["IamInstanceProfile"] = {"Name": instance_profile_name}
+    else:
+        log("  HELM Warning: no IAM instance profile found — SSM may not work")
+
+    resp = ec2_client.run_instances(**launch_kwargs)
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log("HELM EC2: " + instance_id)
+
+    private_ip = ""
+    deadline = time.time() + 240
+    while time.time() < deadline:
+        try:
+            desc = ec2_client.describe_instances(InstanceIds=[instance_id])
+            inst = desc["Reservations"][0]["Instances"][0]
+            if inst["State"]["Name"] == "running":
+                private_ip = inst.get("PrivateIpAddress", "")
+                log("  HELM: Instance running, private IP: " + private_ip)
+                break
+        except Exception:
+            pass
+        time.sleep(8)
+    else:
+        raise RuntimeError("HELM EC2 never reached running state")
+
+    # Wait for SSM agent
+    log("  HELM: Waiting for SSM agent...")
+    deadline2 = time.time() + 180
+    ssm_ready = False
+    while time.time() < deadline2:
+        try:
+            info = ssm_client.describe_instance_information(
+                Filters=[{"Key": "InstanceIds", "Values": [instance_id]}])
+            if info["InstanceInformationList"] and info["InstanceInformationList"][0]["PingStatus"] == "Online":
+                ssm_ready = True
+                break
+        except Exception:
+            pass
+        time.sleep(10)
+    if not ssm_ready:
+        raise RuntimeError("SSM agent never came online on HELM EC2")
+    log("  HELM: SSM ready")
+
+    try:
+        if not cached_ami:
+            # Full setup: install docker + kind from S3 + helm
+            s3_client = _get_aws_boto3_client("s3")
+            if s3_client:
+                import urllib.request as _ur
+                for _tool, _url, _s3key in [
+                    ("kubectl", f"https://storage.googleapis.com/kubernetes-release/release/{KUBECTL_VERSION}/bin/linux/amd64/kubectl", f"smoke-tools/kubectl-{KUBECTL_VERSION}"),
+                    ("kind",    f"https://github.com/kubernetes-sigs/kind/releases/download/{KIND_VERSION}/kind-linux-amd64", f"smoke-tools/kind-{KIND_VERSION}"),
+                ]:
+                    try:
+                        s3_client.head_object(Bucket=S3_TOOLS_BUCKET, Key=_s3key)
+                        log(f"  {_tool} already in S3")
+                    except Exception:
+                        log(f"  Downloading {_tool} -> S3...")
+                        _data = _ur.urlopen(_url, timeout=120).read()
+                        s3_client.put_object(Bucket=S3_TOOLS_BUCKET, Key=_s3key, Body=_data)
+                        log(f"  {_tool} staged to s3://{S3_TOOLS_BUCKET}/{_s3key}")
+                KIND_NODE_S3KEY = "smoke-tools/kindest-node-v1.30.0.tar.gz"
+                try:
+                    s3_client.head_object(Bucket=S3_TOOLS_BUCKET, Key=KIND_NODE_S3KEY)
+                    log("  kindest/node image already in S3")
+                except Exception:
+                    log("  kindest/node not in S3 — pulling via platform host docker and staging...")
+                    import subprocess as _sp
+                    KIND_NODE_IMAGE = "kindest/node:v1.30.0"
+                    _pull = _sp.run(["docker", "pull", KIND_NODE_IMAGE], capture_output=True, text=True, timeout=300)
+                    if _pull.returncode != 0:
+                        log(f"  WARNING: docker pull failed: {_pull.stderr[:200]}", ok=False)
+                    else:
+                        _save = _sp.run(["docker", "save", KIND_NODE_IMAGE], capture_output=True, timeout=300)
+                        import gzip as _gz, io as _io
+                        _buf = _io.BytesIO()
+                        with _gz.GzipFile(fileobj=_buf, mode='wb') as _gz_f:
+                            _gz_f.write(_save.stdout)
+                        s3_client.put_object(Bucket=S3_TOOLS_BUCKET, Key=KIND_NODE_S3KEY, Body=_buf.getvalue())
+                        log(f"  kindest/node staged to s3://{S3_TOOLS_BUCKET}/{KIND_NODE_S3KEY}")
+
+            full_setup_script = f"""
+set -e
+dnf install -y docker 2>/dev/null || apt-get install -y docker.io 2>/dev/null || true
+systemctl enable docker && systemctl start docker
+for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break || sleep 2; done
+aws s3 cp s3://{S3_TOOLS_BUCKET}/smoke-tools/kubectl-{KUBECTL_VERSION} /usr/local/bin/kubectl
+chmod +x /usr/local/bin/kubectl
+aws s3 cp s3://{S3_TOOLS_BUCKET}/smoke-tools/kind-{KIND_VERSION} /usr/local/bin/kind
+chmod +x /usr/local/bin/kind
+aws s3 cp s3://{S3_TOOLS_BUCKET}/smoke-tools/kindest-node-v1.30.0.tar.gz - | docker load
+sysctl -w net.ipv4.ip_forward=1
+cat > /tmp/kind-config.yaml <<KINDEOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  apiServerAddress: "0.0.0.0"
+  apiServerPort: 6443
+KINDEOF
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s \
+  --image kindest/node:v1.30.0 >/tmp/kind-out.txt 2>&1 \
+  && echo "KIND_CLUSTER_READY" \
+  || {{ echo "KIND_FAILED"; tail -30 /tmp/kind-out.txt; exit 1; }}
+iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
+kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml 2>/dev/null
+mkdir -p /root/.kube && cp /tmp/smoke-kubeconfig.yaml /root/.kube/config
+# Install helm
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash 2>&1 || true
+helm version || (dnf install -y helm 2>/dev/null || apt-get install -y helm 2>/dev/null || true)
+helm repo add bitnami https://charts.bitnami.com/bitnami 2>&1 || true
+helm repo update 2>&1 || true
+KUBECONFIG=/tmp/smoke-kubeconfig.yaml helm install smoke-nginx bitnami/nginx --namespace default --wait --timeout 120s
+echo "HELM_SETUP_COMPLETE"
+"""
+            setup_out = _ssm_run_poll(ssm_client, instance_id, full_setup_script, timeout=1200, label="helm-full-setup")
+            if "HELM_SETUP_COMPLETE" not in setup_out:
+                raise RuntimeError("HELM full setup did not complete:\n" + setup_out[-500:])
+            log("  HELM: kind cluster + helm + smoke-nginx installed (full setup)")
+            if get_or_create_smoke_ami:
+                get_or_create_smoke_ami(ssm_client, ec2_client, instance_id, "k8s-kind", setup_hash)
+        else:
+            # Cached AMI: start docker, recreate kind cluster, install helm + smoke-nginx
+            log("  HELM: Starting docker + kind cluster from cached AMI, then installing helm+nginx...")
+            restart_script = f"""
+set -e
+sysctl -w net.ipv4.ip_forward=1
+systemctl start docker
+for i in $(seq 1 20); do docker info >/dev/null 2>&1 && break || sleep 3; done
+kind delete cluster --name smoke-test 2>/dev/null || true
+cat > /tmp/kind-config.yaml <<KINDEOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  apiServerAddress: "0.0.0.0"
+  apiServerPort: 6443
+KINDEOF
+kind create cluster --name smoke-test --config /tmp/kind-config.yaml --wait 300s \
+  --image kindest/node:v1.30.0 >/tmp/kind-out.txt 2>&1 \
+  && echo "KIND_CLUSTER_READY" \
+  || {{ echo "KIND_FAILED"; tail -20 /tmp/kind-out.txt; exit 1; }}
+iptables -I FORWARD -i eth0 -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
+iptables -I FORWARD -o eth0 -p tcp --sport 6443 -j ACCEPT 2>/dev/null || true
+iptables -I INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
+kind get kubeconfig --name smoke-test > /tmp/smoke-kubeconfig.yaml 2>/dev/null
+mkdir -p /root/.kube && cp /tmp/smoke-kubeconfig.yaml /root/.kube/config
+helm version 2>/dev/null || (curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash 2>&1 || true)
+helm repo add bitnami https://charts.bitnami.com/bitnami 2>&1 || true
+helm repo update 2>&1 || true
+KUBECONFIG=/tmp/smoke-kubeconfig.yaml helm install smoke-nginx bitnami/nginx --namespace default --wait --timeout 120s
+echo "HELM_SETUP_COMPLETE"
+"""
+            restart_out = _ssm_run_poll(ssm_client, instance_id, restart_script, timeout=900, label="helm-restart")
+            for _diag_line in restart_out.splitlines():
+                if any(k in _diag_line for k in ("KIND_CLUSTER_READY", "KIND_FAILED", "HELM_SETUP_COMPLETE", "Error")):
+                    log("  [helm-diag] " + _diag_line.strip())
+            if "HELM_SETUP_COMPLETE" not in restart_out:
+                raise RuntimeError("HELM cached-AMI setup did not complete:\n" + restart_out[-500:])
+            log("  HELM: kind cluster + smoke-nginx ready (cached AMI)")
+
+        # --- Fetch and patch kubeconfig ---
+        log("  HELM: Fetching kubeconfig...")
+        kubeconfig_content = _ssm_run_poll(
+            ssm_client, instance_id,
+            "kind get kubeconfig --name smoke-test 2>/dev/null || cat /tmp/smoke-kubeconfig.yaml 2>/dev/null || cat /root/.kube/config",
+            timeout=30, label="get-kubeconfig",
+        ).strip()
+
+        if not kubeconfig_content:
+            raise RuntimeError("Could not retrieve kubeconfig from kind cluster")
+        log("  HELM: kubeconfig fetched (" + str(len(kubeconfig_content)) + " bytes)")
+
+        _kube_server_pat = r"server: https://(?:127\.0\.0\.1|0\.0\.0\.0):(\d+)"
+        if private_ip and re.search(_kube_server_pat, kubeconfig_content):
+            log("  HELM: Rewriting kubeconfig server -> " + private_ip + ":" + str(KUBE_API_PORT))
+            kubeconfig_content = re.sub(
+                _kube_server_pat,
+                "server: https://" + private_ip + ":" + str(KUBE_API_PORT),
+                kubeconfig_content,
+            )
+            kubeconfig_content = re.sub(
+                r"    certificate-authority-data: [^\n]+\n",
+                "    insecure-skip-tls-verify: true\n",
+                kubeconfig_content,
+            )
+
+        kubeconfig_b64 = base64.b64encode(kubeconfig_content.encode()).decode()
+
+        # --- Register helm connector ---
+        helm_conn = client.post("/connectors", json={
+            "connector_type": "helm",
+            "name": f"nexplane-smoke-helm-{instance_id}",
+            "display_name": f"nexplane-smoke-helm-{instance_id}",
+            "credentials": {"kubeconfig": kubeconfig_b64},
+        })
+        helm_conn_id = helm_conn.get("id")
+        log("HELM connector registered: " + str(helm_conn_id))
+
+        helm_asset_id = client.register_asset_for_connector(
+            f"nexplane-smoke-helm-{instance_id}", helm_conn_id, asset_type="server")
+        log("HELM asset registered: " + str(helm_asset_id))
+
+        # --- Clean up stale helm connectors from previous runs ---
+        try:
+            all_conns = client.get("/connectors")
+            stale_helm = [c for c in all_conns
+                          if c.get("connector_type") == "helm"
+                          and c.get("id") != helm_conn_id]
+            for sc in stale_helm:
+                try:
+                    client.client.delete(f"{client.base}/connectors/{sc['id']}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # --- CR 1: discover_releases (assert smoke-nginx present) ---
+        cr_discover1 = client.run_cr("[HELM] discover releases", "discover_releases", helm_asset_id, {}, connector_id=helm_conn_id)
+        result1 = client.get_cr_step_result(cr_discover1)
+        releases = result1.get("releases", [])
+        release_names = [r.get("name") for r in releases]
+        log("  HELM: discovered releases: " + str(release_names))
+        if "smoke-nginx" not in release_names:
+            fail(f"[HELM] smoke-nginx not found in initial discover_releases: {release_names}")
+
+        # Verify status=deployed
+        nginx_entry = next((r for r in releases if r.get("name") == "smoke-nginx"), {})
+        nginx_status = nginx_entry.get("status", "").lower()
+        if nginx_status and nginx_status != "deployed":
+            log(f"  HELM Warning: smoke-nginx status is {nginx_status!r} (expected 'deployed')")
+        else:
+            log("  HELM: smoke-nginx is deployed ✓")
+
+        # --- CR 2: rollback_release (revision=0 → no-op reinstall; just assert no error) ---
+        cr_rollback = client.run_cr("[HELM] rollback release", "rollback_release", helm_asset_id,
+            {"release_name": "smoke-nginx", "namespace": "default", "revision": 0},
+            connector_id=helm_conn_id)
+        result_rb = client.get_cr_step_result(cr_rollback)
+        log("  HELM: rollback_release result: " + str(result_rb.get("status", result_rb)))
+        # rollback with revision=0 is a no-op on a single-revision release; just verify no hard failure
+        if result_rb.get("error") and "not found" not in str(result_rb.get("error", "")).lower():
+            fail(f"[HELM] rollback_release returned unexpected error: {result_rb}")
+
+        # --- CR 3: uninstall_release ---
+        cr_uninstall = client.run_cr("[HELM] uninstall release", "uninstall_release", helm_asset_id,
+            {"release_name": "smoke-nginx", "namespace": "default"},
+            connector_id=helm_conn_id)
+        result_ui = client.get_cr_step_result(cr_uninstall)
+        log("  HELM: uninstall_release result: " + str(result_ui.get("status", result_ui)))
+
+        # --- CR 4: discover_releases again (assert smoke-nginx gone) ---
+        cr_discover2 = client.run_cr("[HELM] discover releases (post-uninstall)", "discover_releases", helm_asset_id, {}, connector_id=helm_conn_id)
+        result2 = client.get_cr_step_result(cr_discover2)
+        releases2 = result2.get("releases", [])
+        release_names2 = [r.get("name") for r in releases2]
+        log("  HELM: post-uninstall releases: " + str(release_names2))
+        if "smoke-nginx" in release_names2:
+            fail(f"[HELM] smoke-nginx still present after uninstall_release: {release_names2}")
+        log("  HELM: smoke-nginx successfully uninstalled ✓")
+
+        log("Phase HELM PASSED")
+
+    except Exception as e:
+        print("\n[FAIL] Phase HELM failed: " + str(e))
+        raise
+    finally:
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+            log("  HELM EC2 " + instance_id + " terminated")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
