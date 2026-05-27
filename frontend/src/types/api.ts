@@ -244,7 +244,14 @@ export type ConnectorType =
   | "winrm"
   | "sccm";
 
-export type ConnectorStatus = "active" | "inactive" | "error";
+export type ConnectorStatus =
+  | "active"
+  | "inactive"
+  | "error"
+  | "syncing"
+  | "credential_expired"
+  | "never_synced"
+  | "disabled";
 
 export interface Connector {
   id: string;
