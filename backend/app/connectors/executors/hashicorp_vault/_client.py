@@ -32,10 +32,20 @@ class VaultClient:
         return cls(hvac_client)
 
     def list_leases(self) -> list[dict]:
-        """List all dynamic secret leases. Returns list of dicts with lease_id, ttl, renewable."""
+        """List all dynamic secret leases with real per-lease TTLs from read_lease."""
         result = self._client.sys.list_leases(prefix="")
         keys = result.get("data", {}).get("keys", [])
-        return [{"lease_id": k, "ttl": 3600, "renewable": True} for k in keys]
+        leases = []
+        for k in keys:
+            try:
+                info = self._client.sys.read_lease(lease_id=k)
+                ttl = info.get("data", {}).get("ttl", 3600)
+                renewable = info.get("data", {}).get("renewable", True)
+            except Exception:
+                ttl = 3600
+                renewable = True
+            leases.append({"lease_id": k, "ttl": ttl, "renewable": renewable})
+        return leases
 
     def renew_lease(self, lease_id: str, increment: int = 3600) -> None:
         """Renew a Vault dynamic secret lease."""
