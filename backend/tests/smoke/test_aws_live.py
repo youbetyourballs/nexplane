@@ -21185,8 +21185,8 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
             fail("[AZURE_AD] disable_user did not return accountEnabled=false: " + str(result_disable))
         log("  AZURE_AD: disable_user accountEnabled=false ✓")
 
-        # CR 5: rollback disable_user (re-enables user)
-        client.post(f"/change-requests/{cr_disable['id']}/rollback", json={})
+        # CR 5: rollback disable_user (re-enables user) — wait for completion before verifying
+        client.rollback_cr(cr_disable['id'], "[AZURE_AD] rollback disable_user")
         # Verify rollback actually re-enabled in Azure
         _verify_resp = _httpx.get(
             f"https://graph.microsoft.com/v1.0/users/{smoke_upn}",
