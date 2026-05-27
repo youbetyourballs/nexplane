@@ -29,10 +29,13 @@ export function Settings() {
     queryFn: () => settingsApi.get(),
   });
 
-  const { data: aiProviders, refetch: refetchAIProviders } = useQuery<AIProviders>({
+  const { data: aiProviders, refetch: refetchAIProviders, isError: aiProvidersError, error: aiProvidersRawError } = useQuery<AIProviders>({
     queryKey: ["ai-providers"],
     queryFn: () => apiClient.get("/settings/ai-providers").then((r) => r.data),
+    retry: false,
   });
+
+  const aiProviders403 = aiProvidersError && (aiProvidersRawError as { response?: { status?: number } })?.response?.status === 403;
 
   const S3_DOWNLOAD_BASE =
     (import.meta.env.VITE_AGENT_DOWNLOAD_URL as string) ||
@@ -114,6 +117,11 @@ export function Settings() {
       <div className="bg-white rounded-lg border border-gray-200 p-6 mb-4">
         <h3 className="text-sm font-semibold text-gray-900 mb-1">AI Providers</h3>
         <p className="text-xs text-gray-500 mb-4">Configure API keys for AI planning assistance. Select the default provider.</p>
+        {aiProviders403 && (
+          <p className="text-xs text-amber-600 mb-3">
+            ⚠ You need administrator access to view or edit AI provider keys.
+          </p>
+        )}
         <div className="space-y-3">
           {(["anthropic", "openai"] as const).map((provider) => {
             const info = aiProviders?.providers?.[provider];
@@ -177,7 +185,7 @@ export function Settings() {
                     </div>
                   )}
                 </div>
-                {!isEditing && (
+                {!isEditing && isAdmin && (
                   <button
                     onClick={() => { setEditingProvider(provider); setApiKeyInput(""); }}
                     className="text-xs text-indigo-600 hover:underline mt-0.5"
