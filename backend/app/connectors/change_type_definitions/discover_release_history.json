@@ -1,0 +1,1 @@
+{"change_type":"discover_release_history","display_name":"discover_release_history","steps":[{"generic_action":"discover_release_history","purpose":"execute","required":true}],"preflight_checks":["connector_reachable"],"verification_methods":["api_check"],"rollback_connector_type":"helm"}

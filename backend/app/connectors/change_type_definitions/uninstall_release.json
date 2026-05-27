@@ -1,0 +1,1 @@
+{"change_type":"uninstall_release","display_name":"Uninstall Release","steps":[{"generic_action":"destroy","purpose":"execute","required":true}],"preflight_checks":["connector_reachable"],"verification_methods":["api_check"],"rollback_connector_type":"helm"}

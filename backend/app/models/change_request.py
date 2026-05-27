@@ -92,6 +92,27 @@ class ChangeType(str, enum.Enum):
     terraform_apply = "terraform_apply"
     ansible_playbook = "ansible_playbook"
     helm_upgrade = "helm_upgrade"
+    # Helm releases
+    discover_releases = "discover_releases"
+    discover_release_history = "discover_release_history"
+    rollback_release = "rollback_release"
+    uninstall_release = "uninstall_release"
+    # CloudFormation
+    discover_stacks = "discover_stacks"
+    discover_stack_resources = "discover_stack_resources"
+    detect_stack_drift = "detect_stack_drift"
+    get_drift_results = "get_drift_results"
+    create_change_set = "create_change_set"
+    execute_change_set = "execute_change_set"
+    delete_stack = "delete_stack"
+    update_termination_protection = "update_termination_protection"
+    # Bicep / ARM
+    discover_deployments = "discover_deployments"
+    discover_deployment_operations = "discover_deployment_operations"
+    validate_template = "validate_template"
+    create_deployment = "create_deployment"
+    delete_deployment = "delete_deployment"
+    cancel_deployment = "cancel_deployment"
     # Database administration
     provision_db_user = "provision_db_user"
     deprovision_db_user = "deprovision_db_user"
