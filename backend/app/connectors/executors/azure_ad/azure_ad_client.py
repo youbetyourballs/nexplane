@@ -104,6 +104,7 @@ class AzureADClient:
             return {"user": user_id_or_upn, "action": "sessions_revoked"}
 
     async def list_users(self, top: int = 999) -> list[dict]:
+        """List Azure AD users. Capped at top (default 999); no pagination — sufficient for smoke and typical tenants."""
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{self.GRAPH_BASE}/users",
@@ -114,6 +115,7 @@ class AzureADClient:
             return resp.json().get("value", [])
 
     async def get_group_membership(self, user_id: str) -> list[dict]:
+        """Return groups for user_id. Returns first page only; sufficient for membership checks."""
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{self.GRAPH_BASE}/users/{user_id}/memberOf",
