@@ -672,6 +672,54 @@ Examples:
         except Exception as _e2:
             print(f"  Could not auto-fetch AWS credentials: {_e2}")
 
+    # Auto-fetch SaaS connector credentials from platform DB and inject as env vars.
+    # The runner EC2 doesn't have the app/ module, so credentials must be passed as env vars.
+    _saas_env_extra = ""
+    _SAAS_CONNECTOR_TYPES = ["oci", "azure_ad", "defender_endpoint", "okta", "pagerduty",
+                              "servicenow", "snyk", "gcp"]
+    try:
+        import asyncio as _asyncio_saas, base64 as _b64, json as _json_saas, sys as _sys_saas
+        if "/app" not in _sys_saas.path:
+            _sys_saas.path.insert(0, "/app")
+        from app.config import settings as _cfg_saas
+        from app.models.connector import Connector as _ConnSaas
+        from app.models.connector_credential import ConnectorCredential as _CCSaas
+        from app.services.secrets_service import SecretsService as _SecSaas
+        from sqlalchemy import select as _sel_saas
+        from sqlalchemy.ext.asyncio import create_async_engine as _cae_saas, AsyncSession as _AS_saas
+        from sqlalchemy.orm import sessionmaker as _sm_saas
+
+        async def _fetch_saas_creds():
+            engine = _cae_saas(_cfg_saas.DATABASE_URL, pool_pre_ping=False)
+            Session = _sm_saas(engine, class_=_AS_saas, expire_on_commit=False)
+            result = {}
+            svc = _SecSaas(_cfg_saas.SECRET_KEY)
+            async with Session() as db:
+                for _ct in _SAAS_CONNECTOR_TYPES:
+                    row = await db.execute(_sel_saas(_ConnSaas).where(_ConnSaas.connector_type == _ct))
+                    conn = row.scalars().first()
+                    if not conn:
+                        continue
+                    cred_row = await db.execute(_sel_saas(_CCSaas).where(_CCSaas.connector_id == conn.id))
+                    cred = cred_row.scalar_one_or_none()
+                    if not cred:
+                        continue
+                    try:
+                        result[_ct] = svc.decrypt_json(cred.credentials_encrypted)
+                    except Exception:
+                        pass
+            await engine.dispose()
+            return result
+
+        _saas_creds = _asyncio_saas.run(_fetch_saas_creds())
+        for _ct, _creds in _saas_creds.items():
+            _env_key = f"NEXPLANE_CREDS_{_ct.upper().replace('-', '_')}"
+            _encoded = _b64.b64encode(_json_saas.dumps(_creds).encode()).decode()
+            _saas_env_extra += f"{_env_key}={_encoded} "
+            print(f"  SaaS creds injected for connector_type={_ct}")
+    except Exception as _saas_e:
+        print(f"  SaaS credential injection skipped: {_saas_e}")
+
     region = args.region
     ec2 = boto3.client("ec2", region_name=region)
     ssm = boto3.client("ssm", region_name=region)
@@ -840,6 +888,7 @@ Examples:
             f"AWS_DEFAULT_REGION={aws_region} "
             f"NEXPLANE_BACKEND_TAILSCALE_IP={backend_ts_ip} "
             + (f"TAILSCALE_AUTH_KEY={_ts_key_env} " if _ts_key_env else "")
+            + _saas_env_extra
         )
         # Build test command — email/password are optional for standalone phases
         _email_arg = f" --email {args.email}" if args.email else ""
