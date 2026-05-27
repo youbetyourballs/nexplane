@@ -61,7 +61,9 @@ export function ProjectDetail() {
   const [addSearch, setAddSearch] = useState("");
   const [showNewCrForm, setShowNewCrForm] = useState(false);
   const [depsPopoverFor, setDepsPopoverFor] = useState<string | null>(null);
-  const [showAIPanel, setShowAIPanel] = useState(false);
+  const [showAIPanel, setShowAIPanel] = useState(
+    () => searchParams.get("showAI") === "1"
+  );
 
   const [newCrTitle, setNewCrTitle] = useState("");
   const [newCrType, setNewCrType] = useState<ChangeType>("dns_update");
@@ -111,7 +113,7 @@ export function ProjectDetail() {
     mutationFn: () => projectsApi.create({ name: name.trim(), goal: goal.trim() }),
     onSuccess: (p) => {
       qc.invalidateQueries({ queryKey: ["projects"] });
-      navigate(`/projects/${p.id}`, { replace: true });
+      navigate(`/projects/${p.id}?showAI=1`, { replace: true });
     },
   });
 
@@ -285,10 +287,10 @@ export function ProjectDetail() {
           {!isNew && isDraft && (
             <button
               onClick={() => setShowAIPanel(!showAIPanel)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border transition-colors ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                 showAIPanel
-                  ? "bg-brand-50 border-brand-300 text-brand-700"
-                  : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  ? "bg-brand-700 text-white"
+                  : "bg-brand-600 text-white hover:bg-brand-700"
               }`}
             >
               <Sparkles className="w-3.5 h-3.5" />
