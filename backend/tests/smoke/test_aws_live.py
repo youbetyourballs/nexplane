@@ -7018,21 +7018,36 @@ def run_phase_snyk_scan(client: NexplaneClient, cloud_account_id: str) -> dict:
     except Exception:
         pass
 
-    # Import SnykClient from the bundled connector package
+    # Import SnykClient from the bundled connector package (tarball path) or container path
+    import sys as _sys
+    SnykClient = None
+    for _snyk_path in ["/tmp/nexplane_smoke", "/app"]:
+        if _snyk_path not in _sys.path:
+            _sys.path.insert(0, _snyk_path)
     try:
-        import sys as _sys
-        if "/tmp/nexplane_smoke" not in _sys.path:
-            _sys.path.insert(0, "/tmp/nexplane_smoke")
         from smoke.snyk._client import SnykClient
     except ImportError:
+        pass
+    if SnykClient is None:
+        try:
+            from app.connectors.executors.snyk._client import SnykClient
+        except ImportError:
+            pass
+    if SnykClient is None:
         import importlib.util as _ilu
-        _spec = _ilu.spec_from_file_location(
-            "snyk_client",
+        for _candidate in [
             "/tmp/nexplane_smoke/smoke/snyk/_client.py",
-        )
-        _mod = _ilu.module_from_spec(_spec)
-        _spec.loader.exec_module(_mod)
-        SnykClient = _mod.SnykClient
+            "/app/app/connectors/executors/snyk/_client.py",
+        ]:
+            import os as _os
+            if _os.path.exists(_candidate):
+                _spec = _ilu.spec_from_file_location("snyk_client", _candidate)
+                _mod = _ilu.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                SnykClient = _mod.SnykClient
+                break
+    if SnykClient is None:
+        fail("[SNYK_SCAN] Could not import SnykClient from any known path")
 
     async def _run():
         async with SnykClient(api_token, org_id) as snyk:
