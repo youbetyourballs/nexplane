@@ -155,6 +155,8 @@ Each connector card shows: connector type, status (see below), last sync time, a
 
 New connectors are added via a type-selector wizard that collects credentials and stores them in the platform database. Credentials never leave the backend.
 
+**Implementation constraint:** The EC2 platform instance has live connectors registered with real credentials. No migration, seed, or schema change may drop or overwrite existing connector records. Any DB migration touching the connectors or connector_credentials tables must be additive-only.
+
 ---
 
 ## Approval Policies & Risk Thresholds
