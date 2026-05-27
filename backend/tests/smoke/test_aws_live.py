@@ -20995,6 +20995,7 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
     azure_asset_id = None
     smoke_upn = None
     live_creds = {}
+    cr_create = None
 
     # Fetch live credentials from platform DB
     all_conns = client.get("/connectors")
@@ -21095,7 +21096,16 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
 
         # CR 5: rollback disable_user (re-enables user)
         client.post(f"/change-requests/{cr_disable}/rollback", json={})
-        log("  AZURE_AD: rollback disable_user (re-enabled) ✓")
+        # Verify rollback actually re-enabled in Azure
+        _verify_resp = _httpx.get(
+            f"https://graph.microsoft.com/v1.0/users/{smoke_upn}",
+            headers={"Authorization": f"Bearer {_token}"},
+            params={"$select": "accountEnabled"},
+        )
+        _verify_resp.raise_for_status()
+        if _verify_resp.json().get("accountEnabled") is not True:
+            fail("[AZURE_AD] rollback did not re-enable user in Azure: " + str(_verify_resp.json()))
+        log("  AZURE_AD: rollback disable_user verified (accountEnabled=true) ✓")
 
         log("Phase AZURE_AD PASSED")
 
@@ -21105,6 +21115,13 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
     finally:
         # Always delete smoke user
         if smoke_upn and live_creds.get("tenant_id"):
+            # Attempt CR rollback of create_user (exercises the rollback path)
+            if cr_create:
+                try:
+                    client.post(f"/change-requests/{cr_create}/rollback", json={})
+                    log("  AZURE_AD: create_user CR rollback attempted")
+                except Exception as _cleanup_e:
+                    log("  AZURE_AD: cleanup warning: " + str(_cleanup_e))
             try:
                 _token_resp2 = _httpx.post(
                     f"https://login.microsoftonline.com/{live_creds['tenant_id']}/oauth2/v2.0/token",
@@ -21125,14 +21142,14 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
                     log("  AZURE_AD: warning — smoke user delete returned " + str(_del_resp.status_code))
                 else:
                     log("  AZURE_AD: smoke user deleted")
-            except Exception:
-                pass
+            except Exception as _cleanup_e:
+                log("  AZURE_AD: cleanup warning: " + str(_cleanup_e))
         # Delete smoke connector
         if azure_conn_id:
             try:
                 client.client.delete(f"{client.base}/connectors/{azure_conn_id}")
-            except Exception:
-                pass
+            except Exception as _cleanup_e:
+                log("  AZURE_AD: cleanup warning: " + str(_cleanup_e))
 
 
 if __name__ == "__main__":
