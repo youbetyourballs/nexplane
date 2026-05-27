@@ -10207,6 +10207,16 @@ def run_phase_gcp_key_rotate(client: NexplaneClient, cloud_account_id: str) -> N
     gcp_creds_json = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
     gcp_creds_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if not gcp_creds_json and not gcp_creds_file:
+        # Fall back to platform DB
+        try:
+            from smoke_helpers import get_connector_creds_from_db
+            _gcp_db = get_connector_creds_from_db("gcp")
+            if _gcp_db.get("service_account_key_json"):
+                gcp_creds_json = json.dumps(_gcp_db["service_account_key_json"]) if isinstance(_gcp_db["service_account_key_json"], dict) else _gcp_db["service_account_key_json"]
+        except Exception as _gcp_e:
+            log(f"  Platform DB cred fetch failed: {_gcp_e}")
+
+    if not gcp_creds_json and not gcp_creds_file:
         log("  ⚠️  No GCP credentials configured — skipping GCP_KEY_ROTATE")
         return
 
