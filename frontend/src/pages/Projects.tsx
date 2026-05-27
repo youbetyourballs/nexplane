@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, FolderOpen, LayoutTemplate, X } from "lucide-react";
+import { Plus, FolderOpen, LayoutTemplate, X, Sparkles } from "lucide-react";
 import { projectsApi } from "../api/endpoints";
 import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
@@ -124,22 +124,32 @@ export function Projects() {
       )}
 
       {projects?.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-center">
+        <div className="flex flex-col items-center justify-center py-24 text-center max-w-sm mx-auto">
           <FolderOpen className="w-12 h-12 text-slate-300 mb-4" />
-          <p className="text-slate-500 text-sm">No projects yet.</p>
+          <p className="text-slate-700 text-sm font-medium">No projects yet</p>
+          <p className="text-slate-400 text-xs mt-1 mb-6">
+            Describe a goal to the AI and it will propose the change requests needed to achieve it.
+          </p>
+          <button
+            onClick={() => navigate("/projects/new")}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700"
+          >
+            <Sparkles className="w-4 h-4" />
+            Start with AI
+          </button>
           <div className="flex gap-3 mt-4">
             <button
               onClick={() => setShowTemplates(true)}
-              className="text-brand-600 text-sm hover:underline"
+              className="text-slate-500 text-xs hover:text-slate-700 hover:underline"
             >
-              Start from a template
+              Use a template
             </button>
-            <span className="text-slate-300">·</span>
+            <span className="text-slate-300 text-xs">·</span>
             <button
               onClick={() => navigate("/projects/new")}
-              className="text-brand-600 text-sm hover:underline"
+              className="text-slate-500 text-xs hover:text-slate-700 hover:underline"
             >
-              Create blank project
+              Blank project
             </button>
           </div>
         </div>
