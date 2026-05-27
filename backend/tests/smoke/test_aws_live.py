@@ -21046,6 +21046,7 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
     """Phase AZURE_AD: discover_users → get_group_membership → create_user → disable_user → rollback via CR pipeline."""
     import secrets as _sec
     import httpx as _httpx
+    from smoke_helpers import get_connector_creds_from_db
     print("\n[Phase AZURE_AD] Azure AD lifecycle (discover_users→get_group_membership→create→disable→rollback)")
     suffix = _sec.token_hex(4)
     azure_conn_id = None
@@ -21054,15 +21055,10 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
     live_creds = {}
     cr_create = None
 
-    # Fetch live credentials from platform DB
-    all_conns = client.get("/connectors")
-    source = next((c for c in all_conns if c.get("connector_type") == "azure_ad"), None)
-    if not source:
-        fail("[AZURE_AD] No azure_ad connector found in platform DB — register one with live credentials first")
-    source_creds_resp = client.get(f"/connectors/{source['id']}/credentials")
-    live_creds = source_creds_resp.get("credentials", {})
+    # Fetch live credentials directly from platform DB (REST endpoint returns schema only)
+    live_creds = get_connector_creds_from_db("azure_ad")
     if not live_creds.get("tenant_id"):
-        fail("[AZURE_AD] azure_ad connector has no credentials stored")
+        fail("[AZURE_AD] No azure_ad connector with credentials found in platform DB — register one with live credentials first")
 
     try:
         # Register smoke connector
@@ -21212,21 +21208,17 @@ def run_phase_azure_ad(client, cloud_account_id: str) -> None:
 def run_phase_defender_endpoint(client, cloud_account_id: str) -> None:
     """Phase DEFENDER_ENDPOINT: discover_machines → isolate_machine → unisolate_machine via CR pipeline."""
     import secrets as _sec
+    from smoke_helpers import get_connector_creds_from_db
     print("\n[Phase DEFENDER_ENDPOINT] Defender lifecycle (discover_machines→isolate→unisolate)")
     suffix = _sec.token_hex(4)
     defender_conn_id = None
     defender_asset_id = None
     machine_id = None
 
-    # Fetch live credentials from platform DB
-    all_conns = client.get("/connectors")
-    source = next((c for c in all_conns if c.get("connector_type") == "defender_endpoint"), None)
-    if not source:
-        fail("[DEFENDER] No defender_endpoint connector found in platform DB — register one with live credentials first")
-    source_creds_resp = client.get(f"/connectors/{source['id']}/credentials")
-    live_creds = source_creds_resp.get("credentials", {})
+    # Fetch live credentials directly from platform DB (REST endpoint returns schema only)
+    live_creds = get_connector_creds_from_db("defender_endpoint")
     if not live_creds.get("tenant_id"):
-        fail("[DEFENDER] defender_endpoint connector has no credentials stored")
+        fail("[DEFENDER] No defender_endpoint connector with credentials found in platform DB — register one with live credentials first")
 
     try:
         # Register smoke connector
@@ -21306,21 +21298,17 @@ def run_phase_defender_endpoint(client, cloud_account_id: str) -> None:
 def run_phase_oci(client, cloud_account_id: str) -> None:
     """Phase OCI: discover_compartments → discover_instances → create_bucket → rollback via CR pipeline."""
     import secrets as _sec
+    from smoke_helpers import get_connector_creds_from_db
     print("\n[Phase OCI] OCI lifecycle (discover_compartments→discover_instances→create_bucket→rollback)")
     suffix = _sec.token_hex(4)
     oci_conn_id = None
     oci_asset_id = None
     cr_bucket = None
 
-    # Fetch live credentials from platform DB
-    all_conns = client.get("/connectors")
-    source = next((c for c in all_conns if c.get("connector_type") == "oci"), None)
-    if not source:
-        fail("[OCI] No oci connector found in platform DB — register one with live credentials first")
-    source_creds_resp = client.get(f"/connectors/{source['id']}/credentials")
-    live_creds = source_creds_resp.get("credentials", {})
+    # Fetch live credentials directly from platform DB (REST endpoint returns schema only)
+    live_creds = get_connector_creds_from_db("oci")
     if not live_creds.get("tenancy"):
-        fail("[OCI] oci connector has no credentials stored")
+        fail("[OCI] No oci connector with credentials found in platform DB — register one with live credentials first")
 
     try:
         # Register smoke connector
