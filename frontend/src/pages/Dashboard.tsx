@@ -397,7 +397,7 @@ function TopRisksPanel({
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium text-slate-900 truncate">{asset.name}</div>
               <div className="text-xs text-slate-400 mt-0.5">
-                {asset.asset_type.replace(/_/g, " ")} · {asset.environment}
+                {asset.asset_type?.replace(/_/g, " ")} · {asset.environment}
               </div>
             </div>
             <RiskBadge level={asset.criticality as any} size="sm" />
