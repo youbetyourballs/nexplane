@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plug, CheckCircle2, XCircle, Loader2, Download, Trash2 } from "lucide-react";
+import { Plug, CheckCircle2, XCircle, Loader2, Download, Trash2, AlertTriangle } from "lucide-react";
 import { connectorsApi } from "../api/endpoints";
 import { apiClient } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
@@ -8,7 +8,7 @@ import { PageLoading } from "../components/LoadingSpinner";
 import CredentialModal from "../components/CredentialModal";
 import ScheduleModal from "../components/ScheduleModal";
 import AddConnectorModal from "../components/AddConnectorModal";
-import type { ConnectorRead, ConnectorType, ConnectorTestResult, IngestResponse } from "../types/api";
+import type { ConnectorRead, ConnectorType, ConnectorTestResult, IngestResponse, ConnectorStatus } from "../types/api";
 
 const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   aws: "Amazon Web Services",
@@ -159,6 +159,63 @@ const INTERVAL_LABELS: Record<number, string> = {
   24: "every 24 hours",
   168: "weekly",
 };
+
+const STATUS_CONFIG: Record<ConnectorStatus, { label: string; badgeClass: string }> = {
+  active:             { label: "Active",        badgeClass: "bg-emerald-50 text-emerald-700" },
+  syncing:            { label: "Syncing…",      badgeClass: "bg-blue-50 text-blue-700" },
+  error:              { label: "Error",         badgeClass: "bg-red-50 text-red-700" },
+  credential_expired: { label: "Auth Failed",   badgeClass: "bg-red-50 text-red-700" },
+  never_synced:       { label: "Never Synced",  badgeClass: "bg-slate-100 text-slate-500" },
+  disabled:           { label: "Disabled",      badgeClass: "bg-slate-100 text-slate-400" },
+  inactive:           { label: "Inactive",      badgeClass: "bg-slate-100 text-slate-500" },
+};
+
+function ConnectorErrorBanner({
+  connector,
+  onUpdateCredentials,
+  onRetrySync,
+}: {
+  connector: ConnectorRead;
+  onUpdateCredentials: () => void;
+  onRetrySync: () => void;
+}) {
+  if (connector.status === "credential_expired") {
+    return (
+      <div className="mt-3 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-md">
+        <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-red-800">Credentials expired</p>
+          <p className="text-xs text-red-600 mt-0.5">Authentication failed — the stored credentials are no longer valid.</p>
+        </div>
+        <button onClick={onUpdateCredentials} className="shrink-0 text-xs font-medium text-red-700 hover:text-red-900 underline">
+          Update Credentials
+        </button>
+      </div>
+    );
+  }
+  if (connector.status === "error") {
+    return (
+      <div className="mt-3 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-md">
+        <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-amber-800">Last sync failed</p>
+          <p className="text-xs text-amber-600 mt-0.5">The previous discovery run encountered an error. Check credentials or retry.</p>
+        </div>
+        <button onClick={onRetrySync} className="shrink-0 text-xs font-medium text-amber-700 hover:text-amber-900 underline">
+          Retry Sync
+        </button>
+      </div>
+    );
+  }
+  if (connector.status === "never_synced") {
+    return (
+      <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-md">
+        <p className="text-xs text-slate-500">Never synced — run discovery to populate assets.</p>
+      </div>
+    );
+  }
+  return null;
+}
 
 function ConnectorScheduleBadge({
   connector,
@@ -325,13 +382,9 @@ export function Connectors() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                    connector.status === "active"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : connector.status === "error"
-                      ? "bg-red-50 text-red-700"
-                      : "bg-slate-100 text-slate-500"
+                    (STATUS_CONFIG[connector.status as ConnectorStatus] ?? STATUS_CONFIG.never_synced).badgeClass
                   }`}>
-                    {connector.status}
+                    {(STATUS_CONFIG[connector.status as ConnectorStatus] ?? STATUS_CONFIG.never_synced).label}
                   </span>
 
                   {deletingId === connector.id ? (
@@ -363,6 +416,12 @@ export function Connectors() {
                   )}
                 </div>
               </div>
+
+              <ConnectorErrorBanner
+                connector={connector}
+                onUpdateCredentials={() => setCredModalConnector(connector)}
+                onRetrySync={() => testConnector(connector.id)}
+              />
 
               <div className="mb-3">
                 <div className="text-xs text-slate-400 mb-1.5">Scoped Permissions</div>
