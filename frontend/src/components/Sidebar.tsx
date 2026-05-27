@@ -124,13 +124,14 @@ export function Sidebar() {
             label={label}
             icon={icon}
             exact={exact}
-            badge={label === "Change Requests" ? pendingCount : undefined}
+            badge={to === "/change-requests" && pendingCount > 0 ? pendingCount : undefined}
           />
         ))}
 
         {/* Operations section */}
         <div className="pt-2">
           <button
+            aria-expanded={operationsOpen}
             onClick={() => setOperationsOpen((v) => !v)}
             className="flex items-center gap-2 w-full px-3 py-1.5 text-xs font-semibold text-slate-500 uppercase tracking-wide hover:text-slate-300 transition-colors"
           >
