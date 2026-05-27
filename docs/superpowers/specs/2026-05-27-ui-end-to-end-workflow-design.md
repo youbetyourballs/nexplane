@@ -139,7 +139,19 @@ Planned and repeatable work — distinct from the bespoke AI-generated project.
 
 Top-level nav. Operators add, edit, and test data source connections here.
 
-Each connector card shows: connector type, status (connected/error/syncing), last sync time, asset count, and a "Test Connection" action.
+Each connector card shows: connector type, status (see below), last sync time, asset count, and a "Test Connection" action.
+
+**Connector status states:**
+- **Connected** — last sync completed successfully, credentials valid
+- **Syncing** — sync in progress (spinner, started-at timestamp)
+- **Error** — last sync failed; shows error message and timestamp. Common causes surfaced inline: credential expired, API rate limit, network unreachable, permission denied
+- **Credential expired** — distinct from generic error; shown when the platform detects auth failure (401/403 from the upstream API). Prompts operator to re-enter credentials directly from the card without navigating away
+- **Never synced** — connector registered but no sync has run yet (e.g., just added)
+- **Disabled** — connector exists but has been manually paused
+
+**Error recovery flow:** When a connector is in Error or Credential Expired state, the card shows a prominent inline banner with the error detail and a single-action CTA ("Update Credentials" or "Retry Sync"). Operators should not need to open a detail page to recover from a common failure.
+
+**Dashboard visibility:** Connectors in Error or Credential Expired state surface a warning indicator on the Dashboard (top of the exposure summary panel) so operators don't need to visit the Connectors page to notice a broken data source.
 
 New connectors are added via a type-selector wizard that collects credentials and stores them in the platform database. Credentials never leave the backend.
 
