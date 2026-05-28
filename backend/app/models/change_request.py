@@ -526,6 +526,7 @@ class ChangeRequest(Base):
     )
     snapshot_before: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     verification_checks: Mapped[list] = mapped_column(_JSONB, default=list, nullable=False, server_default="[]")
+    artifact_refs: Mapped[dict | None] = mapped_column(_JSONB, nullable=True, default=None)
     batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     priority: Mapped[str] = mapped_column(String(16), default="normal", nullable=False)
     emergency_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -43,3 +43,4 @@ from app.models.project_phase import ProjectPhase  # noqa: F401
 from app.models.access_review import AccessReview  # noqa: F401
 from app.models.access_review_schedule import AccessReviewSchedule  # noqa: F401
 from app.models.recurring_job import RecurringJob, RecurringJobType  # noqa: F401
+from app.models.backup_target import BackupTarget, BackupTargetStatus  # noqa: F401
