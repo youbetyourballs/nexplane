@@ -14,6 +14,14 @@ from app.schemas.backup import (
     BackupHistoryRead, RestoreCrCreate, BackupContextRead,
 )
 from app.services.backup_target_service import compute_status
+from pydantic import BaseModel as PydanticBaseModel
+
+
+class RestoreCrRead(PydanticBaseModel):
+    id: str
+    status: str
+    title: str
+
 
 router = APIRouter(tags=["Backup & Recovery"])
 
@@ -95,7 +103,7 @@ async def list_backup_history(
     return result.scalars().all()
 
 
-@router.post("/restore-crs", status_code=201)
+@router.post("/restore-crs", response_model=RestoreCrRead, status_code=201)
 async def create_restore_cr(
     body: RestoreCrCreate,
     user: User = Depends(current_user),
@@ -128,11 +136,11 @@ async def create_restore_cr(
     await db.commit()
     await db.refresh(restore_cr)
 
-    from app.services.change_plan_service import plan_cr
+    from app.services.change_plan_service import plan_cr, PlanBlockedError
     async with db.begin_nested():
         try:
             await plan_cr(db, restore_cr)
-        except Exception:
+        except PlanBlockedError:
             restore_cr.status = ChangeRequestStatus.planned
 
     await db.commit()
