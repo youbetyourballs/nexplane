@@ -239,6 +239,15 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
                     logger.info(f"Auto-closed {_closed} findings for CR {cr_id}")
         except Exception as _fe:
             logger.warning(f"Finding auto-closure failed: {_fe}")
+        # Backup target update — fires for any CR created by a recurring backup job
+        if data.get("source") == "recurring_job":
+            try:
+                from app.services.backup_target_service import on_backup_cr_completed
+                async with AsyncSessionLocal() as _backup_db:
+                    await on_backup_cr_completed(_backup_db, cr_id, execution_result)
+                    await _backup_db.commit()
+            except Exception as _be:
+                logger.warning(f"Backup target update failed for CR {cr_id}: {_be}")
     else:
         failed_verifications = [r for r in verification_result["results"] if not r["passed"]]
         await write_audit_event(
