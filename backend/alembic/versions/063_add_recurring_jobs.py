@@ -8,8 +8,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "063_recurring_jobs"
-down_revision = "g620a5b7c8d9"
+revision: str = "063_recurring_jobs"
+down_revision: str | None = "g620a5b7c8d9"
 branch_labels = None
 depends_on = None
 
@@ -50,6 +50,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_recurring_jobs_organization_id", "recurring_jobs")
+    op.drop_index("ix_recurring_jobs_organization_id", table_name="recurring_jobs")
     op.drop_table("recurring_jobs")
     op.execute("DROP TYPE recurring_job_type")
