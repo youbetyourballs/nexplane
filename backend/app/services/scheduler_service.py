@@ -88,6 +88,24 @@ async def start():
         logger.warning(f"Could not load schedules on startup: {e}")
     logger.info(f"Loaded {loaded} scheduled ingest jobs")
 
+    # Load recurring jobs
+    loaded_recurring = 0
+    try:
+        async with _db_factory() as db:
+            from app.models.recurring_job import RecurringJob
+            from app.services.recurring_job_service import register_job, set_scheduler
+            set_scheduler(scheduler)
+            result = await db.execute(
+                select(RecurringJob).where(RecurringJob.enabled == True)
+            )
+            jobs = result.scalars().all()
+            for job in jobs:
+                register_job(job)
+                loaded_recurring += 1
+    except Exception as e:
+        logger.warning(f"Could not load recurring jobs on startup: {e}")
+    logger.info(f"Loaded {loaded_recurring} recurring jobs")
+
 
 def stop():
     if scheduler.running:
