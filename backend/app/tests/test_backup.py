@@ -104,3 +104,50 @@ def test_compute_status_overdue_when_never_run():
         status=BackupTargetStatus.unprotected,
     )
     assert compute_status(bt) == BackupTargetStatus.overdue
+
+
+# ── API tests ────────────────────────────────────────────────────────────────
+
+import pytest
+from httpx import AsyncClient
+
+
+@pytest.mark.asyncio
+async def test_create_backup_target(auth_client: AsyncClient):
+    resp = await auth_client.post("/backup-targets", json={
+        "target_description": "nexplane postgres DB",
+        "expected_cadence_hours": 24,
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["status"] == "unprotected"
+    assert data["target_description"] == "nexplane postgres DB"
+
+
+@pytest.mark.asyncio
+async def test_list_backup_targets(auth_client: AsyncClient):
+    await auth_client.post("/backup-targets", json={
+        "target_description": "test target",
+        "expected_cadence_hours": 24,
+    })
+    resp = await auth_client.get("/backup-targets")
+    assert resp.status_code == 200
+    assert any(t["target_description"] == "test target" for t in resp.json())
+
+
+@pytest.mark.asyncio
+async def test_backup_history_empty(auth_client: AsyncClient):
+    resp = await auth_client.get("/backup-history")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio
+async def test_restore_cr_invalid_source(auth_client: AsyncClient):
+    resp = await auth_client.post("/restore-crs", json={
+        "source_cr_id": str(uuid.uuid4()),
+        "target_description": "test",
+        "restore_type": "full",
+        "notes": "test restore",
+    })
+    assert resp.status_code == 404
