@@ -204,3 +204,57 @@ export const recurringJobsApi = {
   runNow: (id: string) =>
     apiClient.post<RecurringJob>(`/recurring-jobs/${id}/run-now`).then((r) => r.data),
 };
+
+// ─── Backup & Recovery ───────────────────────────────────────────────────────
+
+export interface BackupTarget {
+  id: string;
+  organization_id: string;
+  recurring_job_id: string | null;
+  asset_id: string | null;
+  target_description: string;
+  expected_cadence_hours: number;
+  last_successful_backup_cr_id: string | null;
+  last_successful_at: string | null;
+  status: "healthy" | "overdue" | "unprotected";
+  created_at: string;
+}
+
+export interface BackupHistoryItem {
+  id: string;
+  title: string;
+  change_type: string;
+  status: string;
+  artifact_refs: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface BackupContext {
+  has_backup: boolean;
+  last_successful_at: string | null;
+  artifact: Record<string, unknown> | null;
+  backup_cr_id: string | null;
+  overdue: boolean;
+}
+
+export interface RestoreCrCreate {
+  source_cr_id: string;
+  target_description: string;
+  restore_type?: string;
+  notes?: string;
+}
+
+export const backupApi = {
+  listTargets: () =>
+    apiClient.get<BackupTarget[]>("/backup-targets").then((r) => r.data),
+  getTarget: (id: string) =>
+    apiClient.get<BackupTarget>(`/backup-targets/${id}`).then((r) => r.data),
+  createTarget: (data: { target_description: string; expected_cadence_hours?: number; recurring_job_id?: string; asset_id?: string }) =>
+    apiClient.post<BackupTarget>("/backup-targets", data).then((r) => r.data),
+  listHistory: (limit = 50, offset = 0) =>
+    apiClient.get<BackupHistoryItem[]>("/backup-history", { params: { limit, offset } }).then((r) => r.data),
+  createRestoreCr: (data: RestoreCrCreate) =>
+    apiClient.post<{ id: string; status: string; title: string }>("/restore-crs", data).then((r) => r.data),
+  getBackupContext: (crId: string) =>
+    apiClient.get<BackupContext>(`/change-requests/${crId}/backup-context`).then((r) => r.data),
+};
