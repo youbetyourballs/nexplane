@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight, ShieldAlert, Layers, RotateCcw, CheckCircle2,
-  AlertTriangle, Play, FileText, Clock, Terminal, ChevronDown,
+  AlertTriangle, Play, FileText, Clock, Terminal, ChevronDown, XCircle,
 } from "lucide-react";
 
 const IAC_CHANGE_TYPES = new Set(["terraform_apply", "ansible_playbook", "helm_upgrade"]);
@@ -46,13 +46,13 @@ function PlanOutputPanel({ title, output }: { title: string; output: string }) {
   );
 }
 import { AutoMigrationStepper } from "../components/AutoMigrationStepper";
-import { changeRequestsApi } from "../api/endpoints";
+import { changeRequestsApi, backupApi, BackupContext } from "../api/endpoints";
 import { apiClient } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import { RiskBadge } from "../components/RiskBadge";
 import { PageLoading } from "../components/LoadingSpinner";
 import { useAuth } from "../hooks/useAuth";
-import { format } from "date-fns";
+import { format, formatDistanceToNow, parseISO } from "date-fns";
 
 function Section({ title, icon: Icon, children }: { title: string; icon: React.ElementType; children: React.ReactNode }) {
   return (
@@ -160,6 +160,68 @@ function FleetHealthCheckResult({ stepMetadata }: { stepMetadata: any }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+const BANNER_STATUSES = new Set(["planned", "awaiting_approval", "approved"]);
+
+function BackupConfidenceBanner({ crId, status }: { crId: string; status: string }) {
+  const { data: ctx } = useQuery<BackupContext>({
+    queryKey: ["backup-context", crId],
+    queryFn: () => backupApi.getBackupContext(crId),
+    enabled: BANNER_STATUSES.has(status),
+    retry: false,
+  });
+
+  if (!ctx || (!ctx.has_backup && !ctx.overdue)) return null;
+
+  if (!ctx.has_backup) {
+    return (
+      <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+        <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+        <div>
+          <span className="font-medium text-red-800">No backup found for this target</span>
+          <span className="text-red-700"> — proceed with caution</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (ctx.overdue) {
+    return (
+      <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+        <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <span className="font-medium text-amber-800">Last backup is overdue</span>
+          {ctx.last_successful_at && (
+            <span className="text-amber-700"> — {formatDistanceToNow(parseISO(ctx.last_successful_at), { addSuffix: true })}</span>
+          )}
+          <span className="text-amber-700"> — consider running a fresh backup before proceeding</span>
+        </div>
+        {ctx.backup_cr_id && (
+          <Link to={`/change-requests/${ctx.backup_cr_id}`} className="text-xs text-amber-700 hover:underline flex-shrink-0">
+            View backup CR →
+          </Link>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">
+      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
+      <div className="flex-1">
+        <span className="font-medium text-emerald-800">Target has a recent backup</span>
+        {ctx.last_successful_at && (
+          <span className="text-emerald-700"> from {formatDistanceToNow(parseISO(ctx.last_successful_at), { addSuffix: true })}</span>
+        )}
+      </div>
+      {ctx.backup_cr_id && (
+        <Link to={`/change-requests/${ctx.backup_cr_id}`} className="text-xs text-emerald-700 hover:underline flex-shrink-0">
+          View backup CR →
+        </Link>
+      )}
     </div>
   );
 }
@@ -377,6 +439,10 @@ export function ChangeRequestDetail() {
           {cr.description}
         </div>
       )}
+
+      <div className="mb-4">
+        <BackupConfidenceBanner crId={cr.id} status={cr.status} />
+      </div>
 
       <div className="space-y-4">
         {/* IaC Plan Output Panel */}
