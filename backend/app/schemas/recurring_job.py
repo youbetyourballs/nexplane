@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.models.recurring_job import RecurringJobType
 
 
@@ -9,7 +9,7 @@ class RecurringJobCreate(BaseModel):
     job_type: RecurringJobType
     connector_id: uuid.UUID | None = None
     action_id: str
-    parameters: dict = {}
+    parameters: dict = Field(default_factory=dict)
     target_description: str
     cron_expression: str
     schedule_preset: str | None = None
