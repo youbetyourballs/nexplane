@@ -31,3 +31,20 @@ def test_recurring_job_update_schema_partial():
     update = RecurringJobUpdate(enabled=False)
     dumped = update.model_dump(exclude_none=True)
     assert dumped == {"enabled": False}
+
+
+# ---------------------------------------------------------------------------
+# recurring_job_service — cron helpers
+# ---------------------------------------------------------------------------
+from app.services.recurring_job_service import compute_next_run
+
+
+def test_compute_next_run_returns_future():
+    next_run = compute_next_run("0 2 * * *")
+    assert next_run > datetime.now(tz=timezone.utc)
+
+
+def test_compute_next_run_daily_2am():
+    next_run = compute_next_run("0 2 * * *")
+    assert next_run.hour == 2
+    assert next_run.minute == 0
