@@ -152,3 +152,55 @@ export const complianceApi = {
   getSummary: (): Promise<CisSummaryResponse> =>
     apiClient.get<CisSummaryResponse>("/compliance/cis-summary").then((r) => r.data),
 };
+
+// Recurring Jobs
+export interface RecurringJob {
+  id: string;
+  organization_id: string;
+  name: string;
+  job_type: "backup" | "scheduled_restore" | "scheduled_op";
+  connector_id: string | null;
+  action_id: string;
+  parameters: Record<string, unknown>;
+  target_description: string;
+  cron_expression: string;
+  schedule_preset: string | null;
+  schedule_hour: number | null;
+  enabled: boolean;
+  last_run_at: string | null;
+  last_cr_id: string | null;
+  next_run_at: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface RecurringJobCreate {
+  name: string;
+  job_type: "backup" | "scheduled_restore" | "scheduled_op";
+  connector_id?: string;
+  action_id: string;
+  parameters?: Record<string, unknown>;
+  target_description: string;
+  cron_expression: string;
+  schedule_preset?: string;
+  schedule_hour?: number;
+}
+
+export const recurringJobsApi = {
+  list: (job_type?: string) =>
+    apiClient.get<RecurringJob[]>("/recurring-jobs", { params: job_type ? { job_type } : {} }).then((r) => r.data),
+  get: (id: string) =>
+    apiClient.get<RecurringJob>(`/recurring-jobs/${id}`).then((r) => r.data),
+  create: (data: RecurringJobCreate) =>
+    apiClient.post<RecurringJob>("/recurring-jobs", data).then((r) => r.data),
+  update: (id: string, data: Partial<RecurringJobCreate> & { enabled?: boolean }) =>
+    apiClient.put<RecurringJob>(`/recurring-jobs/${id}`, data).then((r) => r.data),
+  delete: (id: string) =>
+    apiClient.delete(`/recurring-jobs/${id}`),
+  enable: (id: string) =>
+    apiClient.post<RecurringJob>(`/recurring-jobs/${id}/enable`).then((r) => r.data),
+  disable: (id: string) =>
+    apiClient.post<RecurringJob>(`/recurring-jobs/${id}/disable`).then((r) => r.data),
+  runNow: (id: string) =>
+    apiClient.post<RecurringJob>(`/recurring-jobs/${id}/run-now`).then((r) => r.data),
+};
