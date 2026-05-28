@@ -49,3 +49,58 @@ def test_backup_context_read_schema():
         overdue=False,
     )
     assert ctx.has_backup is True
+
+
+from app.services.backup_target_service import compute_status
+from datetime import timedelta
+
+
+def test_compute_status_unprotected_when_no_job():
+    bt = BackupTarget(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        recurring_job_id=None,
+        target_description="test",
+        expected_cadence_hours=24,
+        status=BackupTargetStatus.unprotected,
+    )
+    assert compute_status(bt) == BackupTargetStatus.unprotected
+
+
+def test_compute_status_healthy_when_recent():
+    bt = BackupTarget(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        recurring_job_id=uuid.uuid4(),
+        target_description="test",
+        expected_cadence_hours=24,
+        last_successful_at=datetime.now(tz=timezone.utc) - timedelta(hours=20),
+        status=BackupTargetStatus.healthy,
+    )
+    assert compute_status(bt) == BackupTargetStatus.healthy
+
+
+def test_compute_status_overdue_when_stale():
+    bt = BackupTarget(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        recurring_job_id=uuid.uuid4(),
+        target_description="test",
+        expected_cadence_hours=24,
+        last_successful_at=datetime.now(tz=timezone.utc) - timedelta(hours=30),
+        status=BackupTargetStatus.overdue,
+    )
+    assert compute_status(bt) == BackupTargetStatus.overdue
+
+
+def test_compute_status_overdue_when_never_run():
+    bt = BackupTarget(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        recurring_job_id=uuid.uuid4(),
+        target_description="test",
+        expected_cadence_hours=24,
+        last_successful_at=None,
+        status=BackupTargetStatus.unprotected,
+    )
+    assert compute_status(bt) == BackupTargetStatus.overdue
