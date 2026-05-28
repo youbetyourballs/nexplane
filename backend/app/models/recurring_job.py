@@ -22,7 +22,7 @@ class RecurringJob(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     job_type: Mapped[RecurringJobType] = mapped_column(
-        SAEnum(RecurringJobType, name="recurring_job_type"), nullable=False
+        SAEnum(RecurringJobType, name="recurring_job_type", native_enum=False), nullable=False
     )
     connector_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("connectors.id", ondelete="SET NULL"), nullable=True
