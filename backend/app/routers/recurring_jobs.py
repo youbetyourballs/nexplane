@@ -56,6 +56,9 @@ async def create_job(
     db.add(job)
     await db.flush()
     register_job(job)
+    if job.job_type.value == "backup":
+        from app.services.backup_target_service import auto_create_for_job
+        await auto_create_for_job(db, job)
     await db.commit()
     await db.refresh(job)
     return job
