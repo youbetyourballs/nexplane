@@ -53,6 +53,7 @@ class ChangeRequestRead(BaseModel):
     emergency_reason: str | None = None
     access_expiry_hours: float | None = None
     scheduled_rollback_cr_id: uuid.UUID | None = None
+    artifact_refs: dict | None = None
     risk_level: RiskLevel
     status: ChangeRequestStatus
     created_at: datetime
