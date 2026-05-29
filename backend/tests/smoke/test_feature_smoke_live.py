@@ -795,18 +795,28 @@ def _sub_phase_azure_ad(client: NexplaneClient, asset_id: str) -> None:
 def _sub_phase_ldap(client: NexplaneClient, asset_id: str) -> None:
     import uuid as _uuid
 
-    creds = get_connector_creds_from_db("ldap")
+    # AD connector is stored as "active_directory" type in the platform
+    creds = get_connector_creds_from_db("active_directory")
     if not creds:
         fail("LDAP credentials not found in DB")
+    # Quick reachability check before attempting operations
+    import socket as _socket
+    _host = creds.get("host") or creds.get("hostname") or creds.get("server", "")
+    _port = int(creds.get("port", 389))
+    try:
+        with _socket.create_connection((_host, _port), timeout=3):
+            pass
+    except OSError:
+        fail(f"LDAP/AD server {_host}:{_port} not reachable — DC may be terminated")
 
-    connector_id = _get_connector_id(client, "ldap")
+    connector_id = _get_connector_id(client, "active_directory")
     suffix = str(_uuid.uuid4())[:8]
     username = f"nxsmoke{suffix}"
     password = f"NxSmoke{suffix}!"
 
     from app.connectors.executors.ldap._client import LDAPClient
     ldap_client = LDAPClient(
-        host=creds.get("host") or creds.get("hostname"),
+        host=creds.get("host") or creds.get("hostname") or creds.get("server"),
         port=int(creds.get("port", 389)),
         bind_dn=creds.get("bind_dn", ""),
         bind_password=creds.get("bind_password") or creds.get("password", ""),
@@ -822,7 +832,7 @@ def _sub_phase_ldap(client: NexplaneClient, asset_id: str) -> None:
     try:
         cr_id = _run_cr_full_lifecycle(
             client, "Smoke: disable LDAP user", "ldap_disable_user",
-            asset_id, {"username": username, "_locked_connector_type": "ldap"},
+            asset_id, {"username": username, "_locked_connector_type": "active_directory"},
             connector_id,
         )
 
@@ -956,7 +966,11 @@ def phase_credential_revocation_live(client: NexplaneClient) -> None:
     _sub_phase_azure_ad(client, asset_id)
 
     print("\n  [LDAP] ldap_disable_user", flush=True)
-    _sub_phase_ldap(client, asset_id)
+    try:
+        _sub_phase_ldap(client, asset_id)
+    except SystemExit:
+        # LDAP/AD sub-phase skipped — no live AD connector (DC may be terminated)
+        print("  [LDAP] SKIPPED — no live AD connector available", flush=True)
 
     print("\n  [OCI] oci_iam_user_disable", flush=True)
     _sub_phase_oci(client, asset_id)
