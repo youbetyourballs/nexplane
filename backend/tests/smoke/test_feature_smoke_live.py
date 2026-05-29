@@ -32,7 +32,7 @@ if _IN_CONTAINER and "/app" not in sys.path:
 if os.path.dirname(__file__) not in sys.path:
     sys.path.insert(0, os.path.dirname(__file__))
 
-from smoke_helpers import NexplaneClient, log, fail, make_base_parser, _get_aws_boto3_client
+from smoke_helpers import NexplaneClient, get_connector_creds_from_db, log, fail, make_base_parser, _get_aws_boto3_client
 
 SMOKE_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 
@@ -611,19 +611,369 @@ def phase_mcp_agent_tokens(client: NexplaneClient) -> None:
     print("[MCP_AGENT_TOKENS] PASSED", flush=True)
 
 
+# ── Phase: CREDENTIAL_REVOCATION ──────────────────────────────────────────────
+
+def _get_connector_id(client: NexplaneClient, connector_type: str) -> str:
+    connectors = client.get("/connectors")
+    matches = [c for c in connectors if c.get("connector_type") == connector_type]
+    if not matches:
+        fail(f"No {connector_type} connector found")
+    return matches[0]["id"]
+
+
+def _get_any_asset_id(client: NexplaneClient) -> str:
+    assets = client.get("/assets", params={"limit": 1})
+    items = assets if isinstance(assets, list) else assets.get("items", [])
+    if not items:
+        fail("No assets found — run discovery first")
+    return items[0]["id"]
+
+
+def _run_cr_full_lifecycle(client: NexplaneClient, title: str, change_type: str,
+                            asset_id: str, desired_outcome: dict, connector_id: str) -> dict:
+    cr_id = client.create_cr(title, change_type, asset_id, desired_outcome, connector_id=connector_id)
+    client.post(f"/change-requests/{cr_id}/plan")
+    client.post(f"/change-requests/{cr_id}/submit-for-approval")
+    client.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "smoke"})
+    client.post(f"/change-requests/{cr_id}/execute")
+    client._wait_timeout(cr_id, title, 120)
+    return cr_id
+
+
+def _sub_phase_gcp(client: NexplaneClient, asset_id: str) -> None:
+    import threading
+    import uuid as _uuid
+
+    creds = get_connector_creds_from_db("gcp")
+    if not creds:
+        fail("GCP credentials not found in DB")
+
+    connector_id = _get_connector_id(client, "gcp")
+    suffix = str(_uuid.uuid4())[:8]
+    sa_name = f"nexplane-smoke-{suffix}"
+    project = creds.get("project_id", "")
+    sa_email = f"{sa_name}@{project}.iam.gserviceaccount.com"
+
+    import json as _json
+    from google.oauth2 import service_account as _sa
+    from google.cloud import iam_admin_v1
+    key_json = _json.loads(creds["service_account_key_json"])
+    gcp_creds = _sa.Credentials.from_service_account_info(
+        key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    iam_client = iam_admin_v1.IAMClient(credentials=gcp_creds)
+    iam_client.create_service_account(request={
+        "name": f"projects/{project}",
+        "account_id": sa_name,
+        "service_account": {"display_name": "nexplane-smoke-temp"},
+    })
+    print(f"  GCP: created temp SA {sa_email}", flush=True)
+
+    try:
+        cr_id = _run_cr_full_lifecycle(
+            client, "Smoke: disable GCP service account", "gcp_disable_service_account",
+            asset_id, {"service_account_email": sa_email, "_locked_connector_type": "gcp"},
+            connector_id,
+        )
+
+        sa = iam_client.get_service_account(request={"name": f"projects/{project}/serviceAccounts/{sa_email}"})
+        assert sa.disabled, f"SA {sa_email} should be disabled"
+        log("GCP SA disabled ✓")
+
+        client.rollback_cr(cr_id, "GCP restore SA")
+
+        sa_after = iam_client.get_service_account(request={"name": f"projects/{project}/serviceAccounts/{sa_email}"})
+        assert not sa_after.disabled, f"SA {sa_email} should be re-enabled after rollback"
+        log("GCP SA re-enabled after rollback ✓")
+
+    finally:
+        try:
+            iam_client.delete_service_account(request={"name": f"projects/{project}/serviceAccounts/{sa_email}"})
+            print(f"  GCP: deleted temp SA {sa_email}", flush=True)
+        except Exception as e:
+            print(f"  GCP: cleanup warning: {e}", flush=True)
+
+
+def _sub_phase_azure_ad(client: NexplaneClient, asset_id: str) -> None:
+    import asyncio
+    import threading
+    import uuid as _uuid
+
+    creds = get_connector_creds_from_db("azure_ad")
+    if not creds:
+        fail("Azure AD credentials not found in DB")
+
+    connector_id = _get_connector_id(client, "azure_ad")
+    suffix = str(_uuid.uuid4())[:8]
+
+    from app.connectors.executors.azure_ad.azure_ad_client import AzureADClient
+    az_client = AzureADClient(creds["tenant_id"], creds["client_id"], creds["client_secret"])
+
+    # Resolve tenant default domain
+    domain_holder = [None]
+
+    def _get_domain():
+        async def _fetch():
+            import httpx
+            token = await az_client._get_token()
+            async with httpx.AsyncClient() as hc:
+                r = await hc.get(
+                    "https://graph.microsoft.com/v1.0/organization",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                r.raise_for_status()
+                domains = r.json().get("value", [{}])[0].get("verifiedDomains", [])
+                default = next((d["name"] for d in domains if d.get("isDefault")), None)
+                return default or domains[0]["name"]
+        domain_holder[0] = asyncio.run(_fetch())
+
+    t = threading.Thread(target=_get_domain)
+    t.start(); t.join()
+    domain = domain_holder[0]
+
+    upn = f"nexplane-smoke-{suffix}@{domain}"
+    user_id_holder = [None]
+
+    def _create_user():
+        async def _c():
+            user = await az_client.create_user(
+                display_name=f"nexplane-smoke-{suffix}",
+                upn=upn,
+                password=f"NxSmoke{suffix}!",
+                force_change_password=False,
+            )
+            user_id_holder[0] = user["id"]
+        asyncio.run(_c())
+
+    t = threading.Thread(target=_create_user)
+    t.start(); t.join()
+    user_id = user_id_holder[0]
+    print(f"  Azure AD: created temp user {upn} ({user_id})", flush=True)
+
+    try:
+        cr_id = _run_cr_full_lifecycle(
+            client, "Smoke: disable Azure AD user", "azure_ad_disable_user",
+            asset_id, {"user_identifier": user_id, "_locked_connector_type": "azure_ad"},
+            connector_id,
+        )
+
+        # Verify disabled
+        disabled_holder = [None]
+
+        def _run_check():
+            disabled_holder[0] = asyncio.run(az_client.get_user(user_id))
+
+        t = threading.Thread(target=_run_check); t.start(); t.join()
+        assert not disabled_holder[0].get("accountEnabled"), f"User {user_id} should be disabled"
+        log("Azure AD user disabled ✓")
+
+        client.rollback_cr(cr_id, "Azure AD restore user")
+
+        enabled_holder = [None]
+
+        def _run_check2():
+            enabled_holder[0] = asyncio.run(az_client.get_user(user_id))
+
+        t = threading.Thread(target=_run_check2); t.start(); t.join()
+        assert enabled_holder[0].get("accountEnabled"), f"User {user_id} should be re-enabled"
+        log("Azure AD user re-enabled after rollback ✓")
+
+    finally:
+        def _delete():
+            asyncio.run(az_client.delete_user(user_id))
+
+        t = threading.Thread(target=_delete); t.start(); t.join()
+        print(f"  Azure AD: deleted temp user {upn}", flush=True)
+
+
+def _sub_phase_ldap(client: NexplaneClient, asset_id: str) -> None:
+    import uuid as _uuid
+
+    creds = get_connector_creds_from_db("ldap")
+    if not creds:
+        fail("LDAP credentials not found in DB")
+
+    connector_id = _get_connector_id(client, "ldap")
+    suffix = str(_uuid.uuid4())[:8]
+    username = f"nxsmoke{suffix}"
+    password = f"NxSmoke{suffix}!"
+
+    from app.connectors.executors.ldap._client import LDAPClient
+    ldap_client = LDAPClient(
+        host=creds.get("host") or creds.get("hostname"),
+        port=int(creds.get("port", 389)),
+        bind_dn=creds.get("bind_dn", ""),
+        bind_password=creds.get("bind_password") or creds.get("password", ""),
+        base_dn=creds.get("base_dn", "dc=example,dc=com"),
+        use_ssl=creds.get("use_ssl", False),
+    )
+
+    result = ldap_client.create_user(username=username, display_name=f"nexplane-smoke-{suffix}", password=password)
+    if not result.get("success"):
+        fail(f"LDAP: failed to create temp user: {result}")
+    print(f"  LDAP: created temp user {username}", flush=True)
+
+    try:
+        cr_id = _run_cr_full_lifecycle(
+            client, "Smoke: disable LDAP user", "ldap_disable_user",
+            asset_id, {"username": username, "_locked_connector_type": "ldap"},
+            connector_id,
+        )
+
+        can_bind = ldap_client.verify_bind(username, password)
+        assert not can_bind, f"LDAP user {username} should not bind after disable"
+        log("LDAP user disabled (bind rejected) ✓")
+
+        client.rollback_cr(cr_id, "LDAP restore user")
+
+        can_bind_after = ldap_client.verify_bind(username, password)
+        assert can_bind_after, f"LDAP user {username} should bind after rollback"
+        log("LDAP user re-enabled after rollback ✓")
+
+    finally:
+        ldap_client.delete_user(username)
+        print(f"  LDAP: deleted temp user {username}", flush=True)
+
+
+def _sub_phase_oci(client: NexplaneClient, asset_id: str) -> None:
+    import uuid as _uuid
+
+    creds = get_connector_creds_from_db("oci")
+    if not creds:
+        fail("OCI credentials not found in DB")
+
+    connector_id = _get_connector_id(client, "oci")
+    suffix = str(_uuid.uuid4())[:8]
+    username = f"nexplane-smoke-{suffix}"
+
+    from app.connectors.executors.oci._client import get_identity_client
+    import oci as _oci
+    oci_client = get_identity_client(creds)
+    compartment_id = creds.get("tenancy")
+
+    user_resp = oci_client.create_user(_oci.identity.models.CreateUserDetails(
+        compartment_id=compartment_id,
+        name=username,
+        description="nexplane smoke test temp user",
+    ))
+    user_id = user_resp.data.id
+    print(f"  OCI: created temp user {username} ({user_id})", flush=True)
+
+    try:
+        cr_id = _run_cr_full_lifecycle(
+            client, "Smoke: disable OCI IAM user", "oci_iam_user_disable",
+            asset_id, {"user_id": user_id, "_locked_connector_type": "oci"},
+            connector_id,
+        )
+
+        user_state = oci_client.get_user(user_id).data
+        assert not user_state.capabilities.can_use_api_keys, f"OCI user {user_id} should have api_keys disabled"
+        log("OCI user disabled ✓")
+
+        client.rollback_cr(cr_id, "OCI restore user")
+
+        user_state_after = oci_client.get_user(user_id).data
+        assert user_state_after.capabilities.can_use_api_keys, f"OCI user {user_id} should have api_keys re-enabled"
+        log("OCI user re-enabled after rollback ✓")
+
+    finally:
+        try:
+            oci_client.delete_user(user_id)
+            print(f"  OCI: deleted temp user {username}", flush=True)
+        except Exception as e:
+            print(f"  OCI: cleanup warning: {e}", flush=True)
+
+
+def _sub_phase_aws(client: NexplaneClient, asset_id: str) -> None:
+    import uuid as _uuid
+
+    creds = get_connector_creds_from_db("aws")
+    if not creds:
+        fail("AWS credentials not found in DB")
+
+    connector_id = _get_connector_id(client, "aws")
+    suffix = str(_uuid.uuid4())[:8]
+    username = f"nexplane-smoke-{suffix}"
+
+    iam = boto3.client(
+        "iam",
+        aws_access_key_id=creds["aws_access_key_id"],
+        aws_secret_access_key=creds["aws_secret_access_key"],
+        region_name=creds.get("region", "us-east-1"),
+    )
+
+    iam.create_user(UserName=username, Tags=[{"Key": "nxp-smoke-temp", "Value": "true"}])
+    key_resp = iam.create_access_key(UserName=username)
+    access_key_id = key_resp["AccessKey"]["AccessKeyId"]
+    print(f"  AWS: created temp user {username}, key {access_key_id}", flush=True)
+
+    try:
+        cr_id = _run_cr_full_lifecycle(
+            client, "Smoke: revoke exposed AWS IAM key", "revoke_exposed_credential",
+            asset_id,
+            {"credential_type": "aws_iam_key", "credential_id": access_key_id, "_locked_connector_type": "aws"},
+            connector_id,
+        )
+
+        keys_after = iam.list_access_keys(UserName=username)["AccessKeyMetadata"]
+        key_ids_after = [k["AccessKeyId"] for k in keys_after]
+        assert access_key_id not in key_ids_after, f"Key {access_key_id} should be deleted"
+        log("AWS IAM key revoked ✓")
+
+        client.rollback_cr(cr_id, "AWS reconstitute access key")
+
+        keys_reconstituted = iam.list_access_keys(UserName=username)["AccessKeyMetadata"]
+        active_keys = [k for k in keys_reconstituted if k["Status"] == "Active"]
+        assert active_keys, f"Expected a new active key for {username} after reconstitution"
+        new_key_id = active_keys[0]["AccessKeyId"]
+        assert new_key_id != access_key_id, "Reconstitution should create a new key"
+        log(f"AWS access reconstituted via new key {new_key_id} ✓")
+
+    finally:
+        try:
+            for k in iam.list_access_keys(UserName=username)["AccessKeyMetadata"]:
+                iam.delete_access_key(UserName=username, AccessKeyId=k["AccessKeyId"])
+            iam.delete_user(UserName=username)
+            print(f"  AWS: deleted temp user {username}", flush=True)
+        except Exception as e:
+            print(f"  AWS: cleanup warning: {e}", flush=True)
+
+
+def phase_credential_revocation_live(client: NexplaneClient) -> None:
+    print("\n[CREDENTIAL_REVOCATION] Live credential disable/revoke + rollback across 5 connectors", flush=True)
+    asset_id = _get_any_asset_id(client)
+
+    print("\n  [GCP] disable_service_account", flush=True)
+    _sub_phase_gcp(client, asset_id)
+
+    print("\n  [Azure AD] azure_ad_disable_user", flush=True)
+    _sub_phase_azure_ad(client, asset_id)
+
+    print("\n  [LDAP] ldap_disable_user", flush=True)
+    _sub_phase_ldap(client, asset_id)
+
+    print("\n  [OCI] oci_iam_user_disable", flush=True)
+    _sub_phase_oci(client, asset_id)
+
+    print("\n  [AWS] revoke_exposed_credential (reconstitution rollback)", flush=True)
+    _sub_phase_aws(client, asset_id)
+
+    print("[CREDENTIAL_REVOCATION] PASSED", flush=True)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-ALL_PHASES = ["VULN_MITIGATION", "CREDENTIAL_EXPIRY", "MCP_AGENT_TOKENS"]
+ALL_PHASES = ["VULN_MITIGATION", "CREDENTIAL_EXPIRY", "MCP_AGENT_TOKENS", "CREDENTIAL_REVOCATION"]
 
 PHASE_FNS = {
     "VULN_MITIGATION": phase_vuln_mitigation,
     "CREDENTIAL_EXPIRY": phase_credential_expiry,
     "MCP_AGENT_TOKENS": phase_mcp_agent_tokens,
+    "CREDENTIAL_REVOCATION": phase_credential_revocation_live,
 }
 
 
 def main() -> None:
-    parser = make_base_parser("Feature smoke tests: VULN_MITIGATION, CREDENTIAL_EXPIRY, MCP_AGENT_TOKENS")
+    parser = make_base_parser("Feature smoke tests: VULN_MITIGATION, CREDENTIAL_EXPIRY, MCP_AGENT_TOKENS, CREDENTIAL_REVOCATION")
     parser.add_argument(
         "--phases",
         default=",".join(ALL_PHASES),
