@@ -1113,6 +1113,19 @@ def _sub_phase_gcp_sa_key(client: NexplaneClient, asset_id: str) -> None:
     })
     print(f"  GCP: created temp SA {temp_sa_email}", flush=True)
 
+    # Wait for SA to be available (GCP eventual consistency — SA not immediately reachable for key ops)
+    import time as _gcp_wait
+    _deadline = _gcp_wait.time() + 30
+    while _gcp_wait.time() < _deadline:
+        try:
+            iam_client.get_service_account(request={"name": f"projects/{project}/serviceAccounts/{temp_sa_email}"})
+            break
+        except Exception:
+            _gcp_wait.sleep(3)
+    else:
+        print(f"  GCP: SA {temp_sa_email} not available after 30s, skipping", flush=True)
+        return
+
     try:
         # Pre-check: create a key and immediately delete it to verify permission before CR attempt
         probe_key = iam_client.create_service_account_key(request={
