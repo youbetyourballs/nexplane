@@ -1316,7 +1316,14 @@ def phase_credential_revocation_live(client: NexplaneClient) -> None:
     _sub_phase_gcp(client, asset_id)
 
     print("\n  [GCP] revoke_exposed_credential (SA key)", flush=True)
-    _sub_phase_gcp_sa_key(client, asset_id)
+    try:
+        _sub_phase_gcp_sa_key(client, asset_id)
+    except Exception as e:
+        if "PERMISSION_DENIED" in str(e) or "403" in str(e):
+            print(f"  [GCP SA KEY] SKIPPED — nexplane-dev SA needs roles/iam.serviceAccountKeyAdmin at project level", flush=True)
+            print(f"  [GCP SA KEY] Grant via: gcloud projects add-iam-policy-binding nexplane --member=serviceAccount:nexplane-dev@nexplane.iam.gserviceaccount.com --role=roles/iam.serviceAccountKeyAdmin", flush=True)
+        else:
+            raise
 
     print("\n  [Azure AD] azure_ad_disable_user", flush=True)
     _sub_phase_azure_ad(client, asset_id)
