@@ -31,7 +31,7 @@ async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dic
         user_info = iam.get_user(UserName=username)
         user_arn = user_info["User"]["Arn"]
 
-        iam.delete_access_key(AccessKeyId=credential_id)
+        iam.delete_access_key(UserName=username, AccessKeyId=credential_id)
         logger.info("Revoked IAM key %s for user %s", credential_id, username)
         return {
             "success": True,
