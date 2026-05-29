@@ -8,7 +8,36 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+async def _reconstitute(rp: dict, connector: Any) -> dict:
+    """Called during rollback — create a new key for the same user."""
+    if rp.get("credential_type") != "aws_iam_key":
+        return {"rolled_back": False, "reason": "Credential revocation is permanent — no rollback available"}
+    creds = getattr(connector, "credentials", {})
+    if not creds:
+        return {"rolled_back": False, "reason": "no credentials available for reconstitution"}
+    import boto3
+    iam = boto3.client(
+        "iam",
+        aws_access_key_id=creds.get("access_key_id") or creds.get("aws_access_key_id"),
+        aws_secret_access_key=creds.get("secret_access_key") or creds.get("aws_secret_access_key"),
+        region_name=creds.get("region", "us-east-1"),
+    )
+    new_key = iam.create_access_key(UserName=rp["username"])["AccessKey"]
+    logger.info("Reconstituted access key %s for user %s", new_key["AccessKeyId"], rp["username"])
+    return {
+        "rolled_back": True,
+        "rollback_type": "reconstitution",
+        "new_access_key_id": new_key["AccessKeyId"],
+        "username": rp["username"],
+        "note": "Original key is permanently deleted. New key created for same user.",
+    }
+
+
 async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dict:
+    # When called during rollback, parameters contain the prior execution result
+    if parameters.get("rollback_type") == "reconstitution" and "rollback_params" in parameters:
+        return await _reconstitute(parameters["rollback_params"], connector)
+
     credential_type = parameters["credential_type"]
     credential_id = parameters.get("credential_id") or parameters.get("access_key_id", "")
     creds = getattr(connector, "credentials", {})
