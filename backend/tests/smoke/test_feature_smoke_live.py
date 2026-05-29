@@ -1234,6 +1234,11 @@ def _sub_phase_azure_client_secret(client: NexplaneClient, asset_id: str) -> Non
     credential_id = f"{app_object_id}/{key_id}"
     print(f"  Azure: created temp client secret {key_id[:8]}...", flush=True)
 
+    # Azure Graph API eventual consistency: wait for the new secret to propagate
+    # before submitting the CR, otherwise removePassword returns 400 "not found"
+    print("  Azure: waiting 30s for secret propagation...", flush=True)
+    time.sleep(30)
+
     _run_cr_full_lifecycle(
         client, "Smoke: revoke Azure client secret", "revoke_exposed_credential",
         asset_id,
