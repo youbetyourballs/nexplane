@@ -1079,8 +1079,14 @@ def _sub_phase_ldap_live(client: NexplaneClient, asset_id: str,
 
 
 def _sub_phase_gcp_sa_key(client: NexplaneClient, asset_id: str) -> None:
-    """Revoke a live GCP service account key via Nexplane CR."""
+    """Revoke a live GCP service account key via Nexplane CR.
+
+    Creates a TEMP SA, creates a key on it, then revokes that key via CR.
+    The platform SA (nexplane-dev) has admin rights over SAs it creates,
+    so it can delete their keys — unlike keys on itself.
+    """
     import json as _json
+    import uuid as _uuid2
     from google.oauth2 import service_account as _sa
     from google.cloud import iam_admin_v1
 
@@ -1091,21 +1097,32 @@ def _sub_phase_gcp_sa_key(client: NexplaneClient, asset_id: str) -> None:
     connector_id = _get_connector_id(client, "gcp")
     project = creds.get("project_id", "")
     key_json = _json.loads(creds["service_account_key_json"])
-    sa_email = key_json["client_email"]
 
     gcp_creds = _sa.Credentials.from_service_account_info(
         key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
     iam_client = iam_admin_v1.IAMClient(credentials=gcp_creds)
 
-    key_resp = iam_client.create_service_account_key(request={
-        "name": f"projects/{project}/serviceAccounts/{sa_email}",
-        "key_algorithm": "KEY_ALG_RSA_2048",
+    # Create a temp SA to own the key (platform SA has admin over SAs it creates)
+    suffix = str(_uuid2.uuid4())[:8]
+    temp_sa_name = f"nxsmoke-key-{suffix}"
+    temp_sa_email = f"{temp_sa_name}@{project}.iam.gserviceaccount.com"
+    iam_client.create_service_account(request={
+        "name": f"projects/{project}",
+        "account_id": temp_sa_name,
+        "service_account": {"display_name": "nexplane-smoke-key-temp"},
     })
-    key_name = key_resp.name  # full resource name
-    short_id = key_name.split("/")[-1]
-    print(f"  GCP: created temp SA key {short_id[:16]}...", flush=True)
+    print(f"  GCP: created temp SA {temp_sa_email}", flush=True)
 
+    key_resp = None
     try:
+        key_resp = iam_client.create_service_account_key(request={
+            "name": f"projects/{project}/serviceAccounts/{temp_sa_email}",
+            "key_algorithm": "KEY_ALG_RSA_2048",
+        })
+        key_name = key_resp.name
+        short_id = key_name.split("/")[-1]
+        print(f"  GCP: created temp SA key {short_id[:16]}...", flush=True)
+
         _run_cr_full_lifecycle(
             client, "Smoke: revoke GCP SA key", "revoke_exposed_credential",
             asset_id,
@@ -1114,18 +1131,20 @@ def _sub_phase_gcp_sa_key(client: NexplaneClient, asset_id: str) -> None:
             connector_id,
         )
         keys_resp = iam_client.list_service_account_keys(request={
-            "name": f"projects/{project}/serviceAccounts/{sa_email}"
+            "name": f"projects/{project}/serviceAccounts/{temp_sa_email}",
+            "key_types": ["USER_MANAGED"],
         })
         remaining = [k.name for k in keys_resp.keys]
         assert key_name not in remaining, f"Key {short_id} should be deleted after revocation"
         log("GCP SA key revoked ✓ (permanent — no rollback)")
-    except Exception:
-        # Best-effort cleanup if CR failed
+    finally:
         try:
-            iam_client.delete_service_account_key(request={"name": key_name})
-        except Exception:
-            pass
-        raise
+            iam_client.delete_service_account(
+                request={"name": f"projects/{project}/serviceAccounts/{temp_sa_email}"}
+            )
+            print(f"  GCP: deleted temp SA {temp_sa_email}", flush=True)
+        except Exception as e:
+            print(f"  GCP: SA cleanup warning: {e}", flush=True)
 
 
 def _sub_phase_azure_client_secret(client: NexplaneClient, asset_id: str) -> None:
