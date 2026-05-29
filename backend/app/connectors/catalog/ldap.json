@@ -14,6 +14,22 @@
       "applicable_asset_types": ["server", "identity"],
       "parameters": [
         {"name": "username", "type": "string", "required": true}
+      ],
+      "rollback_action": "ldap_enable_user",
+      "rollback_connector_type": "ldap"
+    },
+    {
+      "action_id": "ldap_enable_user",
+      "generic_action": "ldap_enable_user",
+      "display_name": "Enable LDAP User",
+      "description": "Re-enables a disabled LDAP user account.",
+      "executor": "ldap.enable_user",
+      "action_type": "change",
+      "execution_tier": 3,
+      "estimated_duration_seconds": 10,
+      "applicable_asset_types": ["server", "identity"],
+      "parameters": [
+        {"name": "username", "type": "string", "required": true}
       ]
     }
   ]
