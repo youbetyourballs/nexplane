@@ -1005,7 +1005,7 @@ def _launch_dc_instance(client: NexplaneClient, ec2_client, ssm_client, iam_clie
     private_ip = ec2_client.describe_instances(InstanceIds=[instance_id])["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
     import socket as _socket
-    deadline = time.time() + 360
+    deadline = time.time() + 480
     while time.time() < deadline:
         try:
             with _socket.create_connection((private_ip, 389), timeout=3):
