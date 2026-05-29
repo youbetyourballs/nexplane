@@ -1,0 +1,20 @@
+{
+  "change_type": "ldap_disable_user",
+  "display_name": "Disable LDAP User",
+  "description": "Disables an LDAP/Active Directory user account by setting pwdAccountLockedTime. Rollback clears the lock to re-enable the account.",
+  "steps": [
+    {
+      "generic_action": "ldap_disable_user",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "ldap_disable_user",
+  "rollback_connector_type": "ldap"
+}
