@@ -681,7 +681,14 @@ def _sub_phase_gcp(client: NexplaneClient, asset_id: str) -> None:
 
         client.rollback_cr(cr_id, "GCP restore SA")
 
-        sa_after = iam_client.get_service_account(request={"name": f"projects/{project}/serviceAccounts/{sa_email}"})
+        # GCP eventual consistency: poll until SA is re-enabled (up to 30s)
+        import time as _gcp_time
+        sa_after = None
+        for _attempt in range(6):
+            sa_after = iam_client.get_service_account(request={"name": f"projects/{project}/serviceAccounts/{sa_email}"})
+            if not sa_after.disabled:
+                break
+            _gcp_time.sleep(5)
         assert not sa_after.disabled, f"SA {sa_email} should be re-enabled after rollback"
         log("GCP SA re-enabled after rollback ✓")
 
