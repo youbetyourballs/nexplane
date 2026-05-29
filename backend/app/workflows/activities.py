@@ -283,6 +283,31 @@ async def activity_execute_rollback(
                 )
                 connector = result.scalar_one_or_none()
 
+            # Fallback: look up any active connector of the rollback type in the org
+            # when the plan step has no locked connector_id (same pattern as execute path).
+            if connector is None and rollback_connector and rollback_connector not in ("", "unknown"):
+                try:
+                    _ct_enum = ConnectorType(rollback_connector)
+                    _cr_result = await db.execute(
+                        select(ChangeRequest).where(ChangeRequest.id == uuid.UUID(change_request_id))
+                    )
+                    _cr_obj = _cr_result.scalar_one_or_none()
+                    if _cr_obj:
+                        _conn_result = await db.execute(
+                            select(Connector).where(
+                                Connector.organization_id == _cr_obj.organization_id,
+                                Connector.connector_type == _ct_enum,
+                            ).order_by(Connector.created_at.desc()).limit(1)
+                        )
+                        _fallback = _conn_result.scalar_one_or_none()
+                        if _fallback:
+                            connector = _fallback
+                            await connector_service._attach_credentials(connector, db)
+                            logger.info("Rollback step %s: using fallback connector %s (type=%s)",
+                                        step.get("step_number"), connector.id, rollback_connector)
+                except Exception as _lookup_exc:
+                    logger.debug("Rollback fallback connector lookup failed: %s", _lookup_exc)
+
             if connector and (not rollback_connector or rollback_connector == "unknown"):
                 rollback_connector = connector.connector_type.value
 
