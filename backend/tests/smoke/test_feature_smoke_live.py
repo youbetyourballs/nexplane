@@ -878,6 +878,7 @@ def _sub_phase_oci(client: NexplaneClient, asset_id: str) -> None:
         compartment_id=compartment_id,
         name=username,
         description="nexplane smoke test temp user",
+        email=f"{username}@nexplane-smoke.invalid",
     ))
     user_id = user_resp.data.id
     print(f"  OCI: created temp user {username} ({user_id})", flush=True)
