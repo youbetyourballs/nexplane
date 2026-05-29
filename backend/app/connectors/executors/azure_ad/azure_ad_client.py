@@ -42,6 +42,7 @@ class AzureADClient:
             resp = await client.get(
                 f"{self.GRAPH_BASE}/users/{user_id_or_upn}",
                 headers=await self._headers(),
+                params={"$select": "id,displayName,userPrincipalName,accountEnabled"},
             )
             resp.raise_for_status()
             return resp.json()
