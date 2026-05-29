@@ -97,9 +97,9 @@ async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dic
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
         )
         service = googleapiclient.discovery.build("iam", "v1", credentials=gcp_creds)
-        service.projects().serviceAccounts().keys().delete(
-            name=f"projects/-/serviceAccounts/-/keys/{credential_id}"
-        ).execute()
+        # credential_id must be the full resource name:
+        # projects/{project}/serviceAccounts/{email}/keys/{key_id}
+        service.projects().serviceAccounts().keys().delete(name=credential_id).execute()
         logger.info("Revoked GCP service account key %s", credential_id)
         return {"success": True, "rolled_back_available": False}
 
