@@ -1260,16 +1260,32 @@ def _sub_phase_azure_client_secret(client: NexplaneClient, asset_id: str) -> Non
         connector_id,
     )
 
-    def _check():
-        async def _inner():
-            token = await _get_token()
-            gone = await _verify_gone(token, key_id, result["pre_existing"])
-            result["gone"] = gone
-        _asyncio.run(_inner())
+    # Verify with retries — Azure list API may lag slightly after removePassword
+    import time as _az_wait
+    for _vcheck in range(6):
+        result.pop("gone", None)
+        result.pop("check_error", None)
 
-    t2 = _threading.Thread(target=_check)
-    t2.start()
-    t2.join(timeout=15)
+        def _check():
+            try:
+                async def _inner():
+                    token = await _get_token()
+                    gone = await _verify_gone(token, key_id, result["pre_existing"])
+                    result["gone"] = gone
+                _asyncio.run(_inner())
+            except Exception as e:
+                result["check_error"] = str(e)
+
+        t2 = _threading.Thread(target=_check)
+        t2.start()
+        t2.join(timeout=20)
+        if result.get("gone"):
+            break
+        if result.get("check_error"):
+            print(f"  Azure verify attempt {_vcheck+1}: {result['check_error']}", flush=True)
+        else:
+            print(f"  Azure verify attempt {_vcheck+1}: key still present, waiting 5s...", flush=True)
+        _az_wait.sleep(5)
     assert result.get("gone"), f"Azure client secret {key_id[:8]} should be removed after revocation"
     log("Azure client secret revoked ✓ (permanent — no rollback)")
 
