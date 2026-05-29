@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dict:
     credential_type = parameters["credential_type"]
-    credential_id = parameters["credential_id"]
-    creds = getattr(connector, "creds", None)
+    credential_id = parameters.get("credential_id") or parameters.get("access_key_id", "")
+    creds = getattr(connector, "credentials", {})
 
     if not creds:
         logger.info("[mock] Would revoke %s %s", credential_type, credential_id)
@@ -21,8 +21,8 @@ async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dic
         import boto3
         iam = boto3.client(
             "iam",
-            aws_access_key_id=creds["aws_access_key_id"],
-            aws_secret_access_key=creds["aws_secret_access_key"],
+            aws_access_key_id=creds.get("access_key_id") or creds.get("aws_access_key_id"),
+            aws_secret_access_key=creds.get("secret_access_key") or creds.get("aws_secret_access_key"),
             region_name=creds.get("region", "us-east-1"),
         )
         # Capture state before deletion for reconstitution rollback
@@ -123,14 +123,14 @@ async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dic
 async def rollback(parameters: dict, execution_result: dict, connector: Any) -> dict:
     rp = execution_result.get("rollback_params", {})
     if rp.get("credential_type") == "aws_iam_key":
-        creds = getattr(connector, "creds", None)
+        creds = getattr(connector, "credentials", {})
         if not creds:
             return {"rolled_back": False, "reason": "no credentials available for reconstitution"}
         import boto3
         iam = boto3.client(
             "iam",
-            aws_access_key_id=creds["aws_access_key_id"],
-            aws_secret_access_key=creds["aws_secret_access_key"],
+            aws_access_key_id=creds.get("access_key_id") or creds.get("aws_access_key_id"),
+            aws_secret_access_key=creds.get("secret_access_key") or creds.get("aws_secret_access_key"),
             region_name=creds.get("region", "us-east-1"),
         )
         new_key = iam.create_access_key(UserName=rp["username"])["AccessKey"]
