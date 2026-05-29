@@ -1,4 +1,7 @@
-"""Executor: immediately revoke a known-compromised credential. NO rollback — permanent."""
+"""Executor: immediately revoke a known-compromised credential.
+For aws_iam_key: reconstitution rollback — saves username before delete, creates new key on rollback.
+Other credential types: permanent, no rollback.
+"""
 import logging
 from typing import Any
 
@@ -22,9 +25,24 @@ async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dic
             aws_secret_access_key=creds["aws_secret_access_key"],
             region_name=creds.get("region", "us-east-1"),
         )
+        # Capture state before deletion for reconstitution rollback
+        key_info = iam.get_access_key_last_used(AccessKeyId=credential_id)
+        username = key_info["UserName"]
+        user_info = iam.get_user(UserName=username)
+        user_arn = user_info["User"]["Arn"]
+
         iam.delete_access_key(AccessKeyId=credential_id)
-        logger.info("Revoked IAM key %s", credential_id)
-        return {"success": True, "rolled_back_available": False}
+        logger.info("Revoked IAM key %s for user %s", credential_id, username)
+        return {
+            "success": True,
+            "rollback_available": True,
+            "rollback_type": "reconstitution",
+            "rollback_params": {
+                "credential_type": "aws_iam_key",
+                "username": username,
+                "user_arn": user_arn,
+            },
+        }
 
     if credential_type == "vault_token":
         import httpx
@@ -103,4 +121,25 @@ async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dic
 
 
 async def rollback(parameters: dict, execution_result: dict, connector: Any) -> dict:
+    rp = execution_result.get("rollback_params", {})
+    if rp.get("credential_type") == "aws_iam_key":
+        creds = getattr(connector, "creds", None)
+        if not creds:
+            return {"rolled_back": False, "reason": "no credentials available for reconstitution"}
+        import boto3
+        iam = boto3.client(
+            "iam",
+            aws_access_key_id=creds["aws_access_key_id"],
+            aws_secret_access_key=creds["aws_secret_access_key"],
+            region_name=creds.get("region", "us-east-1"),
+        )
+        new_key = iam.create_access_key(UserName=rp["username"])["AccessKey"]
+        logger.info("Reconstituted access key %s for user %s", new_key["AccessKeyId"], rp["username"])
+        return {
+            "rolled_back": True,
+            "rollback_type": "reconstitution",
+            "new_access_key_id": new_key["AccessKeyId"],
+            "username": rp["username"],
+            "note": "Original key is permanently deleted. New key created for same user.",
+        }
     return {"rolled_back": False, "reason": "Credential revocation is permanent — no rollback available"}
