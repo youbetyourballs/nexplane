@@ -59,6 +59,7 @@
       "parameters": [{"name": "username", "type": "string", "required": true}],
       "executor": "active_directory.disable_account",
       "rollback_action": "enable_account",
+      "rollback_connector_type": "active_directory",
       "estimated_duration_seconds": 5,
       "blast_radius_hint": "account_access_loss",
       "safety_notes": ["Verify no critical services depend on this account before disabling"]
