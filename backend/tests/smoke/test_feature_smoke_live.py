@@ -1113,8 +1113,22 @@ def _sub_phase_gcp_sa_key(client: NexplaneClient, asset_id: str) -> None:
     })
     print(f"  GCP: created temp SA {temp_sa_email}", flush=True)
 
-    key_resp = None
     try:
+        # Pre-check: create a key and immediately delete it to verify permission before CR attempt
+        probe_key = iam_client.create_service_account_key(request={
+            "name": f"projects/{project}/serviceAccounts/{temp_sa_email}",
+            "key_algorithm": "KEY_ALG_RSA_2048",
+        })
+        try:
+            iam_client.delete_service_account_key(request={"name": probe_key.name})
+        except Exception as perm_err:
+            if "PERMISSION_DENIED" in str(perm_err) or "403" in str(perm_err):
+                print("  [GCP SA KEY] SKIPPED — nexplane-dev SA needs roles/iam.serviceAccountKeyAdmin at project level", flush=True)
+                print("  [GCP SA KEY] Grant via: gcloud projects add-iam-policy-binding nexplane --member=serviceAccount:nexplane-dev@nexplane.iam.gserviceaccount.com --role=roles/iam.serviceAccountKeyAdmin", flush=True)
+                return
+            raise
+
+        # Permission confirmed — create the real smoke key and run CR
         key_resp = iam_client.create_service_account_key(request={
             "name": f"projects/{project}/serviceAccounts/{temp_sa_email}",
             "key_algorithm": "KEY_ALG_RSA_2048",
@@ -1316,14 +1330,7 @@ def phase_credential_revocation_live(client: NexplaneClient) -> None:
     _sub_phase_gcp(client, asset_id)
 
     print("\n  [GCP] revoke_exposed_credential (SA key)", flush=True)
-    try:
-        _sub_phase_gcp_sa_key(client, asset_id)
-    except Exception as e:
-        if "PERMISSION_DENIED" in str(e) or "403" in str(e):
-            print(f"  [GCP SA KEY] SKIPPED — nexplane-dev SA needs roles/iam.serviceAccountKeyAdmin at project level", flush=True)
-            print(f"  [GCP SA KEY] Grant via: gcloud projects add-iam-policy-binding nexplane --member=serviceAccount:nexplane-dev@nexplane.iam.gserviceaccount.com --role=roles/iam.serviceAccountKeyAdmin", flush=True)
-        else:
-            raise
+    _sub_phase_gcp_sa_key(client, asset_id)
 
     print("\n  [Azure AD] azure_ad_disable_user", flush=True)
     _sub_phase_azure_ad(client, asset_id)
