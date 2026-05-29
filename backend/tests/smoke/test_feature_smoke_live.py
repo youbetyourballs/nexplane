@@ -963,28 +963,386 @@ def _sub_phase_aws(client: NexplaneClient, asset_id: str) -> None:
             print(f"  AWS: cleanup warning: {e}", flush=True)
 
 
+def _launch_dc_instance(client: NexplaneClient, ec2_client, ssm_client, iam_client):
+    """Launch DC from cached AMI, register connector, return (instance_id, connector_id, private_ip)."""
+    try:
+        from run_on_ec2 import get_default_vpc_subnet, get_ssm_instance_profile
+    except ImportError:
+        from smoke.run_on_ec2 import get_default_vpc_subnet, get_ssm_instance_profile
+
+    dc_ami = None
+    try:
+        resp = ssm_client.get_parameters_by_path(Path="/nexplane/smoke-amis/dc-smoke", Recursive=True)
+        for p in resp["Parameters"]:
+            if p["Value"].startswith("ami-") and p["Value"] != "INVALID":
+                dc_ami = p["Value"]
+    except Exception:
+        pass
+    if not dc_ami:
+        fail("No cached DC AMI found at /nexplane/smoke-amis/dc-smoke/")
+
+    _, subnet_id = get_default_vpc_subnet(ec2_client, instance_type="t3.small")
+    instance_profile = get_ssm_instance_profile(iam_client) or "NexplaneEC2TestProfile"
+    vpc_id = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"][0]["VpcId"]
+    sg_id = ec2_client.describe_security_groups(
+        Filters=[{"Name": "vpc-id", "Values": [vpc_id]}, {"Name": "group-name", "Values": ["default"]}]
+    )["SecurityGroups"][0]["GroupId"]
+
+    print(f"  Using DC AMI: {dc_ami}", flush=True)
+    resp = ec2_client.run_instances(
+        ImageId=dc_ami, InstanceType="t3.small", MinCount=1, MaxCount=1,
+        SubnetId=subnet_id, SecurityGroupIds=[sg_id],
+        IamInstanceProfile={"Name": instance_profile},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-dc-revocation"},
+            {"Key": "nxp-smoke-temp", "Value": "true"},
+        ]}],
+    )
+    instance_id = resp["Instances"][0]["InstanceId"]
+    print(f"  Launched DC instance: {instance_id}", flush=True)
+
+    ec2_client.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+    private_ip = ec2_client.describe_instances(InstanceIds=[instance_id])["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
+
+    import socket as _socket
+    deadline = time.time() + 180
+    while time.time() < deadline:
+        try:
+            with _socket.create_connection((private_ip, 389), timeout=3):
+                print(f"  DC LDAP ready at {private_ip}:389", flush=True)
+                break
+        except OSError:
+            time.sleep(5)
+    else:
+        ec2_client.terminate_instances(InstanceIds=[instance_id])
+        fail(f"DC LDAP not ready at {private_ip}:389 within 180s")
+
+    connector = client.post("/connectors", json={
+        "name": "nexplane-smoke-dc-revocation",
+        "connector_type": "active_directory",
+        "credentials": {
+            "server": private_ip,
+            "port": "389",
+            "base_dn": "DC=smoke,DC=nexplane,DC=local",
+            "bind_dn": "smokeuser@smoke.nexplane.local",
+            "bind_password": "UserPass123!",
+            "use_ssl": "false",
+        },
+    })
+    connector_id = connector["id"]
+    print(f"  Registered DC connector {connector_id}", flush=True)
+    return instance_id, connector_id, private_ip
+
+
+def _sub_phase_ldap_live(client: NexplaneClient, asset_id: str,
+                         creds: dict, connector_id: str) -> None:
+    """Run the LDAP disable/rollback cycle against a known-reachable DC."""
+    import uuid as _uuid
+
+    suffix = str(_uuid.uuid4())[:8]
+    username = f"nxsmoke{suffix}"
+    password = f"NxSmoke{suffix}!"
+
+    from app.connectors.executors.ldap._client import LDAPClient
+    ldap_client = LDAPClient(
+        host=creds["server"],
+        port=int(creds.get("port", 389)),
+        bind_dn=creds["bind_dn"],
+        bind_password=creds["bind_password"],
+        base_dn=creds.get("base_dn", "dc=example,dc=com"),
+        use_ssl=creds.get("use_ssl", False),
+    )
+
+    result = ldap_client.create_user(username=username, display_name=f"nexplane-smoke-{suffix}", password=password)
+    if not result.get("success"):
+        fail(f"LDAP: failed to create temp user: {result}")
+    print(f"  LDAP: created temp user {username}", flush=True)
+
+    try:
+        cr_id = _run_cr_full_lifecycle(
+            client, "Smoke: disable LDAP user", "ldap_disable_user",
+            asset_id, {"username": username, "_locked_connector_type": "active_directory"},
+            connector_id,
+        )
+        can_bind = ldap_client.verify_bind(username, password)
+        assert not can_bind, f"LDAP user {username} should not bind after disable"
+        log("LDAP user disabled (bind rejected) ✓")
+
+        client.rollback_cr(cr_id, "LDAP restore user")
+
+        can_bind_after = ldap_client.verify_bind(username, password)
+        assert can_bind_after, f"LDAP user {username} should bind after rollback"
+        log("LDAP user re-enabled after rollback ✓")
+    finally:
+        ldap_client.delete_user(username)
+        print(f"  LDAP: deleted temp user {username}", flush=True)
+
+
+def _sub_phase_gcp_sa_key(client: NexplaneClient, asset_id: str) -> None:
+    """Revoke a live GCP service account key via Nexplane CR."""
+    import json as _json
+    from google.oauth2 import service_account as _sa
+    from google.cloud import iam_admin_v1
+
+    creds = get_connector_creds_from_db("gcp")
+    if not creds:
+        fail("GCP credentials not found in DB")
+
+    connector_id = _get_connector_id(client, "gcp")
+    project = creds.get("project_id", "")
+    key_json = _json.loads(creds["service_account_key_json"])
+    sa_email = key_json["client_email"]
+
+    gcp_creds = _sa.Credentials.from_service_account_info(
+        key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    iam_client = iam_admin_v1.IAMClient(credentials=gcp_creds)
+
+    key_resp = iam_client.create_service_account_key(request={
+        "name": f"projects/{project}/serviceAccounts/{sa_email}",
+        "key_algorithm": "KEY_ALG_RSA_2048",
+    })
+    key_name = key_resp.name  # full resource name
+    short_id = key_name.split("/")[-1]
+    print(f"  GCP: created temp SA key {short_id[:16]}...", flush=True)
+
+    try:
+        _run_cr_full_lifecycle(
+            client, "Smoke: revoke GCP SA key", "revoke_exposed_credential",
+            asset_id,
+            {"credential_type": "gcp_service_account_key", "credential_id": key_name,
+             "_locked_connector_type": "gcp"},
+            connector_id,
+        )
+        keys_resp = iam_client.list_service_account_keys(request={
+            "name": f"projects/{project}/serviceAccounts/{sa_email}"
+        })
+        remaining = [k.name for k in keys_resp.keys]
+        assert key_name not in remaining, f"Key {short_id} should be deleted after revocation"
+        log("GCP SA key revoked ✓ (permanent — no rollback)")
+    except Exception:
+        # Best-effort cleanup if CR failed
+        try:
+            iam_client.delete_service_account_key(request={"name": key_name})
+        except Exception:
+            pass
+        raise
+
+
+def _sub_phase_azure_client_secret(client: NexplaneClient, asset_id: str) -> None:
+    """Revoke a live Azure app client secret via Nexplane CR."""
+    import asyncio as _asyncio
+    import httpx as _httpx
+
+    creds = get_connector_creds_from_db("azure_ad")
+    if not creds:
+        fail("Azure AD credentials not found in DB")
+
+    connector_id = _get_connector_id(client, "azure_ad")
+    tenant_id = creds["tenant_id"]
+    client_id_az = creds["client_id"]
+    client_secret_az = creds["client_secret"]
+    app_object_id = "f3cee7df-3689-4776-bf1c-1a78da70b16e"  # Nexplane app object ID
+
+    async def _get_token():
+        async with _httpx.AsyncClient() as c:
+            r = await c.post(
+                f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+                data={"grant_type": "client_credentials", "client_id": client_id_az,
+                      "client_secret": client_secret_az, "scope": "https://graph.microsoft.com/.default"},
+            )
+            return r.json()["access_token"]
+
+    async def _add_secret(token):
+        async with _httpx.AsyncClient() as c:
+            r = await c.post(
+                f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"passwordCredential": {"displayName": "nexplane-smoke-temp"}},
+            )
+            r.raise_for_status()
+            return r.json()["keyId"]
+
+    async def _list_key_ids(token):
+        async with _httpx.AsyncClient() as c:
+            r = await c.get(
+                f"https://graph.microsoft.com/v1.0/applications/{app_object_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"$select": "passwordCredentials"},
+            )
+            r.raise_for_status()
+            return {p["keyId"] for p in r.json().get("passwordCredentials", [])}
+
+    async def _verify_gone(token, key_id, pre_existing_ids):
+        current_ids = await _list_key_ids(token)
+        assert pre_existing_ids.issubset(current_ids), \
+            f"Pre-existing secrets were deleted! Missing: {pre_existing_ids - current_ids}"
+        return key_id not in current_ids
+
+    import threading as _threading
+    result = {}
+
+    def _setup():
+        async def _inner():
+            token = await _get_token()
+            pre_existing = await _list_key_ids(token)
+            result["pre_existing"] = pre_existing
+            key_id = await _add_secret(token)
+            result["token"] = token
+            result["key_id"] = key_id
+        _asyncio.run(_inner())
+
+    t = _threading.Thread(target=_setup)
+    t.start()
+    t.join(timeout=15)
+    if "key_id" not in result:
+        fail("Azure: failed to create temp client secret")
+
+    key_id = result["key_id"]
+    credential_id = f"{app_object_id}/{key_id}"
+    print(f"  Azure: created temp client secret {key_id[:8]}...", flush=True)
+
+    _run_cr_full_lifecycle(
+        client, "Smoke: revoke Azure client secret", "revoke_exposed_credential",
+        asset_id,
+        {"credential_type": "azure_client_secret", "credential_id": credential_id,
+         "_locked_connector_type": "azure_ad"},
+        connector_id,
+    )
+
+    def _check():
+        async def _inner():
+            token = await _get_token()
+            gone = await _verify_gone(token, key_id, result["pre_existing"])
+            result["gone"] = gone
+        _asyncio.run(_inner())
+
+    t2 = _threading.Thread(target=_check)
+    t2.start()
+    t2.join(timeout=15)
+    assert result.get("gone"), f"Azure client secret {key_id[:8]} should be removed after revocation"
+    log("Azure client secret revoked ✓ (permanent — no rollback)")
+
+
+def _sub_phase_vault_token(client: NexplaneClient, asset_id: str,
+                            ec2_client, ssm_client, iam_client) -> None:
+    """Revoke a live Vault token via Nexplane CR."""
+    import hvac
+
+    instance_id, private_ip = _launch_vault_instance(ec2_client, ssm_client, iam_client)
+    vault_addr = f"http://{private_ip}:8200"
+    vault_token = "nexplane-smoke-root"
+
+    connector_id = None
+    try:
+        connector = client.post("/connectors", json={
+            "name": "nexplane-smoke-vault-revocation",
+            "connector_type": "hashicorp_vault",
+            "credentials": {"vault_addr": vault_addr, "vault_token": vault_token},
+        })
+        connector_id = connector["id"]
+        print(f"  Vault available at {vault_addr}", flush=True)
+
+        vclient = hvac.Client(url=vault_addr, token=vault_token)
+        child = vclient.auth.token.create(ttl="3600s", renewable=False)
+        child_token = child["auth"]["client_token"]
+        print(f"  Vault: created child token {child_token[:8]}...", flush=True)
+
+        _run_cr_full_lifecycle(
+            client, "Smoke: revoke Vault token", "revoke_exposed_credential",
+            asset_id,
+            {"credential_type": "vault_token", "credential_id": child_token,
+             "_locked_connector_type": "hashicorp_vault"},
+            connector_id,
+        )
+
+        # Verify: try to look up the revoked token — should get 403
+        try:
+            vclient2 = hvac.Client(url=vault_addr, token=child_token)
+            vclient2.auth.token.lookup_self()
+            assert False, "Token should be revoked — lookup_self should have raised"
+        except Exception as e:
+            if "403" in str(e) or "permission denied" in str(e).lower() or "bad token" in str(e).lower():
+                log("Vault token revoked ✓ (permanent — no rollback)")
+            else:
+                raise
+    finally:
+        if connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{connector_id}")
+            except Exception:
+                pass
+        try:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+            print(f"  Terminated Vault instance {instance_id}", flush=True)
+        except Exception as e:
+            print(f"  Vault teardown warning: {e}", flush=True)
+
+
 def phase_credential_revocation_live(client: NexplaneClient) -> None:
     print("\n[CREDENTIAL_REVOCATION] Live credential disable/revoke + rollback across 5 connectors", flush=True)
     asset_id = _get_any_asset_id(client)
 
+    creds_aws = get_connector_creds_from_db("aws")
+    ec2 = boto3.client("ec2", region_name=SMOKE_REGION,
+                        aws_access_key_id=creds_aws.get("access_key_id"),
+                        aws_secret_access_key=creds_aws.get("secret_access_key"))
+    ssm = boto3.client("ssm", region_name=SMOKE_REGION,
+                        aws_access_key_id=creds_aws.get("access_key_id"),
+                        aws_secret_access_key=creds_aws.get("secret_access_key"))
+    iam_boto = boto3.client("iam", region_name=SMOKE_REGION,
+                        aws_access_key_id=creds_aws.get("access_key_id"),
+                        aws_secret_access_key=creds_aws.get("secret_access_key"))
+
     print("\n  [GCP] disable_service_account", flush=True)
     _sub_phase_gcp(client, asset_id)
+
+    print("\n  [GCP] revoke_exposed_credential (SA key)", flush=True)
+    _sub_phase_gcp_sa_key(client, asset_id)
 
     print("\n  [Azure AD] azure_ad_disable_user", flush=True)
     _sub_phase_azure_ad(client, asset_id)
 
+    print("\n  [Azure AD] revoke_exposed_credential (client secret)", flush=True)
+    _sub_phase_azure_client_secret(client, asset_id)
+
     print("\n  [LDAP] ldap_disable_user", flush=True)
+    dc_instance_id = None
+    dc_connector_id = None
     try:
-        _sub_phase_ldap(client, asset_id)
+        dc_instance_id, dc_connector_id, dc_ip = _launch_dc_instance(client, ec2, ssm, iam_boto)
+        dc_creds = {
+            "server": dc_ip, "port": "389",
+            "base_dn": "DC=smoke,DC=nexplane,DC=local",
+            "bind_dn": "smokeuser@smoke.nexplane.local",
+            "bind_password": "UserPass123!", "use_ssl": "false",
+        }
+        _sub_phase_ldap_live(client, asset_id, dc_creds, dc_connector_id)
     except SystemExit:
-        # LDAP/AD sub-phase skipped — no live AD connector (DC may be terminated)
-        print("  [LDAP] SKIPPED — no live AD connector available", flush=True)
+        print("  [LDAP] SKIPPED — could not launch DC", flush=True)
+    except Exception as e:
+        print(f"  [LDAP] FAILED: {e}", flush=True)
+        raise
+    finally:
+        if dc_connector_id:
+            try:
+                client.client.delete(f"{client.base}/connectors/{dc_connector_id}")
+            except Exception:
+                pass
+        if dc_instance_id:
+            try:
+                ec2.terminate_instances(InstanceIds=[dc_instance_id])
+                print(f"  Terminated DC instance {dc_instance_id}", flush=True)
+            except Exception as e:
+                print(f"  DC teardown warning: {e}", flush=True)
 
     print("\n  [OCI] oci_iam_user_disable", flush=True)
     _sub_phase_oci(client, asset_id)
 
     print("\n  [AWS] revoke_exposed_credential (reconstitution rollback)", flush=True)
     _sub_phase_aws(client, asset_id)
+
+    print("\n  [Vault] revoke_exposed_credential (vault token)", flush=True)
+    _sub_phase_vault_token(client, asset_id, ec2, ssm, iam_boto)
 
     print("[CREDENTIAL_REVOCATION] PASSED", flush=True)
 

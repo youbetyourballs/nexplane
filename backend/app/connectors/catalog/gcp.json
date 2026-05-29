@@ -137,6 +137,24 @@
       ],
       "executor": "gcp.wait_instance_state",
       "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "revoke_exposed_credential",
+      "generic_action": "revoke_exposed_credential",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Revoke Exposed GCP Credential",
+      "description": "Permanently delete a compromised GCP service account key. credential_id must be the full resource name: projects/{project}/serviceAccounts/{email}/keys/{key_id}.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "credential_type", "type": "string", "required": true},
+        {"name": "credential_id", "type": "string", "required": true}
+      ],
+      "executor": "aws.revoke_exposed_credential",
+      "rollback_action": "revoke_exposed_credential",
+      "rollback_connector_type": "gcp",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "gcp_sa_key_permanently_deleted"
     }
   ]
 }
