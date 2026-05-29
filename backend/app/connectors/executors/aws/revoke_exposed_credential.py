@@ -123,12 +123,21 @@ async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dic
             )
             token_resp.raise_for_status()
             token = token_resp.json()["access_token"]
-            remove_resp = await client.post(
-                f"https://graph.microsoft.com/v1.0/applications/{app_id}/removePassword",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={"keyId": key_id},
-            )
-            remove_resp.raise_for_status()
+            # Retry up to 6× with 5s delay for Azure eventual consistency (400 = not yet propagated)
+            import asyncio as _asyncio
+            for _attempt in range(6):
+                remove_resp = await client.post(
+                    f"https://graph.microsoft.com/v1.0/applications/{app_id}/removePassword",
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    json={"keyId": key_id},
+                )
+                if remove_resp.status_code == 400:
+                    await _asyncio.sleep(5)
+                    continue
+                remove_resp.raise_for_status()
+                break
+            else:
+                remove_resp.raise_for_status()
         logger.info("Revoked Azure client secret key %s from app %s", key_id, app_id)
         return {"success": True, "rolled_back_available": False}
 
