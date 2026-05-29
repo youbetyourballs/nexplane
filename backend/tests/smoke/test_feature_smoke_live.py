@@ -921,8 +921,8 @@ def _sub_phase_aws(client: NexplaneClient, asset_id: str) -> None:
 
     iam = boto3.client(
         "iam",
-        aws_access_key_id=creds["aws_access_key_id"],
-        aws_secret_access_key=creds["aws_secret_access_key"],
+        aws_access_key_id=creds.get("access_key_id") or creds.get("aws_access_key_id"),
+        aws_secret_access_key=creds.get("secret_access_key") or creds.get("aws_secret_access_key"),
         region_name=creds.get("region", "us-east-1"),
     )
 
