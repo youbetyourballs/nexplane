@@ -2104,6 +2104,24 @@
       "estimated_duration_seconds": 30,
       "blast_radius_hint": "s3_object_lock_applied",
       "safety_notes": ["S3 bucket must have Object Lock enabled at bucket level before this action will succeed"]
+    },
+    {
+      "action_id": "revoke_exposed_credential",
+      "generic_action": "revoke_exposed_credential",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Revoke Exposed Credential",
+      "description": "Permanently revoke a compromised IAM access key. Rollback reconstitutes access by creating a new key for the same user.",
+      "applicable_asset_types": ["cloud_account", "iam_user"],
+      "parameters": [
+        {"name": "credential_type", "type": "string", "required": true},
+        {"name": "credential_id", "type": "string", "required": true}
+      ],
+      "executor": "aws.revoke_exposed_credential",
+      "rollback_action": "revoke_exposed_credential",
+      "rollback_connector_type": "aws",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "iam_key_permanently_deleted"
     }
   ]
 }
