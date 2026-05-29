@@ -1020,6 +1020,10 @@ def _launch_dc_instance(client: NexplaneClient, ec2_client, ssm_client, iam_clie
     connector = client.post("/connectors", json={
         "name": "nexplane-smoke-dc-revocation",
         "connector_type": "active_directory",
+    })
+    connector_id = connector["id"]
+    # Credentials must be stored via PUT — POST body is ignored
+    client.put(f"/connectors/{connector_id}/credentials", json={
         "credentials": {
             "server": private_ip,
             "port": "389",
@@ -1029,7 +1033,6 @@ def _launch_dc_instance(client: NexplaneClient, ec2_client, ssm_client, iam_clie
             "use_ssl": "false",
         },
     })
-    connector_id = connector["id"]
     print(f"  Registered DC connector {connector_id}", flush=True)
     return instance_id, connector_id, private_ip
 
@@ -1304,9 +1307,12 @@ def _sub_phase_vault_token(client: NexplaneClient, asset_id: str,
         connector = client.post("/connectors", json={
             "name": "nexplane-smoke-vault-revocation",
             "connector_type": "hashicorp_vault",
-            "credentials": {"vault_addr": vault_addr, "vault_token": vault_token},
         })
         connector_id = connector["id"]
+        # Credentials must be stored via the PUT endpoint — POST body is ignored
+        client.put(f"/connectors/{connector_id}/credentials", json={
+            "credentials": {"vault_addr": vault_addr, "token": vault_token},
+        })
         print(f"  Vault available at {vault_addr}", flush=True)
 
         vclient = hvac.Client(url=vault_addr, token=vault_token)

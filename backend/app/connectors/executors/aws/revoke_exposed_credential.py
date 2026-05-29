@@ -76,7 +76,7 @@ async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dic
     if credential_type == "vault_token":
         import httpx
         vault_addr = creds.get("vault_addr", "http://localhost:8200")
-        vault_token = creds.get("vault_token")
+        vault_token = creds.get("token") or creds.get("vault_token")
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{vault_addr}/v1/auth/token/revoke",
