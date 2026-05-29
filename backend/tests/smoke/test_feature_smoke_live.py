@@ -756,13 +756,16 @@ def _sub_phase_azure_ad(client: NexplaneClient, asset_id: str) -> None:
             connector_id,
         )
 
-        # Verify disabled
+        # Verify disabled — Azure AD eventual consistency: poll up to 30s
+        import time as _time
         disabled_holder = [None]
-
-        def _run_check():
-            disabled_holder[0] = asyncio.run(az_client.get_user(user_id))
-
-        t = threading.Thread(target=_run_check); t.start(); t.join()
+        for _attempt in range(6):
+            def _run_check():
+                disabled_holder[0] = asyncio.run(az_client.get_user(user_id))
+            t = threading.Thread(target=_run_check); t.start(); t.join()
+            if disabled_holder[0] is not None and not disabled_holder[0].get("accountEnabled"):
+                break
+            _time.sleep(5)
         assert not disabled_holder[0].get("accountEnabled"), f"User {user_id} should be disabled"
         log("Azure AD user disabled ✓")
 
