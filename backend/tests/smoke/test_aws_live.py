@@ -21570,14 +21570,12 @@ def run_phase_seccomp_autogen(client, base_url, cloud_account_id=None,
     log(f"Using project {project_id} ({projects[0].get('name', 'unnamed')})")
 
     # ---- 5. Start first soak session (60s) ----
-    start_r = client.post("/security-policy/soak-sessions", json={
+    session = client.post("/security-policy/soak-sessions", json={
         "project_id": project_id,
         "policy_type": "seccomp",
         "asset_ids": [agent_asset_id],
         "window_seconds": 60,
     })
-    assert start_r.status_code == 201, f"Start session failed: {start_r.text}"
-    session = start_r.json()
     session_id = session["id"]
     assert session["status"] == "running"
     log(f"Session {session_id} started, status=running, window=60s")
@@ -21587,11 +21585,9 @@ def run_phase_seccomp_autogen(client, base_url, cloud_account_id=None,
 
     # ---- 6. Stop and synthesize ----
     log("Stopping session and synthesizing profile...")
-    stop_r = client.post(f"/security-policy/soak-sessions/{session_id}/stop", json={
+    session = client.post(f"/security-policy/soak-sessions/{session_id}/stop", json={
         "service_name": "nginx",
     })
-    assert stop_r.status_code == 200, f"Stop session failed: {stop_r.text}"
-    session = stop_r.json()
     log(f"Session status after stop: {session['status']}")
     # First run: no baseline → auto-propose CR
     assert session["status"] == "cr_proposed", (
@@ -21604,27 +21600,25 @@ def run_phase_seccomp_autogen(client, base_url, cloud_account_id=None,
     log(f"Profile synthesized: {syscall_count} nginx syscalls. CR proposed: {cr_id} ✓")
 
     # ---- 7. Verify CR state ----
-    cr = client.get(f"/change-requests/{cr_id}").json()
+    cr = client.get(f"/change-requests/{cr_id}")
     assert cr["change_type"] == "configure_seccomp", f"Unexpected change_type: {cr['change_type']}"
     assert cr["status"] in ("draft", "awaiting_approval"), f"Unexpected CR status: {cr['status']}"
     log(f"CR change_type=configure_seccomp, status={cr['status']} ✓")
 
     # ---- 8. Verify baseline stored ----
-    baseline_r = client.get(f"/security-policy/baselines/{project_id}?policy_type=seccomp")
-    assert baseline_r.status_code == 200, f"Expected baseline: {baseline_r.status_code} {baseline_r.text}"
-    baseline = baseline_r.json()
+    baseline = client.get(f"/security-policy/baselines/{project_id}", params={"policy_type": "seccomp"})
     assert "syscalls" in baseline["profile"], "Baseline profile missing syscalls key"
     log(f"Baseline stored: {len(baseline['profile']['syscalls'][0]['names'])} syscalls ✓")
 
     # ---- 9. Submit, approve, execute CR ----
-    assert client.post(f"/change-requests/{cr_id}/submit-for-approval").status_code in (200, 204)
-    assert client.post(f"/change-requests/{cr_id}/approve").status_code in (200, 204)
+    client.post(f"/change-requests/{cr_id}/submit-for-approval")
+    client.post(f"/change-requests/{cr_id}/approve")
     log("CR submitted and approved ✓")
 
-    assert client.post(f"/change-requests/{cr_id}/execute").status_code in (200, 204)
+    client.post(f"/change-requests/{cr_id}/execute")
     for _ in range(30):
         _time.sleep(5)
-        cr = client.get(f"/change-requests/{cr_id}").json()
+        cr = client.get(f"/change-requests/{cr_id}")
         if cr["status"] in ("completed", "failed", "rolled_back"):
             break
     assert cr["status"] == "completed", f"CR execution did not complete: {cr['status']}"
@@ -21640,10 +21634,10 @@ def run_phase_seccomp_autogen(client, base_url, cloud_account_id=None,
     log("nginx responding correctly under seccomp profile ✓")
 
     # ---- 10. Rollback ----
-    assert client.post(f"/change-requests/{cr_id}/rollback").status_code in (200, 204)
+    client.post(f"/change-requests/{cr_id}/rollback")
     for _ in range(20):
         _time.sleep(5)
-        cr = client.get(f"/change-requests/{cr_id}").json()
+        cr = client.get(f"/change-requests/{cr_id}")
         if cr["status"] == "rolled_back":
             break
     assert cr["status"] == "rolled_back", f"Rollback did not complete: {cr['status']}"
@@ -21660,22 +21654,19 @@ def run_phase_seccomp_autogen(client, base_url, cloud_account_id=None,
 
     # ---- 11. Second soak → delta review flow ----
     log("Starting second soak session to test baseline-delta flow...")
-    start2_r = client.post("/security-policy/soak-sessions", json={
+    session2 = client.post("/security-policy/soak-sessions", json={
         "project_id": project_id,
         "policy_type": "seccomp",
         "asset_ids": [agent_asset_id],
         "window_seconds": 60,
     })
-    assert start2_r.status_code == 201, f"Start session 2 failed: {start2_r.text}"
-    session2_id = start2_r.json()["id"]
+    session2_id = session2["id"]
     log("Waiting 65s for second observation window...")
     _time.sleep(65)
 
-    stop2_r = client.post(f"/security-policy/soak-sessions/{session2_id}/stop", json={
+    session2 = client.post(f"/security-policy/soak-sessions/{session2_id}/stop", json={
         "service_name": "nginx",
     })
-    assert stop2_r.status_code == 200, f"Stop session 2 failed: {stop2_r.text}"
-    session2 = stop2_r.json()
     # Second run: baseline exists → status=synthesized with delta, no auto-CR
     assert session2["status"] == "synthesized", (
         f"Expected synthesized (baseline exists), got {session2['status']}"
@@ -21686,11 +21677,9 @@ def run_phase_seccomp_autogen(client, base_url, cloud_account_id=None,
     log(f"Delta computed: +{len(delta['added'])} added, -{len(delta['removed'])} removed syscalls ✓")
 
     # Accept diff → create second CR
-    accept_r = client.post(f"/security-policy/soak-sessions/{session2_id}/accept", json={
+    session2 = client.post(f"/security-policy/soak-sessions/{session2_id}/accept", json={
         "service_name": "nginx",
     })
-    assert accept_r.status_code == 200, f"Accept diff failed: {accept_r.text}"
-    session2 = accept_r.json()
     assert session2["status"] == "cr_proposed"
     assert session2["cr_id"] is not None
     log(f"Second CR proposed after operator accept: {session2['cr_id']} ✓")
