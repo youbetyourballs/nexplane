@@ -95,6 +95,7 @@ async def stop_and_synthesize(
 
     result = await db.execute(
         select(SecurityPolicyBaseline).where(
+            SecurityPolicyBaseline.organization_id == session.organization_id,
             SecurityPolicyBaseline.project_id == session.project_id,
             SecurityPolicyBaseline.policy_type == session.policy_type,
         )
@@ -134,6 +135,8 @@ async def accept_diff(
         raise ValueError(f"Session status must be 'synthesized', got {session.status!r}")
     if session.synthesized_profile is None:
         raise ValueError("Session has no synthesized profile")
+    if session.baseline_delta is None:
+        raise ValueError("No baseline delta to accept — use stop response cr_id for first-run sessions")
 
     cr = await _create_configure_seccomp_cr(
         db, session, session.synthesized_profile, service_name, user_id
@@ -180,6 +183,7 @@ async def _upsert_baseline(
 ) -> None:
     result = await db.execute(
         select(SecurityPolicyBaseline).where(
+            SecurityPolicyBaseline.organization_id == session.organization_id,
             SecurityPolicyBaseline.project_id == session.project_id,
             SecurityPolicyBaseline.policy_type == session.policy_type,
         )

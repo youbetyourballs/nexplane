@@ -42,6 +42,7 @@ class AcceptDiffBody(BaseModel):
 
 class BaselineRead(BaseModel):
     id: uuid.UUID
+    organization_id: uuid.UUID
     project_id: uuid.UUID
     policy_type: str
     profile: dict
