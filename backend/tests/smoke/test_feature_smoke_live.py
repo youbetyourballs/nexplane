@@ -1304,7 +1304,7 @@ def _sub_phase_azure_client_secret(client: NexplaneClient, asset_id: str) -> Non
             r.raise_for_status()
             return r.json()["keyId"]
 
-    async def _list_key_ids(token):
+    async def _list_creds(token):
         async with _httpx.AsyncClient() as c:
             r = await c.get(
                 f"https://graph.microsoft.com/v1.0/applications/{app_object_id}",
@@ -1312,7 +1312,22 @@ def _sub_phase_azure_client_secret(client: NexplaneClient, asset_id: str) -> Non
                 params={"$select": "passwordCredentials"},
             )
             r.raise_for_status()
-            return {p["keyId"] for p in r.json().get("passwordCredentials", [])}
+            return r.json().get("passwordCredentials", [])
+
+    async def _list_key_ids(token):
+        return {p["keyId"] for p in await _list_creds(token)}
+
+    async def _cleanup_smoke_leftovers(token):
+        """Delete any nexplane-smoke-temp secrets left by prior crashed runs."""
+        creds_list = await _list_creds(token)
+        for p in creds_list:
+            if p.get("displayName") == "nexplane-smoke-temp":
+                async with _httpx.AsyncClient() as c:
+                    await c.post(
+                        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/removePassword",
+                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                        json={"keyId": p["keyId"]},
+                    )
 
     async def _verify_gone(token, key_id, pre_existing_ids):
         current_ids = await _list_key_ids(token)
@@ -1326,6 +1341,7 @@ def _sub_phase_azure_client_secret(client: NexplaneClient, asset_id: str) -> Non
     def _setup():
         async def _inner():
             token = await _get_token()
+            await _cleanup_smoke_leftovers(token)
             pre_existing = await _list_key_ids(token)
             result["pre_existing"] = pre_existing
             key_id = await _add_secret(token)
