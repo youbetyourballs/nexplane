@@ -110,14 +110,16 @@ class LDAPClient:
 
 def get_ldap_client(connector) -> LDAPClient | None:
     creds = getattr(connector, "credentials", None) or {}
-    host = creds.get("host") or creds.get("hostname")
+    host = creds.get("host") or creds.get("hostname") or creds.get("server")
     if not host:
         return None
+    raw_ssl = creds.get("use_ssl", False)
+    use_ssl = raw_ssl if isinstance(raw_ssl, bool) else str(raw_ssl).lower() not in ("false", "0", "no", "")
     return LDAPClient(
         host=host,
         port=int(creds.get("port", 389)),
         bind_dn=creds.get("bind_dn", ""),
         bind_password=creds.get("bind_password") or creds.get("password", ""),
         base_dn=creds.get("base_dn", "dc=example,dc=com"),
-        use_ssl=creds.get("use_ssl", False),
+        use_ssl=use_ssl,
     )
