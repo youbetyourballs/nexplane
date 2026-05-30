@@ -21563,11 +21563,25 @@ def run_phase_seccomp_autogen(client, base_url, cloud_account_id=None,
     )
     log("Traffic generator started — nginx will make network, file, and memory syscalls ✓")
 
-    # ---- 4. Find project ----
+    # ---- 4. Find project and clean up any prior baseline ----
     projects = client.get("/projects")
     assert projects, "Need at least one project"
     project_id = projects[0]["id"]
     log(f"Using project {project_id} ({projects[0].get('name', 'unnamed')})")
+
+    # Remove any existing seccomp baseline for this project so we always test
+    # the first-run (auto-propose) path before the delta-review path.
+    try:
+        import subprocess as _sp
+        _sp.run(
+            ["docker", "exec", "nexplane-db-1",
+             "psql", "-U", "nexplane", "-d", "nexplane", "-c",
+             f"DELETE FROM security_policy_baselines WHERE project_id = '{project_id}' AND policy_type = 'seccomp'"],
+            capture_output=True, text=True, timeout=10,
+        )
+        log("Pre-run: cleared any existing seccomp baseline for project ✓")
+    except Exception as _e:
+        log(f"Pre-run baseline cleanup warning (non-fatal): {_e}")
 
     # ---- 5. Start first soak session (60s) ----
     session = client.post("/security-policy/soak-sessions", json={
