@@ -19,38 +19,52 @@ class LDAPClient:
         conn = Connection(server, user=self.bind_dn, password=self.bind_password, auto_bind=True)
         return conn
 
+    def _find_user_dn(self, conn: Connection, username: str) -> str | None:
+        """Search by uid (OpenLDAP) then sAMAccountName (AD), return DN or None."""
+        conn.search(self.base_dn, f"(uid={username})", SUBTREE, attributes=["uid"])
+        if not conn.entries:
+            conn.search(self.base_dn, f"(sAMAccountName={username})", SUBTREE,
+                        attributes=["sAMAccountName"])
+        return conn.entries[0].entry_dn if conn.entries else None
+
     def disable_user(self, username: str) -> dict:
-        """Disable a user by setting pwdAccountLockedTime or loginShell."""
+        """Disable a user. Uses userAccountControl (AD) or pwdAccountLockedTime (OpenLDAP)."""
         conn = self._connect()
         try:
-            # Search for the user
-            conn.search(self.base_dn, f"(uid={username})", SUBTREE, attributes=["uid"])
-            if not conn.entries:
-                # Try sAMAccountName for Active Directory
-                conn.search(self.base_dn, f"(sAMAccountName={username})", SUBTREE, attributes=["sAMAccountName"])
-            if not conn.entries:
+            user_dn = self._find_user_dn(conn, username)
+            if not user_dn:
                 return {"success": False, "error": f"User {username} not found"}
-            user_dn = conn.entries[0].entry_dn
-            # For OpenLDAP with ppolicy overlay: set pwdAccountLockedTime to epoch (locked)
-            result = conn.modify(user_dn, {"pwdAccountLockedTime": [(MODIFY_REPLACE, ["000001010000Z"])]})
-            if not result:
-                # Fallback: set loginShell to nologin
-                conn.modify(user_dn, {"loginShell": [(MODIFY_REPLACE, ["/sbin/nologin"])]})
-            return {"success": True, "user_dn": user_dn, "username": username, "action": "disabled"}
+            # Try AD-style first (userAccountControl bit 0x2 = ACCOUNTDISABLE)
+            # 514 = 0x202 = NORMAL_ACCOUNT | ACCOUNTDISABLE
+            if conn.modify(user_dn, {"userAccountControl": [(MODIFY_REPLACE, [514])]}):
+                return {"success": True, "user_dn": user_dn, "username": username,
+                        "action": "disabled", "method": "userAccountControl"}
+            # OpenLDAP ppolicy: set pwdAccountLockedTime to epoch
+            if conn.modify(user_dn, {"pwdAccountLockedTime": [(MODIFY_REPLACE, ["000001010000Z"])]}):
+                return {"success": True, "user_dn": user_dn, "username": username,
+                        "action": "disabled", "method": "pwdAccountLockedTime"}
+            # Last resort: set loginShell to nologin
+            conn.modify(user_dn, {"loginShell": [(MODIFY_REPLACE, ["/sbin/nologin"])]})
+            return {"success": True, "user_dn": user_dn, "username": username,
+                    "action": "disabled", "method": "loginShell"}
         finally:
             conn.unbind()
 
     def enable_user(self, username: str) -> dict:
-        """Re-enable a user by clearing the lock."""
+        """Re-enable a user. Uses userAccountControl (AD) or clears pwdAccountLockedTime (OpenLDAP)."""
         conn = self._connect()
         try:
-            conn.search(self.base_dn, f"(|(uid={username})(sAMAccountName={username}))",
-                        SUBTREE, attributes=["sAMAccountName"])
-            if not conn.entries:
+            user_dn = self._find_user_dn(conn, username)
+            if not user_dn:
                 return {"success": False, "error": f"User {username} not found"}
-            user_dn = conn.entries[0].entry_dn
+            # Try AD-style first: 512 = 0x200 = NORMAL_ACCOUNT (enabled)
+            if conn.modify(user_dn, {"userAccountControl": [(MODIFY_REPLACE, [512])]}):
+                return {"success": True, "user_dn": user_dn, "username": username,
+                        "action": "enabled", "method": "userAccountControl"}
+            # OpenLDAP: clear the lock
             conn.modify(user_dn, {"pwdAccountLockedTime": [(MODIFY_REPLACE, [])]})
-            return {"success": True, "user_dn": user_dn, "username": username, "action": "enabled"}
+            return {"success": True, "user_dn": user_dn, "username": username,
+                    "action": "enabled", "method": "pwdAccountLockedTime"}
         finally:
             conn.unbind()
 
