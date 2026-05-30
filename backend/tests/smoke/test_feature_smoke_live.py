@@ -1319,15 +1319,22 @@ def _sub_phase_azure_client_secret(client: NexplaneClient, asset_id: str) -> Non
 
     async def _cleanup_smoke_leftovers(token):
         """Delete any nexplane-smoke-temp secrets left by prior crashed runs."""
+        import asyncio as _aio
         creds_list = await _list_creds(token)
+        first = True
         for p in creds_list:
             if p.get("displayName") == "nexplane-smoke-temp":
+                if not first:
+                    await _aio.sleep(5)  # Azure rejects rapid sequential removePassword calls with 409
+                first = False
                 async with _httpx.AsyncClient() as c:
-                    await c.post(
+                    r = await c.post(
                         f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/removePassword",
                         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
                         json={"keyId": p["keyId"]},
                     )
+                    if r.status_code not in (200, 204):
+                        print(f"  Azure cleanup: removePassword {p['keyId'][:8]} returned {r.status_code}", flush=True)
 
     async def _verify_gone(token, key_id, pre_existing_ids):
         current_ids = await _list_key_ids(token)
