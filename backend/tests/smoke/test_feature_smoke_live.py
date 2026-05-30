@@ -1078,13 +1078,18 @@ def _launch_dc_instance(client: NexplaneClient, ec2_client, ssm_client, iam_clie
 
 
 def _sub_phase_ldap_live(client: NexplaneClient, asset_id: str,
-                         creds: dict, connector_id: str) -> None:
-    """Run the LDAP disable/rollback cycle against a known-reachable DC."""
+                         creds: dict, connector_id: str,
+                         ssm_client=None, instance_id: str = "") -> None:
+    """Run the LDAP disable/rollback cycle against a known-reachable DC.
+
+    Creates the test user via SSM PowerShell (AD-native) rather than OpenLDAP objectClass,
+    then verifies disable/re-enable via the Nexplane CR lifecycle.
+    """
     import uuid as _uuid
 
     suffix = str(_uuid.uuid4())[:8]
     username = f"nxsmoke{suffix}"
-    password = f"NxSmoke{suffix}!"
+    password = f"NxSmoke{suffix[:4]}Pass1!"
 
     from app.connectors.executors.ldap._client import LDAPClient
     _raw_ssl = creds.get("use_ssl", False)
@@ -1098,10 +1103,27 @@ def _sub_phase_ldap_live(client: NexplaneClient, asset_id: str,
         use_ssl=_use_ssl,
     )
 
-    result = ldap_client.create_user(username=username, display_name=f"nexplane-smoke-{suffix}", password=password)
-    if not result.get("success"):
-        fail(f"LDAP: failed to create temp user: {result}")
-    print(f"  LDAP: created temp user {username}", flush=True)
+    # Create test user via SSM PowerShell (AD-native; avoids OpenLDAP objectClass mismatch)
+    if ssm_client and instance_id:
+        cmd = ssm_client.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": [
+                f"New-ADUser -Name '{username}' -SamAccountName '{username}' "
+                f"-UserPrincipalName '{username}@smoke.nexplane.local' "
+                f"-AccountPassword (ConvertTo-SecureString '{password}' -AsPlainText -Force) "
+                f"-Enabled $true -PasswordNeverExpires $true",
+                f"Write-Output 'Created {username}'",
+            ]},
+        )
+        cid = cmd["Command"]["CommandId"]
+        time.sleep(10)
+        out = ssm_client.get_command_invocation(CommandId=cid, InstanceId=instance_id)
+        if out.get("Status") != "Success":
+            fail(f"LDAP: failed to create AD user via SSM: {out.get('StandardErrorContent','')[:300]}")
+        print(f"  LDAP: created temp AD user {username}", flush=True)
+    else:
+        fail("LDAP: ssm_client/instance_id required to create AD test user")
 
     try:
         cr_id = _run_cr_full_lifecycle(
@@ -1115,11 +1137,26 @@ def _sub_phase_ldap_live(client: NexplaneClient, asset_id: str,
 
         client.rollback_cr(cr_id, "LDAP restore user")
 
-        can_bind_after = ldap_client.verify_bind(username, password)
+        # Poll for re-enable propagation (up to 30s)
+        can_bind_after = False
+        for _ in range(6):
+            can_bind_after = ldap_client.verify_bind(username, password)
+            if can_bind_after:
+                break
+            time.sleep(5)
         assert can_bind_after, f"LDAP user {username} should bind after rollback"
         log("LDAP user re-enabled after rollback ✓")
     finally:
-        ldap_client.delete_user(username)
+        # Clean up via SSM PowerShell
+        if ssm_client and instance_id:
+            try:
+                ssm_client.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName="AWS-RunPowerShellScript",
+                    Parameters={"commands": [f"Remove-ADUser -Identity '{username}' -Confirm:$false"]},
+                )
+            except Exception:
+                pass
         print(f"  LDAP: deleted temp user {username}", flush=True)
 
 
@@ -1445,7 +1482,8 @@ def phase_credential_revocation_live(client: NexplaneClient) -> None:
             "bind_dn": "smokeuser@smoke.nexplane.local",
             "bind_password": "UserPass123!", "use_ssl": False,
         }
-        _sub_phase_ldap_live(client, asset_id, dc_creds, dc_connector_id)
+        _sub_phase_ldap_live(client, asset_id, dc_creds, dc_connector_id,
+                             ssm_client=ssm, instance_id=dc_instance_id)
     except SystemExit:
         print("  [LDAP] SKIPPED — could not launch DC", flush=True)
     except Exception as e:
