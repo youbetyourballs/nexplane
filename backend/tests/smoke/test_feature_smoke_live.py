@@ -785,17 +785,17 @@ def _sub_phase_azure_ad(client: NexplaneClient, asset_id: str) -> None:
 
         client.rollback_cr(cr_id, "Azure AD restore user")
 
-        # Azure AD has eventual consistency — poll until accountEnabled=true (up to 60s)
+        # Azure AD has eventual consistency — poll until accountEnabled=true (up to 120s)
         import time as _time
         enabled_holder = [None]
-        for _attempt in range(12):
+        for _attempt in range(24):
             def _run_check2():
                 enabled_holder[0] = asyncio.run(az_client.get_user(user_id))
             t = threading.Thread(target=_run_check2); t.start(); t.join()
             if enabled_holder[0] and enabled_holder[0].get("accountEnabled"):
                 break
             _time.sleep(5)
-        assert enabled_holder[0].get("accountEnabled"), f"User {user_id} should be re-enabled"
+        assert enabled_holder[0] and enabled_holder[0].get("accountEnabled"), f"User {user_id} should be re-enabled"
         log("Azure AD user re-enabled after rollback ✓")
 
     finally:
