@@ -1116,31 +1116,36 @@ def _sub_phase_gcp_sa_key(client: NexplaneClient, asset_id: str) -> None:
     })
     print(f"  GCP: created temp SA {temp_sa_email}", flush=True)
 
-    # Wait for SA to be available (GCP eventual consistency — SA not immediately reachable for key ops)
+    # Wait for SA to be available for key operations (GCP eventual consistency — get_service_account
+    # succeeds before create_service_account_key is ready, so poll both)
     import time as _gcp_wait
-    _deadline = _gcp_wait.time() + 30
+    _deadline = _gcp_wait.time() + 60
+    probe_key = None
     while _gcp_wait.time() < _deadline:
         try:
             iam_client.get_service_account(request={"name": f"projects/{project}/serviceAccounts/{temp_sa_email}"})
+            # SA visible — now try key creation (may still lag behind)
+            probe_key = iam_client.create_service_account_key(request={
+                "name": f"projects/{project}/serviceAccounts/{temp_sa_email}",
+                "key_algorithm": "KEY_ALG_RSA_2048",
+            })
             break
-        except Exception:
-            _gcp_wait.sleep(3)
+        except Exception as _e:
+            if "NOT_FOUND" in str(_e) or "does not exist" in str(_e) or "404" in str(_e):
+                _gcp_wait.sleep(5)
+            else:
+                raise
     else:
-        print(f"  GCP: SA {temp_sa_email} not available after 30s, skipping", flush=True)
+        print(f"  GCP: SA {temp_sa_email} not ready for key ops after 60s, skipping", flush=True)
         return
 
     try:
-        # Pre-check: create a key and immediately delete it to verify permission before CR attempt
-        probe_key = iam_client.create_service_account_key(request={
-            "name": f"projects/{project}/serviceAccounts/{temp_sa_email}",
-            "key_algorithm": "KEY_ALG_RSA_2048",
-        })
+        # probe_key was created in the wait loop — delete it (permission confirmed by successful creation)
         try:
             iam_client.delete_service_account_key(request={"name": probe_key.name})
         except Exception as perm_err:
             if "PERMISSION_DENIED" in str(perm_err) or "403" in str(perm_err):
                 print("  [GCP SA KEY] SKIPPED — nexplane-dev SA needs roles/iam.serviceAccountKeyAdmin at project level", flush=True)
-                print("  [GCP SA KEY] Grant via: gcloud projects add-iam-policy-binding nexplane --member=serviceAccount:nexplane-dev@nexplane.iam.gserviceaccount.com --role=roles/iam.serviceAccountKeyAdmin", flush=True)
                 return
             raise
 
