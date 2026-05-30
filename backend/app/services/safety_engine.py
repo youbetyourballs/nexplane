@@ -132,6 +132,8 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.oci_mysql_delete,
     ChangeType.oci_alarm_create, ChangeType.oci_alarm_delete,
     ChangeType.oci_logging_enable,
+    # Linux security policy — executor has built-in snapshot/restore rollback
+    ChangeType.configure_seccomp,
 }
 
 
