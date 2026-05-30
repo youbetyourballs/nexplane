@@ -848,7 +848,7 @@ def _sub_phase_ldap(client: NexplaneClient, asset_id: str) -> None:
     try:
         cr_id = _run_cr_full_lifecycle(
             client, "Smoke: disable LDAP user", "ldap_disable_user",
-            asset_id, {"username": username, "_locked_connector_type": "active_directory"},
+            asset_id, {"username": username, "_locked_connector_type": "ldap"},
             connector_id,
         )
 
@@ -1059,7 +1059,7 @@ def _launch_dc_instance(client: NexplaneClient, ec2_client, ssm_client, iam_clie
 
     connector = client.post("/connectors", json={
         "name": "nexplane-smoke-dc-revocation",
-        "connector_type": "active_directory",
+        "connector_type": "ldap",
     })
     connector_id = connector["id"]
     # Credentials must be stored via PUT — POST body is ignored
@@ -1128,7 +1128,7 @@ def _sub_phase_ldap_live(client: NexplaneClient, asset_id: str,
     try:
         cr_id = _run_cr_full_lifecycle(
             client, "Smoke: disable LDAP user", "ldap_disable_user",
-            asset_id, {"username": username, "_locked_connector_type": "active_directory"},
+            asset_id, {"username": username, "_locked_connector_type": "ldap"},
             connector_id,
         )
         can_bind = ldap_client.verify_bind(username, password)

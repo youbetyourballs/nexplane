@@ -4,7 +4,7 @@
   "description": "Disables a user account in Active Directory. Rollback re-enables the account.",
   "steps": [
     {
-      "generic_action": "disable_account",
+      "generic_action": "ldap_disable_user",
       "purpose": "execute",
       "required": true
     }
