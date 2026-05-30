@@ -31,20 +31,38 @@ class VaultClient:
         hvac_client = get_vault_client(creds)
         return cls(hvac_client)
 
-    def list_leases(self) -> list[dict]:
-        """List all dynamic secret leases with real per-lease TTLs from read_lease."""
-        result = self._client.sys.list_leases(prefix="")
+    def _collect_lease_ids(self, prefix: str = "") -> list[str]:
+        """Recursively collect all leaf lease IDs under prefix."""
+        try:
+            result = self._client.sys.list_leases(prefix=prefix)
+        except Exception:
+            return []
         keys = result.get("data", {}).get("keys", [])
-        leases = []
+        lease_ids = []
         for k in keys:
+            full = prefix + k
+            if k.endswith("/"):
+                lease_ids.extend(self._collect_lease_ids(full))
+            else:
+                lease_ids.append(full)
+        return lease_ids
+
+    def list_leases(self) -> list[dict]:
+        """List all dynamic secret leases with real per-lease TTLs via recursive traversal."""
+        lease_ids = self._collect_lease_ids("")
+        leases = []
+        for lease_id in lease_ids:
             try:
-                info = self._client.sys.read_lease(lease_id=k)
-                ttl = info.get("data", {}).get("ttl", 3600)
-                renewable = info.get("data", {}).get("renewable", True)
+                info = self._client.sys.read_lease(lease_id=lease_id)
+                data = info.get("data", {})
+                ttl = data.get("ttl")
+                renewable = data.get("renewable", True)
+                # ttl=0 means expired or non-renewable; still report it
+                leases.append({"lease_id": lease_id, "ttl": ttl if ttl is not None else 0,
+                               "renewable": renewable})
             except Exception:
-                ttl = 3600
-                renewable = True
-            leases.append({"lease_id": k, "ttl": ttl, "renewable": renewable})
+                # Lease may have expired between list and read — skip it
+                pass
         return leases
 
     def renew_lease(self, lease_id: str, increment: int = 3600) -> None:
