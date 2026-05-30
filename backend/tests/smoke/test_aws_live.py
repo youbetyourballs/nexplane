@@ -16224,7 +16224,10 @@ def main():
         if "IDENTITY_SNAPSHOT" in phases:
             run_phase_identity_snapshot(client, cloud_account_id)
         if "SECCOMP_AUTOGEN" in phases:
-            run_phase_seccomp_autogen(client, base_url=args.base_url)
+            run_phase_seccomp_autogen(client, base_url=args.base_url,
+                                      cloud_account_id=cloud_account_id,
+                                      tailscale_auth_key=args.tailscale_auth_key,
+                                      backend_tailscale_ip=getattr(args, "backend_tailscale_ip", ""))
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
@@ -21434,142 +21437,274 @@ def run_phase_oci(client, cloud_account_id: str) -> None:
                 log("  OCI: cleanup warning: " + str(_cleanup_e))
 
 
-def run_phase_seccomp_autogen(client, base_url, **kwargs):
+def run_phase_seccomp_autogen(client, base_url, cloud_account_id=None,
+                              tailscale_auth_key=None, backend_tailscale_ip=None, **kwargs):
     """
-    Smoke test for security policy soak session auto-generation.
-    Uses the Nexplane agent on an existing registered Linux asset.
-    Exercises: start session → stop → profile synthesized → CR proposed → execute → rollback.
+    Smoke test for SECCOMP_AUTOGEN.
+    Provisions a fresh EC2 with nginx running under load, exercises the full
+    soak-session → profile synthesis → CR apply → rollback → delta-review pipeline.
     """
     import time as _time
+    import boto3 as _boto3
 
     log = lambda msg: print(f"  [SECCOMP_AUTOGEN] {msg}", flush=True)
     log("Starting SECCOMP_AUTOGEN smoke phase")
 
-    # Find a registered Linux asset with a nexplane agent
-    assets_r = client.get("/assets")
-    assert assets_r.status_code == 200, f"GET /assets failed: {assets_r.text}"
-    assets = assets_r.json()
-    linux_assets = [a for a in assets if a.get("asset_type") in ("server", "ec2_instance")]
-    assert linux_assets, "No Linux assets found — need at least one with agent registered"
-    asset_id = linux_assets[0]["id"]
-    log(f"Using asset {asset_id} ({linux_assets[0].get('name', 'unnamed')})")
+    # ---- Resolve cloud account ----
+    if not cloud_account_id or cloud_account_id == "standalone":
+        cloud_account_id = client.get_cloud_account_asset_id()
+    log(f"Using cloud account {cloud_account_id}")
 
-    # Find a project to scope the session
-    projects_r = client.get("/projects")
-    assert projects_r.status_code == 200
-    projects = projects_r.json()
+    ts = int(_time.time())
+    instance_name = f"nexplane-smoke-seccomp-nginx-{ts}"
+    key_name = f"nexplane-smoke-seccomp-key-{ts}"
+
+    # ---- 1. Provision EC2 ----
+    log(f"Creating key pair {key_name}...")
+    client.run_cr(
+        "[SECCOMP_AUTOGEN] create key pair", "key_pair_create", cloud_account_id,
+        {"key_name": key_name},
+    )
+
+    log(f"Launching EC2 instance {instance_name} (Amazon Linux, t3.micro)...")
+    client.run_cr(
+        "[SECCOMP_AUTOGEN] launch EC2", "ec2_launch", cloud_account_id,
+        {"mode": "quick", "name": instance_name, "os": "amazon_linux",
+         "iam_instance_profile": "NexplaneEC2TestProfile", "key_name": key_name,
+         "rollback_strategy": "terminate_instance"},
+    )
+
+    # Wait for asset to appear in inventory with a running instance_id
+    ec2_client = _boto3.client("ec2", region_name="us-east-1")
+    instance_asset = None
+    instance_id = None
+    for _ in range(48):
+        _time.sleep(5)
+        candidates = [a for a in client.get("/assets", params={"q": instance_name})
+                      if a["name"] == instance_name]
+        for c in sorted(candidates, key=lambda a: a.get("updated_at", ""), reverse=True):
+            cid = c.get("asset_metadata", {}).get("instance_id", "")
+            if not cid:
+                continue
+            try:
+                state = ec2_client.describe_instances(InstanceIds=[cid])["Reservations"][0]["Instances"][0]["State"]["Name"]
+                if state in ("pending", "running"):
+                    instance_asset = c
+                    instance_id = cid
+                    break
+            except Exception:
+                pass
+        if instance_asset:
+            break
+    assert instance_asset, f"Instance {instance_name} not found in inventory within 4min"
+    log(f"Instance {instance_id} in inventory as asset {instance_asset['id']}")
+
+    log("Waiting 3min for SSM agent to become available...")
+    _time.sleep(180)
+
+    # ---- 2. Deploy Nexplane agent ----
+    auth_key = client.get_tailscale_auth_key(tailscale_auth_key or "")
+    agent_secret = client.get_agent_secret()
+    backend_ip = backend_tailscale_ip or "100.101.186.39"
+    nexplane_url = f"http://{backend_ip}:8000"
+
+    client.run_cr(
+        "[SECCOMP_AUTOGEN] tailscale join", "tailscale_join", instance_asset["id"],
+        {"instance_id": instance_id, "auth_key": auth_key, "hostname": instance_name},
+    )
+    client.run_cr(
+        "[SECCOMP_AUTOGEN] deploy nexplane agent", "deploy_nexplane_agent", instance_asset["id"],
+        {"instance_id": instance_id, "nexplane_url": nexplane_url,
+         "nexplane_secret": agent_secret, "hostname": instance_name,
+         "download_url": nexplane_url},
+    )
+
+    # Wait for agent-registered server asset to appear
+    agent_asset = None
+    deadline = _time.time() + 300
+    while _time.time() < deadline:
+        candidates = client.get("/assets", params={"q": instance_name, "asset_type": "server"})
+        tagged = [c for c in candidates
+                  if "nexplane-agent" in (c.get("tags") or [])
+                  and c.get("name") == instance_name]
+        if tagged:
+            agent_asset = sorted(tagged, key=lambda c: c.get("updated_at") or "", reverse=True)[0]
+            log(f"Agent registered: {agent_asset['id']}")
+            break
+        _time.sleep(10)
+    assert agent_asset, "Agent did not register within 5min"
+    agent_asset_id = agent_asset["id"]
+
+    # ---- 3. Install nginx and start HTTP traffic generator ----
+    log("Installing nginx...")
+    client.run_cr(
+        "[SECCOMP_AUTOGEN] install nginx", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": ("dnf install -y nginx && "
+                     "systemctl enable nginx && "
+                     "systemctl start nginx && "
+                     "systemctl is-active nginx"),
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("nginx installed and running as systemd service ✓")
+
+    # Start background traffic generator: curl loop runs for 150s (covers both soak windows)
+    log("Starting HTTP traffic generator (background, 150s)...")
+    client.run_cr(
+        "[SECCOMP_AUTOGEN] start traffic generator", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": ("nohup bash -c '"
+                     "for i in $(seq 1 1500); do "
+                     "  curl -s http://localhost/ > /dev/null; "
+                     "  curl -s http://localhost/nonexistent > /dev/null; "
+                     "  sleep 0.1; "
+                     "done' &>/tmp/traffic-gen.log &"),
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("Traffic generator started — nginx will make network, file, and memory syscalls ✓")
+
+    # ---- 4. Find project ----
+    projects = client.get("/projects")
     assert projects, "Need at least one project"
     project_id = projects[0]["id"]
     log(f"Using project {project_id} ({projects[0].get('name', 'unnamed')})")
 
-    # 1. Start soak session (30s window for smoke)
+    # ---- 5. Start first soak session (60s) ----
     start_r = client.post("/security-policy/soak-sessions", json={
         "project_id": project_id,
         "policy_type": "seccomp",
-        "asset_ids": [asset_id],
-        "window_seconds": 30,
+        "asset_ids": [agent_asset_id],
+        "window_seconds": 60,
     })
     assert start_r.status_code == 201, f"Start session failed: {start_r.text}"
     session = start_r.json()
     session_id = session["id"]
     assert session["status"] == "running"
-    log(f"Session {session_id} started, status=running")
+    log(f"Session {session_id} started, status=running, window=60s")
 
-    # 2. Stop session and synthesize (service_name uses sshd as it's always running)
+    log("Waiting 65s for observation window to complete...")
+    _time.sleep(65)
+
+    # ---- 6. Stop and synthesize ----
     log("Stopping session and synthesizing profile...")
     stop_r = client.post(f"/security-policy/soak-sessions/{session_id}/stop", json={
-        "service_name": "sshd",
+        "service_name": "nginx",
     })
     assert stop_r.status_code == 200, f"Stop session failed: {stop_r.text}"
     session = stop_r.json()
     log(f"Session status after stop: {session['status']}")
-
-    # First run: no baseline → should auto-propose CR
+    # First run: no baseline → auto-propose CR
     assert session["status"] == "cr_proposed", (
         f"Expected cr_proposed (no prior baseline), got {session['status']}"
     )
-    assert session["cr_id"] is not None, "Expected cr_id to be set after auto-propose"
+    assert session["cr_id"] is not None
     cr_id = session["cr_id"]
-    log(f"CR proposed: {cr_id}")
+    profile = session.get("synthesized_profile") or {}
+    syscall_count = len(profile.get("syscalls", [{}])[0].get("names", [])) if profile else 0
+    log(f"Profile synthesized: {syscall_count} nginx syscalls. CR proposed: {cr_id} ✓")
 
-    # 3. Verify CR is in draft/awaiting_approval state
-    cr_r = client.get(f"/change-requests/{cr_id}")
-    assert cr_r.status_code == 200
-    cr = cr_r.json()
+    # ---- 7. Verify CR state ----
+    cr = client.get(f"/change-requests/{cr_id}").json()
+    assert cr["change_type"] == "configure_seccomp", f"Unexpected change_type: {cr['change_type']}"
     assert cr["status"] in ("draft", "awaiting_approval"), f"Unexpected CR status: {cr['status']}"
-    assert cr["change_type"] == "configure_seccomp"
     log(f"CR change_type=configure_seccomp, status={cr['status']} ✓")
 
-    # 4. Verify baseline was stored
+    # ---- 8. Verify baseline stored ----
     baseline_r = client.get(f"/security-policy/baselines/{project_id}?policy_type=seccomp")
-    assert baseline_r.status_code == 200, f"Expected baseline, got {baseline_r.status_code}"
+    assert baseline_r.status_code == 200, f"Expected baseline: {baseline_r.status_code} {baseline_r.text}"
     baseline = baseline_r.json()
-    assert "syscalls" in baseline["profile"]
-    syscall_count = len(baseline["profile"]["syscalls"][0]["names"])
-    log(f"Baseline stored: {syscall_count} syscalls ✓")
+    assert "syscalls" in baseline["profile"], "Baseline profile missing syscalls key"
+    log(f"Baseline stored: {len(baseline['profile']['syscalls'][0]['names'])} syscalls ✓")
 
-    # 5. Submit CR for approval and approve
-    submit_r = client.post(f"/change-requests/{cr_id}/submit-for-approval")
-    assert submit_r.status_code in (200, 204), f"Submit failed: {submit_r.text}"
-    approve_r = client.post(f"/change-requests/{cr_id}/approve")
-    assert approve_r.status_code in (200, 204), f"Approve failed: {approve_r.text}"
+    # ---- 9. Submit, approve, execute CR ----
+    assert client.post(f"/change-requests/{cr_id}/submit-for-approval").status_code in (200, 204)
+    assert client.post(f"/change-requests/{cr_id}/approve").status_code in (200, 204)
     log("CR submitted and approved ✓")
 
-    # 6. Execute CR — poll for completion
-    execute_r = client.post(f"/change-requests/{cr_id}/execute")
-    assert execute_r.status_code in (200, 204), f"Execute failed: {execute_r.text}"
+    assert client.post(f"/change-requests/{cr_id}/execute").status_code in (200, 204)
     for _ in range(30):
         _time.sleep(5)
         cr = client.get(f"/change-requests/{cr_id}").json()
         if cr["status"] in ("completed", "failed", "rolled_back"):
             break
-    assert cr["status"] == "completed", f"CR did not complete: {cr['status']}"
-    log("CR executed successfully ✓")
+    assert cr["status"] == "completed", f"CR execution did not complete: {cr['status']}"
+    log("CR executed — seccomp profile written to nginx systemd drop-in ✓")
 
-    # 7. Rollback CR
-    rollback_r = client.post(f"/change-requests/{cr_id}/rollback")
-    assert rollback_r.status_code in (200, 204), f"Rollback failed: {rollback_r.text}"
+    # Verify nginx still responds under its new seccomp profile
+    client.run_cr(
+        "[SECCOMP_AUTOGEN] verify nginx post-seccomp", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": "curl -sf http://localhost/ > /dev/null && echo nginx_ok_under_seccomp",
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("nginx responding correctly under seccomp profile ✓")
+
+    # ---- 10. Rollback ----
+    assert client.post(f"/change-requests/{cr_id}/rollback").status_code in (200, 204)
     for _ in range(20):
         _time.sleep(5)
         cr = client.get(f"/change-requests/{cr_id}").json()
         if cr["status"] == "rolled_back":
             break
     assert cr["status"] == "rolled_back", f"Rollback did not complete: {cr['status']}"
-    log("CR rolled back ✓")
+    log("CR rolled back — systemd drop-in restored to prior state ✓")
 
-    # 8. Run a second session to verify delta flow
-    log("Starting second session to test diff flow...")
+    # Verify nginx still works after rollback
+    client.run_cr(
+        "[SECCOMP_AUTOGEN] verify nginx post-rollback", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": "curl -sf http://localhost/ > /dev/null && echo nginx_ok_after_rollback",
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("nginx responding correctly after rollback ✓")
+
+    # ---- 11. Second soak → delta review flow ----
+    log("Starting second soak session to test baseline-delta flow...")
     start2_r = client.post("/security-policy/soak-sessions", json={
         "project_id": project_id,
         "policy_type": "seccomp",
-        "asset_ids": [asset_id],
-        "window_seconds": 30,
+        "asset_ids": [agent_asset_id],
+        "window_seconds": 60,
     })
-    assert start2_r.status_code == 201
+    assert start2_r.status_code == 201, f"Start session 2 failed: {start2_r.text}"
     session2_id = start2_r.json()["id"]
+    log("Waiting 65s for second observation window...")
+    _time.sleep(65)
+
     stop2_r = client.post(f"/security-policy/soak-sessions/{session2_id}/stop", json={
-        "service_name": "sshd",
+        "service_name": "nginx",
     })
-    assert stop2_r.status_code == 200
+    assert stop2_r.status_code == 200, f"Stop session 2 failed: {stop2_r.text}"
     session2 = stop2_r.json()
-    # Second run: baseline exists → synthesized (not cr_proposed), delta returned
+    # Second run: baseline exists → status=synthesized with delta, no auto-CR
     assert session2["status"] == "synthesized", (
         f"Expected synthesized (baseline exists), got {session2['status']}"
     )
-    assert session2["baseline_delta"] is not None
-    assert "added" in session2["baseline_delta"]
-    assert "removed" in session2["baseline_delta"]
-    log(f"Delta: +{len(session2['baseline_delta']['added'])} -{len(session2['baseline_delta']['removed'])} syscalls ✓")
+    assert session2["baseline_delta"] is not None, "Expected baseline_delta on second run"
+    delta = session2["baseline_delta"]
+    assert "added" in delta and "removed" in delta
+    log(f"Delta computed: +{len(delta['added'])} added, -{len(delta['removed'])} removed syscalls ✓")
 
-    # 9. Accept diff → propose second CR
+    # Accept diff → create second CR
     accept_r = client.post(f"/security-policy/soak-sessions/{session2_id}/accept", json={
-        "service_name": "sshd",
+        "service_name": "nginx",
     })
-    assert accept_r.status_code == 200
+    assert accept_r.status_code == 200, f"Accept diff failed: {accept_r.text}"
     session2 = accept_r.json()
     assert session2["status"] == "cr_proposed"
     assert session2["cr_id"] is not None
-    log(f"Second CR proposed: {session2['cr_id']} ✓")
+    log(f"Second CR proposed after operator accept: {session2['cr_id']} ✓")
+
+    # ---- 12. Terminate instance ----
+    log("Terminating EC2 instance...")
+    try:
+        client.run_cr(
+            "[SECCOMP_AUTOGEN] terminate instance", "ec2_terminate", cloud_account_id,
+            {"instance_id": instance_id},
+        )
+        log("Instance terminated ✓")
+    except Exception as e:
+        log(f"Terminate warning (non-fatal): {e}")
 
     log("SECCOMP_AUTOGEN PASSED ✓")
     return {"status": "passed", "session_id": session_id, "cr_id": cr_id}
