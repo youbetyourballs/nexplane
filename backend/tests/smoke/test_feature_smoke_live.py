@@ -1165,12 +1165,21 @@ def _sub_phase_gcp_sa_key(client: NexplaneClient, asset_id: str) -> None:
              "_locked_connector_type": "gcp"},
             connector_id,
         )
-        keys_resp = iam_client.list_service_account_keys(request={
-            "name": f"projects/{project}/serviceAccounts/{temp_sa_email}",
-            "key_types": ["USER_MANAGED"],
-        })
-        remaining = [k.name for k in keys_resp.keys]
-        assert key_name not in remaining, f"Key {short_id} should be deleted after revocation"
+        # GCP eventual consistency — key may still appear in list briefly after deletion
+        import time as _kv_wait
+        _kv_deadline = _kv_wait.time() + 30
+        key_gone = False
+        while _kv_wait.time() < _kv_deadline:
+            keys_resp = iam_client.list_service_account_keys(request={
+                "name": f"projects/{project}/serviceAccounts/{temp_sa_email}",
+                "key_types": ["USER_MANAGED"],
+            })
+            remaining = [k.name for k in keys_resp.keys]
+            if key_name not in remaining:
+                key_gone = True
+                break
+            _kv_wait.sleep(5)
+        assert key_gone, f"Key {short_id} should be deleted after revocation"
         log("GCP SA key revoked ✓ (permanent — no rollback)")
     finally:
         try:
