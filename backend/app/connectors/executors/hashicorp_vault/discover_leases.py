@@ -4,12 +4,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})
     if not creds:
         return {"action": "discover_leases", "leases": [], "count": 0}
-    from ._client import get_vault_client
+    from ._client import VaultClient, get_vault_client
     loop = asyncio.get_event_loop()
-    client = get_vault_client(creds)
+    hvac_client = get_vault_client(creds)
+    vault = VaultClient(hvac_client)
     try:
-        result = await loop.run_in_executor(None, lambda: client.sys.list_leases(prefix=""))
-        leases = result.get("data", {}).get("keys", [])
+        leases = await loop.run_in_executor(None, vault.list_leases)
     except Exception:
         leases = []
     return {"action": "discover_leases", "leases": leases, "count": len(leases)}
