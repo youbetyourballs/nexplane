@@ -981,14 +981,14 @@ def _launch_dc_instance(client: NexplaneClient, ec2_client, ssm_client, iam_clie
 
     dc_ami = None
     try:
-        resp = ssm_client.get_parameters_by_path(Path="/nexplane/smoke-amis/dc-smoke", Recursive=True)
-        for p in resp["Parameters"]:
-            if p["Value"].startswith("ami-") and p["Value"] != "INVALID":
-                dc_ami = p["Value"]
+        resp = ssm_client.get_parameter(Name="/nexplane/smoke-amis/dc-smoke/ami")
+        v = resp["Parameter"]["Value"]
+        if v.startswith("ami-") and v != "INVALID":
+            dc_ami = v
     except Exception:
         pass
     if not dc_ami:
-        fail("No cached DC AMI found at /nexplane/smoke-amis/dc-smoke/")
+        fail("No cached DC AMI found at /nexplane/smoke-amis/dc-smoke/ami")
 
     _, subnet_id = get_default_vpc_subnet(ec2_client, instance_type="t3.small")
     instance_profile = get_ssm_instance_profile(iam_client) or "NexplaneEC2TestProfile"
