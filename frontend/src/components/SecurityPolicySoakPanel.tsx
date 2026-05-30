@@ -17,6 +17,7 @@ interface SoakSession {
   cr_id: string | null;
   partial: boolean;
   stopped_at: string | null;
+  asset_ids: string[];
 }
 
 interface Props {
@@ -174,7 +175,7 @@ export function SecurityPolicySoakPanel({ projectId, assets }: Props) {
           {session && session.status === "running" && (
             <div className="mt-3 space-y-2">
               <div className="text-sm text-slate-600">
-                Session running — observing {(session as any).asset_ids?.length ?? "?"} assets for {Math.round(session.window_seconds / 60)} min.
+                Session running — observing {session.asset_ids?.length ?? "?"} assets for {Math.round(session.window_seconds / 60)} min.
               </div>
               <input
                 className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
