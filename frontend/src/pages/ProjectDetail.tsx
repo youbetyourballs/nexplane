@@ -9,6 +9,7 @@ import { changeRequestsApi } from "../api/endpoints";
 import { assetsApi } from "../api/endpoints";
 import { PageLoading } from "../components/LoadingSpinner";
 import { AIPanel } from "../components/AIPanel";
+import { SecurityPolicySoakPanel } from "../components/SecurityPolicySoakPanel";
 import { StatusBadge } from "../components/StatusBadge";
 import ProjectGraph from "../components/ProjectGraph";
 import type {
@@ -94,7 +95,7 @@ export function ProjectDetail() {
   const { data: assets } = useQuery({
     queryKey: ["assets"],
     queryFn: () => assetsApi.list(),
-    enabled: showNewCrForm,
+    enabled: !isNew,
   });
 
   useEffect(() => {
@@ -620,6 +621,13 @@ export function ProjectDetail() {
               </div>
             </div>
           )}
+
+            {!isNew && project && (
+              <SecurityPolicySoakPanel
+                projectId={project.id}
+                assets={(assets ?? []).map(a => ({ id: a.id, name: a.name }))}
+              />
+            )}
             </div>
             {showAIPanel && (
               <div className="w-80 shrink-0 sticky top-4" style={{ height: "calc(100vh - 200px)" }}>
