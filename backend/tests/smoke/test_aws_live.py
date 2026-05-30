@@ -21619,6 +21619,7 @@ def run_phase_seccomp_autogen(client, base_url, cloud_account_id=None,
     log(f"Baseline stored: {len(baseline['profile']['syscalls'][0]['names'])} syscalls ✓")
 
     # ---- 9. Submit, approve, execute CR ----
+    client.post(f"/change-requests/{cr_id}/plan")
     client.post(f"/change-requests/{cr_id}/submit-for-approval")
     client.post(f"/change-requests/{cr_id}/approve")
     log("CR submitted and approved ✓")
