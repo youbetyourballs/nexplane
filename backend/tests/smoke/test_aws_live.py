@@ -21572,16 +21572,10 @@ def run_phase_seccomp_autogen(client, base_url, cloud_account_id=None,
     # Remove any existing seccomp baseline for this project so we always test
     # the first-run (auto-propose) path before the delta-review path.
     try:
-        import subprocess as _sp
-        _sp.run(
-            ["docker", "exec", "nexplane-db-1",
-             "psql", "-U", "nexplane", "-d", "nexplane", "-c",
-             f"DELETE FROM security_policy_baselines WHERE project_id = '{project_id}' AND policy_type = 'seccomp'"],
-            capture_output=True, text=True, timeout=10,
-        )
+        client.delete(f"/security-policy/baselines/{project_id}?policy_type=seccomp")
         log("Pre-run: cleared any existing seccomp baseline for project ✓")
     except Exception as _e:
-        log(f"Pre-run baseline cleanup warning (non-fatal): {_e}")
+        log(f"Pre-run baseline cleanup (non-fatal, may not exist): {_e}")
 
     # ---- 5. Start first soak session (60s) ----
     session = client.post("/security-policy/soak-sessions", json={
