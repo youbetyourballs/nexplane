@@ -822,13 +822,15 @@ def _sub_phase_ldap(client: NexplaneClient, asset_id: str) -> None:
     password = f"NxSmoke{suffix}!"
 
     from app.connectors.executors.ldap._client import LDAPClient
+    _raw_ssl2 = creds.get("use_ssl", False)
+    _use_ssl2 = _raw_ssl2 if isinstance(_raw_ssl2, bool) else str(_raw_ssl2).lower() not in ("false", "0", "no", "")
     ldap_client = LDAPClient(
         host=creds.get("host") or creds.get("hostname") or creds.get("server"),
         port=int(creds.get("port", 389)),
         bind_dn=creds.get("bind_dn", ""),
         bind_password=creds.get("bind_password") or creds.get("password", ""),
         base_dn=creds.get("base_dn", "dc=example,dc=com"),
-        use_ssl=creds.get("use_ssl", False),
+        use_ssl=_use_ssl2,
     )
 
     result = ldap_client.create_user(username=username, display_name=f"nexplane-smoke-{suffix}", password=password)
@@ -1030,7 +1032,7 @@ def _launch_dc_instance(client: NexplaneClient, ec2_client, ssm_client, iam_clie
             "base_dn": "DC=smoke,DC=nexplane,DC=local",
             "bind_dn": "smokeuser@smoke.nexplane.local",
             "bind_password": "UserPass123!",
-            "use_ssl": False,
+            "use_ssl": "false",
         },
     })
     print(f"  Registered DC connector {connector_id}", flush=True)
@@ -1047,13 +1049,15 @@ def _sub_phase_ldap_live(client: NexplaneClient, asset_id: str,
     password = f"NxSmoke{suffix}!"
 
     from app.connectors.executors.ldap._client import LDAPClient
+    _raw_ssl = creds.get("use_ssl", False)
+    _use_ssl = _raw_ssl if isinstance(_raw_ssl, bool) else str(_raw_ssl).lower() not in ("false", "0", "no", "")
     ldap_client = LDAPClient(
-        host=creds["server"],
+        host=creds.get("server") or creds.get("host", ""),
         port=int(creds.get("port", 389)),
         bind_dn=creds["bind_dn"],
         bind_password=creds["bind_password"],
         base_dn=creds.get("base_dn", "dc=example,dc=com"),
-        use_ssl=creds.get("use_ssl", False),
+        use_ssl=_use_ssl,
     )
 
     result = ldap_client.create_user(username=username, display_name=f"nexplane-smoke-{suffix}", password=password)
