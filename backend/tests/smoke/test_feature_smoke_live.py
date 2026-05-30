@@ -1026,8 +1026,19 @@ def _launch_dc_instance(client: NexplaneClient, ec2_client, ssm_client, iam_clie
         ec2_client.terminate_instances(InstanceIds=[instance_id])
         fail(f"DC LDAP not ready at {private_ip}:389 within 600s")
 
-    # Reset smokeuser password via SSM to ensure consistency regardless of AMI bake state
+    # Reset smokeuser password via SSM — wait for SSM agent to register first
     try:
+        _ssm_deadline = time.time() + 120
+        while time.time() < _ssm_deadline:
+            try:
+                _info = ssm_client.describe_instance_information(
+                    Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+                )
+                if _info["InstanceInformationList"]:
+                    break
+            except Exception:
+                pass
+            time.sleep(5)
         reset_cmd = ssm_client.send_command(
             InstanceIds=[instance_id],
             DocumentName="AWS-RunPowerShellScript",
@@ -1037,12 +1048,12 @@ def _launch_dc_instance(client: NexplaneClient, ec2_client, ssm_client, iam_clie
             ]},
         )
         reset_cid = reset_cmd["Command"]["CommandId"]
-        time.sleep(15)
+        time.sleep(20)
         reset_out = ssm_client.get_command_invocation(CommandId=reset_cid, InstanceId=instance_id)
         if reset_out.get("Status") == "Success":
             print("  DC: smokeuser password reset OK", flush=True)
         else:
-            print(f"  DC: password reset status={reset_out.get('Status')}", flush=True)
+            print(f"  DC: password reset status={reset_out.get('Status')} err={reset_out.get('StandardErrorContent','')[:200]}", flush=True)
     except Exception as _ssm_err:
         print(f"  DC: SSM password reset warning: {_ssm_err}", flush=True)
 
