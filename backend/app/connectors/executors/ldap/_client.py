@@ -27,7 +27,7 @@ class LDAPClient:
             conn.search(self.base_dn, f"(uid={username})", SUBTREE, attributes=["uid"])
             if not conn.entries:
                 # Try sAMAccountName for Active Directory
-                conn.search(self.base_dn, f"(sAMAccountName={username})", SUBTREE, attributes=["dn"])
+                conn.search(self.base_dn, f"(sAMAccountName={username})", SUBTREE, attributes=["sAMAccountName"])
             if not conn.entries:
                 return {"success": False, "error": f"User {username} not found"}
             user_dn = conn.entries[0].entry_dn
@@ -45,7 +45,7 @@ class LDAPClient:
         conn = self._connect()
         try:
             conn.search(self.base_dn, f"(|(uid={username})(sAMAccountName={username}))",
-                        SUBTREE, attributes=["dn"])
+                        SUBTREE, attributes=["sAMAccountName"])
             if not conn.entries:
                 return {"success": False, "error": f"User {username} not found"}
             user_dn = conn.entries[0].entry_dn
@@ -82,7 +82,7 @@ class LDAPClient:
         conn = self._connect()
         try:
             conn.search(self.base_dn, f"(|(uid={username})(sAMAccountName={username}))",
-                        SUBTREE, attributes=["dn"])
+                        SUBTREE, attributes=["sAMAccountName"])
             if not conn.entries:
                 return {"success": False, "error": f"User {username} not found"}
             user_dn = conn.entries[0].entry_dn
@@ -97,7 +97,7 @@ class LDAPClient:
             server = Server(self.host, port=self.port, use_ssl=self.use_ssl)
             admin_conn = self._connect()
             admin_conn.search(self.base_dn, f"(|(uid={username})(sAMAccountName={username}))",
-                              SUBTREE, attributes=["dn"])
+                              SUBTREE, attributes=["sAMAccountName"])
             if not admin_conn.entries:
                 return False
             user_dn = admin_conn.entries[0].entry_dn
