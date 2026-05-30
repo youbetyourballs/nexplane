@@ -16223,6 +16223,8 @@ def main():
             run_phase_identity_fanout(client, cloud_account_id)
         if "IDENTITY_SNAPSHOT" in phases:
             run_phase_identity_snapshot(client, cloud_account_id)
+        if "SECCOMP_AUTOGEN" in phases:
+            run_phase_seccomp_autogen(client, base_url=args.base_url)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
@@ -21430,6 +21432,147 @@ def run_phase_oci(client, cloud_account_id: str) -> None:
                 client.client.delete(f"{client.base}/connectors/{oci_conn_id}")
             except Exception as _cleanup_e:
                 log("  OCI: cleanup warning: " + str(_cleanup_e))
+
+
+def run_phase_seccomp_autogen(client, base_url, **kwargs):
+    """
+    Smoke test for security policy soak session auto-generation.
+    Uses the Nexplane agent on an existing registered Linux asset.
+    Exercises: start session → stop → profile synthesized → CR proposed → execute → rollback.
+    """
+    import time as _time
+
+    log = lambda msg: print(f"  [SECCOMP_AUTOGEN] {msg}", flush=True)
+    log("Starting SECCOMP_AUTOGEN smoke phase")
+
+    # Find a registered Linux asset with a nexplane agent
+    assets_r = client.get("/assets")
+    assert assets_r.status_code == 200, f"GET /assets failed: {assets_r.text}"
+    assets = assets_r.json()
+    linux_assets = [a for a in assets if a.get("asset_type") in ("server", "ec2_instance")]
+    assert linux_assets, "No Linux assets found — need at least one with agent registered"
+    asset_id = linux_assets[0]["id"]
+    log(f"Using asset {asset_id} ({linux_assets[0].get('name', 'unnamed')})")
+
+    # Find a project to scope the session
+    projects_r = client.get("/projects")
+    assert projects_r.status_code == 200
+    projects = projects_r.json()
+    assert projects, "Need at least one project"
+    project_id = projects[0]["id"]
+    log(f"Using project {project_id} ({projects[0].get('name', 'unnamed')})")
+
+    # 1. Start soak session (30s window for smoke)
+    start_r = client.post("/security-policy/soak-sessions", json={
+        "project_id": project_id,
+        "policy_type": "seccomp",
+        "asset_ids": [asset_id],
+        "window_seconds": 30,
+    })
+    assert start_r.status_code == 201, f"Start session failed: {start_r.text}"
+    session = start_r.json()
+    session_id = session["id"]
+    assert session["status"] == "running"
+    log(f"Session {session_id} started, status=running")
+
+    # 2. Stop session and synthesize (service_name uses sshd as it's always running)
+    log("Stopping session and synthesizing profile...")
+    stop_r = client.post(f"/security-policy/soak-sessions/{session_id}/stop", json={
+        "service_name": "sshd",
+    })
+    assert stop_r.status_code == 200, f"Stop session failed: {stop_r.text}"
+    session = stop_r.json()
+    log(f"Session status after stop: {session['status']}")
+
+    # First run: no baseline → should auto-propose CR
+    assert session["status"] == "cr_proposed", (
+        f"Expected cr_proposed (no prior baseline), got {session['status']}"
+    )
+    assert session["cr_id"] is not None, "Expected cr_id to be set after auto-propose"
+    cr_id = session["cr_id"]
+    log(f"CR proposed: {cr_id}")
+
+    # 3. Verify CR is in draft/awaiting_approval state
+    cr_r = client.get(f"/change-requests/{cr_id}")
+    assert cr_r.status_code == 200
+    cr = cr_r.json()
+    assert cr["status"] in ("draft", "awaiting_approval"), f"Unexpected CR status: {cr['status']}"
+    assert cr["change_type"] == "configure_seccomp"
+    log(f"CR change_type=configure_seccomp, status={cr['status']} ✓")
+
+    # 4. Verify baseline was stored
+    baseline_r = client.get(f"/security-policy/baselines/{project_id}?policy_type=seccomp")
+    assert baseline_r.status_code == 200, f"Expected baseline, got {baseline_r.status_code}"
+    baseline = baseline_r.json()
+    assert "syscalls" in baseline["profile"]
+    syscall_count = len(baseline["profile"]["syscalls"][0]["names"])
+    log(f"Baseline stored: {syscall_count} syscalls ✓")
+
+    # 5. Submit CR for approval and approve
+    submit_r = client.post(f"/change-requests/{cr_id}/submit-for-approval")
+    assert submit_r.status_code in (200, 204), f"Submit failed: {submit_r.text}"
+    approve_r = client.post(f"/change-requests/{cr_id}/approve")
+    assert approve_r.status_code in (200, 204), f"Approve failed: {approve_r.text}"
+    log("CR submitted and approved ✓")
+
+    # 6. Execute CR — poll for completion
+    execute_r = client.post(f"/change-requests/{cr_id}/execute")
+    assert execute_r.status_code in (200, 204), f"Execute failed: {execute_r.text}"
+    for _ in range(30):
+        _time.sleep(5)
+        cr = client.get(f"/change-requests/{cr_id}").json()
+        if cr["status"] in ("completed", "failed", "rolled_back"):
+            break
+    assert cr["status"] == "completed", f"CR did not complete: {cr['status']}"
+    log("CR executed successfully ✓")
+
+    # 7. Rollback CR
+    rollback_r = client.post(f"/change-requests/{cr_id}/rollback")
+    assert rollback_r.status_code in (200, 204), f"Rollback failed: {rollback_r.text}"
+    for _ in range(20):
+        _time.sleep(5)
+        cr = client.get(f"/change-requests/{cr_id}").json()
+        if cr["status"] == "rolled_back":
+            break
+    assert cr["status"] == "rolled_back", f"Rollback did not complete: {cr['status']}"
+    log("CR rolled back ✓")
+
+    # 8. Run a second session to verify delta flow
+    log("Starting second session to test diff flow...")
+    start2_r = client.post("/security-policy/soak-sessions", json={
+        "project_id": project_id,
+        "policy_type": "seccomp",
+        "asset_ids": [asset_id],
+        "window_seconds": 30,
+    })
+    assert start2_r.status_code == 201
+    session2_id = start2_r.json()["id"]
+    stop2_r = client.post(f"/security-policy/soak-sessions/{session2_id}/stop", json={
+        "service_name": "sshd",
+    })
+    assert stop2_r.status_code == 200
+    session2 = stop2_r.json()
+    # Second run: baseline exists → synthesized (not cr_proposed), delta returned
+    assert session2["status"] == "synthesized", (
+        f"Expected synthesized (baseline exists), got {session2['status']}"
+    )
+    assert session2["baseline_delta"] is not None
+    assert "added" in session2["baseline_delta"]
+    assert "removed" in session2["baseline_delta"]
+    log(f"Delta: +{len(session2['baseline_delta']['added'])} -{len(session2['baseline_delta']['removed'])} syscalls ✓")
+
+    # 9. Accept diff → propose second CR
+    accept_r = client.post(f"/security-policy/soak-sessions/{session2_id}/accept", json={
+        "service_name": "sshd",
+    })
+    assert accept_r.status_code == 200
+    session2 = accept_r.json()
+    assert session2["status"] == "cr_proposed"
+    assert session2["cr_id"] is not None
+    log(f"Second CR proposed: {session2['cr_id']} ✓")
+
+    log("SECCOMP_AUTOGEN PASSED ✓")
+    return {"status": "passed", "session_id": session_id, "cr_id": cr_id}
 
 
 if __name__ == "__main__":
