@@ -675,7 +675,14 @@ def _sub_phase_gcp(client: NexplaneClient, asset_id: str) -> None:
             connector_id,
         )
 
-        sa = iam_client.get_service_account(request={"name": f"projects/{project}/serviceAccounts/{sa_email}"})
+        # GCP eventual consistency — poll until disable propagates (up to 30s)
+        import time as _gcp_dis_time
+        sa = None
+        for _d_attempt in range(6):
+            sa = iam_client.get_service_account(request={"name": f"projects/{project}/serviceAccounts/{sa_email}"})
+            if sa.disabled:
+                break
+            _gcp_dis_time.sleep(5)
         assert sa.disabled, f"SA {sa_email} should be disabled"
         log("GCP SA disabled ✓")
 
