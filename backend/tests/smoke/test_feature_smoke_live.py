@@ -1030,7 +1030,7 @@ def _launch_dc_instance(client: NexplaneClient, ec2_client, ssm_client, iam_clie
             "base_dn": "DC=smoke,DC=nexplane,DC=local",
             "bind_dn": "smokeuser@smoke.nexplane.local",
             "bind_password": "UserPass123!",
-            "use_ssl": "false",
+            "use_ssl": False,
         },
     })
     print(f"  Registered DC connector {connector_id}", flush=True)
@@ -1401,7 +1401,7 @@ def phase_credential_revocation_live(client: NexplaneClient) -> None:
             "server": dc_ip, "port": "389",
             "base_dn": "DC=smoke,DC=nexplane,DC=local",
             "bind_dn": "smokeuser@smoke.nexplane.local",
-            "bind_password": "UserPass123!", "use_ssl": "false",
+            "bind_password": "UserPass123!", "use_ssl": False,
         }
         _sub_phase_ldap_live(client, asset_id, dc_creds, dc_connector_id)
     except SystemExit:
