@@ -1,7 +1,7 @@
 # backend/app/routers/security_policy.py
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -141,3 +141,20 @@ async def get_baseline(
     if not baseline:
         raise HTTPException(status_code=404, detail="No baseline for this project")
     return baseline
+
+
+@router.delete("/baselines/{project_id}", status_code=204)
+async def delete_baseline(
+    project_id: uuid.UUID,
+    policy_type: str = "seccomp",
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(
+        delete(SecurityPolicyBaseline).where(
+            SecurityPolicyBaseline.project_id == project_id,
+            SecurityPolicyBaseline.organization_id == user.organization_id,
+            SecurityPolicyBaseline.policy_type == policy_type,
+        )
+    )
+    await db.commit()
