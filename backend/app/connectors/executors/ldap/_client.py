@@ -24,7 +24,7 @@ class LDAPClient:
         conn = self._connect()
         try:
             # Search for the user
-            conn.search(self.base_dn, f"(uid={username})", SUBTREE, attributes=["dn", "uid"])
+            conn.search(self.base_dn, f"(uid={username})", SUBTREE, attributes=["uid"])
             if not conn.entries:
                 # Try sAMAccountName for Active Directory
                 conn.search(self.base_dn, f"(sAMAccountName={username})", SUBTREE, attributes=["dn"])
