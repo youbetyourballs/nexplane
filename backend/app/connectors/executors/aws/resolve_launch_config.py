@@ -9,9 +9,15 @@ _QUICK_AMI_FILTERS = {
     ],
     "ubuntu": [
         {"Name": "name", "Values": ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]},
-        {"Name": "owner-alias", "Values": ["aws-marketplace"]},
+        {"Name": "architecture", "Values": ["x86_64"]},
         {"Name": "state", "Values": ["available"]},
     ],
+}
+
+# Canonical's official owner ID for free Ubuntu AMIs (excludes Marketplace opt-in AMIs)
+_QUICK_AMI_OWNERS = {
+    "amazon_linux": [],  # filter uses owner-alias
+    "ubuntu": ["099720109477"],
 }
 
 _MOCK_AMIS = {
@@ -97,7 +103,11 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     ec2 = get_ec2_client(creds)
     loop = asyncio.get_event_loop()
     filters = _QUICK_AMI_FILTERS.get(os_family, _QUICK_AMI_FILTERS["amazon_linux"])
-    imgs = await loop.run_in_executor(None, lambda: ec2.describe_images(Filters=filters))
+    owners = _QUICK_AMI_OWNERS.get(os_family, [])
+    if owners:
+        imgs = await loop.run_in_executor(None, lambda: ec2.describe_images(Owners=owners, Filters=filters))
+    else:
+        imgs = await loop.run_in_executor(None, lambda: ec2.describe_images(Filters=filters))
     images = sorted(imgs.get('Images', []), key=lambda i: i['CreationDate'], reverse=True)
     ami_id = images[0]['ImageId'] if images else _MOCK_AMIS.get(os_family, _MOCK_AMIS["amazon_linux"])
     vpcs = await loop.run_in_executor(None, lambda: ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}]))
