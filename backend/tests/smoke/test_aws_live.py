@@ -22354,6 +22354,7 @@ def run_phase_ai_manifest_plan(client, **kwargs):
         "name": project_name,
         "goal": "Harden the nginx service with SELinux on this Linux host.",
     })
+    assert "id" in project, f"Project creation failed: {project}"
     project_id = project["id"]
     log(f"Created project {project_id}")
 
@@ -22363,6 +22364,8 @@ def run_phase_ai_manifest_plan(client, **kwargs):
     assert server_assets, "No server assets registered — register at least one server asset before running this phase"
     # Pick a server with a real name so the LLM does not need to ask which one
     named_servers = [a for a in server_assets if a.get("name") and not a["name"].startswith("Linux Server Group")]
+    if not named_servers:
+        log("WARNING: no named server found, falling back to first server asset — LLM may not produce a host-specific plan")
     asset = named_servers[0] if named_servers else server_assets[0]
     asset_id = asset["id"]
     asset_name = asset.get("name") or asset_id
@@ -22371,7 +22374,7 @@ def run_phase_ai_manifest_plan(client, **kwargs):
     # 4. Send one chat message requesting a full plan — name the target asset explicitly
     #    so the LLM does not need to ask a clarifying question about which host to target.
     msg = f"Propose a full plan now for {asset_name}. Include all required steps."
-    response = client.post(
+    response = client.post(  # relies on client's default timeout (300 s)
         f"/projects/{project_id}/ai/chat",
         json={
             "message": msg,
@@ -22379,11 +22382,17 @@ def run_phase_ai_manifest_plan(client, **kwargs):
         },
     )
     proposed_crs = response.get("proposed_crs")
-    assert proposed_crs, (
-        f"No proposed_crs in response — LLM did not emit a <nexplane-proposal> block. "
+    assert proposed_crs is not None, (
+        f"No proposed_crs key in response — LLM did not emit a <nexplane-proposal> block. "
         f"Response message: {str(response.get('message', ''))[:500]}"
     )
+    assert len(proposed_crs) > 0, "proposed_crs is empty — LLM emitted an empty proposal block"
     log(f"Got {len(proposed_crs)} proposed CRs ✓")
+
+    missing_type = [cr for cr in proposed_crs if "change_type" not in cr]
+    assert not missing_type, (
+        f"{len(missing_type)} proposed CRs have no change_type field: {missing_type}"
+    )
 
     # 5. Load manifest vocabulary
     manifest_resp = client.get("/cr-manifest")
