@@ -16228,6 +16228,11 @@ def main():
                                       cloud_account_id=cloud_account_id,
                                       tailscale_auth_key=args.tailscale_auth_key,
                                       backend_tailscale_ip=getattr(args, "backend_tailscale_ip", ""))
+        if "APPARMOR_AUTOGEN" in phases:
+            run_phase_apparmor_autogen(client, base_url=args.base_url,
+                                       cloud_account_id=cloud_account_id,
+                                       tailscale_auth_key=args.tailscale_auth_key,
+                                       backend_tailscale_ip=getattr(args, "backend_tailscale_ip", ""))
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
@@ -21705,6 +21710,270 @@ def run_phase_seccomp_autogen(client, base_url, cloud_account_id=None,
         log(f"Terminate warning (non-fatal): {e}")
 
     log("SECCOMP_AUTOGEN PASSED ✓")
+    return {"status": "passed", "session_id": session_id, "cr_id": cr_id}
+
+
+def run_phase_apparmor_autogen(client, base_url, cloud_account_id=None,
+                               tailscale_auth_key=None, backend_tailscale_ip=None, **kwargs):
+    """
+    Smoke test for APPARMOR_AUTOGEN.
+    Provisions a fresh Ubuntu 22.04 EC2 with nginx running under load, exercises the full
+    soak-session → profile synthesis → CR apply (complain mode) → rollback → delta-review pipeline.
+    """
+    import time as _time
+    import boto3 as _boto3
+
+    log = lambda msg: print(f"  [APPARMOR_AUTOGEN] {msg}", flush=True)
+    log("Starting APPARMOR_AUTOGEN smoke phase")
+
+    # ---- Resolve cloud account ----
+    if not cloud_account_id or cloud_account_id == "standalone":
+        cloud_account_id = client.get_cloud_account_asset_id()
+    log(f"Using cloud account {cloud_account_id}")
+
+    ts = int(_time.time())
+    instance_name = f"nexplane-smoke-apparmor-nginx-{ts}"
+    key_name = f"nexplane-smoke-apparmor-key-{ts}"
+
+    # ---- 1. Provision EC2 (Ubuntu 22.04) ----
+    log(f"Creating key pair {key_name}...")
+    client.run_cr(
+        "[APPARMOR_AUTOGEN] create key pair", "key_pair_create", cloud_account_id,
+        {"key_name": key_name},
+    )
+
+    log(f"Launching EC2 instance {instance_name} (Ubuntu 22.04, t3.micro)...")
+    client.run_cr(
+        "[APPARMOR_AUTOGEN] launch EC2", "ec2_launch", cloud_account_id,
+        {"mode": "quick", "name": instance_name, "os": "ubuntu",
+         "iam_instance_profile": "NexplaneEC2TestProfile", "key_name": key_name,
+         "rollback_strategy": "terminate_instance"},
+    )
+
+    # Wait for asset to appear in inventory with a running instance_id
+    ec2_client = _boto3.client("ec2", region_name="us-east-1")
+    instance_asset = None
+    instance_id = None
+    for _ in range(48):
+        _time.sleep(5)
+        candidates = [a for a in client.get("/assets", params={"q": instance_name})
+                      if a["name"] == instance_name]
+        for c in sorted(candidates, key=lambda a: a.get("updated_at", ""), reverse=True):
+            cid = c.get("asset_metadata", {}).get("instance_id", "")
+            if not cid:
+                continue
+            try:
+                state = ec2_client.describe_instances(InstanceIds=[cid])["Reservations"][0]["Instances"][0]["State"]["Name"]
+                if state in ("pending", "running"):
+                    instance_asset = c
+                    instance_id = cid
+                    break
+            except Exception:
+                pass
+        if instance_asset:
+            break
+    assert instance_asset, f"Instance {instance_name} not found in inventory within 4min"
+    log(f"Instance {instance_id} in inventory as asset {instance_asset['id']}")
+
+    log("Waiting 3min for SSM agent to become available...")
+    _time.sleep(180)
+
+    # ---- 2. Deploy Nexplane agent ----
+    auth_key = client.get_tailscale_auth_key(tailscale_auth_key or "")
+    agent_secret = client.get_agent_secret()
+    backend_ip = backend_tailscale_ip or "100.101.186.39"
+    nexplane_url = f"http://{backend_ip}:8000"
+
+    client.run_cr(
+        "[APPARMOR_AUTOGEN] tailscale join", "tailscale_join", instance_asset["id"],
+        {"instance_id": instance_id, "auth_key": auth_key, "hostname": instance_name},
+    )
+    client.run_cr(
+        "[APPARMOR_AUTOGEN] deploy nexplane agent", "deploy_nexplane_agent", instance_asset["id"],
+        {"instance_id": instance_id, "nexplane_url": nexplane_url,
+         "nexplane_secret": agent_secret, "hostname": instance_name,
+         "download_url": nexplane_url},
+    )
+
+    # Wait for agent-registered server asset to appear
+    agent_asset = None
+    deadline = _time.time() + 300
+    while _time.time() < deadline:
+        candidates = client.get("/assets", params={"q": instance_name, "asset_type": "server"})
+        tagged = [c for c in candidates
+                  if "nexplane-agent" in (c.get("tags") or [])
+                  and c.get("name") == instance_name]
+        if tagged:
+            agent_asset = sorted(tagged, key=lambda c: c.get("updated_at") or "", reverse=True)[0]
+            log(f"Agent registered: {agent_asset['id']}")
+            break
+        _time.sleep(10)
+    assert agent_asset, "Agent did not register within 5min"
+    agent_asset_id = agent_asset["id"]
+
+    # ---- 3. Install auditd + apparmor-utils + nginx and start HTTP traffic generator ----
+    log("Installing auditd, apparmor-utils, and nginx...")
+    client.run_cr(
+        "[APPARMOR_AUTOGEN] install nginx", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": ("export DEBIAN_FRONTEND=noninteractive && "
+                     "apt-get update -qq && "
+                     "apt-get install -y auditd apparmor-utils nginx && "
+                     "systemctl enable auditd nginx && "
+                     "systemctl start auditd nginx && "
+                     "nginx -t && echo nginx_ok"),
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("nginx and auditd installed ✓")
+
+    log("Starting HTTP traffic generator (background, 150s)...")
+    client.run_cr(
+        "[APPARMOR_AUTOGEN] start traffic generator", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": ("nohup bash -c '"
+                     "for i in $(seq 1 1500); do "
+                     "  curl -s http://localhost/ > /dev/null; "
+                     "  curl -s http://localhost/nonexistent > /dev/null; "
+                     "  sleep 0.1; "
+                     "done' &>/tmp/traffic-gen.log &"),
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("Traffic generator started ✓")
+
+    # ---- 4. Find project and clean up any prior baseline ----
+    projects = client.get("/projects")
+    assert projects, "Need at least one project"
+    project_id = projects[0]["id"]
+    log(f"Using project {project_id} ({projects[0].get('name', 'unnamed')})")
+
+    try:
+        client.delete(f"/security-policy/baselines/{project_id}?policy_type=apparmor")
+        log("Pre-run: cleared any existing apparmor baseline for project ✓")
+    except Exception as _e:
+        log(f"Pre-run baseline cleanup (non-fatal, may not exist): {_e}")
+
+    # ---- 5. Start first soak session (60s) ----
+    session = client.post("/security-policy/soak-sessions", json={
+        "project_id": project_id,
+        "policy_type": "apparmor",
+        "asset_ids": [agent_asset_id],
+        "window_seconds": 60,
+    })
+    session_id = session["id"]
+    assert session["status"] == "running"
+    log(f"Session {session_id} started, status=running, window=60s")
+
+    log("Waiting 65s for observation window to complete...")
+    _time.sleep(65)
+
+    # ---- 6. Stop and synthesize ----
+    log("Stopping session and synthesizing profile...")
+    session = client.post(f"/security-policy/soak-sessions/{session_id}/stop", json={
+        "service_name": "nginx",
+    })
+    log(f"Session status after stop: {session['status']}")
+    assert session["status"] == "cr_proposed", (
+        f"Expected cr_proposed (no prior baseline), got {session['status']}"
+    )
+    assert session["cr_id"] is not None
+    cr_id = session["cr_id"]
+    log(f"Profile synthesized, CR proposed: {cr_id} ✓")
+
+    # ---- 7. Verify CR state ----
+    cr = client.get(f"/change-requests/{cr_id}")
+    assert cr["change_type"] == "configure_apparmor", f"Unexpected change_type: {cr['change_type']}"
+    assert cr["status"] in ("draft", "awaiting_approval"), f"Unexpected CR status: {cr['status']}"
+    log(f"CR change_type=configure_apparmor, status={cr['status']} ✓")
+
+    # ---- 8. Verify baseline stored ----
+    baseline = client.get(f"/security-policy/baselines/{project_id}", params={"policy_type": "apparmor"})
+    assert "profile_text" in baseline["profile"], "Baseline profile missing profile_text"
+    log("Baseline stored ✓")
+
+    # ---- 9. Submit, approve, execute CR ----
+    client.post(f"/change-requests/{cr_id}/plan")
+    client.post(f"/change-requests/{cr_id}/submit-for-approval")
+    client.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "apparmor_autogen smoke"})
+    log("CR submitted and approved ✓")
+
+    client.post(f"/change-requests/{cr_id}/execute")
+    for _ in range(30):
+        _time.sleep(5)
+        cr = client.get(f"/change-requests/{cr_id}")
+        if cr["status"] in ("completed", "failed", "rolled_back"):
+            break
+    assert cr["status"] == "completed", f"CR execution did not complete: {cr['status']}"
+    log("CR executed — AppArmor profile loaded in complain mode ✓")
+
+    # Verify nginx still responds and AppArmor profile is active
+    client.run_cr(
+        "[APPARMOR_AUTOGEN] verify nginx post-apparmor", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": "curl -sf http://localhost/ > /dev/null && aa-status | grep nexplane && echo aa_ok",
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("nginx responding and AppArmor profile active ✓")
+
+    # ---- 10. Rollback ----
+    client.post(f"/change-requests/{cr_id}/rollback")
+    for _ in range(20):
+        _time.sleep(5)
+        cr = client.get(f"/change-requests/{cr_id}")
+        if cr["status"] == "rolled_back":
+            break
+    assert cr["status"] == "rolled_back", f"Rollback did not complete: {cr['status']}"
+    log("CR rolled back ✓")
+
+    client.run_cr(
+        "[APPARMOR_AUTOGEN] verify nginx post-rollback", "ssm_command", instance_asset["id"],
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": "curl -sf http://localhost/ > /dev/null && echo nginx_ok_post_rollback",
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("nginx responding correctly after rollback ✓")
+
+    # ---- 11. Second soak → delta review flow ----
+    log("Starting second soak session to test baseline-delta flow...")
+    session2 = client.post("/security-policy/soak-sessions", json={
+        "project_id": project_id,
+        "policy_type": "apparmor",
+        "asset_ids": [agent_asset_id],
+        "window_seconds": 60,
+    })
+    session2_id = session2["id"]
+    log("Waiting 65s for second observation window...")
+    _time.sleep(65)
+
+    session2 = client.post(f"/security-policy/soak-sessions/{session2_id}/stop", json={
+        "service_name": "nginx",
+    })
+    assert session2["status"] == "synthesized", (
+        f"Expected synthesized (baseline exists), got {session2['status']}"
+    )
+    assert session2["baseline_delta"] is not None, "Expected baseline_delta on second run"
+    delta = session2["baseline_delta"]
+    assert "added" in delta and "removed" in delta
+    log(f"Delta computed: +{len(delta['added'])} added, -{len(delta['removed'])} removed rules ✓")
+
+    session2 = client.post(f"/security-policy/soak-sessions/{session2_id}/accept", json={
+        "service_name": "nginx",
+    })
+    assert session2["status"] == "cr_proposed"
+    assert session2["cr_id"] is not None
+    log(f"Second CR proposed after operator accept: {session2['cr_id']} ✓")
+
+    # ---- 12. Terminate instance ----
+    log("Terminating EC2 instance...")
+    try:
+        client.run_cr(
+            "[APPARMOR_AUTOGEN] terminate instance", "ec2_terminate", cloud_account_id,
+            {"instance_id": instance_id},
+        )
+        log("Instance terminated ✓")
+    except Exception as e:
+        log(f"Terminate warning (non-fatal): {e}")
+
+    log("APPARMOR_AUTOGEN PASSED ✓")
     return {"status": "passed", "session_id": session_id, "cr_id": cr_id}
 
 
