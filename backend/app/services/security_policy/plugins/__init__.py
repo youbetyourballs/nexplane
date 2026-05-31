@@ -17,3 +17,11 @@ def get_plugin(policy_type: str) -> "PolicyPlugin":
     if plugin is None:
         raise ValueError(f"Unsupported policy_type: {policy_type!r}. Known: {sorted(_REGISTRY)}")
     return plugin
+
+
+# Register built-in plugins
+from app.services.security_policy.plugins.seccomp import SECCOMP_PLUGIN  # noqa: E402
+_register(SECCOMP_PLUGIN)
+# apparmor registered in apparmor.py (Task 5)
+# selinux: SP3
+# network_policy: SP4
