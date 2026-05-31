@@ -3,6 +3,9 @@ package linuxharden
 func SeccompLearnExecute(params map[string]any) (map[string]any, error) { return seccompLearnExecute(params) }
 func SeccompLearnRollback(params map[string]any) (map[string]any, error) { return seccompLearnRollback(params) }
 
+func ApparmorLearnExecute(params map[string]any) (map[string]any, error) { return apparmorLearnExecute(params) }
+func ApparmorLearnRollback(params map[string]any) (map[string]any, error) { return apparmorLearnRollback(params) }
+
 func IptablesLogBaselineExecute(params map[string]any) (map[string]any, error) { return iptablesLogBaselineExecute(params) }
 func IptablesLogBaselineRollback(params map[string]any) (map[string]any, error) { return iptablesLogBaselineRollback(params) }
 
