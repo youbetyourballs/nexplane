@@ -16238,6 +16238,8 @@ def main():
                                       cloud_account_id=cloud_account_id,
                                       tailscale_auth_key=args.tailscale_auth_key,
                                       backend_tailscale_ip=getattr(args, "backend_tailscale_ip", ""))
+        if "CR_MANIFEST" in phases:
+            run_phase_cr_manifest(client, base_url=args.base_url)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
@@ -22265,6 +22267,70 @@ def run_phase_selinux_autogen(client, base_url, cloud_account_id=None,
 
     log("SELINUX_AUTOGEN PASSED ✓")
     return {"status": "passed", "session_id": session_id, "cr_id": cr_id}
+
+
+def run_phase_cr_manifest(client, base_url, **kwargs):
+    import time as _time
+
+    log = lambda msg: print(f"  [CR_MANIFEST] {msg}", flush=True)
+    log("Starting CR_MANIFEST smoke phase")
+
+    # ---- 1. Full manifest ----
+    manifest = client.get("/cr-manifest")
+    assert "count" in manifest and "entries" in manifest, f"Unexpected response shape: {manifest}"
+    assert manifest["count"] >= 390, f"Expected >= 390 entries, got {manifest['count']}"
+    log(f"Full manifest: {manifest['count']} entries ✓")
+
+    # ---- 2. Schema check on first 20 entries ----
+    required_fields = {"change_type", "display_name", "domain", "action_class",
+                       "touches", "preconditions", "effects", "rollback_type"}
+    for entry in manifest["entries"][:20]:
+        missing = required_fields - entry.keys()
+        assert not missing, f"{entry.get('change_type')} missing fields: {missing}"
+    log("Schema check: required fields present on sampled entries ✓")
+
+    # ---- 3. Filter by domain=hardening ----
+    hardening = client.get("/cr-manifest", params={"domain": "hardening"})
+    assert hardening["count"] > 0, "domain=hardening returned 0 entries"
+    types_hardening = {e["change_type"] for e in hardening["entries"]}
+    for expected in ("configure_selinux", "configure_seccomp", "configure_apparmor"):
+        assert expected in types_hardening, f"{expected} not in hardening domain"
+    assert all(e["domain"] == "hardening" for e in hardening["entries"]), \
+        "domain filter returned non-hardening entries"
+    log(f"domain=hardening: {hardening['count']} entries, configure_selinux/seccomp/apparmor present ✓")
+
+    # ---- 4. Filter by action_class=rotate ----
+    rotations = client.get("/cr-manifest", params={"action_class": "rotate"})
+    assert rotations["count"] > 0, "action_class=rotate returned 0 entries"
+    types_rotate = {e["change_type"] for e in rotations["entries"]}
+    assert "rotate_iam_key" in types_rotate, "rotate_iam_key not in action_class=rotate"
+    assert all(e["action_class"] == "rotate" for e in rotations["entries"]), \
+        "action_class filter returned non-rotate entries"
+    log(f"action_class=rotate: {rotations['count']} entries ✓")
+
+    # ---- 5. Filter by rollback_type=permanent ----
+    permanent = client.get("/cr-manifest", params={"rollback_type": "permanent"})
+    assert permanent["count"] > 0, "rollback_type=permanent returned 0 entries"
+    assert all(e["rollback_type"] == "permanent" for e in permanent["entries"]), \
+        "rollback_type filter returned non-permanent entries"
+    log(f"rollback_type=permanent: {permanent['count']} entries ✓")
+
+    # ---- 6. Combined filter ----
+    combined = client.get("/cr-manifest", params={"domain": "hardening", "rollback_type": "reversible"})
+    assert combined["count"] > 0, "combined filter returned 0 entries"
+    assert all(e["domain"] == "hardening" and e["rollback_type"] == "reversible"
+               for e in combined["entries"]), "combined filter mismatch"
+    log(f"Combined domain=hardening+rollback_type=reversible: {combined['count']} entries ✓")
+
+    # ---- 7. touches filter ----
+    linux_hosts = client.get("/cr-manifest", params={"touches": "linux_host"})
+    assert linux_hosts["count"] > 0, "touches=linux_host returned 0 entries"
+    assert all("linux_host" in e["touches"] for e in linux_hosts["entries"]), \
+        "touches filter returned entries without linux_host"
+    log(f"touches=linux_host: {linux_hosts['count']} entries ✓")
+
+    log("CR_MANIFEST PASSED ✓")
+    return {"status": "passed", "manifest_count": manifest["count"]}
 
 
 if __name__ == "__main__":
