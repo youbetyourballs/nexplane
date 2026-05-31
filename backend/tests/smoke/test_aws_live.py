@@ -22357,18 +22357,24 @@ def run_phase_ai_manifest_plan(client, **kwargs):
     project_id = project["id"]
     log(f"Created project {project_id}")
 
-    # 3. Get a server asset
+    # 3. Get a server asset — prefer one with a real hostname over group placeholders
     assets = client.get("/assets")
     server_assets = [a for a in assets if a.get("asset_type") == "server"]
     assert server_assets, "No server assets registered — register at least one server asset before running this phase"
-    asset_id = server_assets[0]["id"]
-    log(f"Using asset {asset_id}")
+    # Pick a server with a real name so the LLM does not need to ask which one
+    named_servers = [a for a in server_assets if a.get("name") and not a["name"].startswith("Linux Server Group")]
+    asset = named_servers[0] if named_servers else server_assets[0]
+    asset_id = asset["id"]
+    asset_name = asset.get("name") or asset_id
+    log(f"Using asset {asset_id} - {asset_name}")
 
-    # 4. Send one chat message requesting a full plan
+    # 4. Send one chat message requesting a full plan — name the target asset explicitly
+    #    so the LLM does not need to ask a clarifying question about which host to target.
+    msg = f"Propose a full plan now for {asset_name}. Include all required steps."
     response = client.post(
         f"/projects/{project_id}/ai/chat",
         json={
-            "message": "Propose a full plan now. Include all required steps.",
+            "message": msg,
             "asset_ids": [asset_id],
         },
     )
@@ -22397,7 +22403,8 @@ def run_phase_ai_manifest_plan(client, **kwargs):
         f"Available hardening types (sample): {sorted(hardening_types)[:10]}"
     )
     log(f"Hardening CRs in plan: {hardening_in_plan} ✓")
-    log(f"Note: smoke project {project_id} left in place (no project delete endpoint)")
+    # TODO: DELETE /projects/{id} endpoint does not exist yet — smoke project remains
+    log(f"Note: project {project_id} left in place (no DELETE /projects endpoint)")
 
     log("AI_MANIFEST_PLAN PASSED ✓")
     return {"status": "passed"}
