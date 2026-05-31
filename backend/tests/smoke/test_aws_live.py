@@ -22101,11 +22101,16 @@ def run_phase_selinux_autogen(client, base_url, cloud_account_id=None,
     )
     log("nginx and auditd installed ✓")
 
-    # ---- 5. Verify SELinux is enforcing ----
+    # ---- 5. Ensure SELinux is in enforcing mode (AL2 AMIs may ship permissive) ----
+    log("Ensuring SELinux is in enforcing mode...")
     client.run_cr(
-        "[SELINUX_AUTOGEN] verify selinux enforcing", "ssm_command", instance_asset_id,
+        "[SELINUX_AUTOGEN] set selinux enforcing", "ssm_command", instance_asset_id,
         {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
-         "command": "getenforce | grep -i enforcing && echo selinux_enforcing",
+         "command": (
+             "setenforce 1 || true && "
+             "sed -i 's/^SELINUX=.*/SELINUX=enforcing/' /etc/selinux/config && "
+             "getenforce | grep -i enforcing && echo selinux_enforcing"
+         ),
          "rollback_strategy": "rollback_unavailable"},
     )
     log("SELinux is Enforcing ✓")
