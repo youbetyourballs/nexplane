@@ -33,8 +33,8 @@ async def _collect_observations(
                 asset_ids=[asset_id],
                 timeout_seconds=window_seconds + 60,
             )
-            # seccomp returns syscalls_seen; apparmor returns apparmor_events
-            observations = result.get("syscalls_seen") or result.get("apparmor_events") or []
+            # seccomp returns syscalls_seen; apparmor returns apparmor_events; selinux returns avc_lines
+            observations = result.get("syscalls_seen") or result.get("apparmor_events") or result.get("avc_lines") or []
             return asset_id, observations
         except Exception:
             return asset_id, None
