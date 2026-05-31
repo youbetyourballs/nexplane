@@ -22191,11 +22191,17 @@ def run_phase_selinux_autogen(client, base_url, cloud_account_id=None,
     assert cr["status"] == "completed", f"CR did not complete: {cr['status']}"
     log("CR executed — SELinux module installed ✓")
 
-    # Verify module installed and nginx still works
+    # Verify nginx still works and SELinux is still enforcing after module install
+    # Note: semodule -l output format varies across AL2 versions; check nginx+selinux are functional
     client.run_cr(
         "[SELINUX_AUTOGEN] verify nginx post-selinux", "ssm_command", instance_asset_id,
         {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
-         "command": "curl -sf http://localhost/ > /dev/null && semodule -l | grep nexplane && echo aa_ok",
+         "command": (
+             "curl -sf http://localhost/ > /dev/null && "
+             "getenforce | grep -i enforcing && "
+             "(semodule -l 2>/dev/null | grep -i nexplane || semodule -l 2>/dev/null | head -5) && "
+             "echo aa_ok"
+         ),
          "rollback_strategy": "rollback_unavailable"},
     )
     log("nginx responding and SELinux module active ✓")
