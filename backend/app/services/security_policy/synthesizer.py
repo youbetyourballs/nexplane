@@ -1,22 +1,19 @@
-"""Seccomp profile synthesizer for security policy generation."""
+# backend/app/services/security_policy/synthesizer.py
+"""Security policy synthesizer — delegates to policy plugins."""
 
 
 def synthesize_seccomp(raw_observations: dict[str, list[str]]) -> dict:
-    """Merge per-asset syscall lists into a single seccomp allowlist profile."""
-    all_syscalls: set[str] = set()
-    for syscalls in raw_observations.values():
-        all_syscalls.update(syscalls)
-    return {
-        "defaultAction": "SCMP_ACT_ERRNO",
-        "architectures": ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
-        "syscalls": [{"names": sorted(all_syscalls), "action": "SCMP_ACT_ALLOW"}],
-    }
+    """Kept for backward compatibility. Use plugin.synthesize() for new code."""
+    from app.services.security_policy.plugins.seccomp import SECCOMP_PLUGIN
+    return SECCOMP_PLUGIN.synthesize(raw_observations)
 
 
-def compute_delta(prior: dict, current: dict) -> dict:
-    """Return {added, removed} syscall sets between two seccomp profiles."""
-    prior_set = set(prior["syscalls"][0]["names"])
-    current_set = set(current["syscalls"][0]["names"])
+def compute_delta(prior: dict, current: dict, policy_type: str = "seccomp") -> dict:
+    """Return {added, removed} rule sets between two profiles."""
+    from app.services.security_policy.plugins import get_plugin
+    plugin = get_plugin(policy_type)
+    prior_set = plugin.delta_extract(prior)
+    current_set = plugin.delta_extract(current)
     return {
         "added": sorted(current_set - prior_set),
         "removed": sorted(prior_set - current_set),

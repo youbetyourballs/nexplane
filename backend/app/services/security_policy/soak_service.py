@@ -10,37 +10,42 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connectors.executors.nexplane_agent import _dispatch
-from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType, RiskLevel
+from app.models.change_request import ChangeRequest, ChangeRequestStatus, RiskLevel
 from app.models.security_policy import SecurityPolicySoakSession, SecurityPolicyBaseline
-from app.services.security_policy.synthesizer import compute_delta, synthesize_seccomp
+from app.services.security_policy.synthesizer import compute_delta
 
 
 async def _collect_observations(
     asset_ids: list[str],
     window_seconds: int,
-) -> tuple[dict[str, list[str]], bool]:
-    """Run seccomp_learn on each asset concurrently. Returns (observations, partial)."""
+    policy_type: str,
+) -> tuple[dict[str, list], bool]:
+    """Run the policy-specific learn command on each asset concurrently."""
+    from app.services.security_policy.plugins import get_plugin
+    plugin = get_plugin(policy_type)
     partial = False
 
-    async def _observe_one(asset_id: str) -> tuple[str, list[str] | None]:
+    async def _observe_one(asset_id: str) -> tuple[str, list | None]:
         try:
             result = await _dispatch.dispatch_agent_job(
-                command="seccomp_learn",
+                command=plugin.learn_command,
                 parameters={"duration_seconds": window_seconds},
                 asset_ids=[asset_id],
                 timeout_seconds=window_seconds + 60,
             )
-            return asset_id, result.get("syscalls_seen", [])
+            # seccomp returns syscalls_seen; apparmor returns apparmor_events
+            observations = result.get("syscalls_seen") or result.get("apparmor_events") or []
+            return asset_id, observations
         except Exception:
             return asset_id, None
 
     results = await asyncio.gather(*[_observe_one(aid) for aid in asset_ids])
-    observations: dict[str, list[str]] = {}
-    for asset_id, syscalls in results:
-        if syscalls is None:
+    observations: dict[str, list] = {}
+    for asset_id, data in results:
+        if data is None:
             partial = True
         else:
-            observations[asset_id] = syscalls
+            observations[asset_id] = data
     return observations, partial
 
 
@@ -89,9 +94,12 @@ async def stop_and_synthesize(
     observations, partial = await _collect_observations(
         asset_ids=[str(a) for a in session.asset_ids],
         window_seconds=session.window_seconds,
+        policy_type=session.policy_type,
     )
 
-    profile = synthesize_seccomp(observations)
+    from app.services.security_policy.plugins import get_plugin
+    plugin = get_plugin(session.policy_type)
+    profile = plugin.synthesize(observations)
 
     result = await db.execute(
         select(SecurityPolicyBaseline).where(
@@ -104,7 +112,7 @@ async def stop_and_synthesize(
 
     delta = None
     if baseline:
-        delta = compute_delta(baseline.profile, profile)
+        delta = compute_delta(baseline.profile, profile, policy_type=session.policy_type)
 
     session.raw_observations = observations
     session.synthesized_profile = profile
@@ -114,7 +122,7 @@ async def stop_and_synthesize(
     session.status = "synthesized"
 
     if should_auto_propose(baseline):
-        cr = await _create_configure_seccomp_cr(db, session, profile, service_name, user_id)
+        cr = await _create_policy_cr(db, session, profile, service_name, user_id)
         await _upsert_baseline(db, session, profile, cr.id)
         session.cr_id = cr.id
         session.status = "cr_proposed"
@@ -138,7 +146,7 @@ async def accept_diff(
     if session.baseline_delta is None:
         raise ValueError("No baseline delta to accept — use stop response cr_id for first-run sessions")
 
-    cr = await _create_configure_seccomp_cr(
+    cr = await _create_policy_cr(
         db, session, session.synthesized_profile, service_name, user_id
     )
     await _upsert_baseline(db, session, session.synthesized_profile, cr.id)
@@ -149,22 +157,25 @@ async def accept_diff(
     return session
 
 
-async def _create_configure_seccomp_cr(
+async def _create_policy_cr(
     db: AsyncSession,
     session: SecurityPolicySoakSession,
     profile: dict,
     service_name: str,
     user_id: uuid.UUID,
 ) -> ChangeRequest:
+    from app.services.security_policy.plugins import get_plugin
+    plugin = get_plugin(session.policy_type)
     params = _build_cr_params(session, profile, service_name)
+    rule_count = len(plugin.delta_extract(profile))
     cr = ChangeRequest(
         organization_id=session.organization_id,
         requester_id=user_id,
-        title=f"Apply seccomp profile (project soak session {str(session.id)[:8]})",
-        description=f"Seccomp profile synthesized from soak session. "
-                    f"Syscalls allowed: {len(profile['syscalls'][0]['names'])}. "
-                    f"Partial observation: {session.partial}.",
-        change_type=ChangeType.configure_seccomp,
+        title=plugin.cr_title_template.format(service_name=service_name),
+        description=plugin.cr_description_template.format(
+            rule_count=rule_count, partial=session.partial
+        ),
+        change_type=plugin.cr_change_type,
         target_asset_ids=[str(a) for a in session.asset_ids],
         desired_outcome=params,
         status=ChangeRequestStatus.draft,
