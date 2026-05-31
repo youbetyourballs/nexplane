@@ -8,55 +8,32 @@ _PROVIDER_DEFAULTS = {
     "openai": "gpt-4o",
 }
 
-_CHANGE_TYPES_TEXT = """
-Agent commands (run directly on hosts via Nexplane Agent):
-  agent_ossecurity, agent_linuxauth, agent_linux_patch, agent_linuxupgrade,
-  agent_winharden, agent_win_patch, agent_crossplatform, agent_compliance,
-  agent_forensics, agent_fleet, agent_backup, agent_reboot, agent_credrotation, agent_iac
+def _build_change_types_text() -> str:
+    from app.services.manifest_builder import get_manifest
+    from collections import defaultdict
 
-EC2 lifecycle: ec2_launch, ec2_stop, ec2_start, ec2_reboot, ec2_stop_start, ec2_terminate
-EC2 ops: key_pair_create, ssm_command, snapshot_asset, capture_instance_state
+    entries = get_manifest()
+    by_domain: dict[str, list[dict]] = defaultdict(list)
+    for e in entries:
+        by_domain[e["domain"]].append(e)
 
-Networking: security_group_update, microsegmentation_policy, dns_update,
-  route53_zone_create, route53_record_upsert, route53_record_delete
-  alb_create, alb_delete, target_group_create, target_group_delete,
-  listener_create, listener_modify, listener_delete, register_targets, deregister_targets
-
-Storage: s3_bucket_create, s3_bucket_delete, s3_lifecycle_configure,
-  block_s3_public_access, restore_s3_public_access, put_bucket_policy
-
-IAM / identity: iam_user_create, iam_user_delete, attach_iam_policy, detach_iam_policy,
-  disable_iam_user, enable_iam_user, rotate_iam_key, key_rotation,
-  offboard_user, onboard_user
-
-Database: rds_instance_create, rds_instance_delete, rds_snapshot_create,
-  rds_replica_create, promote_db_replica, provision_db_user, deprovision_db_user
-
-Monitoring: cloudwatch_alarm_create, cloudwatch_alarm_delete
-
-IaC / config: terraform_local_apply, ansible_local_playbook, tag_resource
-
-Tailscale / agent deploy: tailscale_join, tailscale_remove, deploy_nexplane_agent, remove_nexplane_agent
-
-GCE: gce_instance_create, gce_stop, gce_start, gce_instance_reboot, gce_instance_delete, gce_disk_snapshot
-GCP ops: gcp_firewall_create, gcp_firewall_delete, gcp_block_public_bucket_access,
-  gcp_disable_service_account, gcp_rotate_service_account_key
-
-Azure VM: azure_vm_create, azure_vm_stop, azure_vm_start, azure_vm_reboot, azure_vm_delete, azure_vm_snapshot
-Azure ops: azure_update_nsg_rule, azure_restore_nsg_rule, azure_disable_public_blob_access,
-  azure_enable_public_blob_access, azure_rotate_storage_key, azure_storage_account_create,
-  azure_storage_account_delete, azure_blob_container_create, azure_blob_container_delete,
-  azure_managed_identity_create, azure_managed_identity_delete,
-  azure_role_assignment_create, azure_role_assignment_delete,
-  azure_vnet_create, azure_vnet_delete, azure_dns_zone_create, azure_dns_zone_delete,
-  azure_dns_record_create, azure_dns_record_delete,
-  azure_sql_server_create, azure_sql_server_delete,
-  azure_sql_database_create, azure_sql_database_delete,
-  azure_metric_alert_create, azure_metric_alert_delete
-
-Incident response: isolate_host, lockdown_account, preserve_evidence
-Backup / DR: create_backup, verify_backup, restore_files, dr_failover, dr_dns_failover_route53
-""".strip()
+    lines = []
+    for domain in sorted(by_domain):
+        lines.append(f"\n## {domain}")
+        for e in sorted(by_domain[domain], key=lambda x: x["change_type"]):
+            touches = ", ".join(e.get("touches") or [])
+            preconditions = "; ".join(e.get("preconditions") or [])
+            effects = "; ".join(e.get("effects") or [])
+            rollback = e.get("rollback_type", "unknown")
+            line = (
+                f"{e['change_type']}  —  {e['display_name']}"
+                f"  |  touches: {touches}"
+                f"  |  requires: {preconditions}"
+                f"  |  effects: {effects}"
+                f"  |  rollback: {rollback}"
+            )
+            lines.append(line)
+    return "\n".join(lines).strip()
 
 
 _SYSTEM_PROMPT_TEMPLATE = """You are a planning assistant for Nexplane, a secure infrastructure change management platform.
@@ -215,7 +192,7 @@ class AIService:
             goal=safe_goal,
             asset_count=len(asset_context),
             assets_text=safe_assets_text,
-            change_types=_CHANGE_TYPES_TEXT,
+            change_types=_build_change_types_text(),
         )
         # Restore literal braces that were escaped in user-supplied text
         return rendered.replace("{{", "{").replace("}}", "}")
