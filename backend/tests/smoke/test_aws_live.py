@@ -21906,10 +21906,12 @@ def run_phase_apparmor_autogen(client, base_url, cloud_account_id=None,
     log("CR executed — AppArmor profile loaded in complain mode ✓")
 
     # Verify nginx still responds and AppArmor profile is active
+    # The synthesized profile starts with "/usr/sbin/{service_name}" so the loaded
+    # profile name is "/usr/sbin/nginx" — verify it's in aa-status output.
     client.run_cr(
         "[APPARMOR_AUTOGEN] verify nginx post-apparmor", "ssm_command", instance_asset["id"],
         {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
-         "command": "curl -sf http://localhost/ > /dev/null && aa-status | grep nexplane && echo aa_ok",
+         "command": "curl -sf http://localhost/ > /dev/null && aa-status | grep -E 'nginx|nexplane' && echo aa_ok",
          "rollback_strategy": "rollback_unavailable"},
     )
     log("nginx responding and AppArmor profile active ✓")
