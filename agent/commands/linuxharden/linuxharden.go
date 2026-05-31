@@ -5,6 +5,8 @@ func SeccompLearnRollback(params map[string]any) (map[string]any, error) { retur
 
 func ApparmorLearnExecute(params map[string]any) (map[string]any, error) { return apparmorLearnExecute(params) }
 func ApparmorLearnRollback(params map[string]any) (map[string]any, error) { return apparmorLearnRollback(params) }
+func SelinuxLearnExecute(params map[string]any) (map[string]any, error) { return selinuxLearnExecute(params) }
+func SelinuxLearnRollback(params map[string]any) (map[string]any, error) { return selinuxLearnRollback(params) }
 
 func IptablesLogBaselineExecute(params map[string]any) (map[string]any, error) { return iptablesLogBaselineExecute(params) }
 func IptablesLogBaselineRollback(params map[string]any) (map[string]any, error) { return iptablesLogBaselineRollback(params) }
