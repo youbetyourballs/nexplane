@@ -71,8 +71,17 @@ async def dispatch_agent_job(
 
         # Generate job_id up front so it can be included in the HMAC.
         # Go agent's agenthmac.Sign format: "{jobID}:{command}:{canonicalJSON(params)}"
+        # Go's json.Marshal HTML-escapes <, >, & by default — match that here so the
+        # HMAC byte stream is identical on both sides (critical for profiles like
+        # AppArmor whose profile_text contains "<tunables/global>").
         job_id = uuid.uuid4()
         canonical_params = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
+        canonical_params = (
+            canonical_params
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026")
+        )
         message = f"{job_id}:{command}:{canonical_params}"
         sig = _hmac.new(
             agent_secret_plain.encode() if agent_secret_plain else b"",
