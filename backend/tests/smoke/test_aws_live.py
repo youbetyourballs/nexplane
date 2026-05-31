@@ -16241,6 +16241,9 @@ def main():
         if "CR_MANIFEST" in phases:
             run_phase_cr_manifest(client, base_url=args.base_url)
 
+        if "AI_MANIFEST_PLAN" in phases:
+            run_phase_ai_manifest_plan(client)
+
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
         print("=" * 60)
@@ -22331,6 +22334,73 @@ def run_phase_cr_manifest(client, base_url, **kwargs):
 
     log("CR_MANIFEST PASSED ✓")
     return {"status": "passed", "manifest_count": manifest["count"]}
+
+
+def run_phase_ai_manifest_plan(client, **kwargs):
+    import time as _time
+
+    log = lambda msg: print(f"  [AI_MANIFEST_PLAN] {msg}", flush=True)
+    log("Starting AI_MANIFEST_PLAN smoke phase")
+
+    # 1. Verify AI is configured
+    settings = client.get("/settings")
+    ai_configured = settings.get("ai_configured")
+    assert ai_configured, "No AI provider configured — set an API key in org settings before running this phase"
+    log("AI provider configured ✓")
+
+    # 2. Create a smoke project
+    project_name = f"smoke-ai-manifest-{int(_time.time())}"
+    project = client.post("/projects", json={
+        "name": project_name,
+        "goal": "Harden the nginx service with SELinux on this Linux host.",
+    })
+    project_id = project["id"]
+    log(f"Created project {project_id}")
+
+    # 3. Get a server asset
+    assets = client.get("/assets")
+    server_assets = [a for a in assets if a.get("asset_type") == "server"]
+    assert server_assets, "No server assets registered — register at least one server asset before running this phase"
+    asset_id = server_assets[0]["id"]
+    log(f"Using asset {asset_id}")
+
+    # 4. Send one chat message requesting a full plan
+    response = client.post(
+        f"/projects/{project_id}/ai/chat",
+        json={
+            "message": "Propose a full plan now. Include all required steps.",
+            "asset_ids": [asset_id],
+        },
+    )
+    proposed_crs = response.get("proposed_crs")
+    assert proposed_crs, (
+        f"No proposed_crs in response — LLM did not emit a <nexplane-proposal> block. "
+        f"Response message: {str(response.get('message', ''))[:500]}"
+    )
+    log(f"Got {len(proposed_crs)} proposed CRs ✓")
+
+    # 5. Load manifest vocabulary
+    manifest_resp = client.get("/cr-manifest")
+    valid_change_types = {e["change_type"] for e in manifest_resp["entries"]}
+    hardening_types = {e["change_type"] for e in manifest_resp["entries"] if e["domain"] == "hardening"}
+
+    # 6. Assert no hallucinations
+    proposed_types = [cr["change_type"] for cr in proposed_crs if "change_type" in cr]
+    hallucinated = [ct for ct in proposed_types if ct not in valid_change_types]
+    assert not hallucinated, f"Hallucinated CR types not in manifest: {hallucinated}"
+    log(f"All {len(proposed_types)} proposed change_types are valid manifest entries ✓")
+
+    # 7. Assert at least one hardening CR
+    hardening_in_plan = [ct for ct in proposed_types if ct in hardening_types]
+    assert hardening_in_plan, (
+        f"No hardening-domain CR types in proposal. Proposed: {proposed_types}. "
+        f"Available hardening types (sample): {sorted(hardening_types)[:10]}"
+    )
+    log(f"Hardening CRs in plan: {hardening_in_plan} ✓")
+    log(f"Note: smoke project {project_id} left in place (no project delete endpoint)")
+
+    log("AI_MANIFEST_PLAN PASSED ✓")
+    return {"status": "passed"}
 
 
 if __name__ == "__main__":
