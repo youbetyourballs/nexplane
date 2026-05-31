@@ -1,0 +1,11 @@
+{
+  "change_type": "configure_selinux",
+  "display_name": "Configure SELinux Policy Module",
+  "steps": [
+    {"generic_action": "configure_selinux", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "configure_selinux",
+  "rollback_connector_type": "nexplane_agent"
+}

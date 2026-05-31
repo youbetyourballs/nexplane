@@ -1,0 +1,11 @@
+{
+  "change_type": "selinux_learn",
+  "display_name": "SELinux Learn (Observe AVC Denials)",
+  "steps": [
+    {"generic_action": "selinux_learn", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "selinux_learn",
+  "rollback_connector_type": "nexplane_agent"
+}
