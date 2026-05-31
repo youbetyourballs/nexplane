@@ -1,0 +1,11 @@
+{
+  "change_type": "configure_apparmor",
+  "display_name": "Configure AppArmor Profile",
+  "steps": [
+    {"generic_action": "configure_apparmor", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "configure_apparmor",
+  "rollback_connector_type": "nexplane_agent"
+}
