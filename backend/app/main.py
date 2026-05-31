@@ -32,6 +32,7 @@ from app.routers.api_tokens import router as api_tokens_router
 from app.routers import recurring_jobs as recurring_jobs_router
 from app.routers import backup as backup_router
 from app.routers import security_policy as security_policy_router
+from app.routers import cr_manifest as cr_manifest_router
 from app.mcp_server import create_mcp_app
 from app.services import scheduler_service
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -51,6 +52,8 @@ async def lifespan(app: FastAPI):
     from app.connectors.catalog_service import init_catalog_service
     import pathlib
     init_catalog_service(pathlib.Path(__file__).parent / "connectors" / "catalog")
+    from app.services.manifest_builder import build_manifest
+    build_manifest()
     scheduler_service.init_scheduler(lambda: AsyncSessionLocal())
     await scheduler_service.start()
     _escalation_scheduler = AsyncIOScheduler()
@@ -171,6 +174,7 @@ app.include_router(api_tokens_router)
 app.include_router(recurring_jobs_router.router)
 app.include_router(backup_router.router)
 app.include_router(security_policy_router.router)
+app.include_router(cr_manifest_router.router)
 app.mount("/mcp", create_mcp_app())
 
 
