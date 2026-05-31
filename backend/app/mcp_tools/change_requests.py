@@ -495,3 +495,44 @@ async def get_execution_progress(token: str, cr_id: str) -> dict:
         }
     finally:
         await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def get_cr_manifest(
+    token: str,
+    domain: Optional[str] = None,
+    action_class: Optional[str] = None,
+    touches: Optional[str] = None,
+    rollback_type: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Return the full CR type vocabulary enriched with planning metadata.
+
+    Each entry includes: change_type, display_name, domain, action_class, touches,
+    preconditions, effects, rollback_type, and parameters.
+
+    Use filters to load only the relevant slice for a planning goal:
+    - domain: hardening | credential_rotation | incident_response | compliance |
+               identity | aws_compute | aws_identity | gcp | azure | oci |
+               iac | backup_dr | networking | infrastructure
+    - action_class: create | delete | configure | rotate | patch | scan |
+                    audit | isolate | observe | verify | execute
+    - touches: ec2_instance | linux_host | iam_user | selinux_policy | ...
+    - rollback_type: reversible | permanent | snapshot_based
+
+    Returns {"count": N, "entries": [...]}
+    """
+    from app.services.manifest_builder import get_manifest
+    user, db, db_cm = await _auth(token)
+    try:
+        entries = get_manifest(
+            domain=domain,
+            action_class=action_class,
+            touches=touches,
+            rollback_type=rollback_type,
+        )
+        return {"count": len(entries), "entries": entries}
+    except Exception as exc:
+        return {"error": str(exc)}
+    finally:
+        await db_cm.__aexit__(None, None, None)
