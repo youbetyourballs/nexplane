@@ -10,8 +10,10 @@ func ConfigureSELinuxExecute(params map[string]any) (map[string]any, error) {
 	_, hasMode := params["mode"].(string)
 	_, hasModule := params["policy_module_path"].(string)
 	_, hasGenerate := params["generate_from_audit_log"].(bool)
-	if !hasMode && !hasModule && !hasGenerate {
-		return nil, fmt.Errorf("at least one of mode, policy_module_path, or generate_from_audit_log is required")
+	moduleSource, _ := params["module_source"].(string)
+	hasModuleSource := moduleSource != ""
+	if !hasMode && !hasModule && !hasGenerate && !hasModuleSource {
+		return nil, fmt.Errorf("at least one of mode, policy_module_path, module_source, or generate_from_audit_log is required")
 	}
 	if mode, ok := params["mode"].(string); ok && mode != "" && !validSELinuxModes[mode] {
 		return nil, fmt.Errorf("invalid mode %q: must be enforcing, permissive, or disabled", mode)
