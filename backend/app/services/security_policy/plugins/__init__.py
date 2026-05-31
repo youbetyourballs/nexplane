@@ -22,6 +22,7 @@ def get_plugin(policy_type: str) -> "PolicyPlugin":
 # Register built-in plugins
 from app.services.security_policy.plugins.seccomp import SECCOMP_PLUGIN  # noqa: E402
 _register(SECCOMP_PLUGIN)
-# apparmor registered in apparmor.py (Task 5)
+from app.services.security_policy.plugins.apparmor import APPARMOR_PLUGIN  # noqa: E402
+_register(APPARMOR_PLUGIN)
 # selinux: SP3
 # network_policy: SP4
