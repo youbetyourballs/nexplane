@@ -24,5 +24,7 @@ from app.services.security_policy.plugins.seccomp import SECCOMP_PLUGIN  # noqa:
 _register(SECCOMP_PLUGIN)
 from app.services.security_policy.plugins.apparmor import APPARMOR_PLUGIN  # noqa: E402
 _register(APPARMOR_PLUGIN)
-# selinux: SP3
+from app.services.security_policy.plugins.selinux import SELINUX_PLUGIN  # noqa: E402
+_register(SELINUX_PLUGIN)
+# selinux: SP3 done
 # network_policy: SP4
