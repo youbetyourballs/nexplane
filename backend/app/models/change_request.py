@@ -310,6 +310,10 @@ class ChangeType(str, enum.Enum):
     # Seccomp pipeline — Phase SECCOMP_PIPELINE
     seccomp_learn = "seccomp_learn"
     configure_seccomp = "configure_seccomp"
+    # AppArmor pipeline — SP2
+    configure_apparmor = "configure_apparmor"
+    # SELinux pipeline — SP3 (stub)
+    configure_selinux = "configure_selinux"
     # OS security posture audit — Phase BULK_PATCH
     audit_os_security_posture = "audit_os_security_posture"
     # Credential rotation additions
