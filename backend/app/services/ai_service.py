@@ -8,7 +8,12 @@ _PROVIDER_DEFAULTS = {
     "openai": "gpt-4o",
 }
 
+_CHANGE_TYPES_TEXT_CACHE: str | None = None
+
 def _build_change_types_text() -> str:
+    global _CHANGE_TYPES_TEXT_CACHE
+    if _CHANGE_TYPES_TEXT_CACHE is not None:
+        return _CHANGE_TYPES_TEXT_CACHE
     from app.services.manifest_builder import get_manifest
     from collections import defaultdict
 
@@ -33,7 +38,8 @@ def _build_change_types_text() -> str:
                 f"  |  rollback: {rollback}"
             )
             lines.append(line)
-    return "\n".join(lines).strip()
+    _CHANGE_TYPES_TEXT_CACHE = "\n".join(lines).strip()
+    return _CHANGE_TYPES_TEXT_CACHE
 
 
 _SYSTEM_PROMPT_TEMPLATE = """You are a planning assistant for Nexplane, a secure infrastructure change management platform.
@@ -188,11 +194,12 @@ class AIService:
         assets_text = _build_asset_context_text(asset_context)
         safe_goal = goal.replace("{", "{{").replace("}", "}}")
         safe_assets_text = assets_text.replace("{", "{{").replace("}", "}}")
+        safe_change_types = _build_change_types_text().replace("{", "{{").replace("}", "}}")
         rendered = _SYSTEM_PROMPT_TEMPLATE.format(
             goal=safe_goal,
             asset_count=len(asset_context),
             assets_text=safe_assets_text,
-            change_types=_build_change_types_text(),
+            change_types=safe_change_types,
         )
         # Restore literal braces that were escaped in user-supplied text
         return rendered.replace("{{", "{").replace("}}", "}")
