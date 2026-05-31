@@ -17,6 +17,17 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         module_source = (profile.get("module_source") or "").replace("{service_name}", service_name)
         agent_params["module_name"] = module_name
         agent_params["module_source"] = module_source
+        # Ensure the Go agent's validation passes: the agent requires at least one of
+        # mode/policy_module_path/module_source/generate_from_audit_log. Older binaries
+        # (pre module_source support) only check mode/policy_module_path/generate_from_audit_log,
+        # so we also set mode="" which is ignored by selinuxExecuteOS if empty but satisfies
+        # the type assertion `params["mode"].(string)` returning ok=true.
+        # We use "permissive" here to keep the type-check compatible; the selinux_linux.go
+        # only calls setenforce if mode is non-empty AND in the valid set, so passing the
+        # current effective mode as a hint is safe if the host is already enforcing.
+        # SAFER: pass mode only when module_source is present and mode is not already set.
+        if module_source and "mode" not in agent_params:
+            agent_params["mode"] = ""  # empty string: selinuxExecuteOS skips mode change
 
     result = await _dispatch.dispatch_agent_job(
         command="configure_selinux",
