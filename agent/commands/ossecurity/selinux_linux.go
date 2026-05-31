@@ -83,6 +83,42 @@ func selinuxExecuteOS(params map[string]any) (map[string]any, error) {
 		}
 	}
 
+	if moduleSource, ok := params["module_source"].(string); ok && moduleSource != "" {
+		svcName, _ := params["service_name"].(string)
+		if svcName == "" {
+			svcName = "nexplane"
+		}
+		moduleName, _ := params["module_name"].(string)
+		if moduleName == "" {
+			moduleName = "nexplane-" + svcName
+		}
+		// Substitute {service_name} placeholder if still present
+		moduleName = strings.ReplaceAll(moduleName, "{service_name}", svcName)
+		moduleSource = strings.ReplaceAll(moduleSource, "{service_name}", svcName)
+
+		tePath := "/tmp/" + moduleName + ".te"
+		modPath := "/tmp/" + moduleName + ".mod"
+		ppPath := "/tmp/" + moduleName + ".pp"
+		defer os.Remove(tePath)  //nolint:errcheck
+		defer os.Remove(modPath) //nolint:errcheck
+		defer os.Remove(ppPath)  //nolint:errcheck
+
+		if err := os.WriteFile(tePath, []byte(moduleSource), 0644); err != nil {
+			return nil, fmt.Errorf("writing .te file: %w", err)
+		}
+		if out, err := exec.Command("checkmodule", "-M", "-m", "-o", modPath, tePath).CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("checkmodule: %s: %w", out, err)
+		}
+		if out, err := exec.Command("semodule_package", "-o", ppPath, "-m", modPath).CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("semodule_package: %s: %w", out, err)
+		}
+		if out, err := exec.Command("semodule", "-i", ppPath).CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("semodule -i %s: %s: %w", ppPath, out, err)
+		}
+		modulesInstalled = append(modulesInstalled, moduleName)
+		snapshot["modules_installed"] = modulesInstalled
+	}
+
 	return map[string]any{
 		"previous_mode":     currentMode,
 		"new_mode":          newMode,
