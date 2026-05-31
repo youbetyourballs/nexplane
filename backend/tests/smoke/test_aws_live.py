@@ -16233,6 +16233,11 @@ def main():
                                        cloud_account_id=cloud_account_id,
                                        tailscale_auth_key=args.tailscale_auth_key,
                                        backend_tailscale_ip=getattr(args, "backend_tailscale_ip", ""))
+        if "SELINUX_AUTOGEN" in phases:
+            run_phase_selinux_autogen(client, base_url=args.base_url,
+                                      cloud_account_id=cloud_account_id,
+                                      tailscale_auth_key=args.tailscale_auth_key,
+                                      backend_tailscale_ip=getattr(args, "backend_tailscale_ip", ""))
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
@@ -21976,6 +21981,278 @@ def run_phase_apparmor_autogen(client, base_url, cloud_account_id=None,
         log(f"Terminate warning (non-fatal): {e}")
 
     log("APPARMOR_AUTOGEN PASSED ✓")
+    return {"status": "passed", "session_id": session_id, "cr_id": cr_id}
+
+
+def run_phase_selinux_autogen(client, base_url, cloud_account_id=None,
+                              tailscale_auth_key="", backend_tailscale_ip="", **kwargs):
+    import time as _time
+
+    tag = int(_time.time())
+    log = lambda msg: print(f"  [SELINUX_AUTOGEN] {msg}", flush=True)
+    log("Starting SELINUX_AUTOGEN smoke phase")
+
+    if not cloud_account_id or cloud_account_id == "standalone":
+        cloud_account_id = client.get_cloud_account_asset_id()
+    log(f"Using cloud account {cloud_account_id}")
+
+    # ---- 1. Key pair ----
+    key_name = f"nexplane-smoke-selinux-key-{tag}"
+    log(f"Creating key pair {key_name}...")
+    client.run_cr(
+        "[SELINUX_AUTOGEN] create key pair", "key_pair_create", cloud_account_id,
+        {"key_name": key_name, "rollback_strategy": "rollback_unavailable"},
+    )
+
+    # ---- 2. Launch Amazon Linux 2 EC2 (SELinux enforcing by default) ----
+    instance_name = f"nexplane-smoke-selinux-nginx-{tag}"
+    log(f"Launching EC2 instance {instance_name} (Amazon Linux 2, t3.micro)...")
+    cr_result = client.run_cr(
+        "[SELINUX_AUTOGEN] launch EC2", "ec2_launch", cloud_account_id,
+        {
+            "mode": "quick",
+            "name": instance_name,
+            "instance_type": "t3.micro",
+            "key_name": key_name,
+            "os": "amazon_linux",
+            "iam_instance_profile": "NexplaneEC2TestProfile",
+            "rollback_strategy": "terminate_instance",
+        },
+    )
+    instance_id = None
+    if isinstance(cr_result, dict):
+        instance_id = (cr_result.get("instance_id") or
+                       cr_result.get("step_results", {}).get("instance_id", ""))
+
+    # Poll for inventory
+    import boto3 as _boto3
+    ec2_client = _boto3.client("ec2", region_name="us-east-1")
+    instance_asset = None
+    for _ in range(48):
+        _time.sleep(5)
+        candidates = [a for a in client.get("/assets", params={"q": instance_name})
+                      if a["name"] == instance_name]
+        for c in sorted(candidates, key=lambda a: a.get("updated_at", ""), reverse=True):
+            cid = c.get("asset_metadata", {}).get("instance_id", "")
+            if not cid:
+                continue
+            try:
+                state = ec2_client.describe_instances(InstanceIds=[cid])["Reservations"][0]["Instances"][0]["State"]["Name"]
+                if state in ("pending", "running"):
+                    instance_asset = c
+                    instance_id = cid
+                    break
+            except Exception:
+                pass
+        if instance_asset:
+            break
+    assert instance_asset, f"Instance {instance_name} not found in inventory after 4min"
+    instance_asset_id = instance_asset["id"]
+    log(f"Instance {instance_id} in inventory as asset {instance_asset_id}")
+
+    # ---- 3. Wait for SSM + Tailscale + agent ----
+    log("Waiting 3min for SSM agent to become available...")
+    _time.sleep(180)
+
+    auth_key = client.get_tailscale_auth_key(tailscale_auth_key or "")
+    agent_secret = client.get_agent_secret()
+    backend_ip = backend_tailscale_ip or "100.101.186.39"
+    nexplane_url = f"http://{backend_ip}:8000"
+
+    client.run_cr(
+        "[SELINUX_AUTOGEN] tailscale join", "tailscale_join", instance_asset_id,
+        {"instance_id": instance_id, "auth_key": auth_key, "hostname": instance_name},
+    )
+    client.run_cr(
+        "[SELINUX_AUTOGEN] deploy nexplane agent", "deploy_nexplane_agent", instance_asset_id,
+        {"instance_id": instance_id, "nexplane_url": nexplane_url,
+         "nexplane_secret": agent_secret, "hostname": instance_name,
+         "download_url": nexplane_url},
+    )
+
+    # Poll for agent registration
+    agent_asset = None
+    deadline = _time.time() + 300
+    while _time.time() < deadline:
+        candidates = client.get("/assets", params={"q": instance_name, "asset_type": "server"})
+        tagged = [c for c in candidates
+                  if "nexplane-agent" in (c.get("tags") or [])
+                  and c.get("name") == instance_name]
+        if tagged:
+            agent_asset = sorted(tagged, key=lambda c: c.get("updated_at") or "", reverse=True)[0]
+            log(f"Agent registered: {agent_asset['id']}")
+            break
+        _time.sleep(10)
+    assert agent_asset, "Agent did not register within 5min"
+    agent_asset_id = agent_asset["id"]
+
+    # ---- 4. Install nginx + auditd + selinux tools ----
+    log("Installing nginx, auditd, and policycoreutils-python-utils...")
+    client.run_cr(
+        "[SELINUX_AUTOGEN] install nginx", "ssm_command", instance_asset_id,
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": (
+             "yum install -y nginx audit policycoreutils-python-utils && "
+             "systemctl enable auditd nginx && "
+             "systemctl start auditd nginx && "
+             "nginx -t && echo nginx_ok"
+         ),
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("nginx and auditd installed ✓")
+
+    # ---- 5. Verify SELinux is enforcing ----
+    client.run_cr(
+        "[SELINUX_AUTOGEN] verify selinux enforcing", "ssm_command", instance_asset_id,
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": "getenforce | grep -i enforcing && echo selinux_enforcing",
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("SELinux is Enforcing ✓")
+
+    # ---- 6. Start traffic generator ----
+    log("Starting HTTP traffic generator (background, 150s)...")
+    client.run_cr(
+        "[SELINUX_AUTOGEN] start traffic generator", "ssm_command", instance_asset_id,
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": (
+             "nohup bash -c 'for i in $(seq 1 1500); do "
+             "curl -s http://localhost/ > /dev/null; "
+             "curl -s http://localhost/nonexistent > /dev/null; "
+             "sleep 0.1; done' &>/tmp/traffic-gen.log &"
+         ),
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("Traffic generator started ✓")
+
+    # ---- 7. Get project ----
+    projects = client.get("/projects")
+    assert projects, "Need at least one project"
+    project_id = next(
+        (p["id"] for p in projects if "Microsegmentation" in p.get("name", "")),
+        projects[0]["id"],
+    )
+    log(f"Using project {project_id}")
+
+    # ---- 8. Clear any prior selinux baseline ----
+    try:
+        client.delete(f"/security-policy/baselines/{project_id}?policy_type=selinux")
+        log("Pre-run: cleared any existing selinux baseline ✓")
+    except Exception as _e:
+        log(f"Pre-run baseline cleanup (non-fatal): {_e}")
+
+    # ---- 9. First soak session ----
+    session = client.post("/security-policy/soak-sessions", json={
+        "project_id": project_id,
+        "policy_type": "selinux",
+        "asset_ids": [agent_asset_id],
+        "window_seconds": 60,
+    })
+    session_id = session["id"]
+    log(f"Session {session_id} started, status={session['status']}, window=60s")
+
+    log("Waiting 65s for observation window...")
+    _time.sleep(65)
+
+    log("Stopping session and synthesizing profile...")
+    session = client.post(f"/security-policy/soak-sessions/{session_id}/stop",
+                          json={"service_name": "nginx"})
+    assert session["status"] == "cr_proposed", (
+        f"Expected cr_proposed (no prior baseline), got {session['status']}"
+    )
+    cr_id = session["cr_id"]
+    cr = client.get(f"/change-requests/{cr_id}")
+    assert cr["change_type"] == "configure_selinux", f"Wrong change_type: {cr['change_type']}"
+    log(f"Profile synthesized, CR proposed: {cr_id} (change_type=configure_selinux) ✓")
+
+    baseline = client.get(f"/security-policy/baselines/{project_id}",
+                          params={"policy_type": "selinux"})
+    assert "module_source" in baseline["profile"], "Baseline missing module_source"
+    log("Baseline stored with module_source ✓")
+
+    # ---- 10. Plan → approve → execute CR ----
+    client.post(f"/change-requests/{cr_id}/plan")
+    client.post(f"/change-requests/{cr_id}/submit-for-approval")
+    client.post(f"/change-requests/{cr_id}/approve",
+                json={"decision": "approved", "comment": "selinux_autogen smoke"})
+    log("CR submitted and approved ✓")
+
+    client.post(f"/change-requests/{cr_id}/execute")
+    for _ in range(36):
+        _time.sleep(5)
+        cr = client.get(f"/change-requests/{cr_id}")
+        if cr["status"] in ("completed", "failed", "rolled_back"):
+            break
+    assert cr["status"] == "completed", f"CR did not complete: {cr['status']}"
+    log("CR executed — SELinux module installed ✓")
+
+    # Verify module installed and nginx still works
+    client.run_cr(
+        "[SELINUX_AUTOGEN] verify nginx post-selinux", "ssm_command", instance_asset_id,
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": "curl -sf http://localhost/ > /dev/null && semodule -l | grep nexplane && echo aa_ok",
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("nginx responding and SELinux module active ✓")
+
+    # ---- 11. Rollback ----
+    client.post(f"/change-requests/{cr_id}/rollback")
+    for _ in range(30):
+        _time.sleep(5)
+        cr = client.get(f"/change-requests/{cr_id}")
+        if cr["status"] in ("rolled_back", "failed"):
+            break
+    assert cr["status"] == "rolled_back", f"CR rollback failed: {cr['status']}"
+    log("CR rolled back ✓")
+
+    client.run_cr(
+        "[SELINUX_AUTOGEN] verify nginx post-rollback", "ssm_command", instance_asset_id,
+        {"instance_id": instance_id, "document_name": "AWS-RunShellScript",
+         "command": "curl -sf http://localhost/ > /dev/null && echo nginx_ok_post_rollback",
+         "rollback_strategy": "rollback_unavailable"},
+    )
+    log("nginx responding correctly after rollback ✓")
+
+    # ---- 12. Second soak → delta flow ----
+    log("Starting second soak session to test baseline-delta flow...")
+    session2 = client.post("/security-policy/soak-sessions", json={
+        "project_id": project_id,
+        "policy_type": "selinux",
+        "asset_ids": [agent_asset_id],
+        "window_seconds": 60,
+    })
+    session2_id = session2["id"]
+    log("Waiting 65s for second observation window...")
+    _time.sleep(65)
+
+    session2 = client.post(f"/security-policy/soak-sessions/{session2_id}/stop",
+                           json={"service_name": "nginx"})
+    assert session2["status"] == "synthesized", (
+        f"Expected synthesized (baseline exists), got {session2['status']}"
+    )
+    assert session2["baseline_delta"] is not None, "Expected baseline_delta on second run"
+    delta = session2["baseline_delta"]
+    assert "added" in delta and "removed" in delta
+    log(f"Delta computed: +{len(delta['added'])} added, -{len(delta['removed'])} removed rules ✓")
+
+    session2 = client.post(f"/security-policy/soak-sessions/{session2_id}/accept",
+                           json={"service_name": "nginx"})
+    assert session2["status"] == "cr_proposed"
+    assert session2["cr_id"] is not None
+    log(f"Second CR proposed after operator accept: {session2['cr_id']} ✓")
+
+    # ---- 13. Terminate instance ----
+    log("Terminating EC2 instance...")
+    try:
+        client.run_cr(
+            "[SELINUX_AUTOGEN] terminate instance", "ec2_terminate", cloud_account_id,
+            {"instance_id": instance_id},
+        )
+        log("Instance terminated ✓")
+    except Exception as e:
+        log(f"Terminate warning (non-fatal): {e}")
+
+    log("SELINUX_AUTOGEN PASSED ✓")
     return {"status": "passed", "session_id": session_id, "cr_id": cr_id}
 
 
