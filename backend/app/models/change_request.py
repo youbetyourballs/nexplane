@@ -314,6 +314,11 @@ class ChangeType(str, enum.Enum):
     configure_apparmor = "configure_apparmor"
     # SELinux pipeline — SP3 (stub)
     configure_selinux = "configure_selinux"
+    # eBPF policy autogen — SP4
+    ebpf_network_soak = "ebpf_network_soak"
+    configure_ebpf_network = "configure_ebpf_network"
+    configure_ebpf_lsm = "configure_ebpf_lsm"
+    promote_ebpf_policy = "promote_ebpf_policy"
     # OS security posture audit — Phase BULK_PATCH
     audit_os_security_posture = "audit_os_security_posture"
     # Credential rotation additions
