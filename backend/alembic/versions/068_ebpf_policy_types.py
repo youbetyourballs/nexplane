@@ -1,13 +1,13 @@
 """add ebpf_network and ebpf_lsm policy types
 
 Revision ID: 068_ebpf_policy_types
-Revises: 067_merge_project_rollback_and_soak
+Revises: 067_merge_rollback
 Create Date: 2026-06-01
 """
 from alembic import op
 
 revision = "068_ebpf_policy_types"
-down_revision = "067_merge_project_rollback_and_soak"
+down_revision = "067_merge_rollback"
 branch_labels = None
 depends_on = None
 
