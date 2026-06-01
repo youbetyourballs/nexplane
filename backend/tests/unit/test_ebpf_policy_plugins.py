@@ -68,3 +68,65 @@ def test_ebpf_network_default_action_always_audit():
     raw = {"asset-1": [{"dst_ip": "1.1.1.1", "dst_port": 443, "protocol": "tcp", "process": "curl"}]}
     profile = EBPF_NETWORK_PLUGIN.synthesize(raw)
     assert profile["default_action"] == "audit"
+
+
+def test_ebpf_lsm_synthesize_basic():
+    from app.services.security_policy.plugins.ebpf_lsm import EBPF_LSM_PLUGIN
+    raw = {
+        "asset-1": [
+            {"syscall": "open",   "path": "/etc/nginx/nginx.conf", "process": "nginx", "uid": 0},
+            {"syscall": "open",   "path": "/etc/nginx/nginx.conf", "process": "nginx", "uid": 0},  # dup
+            {"syscall": "execve", "path": "/usr/sbin/nginx",       "process": "nginx", "uid": 0},
+        ],
+        "asset-2": [
+            {"syscall": "open", "path": "/etc/resolv.conf", "process": "systemd-resolved", "uid": 101},
+        ],
+    }
+    profile = EBPF_LSM_PLUGIN.synthesize(raw)
+    assert profile["default_action"] == "audit"
+    rules = profile["rules"]
+    open_nginx = [r for r in rules if r["syscall"] == "open" and "nginx" in r["path_pattern"]]
+    assert len(open_nginx) == 1
+    assert open_nginx[0]["action"] == "allow"
+
+
+def test_ebpf_lsm_synthesize_empty():
+    from app.services.security_policy.plugins.ebpf_lsm import EBPF_LSM_PLUGIN
+    profile = EBPF_LSM_PLUGIN.synthesize({})
+    assert profile["rules"] == []
+    assert profile["default_action"] == "audit"
+
+
+def test_ebpf_lsm_delta():
+    from app.services.security_policy.plugins.ebpf_lsm import EBPF_LSM_PLUGIN
+    prior = {
+        "default_action": "audit",
+        "rules": [
+            {"syscall": "open",   "path_pattern": "/etc/nginx/*", "process": "nginx", "action": "allow"},
+            {"syscall": "execve", "path_pattern": "/usr/sbin/*",  "process": "nginx", "action": "allow"},
+        ],
+    }
+    current = {
+        "default_action": "audit",
+        "rules": [
+            {"syscall": "open",   "path_pattern": "/etc/nginx/*", "process": "nginx", "action": "allow"},
+            {"syscall": "open",   "path_pattern": "/var/log/*",   "process": "nginx", "action": "allow"},
+        ],
+    }
+    removed = EBPF_LSM_PLUGIN.delta_extract(prior) - EBPF_LSM_PLUGIN.delta_extract(current)
+    assert ("execve", "/usr/sbin/*", "nginx") in removed
+    added = EBPF_LSM_PLUGIN.delta_extract(current) - EBPF_LSM_PLUGIN.delta_extract(prior)
+    assert ("open", "/var/log/*", "nginx") in added
+
+
+def test_ebpf_lsm_default_action_always_audit():
+    from app.services.security_policy.plugins.ebpf_lsm import EBPF_LSM_PLUGIN
+    raw = {"asset-1": [{"syscall": "open", "path": "/tmp/x", "process": "bash", "uid": 1000}]}
+    profile = EBPF_LSM_PLUGIN.synthesize(raw)
+    assert profile["default_action"] == "audit"
+
+
+def test_plugin_registry_both_registered():
+    from app.services.security_policy.plugins import get_plugin
+    assert get_plugin("ebpf_network").policy_type == "ebpf_network"
+    assert get_plugin("ebpf_lsm").policy_type == "ebpf_lsm"
