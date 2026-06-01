@@ -16244,6 +16244,9 @@ def main():
         if "AI_MANIFEST_PLAN" in phases:
             run_phase_ai_manifest_plan(client)
 
+        if "PROJECT_ROLLBACK" in phases:
+            run_phase_project_rollback(client)
+
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
         print("=" * 60)
@@ -22417,6 +22420,79 @@ def run_phase_ai_manifest_plan(client, **kwargs):
 
     log("AI_MANIFEST_PLAN PASSED ✓")
     return {"status": "passed"}
+
+
+def run_phase_project_rollback(client, **kwargs):
+    import time as _time
+
+    log = lambda msg: print(f"  [PROJECT_ROLLBACK] {msg}", flush=True)
+    log("Starting PROJECT_ROLLBACK smoke phase")
+
+    # Use an existing completed project if available, otherwise bail (no project to roll back)
+    projects_resp = client.get("/projects")
+    # Handle both list response and dict-with-items response
+    projects = projects_resp if isinstance(projects_resp, list) else projects_resp.get("items", [])
+    completed = [p for p in projects if p.get("status") == "completed" and p.get("id")]
+
+    created_project = False
+    project_id = None
+
+    if completed:
+        project = completed[0]
+        project_id = project["id"]
+        log(f"Using existing completed project {project_id}")
+    else:
+        # Create a project — but we can't make it 'completed' without executing CRs
+        # Just create one in in_progress state and roll back its (empty) CR list
+        # The rollback should succeed immediately with 0 steps if no completed CRs
+        project_name = f"smoke-rollback-{int(_time.time())}"
+        project = client.post("/projects", json={
+            "name": project_name,
+            "goal": "Smoke test project-level rollback",
+        })
+        assert "id" in project, f"Project creation failed: {project}"
+        project_id = project["id"]
+        log(f"Created project {project_id} (status: {project.get('status')})")
+        created_project = True
+
+    # Initiate rollback
+    rollback_resp = client.post(f"/projects/{project_id}/rollback", json={"notes": "smoke test"})
+    assert "rollback" in rollback_resp, f"Unexpected rollback response: {rollback_resp}"
+    rollback = rollback_resp["rollback"]
+    rollback_id = rollback["id"]
+    warnings = rollback_resp.get("warnings", [])
+    log(f"Rollback initiated: {rollback_id}")
+    if warnings:
+        log(f"  Preflight warnings: {warnings}")
+
+    # Poll until rollback reaches terminal state
+    for attempt in range(30):
+        _time.sleep(4)
+        rb = client.get(f"/projects/{project_id}/rollback")
+        status = rb["status"]
+        log(f"  Rollback status: {status} (attempt {attempt + 1})")
+        if status in ("completed", "failed", "awaiting_user", "paused"):
+            break
+
+    assert rb["status"] in ("completed", "awaiting_user"), (
+        f"Rollback ended in unexpected status: {rb['status']}. Steps: {rb.get('steps')}"
+    )
+    log(f"Rollback reached terminal state: {rb['status']} ✓")
+
+    # Verify all steps have valid rollback_kind
+    steps = rb.get("steps", [])
+    valid_kinds = {"standard", "reconstitution", "permanent_no_backup"}
+    for step in steps:
+        assert step["rollback_kind"] in valid_kinds, f"Unknown rollback_kind: {step['rollback_kind']}"
+    log(f"All {len(steps)} steps have valid rollback_kind ✓")
+
+    # Cleanup
+    if created_project:
+        client.delete(f"/projects/{project_id}")
+        log(f"Deleted project {project_id}")
+
+    log("PROJECT_ROLLBACK PASSED ✓")
+    return {"status": "passed", "rollback_status": rb["status"], "steps": len(steps)}
 
 
 if __name__ == "__main__":
