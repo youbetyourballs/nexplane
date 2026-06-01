@@ -584,12 +584,13 @@ async def manual_rollback(
     async def _do_rollback():
         from app.database import AsyncSessionLocal
         try:
+            result_data = await execute_cr_rollback(cr.id)
             async with AsyncSessionLocal() as s:
-                result_data = await execute_cr_rollback(cr.id, s)
                 run2 = await s.get(ExecutionRun, rollback_run_id)
                 if run2:
                     run2.status = ExecutionStatus.rolled_back
                     run2.result = result_data
+                    run2.completed_at = datetime.now(timezone.utc)
                 await s.commit()
         except Exception as exc:
             _logger.error("Manual rollback failed: %s", exc)
@@ -599,6 +600,7 @@ async def manual_rollback(
                 if run2:
                     run2.status = ExecutionStatus.failed
                     run2.result = {"error": str(exc)}
+                    run2.completed_at = datetime.now(timezone.utc)
                 if cr2:
                     cr2.status = ChangeRequestStatus.failed
                 await s.commit()
