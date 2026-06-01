@@ -16238,6 +16238,11 @@ def main():
                                       cloud_account_id=cloud_account_id,
                                       tailscale_auth_key=args.tailscale_auth_key,
                                       backend_tailscale_ip=getattr(args, "backend_tailscale_ip", ""))
+        if "EBPF_POLICY" in phases:
+            run_phase_ebpf_policy(client, base_url=args.base_url,
+                                  cloud_account_id=cloud_account_id,
+                                  tailscale_auth_key=args.tailscale_auth_key,
+                                  backend_tailscale_ip=getattr(args, "backend_tailscale_ip", ""))
         if "CR_MANIFEST" in phases:
             run_phase_cr_manifest(client, base_url=args.base_url)
 
@@ -22493,6 +22498,233 @@ def run_phase_project_rollback(client, **kwargs):
 
     log("PROJECT_ROLLBACK PASSED ✓")
     return {"status": "passed", "rollback_status": rb["status"], "steps": len(steps)}
+
+
+def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
+                          tailscale_auth_key=None, backend_tailscale_ip=None, **kwargs):
+    """
+    Smoke test for EBPF_POLICY.
+    Provisions a fresh EC2 with the Nexplane agent, exercises both eBPF network and
+    LSM soak → synthesize → configure (audit) → promote → enforce → rollback pipeline.
+    """
+    import time as _time
+    import boto3 as _boto3
+
+    log = lambda msg: print(f"  [EBPF_POLICY] {msg}", flush=True)
+    log("Starting EBPF_POLICY smoke phase")
+
+    if not cloud_account_id or cloud_account_id == "standalone":
+        cloud_account_id = client.get_cloud_account_asset_id()
+
+    ts = int(_time.time())
+    instance_name = f"nexplane-smoke-ebpf-{ts}"
+    key_name = f"nexplane-smoke-ebpf-key-{ts}"
+
+    # ---- 1. Provision EC2 ----
+    log(f"Creating key pair {key_name}...")
+    client.run_cr("[EBPF_POLICY] create key pair", "key_pair_create", cloud_account_id,
+                  {"key_name": key_name})
+
+    log(f"Launching EC2 instance {instance_name}...")
+    client.run_cr("[EBPF_POLICY] launch EC2", "ec2_launch", cloud_account_id,
+                  {"mode": "quick", "name": instance_name, "os": "amazon_linux",
+                   "iam_instance_profile": "NexplaneEC2TestProfile", "key_name": key_name,
+                   "rollback_strategy": "terminate_instance"})
+
+    ec2_client = _boto3.client("ec2", region_name="us-east-1")
+    instance_asset = None
+    instance_id = None
+    for _ in range(48):
+        _time.sleep(5)
+        candidates = [a for a in client.get("/assets", params={"q": instance_name})
+                      if a["name"] == instance_name]
+        for c in sorted(candidates, key=lambda a: a.get("updated_at", ""), reverse=True):
+            cid = c.get("asset_metadata", {}).get("instance_id", "")
+            if not cid:
+                continue
+            try:
+                state = ec2_client.describe_instances(InstanceIds=[cid])["Reservations"][0]["Instances"][0]["State"]["Name"]
+                if state in ("pending", "running"):
+                    instance_asset = c
+                    instance_id = cid
+                    break
+            except Exception:
+                pass
+        if instance_asset:
+            break
+    assert instance_asset, f"Instance {instance_name} not found in inventory within 4min"
+    log(f"Instance {instance_id} in inventory as asset {instance_asset['id']}")
+
+    log("Waiting 3min for SSM agent...")
+    _time.sleep(180)
+
+    # ---- 2. Deploy Nexplane agent ----
+    auth_key = client.get_tailscale_auth_key(tailscale_auth_key or "")
+    agent_secret = client.get_agent_secret()
+    backend_ip = backend_tailscale_ip or "100.101.186.39"
+    nexplane_url = f"http://{backend_ip}:8000"
+
+    client.run_cr("[EBPF_POLICY] tailscale join", "tailscale_join", instance_asset["id"],
+                  {"instance_id": instance_id, "auth_key": auth_key, "hostname": instance_name})
+    client.run_cr("[EBPF_POLICY] deploy nexplane agent", "deploy_nexplane_agent", instance_asset["id"],
+                  {"instance_id": instance_id, "nexplane_url": nexplane_url,
+                   "nexplane_secret": agent_secret, "hostname": instance_name,
+                   "download_url": nexplane_url})
+
+    agent_asset_id = None
+    deadline = _time.time() + 300
+    while _time.time() < deadline:
+        candidates = client.get("/assets", params={"q": instance_name, "asset_type": "server"})
+        tagged = [c for c in candidates
+                  if "nexplane-agent" in (c.get("tags") or []) and c.get("name") == instance_name]
+        if tagged:
+            agent_asset_id = sorted(tagged, key=lambda c: c.get("updated_at") or "", reverse=True)[0]["id"]
+            log(f"Agent registered: {agent_asset_id}")
+            break
+        _time.sleep(10)
+    assert agent_asset_id, "Agent did not register within 5min"
+
+    # ---- 3. Network soak leg ----
+    log("Starting network soak (30s)...")
+    soak_resp = client.post("/security-policy/soak-sessions", json={
+        "project_id": None,
+        "policy_type": "ebpf_network",
+        "window_seconds": 30,
+        "asset_ids": [agent_asset_id],
+    })
+    session_id = soak_resp["id"]
+    log(f"Soak session {session_id} started")
+
+    deadline = _time.time() + 120
+    session = None
+    while _time.time() < deadline:
+        _time.sleep(10)
+        session = client.get(f"/security-policy/soak-sessions/{session_id}")
+        if session["status"] in ("synthesized", "cr_proposed"):
+            break
+    assert session and session["status"] in ("synthesized", "cr_proposed"), \
+        f"Network soak session did not synthesize within 2min: {session}"
+    profile = session.get("synthesized_profile", {})
+    rules = profile.get("rules", [])
+    assert len(rules) > 0, "Network soak returned no flow rules (expected at least DNS)"
+    log(f"Network soak synthesized — {len(rules)} rules (DNS present: {any(r['dst_port']==53 for r in rules)})")
+
+    log("Applying network policy in audit mode...")
+    cr_net = client.run_cr("[EBPF_POLICY] configure_ebpf_network", "configure_ebpf_network",
+                           agent_asset_id,
+                           {"profile": profile, "service_name": "nexplane-smoke"})
+    result_net = client.get_cr_step_result(cr_net)
+    assert result_net.get("snapshot_id"), f"configure_ebpf_network missing snapshot_id: {result_net}"
+    log(f"Network policy loaded — snapshot_id={result_net['snapshot_id']}")
+
+    log("Promoting network policy to enforce...")
+    cr_net_promote = client.run_cr("[EBPF_POLICY] promote network", "promote_ebpf_policy",
+                                   agent_asset_id,
+                                   {"policy_type": "network", "asset_id": agent_asset_id})
+    result_net_promote = client.get_cr_step_result(cr_net_promote)
+    assert result_net_promote.get("prior_mode") == "audit", \
+        f"Expected prior_mode=audit: {result_net_promote}"
+    log("Network policy in enforce mode")
+
+    log("Rolling back promote (network → audit)...")
+    client.post(f"/change-requests/{cr_net_promote['id']}/rollback", json={})
+    deadline = _time.time() + 60
+    while _time.time() < deadline:
+        cr_state = client.get(f"/change-requests/{cr_net_promote['id']}")
+        if cr_state.get("rollback_status") in ("completed", "rolled_back", "failed"):
+            break
+        _time.sleep(5)
+    assert cr_state.get("rollback_status") in ("completed", "rolled_back"), \
+        f"Network promote rollback did not complete: {cr_state}"
+    log("Network promote rolled back ✓")
+
+    log("Rolling back configure_ebpf_network (unload maps)...")
+    client.post(f"/change-requests/{cr_net['id']}/rollback", json={})
+    deadline = _time.time() + 60
+    while _time.time() < deadline:
+        cr_state = client.get(f"/change-requests/{cr_net['id']}")
+        if cr_state.get("rollback_status") in ("completed", "rolled_back", "failed"):
+            break
+        _time.sleep(5)
+    assert cr_state.get("rollback_status") in ("completed", "rolled_back"), \
+        f"Network policy rollback did not complete: {cr_state}"
+    log("Network policy rolled back ✓")
+
+    # ---- 4. LSM soak leg ----
+    log("Starting LSM soak (30s)...")
+    lsm_soak_resp = client.post("/security-policy/soak-sessions", json={
+        "project_id": None,
+        "policy_type": "ebpf_lsm",
+        "window_seconds": 30,
+        "asset_ids": [agent_asset_id],
+    })
+    lsm_session_id = lsm_soak_resp["id"]
+    log(f"LSM soak session {lsm_session_id} started")
+
+    deadline = _time.time() + 120
+    lsm_session = None
+    while _time.time() < deadline:
+        _time.sleep(10)
+        lsm_session = client.get(f"/security-policy/soak-sessions/{lsm_session_id}")
+        if lsm_session["status"] in ("synthesized", "cr_proposed"):
+            break
+    assert lsm_session and lsm_session["status"] in ("synthesized", "cr_proposed"), \
+        f"LSM soak session did not synthesize within 2min: {lsm_session}"
+    lsm_profile = lsm_session.get("synthesized_profile", {})
+    lsm_rules = lsm_profile.get("rules", [])
+    assert len(lsm_rules) > 0, "LSM soak returned no event rules"
+    log(f"LSM soak synthesized — {len(lsm_rules)} rules")
+
+    log("Applying LSM policy in audit mode...")
+    cr_lsm = client.run_cr("[EBPF_POLICY] configure_ebpf_lsm", "configure_ebpf_lsm",
+                           agent_asset_id,
+                           {"profile": lsm_profile, "service_name": "nexplane-smoke"})
+    result_lsm = client.get_cr_step_result(cr_lsm)
+    assert result_lsm.get("snapshot_id"), f"configure_ebpf_lsm missing snapshot_id: {result_lsm}"
+    log(f"LSM policy loaded — kernel_lsm={result_lsm.get('kernel_lsm')}, snapshot_id={result_lsm['snapshot_id']}")
+
+    log("Promoting LSM policy to enforce...")
+    cr_lsm_promote = client.run_cr("[EBPF_POLICY] promote LSM", "promote_ebpf_policy",
+                                   agent_asset_id,
+                                   {"policy_type": "lsm", "asset_id": agent_asset_id})
+    result_lsm_promote = client.get_cr_step_result(cr_lsm_promote)
+    assert result_lsm_promote.get("prior_mode") == "audit", \
+        f"Expected prior_mode=audit: {result_lsm_promote}"
+    log("LSM policy in enforce mode")
+
+    log("Rolling back promote (LSM → audit)...")
+    client.post(f"/change-requests/{cr_lsm_promote['id']}/rollback", json={})
+    deadline = _time.time() + 60
+    while _time.time() < deadline:
+        cr_state = client.get(f"/change-requests/{cr_lsm_promote['id']}")
+        if cr_state.get("rollback_status") in ("completed", "rolled_back", "failed"):
+            break
+        _time.sleep(5)
+    assert cr_state.get("rollback_status") in ("completed", "rolled_back"), \
+        f"LSM promote rollback did not complete: {cr_state}"
+    log("LSM promote rolled back ✓")
+
+    log("Rolling back configure_ebpf_lsm (unload maps)...")
+    client.post(f"/change-requests/{cr_lsm['id']}/rollback", json={})
+    deadline = _time.time() + 60
+    while _time.time() < deadline:
+        cr_state = client.get(f"/change-requests/{cr_lsm['id']}")
+        if cr_state.get("rollback_status") in ("completed", "rolled_back", "failed"):
+            break
+        _time.sleep(5)
+    assert cr_state.get("rollback_status") in ("completed", "rolled_back"), \
+        f"LSM policy rollback did not complete: {cr_state}"
+    log("LSM policy rolled back ✓")
+
+    # ---- 5. Cleanup ----
+    try:
+        client.run_cr("[EBPF_POLICY] terminate instance", "ec2_terminate", cloud_account_id,
+                      {"instance_id": instance_id})
+        log(f"Instance {instance_id} terminated")
+    except Exception as cleanup_e:
+        log(f"Cleanup warning: {cleanup_e}")
+
+    log("EBPF_POLICY PASSED ✓")
 
 
 if __name__ == "__main__":
