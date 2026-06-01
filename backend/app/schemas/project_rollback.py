@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from app.models.project_rollback import (
     ProjectRollbackStatus, ProjectRollbackTrigger,
@@ -10,7 +10,7 @@ from app.models.project_rollback import (
 
 
 class ProjectRollbackStepRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = {"from_attributes": True}
 
     id: uuid.UUID
     project_rollback_id: uuid.UUID
@@ -25,7 +25,7 @@ class ProjectRollbackStepRead(BaseModel):
 
 
 class ProjectRollbackRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = {"from_attributes": True}
 
     id: uuid.UUID
     project_id: uuid.UUID
