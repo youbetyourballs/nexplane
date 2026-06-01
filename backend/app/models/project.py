@@ -13,6 +13,7 @@ class ProjectStatus(str, enum.Enum):
     in_progress = "in_progress"
     completed = "completed"
     cancelled = "cancelled"
+    rolling_back = "rolling_back"
 
 
 class Project(Base):
