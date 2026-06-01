@@ -22412,8 +22412,8 @@ def run_phase_ai_manifest_plan(client, **kwargs):
         f"Available hardening types (sample): {sorted(hardening_types)[:10]}"
     )
     log(f"Hardening CRs in plan: {hardening_in_plan} ✓")
-    # TODO: DELETE /projects/{id} endpoint does not exist yet — smoke project remains
-    log(f"Note: project {project_id} left in place (no DELETE /projects endpoint)")
+    client.delete(f"/projects/{project_id}")
+    log(f"Deleted project {project_id} ✓")
 
     log("AI_MANIFEST_PLAN PASSED ✓")
     return {"status": "passed"}
