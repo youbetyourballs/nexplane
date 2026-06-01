@@ -4,8 +4,9 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession  # still used by _load_cr_and_run / _executor_fallback
 
+from app.database import AsyncSessionLocal
 from app.models.change_request import ChangeRequest, ChangeRequestStatus
 from app.models.execution_run import ExecutionRun, ExecutionStatus
 
@@ -50,7 +51,6 @@ async def _executor_fallback(
         from app.connectors.catalog_service import get_catalog_service
         from app.models.connector import Connector as _Connector
         from app.services.connector_service import _attach_credentials
-        from app.database import AsyncSessionLocal
 
         _ct = cr.change_type.value if hasattr(cr.change_type, "value") else str(cr.change_type)
         _catalog = get_catalog_service()
@@ -92,8 +92,8 @@ async def _executor_fallback(
                     if _conn_obj:
                         await _attach_credentials(_conn_obj, _rdb)
                         _connector = _conn_obj
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Could not load connector for rollback: %s", exc)
 
         # Try connector type from result first, then fall back to common types
         _mod = None
@@ -137,30 +137,32 @@ async def _executor_fallback(
 
 async def execute_cr_rollback(
     cr_id: uuid.UUID,
-    db: AsyncSession,
     extra_execution_result: dict | None = None,
 ) -> dict:
     """Execute rollback for a single CR. Returns rollback result dict.
 
+    Opens its own DB session so callers are never coupled to this function's commit.
+
     extra_execution_result: merged into execution_result before rollback (used for
     reconstitution — pass the backup CR's execution result here).
     """
-    cr, latest_run, plan = await _load_cr_and_run(cr_id, db)
+    async with AsyncSessionLocal() as db:
+        cr, latest_run, plan = await _load_cr_and_run(cr_id, db)
 
-    execution_result = (latest_run.result or {}) if latest_run else {}
-    if extra_execution_result:
-        execution_result = {**execution_result, **extra_execution_result}
+        execution_result = (latest_run.result or {}) if latest_run else {}
+        if extra_execution_result:
+            execution_result = {**execution_result, **extra_execution_result}
 
-    steps = (plan.generated_steps if plan else []) or []
-    has_rollback_steps = any(s.get("rollback_action") for s in steps)
+        steps = (plan.generated_steps if plan else []) or []
+        has_rollback_steps = any(s.get("rollback_action") for s in steps)
 
-    if has_rollback_steps:
-        from app.workflows.activities import activity_execute_rollback
-        result = await activity_execute_rollback(str(cr.id), steps, execution_result)
-    else:
-        result = await _executor_fallback(cr, execution_result, db)
+        if has_rollback_steps:
+            from app.workflows.activities import activity_execute_rollback
+            result = await activity_execute_rollback(str(cr.id), steps, execution_result)
+        else:
+            result = await _executor_fallback(cr, execution_result, db)
 
-    cr.status = ChangeRequestStatus.rolled_back
-    cr.updated_at = datetime.now(timezone.utc)
-    await db.commit()
-    return result
+        cr.status = ChangeRequestStatus.rolled_back
+        cr.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        return result
