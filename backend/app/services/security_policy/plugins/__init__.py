@@ -28,6 +28,9 @@ from app.services.security_policy.plugins.selinux import SELINUX_PLUGIN  # noqa:
 _register(SELINUX_PLUGIN)
 from app.services.security_policy.plugins.ebpf_network import EBPF_NETWORK_PLUGIN  # noqa: E402
 _register(EBPF_NETWORK_PLUGIN)
+from app.services.security_policy.plugins.ebpf_lsm import EBPF_LSM_PLUGIN  # noqa: E402
+_register(EBPF_LSM_PLUGIN)
 # selinux: SP3 done
 # ebpf_network: SP4 done
-# network_policy: SP5
+# ebpf_lsm: SP5 done
+# network_policy: SP6
