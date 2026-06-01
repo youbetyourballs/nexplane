@@ -59,6 +59,23 @@ async def update_change_request_status(change_request_id: str, status: str) -> N
             cr.status = ChangeRequestStatus(status)
             cr.updated_at = datetime.now(timezone.utc)
             await db.commit()
+    # Notify project rollback service if this CR belongs to a project and has failed
+    if status == "failed":
+        try:
+            import asyncio as _asyncio
+            from sqlalchemy import select as _sa_select
+            from app.models.project import ProjectChangeRequest as _PCR
+            from app.services.project_rollback_service import on_cr_failed as _on_cr_failed
+            _cr_uuid = uuid.UUID(change_request_id)
+            async with AsyncSessionLocal() as _db:
+                _pcr_res = await _db.execute(
+                    _sa_select(_PCR).where(_PCR.change_request_id == _cr_uuid)
+                )
+                _pcr = _pcr_res.scalar_one_or_none()
+                if _pcr:
+                    _asyncio.ensure_future(_on_cr_failed(_pcr.project_id, _cr_uuid))
+        except Exception:
+            pass  # never block CR status update on rollback notification failure
 
 
 async def update_execution_run_status(

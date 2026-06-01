@@ -78,6 +78,8 @@ async def lifespan(app: FastAPI):
     # restarted will never complete; mark them failed now so the
     # dashboard doesn't show phantom "executing" entries.
     await _scrub_orphaned_crs()
+    from app.services.project_rollback_service import resume_interrupted as _resume_rollbacks
+    await _resume_rollbacks()
     yield
     scheduler_service.stop()
     if _escalation_scheduler and _escalation_scheduler.running:
