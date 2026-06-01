@@ -45,3 +45,4 @@ from app.models.access_review_schedule import AccessReviewSchedule  # noqa: F401
 from app.models.recurring_job import RecurringJob, RecurringJobType  # noqa: F401
 from app.models.backup_target import BackupTarget, BackupTargetStatus  # noqa: F401
 from app.models.security_policy import SecurityPolicySoakSession, SecurityPolicyBaseline  # noqa: F401
+from app.models.project_rollback import ProjectRollback, ProjectRollbackStep  # noqa: F401
