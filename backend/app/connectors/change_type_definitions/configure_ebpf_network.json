@@ -2,11 +2,9 @@
   "change_type": "configure_ebpf_network",
   "display_name": "Configure eBPF Network Policy",
   "description": "Load a pre-compiled eBPF TC/cgroup network enforcer and write the allowlist into BPF maps. Starts in audit mode. Rollback unloads the program and clears all maps.",
-  "connector_type": "nexplane_agent",
-  "generic_action": "configure_ebpf_network",
-  "rollback_type": "standard",
-  "parameters": [
-    {"name": "profile",      "type": "object",  "required": true,  "description": "NetworkPolicy profile from synthesis"},
-    {"name": "service_name", "type": "string",  "required": false, "description": "Service label for BPF pin path"}
-  ]
+  "rollback_action": "configure_ebpf_network",
+  "parameters": {
+    "profile":      {"required": true,  "type": "object"},
+    "service_name": {"required": false, "type": "string"}
+  }
 }

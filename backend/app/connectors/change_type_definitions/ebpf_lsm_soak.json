@@ -2,11 +2,9 @@
   "change_type": "ebpf_lsm_soak",
   "display_name": "eBPF LSM Soak",
   "description": "Observe kernel events (syscalls, file access) via eBPF LSM/kprobe hooks for a defined window and return event tuples for policy synthesis.",
-  "connector_type": "nexplane_agent",
-  "generic_action": "ebpf_lsm_soak",
-  "rollback_type": "none",
-  "parameters": [
-    {"name": "window_seconds", "type": "integer", "required": false, "default": 60, "description": "Observation window in seconds"},
-    {"name": "service_name",   "type": "string",  "required": false, "description": "Optional process name filter"}
-  ]
+  "rollback_action": "",
+  "parameters": {
+    "window_seconds": {"required": false, "type": "integer"},
+    "service_name":   {"required": false, "type": "string"}
+  }
 }
