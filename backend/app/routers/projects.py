@@ -239,6 +239,22 @@ async def update_project(
     return project
 
 
+@router.delete("/{project_id}", status_code=204)
+async def delete_project(
+    project_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    project = await _get_project(db, project_id, user.organization_id)
+    await record_event(
+        db, user.organization_id, "project.deleted",
+        {"project_id": str(project_id), "name": project.name},
+        actor_id=user.id,
+    )
+    await db.delete(project)
+    await db.commit()
+
+
 @router.post("/{project_id}/members", response_model=ProjectMemberRead, status_code=201)
 async def add_project_member(
     project_id: uuid.UUID,
