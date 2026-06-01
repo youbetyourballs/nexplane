@@ -290,6 +290,14 @@ async def initiate_rollback(
         {"project_id": str(project_id)},
         actor_id=user.id,
     )
+    # Reload rollback with steps eagerly to avoid async greenlet errors during serialization
+    from sqlalchemy import select as _select2
+    rb_res = await db.execute(
+        _select2(ProjectRollback)
+        .where(ProjectRollback.id == rollback.id)
+        .options(selectinload(ProjectRollback.steps))
+    )
+    rollback = rb_res.scalar_one()
     return RollbackInitResponse(
         rollback=ProjectRollbackRead.model_validate(rollback),
         warnings=warnings,
