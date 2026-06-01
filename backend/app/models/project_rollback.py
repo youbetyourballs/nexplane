@@ -63,6 +63,8 @@ class ProjectRollback(Base):
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    project: Mapped["Project"] = relationship("Project", back_populates="rollbacks")
+
     steps: Mapped[list["ProjectRollbackStep"]] = relationship(
         "ProjectRollbackStep",
         back_populates="rollback",
