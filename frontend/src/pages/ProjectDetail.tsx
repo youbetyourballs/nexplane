@@ -7,6 +7,7 @@ import {
 import { projectsApi } from "../api/endpoints";
 import { changeRequestsApi } from "../api/endpoints";
 import { assetsApi } from "../api/endpoints";
+import type { ProjectRollback, ProjectRollbackStep } from "../api/endpoints";
 import { PageLoading } from "../components/LoadingSpinner";
 import { AIPanel } from "../components/AIPanel";
 import { SecurityPolicySoakPanel } from "../components/SecurityPolicySoakPanel";
@@ -66,6 +67,10 @@ export function ProjectDetail() {
     () => searchParams.get("showAI") === "1"
   );
 
+  const [rollbackOpen, setRollbackOpen] = useState(false);
+  const [rollbackNotes, setRollbackNotes] = useState('');
+  const [rollbackActive, setRollbackActive] = useState(false);
+
   const [newCrTitle, setNewCrTitle] = useState("");
   const [newCrType, setNewCrType] = useState<ChangeType>("dns_update");
   const [newCrAssets, setNewCrAssets] = useState<string[]>([]);
@@ -96,6 +101,35 @@ export function ProjectDetail() {
     queryKey: ["assets"],
     queryFn: () => assetsApi.list(),
     enabled: !isNew,
+  });
+
+  const { data: activeRollback, refetch: refetchRollback } = useQuery<ProjectRollback>({
+    queryKey: ['project-rollback', id],
+    queryFn: () => projectsApi.getRollback(id!),
+    enabled: !!id && !isNew && (project?.status === 'rolling_back' || rollbackActive),
+    refetchInterval: 3000,
+    retry: false,
+  });
+
+  const initiateMutation = useMutation({
+    mutationFn: () => projectsApi.rollback(id!, { notes: rollbackNotes || undefined }),
+    onSuccess: () => { setRollbackActive(true); refetchRollback(); },
+  });
+
+  const pauseMutation = useMutation({
+    mutationFn: () => projectsApi.pauseRollback(id!),
+    onSuccess: () => refetchRollback(),
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: () => projectsApi.resumeRollback(id!),
+    onSuccess: () => refetchRollback(),
+  });
+
+  const stepDecisionMutation = useMutation({
+    mutationFn: ({ stepId, action }: { stepId: string; action: 'skip' | 'retry' | 'mark_done' }) =>
+      projectsApi.rollbackStepDecision(id!, stepId, action),
+    onSuccess: () => refetchRollback(),
   });
 
   useEffect(() => {
@@ -309,6 +343,14 @@ export function ProjectDetail() {
               ))}
             </select>
           )}
+          {!isNew && (project?.status === 'completed' || project?.status === 'in_progress') && (
+            <button
+              onClick={() => setRollbackOpen(true)}
+              className="px-3 py-1.5 border border-slate-300 text-slate-700 text-sm rounded-md hover:bg-slate-50"
+            >
+              Roll Back Project
+            </button>
+          )}
           <button
             onClick={handleSave}
             disabled={!name.trim() || (!headerDirty && !isNew) || createProject.isPending || updateProject.isPending}
@@ -323,6 +365,199 @@ export function ProjectDetail() {
 
       {!isNew && (
         <>
+          {/* Auto-trigger failure banner */}
+          {activeRollback?.status === 'awaiting_user' && activeRollback.trigger === 'execution_failure' && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4 flex items-center justify-between">
+              <span className="text-sm text-yellow-800">
+                A CR failed during execution. Roll back the project?
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setRollbackOpen(true); }}
+                  className="px-3 py-1 bg-yellow-700 text-white text-xs rounded hover:bg-yellow-800"
+                >
+                  Review &amp; Roll Back
+                </button>
+                <button
+                  onClick={() => setRollbackActive(false)}
+                  className="px-3 py-1 text-yellow-700 text-xs rounded hover:bg-yellow-100"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Rollback panel */}
+          {rollbackOpen && (
+            <div className="mb-6 bg-white border border-slate-200 rounded-lg shadow-sm">
+              <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-900">Roll Back Project</h3>
+                <button
+                  onClick={() => setRollbackOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {!activeRollback || activeRollback.status === 'completed' || activeRollback.status === 'failed' ? (
+                /* Initiate form */
+                <div className="px-5 py-4">
+                  {activeRollback?.status === 'completed' && (
+                    <div className="mb-3 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
+                      Rollback completed successfully.
+                    </div>
+                  )}
+                  {activeRollback?.status === 'failed' && (
+                    <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">
+                      Rollback failed. Check steps below for details.
+                    </div>
+                  )}
+                  <label className="block text-xs text-slate-500 mb-1">Notes (optional)</label>
+                  <textarea
+                    value={rollbackNotes}
+                    onChange={(e) => setRollbackNotes(e.target.value)}
+                    placeholder="Reason for rollback…"
+                    rows={3}
+                    className="w-full text-sm border border-slate-200 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 mb-3"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => initiateMutation.mutate()}
+                      disabled={initiateMutation.isPending}
+                      className="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {initiateMutation.isPending ? 'Starting…' : 'Confirm Rollback'}
+                    </button>
+                    <button
+                      onClick={() => setRollbackOpen(false)}
+                      className="px-3 py-1.5 border border-slate-200 text-slate-600 text-sm rounded hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {initiateMutation.isError && (
+                    <p className="mt-2 text-xs text-red-600">
+                      Failed to start rollback. Check that the project supports rollback.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                /* Live progress view */
+                <div className="px-5 py-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-slate-500">Status:</span>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                        activeRollback.status === 'running' ? 'bg-blue-100 text-blue-700' :
+                        activeRollback.status === 'paused' ? 'bg-amber-100 text-amber-700' :
+                        activeRollback.status === 'awaiting_user' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {activeRollback.status.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                    <div className="flex gap-2">
+                      {activeRollback.status === 'running' && (
+                        <button
+                          onClick={() => pauseMutation.mutate()}
+                          disabled={pauseMutation.isPending}
+                          className="text-xs px-2.5 py-1 border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Pause
+                        </button>
+                      )}
+                      {(activeRollback.status === 'paused' || activeRollback.status === 'awaiting_user') && (
+                        <button
+                          onClick={() => resumeMutation.mutate()}
+                          disabled={resumeMutation.isPending}
+                          className="text-xs px-2.5 py-1 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
+                        >
+                          Resume
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {activeRollback.notes && (
+                    <p className="text-xs text-slate-500 italic mb-3">{activeRollback.notes}</p>
+                  )}
+
+                  <div className="space-y-2">
+                    {(activeRollback.steps ?? []).map((step: ProjectRollbackStep) => (
+                      <div
+                        key={step.id}
+                        className={`flex items-start gap-3 p-3 rounded border ${
+                          step.status === 'running' ? 'border-blue-200 bg-blue-50' :
+                          step.status === 'completed' ? 'border-emerald-200 bg-emerald-50' :
+                          step.status === 'failed' ? 'border-red-200 bg-red-50' :
+                          step.status === 'awaiting_user' ? 'border-yellow-200 bg-yellow-50' :
+                          step.status === 'skipped' ? 'border-slate-100 bg-slate-50' :
+                          'border-slate-100 bg-white'
+                        }`}
+                      >
+                        <span className="text-xs text-slate-400 w-5 shrink-0 text-right mt-0.5">
+                          {step.sequence_order + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-mono text-slate-600 truncate">
+                              {step.change_request_id.slice(0, 8)}…
+                            </span>
+                            <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                              step.status === 'running' ? 'bg-blue-100 text-blue-700' :
+                              step.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
+                              step.status === 'failed' ? 'bg-red-100 text-red-700' :
+                              step.status === 'awaiting_user' ? 'bg-yellow-100 text-yellow-700' :
+                              step.status === 'skipped' ? 'bg-slate-100 text-slate-500' :
+                              'bg-slate-100 text-slate-500'
+                            }`}>
+                              {step.status.replace(/_/g, ' ')}
+                            </span>
+                            <span className="text-xs text-slate-400">
+                              [{step.rollback_kind.replace(/_/g, ' ')}]
+                            </span>
+                          </div>
+                          {step.status === 'awaiting_user' && (
+                            <div className="flex gap-2 mt-2">
+                              <button
+                                onClick={() => stepDecisionMutation.mutate({ stepId: step.id, action: 'retry' })}
+                                disabled={stepDecisionMutation.isPending}
+                                className="text-xs px-2 py-0.5 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
+                              >
+                                Retry
+                              </button>
+                              <button
+                                onClick={() => stepDecisionMutation.mutate({ stepId: step.id, action: 'skip' })}
+                                disabled={stepDecisionMutation.isPending}
+                                className="text-xs px-2 py-0.5 border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                Skip
+                              </button>
+                              <button
+                                onClick={() => stepDecisionMutation.mutate({ stepId: step.id, action: 'mark_done' })}
+                                disabled={stepDecisionMutation.isPending}
+                                className="text-xs px-2 py-0.5 border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                Mark done
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {(activeRollback.steps ?? []).length === 0 && (
+                      <p className="text-xs text-slate-400 text-center py-2">
+                        Preparing rollback steps…
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Status summary bar */}
           {isInProgress && members.length > 0 && (
             <div className="flex gap-4 mb-4 text-sm">
