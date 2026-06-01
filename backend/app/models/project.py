@@ -43,6 +43,10 @@ class Project(Base):
         order_by="ProjectChangeRequest.sequence_order",
     )
 
+    rollbacks: Mapped[list["ProjectRollback"]] = relationship(
+        "ProjectRollback", back_populates="project", cascade="all, delete-orphan"
+    )
+
 
 class ProjectChangeRequest(Base):
     __tablename__ = "project_change_requests"

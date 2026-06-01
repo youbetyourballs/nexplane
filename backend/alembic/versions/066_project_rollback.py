@@ -66,8 +66,13 @@ def upgrade():
         )
     """)
 
+    op.create_index("ix_project_rollbacks_project_id", "project_rollbacks", ["project_id"])
+    op.create_index("ix_project_rollback_steps_project_rollback_id", "project_rollback_steps", ["project_rollback_id"])
+
 
 def downgrade():
+    op.execute("DROP INDEX IF EXISTS ix_project_rollback_steps_project_rollback_id")
+    op.execute("DROP INDEX IF EXISTS ix_project_rollbacks_project_id")
     op.execute("DROP TABLE IF EXISTS project_rollback_steps")
     op.execute("DROP TABLE IF EXISTS project_rollbacks")
     op.execute("DROP TYPE IF EXISTS rollback_kind")
