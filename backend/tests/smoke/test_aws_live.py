@@ -22585,34 +22585,35 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     assert agent_asset_id, "Agent did not register within 5min"
 
     # ---- 3. Network soak leg ----
-    log("Starting network soak (30s)...")
+    window_seconds = 30
+    log(f"Starting network soak ({window_seconds}s)...")
     soak_resp = client.post("/security-policy/soak-sessions", json={
-        "project_id": None,
         "policy_type": "ebpf_network",
-        "window_seconds": 30,
+        "window_seconds": window_seconds,
         "asset_ids": [agent_asset_id],
     })
     session_id = soak_resp["id"]
-    log(f"Soak session {session_id} started")
+    log(f"Soak session {session_id} started, waiting {window_seconds}s for observation window...")
+    _time.sleep(window_seconds + 10)
 
-    deadline = _time.time() + 120
-    session = None
-    while _time.time() < deadline:
-        _time.sleep(10)
-        session = client.get(f"/security-policy/soak-sessions/{session_id}")
-        if session["status"] in ("synthesized", "cr_proposed"):
-            break
-    assert session and session["status"] in ("synthesized", "cr_proposed"), \
-        f"Network soak session did not synthesize within 2min: {session}"
+    log("Stopping soak and synthesizing...")
+    session = client.post(f"/security-policy/soak-sessions/{session_id}/stop",
+                          json={"service_name": "nexplane-smoke"})
+    assert session["status"] == "cr_proposed", \
+        f"Network soak did not reach cr_proposed: {session}"
+    net_cr_id = session["cr_id"]
     profile = session.get("synthesized_profile", {})
     rules = profile.get("rules", [])
     assert len(rules) > 0, "Network soak returned no flow rules (expected at least DNS)"
     log(f"Network soak synthesized — {len(rules)} rules (DNS present: {any(r['dst_port']==53 for r in rules)})")
 
-    log("Applying network policy in audit mode...")
-    cr_net = client.run_cr("[EBPF_POLICY] configure_ebpf_network", "configure_ebpf_network",
-                           agent_asset_id,
-                           {"profile": profile, "service_name": "nexplane-smoke"})
+    log("Approving and executing auto-proposed network configure CR...")
+    client.post(f"/change-requests/{net_cr_id}/plan")
+    client.post(f"/change-requests/{net_cr_id}/submit-for-approval")
+    client.post(f"/change-requests/{net_cr_id}/approve",
+                json={"decision": "approved", "comment": "smoke test"})
+    client.post(f"/change-requests/{net_cr_id}/execute")
+    cr_net = client._wait_timeout(net_cr_id, "[EBPF_POLICY] configure_ebpf_network", 300)
     result_net = client.get_cr_step_result(cr_net)
     assert result_net.get("snapshot_id"), f"configure_ebpf_network missing snapshot_id: {result_net}"
     log(f"Network policy loaded — snapshot_id={result_net['snapshot_id']}")
@@ -22651,34 +22652,34 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     log("Network policy rolled back ✓")
 
     # ---- 4. LSM soak leg ----
-    log("Starting LSM soak (30s)...")
+    log(f"Starting LSM soak ({window_seconds}s)...")
     lsm_soak_resp = client.post("/security-policy/soak-sessions", json={
-        "project_id": None,
         "policy_type": "ebpf_lsm",
-        "window_seconds": 30,
+        "window_seconds": window_seconds,
         "asset_ids": [agent_asset_id],
     })
     lsm_session_id = lsm_soak_resp["id"]
-    log(f"LSM soak session {lsm_session_id} started")
+    log(f"LSM soak session {lsm_session_id} started, waiting {window_seconds}s for observation window...")
+    _time.sleep(window_seconds + 10)
 
-    deadline = _time.time() + 120
-    lsm_session = None
-    while _time.time() < deadline:
-        _time.sleep(10)
-        lsm_session = client.get(f"/security-policy/soak-sessions/{lsm_session_id}")
-        if lsm_session["status"] in ("synthesized", "cr_proposed"):
-            break
-    assert lsm_session and lsm_session["status"] in ("synthesized", "cr_proposed"), \
-        f"LSM soak session did not synthesize within 2min: {lsm_session}"
+    log("Stopping LSM soak and synthesizing...")
+    lsm_session = client.post(f"/security-policy/soak-sessions/{lsm_session_id}/stop",
+                              json={"service_name": "nexplane-smoke"})
+    assert lsm_session["status"] == "cr_proposed", \
+        f"LSM soak did not reach cr_proposed: {lsm_session}"
+    lsm_cr_id = lsm_session["cr_id"]
     lsm_profile = lsm_session.get("synthesized_profile", {})
     lsm_rules = lsm_profile.get("rules", [])
     assert len(lsm_rules) > 0, "LSM soak returned no event rules"
     log(f"LSM soak synthesized — {len(lsm_rules)} rules")
 
-    log("Applying LSM policy in audit mode...")
-    cr_lsm = client.run_cr("[EBPF_POLICY] configure_ebpf_lsm", "configure_ebpf_lsm",
-                           agent_asset_id,
-                           {"profile": lsm_profile, "service_name": "nexplane-smoke"})
+    log("Approving and executing auto-proposed LSM configure CR...")
+    client.post(f"/change-requests/{lsm_cr_id}/plan")
+    client.post(f"/change-requests/{lsm_cr_id}/submit-for-approval")
+    client.post(f"/change-requests/{lsm_cr_id}/approve",
+                json={"decision": "approved", "comment": "smoke test"})
+    client.post(f"/change-requests/{lsm_cr_id}/execute")
+    cr_lsm = client._wait_timeout(lsm_cr_id, "[EBPF_POLICY] configure_ebpf_lsm", 300)
     result_lsm = client.get_cr_step_result(cr_lsm)
     assert result_lsm.get("snapshot_id"), f"configure_ebpf_lsm missing snapshot_id: {result_lsm}"
     log(f"LSM policy loaded — kernel_lsm={result_lsm.get('kernel_lsm')}, snapshot_id={result_lsm['snapshot_id']}")
