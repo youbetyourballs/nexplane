@@ -174,10 +174,59 @@ async def pause(db: AsyncSession, rollback: ProjectRollback) -> None:
     await db.commit()
 
 
+async def _populate_steps_for_auto_rollback(db: AsyncSession, rollback: ProjectRollback) -> None:
+    """Populate steps for an auto-triggered rollback that was created without steps."""
+    proj_res = await db.execute(
+        select(Project)
+        .where(Project.id == rollback.project_id)
+        .options(selectinload(Project.members).selectinload(ProjectChangeRequest.change_request))
+    )
+    project = proj_res.scalar_one_or_none()
+    if not project:
+        return
+
+    permanent_types = _get_permanent_types()
+    eligible_members = [
+        m for m in project.members
+        if m.change_request.status == ChangeRequestStatus.completed
+    ]
+    all_crs = [m.change_request for m in project.members]
+    sorted_members = sorted(eligible_members, key=lambda m: m.sequence_order, reverse=True)
+
+    for i, member in enumerate(sorted_members):
+        cr = member.change_request
+        ct = str(cr.change_type)
+        if ct in permanent_types:
+            backup_cr = _find_backup_cr(cr, all_crs)
+            kind = RollbackKind.reconstitution if backup_cr else RollbackKind.permanent_no_backup
+            backup_cr_id = backup_cr.id if backup_cr else None
+        else:
+            kind = RollbackKind.standard
+            backup_cr_id = None
+
+        db.add(ProjectRollbackStep(
+            project_rollback_id=rollback.id,
+            change_request_id=cr.id,
+            sequence_order=i + 1,
+            status=RollbackStepStatus.pending,
+            rollback_kind=kind,
+            backup_cr_id=backup_cr_id,
+        ))
+
+    project.status = ProjectStatus.rolling_back
+    await db.flush()
+
+
 async def resume(rollback_id: uuid.UUID) -> None:
     async with AsyncSessionLocal() as db:
-        res = await db.execute(select(ProjectRollback).where(ProjectRollback.id == rollback_id))
+        res = await db.execute(
+            select(ProjectRollback)
+            .where(ProjectRollback.id == rollback_id)
+            .options(selectinload(ProjectRollback.steps))
+        )
         rollback = res.scalar_one()
+        if not rollback.steps:
+            await _populate_steps_for_auto_rollback(db, rollback)
         rollback.status = ProjectRollbackStatus.running
         rollback.paused_at = None
         await db.commit()
