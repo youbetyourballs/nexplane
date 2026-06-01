@@ -34,6 +34,28 @@ export const assetsApi = {
   delete: (id: string) => apiClient.delete(`/assets/${id}`),
 };
 
+// Rollback types
+export interface ProjectRollbackStep {
+  id: string;
+  change_request_id: string;
+  sequence_order: number;
+  status: 'pending' | 'running' | 'skipped' | 'completed' | 'failed' | 'awaiting_user';
+  rollback_kind: 'standard' | 'reconstitution' | 'permanent_no_backup';
+  backup_cr_id: string | null;
+  result: Record<string, unknown> | null;
+}
+
+export interface ProjectRollback {
+  id: string;
+  project_id: string;
+  status: 'pending' | 'running' | 'paused' | 'awaiting_user' | 'completed' | 'failed';
+  trigger: 'manual' | 'execution_failure' | 'soak_health_check';
+  current_step: number;
+  notes: string | null;
+  created_at: string;
+  steps: ProjectRollbackStep[];
+}
+
 // Projects
 export const projectsApi = {
   list: () =>
@@ -58,6 +80,16 @@ export const projectsApi = {
         params: draftMessage ? { draft_message: draftMessage } : {},
       })
       .then((r) => r.data),
+  rollback: (id: string, body: { notes?: string; cr_ids?: string[] | null }) =>
+    apiClient.post<{ rollback: ProjectRollback; warnings: string[] }>(`/projects/${id}/rollback`, body).then((r) => r.data),
+  getRollback: (id: string) =>
+    apiClient.get<ProjectRollback>(`/projects/${id}/rollback`).then((r) => r.data),
+  pauseRollback: (id: string) =>
+    apiClient.post(`/projects/${id}/rollback/pause`).then((r) => r.data),
+  resumeRollback: (id: string) =>
+    apiClient.post(`/projects/${id}/rollback/resume`).then((r) => r.data),
+  rollbackStepDecision: (projectId: string, stepId: string, action: 'skip' | 'retry' | 'mark_done') =>
+    apiClient.post(`/projects/${projectId}/rollback/steps/${stepId}/decision`, { action }).then((r) => r.data),
 };
 
 // Settings
