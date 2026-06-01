@@ -8,8 +8,8 @@ def test_plugin_registry_ebpf_network():
 
 def test_plugin_registry_ebpf_lsm():
     from app.services.security_policy.plugins import get_plugin
-    with pytest.raises(ValueError, match="ebpf_lsm"):
-        get_plugin("ebpf_lsm")
+    plugin = get_plugin("ebpf_lsm")
+    assert plugin.policy_type == "ebpf_lsm"
 
 
 def test_ebpf_network_synthesize_basic():
