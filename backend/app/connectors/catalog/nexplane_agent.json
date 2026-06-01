@@ -461,6 +461,91 @@
                         "action_id":  "configure_selinux"
                     },
                     {
+                        "display_name": "eBPF Network Soak",
+                        "description": "Observe outbound network connections via eBPF TC/cgroup hooks and return flow tuples for policy synthesis.",
+                        "change_type": "ebpf_network_soak",
+                        "execution_tier": 3,
+                        "rollback_action": "ebpf_network_soak",
+                        "estimated_duration_seconds": 90,
+                        "applicable_asset_types": ["server"],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.ebpf_network_soak",
+                        "generic_action": "ebpf_network_soak",
+                        "action_id": "ebpf_network_soak",
+                        "parameters": [
+                            {"name": "window_seconds", "type": "integer", "required": false},
+                            {"name": "service_name",   "type": "string",  "required": false}
+                        ]
+                    },
+                    {
+                        "display_name": "eBPF LSM Soak",
+                        "description": "Observe kernel events via eBPF LSM/kprobe hooks and return event tuples for policy synthesis.",
+                        "change_type": "ebpf_lsm_soak",
+                        "execution_tier": 3,
+                        "rollback_action": "ebpf_lsm_soak",
+                        "estimated_duration_seconds": 90,
+                        "applicable_asset_types": ["server"],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.ebpf_lsm_soak",
+                        "generic_action": "ebpf_lsm_soak",
+                        "action_id": "ebpf_lsm_soak",
+                        "parameters": [
+                            {"name": "window_seconds", "type": "integer", "required": false},
+                            {"name": "service_name",   "type": "string",  "required": false}
+                        ]
+                    },
+                    {
+                        "display_name": "Configure eBPF Network Policy",
+                        "description": "Load eBPF TC/cgroup network enforcer and write allowlist to BPF maps. Starts in audit mode.",
+                        "change_type": "configure_ebpf_network",
+                        "execution_tier": 3,
+                        "rollback_action": "configure_ebpf_network",
+                        "estimated_duration_seconds": 15,
+                        "applicable_asset_types": ["server"],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.configure_ebpf_network",
+                        "generic_action": "configure_ebpf_network",
+                        "action_id": "configure_ebpf_network",
+                        "parameters": [
+                            {"name": "profile",      "type": "object",  "required": true},
+                            {"name": "service_name", "type": "string",  "required": false}
+                        ]
+                    },
+                    {
+                        "display_name": "Configure eBPF LSM Policy",
+                        "description": "Load eBPF LSM enforcer (kprobe fallback on kernel < 5.7) and write allowlist to BPF maps. Starts in audit mode.",
+                        "change_type": "configure_ebpf_lsm",
+                        "execution_tier": 3,
+                        "rollback_action": "configure_ebpf_lsm",
+                        "estimated_duration_seconds": 15,
+                        "applicable_asset_types": ["server"],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.configure_ebpf_lsm",
+                        "generic_action": "configure_ebpf_lsm",
+                        "action_id": "configure_ebpf_lsm",
+                        "parameters": [
+                            {"name": "profile",      "type": "object",  "required": true},
+                            {"name": "service_name", "type": "string",  "required": false}
+                        ]
+                    },
+                    {
+                        "display_name": "Promote eBPF Policy to Enforce",
+                        "description": "Flip a loaded eBPF policy from audit to enforce by writing to the BPF mode map. Rollback restores audit mode.",
+                        "change_type": "promote_ebpf_policy",
+                        "execution_tier": 3,
+                        "rollback_action": "promote_ebpf_policy",
+                        "estimated_duration_seconds": 5,
+                        "applicable_asset_types": ["server"],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.promote_ebpf_policy",
+                        "generic_action": "promote_ebpf_policy",
+                        "action_id": "promote_ebpf_policy",
+                        "parameters": [
+                            {"name": "policy_type", "type": "string", "required": true},
+                            {"name": "asset_id",    "type": "string", "required": true}
+                        ]
+                    },
+                    {
                         "display_name":  "Configure AppArmor",
                         "description":  "Load AppArmor profiles and set enforce/complain/disable mode.",
                         "parameters":  [
