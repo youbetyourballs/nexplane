@@ -10,8 +10,13 @@ from app.database import get_db
 from app.models.project import Project, ProjectChangeRequest, ProjectStatus
 from app.models.project_phase import ProjectPhase
 from app.models.change_request import ChangeRequest, ChangeRequestStatus
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.org_settings import OrganizationSettings
+from app.models.project_rollback import ProjectRollback, ProjectRollbackStep, ProjectRollbackStatus
+from app.schemas.project_rollback import (
+    ProjectRollbackRead, RollbackInitRequest, RollbackInitResponse, StepDecisionRequest,
+)
+import app.services.project_rollback_service as rollback_svc
 from app.models.asset import Asset
 from app.routers import current_user
 from app.schemas.project import (
@@ -253,6 +258,133 @@ async def delete_project(
     )
     await db.delete(project)
     await db.commit()
+
+
+@router.post("/{project_id}/rollback", response_model=RollbackInitResponse, status_code=201)
+async def initiate_rollback(
+    project_id: uuid.UUID,
+    body: RollbackInitRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if user.role not in (UserRole.admin, UserRole.approver):
+        raise HTTPException(status_code=403, detail="Only admins and approvers can initiate rollback")
+    from sqlalchemy import select as _select
+    proj_res = await db.execute(
+        _select(Project)
+        .where(Project.id == project_id, Project.organization_id == user.organization_id)
+        .options(
+            selectinload(Project.members).selectinload(ProjectChangeRequest.change_request)
+        )
+    )
+    project = proj_res.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.status == ProjectStatus.rolling_back:
+        raise HTTPException(status_code=409, detail="A rollback is already in progress for this project")
+    rollback, warnings = await rollback_svc.initiate(
+        db, project, user.id, body.notes, body.cr_ids,
+    )
+    await record_event(
+        db, user.organization_id, "project.rollback_initiated",
+        {"project_id": str(project_id)},
+        actor_id=user.id,
+    )
+    return RollbackInitResponse(
+        rollback=ProjectRollbackRead.model_validate(rollback),
+        warnings=warnings,
+    )
+
+
+@router.get("/{project_id}/rollback", response_model=ProjectRollbackRead)
+async def get_rollback(
+    project_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_project(db, project_id, user.organization_id)
+    from sqlalchemy import select as _select
+    res = await db.execute(
+        _select(ProjectRollback)
+        .where(ProjectRollback.project_id == project_id)
+        .options(selectinload(ProjectRollback.steps))
+        .order_by(ProjectRollback.created_at.desc())
+        .limit(1)
+    )
+    rollback = res.scalar_one_or_none()
+    if not rollback:
+        raise HTTPException(status_code=404, detail="No rollback found for this project")
+    return rollback
+
+
+@router.post("/{project_id}/rollback/pause", status_code=204)
+async def pause_rollback(
+    project_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if user.role not in (UserRole.admin, UserRole.approver):
+        raise HTTPException(status_code=403, detail="Only admins and approvers can pause rollback")
+    await _get_project(db, project_id, user.organization_id)
+    from sqlalchemy import select as _select
+    res = await db.execute(
+        _select(ProjectRollback).where(
+            ProjectRollback.project_id == project_id,
+            ProjectRollback.status == ProjectRollbackStatus.running,
+        ).order_by(ProjectRollback.created_at.desc()).limit(1)
+    )
+    rollback = res.scalar_one_or_none()
+    if not rollback:
+        raise HTTPException(status_code=404, detail="No running rollback found")
+    await rollback_svc.pause(db, rollback)
+
+
+@router.post("/{project_id}/rollback/resume", status_code=204)
+async def resume_rollback(
+    project_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if user.role not in (UserRole.admin, UserRole.approver):
+        raise HTTPException(status_code=403, detail="Only admins and approvers can resume rollback")
+    await _get_project(db, project_id, user.organization_id)
+    from sqlalchemy import select as _select
+    res = await db.execute(
+        _select(ProjectRollback).where(
+            ProjectRollback.project_id == project_id,
+            ProjectRollback.status.in_([
+                ProjectRollbackStatus.paused,
+                ProjectRollbackStatus.awaiting_user,
+            ]),
+        ).order_by(ProjectRollback.created_at.desc()).limit(1)
+    )
+    rollback = res.scalar_one_or_none()
+    if not rollback:
+        raise HTTPException(status_code=404, detail="No paused or awaiting rollback found")
+    await rollback_svc.resume(rollback.id)
+
+
+@router.post("/{project_id}/rollback/steps/{step_id}/decision", status_code=204)
+async def rollback_step_decision(
+    project_id: uuid.UUID,
+    step_id: uuid.UUID,
+    body: StepDecisionRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if user.role not in (UserRole.admin, UserRole.approver):
+        raise HTTPException(status_code=403, detail="Only admins and approvers can make rollback decisions")
+    await _get_project(db, project_id, user.organization_id)
+    from sqlalchemy import select as _select
+    step_res = await db.execute(_select(ProjectRollbackStep).where(ProjectRollbackStep.id == step_id))
+    step = step_res.scalar_one_or_none()
+    if not step:
+        raise HTTPException(status_code=404, detail="Rollback step not found")
+    rollback_res = await db.execute(
+        _select(ProjectRollback).where(ProjectRollback.id == step.project_rollback_id)
+    )
+    rollback = rollback_res.scalar_one()
+    await rollback_svc.step_decision(db, step, rollback, body.action)
 
 
 @router.post("/{project_id}/members", response_model=ProjectMemberRead, status_code=201)
