@@ -26,5 +26,8 @@ from app.services.security_policy.plugins.apparmor import APPARMOR_PLUGIN  # noq
 _register(APPARMOR_PLUGIN)
 from app.services.security_policy.plugins.selinux import SELINUX_PLUGIN  # noqa: E402
 _register(SELINUX_PLUGIN)
+from app.services.security_policy.plugins.ebpf_network import EBPF_NETWORK_PLUGIN  # noqa: E402
+_register(EBPF_NETWORK_PLUGIN)
 # selinux: SP3 done
-# network_policy: SP4
+# ebpf_network: SP4 done
+# network_policy: SP5
