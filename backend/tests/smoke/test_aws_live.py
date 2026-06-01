@@ -22585,9 +22585,23 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     assert agent_asset_id, "Agent did not register within 5min"
 
     # ---- 3. Network soak leg ----
+    projects = client.get("/projects")
+    if not projects:
+        raise Exception("No projects found — create a project first")
+    smoke_project_id = projects[0]["id"]
+    log(f"Using project {smoke_project_id} for soak sessions")
+
+    # Clear any stale baselines from prior smoke runs
+    for pt in ("ebpf_network", "ebpf_lsm"):
+        try:
+            client.delete(f"/security-policy/baselines/{smoke_project_id}?policy_type={pt}")
+        except Exception:
+            pass
+
     window_seconds = 30
     log(f"Starting network soak ({window_seconds}s)...")
     soak_resp = client.post("/security-policy/soak-sessions", json={
+        "project_id": smoke_project_id,
         "policy_type": "ebpf_network",
         "window_seconds": window_seconds,
         "asset_ids": [agent_asset_id],
@@ -22654,6 +22668,7 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     # ---- 4. LSM soak leg ----
     log(f"Starting LSM soak ({window_seconds}s)...")
     lsm_soak_resp = client.post("/security-policy/soak-sessions", json={
+        "project_id": smoke_project_id,
         "policy_type": "ebpf_lsm",
         "window_seconds": window_seconds,
         "asset_ids": [agent_asset_id],
