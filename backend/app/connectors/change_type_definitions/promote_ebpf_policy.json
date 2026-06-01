@@ -2,11 +2,9 @@
   "change_type": "promote_ebpf_policy",
   "display_name": "Promote eBPF Policy to Enforce",
   "description": "Flip a loaded eBPF policy from audit mode to enforce mode by writing to the BPF mode map. Rollback writes audit mode back.",
-  "connector_type": "nexplane_agent",
-  "generic_action": "promote_ebpf_policy",
-  "rollback_type": "standard",
-  "parameters": [
-    {"name": "policy_type", "type": "string", "required": true, "description": "network or lsm"},
-    {"name": "asset_id",    "type": "string", "required": true, "description": "Asset UUID the policy is loaded on"}
-  ]
+  "rollback_action": "promote_ebpf_policy",
+  "parameters": {
+    "policy_type": {"required": true,  "type": "string"},
+    "asset_id":    {"required": true,  "type": "string"}
+  }
 }
