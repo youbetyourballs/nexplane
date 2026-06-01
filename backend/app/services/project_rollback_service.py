@@ -32,6 +32,7 @@ RECONSTITUTION_PAIRS: dict[str, list[str]] = {
 }
 
 _PERMANENT_TYPES_CACHE: set[str] | None = None
+_ACTIVE_ROLLBACKS: set[uuid.UUID] = set()
 
 
 def _get_permanent_types() -> set[str]:
@@ -91,7 +92,11 @@ async def initiate(
     notes: str | None,
     cr_ids: list[uuid.UUID] | None,
 ) -> tuple[ProjectRollback, list[str]]:
-    """Create a ProjectRollback and steps. Fires background task. Returns (rollback, warnings)."""
+    """Create a ProjectRollback and steps. Fires background task. Returns (rollback, warnings).
+
+    Requires: project.members and each member.change_request must be eagerly loaded
+    before calling (selectinload). Accessing them as lazy loads in async context will raise.
+    """
     permanent_types = _get_permanent_types()
 
     eligible_members = [
@@ -198,7 +203,8 @@ async def step_decision(
         step.result = None
     await db.commit()
     if action in ("skip", "mark_done", "retry"):
-        asyncio.ensure_future(_run_rollback(rollback.id))
+        if rollback.status != ProjectRollbackStatus.running:
+            asyncio.ensure_future(_run_rollback(rollback.id))
 
 
 async def on_cr_failed(project_id: uuid.UUID, cr_id: uuid.UUID) -> None:
@@ -232,6 +238,16 @@ async def resume_interrupted() -> None:
 
 
 async def _run_rollback(rollback_id: uuid.UUID) -> None:
+    if rollback_id in _ACTIVE_ROLLBACKS:
+        return
+    _ACTIVE_ROLLBACKS.add(rollback_id)
+    try:
+        await _run_rollback_inner(rollback_id)
+    finally:
+        _ACTIVE_ROLLBACKS.discard(rollback_id)
+
+
+async def _run_rollback_inner(rollback_id: uuid.UUID) -> None:
     """Background task: drive each step in sequence_order, checking for pause after each."""
     async with AsyncSessionLocal() as db:
         res = await db.execute(
@@ -251,6 +267,7 @@ async def _run_rollback(rollback_id: uuid.UUID) -> None:
 
         for i, step in enumerate(steps):
             await db.refresh(rollback)
+            await db.refresh(step)  # re-read step status in case of external changes
             if rollback.status == ProjectRollbackStatus.paused:
                 return
             if step.status in (RollbackStepStatus.completed, RollbackStepStatus.skipped):
