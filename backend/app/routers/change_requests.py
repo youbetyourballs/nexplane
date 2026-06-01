@@ -576,124 +576,29 @@ async def manual_rollback(
 
     # Run the rollback asynchronously so the endpoint returns immediately
     import asyncio
-    from app.workflows.activities import activity_execute_rollback
+    import logging
+    from app.services.rollback_executor import execute_cr_rollback
 
-    plan = cr.change_plan
-    execution_result = latest_run.result or {}
-
-    # Check if any plan step has a rollback_action defined
-    _steps = (plan.generated_steps if plan else []) or []
-    _has_rollback_steps = any(s.get("rollback_action") for s in _steps)
+    _logger = logging.getLogger(__name__)
 
     async def _do_rollback():
         from app.database import AsyncSessionLocal
         try:
-            # If no plan rollback steps are defined, fall back to calling the
-            # executor's own rollback() function directly.  This covers simple
-            # identity / single-step executors (emergency_user_lockout, etc.)
-            # whose plan steps never get rollback_action populated.
-            if not _has_rollback_steps:
-                try:
-                    from app.connectors.catalog_service import get_catalog_service
-                    from app.models.connector import Connector as _Connector
-                    from app.services.connector_service import _attach_credentials
-                    _ct = cr.change_type.value if hasattr(cr.change_type, "value") else str(cr.change_type)
-                    _catalog = get_catalog_service()
-                    # Derive connector_type from the execution_result steps (stored at execute time).
-                    # This avoids relying on asset.connector_id which is not always set.
-                    _exec_steps_for_ct = (
-                        execution_result.get("execution", {}).get("steps")
-                        or execution_result.get("steps")
-                        or []
-                    )
-                    _connector_type_from_result = next(
-                        (s.get("connector_type") for s in _exec_steps_for_ct if s.get("connector_type")),
-                        None,
-                    )
-                    _connector = None
-                    # Resolve connector object for credentials if a connector_id is in the step
-                    _step_connector_id = next(
-                        (s.get("connector_id") for s in _exec_steps_for_ct if s.get("connector_id")),
-                        None,
-                    )
-                    try:
-                        from sqlalchemy import select as _sa_select
-                        async with AsyncSessionLocal() as _rdb:
-                            if _step_connector_id:
-                                _conn_obj = await _rdb.get(_Connector, uuid.UUID(str(_step_connector_id)))
-                                if _conn_obj:
-                                    await _attach_credentials(_conn_obj, _rdb)
-                                    _connector = _conn_obj
-                            # If no connector found via step_id, find one by type in the org
-                            if not _connector and _connector_type_from_result:
-                                from app.models.connector import ConnectorType as _ConnectorType
-                                _res = await _rdb.execute(
-                                    _sa_select(_Connector).where(
-                                        _Connector.organization_id == cr.organization_id,
-                                        _Connector.connector_type == _ConnectorType(_connector_type_from_result),
-                                    ).limit(1)
-                                )
-                                _conn_obj = _res.scalar_one_or_none()
-                                if _conn_obj:
-                                    await _attach_credentials(_conn_obj, _rdb)
-                                    _connector = _conn_obj
-                    except Exception:
-                        pass
-                    # Try connector type from result first, then fall back to common types
-                    _mod = None
-                    _conn_types_to_try = []
-                    if _connector_type_from_result:
-                        _conn_types_to_try.append(_connector_type_from_result)
-                    _conn_types_to_try.extend(t for t in ("nexplane_agent", "aws", "azure_ad", "okta") if t != _connector_type_from_result)
-                    for _conn_type in _conn_types_to_try:
-                        try:
-                            _mod = _catalog.get_executor(_conn_type, _ct)
-                            break
-                        except Exception:
-                            continue
-                    if _mod and hasattr(_mod, "rollback"):
-                        # Extract step 1 result from nested execution structure so
-                        # rollback() receives the actual step result dict, not the
-                        # full workflow result envelope.
-                        _exec_steps = (
-                            execution_result.get("execution", {}).get("steps")
-                            or execution_result.get("steps")
-                            or []
-                        )
-                        _step1 = next(
-                            (s.get("result", {}) for s in _exec_steps if s.get("step_number") == 1),
-                            execution_result,
-                        )
-                        rollback_result = await _mod.rollback(
-                            cr.desired_outcome or {}, _step1, _connector
-                        )
-                    else:
-                        rollback_result = {"rolled_back": False, "reason": "no_rollback_function_found"}
-                except Exception as _exc:
-                    rollback_result = {"rolled_back": False, "reason": str(_exc)}
-            else:
-                rollback_result = await activity_execute_rollback(
-                    str(cr.id), _steps, execution_result
-                )
             async with AsyncSessionLocal() as s:
-                run = await s.get(ExecutionRun, rollback_run_id)
-                cr2 = await s.get(ChangeRequest, cr.id)
-                if run:
-                    run.status = ExecutionStatus.rolled_back
-                    run.result = rollback_result
-                if cr2:
-                    cr2.status = ChangeRequestStatus.rolled_back
-                    cr2.updated_at = datetime.now(timezone.utc)
+                result_data = await execute_cr_rollback(cr.id, s)
+                run2 = await s.get(ExecutionRun, rollback_run_id)
+                if run2:
+                    run2.status = ExecutionStatus.rolled_back
+                    run2.result = result_data
                 await s.commit()
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).error("Manual rollback failed: %s", exc)
+            _logger.error("Manual rollback failed: %s", exc)
             async with AsyncSessionLocal() as s:
-                run = await s.get(ExecutionRun, rollback_run_id)
+                run2 = await s.get(ExecutionRun, rollback_run_id)
                 cr2 = await s.get(ChangeRequest, cr.id)
-                if run:
-                    run.status = ExecutionStatus.failed
-                    run.result = {"error": str(exc)}
+                if run2:
+                    run2.status = ExecutionStatus.failed
+                    run2.result = {"error": str(exc)}
                 if cr2:
                     cr2.status = ChangeRequestStatus.failed
                 await s.commit()
