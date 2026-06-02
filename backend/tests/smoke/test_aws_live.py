@@ -16338,25 +16338,20 @@ def run_phase_mac_agent_bootstrap(
             public_ip = reservations[0]["Instances"][0].get("PublicIpAddress", "") or private_ip
             hostname = reservations[0]["Instances"][0].get("PrivateDnsName", private_ip)
             log(f"MAC_AGENT_BOOTSTRAP: found existing instance {instance_id} ({public_ip})")
-            # Ensure we have SSH access for the existing instance — recreate key if needed
+            # Without the original SSH key we cannot authenticate to the existing instance —
+            # terminate it and fall through to launch a fresh one with a known key.
             if not ssh_key_path:
-                import tempfile as _tempfile2
-                try:
-                    try:
-                        ec2_client.delete_key_pair(KeyName=KEY_NAME)
-                    except Exception:
-                        pass
-                    _kp_resp2 = ec2_client.create_key_pair(KeyName=KEY_NAME)
-                    _tmp_key2 = _tempfile2.NamedTemporaryFile(delete=False, suffix=".pem", mode="w")
-                    _tmp_key2.write(_kp_resp2["KeyMaterial"])
-                    _tmp_key2.close()
-                    import os as _os2; _os2.chmod(_tmp_key2.name, 0o600)
-                    ssh_key_path = _tmp_key2.name
-                    log(f"MAC_AGENT_BOOTSTRAP: created key pair {KEY_NAME} for existing instance, key at {ssh_key_path}")
-                    fresh_launch = True  # force agent install since key was regenerated
-                except Exception as _ke2:
-                    log(f"MAC_AGENT_BOOTSTRAP: could not create key pair for existing instance: {_ke2}")
-        else:
+                log(f"MAC_AGENT_BOOTSTRAP: no SSH key for existing instance {instance_id} — terminating and relaunching fresh")
+                ec2_client.terminate_instances(InstanceIds=[instance_id])
+                for _tw in range(60):
+                    _st = ec2_client.describe_instances(InstanceIds=[instance_id])
+                    if _st["Reservations"][0]["Instances"][0]["State"]["Name"] == "terminated":
+                        break
+                    time.sleep(5)
+                instance_id = ""
+                reservations = []
+
+        if not reservations:
             # Find latest macOS AMI from AWS
             log("MAC_AGENT_BOOTSTRAP: finding latest macOS AMI...")
             images_resp = ec2_client.describe_images(
