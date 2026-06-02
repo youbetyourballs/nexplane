@@ -53,6 +53,7 @@ def _build_cr_params(session: SecurityPolicySoakSession, profile: dict, service_
         "session_id": str(session.id),
         "service_name": service_name,
         "profile": json.dumps(profile),
+        "mode": "audit",
     }
 
 
