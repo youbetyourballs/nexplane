@@ -2,9 +2,9 @@
   "change_type": "configure_ebpf_lsm",
   "display_name": "Configure eBPF LSM Policy",
   "description": "Load a pre-compiled eBPF LSM enforcer (kprobe fallback on kernel < 5.7) and write the allowlist into BPF maps. Starts in audit mode. Sets kernel_lsm=true/false in result. Rollback unloads and clears all maps.",
-  "rollback_action": "configure_ebpf_lsm",
-  "parameters": {
-    "profile":      {"required": true,  "type": "object"},
-    "service_name": {"required": false, "type": "string"}
-  }
+  "steps": [
+    {"generic_action": "configure_ebpf_lsm", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
 }
