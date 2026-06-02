@@ -17,7 +17,10 @@ func LockLocalUserExecute(params map[string]any) (map[string]any, error) {
 	terminateSessions, _ := params["terminate_sessions"].(bool)
 
 	// Snapshot current AuthenticationAuthority for rollback
-	snapshotOut, _ := exec.Command("dscl", ".", "-read", "/Users/"+username, "AuthenticationAuthority").Output()
+	snapshotOut, snapshotErr := exec.Command("dscl", ".", "-read", "/Users/"+username, "AuthenticationAuthority").Output()
+	if snapshotErr != nil {
+		return nil, fmt.Errorf("failed to read user state for snapshot: %w", snapshotErr)
+	}
 	snapshot := strings.TrimSpace(string(snapshotOut))
 
 	// Disable via sysadminctl (preferred) or dscl fallback
@@ -33,8 +36,10 @@ func LockLocalUserExecute(params map[string]any) (map[string]any, error) {
 
 	killedSessions := 0
 	if terminateSessions {
-		exec.Command("pkill", "-KILL", "-u", username).Run() //nolint:errcheck
-		killedSessions = 1
+		// pkill exits non-zero if no processes matched; ignore that case
+		if err2 := exec.Command("pkill", "-KILL", "-u", username).Run(); err2 == nil {
+			killedSessions = 1
+		}
 	}
 
 	return map[string]any{
