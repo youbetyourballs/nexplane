@@ -22658,7 +22658,19 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
         except Exception:
             pass
 
-    window_seconds = 30
+    # Generate steady background traffic so the soak window captures real flows.
+    # The nexplane-agent has no active TCP connection during the observation loop
+    # (it closed the dispatch connection before running ss), so without this we'd
+    # get 0 flows. The metadata service (169.254.169.254) is always reachable and
+    # gives us a guaranteed TCP flow every 5s.
+    log("Starting background traffic generator for soak window...")
+    client.run_cr("[EBPF_POLICY] pre-soak traffic gen", "ssm_command", instance_asset["id"],
+                  {"instance_id": instance_id,
+                   "document_name": "AWS-RunShellScript",
+                   "command": "while true; do curl -sf http://169.254.169.254/latest/meta-data/instance-id > /dev/null 2>&1; sleep 3; done & echo TRAFFIC_GEN_PID:$!",
+                   "rollback_strategy": "rollback_unavailable"})
+
+    window_seconds = 60
     log(f"Starting network soak ({window_seconds}s)...")
     soak_resp = client.post("/security-policy/soak-sessions", json={
         "project_id": smoke_project_id,
