@@ -16299,6 +16299,27 @@ def run_phase_mac_agent_bootstrap(
 
     log(f"MAC_AGENT_BOOTSTRAP: using dedicated host {dedicated_host_id}")
 
+    # Convert legacy RSA PEM key to OpenSSH format if needed (paramiko requires OpenSSH)
+    if ssh_key_path:
+        try:
+            from cryptography.hazmat.primitives.serialization import (
+                load_pem_private_key, Encoding, PrivateFormat, NoEncryption
+            )
+            import os as _os
+            with open(ssh_key_path, "rb") as _kf:
+                _raw = _kf.read()
+            if b"BEGIN RSA PRIVATE KEY" in _raw or b"BEGIN PRIVATE KEY" in _raw:
+                _key = load_pem_private_key(_raw, password=None)
+                _openssh = _key.private_bytes(Encoding.PEM, PrivateFormat.OpenSSH, NoEncryption())
+                _conv_path = ssh_key_path + ".openssh"
+                with open(_conv_path, "wb") as _kf2:
+                    _kf2.write(_openssh)
+                _os.chmod(_conv_path, 0o600)
+                ssh_key_path = _conv_path
+                log(f"MAC_AGENT_BOOTSTRAP: converted key to OpenSSH format at {ssh_key_path}")
+        except Exception as _ke:
+            log(f"MAC_AGENT_BOOTSTRAP: key conversion skipped: {_ke}")
+
     instance_id = ""
     fresh_launch = False
 
@@ -16323,8 +16344,8 @@ def run_phase_mac_agent_bootstrap(
             images_resp = ec2_client.describe_images(
                 Owners=["amazon"],
                 Filters=[
-                    {"Name": "platform", "Values": ["mac"]},
                     {"Name": "name", "Values": ["amzn-ec2-macos-*"]},
+                    {"Name": "architecture", "Values": ["arm64_mac"]},
                 ],
             )
             images = sorted(images_resp.get("Images", []), key=lambda x: x["CreationDate"], reverse=True)
@@ -16332,6 +16353,22 @@ def run_phase_mac_agent_bootstrap(
                 fail("MAC_AGENT_BOOTSTRAP: no macOS AMI found from AWS")
             ami_id = images[0]["ImageId"]
             log(f"MAC_AGENT_BOOTSTRAP: using AMI {ami_id} ({images[0]['Name']})")
+
+            # Ensure key pair exists in EC2 (pre-run cleanup deletes it)
+            if ssh_key_path:
+                try:
+                    from cryptography.hazmat.primitives.serialization import load_pem_private_key, Encoding, PublicFormat
+                    with open(ssh_key_path, "rb") as _kf:
+                        _priv = load_pem_private_key(_kf.read(), password=None)
+                    _pub = _priv.public_key().public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH)
+                    try:
+                        ec2_client.delete_key_pair(KeyName=KEY_NAME)
+                    except Exception:
+                        pass
+                    ec2_client.import_key_pair(KeyName=KEY_NAME, PublicKeyMaterial=_pub)
+                    log(f"MAC_AGENT_BOOTSTRAP: imported key pair {KEY_NAME} from {ssh_key_path}")
+                except Exception as _ke:
+                    log(f"MAC_AGENT_BOOTSTRAP: could not import key pair: {_ke}")
 
             # Launch on the dedicated host
             log(f"MAC_AGENT_BOOTSTRAP: launching mac2.metal on dedicated host {dedicated_host_id}...")
@@ -16368,21 +16405,21 @@ def run_phase_mac_agent_bootstrap(
             # Wait for SSH on port 22
             import socket as _socket
             log("MAC_AGENT_BOOTSTRAP: waiting for SSH port 22...")
-            for _attempt in range(60):
+            for _attempt in range(120):
                 try:
-                    with _socket.create_connection((public_ip, 22), timeout=5):
+                    with _socket.create_connection((private_ip or public_ip, 22), timeout=5):
                         break
                 except OSError:
                     time.sleep(10)
             else:
-                fail(f"MAC_AGENT_BOOTSTRAP: SSH port 22 not available on {public_ip} after 600s")
+                fail(f"MAC_AGENT_BOOTSTRAP: SSH port 22 not available on {private_ip or public_ip} after 1200s")
 
             # Step 3 — Install Nexplane agent via SSH
             log("MAC_AGENT_BOOTSTRAP: connecting via SSH to install Nexplane agent...")
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             ssh.connect(
-                hostname=public_ip,
+                hostname=private_ip or public_ip,
                 username="ec2-user",
                 key_filename=ssh_key_path,
                 timeout=30,
@@ -16463,7 +16500,7 @@ def run_phase_mac_agent_bootstrap(
         # Verify side effect via SSH: defaults read should return "hello"
         ssh2 = paramiko.SSHClient()
         ssh2.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh2.connect(hostname=public_ip, username="ec2-user", key_filename=ssh_key_path, timeout=30)
+        ssh2.connect(hostname=private_ip or public_ip, username="ec2-user", key_filename=ssh_key_path, timeout=30)
         _, _out, _ = ssh2.exec_command("defaults read com.nexplane.smoke SmokeTestValue")
         written_val = _out.read().decode().strip()
         assert written_val == "hello", (
