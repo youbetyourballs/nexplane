@@ -16422,10 +16422,11 @@ def run_phase_mac_agent_bootstrap(
             log("MAC_AGENT_BOOTSTRAP: connecting via SSH to install Nexplane agent...")
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            _ssh_pkey = paramiko.RSAKey.from_private_key_file(ssh_key_path)
             ssh.connect(
                 hostname=private_ip or public_ip,
                 username="ec2-user",
-                key_filename=ssh_key_path,
+                pkey=_ssh_pkey,
                 timeout=30,
             )
 
@@ -16504,7 +16505,8 @@ def run_phase_mac_agent_bootstrap(
         # Verify side effect via SSH: defaults read should return "hello"
         ssh2 = paramiko.SSHClient()
         ssh2.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh2.connect(hostname=private_ip or public_ip, username="ec2-user", key_filename=ssh_key_path, timeout=30)
+        _ssh2_pkey = paramiko.RSAKey.from_private_key_file(ssh_key_path)
+        ssh2.connect(hostname=private_ip or public_ip, username="ec2-user", pkey=_ssh2_pkey, timeout=30)
         _, _out, _ = ssh2.exec_command("defaults read com.nexplane.smoke SmokeTestValue")
         written_val = _out.read().decode().strip()
         assert written_val == "hello", (
