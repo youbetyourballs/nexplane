@@ -16354,21 +16354,25 @@ def run_phase_mac_agent_bootstrap(
             ami_id = images[0]["ImageId"]
             log(f"MAC_AGENT_BOOTSTRAP: using AMI {ami_id} ({images[0]['Name']})")
 
-            # Ensure key pair exists in EC2 (pre-run cleanup deletes it)
-            if ssh_key_path:
+            # Ensure key pair exists in EC2 (pre-run cleanup deletes it).
+            # Always (re-)create via EC2 create_key_pair so we have the private key material
+            # regardless of whether a --ssh-key-path was provided.
+            import tempfile as _tempfile
+            try:
                 try:
-                    from cryptography.hazmat.primitives.serialization import load_pem_private_key, Encoding, PublicFormat
-                    with open(ssh_key_path, "rb") as _kf:
-                        _priv = load_pem_private_key(_kf.read(), password=None)
-                    _pub = _priv.public_key().public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH)
-                    try:
-                        ec2_client.delete_key_pair(KeyName=KEY_NAME)
-                    except Exception:
-                        pass
-                    ec2_client.import_key_pair(KeyName=KEY_NAME, PublicKeyMaterial=_pub)
-                    log(f"MAC_AGENT_BOOTSTRAP: imported key pair {KEY_NAME} from {ssh_key_path}")
-                except Exception as _ke:
-                    log(f"MAC_AGENT_BOOTSTRAP: could not import key pair: {_ke}")
+                    ec2_client.delete_key_pair(KeyName=KEY_NAME)
+                except Exception:
+                    pass
+                _kp_resp = ec2_client.create_key_pair(KeyName=KEY_NAME)
+                _key_material = _kp_resp["KeyMaterial"]
+                _tmp_key = _tempfile.NamedTemporaryFile(delete=False, suffix=".pem", mode="w")
+                _tmp_key.write(_key_material)
+                _tmp_key.close()
+                import os as _os; _os.chmod(_tmp_key.name, 0o600)
+                ssh_key_path = _tmp_key.name
+                log(f"MAC_AGENT_BOOTSTRAP: created key pair {KEY_NAME}, private key at {ssh_key_path}")
+            except Exception as _ke:
+                log(f"MAC_AGENT_BOOTSTRAP: could not create key pair: {_ke}")
 
             # Launch on the dedicated host
             log(f"MAC_AGENT_BOOTSTRAP: launching mac2.metal on dedicated host {dedicated_host_id}...")
