@@ -16438,16 +16438,26 @@ def run_phase_mac_agent_bootstrap(
                 fail(f"MAC_AGENT_BOOTSTRAP: SSH port 22 not available on {private_ip or public_ip} after 1200s")
 
             # Step 3 — Install Nexplane agent via SSH
+            # macOS EC2: sshd starts before cloud-init populates authorized_keys —
+            # retry with backoff until auth succeeds (up to 3 minutes)
             log("MAC_AGENT_BOOTSTRAP: connecting via SSH to install Nexplane agent...")
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             _ssh_pkey = paramiko.RSAKey.from_private_key_file(ssh_key_path)
-            ssh.connect(
-                hostname=private_ip or public_ip,
-                username="ec2-user",
-                pkey=_ssh_pkey,
-                timeout=30,
-            )
+            for _ssh_attempt in range(18):  # 18 × 10s = 3 minutes
+                try:
+                    ssh.connect(
+                        hostname=private_ip or public_ip,
+                        username="ec2-user",
+                        pkey=_ssh_pkey,
+                        timeout=30,
+                    )
+                    break
+                except paramiko.ssh_exception.AuthenticationException:
+                    if _ssh_attempt == 17:
+                        raise
+                    log(f"MAC_AGENT_BOOTSTRAP: SSH auth attempt {_ssh_attempt + 1} failed (cloud-init still setting up keys), retrying in 10s...")
+                    time.sleep(10)
 
             def _ssh_run(cmd: str) -> str:
                 _, stdout, stderr = ssh.exec_command(cmd)
