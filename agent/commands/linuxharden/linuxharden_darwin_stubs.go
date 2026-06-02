@@ -1,8 +1,8 @@
-//go:build !linux && !darwin
+//go:build darwin
 
 package linuxharden
 
-func trivyScanExecute(params map[string]any) (map[string]any, error) {
+func trivyScanExecute(_ map[string]any) (map[string]any, error) {
 	return map[string]any{"error": "trivy_scan is Linux-only"}, nil
 }
 func trivyScanRollback(_ map[string]any) (map[string]any, error) {
@@ -20,26 +20,8 @@ func openscapScanExecute(_ map[string]any) (map[string]any, error) {
 func openscapScanRollback(_ map[string]any) (map[string]any, error) {
 	return map[string]any{"error": "Linux-only"}, nil
 }
-func authorizedKeysAuditExecute(_ map[string]any) (map[string]any, error) {
-	return map[string]any{"error": "Linux-only"}, nil
-}
-func authorizedKeysAuditRollback(_ map[string]any) (map[string]any, error) {
-	return map[string]any{"error": "Linux-only"}, nil
-}
-func sudoersAuditExecute(_ map[string]any) (map[string]any, error) {
-	return map[string]any{"error": "Linux-only"}, nil
-}
-func sudoersAuditRollback(_ map[string]any) (map[string]any, error) {
-	return map[string]any{"error": "Linux-only"}, nil
-}
-func suidScanExecute(_ map[string]any) (map[string]any, error) {
-	return map[string]any{"error": "Linux-only"}, nil
-}
-func suidScanRollback(_ map[string]any) (map[string]any, error) {
-	return map[string]any{"error": "Linux-only"}, nil
-}
 func sslCertInspectExecute(_ map[string]any) (map[string]any, error) {
-	return map[string]any{"error": "Linux-only"}, nil
+	return map[string]any{"error": "ssl_cert_inspect requires Linux (uses ss)"}, nil
 }
 func sslCertInspectRollback(_ map[string]any) (map[string]any, error) {
 	return map[string]any{"error": "Linux-only"}, nil
