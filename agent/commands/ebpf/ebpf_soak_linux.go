@@ -194,15 +194,3 @@ func splitAddrPort(s string) (string, int) {
 	}
 	return ip, port
 }
-
-func toFloat(v any) float64 {
-	switch x := v.(type) {
-	case float64:
-		return x
-	case int:
-		return float64(x)
-	case int64:
-		return float64(x)
-	}
-	return 0
-}
