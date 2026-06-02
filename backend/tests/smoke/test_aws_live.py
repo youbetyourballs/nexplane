@@ -16338,6 +16338,24 @@ def run_phase_mac_agent_bootstrap(
             public_ip = reservations[0]["Instances"][0].get("PublicIpAddress", "") or private_ip
             hostname = reservations[0]["Instances"][0].get("PrivateDnsName", private_ip)
             log(f"MAC_AGENT_BOOTSTRAP: found existing instance {instance_id} ({public_ip})")
+            # Ensure we have SSH access for the existing instance — recreate key if needed
+            if not ssh_key_path:
+                import tempfile as _tempfile2
+                try:
+                    try:
+                        ec2_client.delete_key_pair(KeyName=KEY_NAME)
+                    except Exception:
+                        pass
+                    _kp_resp2 = ec2_client.create_key_pair(KeyName=KEY_NAME)
+                    _tmp_key2 = _tempfile2.NamedTemporaryFile(delete=False, suffix=".pem", mode="w")
+                    _tmp_key2.write(_kp_resp2["KeyMaterial"])
+                    _tmp_key2.close()
+                    import os as _os2; _os2.chmod(_tmp_key2.name, 0o600)
+                    ssh_key_path = _tmp_key2.name
+                    log(f"MAC_AGENT_BOOTSTRAP: created key pair {KEY_NAME} for existing instance, key at {ssh_key_path}")
+                    fresh_launch = True  # force agent install since key was regenerated
+                except Exception as _ke2:
+                    log(f"MAC_AGENT_BOOTSTRAP: could not create key pair for existing instance: {_ke2}")
         else:
             # Find latest macOS AMI from AWS
             log("MAC_AGENT_BOOTSTRAP: finding latest macOS AMI...")
@@ -16406,6 +16424,7 @@ def run_phase_mac_agent_bootstrap(
             hostname = inst.get("PrivateDnsName", private_ip)
             log(f"MAC_AGENT_BOOTSTRAP: instance running — public_ip={public_ip} hostname={hostname}")
 
+        if fresh_launch:
             # Wait for SSH on port 22
             import socket as _socket
             log("MAC_AGENT_BOOTSTRAP: waiting for SSH port 22...")
@@ -16471,8 +16490,6 @@ def run_phase_mac_agent_bootstrap(
             ssh.close()
 
             # Step 4 — AMI snapshot (best-effort; SSM is not available on Mac EC2)
-            # Note: get_or_create_smoke_ami uses SSM to read the cache key — this will not work
-            # on the Mac instance itself, but the helper only needs SSM on the runner side.
             import hashlib as _hashlib
             setup_hash = _hashlib.md5(f"mac-nexplane-agent-{version}".encode()).hexdigest()[:8]
             try:
