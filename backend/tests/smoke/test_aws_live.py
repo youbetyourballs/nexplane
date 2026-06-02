@@ -22728,10 +22728,10 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     deadline = _time.time() + 60
     while _time.time() < deadline:
         cr_state = client.get(f"/change-requests/{cr_net_promote['id']}")
-        if cr_state.get("rollback_status") in ("completed", "rolled_back", "failed"):
+        if cr_state.get("status") in ("completed", "rolled_back", "failed"):
             break
         _time.sleep(5)
-    assert cr_state.get("rollback_status") in ("completed", "rolled_back"), \
+    assert cr_state.get("status") in ("completed", "rolled_back"), \
         f"Network promote rollback did not complete: {cr_state}"
     log("Network promote rolled back ✓")
 
@@ -22740,10 +22740,10 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     deadline = _time.time() + 60
     while _time.time() < deadline:
         cr_state = client.get(f"/change-requests/{cr_net['id']}")
-        if cr_state.get("rollback_status") in ("completed", "rolled_back", "failed"):
+        if cr_state.get("status") in ("completed", "rolled_back", "failed"):
             break
         _time.sleep(5)
-    assert cr_state.get("rollback_status") in ("completed", "rolled_back"), \
+    assert cr_state.get("status") in ("completed", "rolled_back"), \
         f"Network policy rollback did not complete: {cr_state}"
     log("Network policy rolled back ✓")
 
@@ -22795,10 +22795,10 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     deadline = _time.time() + 60
     while _time.time() < deadline:
         cr_state = client.get(f"/change-requests/{cr_lsm_promote['id']}")
-        if cr_state.get("rollback_status") in ("completed", "rolled_back", "failed"):
+        if cr_state.get("status") in ("completed", "rolled_back", "failed"):
             break
         _time.sleep(5)
-    assert cr_state.get("rollback_status") in ("completed", "rolled_back"), \
+    assert cr_state.get("status") in ("completed", "rolled_back"), \
         f"LSM promote rollback did not complete: {cr_state}"
     log("LSM promote rolled back ✓")
 
@@ -22807,10 +22807,10 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     deadline = _time.time() + 60
     while _time.time() < deadline:
         cr_state = client.get(f"/change-requests/{cr_lsm['id']}")
-        if cr_state.get("rollback_status") in ("completed", "rolled_back", "failed"):
+        if cr_state.get("status") in ("completed", "rolled_back", "failed"):
             break
         _time.sleep(5)
-    assert cr_state.get("rollback_status") in ("completed", "rolled_back"), \
+    assert cr_state.get("status") in ("completed", "rolled_back"), \
         f"LSM policy rollback did not complete: {cr_state}"
     log("LSM policy rolled back ✓")
 
