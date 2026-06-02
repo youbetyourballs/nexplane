@@ -20,7 +20,10 @@ func EbpfLsmSoakRollback(_ map[string]any) (map[string]any, error) {
 	return map[string]any{"rolled_back": false, "reason": "soak is read-only"}, nil
 }
 
-func parseSSLine(_ string) map[string]any { return nil }
+func parseSSLine(_ string) map[string]any       { return nil }
+func splitAddrPort(s string) (string, int)       { return s, 0 }
+func collectProcEvents(_ map[string]bool, _ *[]map[string]any) {}
+func readComm(_ string) string                   { return "*" }
 
 func toFloat(v any) float64 {
 	switch x := v.(type) {
