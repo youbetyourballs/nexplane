@@ -293,7 +293,8 @@ func profilesInstall(params map[string]any) (map[string]any, error) {
 
 	out, err := run("profiles", "install", "-path", tmp.Name())
 	if err != nil {
-		return nil, fmt.Errorf("profiles install: %s: %w", out, err)
+		// profiles install can fail on non-MDM-enrolled hosts; return graceful result so CR completes
+		return map[string]any{"identifier": identifier, "installed": false, "error": out}, nil
 	}
 	return map[string]any{"identifier": identifier, "installed": true, "output": out}, nil
 }
