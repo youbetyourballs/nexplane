@@ -135,6 +135,9 @@ var commands = map[string]CommandFunc{
 	// Linux patching (Spec 5f)
 	"apply_linux_patches":      linuxpatch.ApplyLinuxPatchesExecute,
 	"audit_linux_patch_status": linuxpatch.AuditLinuxPatchStatusExecute,
+	// macOS patching
+	"apply_mac_patches": linuxpatch.ApplyMacPatchesExecute,
+	"audit_mac_patches": linuxpatch.AuditPatchesMacExecute,
 	// Windows patching (Spec 5f)
 	"apply_windows_patches":      winpatch.ApplyWindowsPatchesExecute,
 	"audit_windows_patch_status": winpatch.AuditWindowsPatchStatusExecute,
@@ -242,6 +245,9 @@ var rollbacks = map[string]CommandFunc{
 	"lock_local_user": linuxauth.LockLocalUserRollback,
 	// Linux patching rollback
 	"apply_linux_patches":   linuxpatch.ApplyLinuxPatchesRollback,
+	// macOS patching rollback
+	"apply_mac_patches": linuxpatch.ApplyMacPatchesRollback,
+	"audit_mac_patches": linuxpatch.AuditPatchesMacRollback,
 	// Windows patching rollback
 	"apply_windows_patches": winpatch.ApplyWindowsPatchesRollback,
 	// macOS rollbacks
