@@ -16472,8 +16472,12 @@ def run_phase_mac_agent_bootstrap(
 
             # Get agent secret for registration
             agent_secret = ""
-            import os as _mac_os; _bts = backend_tailscale_ip or _mac_os.environ.get("NEXPLANE_BACKEND_TAILSCALE_IP", "")
-            control_plane_url = f"http://{_bts}:8000" if _bts else "http://localhost:8000"
+            # Mac instance has no Tailscale — use platform's private VPC IP for control plane
+            import os as _mac_os
+            _bts = backend_tailscale_ip or _mac_os.environ.get("NEXPLANE_BACKEND_TAILSCALE_IP", "")
+            _platform_private_ip = _mac_os.environ.get("NEXPLANE_BACKEND_PRIVATE_IP", "172.31.1.233")
+            control_plane_url = f"http://{_platform_private_ip}:8000"
+            log(f"MAC_AGENT_BOOTSTRAP: using control_plane_url={control_plane_url} (VPC private IP)")
             try:
                 agent_secret = client.get_agent_secret()
             except Exception as _se:
@@ -16485,7 +16489,8 @@ def run_phase_mac_agent_bootstrap(
                 f"--control-plane='{control_plane_url}' "
                 f"--non-interactive"
             )
-            _ssh_run("sudo launchctl load /Library/LaunchDaemons/com.nexplane.agent.plist")
+            # launchctl load is deprecated on macOS 13+; use bootstrap instead
+            _ssh_run("sudo launchctl bootstrap system /Library/LaunchDaemons/com.nexplane.agent.plist")
             log("MAC_AGENT_BOOTSTRAP: agent installed and launchd plist loaded")
             ssh.close()
 
