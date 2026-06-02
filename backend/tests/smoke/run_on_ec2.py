@@ -58,6 +58,8 @@ pip3 install cryptography pydantic pydantic-settings sqlalchemy 2>/dev/null || t
 pip3 install pymongo redis psycopg2-binary 2>/dev/null || true
 # WinRM connector
 pip3 install pywinrm>=0.4.3 2>/dev/null || true
+# SSH connector (mac2.metal bootstrap)
+pip3 install paramiko 2>/dev/null || true
 echo "RUNNER_USERDATA_COMPLETE"
 """
 
