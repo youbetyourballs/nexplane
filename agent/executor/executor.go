@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	"runtime"
 
 	"nexplane-agent/commands/changip"
 	"nexplane-agent/commands/configsyslog"
@@ -65,6 +66,11 @@ var commands = map[string]CommandFunc{
 	"deploy_ebpf_policy":              ebpf.DeployEBPFPolicyExecute,
 	"configure_ebpf_security_policy":  ebpf.ConfigureEBPFSecurityPolicyExecute,
 	"audit_ebpf_posture":              ebpf.AuditEBPFPostureExecute,
+	"ebpf_network_soak":               ebpf.EbpfNetworkSoakExecute,
+	"ebpf_lsm_soak":                   ebpf.EbpfLsmSoakExecute,
+	"configure_ebpf_network":          ebpf.ConfigureEbpfNetworkExecute,
+	"configure_ebpf_lsm":              ebpf.ConfigureEbpfLsmExecute,
+	"promote_ebpf_policy":             ebpf.PromoteEbpfPolicyExecute,
 	// Windows hardening (Spec 5c)
 	"configure_laps":                 winharden.ConfigureLAPSExecute,
 	"enable_credential_guard":        winharden.EnableCredentialGuardExecute,
@@ -132,6 +138,15 @@ var commands = map[string]CommandFunc{
 	// Windows patching (Spec 5f)
 	"apply_windows_patches":      winpatch.ApplyWindowsPatchesExecute,
 	"audit_windows_patch_status": winpatch.AuditWindowsPatchStatusExecute,
+	// User lockout
+	"lock_local_user": linuxauth.LockLocalUserExecute,
+	// Cross-platform patch audit router
+	"audit_patch_status": func(params map[string]any) (map[string]any, error) {
+		if runtime.GOOS == "windows" {
+			return winpatch.AuditWindowsPatchStatusExecute(params)
+		}
+		return linuxpatch.AuditLinuxPatchStatusExecute(params)
+	},
 	// macOS hardening
 	"filevault_status":       macos.FilevaultStatusExecute,
 	"filevault_enable":       macos.FilevaultEnableExecute,
@@ -184,6 +199,11 @@ var rollbacks = map[string]CommandFunc{
 	// eBPF (Spec 5a)
 	"deploy_ebpf_policy":              ebpf.DeployEBPFPolicyRollback,
 	"configure_ebpf_security_policy":  ebpf.ConfigureEBPFSecurityPolicyRollback,
+	"ebpf_network_soak":               ebpf.EbpfNetworkSoakRollback,
+	"ebpf_lsm_soak":                   ebpf.EbpfLsmSoakRollback,
+	"configure_ebpf_network":          ebpf.ConfigureEbpfNetworkRollback,
+	"configure_ebpf_lsm":              ebpf.ConfigureEbpfLsmRollback,
+	"promote_ebpf_policy":             ebpf.PromoteEbpfPolicyRollback,
 	// Windows hardening (Spec 5c)
 	"configure_laps":                 winharden.ConfigureLAPSRollback,
 	"enable_credential_guard":        winharden.EnableCredentialGuardRollback,
@@ -218,6 +238,8 @@ var rollbacks = map[string]CommandFunc{
 	"upgrade_linux_instance":  linuxupgrade.UpgradeLinuxInstanceRollback,
 	"execute_os_upgrade":      linuxupgrade.UpgradeLinuxInstanceRollback,
 	"containerize_retire":     containerizeretire.ContainerizeRetireRollback,
+	// User lockout rollback
+	"lock_local_user": linuxauth.LockLocalUserRollback,
 	// Linux patching rollback
 	"apply_linux_patches":   linuxpatch.ApplyLinuxPatchesRollback,
 	// Windows patching rollback
