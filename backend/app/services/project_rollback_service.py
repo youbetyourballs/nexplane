@@ -324,7 +324,7 @@ async def _run_rollback_inner(rollback_id: uuid.UUID) -> None:
             if step.status == RollbackStepStatus.awaiting_user:
                 return
 
-            rollback.current_step = i
+            rollback.current_step = step.sequence_order
             step.status = RollbackStepStatus.running
             step.started_at = datetime.now(timezone.utc)
             await db.commit()

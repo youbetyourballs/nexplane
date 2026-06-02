@@ -21,6 +21,7 @@ def upgrade():
     op.execute("""
         ALTER TABLE security_policy_soak_sessions
           DROP CONSTRAINT IF EXISTS security_policy_soak_sessions_policy_type_check,
+          DROP CONSTRAINT IF EXISTS ck_soak_sessions_policy_type,
           ADD CONSTRAINT security_policy_soak_sessions_policy_type_check
             CHECK (policy_type IN ('seccomp','apparmor','selinux','ebpf_network','ebpf_lsm'))
     """)

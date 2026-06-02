@@ -6,6 +6,17 @@ from typing import Callable
 from app.models.change_request import ChangeType
 
 
+def _default_observations_extractor(result: dict) -> list:
+    return (
+        result.get("syscalls_seen")
+        or result.get("apparmor_events")
+        or result.get("avc_lines")
+        or result.get("flows")
+        or result.get("events")
+        or []
+    )
+
+
 @dataclass
 class PolicyPlugin:
     policy_type: str
@@ -15,3 +26,4 @@ class PolicyPlugin:
     delta_extract: Callable[[dict], set]
     cr_title_template: str        # receives {service_name}
     cr_description_template: str  # receives {rule_count}, {partial}
+    observations_extractor: Callable[[dict], list] = _default_observations_extractor

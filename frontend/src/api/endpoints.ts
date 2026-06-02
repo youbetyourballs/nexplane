@@ -37,11 +37,14 @@ export const assetsApi = {
 // Rollback types
 export interface ProjectRollbackStep {
   id: string;
+  project_rollback_id: string;
   change_request_id: string;
   sequence_order: number;
   status: 'pending' | 'running' | 'skipped' | 'completed' | 'failed' | 'awaiting_user';
   rollback_kind: 'standard' | 'reconstitution' | 'permanent_no_backup';
   backup_cr_id: string | null;
+  started_at: string | null;
+  completed_at: string | null;
   result: Record<string, unknown> | null;
 }
 
@@ -50,9 +53,14 @@ export interface ProjectRollback {
   project_id: string;
   status: 'pending' | 'running' | 'paused' | 'awaiting_user' | 'completed' | 'failed';
   trigger: 'manual' | 'execution_failure' | 'soak_health_check';
+  triggered_by_user_id: string | null;
+  triggered_by_cr_id: string | null;
   current_step: number;
   notes: string | null;
   created_at: string;
+  started_at: string | null;
+  paused_at: string | null;
+  completed_at: string | null;
   steps: ProjectRollbackStep[];
 }
 
