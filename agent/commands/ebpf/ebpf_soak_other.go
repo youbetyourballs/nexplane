@@ -24,15 +24,3 @@ func parseSSLine(_ string) map[string]any       { return nil }
 func splitAddrPort(s string) (string, int)       { return s, 0 }
 func collectProcEvents(_ map[string]bool, _ *[]map[string]any) {}
 func readComm(_ string) string                   { return "*" }
-
-func toFloat(v any) float64 {
-	switch x := v.(type) {
-	case float64:
-		return x
-	case int:
-		return float64(x)
-	case int64:
-		return float64(x)
-	}
-	return 0
-}
