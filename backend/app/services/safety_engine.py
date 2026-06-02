@@ -136,6 +136,9 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.configure_seccomp,
     ChangeType.configure_apparmor,
     ChangeType.configure_selinux,
+    ChangeType.configure_ebpf_network,
+    ChangeType.configure_ebpf_lsm,
+    ChangeType.promote_ebpf_policy,
 }
 
 
