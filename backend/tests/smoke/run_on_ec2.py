@@ -957,9 +957,10 @@ Examples:
         try:
             ssm_run(ssm, runner_id, bg_launch_script, timeout=30)
             print("  Test launched in background, polling for completion...")
-            # Poll /tmp/smoke_done + tail log every 30s, up to 7200s total
+            # Poll /tmp/smoke_done + tail log every 30s, up to 18000s total
+            # (MAC_AGENT_BOOTSTRAP retry loop can run up to 4h for scrub cycle)
             out = ""
-            poll_deadline = time.time() + 7200
+            poll_deadline = time.time() + 18000
             last_log_size = 0
             while time.time() < poll_deadline:
                 time.sleep(30)
@@ -993,7 +994,7 @@ Examples:
                     pass
                 print(".", end="", flush=True)
             else:
-                raise RuntimeError("Smoke test polling timed out after 7200s")
+                raise RuntimeError("Smoke test polling timed out after 18000s")
             # Check if the test itself failed (exit code embedded in output)
             if "SMOKE_EXIT_CODE:0" not in out:
                 # Retrieve full log if available
