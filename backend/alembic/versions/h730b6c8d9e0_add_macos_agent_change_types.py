@@ -29,7 +29,7 @@ def upgrade() -> None:
         "macos_gatekeeper_status",
     ]
     for val in new_values:
-        op.execute(f"ALTER TYPE cr_type ADD VALUE IF NOT EXISTS '{val}'")
+        op.execute(f"ALTER TYPE change_type ADD VALUE IF NOT EXISTS '{val}'")
 
 
 def downgrade() -> None:
