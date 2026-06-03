@@ -1,0 +1,340 @@
+{
+  "connector_type": "jamf",
+  "display_name": "Jamf Pro",
+  "credential_fields": [
+    {"name": "base_url", "label": "Jamf Pro URL (e.g. https://acme.jamfcloud.com)", "type": "string", "required": true},
+    {"name": "client_id", "label": "Client ID (API Role OAuth)", "type": "string", "required": true},
+    {"name": "client_secret", "label": "Client Secret", "type": "password", "required": true}
+  ],
+  "actions": [
+    {
+      "action_id": "enroll_device",
+      "generic_action": "enroll_device",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Enroll Device in MDM",
+      "description": "Pushes the Jamf enrollment profile to the device via the Nexplane agent and waits for the device to appear in Jamf inventory.",
+      "applicable_asset_types": ["server"],
+      "parameters": [],
+      "executor": "jamf.enroll_device",
+      "rollback_action": "unenroll_device",
+      "estimated_duration_seconds": 120,
+      "blast_radius_hint": "single_device",
+      "safety_notes": ["Requires Nexplane agent to be installed on the target device."]
+    },
+    {
+      "action_id": "unenroll_device",
+      "generic_action": "unenroll_device",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Unenroll Device from MDM",
+      "description": "Removes the MDM enrollment profile from the device and deletes the device record from Jamf.",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "device_id", "type": "string", "required": true, "description": "Jamf computer ID from enroll_device result"}],
+      "executor": "jamf.unenroll_device",
+      "rollback_action": "enroll_device",
+      "estimated_duration_seconds": 60,
+      "blast_radius_hint": "single_device"
+    },
+    {
+      "action_id": "sync_device",
+      "generic_action": "sync_device",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Sync Device",
+      "description": "Triggers an immediate MDM check-in on the device to pull latest policy.",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "device_id", "type": "string", "required": true}],
+      "executor": "jamf.sync_device",
+      "rollback_action": null,
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "none",
+      "safety_notes": ["Read-only trigger — no state changed."]
+    },
+    {
+      "action_id": "check_compliance",
+      "generic_action": "check_compliance",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Check Device Compliance",
+      "description": "Returns current compliance state and failing policies for a Jamf-managed device.",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "device_id", "type": "string", "required": true}],
+      "executor": "jamf.check_compliance",
+      "rollback_action": null,
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "none"
+    },
+    {
+      "action_id": "query_device",
+      "generic_action": "query_device",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Query Device Inventory",
+      "description": "Returns full hardware, software, profile, and certificate inventory from Jamf.",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "device_id", "type": "string", "required": true}],
+      "executor": "jamf.query_device",
+      "rollback_action": null,
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "none"
+    },
+    {
+      "action_id": "push_configuration_profile",
+      "generic_action": "push_configuration_profile",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Push Configuration Profile",
+      "description": "Deploys a .mobileconfig profile to the device via Jamf MDM.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "profile_b64", "type": "string", "required": true, "description": "Base64-encoded .mobileconfig content"},
+        {"name": "profile_name", "type": "string", "required": true}
+      ],
+      "executor": "jamf.push_configuration_profile",
+      "rollback_action": "remove_configuration_profile",
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "single_device"
+    },
+    {
+      "action_id": "remove_configuration_profile",
+      "generic_action": "remove_configuration_profile",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Remove Configuration Profile",
+      "description": "Removes a configuration profile by identifier from a Jamf-managed device.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "profile_identifier", "type": "string", "required": true}
+      ],
+      "executor": "jamf.remove_configuration_profile",
+      "rollback_action": null,
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "single_device"
+    },
+    {
+      "action_id": "schedule_os_update",
+      "generic_action": "schedule_os_update",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Schedule OS Update",
+      "description": "Sends MDM ScheduleOSUpdate command for security patches and minor updates.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "install_action", "type": "string", "required": false, "description": "Default: InstallASAP. Options: Default, DownloadOnly, InstallASAP, NotifyOnly, InstallLater"}
+      ],
+      "executor": "jamf.schedule_os_update",
+      "rollback_action": null,
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "single_device",
+      "safety_notes": ["Cannot be undone. Device will restart after update."]
+    },
+    {
+      "action_id": "os_major_upgrade",
+      "generic_action": "os_major_upgrade",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Major OS Upgrade",
+      "description": "Pushes a major macOS version upgrade via Jamf policy. Irreversible — device restarts into new OS.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "target_version", "type": "string", "required": true, "description": "e.g. 15.0"},
+        {"name": "confirm", "type": "boolean", "required": true, "description": "Must be true to proceed"}
+      ],
+      "executor": "jamf.os_major_upgrade",
+      "rollback_action": null,
+      "estimated_duration_seconds": 1800,
+      "blast_radius_hint": "irreversible",
+      "safety_notes": ["Irreversible. Requires confirm: true. Reconstitution rollback only."]
+    },
+    {
+      "action_id": "run_script",
+      "generic_action": "run_script",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Run Script",
+      "description": "Deploys and runs a shell script on the device via Jamf.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "script_content", "type": "string", "required": true},
+        {"name": "script_name", "type": "string", "required": true}
+      ],
+      "executor": "jamf.run_script",
+      "rollback_action": "delete_script",
+      "estimated_duration_seconds": 120,
+      "blast_radius_hint": "single_device"
+    },
+    {
+      "action_id": "delete_script",
+      "generic_action": "delete_script",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Delete Script",
+      "description": "Removes a previously deployed script from Jamf.",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "script_id", "type": "string", "required": true}],
+      "executor": "jamf.delete_script",
+      "rollback_action": null,
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "none"
+    },
+    {
+      "action_id": "install_package",
+      "generic_action": "install_package",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Install Package",
+      "description": "Pushes a .pkg to the device via Jamf MDM InstallApplication.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "manifest_url", "type": "string", "required": true, "description": "URL to a .plist app manifest or direct .pkg URL"}
+      ],
+      "executor": "jamf.install_package",
+      "rollback_action": "remove_package",
+      "estimated_duration_seconds": 300,
+      "blast_radius_hint": "single_device"
+    },
+    {
+      "action_id": "remove_package",
+      "generic_action": "remove_package",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Remove Package",
+      "description": "Uninstalls a package by bundle ID from a Jamf-managed device.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "bundle_id", "type": "string", "required": true}
+      ],
+      "executor": "jamf.remove_package",
+      "rollback_action": null,
+      "estimated_duration_seconds": 60,
+      "blast_radius_hint": "single_device"
+    },
+    {
+      "action_id": "lock_device",
+      "generic_action": "lock_device",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Lock Device",
+      "description": "Sends MDM DeviceLock with a 6-digit PIN. Device is locked immediately on next check-in.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "pin", "type": "string", "required": true, "description": "6-digit unlock PIN"}
+      ],
+      "executor": "jamf.lock_device",
+      "rollback_action": "unlock_device",
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "single_device"
+    },
+    {
+      "action_id": "unlock_device",
+      "generic_action": "unlock_device",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Unlock Device",
+      "description": "Clears the MDM device lock. Device must already be unlocked with the PIN before MDM clear takes effect.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true}
+      ],
+      "executor": "jamf.unlock_device",
+      "rollback_action": null,
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "single_device"
+    },
+    {
+      "action_id": "remote_wipe",
+      "generic_action": "remote_wipe",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Remote Wipe",
+      "description": "Sends MDM EraseDevice command. All data is destroyed. Reconstitution rollback only.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "confirm", "type": "boolean", "required": true, "description": "Must be true to proceed"}
+      ],
+      "executor": "jamf.remote_wipe",
+      "rollback_action": null,
+      "estimated_duration_seconds": 60,
+      "blast_radius_hint": "irreversible",
+      "safety_notes": ["Irreversible. All data destroyed. Requires confirm: true."]
+    },
+    {
+      "action_id": "manage_smart_group",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Manage Smart Group Membership",
+      "description": "Adds or removes the device from a Jamf static computer group.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "group_id", "type": "string", "required": true},
+        {"name": "action", "type": "string", "required": true, "description": "add or remove"}
+      ],
+      "executor": "jamf.manage_smart_group",
+      "rollback_action": "manage_smart_group",
+      "estimated_duration_seconds": 15,
+      "blast_radius_hint": "single_device"
+    },
+    {
+      "action_id": "assign_patch_policy",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Assign Patch Policy",
+      "description": "Assigns the device to a Jamf patch management software title with a deadline.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "software_title_id", "type": "string", "required": true},
+        {"name": "patch_version", "type": "string", "required": true},
+        {"name": "deadline_days", "type": "integer", "required": false, "description": "Days until forced install. Default: 7"}
+      ],
+      "executor": "jamf.assign_patch_policy",
+      "rollback_action": null,
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "single_device"
+    },
+    {
+      "action_id": "manage_extension_attribute",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Set Extension Attribute",
+      "description": "Sets a custom Jamf extension attribute value on the device record.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "attribute_id", "type": "string", "required": true},
+        {"name": "value", "type": "string", "required": true}
+      ],
+      "executor": "jamf.manage_extension_attribute",
+      "rollback_action": null,
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "none"
+    },
+    {
+      "action_id": "deploy_vpp_app",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Deploy VPP App",
+      "description": "Pushes an App Store app to the device via Jamf VPP token assignment.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "device_id", "type": "string", "required": true},
+        {"name": "adam_id", "type": "string", "required": true, "description": "App Store Adam ID"}
+      ],
+      "executor": "jamf.deploy_vpp_app",
+      "rollback_action": "remove_package",
+      "estimated_duration_seconds": 120,
+      "blast_radius_hint": "single_device"
+    }
+  ]
+}
