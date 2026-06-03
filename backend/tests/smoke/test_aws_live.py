@@ -16338,8 +16338,23 @@ def run_phase_mac_agent_bootstrap(
             public_ip = reservations[0]["Instances"][0].get("PublicIpAddress", "") or private_ip
             hostname = reservations[0]["Instances"][0].get("PrivateDnsName", private_ip)
             log(f"MAC_AGENT_BOOTSTRAP: found existing instance {instance_id} ({public_ip})")
-            # Without the original SSH key we cannot authenticate to the existing instance —
-            # terminate it and fall through to launch a fresh one with a known key.
+            # Without the original SSH key we cannot authenticate to the existing instance.
+            # Try SSM first; only terminate if the key is truly unrecoverable.
+            if not ssh_key_path:
+                try:
+                    _ssm_param = ssm_boto.get_parameter(
+                        Name="/nexplane/smoke/mac-ssh-key", WithDecryption=True
+                    )
+                    _recovered_material = _ssm_param["Parameter"]["Value"]
+                    import tempfile as _tempfile2
+                    _rec_tmp = _tempfile2.NamedTemporaryFile(delete=False, suffix=".pem", mode="w")
+                    _rec_tmp.write(_recovered_material)
+                    _rec_tmp.close()
+                    import os as _os2; _os2.chmod(_rec_tmp.name, 0o600)
+                    ssh_key_path = _rec_tmp.name
+                    log(f"MAC_AGENT_BOOTSTRAP: recovered SSH key from SSM, written to {ssh_key_path}")
+                except Exception as _ssm_re:
+                    log(f"MAC_AGENT_BOOTSTRAP: could not recover SSH key from SSM: {_ssm_re}")
             if not ssh_key_path:
                 log(f"MAC_AGENT_BOOTSTRAP: no SSH key for existing instance {instance_id} — terminating and relaunching fresh")
                 ec2_client.terminate_instances(InstanceIds=[instance_id])
@@ -16384,6 +16399,17 @@ def run_phase_mac_agent_bootstrap(
                 import os as _os; _os.chmod(_tmp_key.name, 0o600)
                 ssh_key_path = _tmp_key.name
                 log(f"MAC_AGENT_BOOTSTRAP: created key pair {KEY_NAME}, private key at {ssh_key_path}")
+                # Persist key to SSM so future runners can retrieve it without relaunching
+                try:
+                    ssm_boto.put_parameter(
+                        Name="/nexplane/smoke/mac-ssh-key",
+                        Value=_key_material,
+                        Type="SecureString",
+                        Overwrite=True,
+                    )
+                    log("MAC_AGENT_BOOTSTRAP: SSH key persisted to SSM /nexplane/smoke/mac-ssh-key")
+                except Exception as _ssm_e:
+                    log(f"MAC_AGENT_BOOTSTRAP: WARNING — could not persist key to SSM: {_ssm_e}")
             except Exception as _ke:
                 log(f"MAC_AGENT_BOOTSTRAP: could not create key pair: {_ke}")
 
