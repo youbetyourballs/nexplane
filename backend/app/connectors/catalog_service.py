@@ -29,14 +29,15 @@ class ActionCatalogService:
             self._catalog[connector_type] = actions
             self._raw[connector_type] = data
             for action_def in actions:
-                generic = action_def["generic_action"]
+                generic = action_def.get("generic_action")
                 option = ActionOption(
                     connector_type=connector_type,
                     action_id=action_def["action_id"],
                     action_def=action_def,
                     execution_tier=action_def.get("execution_tier", 99),
                 )
-                self._generic_index.setdefault(generic, []).append(option)
+                if generic:
+                    self._generic_index.setdefault(generic, []).append(option)
         for key in self._generic_index:
             self._generic_index[key].sort(key=lambda o: o.execution_tier)
 
