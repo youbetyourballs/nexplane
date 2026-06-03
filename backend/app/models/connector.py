@@ -80,6 +80,8 @@ class ConnectorType(str, enum.Enum):
     winrm = "winrm"
     sccm = "sccm"
     intune = "intune"
+    jamf = "jamf"
+    micromdm = "micromdm"
     wufb = "wufb"
     laps = "laps"
     # DNS
