@@ -16526,7 +16526,7 @@ def run_phase_mac_agent_bootstrap(
         log("MAC_AGENT_BOOTSTRAP: running defaults_write CR...")
         cr_dw = client.run_cr(
             "[MAC_AGENT_BOOTSTRAP] defaults_write com.nexplane.smoke",
-            "defaults_write",
+            "macos_defaults_write",
             endpoint_asset_id,
             {"domain": "com.nexplane.smoke", "key": "SmokeTestValue", "value": "hello", "type": "string"},
         )
@@ -16570,7 +16570,7 @@ def run_phase_mac_agent_bootstrap(
         log("MAC_AGENT_BOOTSTRAP: running santa_check CR...")
         cr_sc = client.run_cr(
             "[MAC_AGENT_BOOTSTRAP] santa_check",
-            "santa_check",
+            "macos_santa_check",
             endpoint_asset_id,
             {},
         )
