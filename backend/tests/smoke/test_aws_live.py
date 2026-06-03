@@ -16488,12 +16488,18 @@ def run_phase_mac_agent_bootstrap(
             except Exception as _se:
                 log(f"MAC_AGENT_BOOTSTRAP: could not get agent secret: {_se}")
 
-            _ssh_run(
-                f"sudo ~/nexplane-agent-darwin-arm64 install "
-                f"--secret='{agent_secret}' "
-                f"--control-plane='{control_plane_url}' "
-                f"--non-interactive"
+            import shlex as _shlex
+            _install_cmd = (
+                f"sudo /usr/bin/env "
+                f"NP_CONTROL_PLANE={_shlex.quote(control_plane_url)} "
+                f"NP_SECRET={_shlex.quote(agent_secret)} "
+                f"~/nexplane-agent-darwin-arm64 install --non-interactive"
             )
+            _ssh_run(_install_cmd)
+            # Verify install created the LaunchDaemon plist before proceeding
+            _plist_out = _ssh_run("test -f /Library/LaunchDaemons/com.nexplane.agent.plist && echo EXISTS || echo MISSING")
+            if "MISSING" in (_plist_out or ""):
+                raise RuntimeError("MAC_AGENT_BOOTSTRAP: LaunchDaemon plist not created — agent install failed (check stderr above)")
             # launchctl load is deprecated on macOS 13+; use bootstrap instead
             _ssh_run("sudo launchctl bootstrap system /Library/LaunchDaemons/com.nexplane.agent.plist")
             log("MAC_AGENT_BOOTSTRAP: agent installed and launchd plist loaded")
