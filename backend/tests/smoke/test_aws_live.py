@@ -16526,8 +16526,28 @@ def run_phase_mac_agent_bootstrap(
             _plist_out = _ssh_run("test -f /Library/LaunchDaemons/com.nexplane.agent.plist && echo EXISTS || echo MISSING")
             if "MISSING" in (_plist_out or ""):
                 raise RuntimeError("MAC_AGENT_BOOTSTRAP: LaunchDaemon plist not created — agent install failed (check stderr above)")
-            # launchctl load is deprecated on macOS 13+; use bootstrap instead
-            _ssh_run("sudo launchctl bootstrap system /Library/LaunchDaemons/com.nexplane.agent.plist")
+            # launchctl bootstrap can fail with I/O error if macOS is still initializing.
+            # Retry up to 5 times with 30s gaps; fall back to direct launch if all attempts fail.
+            import time as _time2
+            _bootstrap_ok = False
+            for _bi in range(5):
+                _bl_out = _ssh_run(
+                    "sudo launchctl bootstrap system /Library/LaunchDaemons/com.nexplane.agent.plist 2>&1; echo EXIT:$?"
+                ) or ""
+                if "Input/output error" in _bl_out or "Bootstrap failed" in _bl_out:
+                    log(f"MAC_AGENT_BOOTSTRAP: launchctl bootstrap attempt {_bi+1} failed (I/O error — macOS still initializing), waiting 30s...")
+                    _time2.sleep(30)
+                else:
+                    _bootstrap_ok = True
+                    break
+            if not _bootstrap_ok:
+                # macOS boot hasn't settled; start agent directly in background as last resort
+                log("MAC_AGENT_BOOTSTRAP: launchctl bootstrap kept failing — starting agent directly in background")
+                _ssh_run(
+                    f"sudo NP_CONTROL_PLANE={_shlex.quote(control_plane_url)} "
+                    f"NP_SECRET={_shlex.quote(agent_secret)} "
+                    f"/usr/local/bin/nexplane-agent run </dev/null >/tmp/nexplane-agent.log 2>&1 &"
+                )
             log("MAC_AGENT_BOOTSTRAP: agent installed and launchd plist loaded")
             ssh.close()
 
