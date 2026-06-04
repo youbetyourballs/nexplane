@@ -16343,7 +16343,7 @@ def run_phase_mac_agent_bootstrap(
             if not ssh_key_path:
                 try:
                     _ssm_param = ssm_boto.get_parameter(
-                        Name="/nexplane/smoke/mac-ssh-key", WithDecryption=True
+                        Name="/nexplane/smoke/mac-ssh-key", WithDecryption=False
                     )
                     _recovered_material = _ssm_param["Parameter"]["Value"]
                     import tempfile as _tempfile2
@@ -16356,15 +16356,14 @@ def run_phase_mac_agent_bootstrap(
                 except Exception as _ssm_re:
                     log(f"MAC_AGENT_BOOTSTRAP: could not recover SSH key from SSM: {_ssm_re}")
             if not ssh_key_path:
-                log(f"MAC_AGENT_BOOTSTRAP: no SSH key for existing instance {instance_id} — terminating and relaunching fresh")
-                ec2_client.terminate_instances(InstanceIds=[instance_id])
-                for _tw in range(60):
-                    _st = ec2_client.describe_instances(InstanceIds=[instance_id])
-                    if _st["Reservations"][0]["Instances"][0]["State"]["Name"] == "terminated":
-                        break
-                    time.sleep(5)
-                instance_id = ""
-                reservations = []
+                # Cannot authenticate to the existing instance and must not terminate it
+                # (24-hour mac2.metal billing commitment — termination triggers another scrub cycle).
+                # Fail the test; the operator must re-run once the SSM key is restored.
+                raise RuntimeError(
+                    f"MAC_AGENT_BOOTSTRAP: existing instance {instance_id} found but SSH key "
+                    "could not be recovered from SSM (/nexplane/smoke/mac-ssh-key). "
+                    "Instance is left running. Fix SSM key and re-run."
+                )
 
         if not reservations:
             # Find latest macOS AMI from AWS
@@ -16404,7 +16403,7 @@ def run_phase_mac_agent_bootstrap(
                     ssm_boto.put_parameter(
                         Name="/nexplane/smoke/mac-ssh-key",
                         Value=_key_material,
-                        Type="SecureString",
+                        Type="String",  # not SecureString — runner role may lack kms:Decrypt
                         Overwrite=True,
                     )
                     log("MAC_AGENT_BOOTSTRAP: SSH key persisted to SSM /nexplane/smoke/mac-ssh-key")
