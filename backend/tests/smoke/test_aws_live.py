@@ -16650,7 +16650,8 @@ def run_phase_mac_agent_bootstrap(
         ssh2.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         _ssh2_pkey = paramiko.RSAKey.from_private_key_file(ssh_key_path)
         ssh2.connect(hostname=private_ip or public_ip, username="ec2-user", pkey=_ssh2_pkey, timeout=30)
-        _, _out, _ = ssh2.exec_command("defaults read com.nexplane.smoke SmokeTestValue")
+        # Agent runs as root so defaults are written to root's domain — read with sudo
+        _, _out, _ = ssh2.exec_command("sudo defaults read com.nexplane.smoke SmokeTestValue 2>/dev/null || defaults read com.nexplane.smoke SmokeTestValue 2>/dev/null")
         written_val = _out.read().decode().strip()
         assert written_val == "hello", (
             f"MAC_AGENT_BOOTSTRAP: defaults read returned unexpected value: {written_val!r}"
@@ -16667,8 +16668,8 @@ def run_phase_mac_agent_bootstrap(
                 break
             time.sleep(5)
 
-        # Verify key was deleted via SSH
-        _, _out2, _ = ssh2.exec_command("defaults read com.nexplane.smoke SmokeTestValue 2>&1; echo EXIT:$?")
+        # Verify key was deleted via SSH (check both root and user domains)
+        _, _out2, _ = ssh2.exec_command("sudo defaults read com.nexplane.smoke SmokeTestValue 2>&1; echo EXIT:$?")
         rb_out = _out2.read().decode().strip()
         assert "does not exist" in rb_out or "EXIT:1" in rb_out, (
             f"MAC_AGENT_BOOTSTRAP: expected key deleted after rollback but got: {rb_out!r}"
