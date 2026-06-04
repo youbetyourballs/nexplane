@@ -226,6 +226,7 @@ class ChangeType(str, enum.Enum):
     macos_profiles_install = "macos_profiles_install"
     macos_profiles_remove = "macos_profiles_remove"
     macos_defaults_write = "macos_defaults_write"
+    macos_defaults_delete = "macos_defaults_delete"
     macos_launchctl_list = "macos_launchctl_list"
     macos_homebrew_list = "macos_homebrew_list"
     macos_santa_check = "macos_santa_check"

@@ -16633,6 +16633,12 @@ def run_phase_mac_agent_bootstrap(
         log(f"MAC_AGENT_BOOTSTRAP: agent registered as asset {endpoint_asset_id}")
 
         # Step 6a — defaults_write CR: write, verify via SSH, rollback, verify deletion
+        # Pre-clean: delete the key if left over from a previous run (instance reuse)
+        _clean_ssh = paramiko.SSHClient()
+        _clean_ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        _clean_ssh.connect(hostname=private_ip or public_ip, username="ec2-user", pkey=paramiko.RSAKey.from_private_key_file(ssh_key_path), timeout=30)
+        _clean_ssh.exec_command("sudo defaults delete com.nexplane.smoke SmokeTestValue 2>/dev/null; true")
+        _clean_ssh.close()
         log("MAC_AGENT_BOOTSTRAP: running defaults_write CR...")
         cr_dw = client.run_cr(
             "[MAC_AGENT_BOOTSTRAP] defaults_write com.nexplane.smoke",
