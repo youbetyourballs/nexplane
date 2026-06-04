@@ -2155,6 +2155,20 @@
                       "execution_tier": 1
                     }
                     ,{
+                      "action_id": "macos_santa_install",
+                      "generic_action": "macos_santa_install",
+                      "display_name": "Install Santa",
+                      "description": "Downloads and installs the Santa binary allowlisting agent. Enables system extension developer mode. Rollback removes Santa.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                          {"name": "version", "type": "string", "required": false, "description": "Santa release version to install (default: 2024.7)"}
+                      ],
+                      "action_type": "change",
+                      "executor": "nexplane_agent.macos_santa_install",
+                      "estimated_duration_seconds": 300,
+                      "execution_tier": 2
+                    }
+                    ,{
                       "action_id": "macos_profiles_install",
                       "generic_action": "macos_profiles_install",
                       "display_name": "Install Configuration Profile",

@@ -138,6 +138,21 @@ func RollbackSantaModeSet(params map[string]any) (map[string]any, error) {
 	return map[string]any{"rolled_back": true, "mode": previousMode, "output": out}, nil
 }
 
+// RollbackSantaInstall unloads the Santa system extension, removes Santa files, and forgets the package receipt.
+func RollbackSantaInstall(_ map[string]any) (map[string]any, error) {
+	// Unload system extension
+	run("systemextensionsctl", "uninstall", "-", "com.northpolesec.santa.daemon")
+	// Remove Santa application bundle
+	run("rm", "-rf", "/Applications/Santa.app")
+	// Forget package receipt so installer state is clean
+	out, err := run("pkgutil", "--forget", "com.northpolesec.santa")
+	if err != nil {
+		// Not fatal — pkg may not have been recorded
+		_ = out
+	}
+	return map[string]any{"rolled_back": true}, nil
+}
+
 func RollbackProfilesRemove(params map[string]any) (map[string]any, error) {
 	plistB64, _ := params["previous_plist_b64"].(string)
 	if plistB64 == "" {
