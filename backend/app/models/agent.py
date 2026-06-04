@@ -11,6 +11,7 @@ from app.database import Base
 class OsType(str, enum.Enum):
     linux = "linux"
     windows = "windows"
+    darwin = "darwin"
 
 
 class AgentJobStatus(str, enum.Enum):
