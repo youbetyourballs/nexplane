@@ -91,3 +91,7 @@ func santaEventExport(_ map[string]any) (map[string]any, error) {
 func santaBinaryCheck(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("santa_binary_check is only supported on macOS")
 }
+
+func santaInstall(_ map[string]any) (map[string]any, error) {
+	return nil, fmt.Errorf("santa_install is only supported on macOS")
+}

@@ -173,6 +173,7 @@ var commands = map[string]CommandFunc{
 	"santa_sync_trigger":     macos.SantaSyncTriggerExecute,
 	"santa_event_export":     macos.SantaEventExportExecute,
 	"santa_binary_check":     macos.SantaBinaryCheckExecute,
+	"santa_install":          macos.SantaInstallExecute,
 	// Credential rotation
 	"rotate_ssh_keys":        credrotation.SSHKeyExecute,
 	"rotate_db_creds":        credrotation.DBRotateExecute,
@@ -260,6 +261,7 @@ var rollbacks = map[string]CommandFunc{
 	"santa_rule_add":     macos.SantaRuleAddRollback,
 	"santa_rule_remove":  macos.SantaRuleRemoveRollback,
 	"santa_mode_set":     macos.SantaModeSetRollback,
+	"santa_install":      macos.SantaInstallRollback,
 	// Credential rotation rollback
 	"rotate_ssh_keys":        credrotation.SSHKeyRollback,
 	"rotate_db_creds":        credrotation.DBRotateRollback,
