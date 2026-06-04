@@ -2128,6 +2128,21 @@
                       "execution_tier": 2
                     }
                     ,{
+                      "action_id": "macos_defaults_delete",
+                      "generic_action": "macos_defaults_delete",
+                      "display_name": "macOS Defaults Delete",
+                      "description": "Deletes a macOS defaults preference key.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                        {"name": "domain", "type": "string", "required": true, "description": "Defaults domain"},
+                        {"name": "key", "type": "string", "required": true, "description": "Preference key to delete"}
+                      ],
+                      "action_type": "change",
+                      "executor": "nexplane_agent.macos_defaults_delete",
+                      "estimated_duration_seconds": 10,
+                      "execution_tier": 2
+                    }
+                    ,{
                       "action_id": "macos_santa_check",
                       "generic_action": "macos_santa_check",
                       "display_name": "Santa Status Check",
