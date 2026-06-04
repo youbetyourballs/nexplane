@@ -16431,7 +16431,13 @@ def run_phase_mac_agent_bootstrap(
             )
             instance_id = launch_resp["Instances"][0]["InstanceId"]
             fresh_launch = True
-            log(f"MAC_AGENT_BOOTSTRAP: launched {instance_id} — waiting for running state...")
+            # Prevent any API caller (cleanup, rogue script) from terminating the mac mid-test.
+            # Must be set before the instance reaches running state.
+            ec2_client.modify_instance_attribute(
+                InstanceId=instance_id,
+                DisableApiTermination={"Value": True},
+            )
+            log(f"MAC_AGENT_BOOTSTRAP: launched {instance_id} — termination protection enabled, waiting for running state...")
 
             # Wait for running
             waiter = ec2_client.get_waiter("instance_running")
@@ -16548,6 +16554,7 @@ def run_phase_mac_agent_bootstrap(
                     f"/usr/local/bin/nexplane-agent run </dev/null >/tmp/nexplane-agent.log 2>&1 &"
                 )
             log("MAC_AGENT_BOOTSTRAP: agent installed and launchd plist loaded")
+
             ssh.close()
 
             # Step 4 — AMI snapshot (best-effort; SSM is not available on Mac EC2)
@@ -16632,13 +16639,47 @@ def run_phase_mac_agent_bootstrap(
         endpoint_asset_id = endpoint_asset["id"]
         log(f"MAC_AGENT_BOOTSTRAP: agent registered as asset {endpoint_asset_id}")
 
-        # Step 6a — defaults_write CR: write, verify via SSH, rollback, verify deletion
-        # Pre-clean: delete the key if left over from a previous run (instance reuse)
+        # Step 5b — Install Santa via CR (proper platform lifecycle, not SSH hack)
+        log("MAC_AGENT_BOOTSTRAP: running macos_santa_install CR...")
+        _cr_si = client.run_cr(
+            "[MAC_AGENT_BOOTSTRAP] santa_install",
+            "macos_santa_install",
+            endpoint_asset_id,
+            {},
+        )
+        _step_si = client.get_cr_step_result(_cr_si)
+        if not _step_si.get("installed"):
+            raise RuntimeError(f"MAC_AGENT_BOOTSTRAP: santa_install CR failed: {_step_si}")
+        log(f"MAC_AGENT_BOOTSTRAP: santa_install OK — already_present={_step_si.get('already_present')}, version={_step_si.get('version')}")
+
+        # Steps 6a-6i — Run ALL CRs first, collect results, rollback at the end.
+        # This lets us see which operations succeed independently before testing reversibility.
+        _crs_to_rollback = []  # (cr, label) pairs — rolled back in append order
+
+        def _wait_rollback(cr_obj, label):
+            """Submit rollback and poll to completion. Logs result, does not raise."""
+            cr_id = cr_obj["id"]
+            client.post(f"/change-requests/{cr_id}/rollback", json={})
+            for _w in range(60):
+                _s = client.get(f"/change-requests/{cr_id}").get("status", "")
+                if _s in ("rolled_back", "failed", "completed"):
+                    log(f"MAC_AGENT_BOOTSTRAP: rollback {label} → {_s}")
+                    return _s
+                time.sleep(5)
+            log(f"MAC_AGENT_BOOTSTRAP: rollback {label} timed out")
+            return "timeout"
+
+        # --- Pre-clean defaults key in case a prior run left it ---
         _clean_ssh = paramiko.SSHClient()
         _clean_ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        _clean_ssh.connect(hostname=private_ip or public_ip, username="ec2-user", pkey=paramiko.RSAKey.from_private_key_file(ssh_key_path), timeout=30)
-        _clean_ssh.exec_command("sudo defaults delete com.nexplane.smoke SmokeTestValue 2>/dev/null; true")
+        _clean_ssh.connect(hostname=private_ip or public_ip, username="ec2-user",
+                           pkey=paramiko.RSAKey.from_private_key_file(ssh_key_path), timeout=30)
+        # Agent runs as root — pre-clean root's defaults domain
+        _, _c_out, _ = _clean_ssh.exec_command("sudo -n defaults delete com.nexplane.smoke SmokeTestValue 2>/dev/null; true")
+        _c_out.read()  # wait for command to finish before closing
         _clean_ssh.close()
+
+        # --- 6a: defaults_write ---
         log("MAC_AGENT_BOOTSTRAP: running defaults_write CR...")
         cr_dw = client.run_cr(
             "[MAC_AGENT_BOOTSTRAP] defaults_write com.nexplane.smoke",
@@ -16650,69 +16691,42 @@ def run_phase_mac_agent_bootstrap(
         assert result_dw.get("domain") == "com.nexplane.smoke", (
             f"MAC_AGENT_BOOTSTRAP: defaults_write result missing expected domain: {result_dw}"
         )
-
-        # Verify side effect via SSH: defaults read should return "hello"
+        # Verify via SSH — agent runs as root so defaults are in root's domain (use sudo -n)
         ssh2 = paramiko.SSHClient()
         ssh2.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        _ssh2_pkey = paramiko.RSAKey.from_private_key_file(ssh_key_path)
-        ssh2.connect(hostname=private_ip or public_ip, username="ec2-user", pkey=_ssh2_pkey, timeout=30)
-        # Agent runs as root so defaults are written to root's domain — read with sudo
-        _, _out, _ = ssh2.exec_command("sudo defaults read com.nexplane.smoke SmokeTestValue 2>/dev/null || defaults read com.nexplane.smoke SmokeTestValue 2>/dev/null")
-        written_val = _out.read().decode().strip()
-        assert written_val == "hello", (
-            f"MAC_AGENT_BOOTSTRAP: defaults read returned unexpected value: {written_val!r}"
+        ssh2.connect(hostname=private_ip or public_ip, username="ec2-user",
+                     pkey=paramiko.RSAKey.from_private_key_file(ssh_key_path), timeout=30)
+        _, _dw_out, _ = ssh2.exec_command(
+            "sudo -n defaults read com.nexplane.smoke SmokeTestValue 2>/dev/null"
         )
+        written_val = _dw_out.read().decode().strip()
+        assert written_val == "hello", f"MAC_AGENT_BOOTSTRAP: defaults read unexpected: {written_val!r}"
         log("MAC_AGENT_BOOTSTRAP: defaults_write verified via SSH — value='hello'")
+        _crs_to_rollback.append((cr_dw, "defaults_write"))
 
-        # Rollback via Nexplane
-        cr_dw_id = cr_dw["id"]
-        client.post(f"/change-requests/{cr_dw_id}/rollback", json={})
-        # Poll for rollback completion — CR status transitions to rolled_back/failed
-        for _rb_wait in range(60):
-            cr_rb = client.get(f"/change-requests/{cr_dw_id}")
-            if cr_rb.get("status") in ("rolled_back", "failed", "completed"):
-                break
-            time.sleep(5)
-
-        # Verify key was deleted via SSH (check both root and user domains)
-        _, _out2, _ = ssh2.exec_command("sudo defaults read com.nexplane.smoke SmokeTestValue 2>&1; echo EXIT:$?")
-        rb_out = _out2.read().decode().strip()
-        assert "does not exist" in rb_out or "EXIT:1" in rb_out, (
-            f"MAC_AGENT_BOOTSTRAP: expected key deleted after rollback but got: {rb_out!r}"
-        )
-        ssh2.close()
-        log("MAC_AGENT_BOOTSTRAP: defaults_write rollback verified — key deleted")
-
-        # Step 6b — santa_check CR: read-only, verify returns installed field cleanly
+        # --- 6b: santa_check (read-only) ---
         log("MAC_AGENT_BOOTSTRAP: running santa_check CR...")
-        cr_sc = client.run_cr(
-            "[MAC_AGENT_BOOTSTRAP] santa_check",
-            "macos_santa_check",
-            endpoint_asset_id,
-            {},
-        )
+        cr_sc = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_check", "macos_santa_check", endpoint_asset_id, {})
         result_sc = client.get_cr_step_result(cr_sc)
-        assert "installed" in result_sc, (
-            f"MAC_AGENT_BOOTSTRAP: santa_check result missing 'installed' key: {result_sc}"
-        )
+        assert "installed" in result_sc, f"MAC_AGENT_BOOTSTRAP: santa_check missing 'installed': {result_sc}"
         _santa_installed = result_sc.get("installed", False)
-        # Santa is not installed on a fresh EC2 Mac — installed should be False
-        log(f"MAC_AGENT_BOOTSTRAP: santa_check complete — installed={_santa_installed}")
+        log(f"MAC_AGENT_BOOTSTRAP: santa_check OK — installed={_santa_installed}")
 
-        # --- profiles_install ---
+        # --- 6c: profiles_install ---
         _TEST_PROFILE_ID = "com.nexplane.smoke.test"
+        # Each key/value pair must be on separate lines — extractPlistKey() splits on \n
         _TEST_PROFILE_PLIST = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
             '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
-            '<plist version="1.0"><dict>'
-            '<key>PayloadContent</key><array/>'
-            '<key>PayloadDisplayName</key><string>Nexplane Smoke Test Profile</string>'
-            '<key>PayloadIdentifier</key><string>com.nexplane.smoke.test</string>'
-            '<key>PayloadType</key><string>Configuration</string>'
-            '<key>PayloadUUID</key><string>12345678-1234-1234-1234-123456789012</string>'
-            '<key>PayloadVersion</key><integer>1</integer>'
-            '</dict></plist>'
+            '<plist version="1.0">\n<dict>\n'
+            '<key>PayloadContent</key>\n<array/>\n'
+            '<key>PayloadDisplayName</key>\n<string>Nexplane Smoke Test Profile</string>\n'
+            '<key>PayloadIdentifier</key>\n<string>com.nexplane.smoke.test</string>\n'
+            '<key>PayloadType</key>\n<string>Configuration</string>\n'
+            '<key>PayloadUUID</key>\n<string>12345678-1234-1234-1234-123456789012</string>\n'
+            '<key>PayloadVersion</key>\n<integer>1</integer>\n'
+            '</dict>\n</plist>'
         )
         import base64 as _base64
         _plist_b64 = _base64.b64encode(_TEST_PROFILE_PLIST.encode()).decode()
@@ -16722,126 +16736,114 @@ def run_phase_mac_agent_bootstrap(
             "macos_profiles_install",
             endpoint_asset_id,
             {"plist_b64": _plist_b64},
-            connector_id=None,
         )
         _step_pi = client.get_cr_step_result(_cr_pi)
         if _step_pi.get("identifier") == _TEST_PROFILE_ID:
             log(f"MAC_AGENT_BOOTSTRAP: profiles_install OK — identifier={_step_pi.get('identifier')}")
-            client.post(f"/change-requests/{_cr_pi['id']}/rollback", json={})
-            log("MAC_AGENT_BOOTSTRAP: profiles_install rollback submitted")
+            _crs_to_rollback.append((_cr_pi, "profiles_install"))
         else:
-            # profiles install may fail on non-MDM-enrolled instances — log warning, continue
-            log(f"MAC_AGENT_BOOTSTRAP: WARNING profiles_install did not return expected identifier (non-fatal on non-MDM hosts): {_step_pi}")
+            log(f"MAC_AGENT_BOOTSTRAP: WARNING profiles_install unexpected result (non-fatal on non-MDM hosts): {_step_pi}")
 
-        # --- homebrew_list ---
+        # --- 6d: homebrew_list (read-only) ---
         log("MAC_AGENT_BOOTSTRAP: running homebrew_list CR...")
-        _cr_hb = client.run_cr(
-            "[MAC_AGENT_BOOTSTRAP] homebrew_list",
-            "macos_homebrew_list",
-            endpoint_asset_id,
-            {},
-            connector_id=None,
-        )
+        _cr_hb = client.run_cr("[MAC_AGENT_BOOTSTRAP] homebrew_list", "macos_homebrew_list", endpoint_asset_id, {})
         _step_hb = client.get_cr_step_result(_cr_hb)
         if "packages" not in _step_hb:
             fail(f"MAC_AGENT_BOOTSTRAP: homebrew_list missing 'packages': {_step_hb}")
         log(f"MAC_AGENT_BOOTSTRAP: homebrew_list OK — installed={_step_hb.get('installed')}, count={len(_step_hb.get('packages', []))}")
 
-        # --- santa_rule_add + list verify + rollback (Santa must be installed) ---
+        # --- 6e-6f: Santa rule CRs (Santa installed via CR in Step 5b) ---
         _SMOKE_SHA256 = "a" * 64
-        if _santa_installed:
+        _cr_sra = None
+        _cr_sms = None
+        if True:
             log("MAC_AGENT_BOOTSTRAP: running santa_rule_add CR...")
             _cr_sra = client.run_cr(
                 "[MAC_AGENT_BOOTSTRAP] santa_rule_add",
                 "macos_santa_rule_add",
                 endpoint_asset_id,
                 {"rule_type": "denylist", "identifier_type": "binary", "identifier": _SMOKE_SHA256, "custom_message": "nexplane smoke test"},
-                connector_id=None,
             )
             _step_sra = client.get_cr_step_result(_cr_sra)
             if not _step_sra.get("added"):
                 fail(f"MAC_AGENT_BOOTSTRAP: santa_rule_add failed: {_step_sra}")
             log(f"MAC_AGENT_BOOTSTRAP: santa_rule_add OK — previous_state={_step_sra.get('previous_state')}")
+            _crs_to_rollback.append((_cr_sra, "santa_rule_add"))
 
-            _cr_srl = client.run_cr(
-                "[MAC_AGENT_BOOTSTRAP] santa_rule_list verify",
-                "macos_santa_rule_list",
-                endpoint_asset_id, {},
-                connector_id=None,
-            )
+            _cr_srl = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_rule_list", "macos_santa_rule_list", endpoint_asset_id, {})
             _step_srl = client.get_cr_step_result(_cr_srl)
             _rule_ids = [r.get("identifier", "") for r in _step_srl.get("rules", [])]
             if _SMOKE_SHA256 not in _rule_ids:
-                log("MAC_AGENT_BOOTSTRAP: WARNING — smoke rule not found in santa_rule_list")
+                log("MAC_AGENT_BOOTSTRAP: WARNING smoke rule not found in santa_rule_list after add")
+            else:
+                log("MAC_AGENT_BOOTSTRAP: santa_rule_list verified smoke rule present")
 
-            client.post(f"/change-requests/{_cr_sra['id']}/rollback", json={})
-            log("MAC_AGENT_BOOTSTRAP: santa_rule_add rollback submitted")
-
-            # --- santa_mode_set + rollback ---
             log("MAC_AGENT_BOOTSTRAP: running santa_mode_set CR (monitor)...")
             _cr_sms = client.run_cr(
                 "[MAC_AGENT_BOOTSTRAP] santa_mode_set",
                 "macos_santa_mode_set",
                 endpoint_asset_id,
                 {"mode": "monitor"},
-                connector_id=None,
             )
             _step_sms = client.get_cr_step_result(_cr_sms)
             if "previous_mode" not in _step_sms:
                 fail(f"MAC_AGENT_BOOTSTRAP: santa_mode_set missing previous_mode: {_step_sms}")
-            log(f"MAC_AGENT_BOOTSTRAP: santa_mode_set OK — mode=monitor, previous_mode={_step_sms.get('previous_mode')}")
-            client.post(f"/change-requests/{_cr_sms['id']}/rollback", json={})
-            log("MAC_AGENT_BOOTSTRAP: santa_mode_set rollback submitted")
-        else:
-            log("MAC_AGENT_BOOTSTRAP: Santa not installed — skipping santa_rule_add, santa_rule_list, santa_mode_set")
+            log(f"MAC_AGENT_BOOTSTRAP: santa_mode_set OK — previous_mode={_step_sms.get('previous_mode')}")
+            _crs_to_rollback.append((_cr_sms, "santa_mode_set"))
 
-        # --- event_export, binary_check, sync_trigger ---
+        # --- 6g: santa_event_export (read-only) ---
         log("MAC_AGENT_BOOTSTRAP: running santa_event_export CR...")
-        _cr_see = client.run_cr(
-            "[MAC_AGENT_BOOTSTRAP] santa_event_export",
-            "macos_santa_event_export",
-            endpoint_asset_id, {"limit": 10},
-            connector_id=None,
-        )
+        _cr_see = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_event_export", "macos_santa_event_export", endpoint_asset_id, {"limit": 10})
         _step_see = client.get_cr_step_result(_cr_see)
         if "events" not in _step_see:
             fail(f"MAC_AGENT_BOOTSTRAP: santa_event_export missing 'events': {_step_see}")
         log(f"MAC_AGENT_BOOTSTRAP: santa_event_export OK — count={_step_see.get('count', 0)}")
 
+        # --- 6h: santa_binary_check (read-only) ---
         log("MAC_AGENT_BOOTSTRAP: running santa_binary_check CR...")
-        _cr_sbc = client.run_cr(
-            "[MAC_AGENT_BOOTSTRAP] santa_binary_check",
-            "macos_santa_binary_check",
-            endpoint_asset_id, {"path": "/usr/bin/true"},
-            connector_id=None,
-        )
+        _cr_sbc = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_binary_check", "macos_santa_binary_check", endpoint_asset_id, {"path": "/usr/bin/true"})
         _step_sbc = client.get_cr_step_result(_cr_sbc)
         if "decision" not in _step_sbc:
             fail(f"MAC_AGENT_BOOTSTRAP: santa_binary_check missing 'decision': {_step_sbc}")
         log(f"MAC_AGENT_BOOTSTRAP: santa_binary_check OK — decision={_step_sbc.get('decision')}")
 
+        # --- 6i: santa_sync_trigger ---
         log("MAC_AGENT_BOOTSTRAP: running santa_sync_trigger CR...")
-        _cr_sst = client.run_cr(
-            "[MAC_AGENT_BOOTSTRAP] santa_sync_trigger",
-            "macos_santa_sync_trigger",
-            endpoint_asset_id, {},
-            connector_id=None,
-        )
+        _cr_sst = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_sync_trigger", "macos_santa_sync_trigger", endpoint_asset_id, {})
         _step_sst = client.get_cr_step_result(_cr_sst)
         log(f"MAC_AGENT_BOOTSTRAP: santa_sync_trigger OK — synced={_step_sst.get('synced')}")
 
-        log("MAC_AGENT_BOOTSTRAP: all new CRs passed")
+        log("MAC_AGENT_BOOTSTRAP: all CRs executed — running rollbacks now")
+
+        # --- Step 7: Rollback all stateful CRs (santa_install last — rules depend on it) ---
+        _crs_to_rollback.append((_cr_si, "santa_install"))
+        for _rb_cr, _rb_label in _crs_to_rollback:
+            _wait_rollback(_rb_cr, _rb_label)
+
+        # Verify defaults_write key was deleted after rollback
+        _, _rb_dw_out, _ = ssh2.exec_command("sudo -n defaults read com.nexplane.smoke SmokeTestValue 2>&1; echo EXIT:$?")
+        _rb_dw_val = _rb_dw_out.read().decode().strip()
+        assert "does not exist" in _rb_dw_val or "EXIT:1" in _rb_dw_val, (
+            f"MAC_AGENT_BOOTSTRAP: defaults key not deleted after rollback: {_rb_dw_val!r}"
+        )
+        ssh2.close()
+        log("MAC_AGENT_BOOTSTRAP: defaults_write rollback verified — key deleted")
+
+        log("MAC_AGENT_BOOTSTRAP: all CRs passed and rolled back")
 
     finally:
-        # Step 7 — Cleanup note (do NOT terminate; 24-hour billing window applies)
-        if fresh_launch and instance_id:
-            log(
-                f"MAC_AGENT_BOOTSTRAP: instance {instance_id} left running on dedicated host {dedicated_host_id}. "
-                f"EC2 Mac Dedicated Hosts have a 24-hour minimum billing commitment — "
-                f"do NOT release the host or terminate the instance until the 24-hour window has elapsed."
-            )
-        elif instance_id:
-            log(f"MAC_AGENT_BOOTSTRAP: reused existing instance {instance_id} — no termination performed")
+        # Step 7 — Terminate the mac instance. Disable termination protection first,
+        # then terminate regardless of fresh_launch vs reuse.
+        if instance_id:
+            try:
+                ec2_client.modify_instance_attribute(
+                    InstanceId=instance_id,
+                    DisableApiTermination={"Value": False},
+                )
+                ec2_client.terminate_instances(InstanceIds=[instance_id])
+                log(f"MAC_AGENT_BOOTSTRAP: terminated mac instance {instance_id}")
+            except Exception as _te:
+                log(f"MAC_AGENT_BOOTSTRAP: WARNING — could not terminate {instance_id}: {_te}")
 
 
 def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):

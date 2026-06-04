@@ -140,3 +140,13 @@ func SantaBinaryCheckExecute(params map[string]any) (map[string]any, error) {
 func SantaModeSetRollback(params map[string]any) (map[string]any, error) {
 	return RollbackSantaModeSet(params)
 }
+
+// SantaInstallExecute installs Santa binary allowlisting software.
+func SantaInstallExecute(params map[string]any) (map[string]any, error) {
+	return santaInstall(params)
+}
+
+// SantaInstallRollback uninstalls Santa.
+func SantaInstallRollback(params map[string]any) (map[string]any, error) {
+	return RollbackSantaInstall(params)
+}

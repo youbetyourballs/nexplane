@@ -636,3 +636,65 @@ func macosSysinfo(_ map[string]any) (map[string]any, error) {
 
 	return result, nil
 }
+
+// santaInstall downloads and installs Santa, enables developer mode for the system extension,
+// and waits for santactl to become responsive. Params: version (optional, defaults to "2024.7").
+func santaInstall(params map[string]any) (map[string]any, error) {
+	version, _ := params["version"].(string)
+	if version == "" {
+		version = "2024.7"
+	}
+
+	// Check if already installed
+	existing, _ := run("santactl", "version")
+	if existing != "" && !strings.Contains(existing, "not found") && !strings.Contains(existing, "No such file") {
+		return map[string]any{
+			"installed":       true,
+			"already_present": true,
+			"version":         version,
+			"output":          existing,
+		}, nil
+	}
+
+	pkgURL := fmt.Sprintf(
+		"https://github.com/northpolesec/santa/releases/download/%s/santa-%s.pkg",
+		version, version,
+	)
+
+	out, err := run("curl", "-fsSL", "-o", "/tmp/santa.pkg", pkgURL)
+	if err != nil {
+		return nil, fmt.Errorf("santa download: %s: %w", out, err)
+	}
+
+	installOut, err := run("installer", "-pkg", "/tmp/santa.pkg", "-target", "/")
+	if err != nil {
+		return nil, fmt.Errorf("santa installer: %s: %w", installOut, err)
+	}
+	os.Remove("/tmp/santa.pkg")
+
+	// Allow system extension without MDM
+	run("systemextensionsctl", "developer", "on")
+
+	// Wait up to 3 minutes for Santa to become ready
+	ready := false
+	for i := 0; i < 18; i++ {
+		time.Sleep(10 * time.Second)
+		v, verr := run("santactl", "version")
+		if verr == nil && v != "" && !strings.Contains(v, "not found") {
+			ready = true
+			break
+		}
+	}
+	if !ready {
+		return nil, fmt.Errorf("santa did not become ready after installation; system extension may require MDM approval")
+	}
+
+	v, _ := run("santactl", "version")
+	return map[string]any{
+		"installed":        true,
+		"already_present":  false,
+		"version":          version,
+		"install_output":   installOut,
+		"santactl_version": v,
+	}, nil
+}
