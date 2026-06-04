@@ -16560,6 +16560,71 @@ def run_phase_mac_agent_bootstrap(
             except Exception as _ami_e:
                 log(f"MAC_AGENT_BOOTSTRAP: AMI cache skipped (best-effort for Mac): {_ami_e}")
 
+        if not fresh_launch:
+            # Existing instance reuse — the platform's rollback guarantee means prior CRs
+            # were reversed, so the instance is clean. We just need the agent running.
+            # SSH in, check if the agent process is alive, start it if not.
+            log("MAC_AGENT_BOOTSTRAP: reusing existing instance — checking agent status via SSH...")
+            import paramiko as _paramiko2, shlex as _shlex2
+            _reuse_ssh = _paramiko2.SSHClient()
+            _reuse_ssh.set_missing_host_key_policy(_paramiko2.AutoAddPolicy())
+            _reuse_pkey = _paramiko2.RSAKey.from_private_key_file(ssh_key_path)
+            for _ra in range(18):
+                try:
+                    _reuse_ssh.connect(hostname=private_ip or public_ip, username="ec2-user", pkey=_reuse_pkey, timeout=30)
+                    break
+                except Exception as _re:
+                    if _ra == 17:
+                        raise
+                    log(f"MAC_AGENT_BOOTSTRAP: SSH attempt {_ra+1} failed, retrying in 10s... ({_re})")
+                    time.sleep(10)
+
+            def _rsshr(cmd):
+                _, o, e = _reuse_ssh.exec_command(cmd)
+                out = o.read().decode().strip()
+                err = e.read().decode().strip()
+                log(f"  $ {cmd[:80]}")
+                if out: log(f"    stdout: {out[:200]}")
+                if err: log(f"    stderr: {err[:200]}")
+                return out
+
+            _agent_running = _rsshr("pgrep -x nexplane-agent && echo RUNNING || echo NOT_RUNNING")
+            if "NOT_RUNNING" in _agent_running:
+                log("MAC_AGENT_BOOTSTRAP: agent not running — attempting restart...")
+                # Try launchctl bootstrap first; fall back to direct run
+                _platform_private_ip2 = __import__("os").environ.get("NEXPLANE_BACKEND_PRIVATE_IP", "172.31.1.233")
+                _control_plane_url2 = f"http://{_platform_private_ip2}:8000"
+                try:
+                    _agent_secret2 = client.get_agent_secret()
+                except Exception:
+                    _agent_secret2 = ""
+                _plist_check = _rsshr("test -f /Library/LaunchDaemons/com.nexplane.agent.plist && echo EXISTS || echo MISSING")
+                if "EXISTS" in _plist_check:
+                    _bl2 = _rsshr("sudo launchctl bootstrap system /Library/LaunchDaemons/com.nexplane.agent.plist 2>&1; echo EXIT:$?") or ""
+                    if "Bootstrap failed" in _bl2 or "Input/output error" in _bl2:
+                        log("MAC_AGENT_BOOTSTRAP: launchctl bootstrap failed — starting agent directly")
+                        _rsshr(
+                            f"sudo NP_CONTROL_PLANE={_shlex2.quote(_control_plane_url2)} "
+                            f"NP_SECRET={_shlex2.quote(_agent_secret2)} "
+                            f"/usr/local/bin/nexplane-agent run </dev/null >/tmp/nexplane-agent.log 2>&1 &"
+                        )
+                else:
+                    # Plist missing — re-install agent
+                    log("MAC_AGENT_BOOTSTRAP: plist missing — reinstalling agent")
+                    _v2 = _rsshr("curl -sf https://nexplane-agent-downloads.s3.amazonaws.com/version").strip()
+                    _url2 = f"https://nexplane-agent-downloads.s3.amazonaws.com/nexplane-agent-darwin-arm64-{_v2}"
+                    _rsshr(f"curl -sf -o ~/nexplane-agent-darwin-arm64 '{_url2}'")
+                    _rsshr("chmod +x ~/nexplane-agent-darwin-arm64")
+                    _rsshr(
+                        f"sudo /usr/bin/env NP_CONTROL_PLANE={_shlex2.quote(_control_plane_url2)} "
+                        f"NP_SECRET={_shlex2.quote(_agent_secret2)} "
+                        f"~/nexplane-agent-darwin-arm64 install --non-interactive"
+                    )
+                    _rsshr("sudo launchctl bootstrap system /Library/LaunchDaemons/com.nexplane.agent.plist 2>&1")
+            else:
+                log("MAC_AGENT_BOOTSTRAP: agent already running on existing instance")
+            _reuse_ssh.close()
+
         # Step 5 — Wait for agent registration
         log(f"MAC_AGENT_BOOTSTRAP: polling for agent registration (hostname={hostname}, timeout=600s)...")
         from test_agent_live import _poll_for_endpoint
