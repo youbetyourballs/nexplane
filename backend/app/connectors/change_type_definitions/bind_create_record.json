@@ -15,6 +15,6 @@
   "verification_methods": [
     "api_check"
   ],
-  "rollback_action": "delete_dns_record",
+  "rollback_action": "delete_record",
   "rollback_connector_type": "bind_dns"
 }

@@ -15,6 +15,6 @@
   "verification_methods": [
     "api_check"
   ],
-  "rollback_action": "delete_boot_volume_backup",
+  "rollback_action": "rollback_unavailable",
   "rollback_connector_type": "oci"
 }

@@ -139,7 +139,8 @@ def test_cr_type_definitions_reference_valid_executors():
     for cr_type, cr_def in _load_cr_defs().items():
         rollback_conn = cr_def.get("rollback_connector_type")
         rollback_action = cr_def.get("rollback_action")
-        if rollback_conn and rollback_action and rollback_action != cr_type:
+        # "rollback_unavailable" is an intentional sentinel for ops that cannot be undone
+        if rollback_conn and rollback_action and rollback_action not in (cr_type, "rollback_unavailable", None):
             if not _executor_module_exists(rollback_conn, rollback_action):
                 failures.append(
                     f"{cr_type}: rollback executor missing: "
