@@ -1,4 +1,4 @@
-"""CISA KEV check, PoC discovery, and exploitability state transitions."""
+"""CISA KEV check, EPSS enrichment, PoC discovery, and exploitability state transitions."""
 from __future__ import annotations
 import logging
 from datetime import datetime, timezone
@@ -10,6 +10,10 @@ logger = logging.getLogger(__name__)
 
 _CISA_KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 _kev_cache: Optional[dict] = None
+
+_EPSS_API_URL = "https://api.first.org/data/v1/epss"
+# In-memory cache: cve_id → {"score": float, "percentile": float, "fetched_at": datetime}
+_epss_cache: dict[str, dict] = {}
 
 _SEVERITY_ORDER = ["informational", "low", "medium", "high", "critical"]
 
@@ -34,6 +38,48 @@ async def refresh_kev_cache() -> None:
         logger.info("CISA KEV cache refreshed: %d entries", len(_kev_cache.get("vulnerabilities", [])))
     except Exception as exc:
         logger.warning("Failed to refresh CISA KEV cache: %s", exc)
+
+
+def get_epss_score(cve_id: str) -> Optional[dict]:
+    """Return cached EPSS data for cve_id, or None if not cached yet."""
+    return _epss_cache.get(cve_id)
+
+
+async def fetch_epss(cve_id: str) -> Optional[dict]:
+    """Fetch EPSS score for a single CVE from FIRST.org. Caches the result in-memory."""
+    if not cve_id or not cve_id.upper().startswith("CVE-"):
+        return None
+    if cve_id in _epss_cache:
+        return _epss_cache[cve_id]
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(_EPSS_API_URL, params={"cve": cve_id})
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        if not data:
+            return None
+        entry = data[0]
+        result = {
+            "score": float(entry.get("epss", 0)),
+            "percentile": float(entry.get("percentile", 0)),
+            "fetched_at": datetime.now(timezone.utc),
+        }
+        _epss_cache[cve_id] = result
+        return result
+    except Exception as exc:
+        logger.debug("EPSS fetch failed for %s: %s", cve_id, exc)
+        return None
+
+
+async def enrich_finding_epss(finding) -> None:
+    """Fetch and apply EPSS score to a finding if it has a CVE ID. No-op if no CVE or fetch fails."""
+    if not finding.cve_id:
+        return
+    epss = await fetch_epss(finding.cve_id)
+    if epss:
+        finding.epss_score = epss["score"]
+        finding.epss_percentile = epss["percentile"]
+        finding.epss_fetched_at = epss["fetched_at"]
 
 
 def _escalate_severity(current: str) -> str:
