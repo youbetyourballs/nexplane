@@ -37,7 +37,7 @@ func CheckAndUpdate(ctx context.Context, controlPlaneURL, currentVersion string)
 	}
 
 	arch := runtime.GOARCH
-	binaryName := fmt.Sprintf("nexplane-agent-linux-%s-%s", arch, serverVersion)
+	binaryName := fmt.Sprintf("nexplane-agent-%s-%s-%s", runtime.GOOS, arch, serverVersion)
 
 	execPath, err := os.Executable()
 	if err != nil {
