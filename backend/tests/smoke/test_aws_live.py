@@ -16628,8 +16628,8 @@ def run_phase_mac_agent_bootstrap(
                     log(f"MAC_AGENT_BOOTSTRAP: SSH auth attempt {_ssh_attempt + 1} failed (cloud-init still setting up keys), retrying in 10s...")
                     time.sleep(10)
 
-            def _ssh_run(cmd: str) -> str:
-                _, stdout, stderr = ssh.exec_command(cmd)
+            def _ssh_run(cmd: str, timeout: int = 120) -> str:
+                _, stdout, stderr = ssh.exec_command(cmd, timeout=timeout)
                 out = stdout.read().decode().strip()
                 err = stderr.read().decode().strip()
                 log(f"  $ {cmd[:80]}")
@@ -16669,7 +16669,7 @@ def run_phase_mac_agent_bootstrap(
                 f"NP_SECRET={_shlex.quote(agent_secret)} "
                 f"~/nexplane-agent-darwin-arm64 install --non-interactive"
             )
-            _ssh_run(_install_cmd)
+            _ssh_run(_install_cmd, timeout=60)
             # Verify install created the LaunchDaemon plist before proceeding
             _plist_out = _ssh_run("test -f /Library/LaunchDaemons/com.nexplane.agent.plist && echo EXISTS || echo MISSING")
             if "MISSING" in (_plist_out or ""):
@@ -19565,6 +19565,25 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
     santa_asset_id = None
     _mock_proc = None
 
+    def _get_runner_ip() -> str:
+        """Return the IP address reachable from the platform backend (VPC private IP on EC2, else 127.0.0.1)."""
+        import urllib.request as _ur
+        try:
+            token = _ur.urlopen(
+                _ur.Request("http://169.254.169.254/latest/api/token",
+                            method="PUT",
+                            headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"}),
+                timeout=2,
+            ).read().decode().strip()
+            ip = _ur.urlopen(
+                _ur.Request("http://169.254.169.254/latest/meta-data/local-ipv4",
+                            headers={"X-aws-ec2-metadata-token": token}),
+                timeout=2,
+            ).read().decode().strip()
+            return ip
+        except Exception:
+            return "127.0.0.1"
+
     def _start_mock_server():
         nonlocal _mock_proc
         _mock_proc = _subprocess.Popen(
@@ -19597,7 +19616,8 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
         # Step 1: Start mock sync server
         print(f"  [SANTA_SYNC] Starting Python mock sync server on :{MOCK_PORT}...")
         _start_mock_server()
-        print(f"  [SANTA_SYNC] Mock sync server ready on :{MOCK_PORT}")
+        _runner_ip = _get_runner_ip()
+        print(f"  [SANTA_SYNC] Mock sync server ready on :{MOCK_PORT} (runner IP: {_runner_ip})")
 
         # Step 2: Register santa_sync_server connector
         print("  [SANTA_SYNC] Registering santa_sync_server connector...")
@@ -19611,9 +19631,9 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
             fail(f"[SANTA_SYNC] Failed to create santa_sync_server connector: {conn_resp}")
         print(f"  [SANTA_SYNC] Connector registered: {santa_connector_id}")
 
-        # Store credentials (POST /connectors ignores credentials in body — store separately)
+        # Store credentials: use runner's VPC private IP so the backend executor can reach the mock server
         client.put(f"/connectors/{santa_connector_id}/credentials", json={"credentials": {
-            "sync_server_url": f"http://localhost:{MOCK_PORT}",
+            "sync_server_url": f"http://{_runner_ip}:{MOCK_PORT}",
             "auth_token": "smoke-santa-token",
             "default_machine_group": "default",
         }})
