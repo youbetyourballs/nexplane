@@ -15,6 +15,6 @@
   "verification_methods": [
     "api_check"
   ],
-  "rollback_action": "delete_volume",
+  "rollback_action": "delete_block_volume",
   "rollback_connector_type": "oci"
 }

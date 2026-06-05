@@ -15,6 +15,6 @@
   "verification_methods": [
     "api_check"
   ],
-  "rollback_action": "oci_instance_delete",
+  "rollback_action": "terminate_instance",
   "rollback_connector_type": "oci"
 }

@@ -15,6 +15,6 @@
   "verification_methods": [
     "api_check"
   ],
-  "rollback_action": "detach_volume",
+  "rollback_action": "detach_block_volume",
   "rollback_connector_type": "oci"
 }

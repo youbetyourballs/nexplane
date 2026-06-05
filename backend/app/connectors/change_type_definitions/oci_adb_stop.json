@@ -15,6 +15,6 @@
   "verification_methods": [
     "api_check"
   ],
-  "rollback_action": "start_database",
+  "rollback_action": "start_adb",
   "rollback_connector_type": "oci"
 }
