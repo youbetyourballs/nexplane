@@ -11,10 +11,15 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-CATALOG_DIR = REPO_ROOT / "backend" / "app" / "connectors" / "catalog"
-EXECUTORS_DIR = REPO_ROOT / "backend" / "app" / "connectors" / "executors"
-CR_DEFS_DIR = REPO_ROOT / "backend" / "app" / "connectors" / "change_type_definitions"
+# Inside Docker the backend is mounted at /app; on the host the path has
+# three more components. Detect by checking if /app/app/connectors exists.
+_this = Path(__file__).resolve()
+_backend_root = _this.parents[2]  # /app (or .../backend/)
+if not (_backend_root / "app" / "connectors").exists():
+    _backend_root = _this.parents[4] / "backend"  # host path fallback
+CATALOG_DIR = _backend_root / "app" / "connectors" / "catalog"
+EXECUTORS_DIR = _backend_root / "app" / "connectors" / "executors"
+CR_DEFS_DIR = _backend_root / "app" / "connectors" / "change_type_definitions"
 
 # Ingest-only action types that don't require a CR-type definition (they run
 # as connector.ingest() calls, not as CRs).
