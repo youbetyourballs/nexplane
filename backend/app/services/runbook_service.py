@@ -16,6 +16,15 @@ _RB_OPTIONS = [selectinload(Runbook.steps).selectinload(RunbookStep.children)]
 _EXEC_OPTIONS = [selectinload(RunbookExecution.step_results)]
 
 
+async def tick_scheduled_runbooks(db_factory) -> None:
+    """Called by the scheduler every minute to fire due scheduled runbooks."""
+    try:
+        async with db_factory() as db:
+            await RunbookService(db).tick_scheduled()
+    except Exception as exc:
+        log.error("tick_scheduled_runbooks error: %s", exc)
+
+
 class RunbookService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -51,6 +60,7 @@ class RunbookService:
             description=payload.description,
             tags=payload.tags,
             auto_execute=payload.auto_execute,
+            cron_schedule=payload.cron_schedule,
             version=1,
             is_seed=False,
             created_by=user_id,
@@ -73,6 +83,8 @@ class RunbookService:
             rb.tags = payload.tags
         if payload.auto_execute is not None:
             rb.auto_execute = payload.auto_execute
+        if payload.cron_schedule is not None:
+            rb.cron_schedule = payload.cron_schedule if payload.cron_schedule.strip() else None
         if payload.steps is not None:
             # Replace all steps atomically
             await self.db.execute(
@@ -320,6 +332,39 @@ class RunbookService:
             await self.db.flush()
             if s.parallel_steps:
                 await self._insert_steps(s.parallel_steps, runbook_id, step.id)
+
+    # --- Scheduled trigger ---
+
+    async def tick_scheduled(self) -> list[str]:
+        """Fire any runbooks whose cron schedule is due. Returns list of triggered execution IDs."""
+        from croniter import croniter
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        q = select(Runbook).where(
+            Runbook.cron_schedule.isnot(None),
+            Runbook.auto_execute.is_(True),
+        )
+        result = await self.db.execute(q.options(*_RB_OPTIONS))
+        runbooks = list(result.scalars().all())
+
+        triggered = []
+        for rb in runbooks:
+            try:
+                cron = croniter(rb.cron_schedule, rb.last_scheduled_run_at or rb.created_at)
+                next_run = cron.get_next(datetime)
+                if next_run > now:
+                    continue
+                execution = await self.trigger_runbook(
+                    str(rb.id), rb.organization_id, rb.created_by, {}, force=False
+                )
+                rb.last_scheduled_run_at = now
+                await self.db.commit()
+                triggered.append(str(execution.id))
+                log.info("Scheduled runbook %s triggered execution %s", rb.id, execution.id)
+            except Exception as exc:
+                log.warning("Scheduled runbook %s skipped: %s", rb.id, exc)
+        return triggered
 
     async def _copy_steps(self, steps, runbook_id: uuid.UUID,
                           parent_id: uuid.UUID | None) -> None:

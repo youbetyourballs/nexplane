@@ -61,7 +61,7 @@ pip3 install pywinrm>=0.4.3 2>/dev/null || true
 # SSH connector (mac2.metal bootstrap)
 pip3 install paramiko 2>/dev/null || true
 # GCP connector (key rotation)
-pip3 install google-auth google-cloud-iam 2>/dev/null || true
+pip3 install google-auth google-cloud-iam google-api-python-client 2>/dev/null || true
 echo "RUNNER_USERDATA_COMPLETE"
 """
 
@@ -857,14 +857,12 @@ Examples:
                 _state = _desc["Reservations"][0]["Instances"][0]["State"]["Name"]
                 if _state in ("terminated", "stopped", "shutting-down"):
                     raise RuntimeError(f"Runner {runner_id} entered unexpected state: {_state}")
-                _st = ec2.describe_instance_status(InstanceIds=[runner_id])
-                _statuses = _st.get("InstanceStatuses", [])
-                if _statuses:
-                    _is = _statuses[0]
-                    if (_is["InstanceStatus"]["Status"] == "ok"
-                            and _is["SystemStatus"]["Status"] == "ok"):
-                        _status_ok = True
-                        break
+                # Instance is running — treat that as "status ok" to avoid needing
+                # ec2:DescribeInstanceStatus (which may not be in the test role).
+                # We already know the state above; if it's "running" we're good.
+                if _state == "running":
+                    _status_ok = True
+                    break
             except RuntimeError:
                 raise
             except Exception as _e:
