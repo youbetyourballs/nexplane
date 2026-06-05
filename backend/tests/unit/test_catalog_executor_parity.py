@@ -35,6 +35,8 @@ def _load_cr_defs() -> dict[str, dict]:
     result = {}
     for p in CR_DEFS_DIR.glob("*.json"):
         d = json.loads(p.read_text())
+        if "change_type" not in d:
+            continue
         result[d["change_type"]] = d
     return result
 
