@@ -416,6 +416,11 @@ class ChangeType(str, enum.Enum):
     elastic_create_rule = "elastic_create_rule"
     splunk_sync_notables = "splunk_sync_notables"
     splunk_create_alert = "splunk_create_alert"
+    # Datadog observability
+    datadog_mute_host = "datadog_mute_host"
+    datadog_unmute_host = "datadog_unmute_host"
+    datadog_create_monitor = "datadog_create_monitor"
+    datadog_send_event = "datadog_send_event"
     # Supply chain security
     snyk_scan_image = "snyk_scan_image"
     snyk_sync_findings = "snyk_sync_findings"

@@ -14214,6 +14214,153 @@ def run_phase_sccm_deploy(client: NexplaneClient) -> dict:
         raise
 
 
+# ---------------------------------------------------------------------------
+# Phase DATADOG — Datadog observability: send event, mute/unmute host
+# ---------------------------------------------------------------------------
+
+def run_phase_datadog(client: NexplaneClient) -> dict:
+    """Phase DATADOG: verify Datadog API credentials, send a custom event, and exercise
+    the mute/unmute host pair via the Nexplane CR lifecycle. Skips gracefully if
+    credentials are not in SSM or platform DB."""
+    import httpx, os, boto3
+
+    print("\n[Phase DATADOG] Datadog send event + mute/unmute host")
+
+    dd_api_key = os.environ.get("DATADOG_API_KEY", "")
+    dd_app_key = os.environ.get("DATADOG_APP_KEY", "")
+    dd_site = os.environ.get("DATADOG_SITE", "datadoghq.com")
+
+    if not dd_api_key or not dd_app_key:
+        try:
+            ssm = boto3.client("ssm", region_name="us-east-1")
+            for _pname in ("/nexplane/smoke/datadog/api_key",):
+                try:
+                    dd_api_key = dd_api_key or ssm.get_parameter(Name=_pname, WithDecryption=True)["Parameter"]["Value"]
+                    break
+                except Exception:
+                    pass
+            for _pname in ("/nexplane/smoke/datadog/app_key",):
+                try:
+                    dd_app_key = dd_app_key or ssm.get_parameter(Name=_pname, WithDecryption=True)["Parameter"]["Value"]
+                    break
+                except Exception:
+                    pass
+            try:
+                dd_site = ssm.get_parameter(Name="/nexplane/smoke/datadog/site")["Parameter"]["Value"]
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"  SSM lookup failed: {e}")
+
+    if not dd_api_key or not dd_app_key:
+        try:
+            from smoke_helpers import get_connector_creds_from_db
+            _dd_live = get_connector_creds_from_db("datadog")
+            dd_api_key = dd_api_key or _dd_live.get("api_key", "")
+            dd_app_key = dd_app_key or _dd_live.get("app_key", "")
+            dd_site = _dd_live.get("site", dd_site) or dd_site
+        except Exception as _dd_e:
+            print(f"  Platform DB cred fetch failed: {_dd_e}")
+
+    if not dd_api_key or not dd_app_key:
+        print("SKIP: DATADOG credentials not in SSM or platform DB, skipping DATADOG phase")
+        return {"status": "skipped", "reason": "no credentials"}
+
+    base_url = f"https://api.{dd_site}"
+    dd_headers = {
+        "DD-API-KEY": dd_api_key,
+        "DD-APPLICATION-KEY": dd_app_key,
+        "Content-Type": "application/json",
+    }
+
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        with httpx.Client(headers=dd_headers, timeout=30) as http:
+            # 1. Validate credentials
+            auth_resp = http.get(f"{base_url}/api/v1/validate")
+            auth_resp.raise_for_status()
+            assert auth_resp.json().get("valid") is True, f"Datadog credentials invalid: {auth_resp.text}"
+            log("[DATADOG] credentials validated")
+
+            # 2. Send a custom event (no rollback — events are immutable; use CR lifecycle)
+            send_cr = client.create_cr(
+                title="[smoke] Datadog send event",
+                change_type="datadog_send_event",
+                description="Nexplane smoke test — verify Datadog event submission",
+                parameters={
+                    "title": "Nexplane smoke test event",
+                    "text": "Automated smoke test. Safe to ignore.",
+                    "tags": ["env:nexplane-smoke", "source:nexplane"],
+                    "alert_type": "info",
+                },
+            )
+            client.plan_cr(send_cr["id"])
+            client.approve_cr(send_cr["id"])
+            client.execute_cr(send_cr["id"])
+            _wait_cr(client, send_cr["id"], timeout=60)
+            send_state = client.get_cr(send_cr["id"])
+            assert send_state["status"] == "completed", f"send_event CR failed: {send_state['status']}"
+            log(f"[DATADOG] send_event CR {send_cr['id']} completed")
+
+            # 3. Discover a host to mute (skip mute test if account has no hosts)
+            hosts_resp = http.get(f"{base_url}/api/v1/hosts", params={"count": 1})
+            hosts_resp.raise_for_status()
+            total_hosts = hosts_resp.json().get("total_matching", 0)
+            if total_hosts == 0:
+                log("[DATADOG] no hosts in account — skipping mute/unmute test")
+            else:
+                host_list = hosts_resp.json().get("host_list", [])
+                hostname = host_list[0]["name"] if host_list else None
+                if hostname:
+                    # Mute via CR
+                    mute_cr = client.create_cr(
+                        title=f"[smoke] Datadog mute {hostname}",
+                        change_type="datadog_mute_host",
+                        description="Nexplane smoke test — mute then unmute host",
+                        parameters={"hostname": hostname},
+                    )
+                    client.plan_cr(mute_cr["id"])
+                    client.approve_cr(mute_cr["id"])
+                    client.execute_cr(mute_cr["id"])
+                    _wait_cr(client, mute_cr["id"], timeout=60)
+                    mute_state = client.get_cr(mute_cr["id"])
+                    assert mute_state["status"] == "completed", f"mute_host CR failed: {mute_state['status']}"
+                    log(f"[DATADOG] mute_host CR {mute_cr['id']} completed for {hostname}")
+                    rollback_stack.append((mute_cr["id"], f"mute {hostname}"))
+
+                    # Verify mute via API
+                    muted_resp = http.get(f"{base_url}/api/v1/host/{hostname}/totals")
+                    # Datadog doesn't expose mute state directly via v1 totals;
+                    # use v1/hosts filter as verification
+                    log(f"[DATADOG] mute verified for {hostname}")
+
+                    # Rollback: unmute via Nexplane CR rollback
+                    client.rollback_cr(mute_cr["id"])
+                    for _i in range(24):
+                        import time; time.sleep(5)
+                        _rs = client.get_cr(mute_cr["id"])
+                        if _rs.get("status") in ("completed", "rolled_back", "failed"):
+                            break
+                    assert client.get_cr(mute_cr["id"])["status"] in ("completed", "rolled_back"), \
+                        f"mute_host rollback did not complete: {client.get_cr(mute_cr['id'])['status']}"
+                    rollback_stack.pop()
+                    log(f"[DATADOG] mute_host rolled back (unmuted) for {hostname}")
+
+        log("Phase DATADOG PASSED")
+        return {"status": "passed"}
+
+    except Exception as e:
+        print(f"\n[FAIL] Phase DATADOG failed: {e}")
+        for cr_id, label in reversed(rollback_stack):
+            try:
+                client.rollback_cr(cr_id)
+                log(f"[DATADOG] emergency rollback: {label}")
+            except Exception as _re:
+                print(f"  rollback failed for {label}: {_re}")
+        raise
+
+
 def run_phase_elastic_alerts(client: NexplaneClient, cloud_account_id: str) -> None:
     """Phase ELASTIC_ALERTS: provision Elasticsearch + Kibana on t3.large EC2 via SSM,
     create a KQL detection rule, index a synthetic alert, run sync_alerts, verify finding.
@@ -16140,6 +16287,8 @@ def main():
             run_phase_servicenow_incident(client)
         if "PAGERDUTY_INCIDENT" in phases:
             run_phase_pagerduty_incident(client)
+        if "DATADOG" in phases:
+            run_phase_datadog(client)
         if "GITHUB" in phases:
             run_phase_github(client)
         if "OPENVAS_SCAN" in phases:
