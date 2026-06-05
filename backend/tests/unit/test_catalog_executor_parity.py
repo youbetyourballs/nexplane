@@ -112,16 +112,18 @@ def _catalog_change_action_cases():
 @pytest.mark.parametrize("connector_type,action_id,generic_action", _catalog_change_action_cases())
 def test_change_action_has_cr_type_definition(connector_type: str, action_id: str, generic_action: str):
     cr_defs = _load_cr_defs()
-    # A CR type definition covers this action if its steps reference the generic_action
-    # OR if a CR type named <connector_type>_<action_id> exists
-    named_match = f"{connector_type}_{action_id}"
-    if named_match in cr_defs:
-        return  # exact name match
-
+    # A CR type covers this action if:
+    # 1. A CR type named <connector_type>_<action_id> exists, OR
+    # 2. A CR type named <action_id> exists (agent actions often omit connector prefix), OR
+    # 3. Some CR def's steps reference generic_action
+    if f"{connector_type}_{action_id}" in cr_defs:
+        return
+    if action_id in cr_defs:
+        return
     for cr_def in cr_defs.values():
         for step in cr_def.get("steps", []):
             if step.get("generic_action") == generic_action:
-                return  # referenced by some CR def
+                return
 
     pytest.fail(
         f"No CR-type definition covers change action '{connector_type}.{action_id}' "
