@@ -224,8 +224,36 @@ async def _run_kev_refresh():
     from app.services.vuln_poc_service import refresh_kev_cache
     try:
         await refresh_kev_cache()
+        # After refreshing KEV, bulk-enrich all orgs' open findings
+        if _db_factory:
+            await _run_bulk_kev_enrich()
     except Exception as exc:
         logger.warning("CISA KEV refresh job failed: %s", exc)
+
+
+async def _run_bulk_kev_enrich():
+    """After a KEV cache refresh, cross-reference all open CVE findings across all orgs."""
+    from app.services.vuln_poc_service import check_cisa_kev, apply_poc_result
+    from app.models.vulnerability import VulnerabilityFinding
+    try:
+        async with _db_factory() as db:
+            result = await db.execute(
+                select(VulnerabilityFinding).where(
+                    VulnerabilityFinding.status.in_(["open", "actionable"]),
+                    VulnerabilityFinding.cve_id.isnot(None),
+                    VulnerabilityFinding.poc_source.is_(None),
+                )
+            )
+            findings = result.scalars().all()
+            updated = sum(
+                1 for f in findings
+                if check_cisa_kev(f.cve_id) and (apply_poc_result(f, "exploited", "cisa_kev", f.cve_id) or True)
+            )
+            if updated:
+                await db.commit()
+            logger.info("KEV bulk enrich: %d/%d findings updated", updated, len(findings))
+    except Exception as exc:
+        logger.warning("KEV bulk enrich job failed: %s", exc)
 
 
 async def _run_smoke_reaper():
