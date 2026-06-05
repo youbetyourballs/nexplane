@@ -418,7 +418,10 @@ def _get_aws_boto3_client(service: str):
                 "session_token": _os.environ.get("AWS_SESSION_TOKEN"),
             }
     if not _aws_creds_cache:
-        from app.config import settings
+        try:
+            from app.config import settings
+        except ImportError:
+            return None
         from app.models.connector import Connector, ConnectorType
         from app.services.connector_service import _attach_credentials
         import asyncio, sqlalchemy as sa
