@@ -16580,13 +16580,7 @@ def run_phase_mac_agent_bootstrap(
             )
             instance_id = launch_resp["Instances"][0]["InstanceId"]
             fresh_launch = True
-            # Prevent any API caller (cleanup, rogue script) from terminating the mac mid-test.
-            # Must be set before the instance reaches running state.
-            ec2_client.modify_instance_attribute(
-                InstanceId=instance_id,
-                DisableApiTermination={"Value": True},
-            )
-            log(f"MAC_AGENT_BOOTSTRAP: launched {instance_id} — termination protection enabled, waiting for running state...")
+            log(f"MAC_AGENT_BOOTSTRAP: launched {instance_id} — waiting for running state...")
 
             # Wait for running
             waiter = ec2_client.get_waiter("instance_running")
@@ -16981,14 +16975,9 @@ def run_phase_mac_agent_bootstrap(
         log("MAC_AGENT_BOOTSTRAP: all CRs passed and rolled back")
 
     finally:
-        # Step 7 — Terminate the mac instance. Disable termination protection first,
-        # then terminate regardless of fresh_launch vs reuse.
+        # Terminate the mac instance after the test completes (or on failure).
         if instance_id:
             try:
-                ec2_client.modify_instance_attribute(
-                    InstanceId=instance_id,
-                    DisableApiTermination={"Value": False},
-                )
                 ec2_client.terminate_instances(InstanceIds=[instance_id])
                 log(f"MAC_AGENT_BOOTSTRAP: terminated mac instance {instance_id}")
             except Exception as _te:

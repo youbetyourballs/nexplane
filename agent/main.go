@@ -14,6 +14,7 @@ import (
 	"nexplane-agent/config"
 	"nexplane-agent/executor"
 	"nexplane-agent/fingerprint"
+	"nexplane-agent/installer"
 	"nexplane-agent/poller"
 	"nexplane-agent/registration"
 	"nexplane-agent/updater"
@@ -24,6 +25,15 @@ import (
 var Version = "dev"
 
 func main() {
+	// Dispatch subcommands before flag parsing so "install" exits after setting up the service.
+	if len(os.Args) > 1 && os.Args[1] == "install" {
+		if err := installer.Run(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg, err := config.Load(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
