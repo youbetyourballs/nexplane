@@ -791,12 +791,21 @@ Examples:
         # Terminate any orphaned runners from previous aborted runs before launching.
         # These accumulate when the platform process dies mid-run (e.g. crash) and
         # the finally-block cleanup never executes. Hitting vCPU limits is the symptom.
+        # Only terminate runners older than 10 minutes — freshly-launched runners from
+        # a concurrent smoke run must not be killed.
         try:
+            import datetime as _dt
+            _now = _dt.datetime.now(_dt.timezone.utc)
             _orphans = ec2.describe_instances(Filters=[
                 {"Name": "tag:Name", "Values": [RUNNER_NAME]},
                 {"Name": "instance-state-name", "Values": ["running", "pending", "stopping"]},
             ])["Reservations"]
-            _orphan_ids = [i["InstanceId"] for r in _orphans for i in r["Instances"]]
+            _orphan_ids = [
+                i["InstanceId"]
+                for r in _orphans
+                for i in r["Instances"]
+                if (_now - i.get("LaunchTime", _now)).total_seconds() > 600
+            ]
             if _orphan_ids:
                 print(f"  Terminating {len(_orphan_ids)} orphaned runner(s): {_orphan_ids}")
                 ec2.terminate_instances(InstanceIds=_orphan_ids)
