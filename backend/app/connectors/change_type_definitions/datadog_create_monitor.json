@@ -1,0 +1,20 @@
+{
+  "change_type": "datadog_create_monitor",
+  "display_name": "Datadog Create Monitor",
+  "description": "Create a Datadog monitor. Rollback: delete the created monitor by ID stored in snapshot_before.",
+  "steps": [
+    {
+      "generic_action": "datadog_create_monitor",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": [
+    "connector_reachable"
+  ],
+  "verification_methods": [
+    "api_check"
+  ],
+  "rollback_action": "datadog_create_monitor",
+  "rollback_connector_type": "datadog"
+}
