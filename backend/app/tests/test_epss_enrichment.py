@@ -49,6 +49,8 @@ async def test_fetch_epss_non_cve_skipped():
 
 @pytest.mark.asyncio
 async def test_fetch_epss_network_error_returns_none():
+    import app.services.vuln_poc_service as _svc
+    _svc._epss_cache.pop("CVE-2021-44228", None)
     with patch("app.services.vuln_poc_service.httpx.AsyncClient") as mock_client:
         mock_client.return_value.__aenter__ = AsyncMock(side_effect=Exception("connection refused"))
         mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
