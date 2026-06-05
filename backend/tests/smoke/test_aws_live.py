@@ -19612,11 +19612,52 @@ HTTPServer(('0.0.0.0', MOCK_PORT), H).serve_forever()
                 pass
             _mock_proc = None
 
+    _runner_ip = _get_runner_ip()
+
+    def _open_mock_server_port():
+        """Allow TCP MOCK_PORT from the VPC CIDR on this runner's default SG."""
+        try:
+            import boto3 as _boto3
+            import urllib.request as _ur2
+            _ec2_cl = _boto3.client("ec2", region_name="us-east-1")
+            # Get this instance's SG IDs via IMDS
+            _iid_token = _ur2.urlopen(
+                _ur2.Request("http://169.254.169.254/latest/api/token",
+                             method="PUT", headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"}),
+                timeout=2,
+            ).read().decode().strip()
+            _iid = _ur2.urlopen(
+                _ur2.Request("http://169.254.169.254/latest/meta-data/instance-id",
+                             headers={"X-aws-ec2-metadata-token": _iid_token}),
+                timeout=2,
+            ).read().decode().strip()
+            _sgs = _ec2_cl.describe_instances(InstanceIds=[_iid])["Reservations"][0]["Instances"][0]["SecurityGroups"]
+            _vpc_cidr = "172.31.0.0/16"
+            for _sg in _sgs:
+                try:
+                    _ec2_cl.authorize_security_group_ingress(
+                        GroupId=_sg["GroupId"],
+                        IpPermissions=[{
+                            "IpProtocol": "tcp",
+                            "FromPort": MOCK_PORT,
+                            "ToPort": MOCK_PORT,
+                            "IpRanges": [{"CidrIp": _vpc_cidr, "Description": "nexplane-smoke-santa-sync"}],
+                        }],
+                    )
+                    print(f"  [SANTA_SYNC] Opened TCP {MOCK_PORT} in SG {_sg['GroupId']}")
+                except Exception as _sge:
+                    if "InvalidPermission.Duplicate" in str(_sge):
+                        print(f"  [SANTA_SYNC] SG rule already exists in {_sg['GroupId']}")
+                    else:
+                        print(f"  [SANTA_SYNC] WARNING: SG open failed for {_sg['GroupId']}: {_sge}")
+        except Exception as _e:
+            print(f"  [SANTA_SYNC] WARNING: Could not open SG port (will proceed anyway): {_e}")
+
     try:
-        # Step 1: Start mock sync server
+        # Step 1: Start mock sync server and open SG port
         print(f"  [SANTA_SYNC] Starting Python mock sync server on :{MOCK_PORT}...")
+        _open_mock_server_port()
         _start_mock_server()
-        _runner_ip = _get_runner_ip()
         print(f"  [SANTA_SYNC] Mock sync server ready on :{MOCK_PORT} (runner IP: {_runner_ip})")
 
         # Step 2: Register santa_sync_server connector
