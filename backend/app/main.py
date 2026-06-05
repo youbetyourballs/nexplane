@@ -73,6 +73,19 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
         max_instances=1,
     )
+
+    async def _tick_scheduled_runbooks_job():
+        from app.services.runbook_service import tick_scheduled_runbooks
+        await tick_scheduled_runbooks(AsyncSessionLocal)
+
+    _escalation_scheduler.add_job(
+        _tick_scheduled_runbooks_job,
+        "interval",
+        minutes=1,
+        id="scheduled_runbook_trigger",
+        replace_existing=True,
+        max_instances=1,
+    )
     _escalation_scheduler.start()
     # Scrub orphaned CRs — any CR still in-flight when the backend
     # restarted will never complete; mark them failed now so the

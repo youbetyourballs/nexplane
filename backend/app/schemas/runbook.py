@@ -37,6 +37,7 @@ class RunbookCreate(BaseModel):
     description: str | None = None
     tags: list[str] = []
     auto_execute: bool = False
+    cron_schedule: str | None = None
     steps: list[RunbookStepCreate]
 
 
@@ -45,6 +46,7 @@ class RunbookUpdate(BaseModel):
     description: str | None = None
     tags: list[str] | None = None
     auto_execute: bool | None = None
+    cron_schedule: str | None = None
     steps: list[RunbookStepCreate] | None = None
 
 
@@ -68,6 +70,8 @@ class RunbookOut(BaseModel):
     tags: list[str]
     is_seed: bool
     auto_execute: bool
+    cron_schedule: str | None
+    last_scheduled_run_at: datetime | None = None
     created_by: UUID
     created_at: datetime
     updated_at: datetime
