@@ -60,6 +60,8 @@ pip3 install pymongo redis psycopg2-binary 2>/dev/null || true
 pip3 install pywinrm>=0.4.3 2>/dev/null || true
 # SSH connector (mac2.metal bootstrap)
 pip3 install paramiko 2>/dev/null || true
+# GCP connector (key rotation)
+pip3 install google-auth google-cloud-iam 2>/dev/null || true
 echo "RUNNER_USERDATA_COMPLETE"
 """
 
@@ -948,10 +950,12 @@ Examples:
         # tmux session) will create smoke_done if bash doesn't for any reason.
         bg_launch_script = (
             # Use bash explicitly (not sh/dash) so PIPESTATUS is available.
+            # disown removes the process from the shell's job table so it survives
+            # when the SSM session shell exits (prevents SIGHUP from killing it).
             f"nohup bash -c '{test_script} 2>&1 | tee /tmp/smoke_test.log; "
             "_ec=${{PIPESTATUS[0]}}; "
             "echo SMOKE_EXIT_CODE:$_ec >> /tmp/smoke_test.log; "
-            "touch /tmp/smoke_done' </dev/null >/dev/null 2>&1 &\n"
+            "touch /tmp/smoke_done' </dev/null >/dev/null 2>&1 & disown\n"
             "echo LAUNCHED:$$"
         )
         try:
@@ -975,9 +979,14 @@ Examples:
                         out += log_out
                 except Exception:
                     pass
-                # Check if done
+                # Check if done — primary: smoke_done file; fallback: detect completion in log
+                # (bash PIPESTATUS wrapper can be killed before touch /tmp/smoke_done runs)
                 try:
-                    done_out = ssm_run(ssm, runner_id, "test -f /tmp/smoke_done && echo DONE", timeout=30)
+                    done_out = ssm_run(ssm, runner_id,
+                        "test -f /tmp/smoke_done && echo DONE || "
+                        "(grep -q 'ALL SELECTED PHASES PASSED\\|SMOKE TEST FAILED\\|SMOKE_EXIT_CODE' "
+                        "/tmp/smoke_test.log 2>/dev/null && echo DONE_FROM_LOG || true)",
+                        timeout=30)
                     if "DONE" in done_out:
                         # Fetch rest of log
                         try:
@@ -995,8 +1004,9 @@ Examples:
                 print(".", end="", flush=True)
             else:
                 raise RuntimeError("Smoke test polling timed out after 18000s")
-            # Check if the test itself failed (exit code embedded in output)
-            if "SMOKE_EXIT_CODE:0" not in out:
+            # Check if the test itself failed — prefer explicit exit code, fall back to log content
+            passed = "SMOKE_EXIT_CODE:0" in out or "ALL SELECTED PHASES PASSED" in out
+            if not passed:
                 # Retrieve full log if available
                 try:
                     full_log = ssm_run(ssm, runner_id,
