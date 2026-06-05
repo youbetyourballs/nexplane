@@ -15,6 +15,6 @@
   "verification_methods": [
     "api_check"
   ],
-  "rollback_action": "datadog_unmute_host",
+  "rollback_action": "unmute_host",
   "rollback_connector_type": "datadog"
 }

@@ -15,6 +15,6 @@
   "verification_methods": [
     "api_check"
   ],
-  "rollback_action": "delete_database",
+  "rollback_action": "delete_mysql",
   "rollback_connector_type": "oci"
 }
