@@ -179,12 +179,18 @@ async def execute_cr_rollback(
             result = await _executor_fallback(cr, execution_result, db)
 
         # Determine truthful terminal state from step outcomes
-        step_results = []
         rollback_ran = True
         if isinstance(result, dict):
-            step_results = result.get("steps", [])
+            # Mirror _executor_fallback's dual-key step extraction
+            step_results = (
+                result.get("execution", {}).get("steps")
+                or result.get("steps")
+                or []
+            )
             if result.get("rolled_back") is False and not step_results:
                 rollback_ran = False
+        else:
+            step_results = []
         cr.status = _determine_rollback_status(step_results, rollback_ran)
         cr.updated_at = datetime.now(timezone.utc)
         await db.commit()
