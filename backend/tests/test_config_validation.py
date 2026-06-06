@@ -62,6 +62,15 @@ def test_staging_rejects_default_secret_key():
         )
 
 
+def test_production_rejects_short_webhook_secret():
+    with pytest.raises(ValueError, match="WEBHOOK_SECRET"):
+        _make_settings(
+            ENVIRONMENT="production",
+            SECRET_KEY="a-real-production-secret-key-here-32chars!!",
+            WEBHOOK_SECRET="tooshort",
+        )
+
+
 def test_error_message_does_not_reveal_secret_value():
     try:
         _make_settings(
