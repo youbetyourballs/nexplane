@@ -135,6 +135,22 @@ async def _executor_fallback(
     return rollback_result
 
 
+def _determine_rollback_status(
+    step_results: list[dict],
+    rollback_ran: bool,
+) -> "ChangeRequestStatus":
+    """Return truthful terminal rollback status from per-step outcomes."""
+    if not rollback_ran or not step_results:
+        return ChangeRequestStatus.rollback_failed
+    failed = [s for s in step_results if not s.get("success", False)]
+    succeeded = [s for s in step_results if s.get("success", False)]
+    if not failed:
+        return ChangeRequestStatus.rolled_back
+    if succeeded:
+        return ChangeRequestStatus.rollback_partial
+    return ChangeRequestStatus.rollback_failed
+
+
 async def execute_cr_rollback(
     cr_id: uuid.UUID,
     extra_execution_result: dict | None = None,
@@ -162,7 +178,14 @@ async def execute_cr_rollback(
         else:
             result = await _executor_fallback(cr, execution_result, db)
 
-        cr.status = ChangeRequestStatus.rolled_back
+        # Determine truthful terminal state from step outcomes
+        step_results = []
+        rollback_ran = True
+        if isinstance(result, dict):
+            step_results = result.get("steps", [])
+            if result.get("rolled_back") is False and not step_results:
+                rollback_ran = False
+        cr.status = _determine_rollback_status(step_results, rollback_ran)
         cr.updated_at = datetime.now(timezone.utc)
         await db.commit()
         return result
