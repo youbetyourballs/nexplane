@@ -17,6 +17,29 @@ def set_scheduler(scheduler_instance) -> None:
     _scheduler = scheduler_instance
 
 
+_RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+
+def _policy_allows(
+    policy,
+    change_type: str,
+    risk_level: str,
+) -> tuple[bool, str | None]:
+    """Return (allowed, reason_or_None). reason is None when allowed."""
+    if policy is None:
+        return False, "no policy attached to recurring job; manual approval required"
+    if not policy.enabled:
+        return False, "recurring job policy is disabled"
+    now = datetime.now(tz=timezone.utc)
+    if policy.expires_at and policy.expires_at <= now:
+        return False, f"policy expired at {policy.expires_at.isoformat()}"
+    if policy.allowed_change_types and change_type not in policy.allowed_change_types:
+        return False, f"change_type '{change_type}' not in policy allowed_change_types"
+    if _RISK_ORDER.get(risk_level, 0) > _RISK_ORDER.get(policy.max_risk_level, 1):
+        return False, f"risk_level '{risk_level}' exceeds policy max_risk_level '{policy.max_risk_level}'"
+    return True, None
+
+
 def compute_next_run(cron_expression: str) -> datetime:
     it = croniter(cron_expression, datetime.now(tz=timezone.utc))
     return it.get_next(datetime)
@@ -112,15 +135,29 @@ async def _fire_recurring_job(job_id: str) -> None:
             )
             cr.status = ChangeRequestStatus.planned
 
-        # Auto-approve using the job owner as the approver
-        approval = Approval(
-            change_request_id=cr.id,
-            approver_id=job.created_by,
-            decision=ApprovalDecision.approved,
-            comment="Auto-approved by recurring job schedule",
-        )
-        db.add(approval)
-        cr.status = ChangeRequestStatus.approved
+        # Policy-gated auto-approval
+        _policy = None
+        if job.policy_id:
+            from app.models.recurring_job_policy import RecurringJobPolicy
+            _policy = await db.get(RecurringJobPolicy, job.policy_id)
+
+        _risk_level = cr.risk_level.value if hasattr(cr.risk_level, "value") else str(cr.risk_level)
+        _allowed, _reason = _policy_allows(_policy, str(change_type.value), _risk_level)
+        if _allowed:
+            approval = Approval(
+                change_request_id=cr.id,
+                approver_id=job.created_by,
+                decision=ApprovalDecision.approved,
+                comment=f"Auto-approved by recurring job policy {job.policy_id}",
+            )
+            db.add(approval)
+            cr.status = ChangeRequestStatus.approved
+        else:
+            logger.warning(
+                "Recurring job %s: auto-approval denied by policy: %s. CR %s awaits manual approval.",
+                job_id, _reason, cr.id,
+            )
+            cr.status = ChangeRequestStatus.awaiting_approval
         await db.flush()
 
         # Record run metadata on the job
