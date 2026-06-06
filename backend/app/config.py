@@ -1,4 +1,21 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEV_ENVIRONMENTS = {"development", "local", "test", "dev"}
+
+_WEAK_SECRET_KEYS = {
+    "dev-secret-key-change-in-production-32chars",
+    "secret",
+    "changeme",
+    "",
+}
+
+_WEAK_WEBHOOK_SECRETS = {
+    "changeme",
+    "secret",
+    "webhook_secret",
+    "",
+}
 
 
 class Settings(BaseSettings):
@@ -13,6 +30,22 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
     AI_MODEL: str = "claude-sonnet-4-6"
     WEBHOOK_SECRET: str = "changeme"
+
+    @model_validator(mode="after")
+    def reject_weak_secrets_in_production(self) -> "Settings":
+        if self.ENVIRONMENT.lower() in _DEV_ENVIRONMENTS:
+            return self
+        if self.SECRET_KEY in _WEAK_SECRET_KEYS or len(self.SECRET_KEY) < 32:
+            raise ValueError(
+                f"SECRET_KEY is a development default or too short for ENVIRONMENT={self.ENVIRONMENT!r}. "
+                "Set a strong SECRET_KEY (>=32 chars) in your environment."
+            )
+        if self.WEBHOOK_SECRET in _WEAK_WEBHOOK_SECRETS:
+            raise ValueError(
+                f"WEBHOOK_SECRET is a development default for ENVIRONMENT={self.ENVIRONMENT!r}. "
+                "Set a strong WEBHOOK_SECRET in your environment."
+            )
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:
