@@ -1,0 +1,14 @@
+{
+  "change_type": "macos_santa_install",
+  "display_name": "Install Santa",
+  "description": "Installs Google Santa binary allowlisting on macOS. Downloads the Santa pkg, installs it, enables the system extension, and waits for the daemon to become ready.",
+  "steps": [
+    {
+      "generic_action": "macos_santa_install",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"]
+}
