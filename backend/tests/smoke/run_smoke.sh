@@ -14,8 +14,12 @@ set -e
 
 PHASES="${1:-LDAP_ROTATE}"
 EXTRA_ARGS="${@:2}"
-LOG="/tmp/smoke_run_${PHASES//,/_}.log"
-DONE="/tmp/smoke_run_${PHASES//,/_}_done"
+_PHASES_SLUG="${PHASES//,/_}"
+if [ ${#_PHASES_SLUG} -gt 180 ]; then
+  _PHASES_SLUG="$(echo -n "$PHASES" | md5sum | cut -c1-12)_multi"
+fi
+LOG="/tmp/smoke_run_${_PHASES_SLUG}.log"
+DONE="/tmp/smoke_run_${_PHASES_SLUG}_done"
 
 echo "[run_smoke.sh] Phases: $PHASES"
 echo "[run_smoke.sh] Log: $LOG"
