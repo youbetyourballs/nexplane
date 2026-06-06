@@ -15901,9 +15901,9 @@ def main():
             "download_package, uninstall_agent on Ubuntu t3.micro (AMI cached). "
             "CF=cloudformation-lifecycle (create_change_set→execute→discover→delete). "
             "HELM=helm-releases lifecycle (discover→rollback→uninstall) on kind cluster AMI. "
-                    "SAFE_EXEC_CONTRACT=Safe Execution Contract enforcement (no EC2): "
-            "production secret fail-closed + agent result ownership (wrong agent->403, correct agent->200, duplicate->409). "
-),
+            "SAFE_EXEC_CONTRACT=Safe Execution Contract enforcement (no EC2): "
+            "production secret fail-closed + agent result ownership (wrong agent→403, correct agent→200, duplicate→409). "
+        ),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
     parser.add_argument("--bind-server-ip", default="",
@@ -23170,7 +23170,6 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     log("EBPF_POLICY PASSED ✓")
 
 
-
 def run_phase_safe_exec_contract(client, base_url="http://localhost:8000", **kwargs):
     """
     SAFE_EXEC_CONTRACT smoke phase — proves the Safe Execution Contract enforcement:
@@ -23396,7 +23395,6 @@ def run_phase_safe_exec_contract(client, base_url="http://localhost:8000", **kwa
     _log("Part 2 PASSED ✓")
     _log("SAFE_EXEC_CONTRACT PASSED ✓")
     return {"status": "passed", "agent_id_a": agent_id_a, "agent_id_b": agent_id_b, "job_id": job_id}
-
 
 
 if __name__ == "__main__":
