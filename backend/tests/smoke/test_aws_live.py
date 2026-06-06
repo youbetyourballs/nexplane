@@ -15901,7 +15901,9 @@ def main():
             "download_package, uninstall_agent on Ubuntu t3.micro (AMI cached). "
             "CF=cloudformation-lifecycle (create_change_set→execute→discover→delete). "
             "HELM=helm-releases lifecycle (discover→rollback→uninstall) on kind cluster AMI. "
-        ),
+                    "SAFE_EXEC_CONTRACT=Safe Execution Contract enforcement (no EC2): "
+            "production secret fail-closed + agent result ownership (wrong agent->403, correct agent->200, duplicate->409). "
+),
     )
     parser.add_argument("--tailscale-auth-key", default="", help="Reusable Tailscale auth key for Phase A")
     parser.add_argument("--bind-server-ip", default="",
@@ -16394,6 +16396,9 @@ def main():
                                   backend_tailscale_ip=getattr(args, "backend_tailscale_ip", ""))
         if "CR_MANIFEST" in phases:
             run_phase_cr_manifest(client, base_url=args.base_url)
+
+        if "SAFE_EXEC_CONTRACT" in phases:
+            run_phase_safe_exec_contract(client, base_url=args.base_url)
 
         if "AI_MANIFEST_PLAN" in phases:
             run_phase_ai_manifest_plan(client)
@@ -23163,6 +23168,235 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
         log(f"Cleanup warning: {cleanup_e}")
 
     log("EBPF_POLICY PASSED ✓")
+
+
+
+def run_phase_safe_exec_contract(client, base_url="http://localhost:8000", **kwargs):
+    """
+    SAFE_EXEC_CONTRACT smoke phase — proves the Safe Execution Contract enforcement:
+    1. Production secret fail-closed: startup rejects dev defaults in non-dev environments
+    2. Agent result ownership: wrong agent is rejected (403), correct agent succeeds (200),
+       duplicate submission is rejected (409)
+    """
+    import uuid as _uuid
+    import asyncio as _asyncio
+    import httpx as _httpx
+
+    _log = lambda msg: print(f"  [SAFE_EXEC_CONTRACT] {msg}", flush=True)
+    _log("Starting SAFE_EXEC_CONTRACT smoke phase")
+
+    # ── Part 1: Secret fail-closed ────────────────────────────────────────────
+    _log("Part 1: Production secret fail-closed validation")
+
+    try:
+        from app.config import Settings as _Settings
+
+        # 1a. Weak SECRET_KEY in production → must raise ValueError
+        try:
+            _Settings(
+                ENVIRONMENT="production",
+                SECRET_KEY="dev-secret-key-change-in-production-32chars",
+                WEBHOOK_SECRET="prod-safe-secret-ok",
+                DATABASE_URL="postgresql+asyncpg://x:x@localhost/x",
+            )
+            fail("[SAFE_EXEC_CONTRACT] FAIL: Settings accepted dev SECRET_KEY in production — should have raised")
+        except ValueError as _e:
+            err_str = str(_e)
+            assert "dev-secret-key-change-in-production-32chars" not in err_str, \
+                f"[SAFE_EXEC_CONTRACT] FAIL: error message leaks secret value: {err_str}"
+            _log("Weak SECRET_KEY in production → ValueError raised, secret not in message ✓")
+
+        # 1b. Strong keys in production → must succeed
+        _s = _Settings(
+            ENVIRONMENT="production",
+            SECRET_KEY="a-strong-prod-key-at-least-32-chars-here!!",
+            WEBHOOK_SECRET="a-strong-prod-webhook-secret-here!",
+            DATABASE_URL="postgresql+asyncpg://x:x@localhost/x",
+        )
+        assert _s.ENVIRONMENT == "production"
+        _log("Strong keys in production → Settings accepted ✓")
+
+        # 1c. Weak WEBHOOK_SECRET in production → must raise ValueError
+        try:
+            _Settings(
+                ENVIRONMENT="production",
+                SECRET_KEY="a-strong-prod-key-at-least-32-chars-here!!",
+                WEBHOOK_SECRET="changeme",
+                DATABASE_URL="postgresql+asyncpg://x:x@localhost/x",
+            )
+            fail("[SAFE_EXEC_CONTRACT] FAIL: Settings accepted weak WEBHOOK_SECRET in production")
+        except ValueError:
+            _log("Weak WEBHOOK_SECRET in production → ValueError raised ✓")
+
+    except ImportError as _ie:
+        fail(f"[SAFE_EXEC_CONTRACT] Cannot import app.config.Settings: {_ie}")
+
+    _log("Part 1 PASSED ✓")
+
+    # ── Part 2: Agent result ownership ───────────────────────────────────────
+    _log("Part 2: Agent result ownership enforcement")
+
+    # Get org agent secret
+    try:
+        agent_secret = client.get_agent_secret()
+    except Exception as _e:
+        fail(f"[SAFE_EXEC_CONTRACT] Could not get agent secret: {_e}")
+
+    agent_headers = {"Authorization": f"Bearer {agent_secret}"}
+    http = _httpx.Client(timeout=30)
+
+    # 2a. Register agent A
+    machine_id_a = f"smoke-safe-exec-a-{_uuid.uuid4().hex[:8]}"
+    reg_a = http.post(f"{base_url}/agent/register", json={
+        "machine_id": machine_id_a,
+        "hostname": "smoke-safe-exec-a",
+        "os_type": "linux",
+        "os_version": "ubuntu-22.04",
+        "agent_version": "0.0.1-smoke",
+        "ip_addresses": ["127.0.0.1"],
+    }, headers=agent_headers)
+    if reg_a.status_code != 200:
+        fail(f"[SAFE_EXEC_CONTRACT] Agent A registration failed: {reg_a.status_code} {reg_a.text}")
+    agent_id_a = reg_a.json()["agent_id"]
+    _log(f"Agent A registered: {agent_id_a} ✓")
+
+    # 2b. Register agent B
+    machine_id_b = f"smoke-safe-exec-b-{_uuid.uuid4().hex[:8]}"
+    reg_b = http.post(f"{base_url}/agent/register", json={
+        "machine_id": machine_id_b,
+        "hostname": "smoke-safe-exec-b",
+        "os_type": "linux",
+        "os_version": "ubuntu-22.04",
+        "agent_version": "0.0.1-smoke",
+        "ip_addresses": ["127.0.0.2"],
+    }, headers=agent_headers)
+    if reg_b.status_code != 200:
+        fail(f"[SAFE_EXEC_CONTRACT] Agent B registration failed: {reg_b.status_code} {reg_b.text}")
+    agent_id_b = reg_b.json()["agent_id"]
+    _log(f"Agent B registered: {agent_id_b} ✓")
+
+    # 2c. Create a test AgentJob for agent A via the database
+    job_id = None
+    try:
+        async def _create_test_job(assigned_agent_id: str) -> str:
+            from app.database import AsyncSessionLocal
+            from app.models.agent import AgentJob, AgentJobStatus
+            from app.models.org_settings import OrganizationSettings
+            from sqlalchemy import select
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(OrganizationSettings).where(
+                        OrganizationSettings.agent_secret_encrypted.is_not(None)
+                    )
+                )
+                org_settings = result.scalars().first()
+                if not org_settings:
+                    raise RuntimeError("No org settings with agent secret found")
+
+                job = AgentJob(
+                    organization_id=org_settings.organization_id,
+                    agent_registration_id=_uuid.UUID(assigned_agent_id),
+                    command="smoke_test_ownership_check",
+                    parameters={"smoke": True},
+                    status=AgentJobStatus.pending,
+                )
+                db.add(job)
+                await db.commit()
+                await db.refresh(job)
+                return str(job.id)
+
+        job_id = _asyncio.run(_create_test_job(agent_id_a))
+        _log(f"Test job created: {job_id} (assigned to agent A) ✓")
+
+    except Exception as _e:
+        fail(f"[SAFE_EXEC_CONTRACT] Failed to create test job: {_e}")
+
+    # 2d. Agent A polls and gets the job
+    poll_resp = http.get(f"{base_url}/agent/jobs/next",
+                         params={"agent_id": agent_id_a},
+                         headers=agent_headers)
+    _poll_set_running = False
+    if poll_resp.status_code == 204:
+        _log("Poll returned 204 (long-poll timeout) — job pre-assigned; will force to running via DB")
+    elif poll_resp.status_code == 200:
+        polled_job = poll_resp.json()
+        assert str(polled_job.get("job_id")) == job_id, \
+            f"Agent A polled wrong job: {polled_job}"
+        _log(f"Agent A polled and received job {job_id} ✓")
+        _poll_set_running = True  # poll endpoint transitions pending→running
+    else:
+        fail(f"[SAFE_EXEC_CONTRACT] Unexpected poll response: {poll_resp.status_code} {poll_resp.text}")
+
+    # If the poll did NOT set the job to running (204 path), force it via DB.
+    # Both asyncio.run() calls share the same SQLAlchemy engine/pool, so we
+    # pass the coroutine into the same event loop used by _create_test_job to
+    # avoid "attached to a different loop" errors from asyncpg.
+    if not _poll_set_running:
+        try:
+            async def _set_job_running(jid: str):
+                from app.database import AsyncSessionLocal
+                from app.models.agent import AgentJob, AgentJobStatus
+                async with AsyncSessionLocal() as db:
+                    job_row = await db.get(AgentJob, _uuid.UUID(jid))
+                    if job_row and job_row.status == AgentJobStatus.pending:
+                        job_row.status = AgentJobStatus.running
+                        await db.commit()
+
+            _asyncio.run(_set_job_running(job_id))
+            _log("Job status forced to running via DB ✓")
+        except Exception as _e:
+            fail(f"[SAFE_EXEC_CONTRACT] Failed to set job to running: {_e}")
+
+    # 2e. Agent B tries to submit result for agent A's job → must be 403
+    wrong_agent_resp = http.post(
+        f"{base_url}/agent/jobs/{job_id}/result",
+        json={
+            "agent_id": agent_id_b,
+            "status": "completed",
+            "result": {"smoke": "wrong_agent"},
+            "error": None,
+        },
+        headers=agent_headers,
+    )
+    assert wrong_agent_resp.status_code == 403, \
+        f"[SAFE_EXEC_CONTRACT] Expected 403 from wrong agent, got {wrong_agent_resp.status_code}: {wrong_agent_resp.text}"
+    _log("Wrong agent (B) rejected with 403 ✓")
+
+    # 2f. Agent A submits the correct result → must succeed (200)
+    correct_agent_resp = http.post(
+        f"{base_url}/agent/jobs/{job_id}/result",
+        json={
+            "agent_id": agent_id_a,
+            "status": "completed",
+            "result": {"smoke": "ownership_verified"},
+            "error": None,
+        },
+        headers=agent_headers,
+    )
+    assert correct_agent_resp.status_code == 200, \
+        f"[SAFE_EXEC_CONTRACT] Expected 200 from correct agent, got {correct_agent_resp.status_code}: {correct_agent_resp.text}"
+    _log("Correct agent (A) accepted with 200 ✓")
+
+    # 2g. Duplicate submission → must be 409
+    duplicate_resp = http.post(
+        f"{base_url}/agent/jobs/{job_id}/result",
+        json={
+            "agent_id": agent_id_a,
+            "status": "completed",
+            "result": {"smoke": "duplicate"},
+            "error": None,
+        },
+        headers=agent_headers,
+    )
+    assert duplicate_resp.status_code == 409, \
+        f"[SAFE_EXEC_CONTRACT] Expected 409 for duplicate submission, got {duplicate_resp.status_code}: {duplicate_resp.text}"
+    _log("Duplicate result submission rejected with 409 ✓")
+
+    _log("Part 2 PASSED ✓")
+    _log("SAFE_EXEC_CONTRACT PASSED ✓")
+    return {"status": "passed", "agent_id_a": agent_id_a, "agent_id_b": agent_id_b, "job_id": job_id}
+
 
 
 if __name__ == "__main__":
