@@ -916,7 +916,7 @@ Examples:
             test_script = "test_aws_live.py"
         test_cmd_parts = [
             "cd /tmp/nexplane_smoke",
-            f"{aws_env}NEXPLANE_RUNNER_EC2=1 PYTHONPATH=/tmp/nexplane_smoke python3 smoke/{test_script}"
+            f"{aws_env}NEXPLANE_RUNNER_EC2=1 PYTHONUNBUFFERED=1 PYTHONPATH=/tmp/nexplane_smoke python3 -u smoke/{test_script}"
             f" --base-url {args.base_url}"
             f"{_email_arg}"
             f"{_password_arg}"
