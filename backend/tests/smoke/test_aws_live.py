@@ -6079,7 +6079,7 @@ echo "LDAP_SETUP_DONE"
         deadline4 = _time.time() + TIMEOUT_SECONDS
         while _time.time() < deadline4:
             cr = client.get(f"/change-requests/{cr_id}")
-            if cr.get("status") in ("rolled_back", "completed"):
+            if cr.get("status") in ("rolled_back", "completed", "rollback_failed", "rollback_partial"):
                 break
             _time.sleep(8)
         log(f"CR post-rollback status: {cr.get('status')}")
