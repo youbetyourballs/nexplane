@@ -280,7 +280,7 @@ class NexplaneClient:
             if cr["status"] == "rolled_back":
                 log(f"  rolled back: {label}")
                 return
-            if cr["status"] in ("failed", "completed"):
+            if cr["status"] in ("failed", "completed", "rollback_failed", "rollback_partial"):
                 print(f"  ⚠️  Rollback CR {cr_id} ended with status '{cr['status']}' ({label})")
                 return
             time.sleep(5)
