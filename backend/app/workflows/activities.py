@@ -244,9 +244,27 @@ async def activity_run_verification(
     verification_plan: dict,
     execution_result: dict,
 ) -> dict:
-    result = await connector_service.run_verification_checks(verification_plan, execution_result)
-    logger.info("Verification for %s: all_passed=%s", change_request_id, result["all_passed"])
-    return result
+    verification_result = await connector_service.run_verification_checks(verification_plan, execution_result)
+    logger.info("Verification for %s: all_passed=%s", change_request_id, verification_result["all_passed"])
+
+    # Persist explicit verification_status to the CR
+    from app.models.change_request import VerificationStatus as _VS
+    _vs_map = {
+        "passed": _VS.passed,
+        "failed": _VS.failed,
+        "unsupported": _VS.unsupported,
+        "manual_required": _VS.manual_required,
+        "skipped": _VS.skipped_development_only,
+        "skipped_development_only": _VS.skipped_development_only,
+    }
+    _vs_raw = verification_result.get("status", "unsupported") if isinstance(verification_result, dict) else "unsupported"
+    async with AsyncSessionLocal() as _vdb:
+        _cr_obj = await _vdb.get(ChangeRequest, uuid.UUID(change_request_id))
+        if _cr_obj:
+            _cr_obj.verification_status = _vs_map.get(_vs_raw, _VS.unsupported)
+            await _vdb.commit()
+
+    return verification_result
 
 
 async def activity_execute_rollback(
