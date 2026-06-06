@@ -16006,9 +16006,12 @@ def main():
 
     if not client.standalone:
         try:
-            # Only clean demo assets when actually running DEMO phases to avoid
-            # race conditions when Phase A and DEMO runs execute concurrently.
-            cleanup_queries = ["nexplane-smoke-test", "nexplane-smoke-ec2"]
+            # Only clean Phase-A assets when Phase A is actually in the batch.
+            # Concurrent batches share the same backend; cleaning "nexplane-smoke-test"
+            # from a non-A batch deletes assets the A-batch runner just created.
+            cleanup_queries = ["nexplane-smoke-ec2"]
+            if "A" in phases:
+                cleanup_queries.insert(0, "nexplane-smoke-test")
             if any(p.startswith("DEMO") for p in phases):
                 cleanup_queries.append("nexplane-demo-payments")
             stale = []
