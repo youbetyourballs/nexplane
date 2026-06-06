@@ -23,8 +23,6 @@ from app.schemas.execution_run import ExecutionRunRead
 from app.services.audit_service import record_event
 from app.services.change_plan_service import plan_cr as _plan_cr, PlanBlockedError
 from app.services.safety_engine import check_approval_requirements
-from app.workflows import runner as workflow_runner
-from app.workflows.execute_change_workflow import execute_change_workflow
 from app.compliance.freeze import require_no_active_freeze
 
 router = APIRouter(prefix="/change-requests", tags=["Change Requests"])
@@ -497,31 +495,12 @@ async def execute_change_request(
                     detail=f"maintenance_window: execution blocked by hard-enforcement window '{_blocking.name}'"
                 )
 
-    attempt = len(cr.execution_runs) + 1
-    workflow_id = f"wf-cr-{cr.id}-{attempt}"
-    run = ExecutionRun(
-        change_request_id=cr.id,
-        workflow_id=workflow_id,
-        status=ExecutionStatus.pending,
-    )
-    db.add(run)
-    await db.flush()
-    run_id = run.id
-
-    await record_event(db, user.organization_id, "execution.initiated",
-                       {"change_request_id": str(cr.id), "workflow_id": workflow_id, "run_id": str(run_id)},
-                       actor_id=user.id, change_request_id=cr.id)
-    await db.commit()
-
-    wf_input = workflow_runner.WorkflowInput(
-        change_request_id=str(cr.id),
-        organization_id=str(cr.organization_id),
-        initiator_id=str(user.id),
-    )
-    await workflow_runner.start_workflow(execute_change_workflow, wf_input, workflow_id=workflow_id)
-
-    result = await db.execute(select(ExecutionRun).where(ExecutionRun.id == run_id))
-    return result.scalar_one()
+    from app.services.change_execution_service import ChangeExecutionService
+    try:
+        run = await ChangeExecutionService.start(cr.id, user.id, "manual", db)
+    except HTTPException:
+        raise
+    return run
 
 
 @router.post("/{cr_id}/rollback", response_model=ExecutionRunRead)

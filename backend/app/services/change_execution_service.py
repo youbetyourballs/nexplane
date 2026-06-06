@@ -5,6 +5,7 @@ ChangeExecutionService.start() so approval checks, audit logging, and
 workflow invocation stay consistent.
 """
 import uuid
+import uuid as _uuid_mod
 import logging
 
 from fastapi import HTTPException
@@ -51,8 +52,7 @@ class ChangeExecutionService:
         if source not in VALID_SOURCES:
             raise HTTPException(status_code=400, detail=f"Unknown execution source: {source!r}")
 
-        attempt = len(getattr(cr, "execution_runs", [])) + 1
-        workflow_id = f"wf-cr-{cr.id}-{attempt}"
+        workflow_id = f"wf-cr-{cr.id}-{_uuid_mod.uuid4().hex[:8]}"
         run = ExecutionRun(
             change_request_id=cr.id,
             workflow_id=workflow_id,
