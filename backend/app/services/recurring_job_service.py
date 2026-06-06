@@ -33,9 +33,9 @@ def _policy_allows(
     now = datetime.now(tz=timezone.utc)
     if policy.expires_at and policy.expires_at <= now:
         return False, f"policy expired at {policy.expires_at.isoformat()}"
-    if policy.allowed_change_types and change_type not in policy.allowed_change_types:
+    if not policy.allowed_change_types or change_type not in policy.allowed_change_types:
         return False, f"change_type '{change_type}' not in policy allowed_change_types"
-    if _RISK_ORDER.get(risk_level, 0) > _RISK_ORDER.get(policy.max_risk_level, 1):
+    if _RISK_ORDER.get(risk_level, 999) > _RISK_ORDER.get(policy.max_risk_level, 0):
         return False, f"risk_level '{risk_level}' exceeds policy max_risk_level '{policy.max_risk_level}'"
     return True, None
 
@@ -92,6 +92,7 @@ async def _fire_recurring_job(job_id: str) -> None:
     from app.models.approval import Approval, ApprovalDecision
     from app.services.change_plan_service import plan_cr
 
+    _allowed = False  # default before policy check; set inside session
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(RecurringJob).where(RecurringJob.id == uuid.UUID(job_id))
@@ -146,7 +147,7 @@ async def _fire_recurring_job(job_id: str) -> None:
         if _allowed:
             approval = Approval(
                 change_request_id=cr.id,
-                approver_id=job.created_by,
+                approver_id=_policy.approved_by if _policy is not None else job.created_by,
                 decision=ApprovalDecision.approved,
                 comment=f"Auto-approved by recurring job policy {job.policy_id}",
             )
@@ -168,15 +169,21 @@ async def _fire_recurring_job(job_id: str) -> None:
         await db.commit()
 
     # Trigger execution outside the session so the CR row is visible to the workflow
-    try:
-        from app.services.change_execution_service import ChangeExecutionService
-        from app.database import AsyncSessionLocal as _ASL
-        async with _ASL() as exec_db:
-            await ChangeExecutionService.start(cr.id, job.created_by, "recurring_job", exec_db)
+    if _allowed:
+        try:
+            from app.services.change_execution_service import ChangeExecutionService
+            from app.database import AsyncSessionLocal as _ASL
+            async with _ASL() as exec_db:
+                await ChangeExecutionService.start(cr.id, job.created_by, "recurring_job", exec_db)
+            logger.info(
+                f"Recurring job {job_id} fired successfully, CR {cr.id} executing"
+            )
+        except Exception as e:
+            logger.error(
+                f"Recurring job {job_id}: failed to trigger workflow for CR {cr.id}: {e}"
+            )
+    else:
         logger.info(
-            f"Recurring job {job_id} fired successfully, CR {cr.id} executing"
-        )
-    except Exception as e:
-        logger.error(
-            f"Recurring job {job_id}: failed to trigger workflow for CR {cr.id}: {e}"
+            "Recurring job %s: CR %s in awaiting_approval, skipping execution (manual approval required)",
+            job_id, cr.id,
         )
