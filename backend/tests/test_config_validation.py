@@ -22,7 +22,7 @@ def test_production_rejects_default_secret_key():
         _make_settings(
             ENVIRONMENT="production",
             SECRET_KEY="dev-secret-key-change-in-production-32chars",
-            WEBHOOK_SECRET="prod-safe-secret",
+            WEBHOOK_SECRET="prod-safe-secret-ok",
         )
 
 
@@ -40,7 +40,7 @@ def test_production_rejects_short_secret_key():
         _make_settings(
             ENVIRONMENT="production",
             SECRET_KEY="tooshort",
-            WEBHOOK_SECRET="prod-safe-secret",
+            WEBHOOK_SECRET="prod-safe-secret-ok",
         )
 
 
@@ -58,7 +58,7 @@ def test_staging_rejects_default_secret_key():
         _make_settings(
             ENVIRONMENT="staging",
             SECRET_KEY="dev-secret-key-change-in-production-32chars",
-            WEBHOOK_SECRET="prod-safe-secret",
+            WEBHOOK_SECRET="prod-safe-secret-ok",
         )
 
 
