@@ -23,8 +23,10 @@ async def execute_scheduled_crs() -> None:
         )
         for cr in result.scalars():
             try:
-                from app.workflows.execute_change_workflow import trigger_change_workflow
-                await trigger_change_workflow(str(cr.id))
+                from app.services.change_execution_service import ChangeExecutionService
+                from app.database import AsyncSessionLocal as _ASL
+                async with _ASL() as exec_db:
+                    await ChangeExecutionService.start(cr.id, cr.requester_id, "scheduled", exec_db)
                 logger.info(f"Triggered scheduled CR {cr.id}")
             except Exception as e:
                 logger.warning(f"Failed to trigger scheduled CR {cr.id}: {e}")
