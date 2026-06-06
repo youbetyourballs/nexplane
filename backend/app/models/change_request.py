@@ -501,6 +501,14 @@ class RiskLevel(str, enum.Enum):
     critical = "critical"
 
 
+class VerificationStatus(str, enum.Enum):
+    passed = "passed"
+    failed = "failed"
+    unsupported = "unsupported"
+    manual_required = "manual_required"
+    skipped_development_only = "skipped_development_only"
+
+
 class ChangeRequestStatus(str, enum.Enum):
     draft = "draft"
     planned = "planned"
@@ -543,6 +551,11 @@ class ChangeRequest(Base):
     status: Mapped[ChangeRequestStatus] = mapped_column(
         SAEnum(ChangeRequestStatus, name="change_request_status"),
         default=ChangeRequestStatus.draft,
+    )
+    verification_status: Mapped[Optional["VerificationStatus"]] = mapped_column(
+        SAEnum(VerificationStatus, name="verification_status"),
+        nullable=True,
+        default=None,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
