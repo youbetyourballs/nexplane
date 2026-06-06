@@ -132,8 +132,10 @@ async def _fire_recurring_job(job_id: str) -> None:
 
     # Trigger execution outside the session so the CR row is visible to the workflow
     try:
-        from app.workflows.execute_change_workflow import trigger_change_workflow
-        await trigger_change_workflow(str(cr.id))
+        from app.services.change_execution_service import ChangeExecutionService
+        from app.database import AsyncSessionLocal as _ASL
+        async with _ASL() as exec_db:
+            await ChangeExecutionService.start(cr.id, job.created_by, "recurring_job", exec_db)
         logger.info(
             f"Recurring job {job_id} fired successfully, CR {cr.id} executing"
         )
