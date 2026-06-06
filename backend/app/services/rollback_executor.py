@@ -181,12 +181,25 @@ async def execute_cr_rollback(
         # Determine truthful terminal state from step outcomes
         rollback_ran = True
         if isinstance(result, dict):
-            # Mirror _executor_fallback's dual-key step extraction
+            # Mirror _executor_fallback's dual-key step extraction.
+            # activity_execute_rollback returns {"rollback_steps": [...]} while
+            # _executor_fallback returns {"steps": [...]} or {"execution": {"steps": [...]}}.
             step_results = (
                 result.get("execution", {}).get("steps")
                 or result.get("steps")
                 or []
             )
+            # Convert rollback_steps format to success-keyed format for _determine_rollback_status.
+            if not step_results and isinstance(result.get("rollback_steps"), list):
+                rollback_steps_raw = result["rollback_steps"]
+                if rollback_steps_raw:
+                    step_results = [
+                        {"success": "error" not in s.get("result", {})}
+                        for s in rollback_steps_raw
+                    ]
+                else:
+                    # No steps to roll back — treat as successful (nothing to undo).
+                    step_results = [{"success": True}]
             if result.get("rolled_back") is False and not step_results:
                 rollback_ran = False
         else:
