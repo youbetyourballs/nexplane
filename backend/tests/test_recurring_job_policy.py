@@ -3,10 +3,12 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 
+_SENTINEL = object()
+
 
 def _make_policy(
     expires_at=None,
-    allowed_change_types=None,
+    allowed_change_types=_SENTINEL,
     max_risk_level="high",
     enabled=True,
 ):
@@ -15,8 +17,9 @@ def _make_policy(
     p.id = uuid.uuid4()
     p.enabled = enabled
     p.expires_at = expires_at
-    p.allowed_change_types = allowed_change_types or ["ssm_command", "ec2_stop"]
+    p.allowed_change_types = ["ssm_command", "ec2_stop"] if allowed_change_types is _SENTINEL else allowed_change_types
     p.max_risk_level = max_risk_level
+    p.approved_by = uuid.uuid4()
     return p
 
 
@@ -57,3 +60,25 @@ def test_no_policy_requires_manual_approval():
     ok, reason = _policy_allows(None, change_type="ssm_command", risk_level="low")
     assert ok is False
     assert "no policy" in reason.lower()
+
+
+def test_disabled_policy_is_rejected():
+    from app.services.recurring_job_service import _policy_allows
+    policy = _make_policy(enabled=False)
+    ok, reason = _policy_allows(policy, change_type="ssm_command", risk_level="low")
+    assert ok is False
+    assert "disabled" in reason.lower()
+
+
+def test_empty_allowed_change_types_rejects_all():
+    from app.services.recurring_job_service import _policy_allows
+    policy = _make_policy(allowed_change_types=[])
+    ok, reason = _policy_allows(policy, change_type="ssm_command", risk_level="low")
+    assert ok is False
+
+
+def test_never_expires_policy_is_valid():
+    from app.services.recurring_job_service import _policy_allows
+    policy = _make_policy(expires_at=None)
+    ok, reason = _policy_allows(policy, change_type="ssm_command", risk_level="low")
+    assert ok is True
