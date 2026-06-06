@@ -26,6 +26,7 @@ class AgentJobResponse(BaseModel):
 
 
 class AgentJobResultRequest(BaseModel):
+    agent_id: uuid.UUID
     status: AgentJobStatus
     result: dict | None = None
     error: str | None = None
