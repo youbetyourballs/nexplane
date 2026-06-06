@@ -40,7 +40,7 @@ class Settings(BaseSettings):
                 f"SECRET_KEY is a development default or too short for ENVIRONMENT={self.ENVIRONMENT!r}. "
                 "Set a strong SECRET_KEY (>=32 chars) in your environment."
             )
-        if self.WEBHOOK_SECRET in _WEAK_WEBHOOK_SECRETS:
+        if self.WEBHOOK_SECRET in _WEAK_WEBHOOK_SECRETS or len(self.WEBHOOK_SECRET) < 16:
             raise ValueError(
                 f"WEBHOOK_SECRET is a development default for ENVIRONMENT={self.ENVIRONMENT!r}. "
                 "Set a strong WEBHOOK_SECRET in your environment."
