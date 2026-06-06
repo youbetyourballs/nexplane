@@ -21,6 +21,7 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
 
 _LONG_POLL_SECONDS = 30
 _POLL_INTERVAL_SECONDS = 2
+_TERMINAL_STATUSES = {AgentJobStatus.completed, AgentJobStatus.failed}
 
 
 def _secrets() -> SecretsService:
@@ -198,6 +199,14 @@ async def post_job_result(
     job = await db.get(AgentJob, job_id)
     if not job or job.organization_id != org_id:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Enforce agent ownership — only the assigned agent may submit results
+    if job.agent_registration_id != body.agent_id:
+        raise HTTPException(status_code=403, detail="Agent not authorized for this job")
+
+    # Prevent duplicate completion of terminal jobs
+    if job.status in _TERMINAL_STATUSES:
+        raise HTTPException(status_code=409, detail="Job result already submitted")
 
     job.status = body.status
     job.result = body.result
