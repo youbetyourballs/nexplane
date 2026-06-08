@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         command="santa_install",
         parameters=parameters,
         asset_ids=list(asset_ids),
-        timeout_seconds=300,  # pkg download + install + extension activation
+        timeout_seconds=600,  # pkg download + install + extension activation
     )
     result["_asset_ids"] = [str(a) for a in asset_ids]
     return result
