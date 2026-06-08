@@ -16706,6 +16706,30 @@ def run_phase_mac_agent_bootstrap(
                 )
             log("MAC_AGENT_BOOTSTRAP: agent installed and launchd plist loaded")
 
+            # Install Santa via SSH while we still have the connection.
+            # The mac is still initializing (launchctl I/O errors), so installer
+            # may take several minutes — do it here with SSH timeout control rather
+            # than through the CR system which has a fixed 600s executor timeout.
+            # The santa_install CR will see Santa already present and return immediately.
+            _santa_version = "2024.7"
+            _santa_url = f"https://github.com/northpolesec/santa/releases/download/{_santa_version}/santa-{_santa_version}.pkg"
+            log(f"MAC_AGENT_BOOTSTRAP: installing Santa {_santa_version} via SSH...")
+            _dl_out = _ssh_run(f"curl -fsSL -o /tmp/santa.pkg '{_santa_url}' 2>&1; echo EXIT:$?", timeout=120)
+            if "EXIT:0" not in (_dl_out or ""):
+                log(f"MAC_AGENT_BOOTSTRAP: Santa download failed — {_dl_out[:200]}; CR will retry")
+            else:
+                _inst_out = _ssh_run("sudo installer -pkg /tmp/santa.pkg -target / 2>&1; echo EXIT:$?", timeout=300)
+                log(f"MAC_AGENT_BOOTSTRAP: Santa installer output: {(_inst_out or '')[:300]}")
+                _ssh_run("rm -f /tmp/santa.pkg")
+                _ssh_run("sudo systemextensionsctl developer on 2>&1 || true")
+                # Wait up to 3 min for santactl to respond
+                for _si in range(18):
+                    _sv = _ssh_run("santactl version 2>/dev/null || true", timeout=15)
+                    if _sv and "not found" not in _sv and "No such file" not in _sv:
+                        log(f"MAC_AGENT_BOOTSTRAP: Santa ready: {_sv[:100]}")
+                        break
+                    _time2.sleep(10)
+
             ssh.close()
 
             # Step 4 — AMI snapshot (best-effort; SSM is not available on Mac EC2)
