@@ -15,11 +15,14 @@ class ActionOption:
 
 
 class ActionCatalogService:
-    def __init__(self, catalog_dir: pathlib.Path):
+    def __init__(self, catalog_dir: pathlib.Path, commercial_catalog_dir: pathlib.Path | None = None):
         self._catalog: dict[str, list[dict]] = {}
         self._raw: dict[str, dict] = {}
         self._generic_index: dict[str, list[ActionOption]] = {}
+        self._commercial_dir = commercial_catalog_dir
         self._load(catalog_dir)
+        if commercial_catalog_dir is not None and commercial_catalog_dir.exists():
+            self._load(commercial_catalog_dir)
 
     def _load(self, catalog_dir: pathlib.Path) -> None:
         for json_file in sorted(catalog_dir.glob("*.json")):
@@ -64,6 +67,10 @@ class ActionCatalogService:
                 return action
         raise KeyError(f"Action '{action_id}' not found in connector '{connector_type}'")
 
+    def list_connector_types(self) -> list[str]:
+        """Return list of all connector types in catalog."""
+        return list(self._catalog.keys())
+
     def list_generic_actions(self, action_type: str | None = None) -> list[str]:
         if action_type is None:
             return list(self._generic_index.keys())
@@ -99,9 +106,9 @@ class ActionCatalogService:
 _catalog_service: ActionCatalogService | None = None
 
 
-def init_catalog_service(catalog_dir: pathlib.Path) -> None:
+def init_catalog_service(catalog_dir: pathlib.Path, commercial_catalog_dir: pathlib.Path | None = None) -> None:
     global _catalog_service
-    _catalog_service = ActionCatalogService(catalog_dir)
+    _catalog_service = ActionCatalogService(catalog_dir, commercial_catalog_dir=commercial_catalog_dir)
 
 
 def get_catalog_service() -> ActionCatalogService:
