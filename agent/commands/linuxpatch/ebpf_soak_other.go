@@ -1,6 +1,6 @@
 //go:build !linux && !darwin
 
-package ebpf
+package linuxpatch
 
 import "fmt"
 
