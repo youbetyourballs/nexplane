@@ -87,7 +87,7 @@ export interface BulkTagBody {
   tags: string[];
 }
 
-export type ProjectStatus = "draft" | "in_progress" | "completed" | "cancelled";
+export type ProjectStatus = "draft" | "in_progress" | "completed" | "cancelled" | "rolling_back";
 
 export interface Project {
   id: string;
