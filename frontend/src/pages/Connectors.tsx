@@ -10,7 +10,7 @@ import ScheduleModal from "../components/ScheduleModal";
 import AddConnectorModal from "../components/AddConnectorModal";
 import type { ConnectorRead, ConnectorType, ConnectorTestResult, IngestResponse, ConnectorStatus } from "../types/api";
 
-const CONNECTOR_LABELS: Record<ConnectorType, string> = {
+const CONNECTOR_LABELS: Record<string, string> = {
   aws: "Amazon Web Services",
   azure: "Microsoft Azure",
   cloudflare: "Cloudflare",
@@ -60,7 +60,7 @@ const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   sccm: "SCCM / MECM",
 };
 
-const CONNECTOR_ICONS: Record<ConnectorType, string> = {
+const CONNECTOR_ICONS: Record<string, string> = {
   aws: "☁️",
   azure: "🔷",
   cloudflare: "🟠",
