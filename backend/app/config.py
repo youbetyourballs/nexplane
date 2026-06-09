@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
     AI_MODEL: str = "claude-sonnet-4-6"
     WEBHOOK_SECRET: str = "changeme"
+    NEXPLANE_EDITION: str = "core"
+    NEXPLANE_COMMERCIAL_CATALOG_PATH: str | None = None
 
     @model_validator(mode="after")
     def reject_weak_secrets_in_production(self) -> "Settings":
