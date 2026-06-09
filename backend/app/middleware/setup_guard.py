@@ -6,7 +6,7 @@ from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models.user import User
 
-_EXEMPT_PREFIXES = ("/setup", "/health", "/docs", "/redoc", "/openapi.json", "/mcp", "/api/health")
+_EXEMPT_PREFIXES = ("/setup", "/health", "/docs", "/redoc", "/openapi.json", "/mcp", "/api/health", "/api/v1/setup")
 
 
 class SetupGuardMiddleware:
