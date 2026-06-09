@@ -19,10 +19,13 @@ class ActionCatalogService:
         self._catalog: dict[str, list[dict]] = {}
         self._raw: dict[str, dict] = {}
         self._generic_index: dict[str, list[ActionOption]] = {}
-        self._commercial_dir = commercial_catalog_dir
         self._load(catalog_dir)
+        # Load commercial catalog second so commercial entries override core entries for the same connector_type
         if commercial_catalog_dir is not None and commercial_catalog_dir.exists():
             self._load(commercial_catalog_dir)
+        # Sort all generic action options by execution tier once after both loads complete
+        for key in self._generic_index:
+            self._generic_index[key].sort(key=lambda o: o.execution_tier)
 
     def _load(self, catalog_dir: pathlib.Path) -> None:
         for json_file in sorted(catalog_dir.glob("*.json")):
@@ -41,8 +44,6 @@ class ActionCatalogService:
                 )
                 if generic:
                     self._generic_index.setdefault(generic, []).append(option)
-        for key in self._generic_index:
-            self._generic_index[key].sort(key=lambda o: o.execution_tier)
 
     def get_options_for_action(
         self,
