@@ -33,6 +33,8 @@ from app.routers import recurring_jobs as recurring_jobs_router
 from app.routers import backup as backup_router
 from app.routers import security_policy as security_policy_router
 from app.routers import cr_manifest as cr_manifest_router
+from app.routers.setup import router as setup_router
+from app.middleware.setup_guard import SetupGuardMiddleware
 from app.mcp_server import create_mcp_app
 from app.services import scheduler_service
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -162,6 +164,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SetupGuardMiddleware)
 
 _downloads_dir = pathlib.Path("/opt/nexplane-downloads")
 if _downloads_dir.exists():
@@ -197,6 +200,7 @@ app.include_router(recurring_jobs_router.router)
 app.include_router(backup_router.router)
 app.include_router(security_policy_router.router)
 app.include_router(cr_manifest_router.router)
+app.include_router(setup_router)
 app.mount("/mcp", create_mcp_app())
 
 
