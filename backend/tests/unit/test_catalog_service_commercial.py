@@ -72,3 +72,62 @@ def test_commercial_actions_accessible_via_get_action_def(tmp_path):
     action = svc.get_action_def("ops_provision", "provision_instance")
     assert action["action_id"] == "provision_instance"
     assert action["executor"] == "commercial.ops_provision.provision_instance"
+
+
+def test_get_executor_commercial_loads_from_filesystem(tmp_path):
+    import types as pytypes
+    from app.connectors.catalog_service import ActionCatalogService
+
+    # Build: pkg/catalog/ops_provision.json (with commercial.ops_provision.provision_instance executor ref)
+    #        pkg/executors/ops_provision/provision_instance.py
+    pkg = tmp_path / "pkg"
+    pkg_catalog = pkg / "catalog"
+    pkg_executors = pkg / "executors" / "ops_provision"
+    pkg_catalog.mkdir(parents=True)
+    pkg_executors.mkdir(parents=True)
+
+    # Create the catalog JSON
+    catalog_dir = _make_catalog(
+        pkg_catalog,
+        "ops_provision",
+        "provision_instance",
+        "commercial.ops_provision.provision_instance",
+    )
+
+    # Create the executor Python file
+    (pkg_executors / "provision_instance.py").write_text(
+        "EXECUTOR_NAME = 'provision_instance'\n"
+    )
+
+    # Create core catalog
+    core_dir = _make_catalog(tmp_path / "core", "aws", "list_instances", "aws.list_instances")
+
+    # Initialize service with commercial_catalog_dir pointing to pkg/catalog
+    # executors will be found at pkg/catalog.parent / "executors" = pkg/executors
+    svc = ActionCatalogService(core_dir, commercial_catalog_dir=pkg_catalog)
+    mod = svc.get_executor("ops_provision", "provision_instance")
+    assert isinstance(mod, pytypes.ModuleType)
+    assert mod.EXECUTOR_NAME == "provision_instance"
+
+
+def test_get_executor_commercial_missing_file_raises(tmp_path):
+    from app.connectors.catalog_service import ActionCatalogService
+
+    pkg = tmp_path / "pkg"
+    pkg_catalog = pkg / "catalog"
+    pkg_catalog.mkdir(parents=True)
+
+    # Create the catalog JSON (but don't create the executor file)
+    catalog_dir = _make_catalog(
+        pkg_catalog,
+        "ops_provision",
+        "provision_instance",
+        "commercial.ops_provision.provision_instance",
+    )
+
+    # Create core catalog
+    core_dir = _make_catalog(tmp_path / "core", "aws", "list_instances", "aws.list_instances")
+
+    svc = ActionCatalogService(core_dir, commercial_catalog_dir=pkg_catalog)
+    with pytest.raises(ImportError):
+        svc.get_executor("ops_provision", "provision_instance")
