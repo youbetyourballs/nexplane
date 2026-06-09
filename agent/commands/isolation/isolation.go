@@ -17,6 +17,7 @@ type PreIsolationState struct {
 	IPTablesRules string `json:"iptables_rules,omitempty"`
 	NFTablesRules string `json:"nftables_rules,omitempty"`
 	WFWRules      string `json:"wfw_rules,omitempty"`
+	PFRules       string `json:"pf_rules,omitempty"`
 }
 
 // validate checks that required fields are present.
@@ -64,6 +65,7 @@ func Execute(params map[string]any) (map[string]any, error) {
 		"iptables_rules": state.IPTablesRules,
 		"nftables_rules": state.NFTablesRules,
 		"wfw_rules":      state.WFWRules,
+		"pf_rules":       state.PFRules,
 	}, nil
 }
 
@@ -74,6 +76,7 @@ func Rollback(params map[string]any) (map[string]any, error) {
 		IPTablesRules: getStr(params, "iptables_rules"),
 		NFTablesRules: getStr(params, "nftables_rules"),
 		WFWRules:      getStr(params, "wfw_rules"),
+		PFRules:       getStr(params, "pf_rules"),
 	}
 	if err := Restore(context.Background(), state); err != nil {
 		return nil, err
