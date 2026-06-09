@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     WEBHOOK_SECRET: str = "changeme"
     NEXPLANE_EDITION: str = "core"
     NEXPLANE_COMMERCIAL_CATALOG_PATH: str | None = None
+    INSTANCE_URL: str = "http://localhost:8000"
 
     @model_validator(mode="after")
     def reject_weak_secrets_in_production(self) -> "Settings":
