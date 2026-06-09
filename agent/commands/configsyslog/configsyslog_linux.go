@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-const nexplaneBegin = "# nexplane-managed-begin"
-const nexplaneEnd = "# nexplane-managed-end"
-
 func executeOS(params map[string]any) (map[string]any, error) {
 	host, _ := params["destination_host"].(string)
 	port := params["destination_port"]
@@ -122,14 +119,3 @@ func removeNexplaneBlock(content string) string {
 	return strings.Join(out, "\n")
 }
 
-func toInt(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case float64:
-		return int(n)
-	case int64:
-		return int(n)
-	}
-	return 514
-}
