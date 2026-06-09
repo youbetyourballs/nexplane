@@ -34,6 +34,8 @@ from app.routers import backup as backup_router
 from app.routers import security_policy as security_policy_router
 from app.routers import cr_manifest as cr_manifest_router
 from app.routers.setup import router as setup_router
+from app.routers.identity_providers import router as identity_providers_router
+from app.routers.org_auth_mode import router as org_auth_mode_router
 from app.middleware.setup_guard import SetupGuardMiddleware
 from app.mcp_server import create_mcp_app
 from app.services import scheduler_service
@@ -201,6 +203,8 @@ app.include_router(backup_router.router)
 app.include_router(security_policy_router.router)
 app.include_router(cr_manifest_router.router)
 app.include_router(setup_router)
+app.include_router(identity_providers_router)
+app.include_router(org_auth_mode_router)
 app.mount("/mcp", create_mcp_app())
 
 
