@@ -1,4 +1,4 @@
-from app.models.organization import Organization
+from app.models.organization import Organization, OrgAuthMode
 from app.models.user import User
 from app.models.asset import Asset
 from app.models.connector import Connector
@@ -46,3 +46,5 @@ from app.models.recurring_job import RecurringJob, RecurringJobType  # noqa: F40
 from app.models.backup_target import BackupTarget, BackupTargetStatus  # noqa: F401
 from app.models.security_policy import SecurityPolicySoakSession, SecurityPolicyBaseline  # noqa: F401
 from app.models.project_rollback import ProjectRollback, ProjectRollbackStep  # noqa: F401
+from app.models.setup_token import SetupToken  # noqa: F401
+from app.models.identity_provider import IdentityProvider, IdpType, IdpStatus  # noqa: F401
