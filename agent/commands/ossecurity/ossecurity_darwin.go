@@ -1,4 +1,4 @@
-//go:build !linux && !darwin
+//go:build darwin
 
 package ossecurity
 
@@ -27,12 +27,6 @@ func sysctlExecuteOS(_ map[string]any) (map[string]any, error) {
 }
 func sysctlRollbackOS(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("apply_sysctl_hardening requires Linux")
-}
-func firewallExecuteOS(_ map[string]any) (map[string]any, error) {
-	return nil, fmt.Errorf("configure_host_firewall requires Linux")
-}
-func firewallRollbackOS(_ map[string]any) (map[string]any, error) {
-	return nil, fmt.Errorf("configure_host_firewall requires Linux")
 }
 func blacklistExecuteOS(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("blacklist_kernel_modules requires Linux")
