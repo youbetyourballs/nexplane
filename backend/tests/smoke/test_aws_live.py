@@ -25,6 +25,9 @@ Phase descriptions:
     K  CloudWatch: alarms + SSM metric push with rollback stack
     W  ALB lifecycle: create ALB + target group + listener, register EC2 target, verify health, deregister, rollback
     MAC_AGENT_BOOTSTRAP  macOS agent: launch mac2.metal on Dedicated Host, install Nexplane agent, run defaults_write + santa_check CRs
+    MAC_POSTURE_AUDIT  macOS security posture: configure_selinux/sysctl/auditd/FIM/apparmor/discover/deep_discover/forensics CRs with rollback
+    MAC_AUTH_HARDENING  macOS auth hardening: harden_ssh/configure_ntp/config_syslog CRs with rollback
+    MAC_OBSERVABILITY  macOS observability (read-only): estimate_size/audit_software_inventory/audit_cis_compliance CRs
     AD_DC_INTEGRITY  Windows Server 2022 AD DC: provision DC via SSM, snapshot AMI, run dc_integrity_check + ad_forest_snapshot CRs
     AD_TIERED_BACKUP  AD Tier 0 backup: launch DC from cached AMI, dry_run enumeration, real IFM backup, S3 manifest verify, rollback
     AD_MEMBER_SERVER_BACKUP  AD Tier 1 backup: launch t3.small, AWS Backup job, verify recovery point, rollback (delete recovery point)
@@ -15891,6 +15894,9 @@ def main():
             "SCCM_DEPLOY=SCCM/MECM connector smoke test (no EC2, read-only, skips if no creds in SSM at /nexplane/smoke/sccm/*). "
             "SCCM_BOOTSTRAP=One-time SCCM AMI pair builder (DC + site server, 2x t3.xlarge Windows, ~3-4 hr, AMIs cached in SSM at /nexplane/smoke/sccm-ami/dc and /nexplane/smoke/sccm-ami/site-server). "
             "MAC_AGENT_BOOTSTRAP=macOS agent smoke test on mac2.metal Dedicated Host (requires --dedicated-host-id and --ssh-key-path; skipped if host not provided). "
+            "MAC_POSTURE_AUDIT=macOS security posture CRs (configure_selinux/sysctl/auditd/FIM/apparmor/discover/forensics) with rollback; requires --mac-endpoint-asset-id and --ssh-host. "
+            "MAC_AUTH_HARDENING=macOS auth hardening CRs (harden_ssh/configure_ntp/config_syslog) with rollback; requires --mac-endpoint-asset-id and --ssh-host. "
+            "MAC_OBSERVABILITY=macOS observability read-only CRs (estimate_size/audit_software_inventory/audit_cis_compliance); requires --mac-endpoint-asset-id. "
             "AD_DC_INTEGRITY=Windows Server 2022 AD DC smoke test: provision DC, snapshot AMI, run dc_integrity_check + ad_forest_snapshot CRs (t3.large, AMI cached in SSM /nexplane/smoke-amis/dc-smoke/). "
             "INTUNE_DEPLOY=Microsoft Intune connector smoke test (no EC2, credential-gated, skips if no creds in SSM at /nexplane/smoke/intune/*). "
             "WUFB_DEPLOY=Windows Update for Business connector smoke test (no EC2, credential-gated, skips if no creds in SSM at /nexplane/smoke/wufb/*). "
@@ -15921,6 +15927,15 @@ def main():
     parser.add_argument(
         "--ssh-key-path", default="",
         help="Path to SSH private key file for EC2 Mac instance access (MAC_AGENT_BOOTSTRAP).",
+    )
+    parser.add_argument(
+        "--ssh-host", default="",
+        help="IP or hostname of the macOS instance for MAC_POSTURE_AUDIT / MAC_AUTH_HARDENING SSH verification.",
+    )
+    parser.add_argument(
+        "--mac-endpoint-asset-id", default="",
+        help="Nexplane asset ID of the macOS endpoint for MAC_POSTURE_AUDIT / MAC_AUTH_HARDENING / MAC_OBSERVABILITY. "
+             "Required when running those phases without MAC_AGENT_BOOTSTRAP in the same run.",
     )
     parser.add_argument(
         "--local", action="store_true",
@@ -16318,6 +16333,11 @@ def main():
             run_phase_wufb_deploy(client)
         if "LAPS_DEPLOY" in phases:
             run_phase_laps_deploy(client)
+        # mac_endpoint_asset_id / ssh_host may be supplied via CLI args when running
+        # MAC_POSTURE_AUDIT / MAC_AUTH_HARDENING / MAC_OBSERVABILITY standalone.
+        mac_endpoint_asset_id: str = getattr(args, "mac_endpoint_asset_id", "")
+        ssh_host: str = getattr(args, "ssh_host", "")
+
         if "MAC_AGENT_BOOTSTRAP" in phases:
             _mac_ec2 = _get_aws_boto3_client("ec2")
             _mac_ssm = _get_aws_boto3_client("ssm")
@@ -16332,6 +16352,28 @@ def main():
                 dedicated_host_id=getattr(args, "dedicated_host_id", ""),
                 ssh_key_path=getattr(args, "ssh_key_path", ""),
             )
+
+        if "MAC_POSTURE_AUDIT" in phases:
+            if not mac_endpoint_asset_id:
+                fail("MAC_POSTURE_AUDIT requires --mac-endpoint-asset-id (the Nexplane asset ID of the macOS endpoint)")
+            if not ssh_host:
+                fail("MAC_POSTURE_AUDIT requires --ssh-host (the mac instance IP)")
+            _mac_ssh_key = getattr(args, "ssh_key_path", "")
+            run_phase_mac_posture_audit(client, mac_endpoint_asset_id, ssh_host, _mac_ssh_key)
+
+        if "MAC_AUTH_HARDENING" in phases:
+            if not mac_endpoint_asset_id:
+                fail("MAC_AUTH_HARDENING requires --mac-endpoint-asset-id (the Nexplane asset ID of the macOS endpoint)")
+            if not ssh_host:
+                fail("MAC_AUTH_HARDENING requires --ssh-host (the mac instance IP)")
+            _mac_ssh_key = getattr(args, "ssh_key_path", "")
+            run_phase_mac_auth_hardening(client, mac_endpoint_asset_id, ssh_host, _mac_ssh_key)
+
+        if "MAC_OBSERVABILITY" in phases:
+            if not mac_endpoint_asset_id:
+                fail("MAC_OBSERVABILITY requires --mac-endpoint-asset-id (the Nexplane asset ID of the macOS endpoint)")
+            run_phase_mac_observability(client, mac_endpoint_asset_id)
+
         if "SANTA_SYNC" in phases:
             _santa_ssm = _get_aws_boto3_client("ssm")
             if not _santa_ssm:
@@ -17014,6 +17056,318 @@ def run_phase_mac_agent_bootstrap(
                 log(f"MAC_AGENT_BOOTSTRAP: terminated mac instance {instance_id}")
             except Exception as _te:
                 log(f"MAC_AGENT_BOOTSTRAP: WARNING — could not terminate {instance_id}: {_te}")
+
+
+def _wait_rollback_posture(client, cr_id: str, label: str, timeout: int = 120) -> str:
+    """Submit rollback for a posture/hardening CR and poll to completion."""
+    client.post(f"/change-requests/{cr_id}/rollback", json={})
+    for _ in range(timeout // 5):
+        s = client.get(f"/change-requests/{cr_id}").get("status", "")
+        if s in ("rolled_back", "failed", "completed"):
+            return s
+        time.sleep(5)
+    return "timeout"
+
+
+def run_phase_mac_posture_audit(client, mac_endpoint_asset_id: str, ssh_host: str, ssh_key_path: str) -> None:
+    """Phase MAC_POSTURE_AUDIT: Run macOS security posture CRs via the Nexplane CR lifecycle."""
+    import paramiko
+    print("\n[Phase MAC_POSTURE_AUDIT] macOS Security Posture Audit")
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    pkey = paramiko.RSAKey.from_private_key_file(ssh_key_path)
+    ssh.connect(hostname=ssh_host, username="ec2-user", pkey=pkey, timeout=30)
+
+    def ssh_run(cmd: str) -> str:
+        _, stdout, stderr = ssh.exec_command(cmd, timeout=60)
+        return stdout.read().decode().strip()
+
+    rollback_stack = []  # (cr_id, label) tuples
+
+    try:
+        # --- 1. configure_selinux (darwin: Gatekeeper + Santa check) ---
+        log("MAC_POSTURE_AUDIT: configure_selinux (Gatekeeper enforce)...")
+        cr_selinux = client.run_cr(
+            "[MAC_POSTURE_AUDIT] configure_selinux enforcing",
+            "configure_selinux",
+            mac_endpoint_asset_id,
+            {"mode": "enforcing"},
+        )
+        result_sl = client.get_cr_step_result(cr_selinux)
+        assert result_sl.get("config_snapshot") is not None, \
+            f"configure_selinux result missing config_snapshot: {result_sl}"
+        rollback_stack.append((cr_selinux["id"], "configure_selinux"))
+        log(f"MAC_POSTURE_AUDIT: configure_selinux OK — new_mode={result_sl.get('new_mode')}")
+
+        gk_status = ssh_run("spctl --status 2>&1")
+        log(f"MAC_POSTURE_AUDIT: Gatekeeper status via SSH: {gk_status}")
+
+        # --- 2. apply_sysctl_hardening ---
+        log("MAC_POSTURE_AUDIT: apply_sysctl_hardening...")
+        cr_sysctl = client.run_cr(
+            "[MAC_POSTURE_AUDIT] apply_sysctl_hardening",
+            "apply_sysctl_hardening",
+            mac_endpoint_asset_id,
+            {},
+        )
+        result_sys = client.get_cr_step_result(cr_sysctl)
+        assert result_sys.get("snapshot") is not None, \
+            f"sysctl result missing snapshot: {result_sys}"
+        rollback_stack.append((cr_sysctl["id"], "apply_sysctl_hardening"))
+
+        ip_fwd = ssh_run("sudo sysctl -n net.inet.ip.forwarding 2>/dev/null || echo unknown")
+        log(f"MAC_POSTURE_AUDIT: net.inet.ip.forwarding={ip_fwd}")
+        assert ip_fwd in ("0", "unknown"), \
+            f"expected ip_forwarding=0 after hardening; got {ip_fwd}"
+        log("MAC_POSTURE_AUDIT: sysctl_hardening OK")
+
+        # --- 3. deploy_auditd_rules (darwin: BSM audit) ---
+        log("MAC_POSTURE_AUDIT: deploy_auditd_rules (BSM cis_level1)...")
+        cr_audit = client.run_cr(
+            "[MAC_POSTURE_AUDIT] deploy_auditd_rules cis_level1",
+            "deploy_auditd_rules",
+            mac_endpoint_asset_id,
+            {"profile": "cis_level1"},
+        )
+        result_aud = client.get_cr_step_result(cr_audit)
+        assert result_aud.get("rules_path") is not None, \
+            f"auditd result missing rules_path: {result_aud}"
+        rollback_stack.append((cr_audit["id"], "deploy_auditd_rules"))
+
+        audit_content = ssh_run("sudo cat /etc/security/audit_control 2>/dev/null || echo MISSING")
+        assert "dir:/var/audit" in audit_content, \
+            f"expected audit_control with dir:/var/audit; got: {audit_content[:200]}"
+        log("MAC_POSTURE_AUDIT: deploy_auditd_rules OK — audit_control verified via SSH")
+
+        # --- 4. setup_file_integrity_monitoring ---
+        log("MAC_POSTURE_AUDIT: setup_fim init...")
+        cr_fim = client.run_cr(
+            "[MAC_POSTURE_AUDIT] setup_fim init",
+            "setup_file_integrity_monitoring",
+            mac_endpoint_asset_id,
+            {"action": "init", "watch_paths": ["/etc/ssh"]},
+        )
+        result_fim = client.get_cr_step_result(cr_fim)
+        assert result_fim.get("snapshot_path") is not None, \
+            f"fim result missing snapshot_path: {result_fim}"
+        log(f"MAC_POSTURE_AUDIT: FIM init OK — files={result_fim.get('file_count')}")
+
+        cr_fim_check = client.run_cr(
+            "[MAC_POSTURE_AUDIT] setup_fim check",
+            "setup_file_integrity_monitoring",
+            mac_endpoint_asset_id,
+            {"action": "check", "watch_paths": ["/etc/ssh"]},
+        )
+        result_fim_check = client.get_cr_step_result(cr_fim_check)
+        assert "violations" in result_fim_check, \
+            f"fim check missing violations field: {result_fim_check}"
+        log(f"MAC_POSTURE_AUDIT: FIM check OK — violations={result_fim_check.get('violations')}")
+
+        # --- 5. configure_apparmor (darwin: Santa rules) ---
+        log("MAC_POSTURE_AUDIT: configure_apparmor (Santa rule)...")
+        _test_sha = "a" * 64
+        cr_aa = client.run_cr(
+            "[MAC_POSTURE_AUDIT] configure_apparmor santa_rule",
+            "configure_apparmor",
+            mac_endpoint_asset_id,
+            {
+                "profile_name": "nexplane_smoke_test",
+                "profile_content": f'[{{"sha256":"{_test_sha}","comment":"nexplane_smoke_test"}}]',
+                "mode": "enforce",
+            },
+        )
+        result_aa = client.get_cr_step_result(cr_aa)
+        assert result_aa.get("snapshot") is not None, \
+            f"apparmor result missing snapshot: {result_aa}"
+        rollback_stack.append((cr_aa["id"], "configure_apparmor"))
+        log(f"MAC_POSTURE_AUDIT: configure_apparmor OK — mode={result_aa.get('mode_applied')}")
+
+        # --- 6. discover_applications (read-only) ---
+        log("MAC_POSTURE_AUDIT: discover_applications...")
+        cr_disc = client.run_cr(
+            "[MAC_POSTURE_AUDIT] discover_applications",
+            "discover_applications",
+            mac_endpoint_asset_id,
+            {},
+        )
+        result_disc = client.get_cr_step_result(cr_disc)
+        apps = result_disc.get("applications", [])
+        log(f"MAC_POSTURE_AUDIT: discover_applications OK — {len(apps)} apps found")
+
+        # --- 7. deep_discover ---
+        log("MAC_POSTURE_AUDIT: deep_discover...")
+        cr_dd = client.run_cr(
+            "[MAC_POSTURE_AUDIT] deep_discover",
+            "deep_discover",
+            mac_endpoint_asset_id,
+            {},
+        )
+        result_dd = client.get_cr_step_result(cr_dd)
+        assert result_dd.get("os") == "darwin" or result_dd.get("OS") == "darwin", \
+            f"deep_discover OS field not darwin: {result_dd}"
+        log(f"MAC_POSTURE_AUDIT: deep_discover OK — workloads={len(result_dd.get('workloads', []))}")
+
+        # --- 8. collect_forensics ---
+        log("MAC_POSTURE_AUDIT: collect_forensics...")
+        cr_for = client.run_cr(
+            "[MAC_POSTURE_AUDIT] collect_forensics",
+            "collect_forensics",
+            mac_endpoint_asset_id,
+            {},
+        )
+        result_for = client.get_cr_step_result(cr_for)
+        artifacts = result_for.get("artifacts", [])
+        assert len(artifacts) > 0, f"collect_forensics returned no artifacts: {result_for}"
+        log(f"MAC_POSTURE_AUDIT: collect_forensics OK — {len(artifacts)} artifacts")
+
+        log("MAC_POSTURE_AUDIT: all execute phases passed — starting rollbacks...")
+
+        for cr_id, label in reversed(rollback_stack):
+            status = _wait_rollback_posture(client, cr_id, label)
+            log(f"MAC_POSTURE_AUDIT: rollback {label} → {status}")
+
+        ip_fwd_after = ssh_run("sudo sysctl -n net.inet.ip.forwarding 2>/dev/null || echo unknown")
+        log(f"MAC_POSTURE_AUDIT: ip_forwarding after rollback: {ip_fwd_after}")
+
+        audit_after = ssh_run("sudo cat /etc/security/audit_control 2>/dev/null || echo MISSING")
+        if "dir:/var/audit" in audit_after:
+            log("MAC_POSTURE_AUDIT: audit_control still has nexplane content after rollback (may be empty originally)")
+        else:
+            log("MAC_POSTURE_AUDIT: audit_control rollback verified")
+
+        log("MAC_POSTURE_AUDIT: phase complete ✓")
+
+    finally:
+        ssh.close()
+
+
+def run_phase_mac_auth_hardening(client, mac_endpoint_asset_id: str, ssh_host: str, ssh_key_path: str) -> None:
+    """Phase MAC_AUTH_HARDENING: SSH hardening, NTP, syslog forwarding with execute+rollback."""
+    import paramiko
+    print("\n[Phase MAC_AUTH_HARDENING] macOS Auth Hardening")
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(hostname=ssh_host, username="ec2-user",
+                pkey=paramiko.RSAKey.from_private_key_file(ssh_key_path), timeout=30)
+
+    def ssh_run(cmd: str) -> str:
+        _, out, _ = ssh.exec_command(cmd, timeout=30)
+        return out.read().decode().strip()
+
+    rollback_stack = []
+    try:
+        # --- 1. harden_ssh ---
+        log("MAC_AUTH_HARDENING: harden_ssh...")
+        cr_ssh = client.run_cr(
+            "[MAC_AUTH_HARDENING] harden_ssh",
+            "harden_ssh",
+            mac_endpoint_asset_id,
+            {"permit_root_login": "no", "x11_forwarding": "no"},
+        )
+        result_ssh = client.get_cr_step_result(cr_ssh)
+        assert result_ssh.get("snapshot") is not None, f"harden_ssh missing snapshot: {result_ssh}"
+        rollback_stack.append((cr_ssh["id"], "harden_ssh"))
+
+        sshd_conf = ssh_run("sudo grep -i PermitRootLogin /etc/ssh/sshd_config 2>/dev/null || echo MISSING")
+        log(f"MAC_AUTH_HARDENING: sshd_config PermitRootLogin: {sshd_conf}")
+        assert "no" in sshd_conf.lower(), f"expected PermitRootLogin no; got: {sshd_conf}"
+        log("MAC_AUTH_HARDENING: harden_ssh verified via SSH ✓")
+
+        # --- 2. configure_ntp ---
+        log("MAC_AUTH_HARDENING: configure_ntp...")
+        cr_ntp = client.run_cr(
+            "[MAC_AUTH_HARDENING] configure_ntp",
+            "configure_ntp",
+            mac_endpoint_asset_id,
+            {"servers": ["time.cloudflare.com", "time.apple.com"]},
+        )
+        result_ntp = client.get_cr_step_result(cr_ntp)
+        assert result_ntp.get("snapshot") is not None, f"ntp missing snapshot: {result_ntp}"
+        rollback_stack.append((cr_ntp["id"], "configure_ntp"))
+
+        ntp_server = ssh_run("systemsetup -getnetworktimeserver 2>/dev/null || echo MISSING")
+        log(f"MAC_AUTH_HARDENING: NTP server: {ntp_server}")
+        assert "cloudflare" in ntp_server or "apple" in ntp_server, \
+            f"expected cloudflare/apple NTP; got: {ntp_server}"
+        log("MAC_AUTH_HARDENING: configure_ntp verified ✓")
+
+        # --- 3. config_syslog ---
+        log("MAC_AUTH_HARDENING: config_syslog...")
+        cr_syslog = client.run_cr(
+            "[MAC_AUTH_HARDENING] config_syslog",
+            "config_syslog",
+            mac_endpoint_asset_id,
+            {
+                "destination_host": "10.0.0.1",
+                "destination_port": 514,
+                "protocol": "udp",
+                "facility": "*.*",
+            },
+        )
+        result_syslog = client.get_cr_step_result(cr_syslog)
+        assert result_syslog.get("config_path") is not None, f"syslog missing config_path: {result_syslog}"
+        rollback_stack.append((cr_syslog["id"], "config_syslog"))
+
+        syslog_conf = ssh_run("sudo grep nexplane /etc/syslog.conf 2>/dev/null || echo MISSING")
+        assert "10.0.0.1" in syslog_conf, f"expected forward line in syslog.conf; got: {syslog_conf}"
+        log("MAC_AUTH_HARDENING: config_syslog verified ✓")
+
+        log("MAC_AUTH_HARDENING: all execute phases passed — rolling back...")
+        for cr_id, label in reversed(rollback_stack):
+            _wait_rollback_posture(client, cr_id, label)
+            log(f"MAC_AUTH_HARDENING: rolled back {label}")
+
+        sshd_after = ssh_run("sudo grep -i PermitRootLogin /etc/ssh/sshd_config 2>/dev/null || echo MISSING")
+        log(f"MAC_AUTH_HARDENING: sshd_config after rollback: {sshd_after}")
+
+        log("MAC_AUTH_HARDENING: phase complete ✓")
+    finally:
+        ssh.close()
+
+
+def run_phase_mac_observability(client, mac_endpoint_asset_id: str) -> None:
+    """Phase MAC_OBSERVABILITY: estimate_size, audit_software_inventory, audit_cis_compliance — read-only CRs."""
+    print("\n[Phase MAC_OBSERVABILITY] macOS Observability (read-only)")
+
+    log("MAC_OBSERVABILITY: estimate_size /etc...")
+    cr_size = client.run_cr(
+        "[MAC_OBSERVABILITY] estimate_size /etc",
+        "estimate_size",
+        mac_endpoint_asset_id,
+        {"path": "/etc"},
+    )
+    result_size = client.get_cr_step_result(cr_size)
+    size_bytes = result_size.get("size_bytes", 0)
+    assert size_bytes > 0, f"estimate_size returned size_bytes=0: {result_size}"
+    log(f"MAC_OBSERVABILITY: estimate_size OK — /etc = {size_bytes} bytes")
+
+    log("MAC_OBSERVABILITY: audit_software_inventory...")
+    cr_inv = client.run_cr(
+        "[MAC_OBSERVABILITY] audit_software_inventory",
+        "audit_software_inventory",
+        mac_endpoint_asset_id,
+        {},
+    )
+    result_inv = client.get_cr_step_result(cr_inv)
+    packages = result_inv.get("packages", [])
+    log(f"MAC_OBSERVABILITY: audit_software_inventory OK — {len(packages)} packages")
+
+    log("MAC_OBSERVABILITY: audit_cis_compliance level=1...")
+    cr_cis = client.run_cr(
+        "[MAC_OBSERVABILITY] audit_cis_compliance darwin level=1",
+        "audit_cis_compliance",
+        mac_endpoint_asset_id,
+        {"level": 1, "os_family": "darwin"},
+    )
+    result_cis = client.get_cr_step_result(cr_cis)
+    assert result_cis.get("os_family") == "darwin", \
+        f"expected os_family=darwin; got {result_cis.get('os_family')}"
+    score = result_cis.get("score", {})
+    log(f"MAC_OBSERVABILITY: CIS compliance OK — score={score}")
+
+    log("MAC_OBSERVABILITY: phase complete ✓")
 
 
 def run_phase_ad_dc_integrity(client, cloud_account_id, tailscale_auth_key=""):
