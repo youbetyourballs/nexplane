@@ -1,5 +1,6 @@
 from __future__ import annotations
 import importlib
+import importlib.util
 import json
 import pathlib
 import types
@@ -19,6 +20,7 @@ class ActionCatalogService:
         self._catalog: dict[str, list[dict]] = {}
         self._raw: dict[str, dict] = {}
         self._generic_index: dict[str, list[ActionOption]] = {}
+        self._commercial_catalog_dir = commercial_catalog_dir
         self._load(catalog_dir)
         # Load commercial catalog second so commercial entries override core entries for the same connector_type
         if commercial_catalog_dir is not None and commercial_catalog_dir.exists():
@@ -87,13 +89,51 @@ class ActionCatalogService:
             raise KeyError(f"Connector type '{connector_type}' not found in catalog")
         return self._raw[connector_type]
 
+    def _load_commercial_executor(self, executor_ref: str) -> types.ModuleType:
+        """Load a commercial executor from the filesystem.
+
+        executor_ref has format 'commercial.{connector_type}.{module_name}'
+        Resolves to: {commercial_catalog_dir.parent}/executors/{connector_type}/{module_name}.py
+        """
+        parts = executor_ref.split(".")
+        if len(parts) != 3 or parts[0] != "commercial":
+            raise ValueError(f"Invalid commercial executor reference '{executor_ref}' — expected 'commercial.connector_type.module_name'")
+
+        connector_type = parts[1]
+        module_name = parts[2]
+
+        if self._commercial_catalog_dir is None:
+            raise ImportError(f"Commercial executor '{executor_ref}' cannot be loaded: no commercial catalog dir configured")
+
+        # Resolve to: {commercial_catalog_dir.parent}/executors/{connector_type}/{module_name}.py
+        executor_file = self._commercial_catalog_dir.parent / "executors" / connector_type / f"{module_name}.py"
+
+        if not executor_file.exists():
+            raise ImportError(f"Commercial executor file '{executor_file}' not found for executor ref '{executor_ref}'")
+
+        spec = importlib.util.spec_from_file_location(executor_ref, executor_file)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not create module spec for '{executor_file}'")
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
     def get_executor(self, connector_type: str, action_id: str) -> types.ModuleType:
         """Resolves executor reference to an importable module.
         Caller accesses execute() and rollback() as module attributes.
         Raises ImportError if the module does not exist yet.
+
+        Handles two types of executors:
+        - Standard: 'connector.module' → app.connectors.executors.connector.module (via importlib.import_module)
+        - Commercial: 'commercial.connector_type.module_name' → filesystem (via importlib.util)
         """
         action_def = self.get_action_def(connector_type, action_id)
         executor_ref = action_def.get("executor", "")
+
+        if executor_ref.startswith("commercial."):
+            return self._load_commercial_executor(executor_ref)
+
         parts = executor_ref.split(".")
         if len(parts) != 2:
             raise ValueError(f"Invalid executor reference '{executor_ref}' — expected 'connector.module'")
