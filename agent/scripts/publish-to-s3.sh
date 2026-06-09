@@ -30,11 +30,7 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.Version=$VERSI
 
 echo ""
 echo "Uploading to S3..."
-aws s3 cp "$DIST/nexplane-agent-linux-amd64" "s3://$BUCKET/nexplane-agent-linux-amd64-${VERSION}" --acl public-read
-aws s3 cp "$DIST/nexplane-agent-linux-arm64" "s3://$BUCKET/nexplane-agent-linux-arm64-${VERSION}" --acl public-read
-aws s3 cp "$DIST/nexplane-agent-windows-amd64-${VERSION}.exe" "s3://$BUCKET/nexplane-agent-windows-amd64-${VERSION}.exe" --acl public-read
-aws s3 cp "$DIST/nexplane-agent-darwin-arm64-${VERSION}" "s3://$BUCKET/nexplane-agent-darwin-arm64-${VERSION}" --acl public-read
-
+aws s3 cp "$DIST/nexplane-agent-linux-amd64" "s3://$BUCKET/nexplane-agent-linux-amd64-${VERSION}"aws s3 cp "$DIST/nexplane-agent-linux-arm64" "s3://$BUCKET/nexplane-agent-linux-arm64-${VERSION}"aws s3 cp "$DIST/nexplane-agent-windows-amd64-${VERSION}.exe" "s3://$BUCKET/nexplane-agent-windows-amd64-${VERSION}.exe"aws s3 cp "$DIST/nexplane-agent-darwin-arm64-${VERSION}" "s3://$BUCKET/nexplane-agent-darwin-arm64-${VERSION}"
 # Update the version pointer
 echo -n "$VERSION" | aws s3 cp - "s3://$BUCKET/version" --acl public-read --content-type text/plain
 
