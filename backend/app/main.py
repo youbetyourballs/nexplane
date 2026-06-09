@@ -50,8 +50,15 @@ _escalation_scheduler: AsyncIOScheduler | None = None
 async def lifespan(app: FastAPI):
     global _escalation_scheduler
     from app.connectors.catalog_service import init_catalog_service
-    import pathlib
-    init_catalog_service(pathlib.Path(__file__).parent / "connectors" / "catalog")
+    commercial_path = (
+        pathlib.Path(settings.NEXPLANE_COMMERCIAL_CATALOG_PATH)
+        if settings.NEXPLANE_COMMERCIAL_CATALOG_PATH
+        else None
+    )
+    init_catalog_service(
+        pathlib.Path(__file__).parent / "connectors" / "catalog",
+        commercial_catalog_dir=commercial_path,
+    )
     from app.services.manifest_builder import build_manifest
     build_manifest()
     scheduler_service.init_scheduler(lambda: AsyncSessionLocal())
