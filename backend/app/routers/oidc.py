@@ -1,3 +1,4 @@
+import logging
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -14,7 +15,16 @@ from app.models.user import User, UserRole
 from app.services.auth_service import create_access_token, hash_password
 from app.services.oidc_service import OidcConfig, build_authorization_url, exchange_code_for_userinfo, _get_oidc_metadata
 
+_log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC"])
+
+
+def _cfg_from_idp(idp: IdentityProvider) -> OidcConfig:
+    raw = {k: idp.config[k] for k in ("issuer", "client_id", "client_secret", "scopes") if k in idp.config}
+    if "scopes" in raw and isinstance(raw["scopes"], str):
+        raw["scopes"] = raw["scopes"].split()
+    return OidcConfig(**raw)
 
 _pending_states: dict[str, dict] = {}
 
@@ -55,7 +65,7 @@ async def oidc_redirect(
     db: AsyncSession = Depends(get_db),
 ):
     idp = await _get_active_oidc_idp(db, idp_id)
-    cfg = OidcConfig(**{k: idp.config[k] for k in ("issuer", "client_id", "client_secret", "scopes") if k in idp.config})
+    cfg = _cfg_from_idp(idp)
 
     metadata = await _get_oidc_metadata(cfg.issuer)
     state = _generate_state(idp_id)
@@ -82,15 +92,16 @@ async def oidc_callback(
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
     idp = await _get_active_oidc_idp(db, idp_id)
-    cfg = OidcConfig(**{k: idp.config[k] for k in ("issuer", "client_id", "client_secret", "scopes") if k in idp.config})
+    cfg = _cfg_from_idp(idp)
     cfg.auto_provision = idp.config.get("auto_provision", False)
 
     redirect_uri = f"{settings.INSTANCE_URL.rstrip('/')}/auth/oidc/{idp_id}/callback"
 
     try:
         userinfo = await exchange_code_for_userinfo(cfg, code, redirect_uri)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"OIDC token exchange failed: {exc}")
+    except Exception:
+        _log.exception("OIDC token exchange failed for idp_id=%s", idp_id)
+        raise HTTPException(status_code=400, detail="OIDC token exchange failed")
 
     email = userinfo.get("email")
     if not email:
@@ -118,8 +129,13 @@ async def oidc_callback(
             role=UserRole.security_operator,
             hashed_password=hash_password(secrets.token_urlsafe(32)),
         )
+        from sqlalchemy.exc import IntegrityError
         db.add(user)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="An account with this email already exists")
         await db.refresh(user)
 
     token = create_access_token(str(user.id))

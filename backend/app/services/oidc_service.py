@@ -18,7 +18,7 @@ async def _get_oidc_metadata(issuer: str) -> dict[str, Any]:
     """Fetch .well-known/openid-configuration."""
     url = issuer.rstrip("/") + "/.well-known/openid-configuration"
     async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(url)   # <-- must be await
+        resp = await client.get(url)
         resp.raise_for_status()
         return resp.json()
 
