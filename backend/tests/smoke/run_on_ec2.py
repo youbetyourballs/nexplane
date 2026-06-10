@@ -918,6 +918,14 @@ Examples:
         # Transfer test suite
         transfer_files(ssm, runner_id, tarball)
 
+        # Ensure MAC smoke dependencies are installed before running the test.
+        # Userdata installs these asynchronously; SSM coming Online doesn't guarantee
+        # they're done. Run a blocking install so paramiko/cryptography are definitely present.
+        print("  Installing MAC smoke dependencies on runner...")
+        ssm_run(ssm, runner_id,
+                "pip3 install paramiko cryptography 2>/dev/null || true")
+        print("  Dependencies installed")
+
         # Build the test command
         # Pass AWS creds as env vars so _get_aws_boto3_client() doesn't need asyncpg/DB
         import os as _os
