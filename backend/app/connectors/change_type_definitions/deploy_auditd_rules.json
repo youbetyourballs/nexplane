@@ -1,0 +1,9 @@
+{
+  "change_type": "deploy_auditd_rules",
+  "display_name": "Deploy Auditd Rules",
+  "steps": [
+    {"generic_action": "deploy_auditd_rules", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}
