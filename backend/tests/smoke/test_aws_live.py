@@ -16827,6 +16827,19 @@ def run_phase_mac_agent_bootstrap(
             import paramiko as _paramiko2, shlex as _shlex2
             _reuse_ssh = _paramiko2.SSHClient()
             _reuse_ssh.set_missing_host_key_policy(_paramiko2.AutoAddPolicy())
+            # SSM always holds the key that was used to launch this instance.
+            # Prefer SSM over any stale local file (prior run may have generated a different key).
+            try:
+                _ssm_key_param = ssm_boto.get_parameter(Name="/nexplane/smoke/mac-ssh-key", WithDecryption=False)
+                import tempfile as _tmpf2, os as _os3
+                _ssm_tmp = _tmpf2.NamedTemporaryFile(delete=False, suffix=".pem", mode="w")
+                _ssm_tmp.write(_ssm_key_param["Parameter"]["Value"])
+                _ssm_tmp.close()
+                _os3.chmod(_ssm_tmp.name, 0o600)
+                ssh_key_path = _ssm_tmp.name
+                log(f"MAC_AGENT_BOOTSTRAP: using SSM key for reuse SSH (path={ssh_key_path})")
+            except Exception as _ssm_ke:
+                log(f"MAC_AGENT_BOOTSTRAP: SSM key fetch failed, using local key: {_ssm_ke}")
             _reuse_pkey = _paramiko2.RSAKey.from_private_key_file(ssh_key_path)
             for _ra in range(18):
                 try:
