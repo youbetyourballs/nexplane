@@ -16897,18 +16897,35 @@ def run_phase_mac_agent_bootstrap(
             endpoint_asset_id = endpoint_asset["id"]
             log(f"MAC_AGENT_BOOTSTRAP: agent registered as asset {endpoint_asset_id}")
 
+        # Step 5b — Check SIP status; Santa system extension requires SIP disabled
+        import paramiko as _paramiko_sip
+        _sip_ssh = _paramiko_sip.SSHClient()
+        _sip_ssh.set_missing_host_key_policy(_paramiko_sip.AutoAddPolicy())
+        _sip_pkey = _paramiko_sip.RSAKey.from_private_key_file(ssh_key_path)
+        _sip_ssh.connect(hostname=private_ip, username="ec2-user", pkey=_sip_pkey, timeout=30)
+        _, _sip_out, _ = _sip_ssh.exec_command("csrutil status 2>&1")
+        _sip_status = _sip_out.read().decode().strip()
+        _sip_ssh.close()
+        _sip_enabled = "enabled" in _sip_status.lower() and "disabled" not in _sip_status.lower()
+        log(f"MAC_AGENT_BOOTSTRAP: SIP status: {_sip_status!r} — sip_enabled={_sip_enabled}")
+
         # Step 5b — Install Santa via CR (proper platform lifecycle, not SSH hack)
-        log("MAC_AGENT_BOOTSTRAP: running macos_santa_install CR...")
-        _cr_si = client.run_cr(
-            "[MAC_AGENT_BOOTSTRAP] santa_install",
-            "macos_santa_install",
-            endpoint_asset_id,
-            {},
-        )
-        _step_si = client.get_cr_step_result(_cr_si)
-        if not _step_si.get("installed"):
-            raise RuntimeError(f"MAC_AGENT_BOOTSTRAP: santa_install CR failed: {_step_si}")
-        log(f"MAC_AGENT_BOOTSTRAP: santa_install OK — already_present={_step_si.get('already_present')}, version={_step_si.get('version')}")
+        # Skip if SIP is enabled — system extension activation is blocked by SIP on EC2 mac2.metal
+        _cr_si = None
+        if _sip_enabled:
+            log("MAC_AGENT_BOOTSTRAP: SIP enabled — skipping macos_santa_install CR (system extension blocked)")
+        else:
+            log("MAC_AGENT_BOOTSTRAP: running macos_santa_install CR...")
+            _cr_si = client.run_cr(
+                "[MAC_AGENT_BOOTSTRAP] santa_install",
+                "macos_santa_install",
+                endpoint_asset_id,
+                {},
+            )
+            _step_si = client.get_cr_step_result(_cr_si)
+            if not _step_si.get("installed"):
+                raise RuntimeError(f"MAC_AGENT_BOOTSTRAP: santa_install CR failed: {_step_si}")
+            log(f"MAC_AGENT_BOOTSTRAP: santa_install OK — already_present={_step_si.get('already_present')}, version={_step_si.get('version')}")
 
         # Steps 6a-6i — Run ALL CRs first, collect results, rollback at the end.
         # This lets us see which operations succeed independently before testing reversibility.
@@ -16967,8 +16984,8 @@ def run_phase_mac_agent_bootstrap(
         cr_sc = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_check", "macos_santa_check", endpoint_asset_id, {})
         result_sc = client.get_cr_step_result(cr_sc)
         assert "installed" in result_sc, f"MAC_AGENT_BOOTSTRAP: santa_check missing 'installed': {result_sc}"
-        _santa_installed = result_sc.get("installed", False)
-        log(f"MAC_AGENT_BOOTSTRAP: santa_check OK — installed={_santa_installed}")
+        _santa_installed = result_sc.get("installed", False) and not _sip_enabled
+        log(f"MAC_AGENT_BOOTSTRAP: santa_check OK — installed={result_sc.get('installed', False)}, sip_enabled={_sip_enabled}, santa_usable={_santa_installed}")
 
         # --- 6c: profiles_install ---
         _TEST_PROFILE_ID = "com.nexplane.smoke.test"
@@ -17076,7 +17093,8 @@ def run_phase_mac_agent_bootstrap(
         log("MAC_AGENT_BOOTSTRAP: all CRs executed — running rollbacks now")
 
         # --- Step 7: Rollback all stateful CRs (santa_install last — rules depend on it) ---
-        _crs_to_rollback.append((_cr_si, "santa_install"))
+        if _cr_si is not None:
+            _crs_to_rollback.append((_cr_si, "santa_install"))
         for _rb_cr, _rb_label in _crs_to_rollback:
             _wait_rollback(_rb_cr, _rb_label)
 
