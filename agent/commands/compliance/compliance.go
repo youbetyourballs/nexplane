@@ -16,11 +16,12 @@ type ControlResult struct {
 }
 
 // AuditCISComplianceExecute is the command entrypoint registered in executor.go.
-// params: {"level": 1|2, "os_family": "rhel"|"debian"|"ubuntu"}
+// params: {"level": 1|2, "os_family": "rhel"|"debian"|"ubuntu"|"darwin"}
 func AuditCISComplianceExecute(params map[string]any) (map[string]any, error) {
 	levelF, ok := params["level"].(float64)
 	if !ok {
-		return nil, fmt.Errorf("level is required and must be 1 or 2")
+		// default to level 1 when not provided
+		levelF = 1
 	}
 	level := int(levelF)
 	if level != 1 && level != 2 {
@@ -28,9 +29,9 @@ func AuditCISComplianceExecute(params map[string]any) (map[string]any, error) {
 	}
 	osFamily, _ := params["os_family"].(string)
 	switch osFamily {
-	case "rhel", "debian", "ubuntu":
+	case "rhel", "debian", "ubuntu", "darwin":
 	default:
-		return nil, fmt.Errorf("unsupported os_family %q: must be rhel, debian, or ubuntu", osFamily)
+		return nil, fmt.Errorf("unsupported os_family %q: must be rhel, debian, ubuntu, or darwin", osFamily)
 	}
 	return auditCISComplianceOS(level, osFamily)
 }
