@@ -16349,7 +16349,7 @@ def main():
             _mac_ssm = _get_aws_boto3_client("ssm")
             if not _mac_ec2:
                 fail("MAC_AGENT_BOOTSTRAP requires AWS credentials (ec2)")
-            _mac_bootstrap_asset_id = run_phase_mac_agent_bootstrap(
+            _mac_bootstrap_result = run_phase_mac_agent_bootstrap(
                 client,
                 _mac_ec2,
                 _mac_ssm,
@@ -16360,8 +16360,17 @@ def main():
                 resume_asset_id=getattr(args, "mac_resume_asset_id", ""),
                 resume_ssh_host=getattr(args, "ssh_host", ""),
             )
+            if isinstance(_mac_bootstrap_result, tuple) and len(_mac_bootstrap_result) == 3:
+                _mac_bootstrap_asset_id, _mac_bootstrap_ip, _mac_bootstrap_key = _mac_bootstrap_result
+            else:
+                _mac_bootstrap_asset_id, _mac_bootstrap_ip, _mac_bootstrap_key = _mac_bootstrap_result, "", ""
             if _mac_bootstrap_asset_id and not mac_endpoint_asset_id:
                 mac_endpoint_asset_id = _mac_bootstrap_asset_id
+            if _mac_bootstrap_ip and not ssh_host:
+                ssh_host = _mac_bootstrap_ip
+            if _mac_bootstrap_key:
+                # Propagate the resolved SSH key path (may be SSM temp file) to subsequent phases
+                setattr(args, "ssh_key_path", _mac_bootstrap_key)
 
         if "MAC_POSTURE_AUDIT" in phases:
             if not mac_endpoint_asset_id:
@@ -17121,7 +17130,7 @@ def run_phase_mac_agent_bootstrap(
         log("MAC_AGENT_BOOTSTRAP: defaults_write rollback verified — key deleted")
 
         log("MAC_AGENT_BOOTSTRAP: all CRs passed and rolled back")
-        return endpoint_asset_id
+        return endpoint_asset_id, private_ip, ssh_key_path
 
     finally:
         # Only terminate on success. On failure, leave the instance running so
