@@ -638,11 +638,11 @@ func macosSysinfo(_ map[string]any) (map[string]any, error) {
 }
 
 // santaInstall downloads and installs Santa, enables developer mode for the system extension,
-// and waits for santactl to become responsive. Params: version (optional, defaults to "2024.7").
+// and waits for santactl to become responsive. Params: version (optional, defaults to "2026.5").
 func santaInstall(params map[string]any) (map[string]any, error) {
 	version, _ := params["version"].(string)
 	if version == "" {
-		version = "2024.7"
+		version = "2026.5"
 	}
 
 	// Check if already installed
@@ -686,13 +686,23 @@ func santaInstall(params map[string]any) (map[string]any, error) {
 		}
 	}
 	if !ready {
-		return nil, fmt.Errorf("santa did not become ready after installation; system extension may require MDM approval")
+		// SIP-enabled or no MDM: pkg is installed but system extension pending approval.
+		// Return success with activated:false so the CR doesn't fail.
+		return map[string]any{
+			"installed":       true,
+			"already_present": false,
+			"activated":       false,
+			"version":         version,
+			"install_output":  installOut,
+			"message":         "Santa installed but system extension not active (SIP enabled or MDM approval required)",
+		}, nil
 	}
 
 	v, _ := run("santactl", "version")
 	return map[string]any{
 		"installed":        true,
 		"already_present":  false,
+		"activated":        true,
 		"version":          version,
 		"install_output":   installOut,
 		"santactl_version": v,
