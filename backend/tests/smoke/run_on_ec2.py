@@ -675,6 +675,38 @@ Examples:
                 print("  AWS credentials auto-fetched from platform DB")
         except Exception as _e2:
             print(f"  Could not auto-fetch AWS credentials: {_e2}")
+            # Fallback: fetch via docker exec into the running backend container (Python 3.9
+            # on EC2 host cannot import app/ due to type-union syntax requiring 3.10+).
+            try:
+                import subprocess as _sp2, json as _json2
+                _script2 = (
+                    "import asyncio,json,sys\n"
+                    "async def _m():\n"
+                    "    from app.database import AsyncSessionLocal\n"
+                    "    from app.services.connector_service import _attach_credentials\n"
+                    "    from app.models.connector import Connector,ConnectorType\n"
+                    "    from sqlalchemy import select\n"
+                    "    async with AsyncSessionLocal() as db:\n"
+                    "        r=await db.execute(select(Connector).where(Connector.connector_type==ConnectorType.aws))\n"
+                    "        conn=r.scalars().first()\n"
+                    "        if not conn: sys.exit(1)\n"
+                    "        await _attach_credentials(conn,db)\n"
+                    "        print(json.dumps(getattr(conn,'credentials',{})))\n"
+                    "asyncio.run(_m())\n"
+                )
+                _out2 = _sp2.check_output(
+                    ["docker", "exec", "nexplane-backend-1", "python3", "-c", _script2],
+                    timeout=15, stderr=_sp2.DEVNULL,
+                )
+                _aws2 = _json2.loads(_out2.strip())
+                if _aws2.get("access_key_id"):
+                    os.environ["AWS_ACCESS_KEY_ID"] = _aws2["access_key_id"]
+                    os.environ["AWS_SECRET_ACCESS_KEY"] = _aws2.get("secret_access_key", "")
+                    if _aws2.get("region"):
+                        args.region = _aws2["region"]
+                    print("  AWS credentials auto-fetched via docker exec fallback")
+            except Exception as _e3:
+                print(f"  AWS credentials docker-exec fallback also failed: {_e3}")
 
     # Auto-fetch SaaS connector credentials from platform DB and inject as env vars.
     # The runner EC2 doesn't have the app/ module, so credentials must be passed as env vars.
