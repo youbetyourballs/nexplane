@@ -17273,6 +17273,15 @@ def run_phase_mac_posture_audit(client, mac_endpoint_asset_id: str, ssh_host: st
             status = _wait_rollback_posture(client, cr_id, label)
             log(f"MAC_POSTURE_AUDIT: rollback {label} → {status}")
 
+        # Reconnect SSH after long rollback waits (connection may have timed out)
+        try:
+            ssh.get_transport().send_ignore()
+        except Exception:
+            ssh.close()
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(hostname=ssh_host, username="ec2-user", pkey=pkey, timeout=30)
+
         ip_fwd_after = ssh_run("sudo sysctl -n net.inet.ip.forwarding 2>/dev/null || echo unknown")
         log(f"MAC_POSTURE_AUDIT: ip_forwarding after rollback: {ip_fwd_after}")
 
@@ -17293,10 +17302,10 @@ def run_phase_mac_auth_hardening(client, mac_endpoint_asset_id: str, ssh_host: s
     import paramiko
     print("\n[Phase MAC_AUTH_HARDENING] macOS Auth Hardening")
 
+    pkey = paramiko.RSAKey.from_private_key_file(ssh_key_path)
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(hostname=ssh_host, username="ec2-user",
-                pkey=paramiko.RSAKey.from_private_key_file(ssh_key_path), timeout=30)
+    ssh.connect(hostname=ssh_host, username="ec2-user", pkey=pkey, timeout=30)
 
     def ssh_run(cmd: str) -> str:
         _, out, _ = ssh.exec_command(cmd, timeout=30)
@@ -17364,6 +17373,15 @@ def run_phase_mac_auth_hardening(client, mac_endpoint_asset_id: str, ssh_host: s
         for cr_id, label in reversed(rollback_stack):
             _wait_rollback_posture(client, cr_id, label)
             log(f"MAC_AUTH_HARDENING: rolled back {label}")
+
+        # Reconnect SSH after long rollback waits (connection may have timed out)
+        try:
+            ssh.get_transport().send_ignore()
+        except Exception:
+            ssh.close()
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(hostname=ssh_host, username="ec2-user", pkey=pkey, timeout=30)
 
         sshd_after = ssh_run("sudo grep -i PermitRootLogin /etc/ssh/sshd_config 2>/dev/null || echo MISSING")
         log(f"MAC_AUTH_HARDENING: sshd_config after rollback: {sshd_after}")
