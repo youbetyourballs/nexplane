@@ -18,9 +18,9 @@ func executeOS(params map[string]any) (map[string]any, error) {
 		path = "/"
 	}
 
-	out, err := execCommandEstimateDarwin("du", "-sk", path).Output()
+	out, err := execCommandEstimateDarwin("du", "-skL", path).Output()
 	if err != nil {
-		return nil, fmt.Errorf("du -sk %s: %w", path, err)
+		return nil, fmt.Errorf("du -skL %s: %w", path, err)
 	}
 	parts := strings.Fields(string(out))
 	if len(parts) == 0 {
