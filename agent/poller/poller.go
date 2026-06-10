@@ -22,7 +22,7 @@ func RunEphemeral(ctx context.Context, c *client.Client, agentID, secret string)
 		log.Println("No pending jobs.")
 		return nil
 	}
-	return processJob(ctx, c, job, secret)
+	return processJob(ctx, c, agentID, job, secret)
 }
 
 // RunService loops indefinitely, polling for jobs at the given interval.
@@ -62,19 +62,19 @@ func RunService(ctx context.Context, c *client.Client, agentID, secret string, p
 			continue
 		}
 
-		if err := processJob(ctx, c, job, secret); err != nil {
+		if err := processJob(ctx, c, agentID, job, secret); err != nil {
 			log.Printf("Job %s error: %v", job.JobID, err)
 		}
 	}
 }
 
-func processJob(ctx context.Context, c *client.Client, job *client.JobResponse, secret string) error {
+func processJob(ctx context.Context, c *client.Client, agentID string, job *client.JobResponse, secret string) error {
 	log.Printf("Received job %s: command=%s", job.JobID, job.Command)
 
 	if !agenthmac.Verify(secret, job.JobID, job.Command, job.Parameters, job.HMACSignature) {
 		errMsg := "signature verification failed — rejecting job"
 		log.Printf("Job %s: %s", job.JobID, errMsg)
-		return c.PostResult(ctx, job.JobID, client.JobResult{Status: "failed", Error: errMsg})
+		return c.PostResult(ctx, job.JobID, client.JobResult{AgentID: agentID, Status: "failed", Error: errMsg})
 	}
 
 	rollback, _ := job.Parameters["rollback"].(bool)
@@ -83,9 +83,10 @@ func processJob(ctx context.Context, c *client.Client, job *client.JobResponse, 
 	result := executor.Dispatch(job.Command, job.Parameters, rollback, previousResult)
 
 	jobResult := client.JobResult{
-		Status: result.Status,
-		Result: result.Data,
-		Error:  result.Error,
+		AgentID: agentID,
+		Status:  result.Status,
+		Result:  result.Data,
+		Error:   result.Error,
 	}
 	if err := c.PostResult(ctx, job.JobID, jobResult); err != nil {
 		return fmt.Errorf("posting result: %w", err)
