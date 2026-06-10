@@ -1,0 +1,9 @@
+{
+  "change_type": "audit_software_inventory",
+  "display_name": "Audit Software Inventory",
+  "steps": [
+    {"generic_action": "audit_software_inventory", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}

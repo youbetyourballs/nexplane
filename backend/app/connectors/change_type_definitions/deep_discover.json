@@ -1,0 +1,9 @@
+{
+  "change_type": "deep_discover",
+  "display_name": "Deep Discovery",
+  "steps": [
+    {"generic_action": "deep_discover", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}
