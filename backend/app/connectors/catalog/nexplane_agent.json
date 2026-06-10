@@ -2346,6 +2346,50 @@
                       "execution_tier": 1
                     },
                     {
+                      "action_id": "deep_discover",
+                      "generic_action": "deep_discover",
+                      "display_name": "Deep Discovery",
+                      "description": "Performs deep discovery of endpoint configuration, services, and security posture.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [],
+                      "action_type": "read",
+                      "executor": "nexplane_agent.deep_discover",
+                      "estimated_duration_seconds": 120,
+                      "execution_tier": 1
+                    },
+                    {
+                      "action_id": "harden_ssh",
+                      "generic_action": "harden_ssh",
+                      "display_name": "Harden SSH",
+                      "description": "Applies SSH hardening configuration (disable root login, enforce key auth, etc.).",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                          {"name": "permit_root_login", "type": "string", "required": false, "description": "no, yes, or without-password"},
+                          {"name": "password_authentication", "type": "string", "required": false, "description": "yes or no"},
+                          {"name": "max_auth_tries", "type": "integer", "required": false, "description": "Maximum auth attempts"}
+                      ],
+                      "action_type": "change",
+                      "executor": "nexplane_agent.harden_ssh",
+                      "rollback_action": "harden_ssh",
+                      "estimated_duration_seconds": 30,
+                      "execution_tier": 1
+                    },
+                    {
+                      "action_id": "configure_ntp",
+                      "generic_action": "configure_ntp",
+                      "display_name": "Configure NTP",
+                      "description": "Configures NTP time synchronization servers.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                          {"name": "servers", "type": "array", "required": false, "description": "List of NTP server addresses"}
+                      ],
+                      "action_type": "change",
+                      "executor": "nexplane_agent.configure_ntp",
+                      "rollback_action": "configure_ntp",
+                      "estimated_duration_seconds": 30,
+                      "execution_tier": 1
+                    },
+                    {
                       "action_id": "collect_forensics",
                       "generic_action": "collect_forensics",
                       "display_name": "Collect Forensic Artifacts",
