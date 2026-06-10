@@ -17356,7 +17356,7 @@ def run_phase_mac_auth_hardening(client, mac_endpoint_asset_id: str, ssh_host: s
         assert result_syslog.get("config_path") is not None, f"syslog missing config_path: {result_syslog}"
         rollback_stack.append((cr_syslog["id"], "config_syslog"))
 
-        syslog_conf = ssh_run("sudo grep nexplane /etc/syslog.conf 2>/dev/null || echo MISSING")
+        syslog_conf = ssh_run("sudo grep -A5 nexplane-managed-begin /etc/syslog.conf 2>/dev/null || echo MISSING")
         assert "10.0.0.1" in syslog_conf, f"expected forward line in syslog.conf; got: {syslog_conf}"
         log("MAC_AUTH_HARDENING: config_syslog verified ✓")
 
