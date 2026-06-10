@@ -1,0 +1,9 @@
+{
+  "change_type": "setup_file_integrity_monitoring",
+  "display_name": "Setup File Integrity Monitoring",
+  "steps": [
+    {"generic_action": "setup_file_integrity_monitoring", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}

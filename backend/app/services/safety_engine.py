@@ -139,6 +139,19 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.configure_ebpf_network,
     ChangeType.configure_ebpf_lsm,
     ChangeType.promote_ebpf_policy,
+    # macOS posture, hardening, observability — executors handle rollback internally
+    ChangeType.apply_sysctl_hardening,
+    ChangeType.deploy_auditd_rules,
+    ChangeType.setup_file_integrity_monitoring,
+    ChangeType.discover_applications,
+    ChangeType.deep_discover,
+    ChangeType.collect_forensics,
+    ChangeType.harden_ssh,
+    ChangeType.configure_ntp,
+    ChangeType.config_syslog,
+    ChangeType.estimate_size,
+    ChangeType.audit_software_inventory,
+    ChangeType.audit_cis_compliance,
 }
 
 
