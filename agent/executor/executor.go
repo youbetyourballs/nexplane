@@ -27,6 +27,8 @@ import (
 	"nexplane-agent/commands/winpatch"
 	"nexplane-agent/commands/credrotation"
 	"nexplane-agent/commands/macos"
+	"nexplane-agent/commands/forensics"
+	"nexplane-agent/commands/compliance"
 )
 
 // Result is the outcome of a command execution.
@@ -118,6 +120,9 @@ var commands = map[string]CommandFunc{
 	"health_check":     fleet.HealthCheckExecute,
 	// App discovery (containerize foundation)
 	"discover_applications": appdiscovery.DiscoverApplicationsExecute,
+	// Forensics and compliance
+	"collect_forensics":    forensics.Execute,
+	"audit_cis_compliance": compliance.AuditCISComplianceExecute,
 	// Containerize build
 	"containerize_build": containerizebuild.ContainerizeBuildExecute,
 	// Containerize retire

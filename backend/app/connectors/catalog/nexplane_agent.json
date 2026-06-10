@@ -2305,6 +2305,71 @@
                       "executor": "nexplane_agent.macos_santa_binary_check",
                       "estimated_duration_seconds": 10,
                       "execution_tier": 1
+                    },
+                    {
+                      "action_id": "config_syslog",
+                      "generic_action": "config_syslog",
+                      "display_name": "Configure Syslog",
+                      "description": "Configures syslog/asl on macOS or rsyslog/syslog-ng on Linux. Supports rollback via snapshot.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [],
+                      "action_type": "change",
+                      "rollback_action": "config_syslog",
+                      "executor": "nexplane_agent.config_syslog",
+                      "estimated_duration_seconds": 30,
+                      "execution_tier": 1
+                    },
+                    {
+                      "action_id": "estimate_size",
+                      "generic_action": "estimate_size",
+                      "display_name": "Estimate Disk Size",
+                      "description": "Estimates the disk usage of a path on the endpoint.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                          {"name": "path", "type": "string", "required": false, "description": "Path to estimate; defaults to /"}
+                      ],
+                      "action_type": "read",
+                      "executor": "nexplane_agent.estimate_size",
+                      "estimated_duration_seconds": 30,
+                      "execution_tier": 1
+                    },
+                    {
+                      "action_id": "discover_applications",
+                      "generic_action": "discover_applications",
+                      "display_name": "Discover Applications",
+                      "description": "Enumerates installed applications on the endpoint.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [],
+                      "action_type": "read",
+                      "executor": "nexplane_agent.discover_applications",
+                      "estimated_duration_seconds": 60,
+                      "execution_tier": 1
+                    },
+                    {
+                      "action_id": "collect_forensics",
+                      "generic_action": "collect_forensics",
+                      "display_name": "Collect Forensic Artifacts",
+                      "description": "Collects forensic artifacts (logs, process list, network state) from the endpoint.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [],
+                      "action_type": "read",
+                      "executor": "nexplane_agent.collect_forensics",
+                      "estimated_duration_seconds": 120,
+                      "execution_tier": 1
+                    },
+                    {
+                      "action_id": "audit_cis_compliance",
+                      "generic_action": "audit_cis_compliance",
+                      "display_name": "Audit CIS Compliance",
+                      "description": "Runs a CIS benchmark compliance audit against the endpoint.",
+                      "applicable_asset_types": ["server", "workstation"],
+                      "parameters": [
+                          {"name": "level", "type": "string", "required": false, "description": "CIS level: 1 or 2 (default: 1)"}
+                      ],
+                      "action_type": "read",
+                      "executor": "nexplane_agent.audit_cis_compliance",
+                      "estimated_duration_seconds": 60,
+                      "execution_tier": 1
                     }
                 ]
 }
