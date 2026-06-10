@@ -48,9 +48,10 @@ type JobResponse struct {
 }
 
 type JobResult struct {
-	Status string         `json:"status"`
-	Result map[string]any `json:"result,omitempty"`
-	Error  string         `json:"error,omitempty"`
+	AgentID string         `json:"agent_id"`
+	Status  string         `json:"status"`
+	Result  map[string]any `json:"result,omitempty"`
+	Error   string         `json:"error,omitempty"`
 }
 
 func (c *Client) Register(ctx context.Context, req RegisterRequest) (*RegisterResponse, error) {
