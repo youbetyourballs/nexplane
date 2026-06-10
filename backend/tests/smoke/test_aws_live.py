@@ -15938,6 +15938,12 @@ def main():
              "Required when running those phases without MAC_AGENT_BOOTSTRAP in the same run.",
     )
     parser.add_argument(
+        "--mac-resume-asset-id", default="",
+        help="Resume MAC_AGENT_BOOTSTRAP CR execution against an already-registered asset, "
+             "skipping instance launch/install/registration. Use with --ssh-host when the "
+             "instance is running but a prior test run failed mid-way through CRs.",
+    )
+    parser.add_argument(
         "--local", action="store_true",
         help="Acknowledge that you are running locally (not recommended). "
              "Prefer: python tests/smoke/run_on_ec2.py to run from a dedicated EC2 runner."
@@ -16335,7 +16341,7 @@ def main():
             run_phase_laps_deploy(client)
         # mac_endpoint_asset_id / ssh_host may be supplied via CLI args when running
         # MAC_POSTURE_AUDIT / MAC_AUTH_HARDENING / MAC_OBSERVABILITY standalone.
-        mac_endpoint_asset_id: str = getattr(args, "mac_endpoint_asset_id", "")
+        mac_endpoint_asset_id: str = getattr(args, "mac_endpoint_asset_id", "") or getattr(args, "mac_resume_asset_id", "")
         ssh_host: str = getattr(args, "ssh_host", "")
 
         if "MAC_AGENT_BOOTSTRAP" in phases:
@@ -16343,7 +16349,7 @@ def main():
             _mac_ssm = _get_aws_boto3_client("ssm")
             if not _mac_ec2:
                 fail("MAC_AGENT_BOOTSTRAP requires AWS credentials (ec2)")
-            run_phase_mac_agent_bootstrap(
+            _mac_bootstrap_asset_id = run_phase_mac_agent_bootstrap(
                 client,
                 _mac_ec2,
                 _mac_ssm,
@@ -16351,7 +16357,11 @@ def main():
                 backend_tailscale_ip=getattr(args, "backend_tailscale_ip", ""),
                 dedicated_host_id=getattr(args, "dedicated_host_id", ""),
                 ssh_key_path=getattr(args, "ssh_key_path", ""),
+                resume_asset_id=getattr(args, "mac_resume_asset_id", ""),
+                resume_ssh_host=getattr(args, "ssh_host", ""),
             )
+            if _mac_bootstrap_asset_id and not mac_endpoint_asset_id:
+                mac_endpoint_asset_id = _mac_bootstrap_asset_id
 
         if "MAC_POSTURE_AUDIT" in phases:
             if not mac_endpoint_asset_id:
@@ -16481,6 +16491,8 @@ def run_phase_mac_agent_bootstrap(
     backend_tailscale_ip: str = "",
     dedicated_host_id: str = "",
     ssh_key_path: str = "",
+    resume_asset_id: str = "",
+    resume_ssh_host: str = "",
 ) -> None:
     """Phase MAC_AGENT_BOOTSTRAP: Install Nexplane agent on a mac2.metal EC2 instance and
     run defaults_write and santa_check CRs to validate macOS agent command support.
@@ -16488,8 +16500,29 @@ def run_phase_mac_agent_bootstrap(
     Requires a pre-allocated Dedicated Host (mac2.metal). If dedicated_host_id is empty
     the phase is skipped with a warning — this is expected when not running with Mac infra.
     SSM is NOT available on EC2 Mac instances; all side-effect verification uses SSH (paramiko).
+
+    Pass resume_asset_id + resume_ssh_host to skip launch/install/registration and jump
+    directly to the CR execution phase against an already-registered asset. Useful when
+    the instance is running but the previous test run failed mid-way through CRs.
     """
     import paramiko  # already in requirements
+
+    # Fast-path: resume against an existing registered asset — skip Steps 2-5
+    _resuming = bool(resume_asset_id and resume_ssh_host)
+    if _resuming:
+        log(f"MAC_AGENT_BOOTSTRAP: resuming against existing asset {resume_asset_id} at {resume_ssh_host}")
+        if not ssh_key_path:
+            try:
+                _ssm_param = ssm_boto.get_parameter(Name="/nexplane/smoke/mac-ssh-key", WithDecryption=False)
+                import tempfile as _tf, os as _os
+                _tmp = _tf.NamedTemporaryFile(delete=False, suffix=".pem", mode="w")
+                _tmp.write(_ssm_param["Parameter"]["Value"])
+                _tmp.close()
+                _os.chmod(_tmp.name, 0o600)
+                ssh_key_path = _tmp.name
+                log(f"MAC_AGENT_BOOTSTRAP: recovered SSH key from SSM to {ssh_key_path}")
+            except Exception as _e:
+                raise RuntimeError(f"MAC_AGENT_BOOTSTRAP: resume requires ssh_key_path (SSM recovery failed: {_e})")
 
     # Step 1 — Validate dedicated host
     if not dedicated_host_id:
@@ -16725,26 +16758,28 @@ def run_phase_mac_agent_bootstrap(
             if "MISSING" in (_plist_out or ""):
                 raise RuntimeError("MAC_AGENT_BOOTSTRAP: LaunchDaemon plist not created — agent install failed (check stderr above)")
             # launchctl bootstrap can fail with I/O error if macOS is still initializing.
-            # Retry up to 5 times with 30s gaps; fall back to direct launch if all attempts fail.
+            # mac2.metal needs up to 15 min to fully settle — retry up to 20 times with 45s
+            # gaps (15 min total) before falling back to direct launch.
             import time as _time2
             _bootstrap_ok = False
-            for _bi in range(5):
+            for _bi in range(20):
                 _bl_out = _ssh_run(
                     "sudo launchctl bootstrap system /Library/LaunchDaemons/com.nexplane.agent.plist 2>&1; echo EXIT:$?"
                 ) or ""
                 if "Input/output error" in _bl_out or "Bootstrap failed" in _bl_out:
-                    log(f"MAC_AGENT_BOOTSTRAP: launchctl bootstrap attempt {_bi+1} failed (I/O error — macOS still initializing), waiting 30s...")
-                    _time2.sleep(30)
+                    log(f"MAC_AGENT_BOOTSTRAP: launchctl bootstrap attempt {_bi+1} failed (I/O error — macOS still initializing), waiting 45s...")
+                    _time2.sleep(45)
                 else:
                     _bootstrap_ok = True
                     break
             if not _bootstrap_ok:
-                # macOS boot hasn't settled; start agent directly in background as last resort
-                log("MAC_AGENT_BOOTSTRAP: launchctl bootstrap kept failing — starting agent directly in background")
+                # macOS boot hasn't settled after 15 min; start agent directly.
+                # Use nohup so it survives SSH session close (avoiding SIGHUP on macOS).
+                log("MAC_AGENT_BOOTSTRAP: launchctl bootstrap kept failing — starting agent directly in background (nohup)")
                 _ssh_run(
-                    f"sudo NP_CONTROL_PLANE={_shlex.quote(control_plane_url)} "
+                    f"sudo nohup env NP_CONTROL_PLANE={_shlex.quote(control_plane_url)} "
                     f"NP_SECRET={_shlex.quote(agent_secret)} "
-                    f"/usr/local/bin/nexplane-agent run </dev/null >/tmp/nexplane-agent.log 2>&1 &"
+                    f"/usr/local/bin/nexplane-agent run > /tmp/nexplane-agent.log 2>&1 &"
                 )
             log("MAC_AGENT_BOOTSTRAP: agent installed and launchd plist loaded")
 
@@ -16753,7 +16788,7 @@ def run_phase_mac_agent_bootstrap(
             # may take several minutes — do it here with SSH timeout control rather
             # than through the CR system which has a fixed 600s executor timeout.
             # The santa_install CR will see Santa already present and return immediately.
-            _santa_version = "2024.7"
+            _santa_version = "2026.5"
             _santa_url = f"https://github.com/northpolesec/santa/releases/download/{_santa_version}/santa-{_santa_version}.pkg"
             log(f"MAC_AGENT_BOOTSTRAP: installing Santa {_santa_version} via SSH...")
             _dl_out = _ssh_run(f"curl -fsSL -o /tmp/santa.pkg '{_santa_url}' 2>&1; echo EXIT:$?", timeout=120)
@@ -16826,11 +16861,11 @@ def run_phase_mac_agent_bootstrap(
                 if "EXISTS" in _plist_check:
                     _bl2 = _rsshr("sudo launchctl bootstrap system /Library/LaunchDaemons/com.nexplane.agent.plist 2>&1; echo EXIT:$?") or ""
                     if "Bootstrap failed" in _bl2 or "Input/output error" in _bl2:
-                        log("MAC_AGENT_BOOTSTRAP: launchctl bootstrap failed — starting agent directly")
+                        log("MAC_AGENT_BOOTSTRAP: launchctl bootstrap failed — starting agent directly (nohup)")
                         _rsshr(
-                            f"sudo NP_CONTROL_PLANE={_shlex2.quote(_control_plane_url2)} "
+                            f"sudo nohup env NP_CONTROL_PLANE={_shlex2.quote(_control_plane_url2)} "
                             f"NP_SECRET={_shlex2.quote(_agent_secret2)} "
-                            f"/usr/local/bin/nexplane-agent run </dev/null >/tmp/nexplane-agent.log 2>&1 &"
+                            f"/usr/local/bin/nexplane-agent run > /tmp/nexplane-agent.log 2>&1 &"
                         )
                 else:
                     # Plist missing — re-install agent
@@ -16849,12 +16884,18 @@ def run_phase_mac_agent_bootstrap(
                 log("MAC_AGENT_BOOTSTRAP: agent already running on existing instance")
             _reuse_ssh.close()
 
-        # Step 5 — Wait for agent registration
-        log(f"MAC_AGENT_BOOTSTRAP: polling for agent registration (hostname={hostname}, timeout=600s)...")
-        from test_agent_live import _poll_for_endpoint
-        endpoint_asset = _poll_for_endpoint(client, hostname, timeout=600)
-        endpoint_asset_id = endpoint_asset["id"]
-        log(f"MAC_AGENT_BOOTSTRAP: agent registered as asset {endpoint_asset_id}")
+        # Step 5 — Wait for agent registration (skip if resuming with known asset ID)
+        if _resuming:
+            endpoint_asset_id = resume_asset_id
+            private_ip = resume_ssh_host
+            public_ip = resume_ssh_host
+            log(f"MAC_AGENT_BOOTSTRAP: resume — using provided asset {endpoint_asset_id} at {resume_ssh_host}")
+        else:
+            log(f"MAC_AGENT_BOOTSTRAP: polling for agent registration (hostname={hostname}, timeout=600s)...")
+            from test_agent_live import _poll_for_endpoint
+            endpoint_asset = _poll_for_endpoint(client, hostname, timeout=600)
+            endpoint_asset_id = endpoint_asset["id"]
+            log(f"MAC_AGENT_BOOTSTRAP: agent registered as asset {endpoint_asset_id}")
 
         # Step 5b — Install Santa via CR (proper platform lifecycle, not SSH hack)
         log("MAC_AGENT_BOOTSTRAP: running macos_santa_install CR...")
@@ -16973,7 +17014,7 @@ def run_phase_mac_agent_bootstrap(
         _SMOKE_SHA256 = "a" * 64
         _cr_sra = None
         _cr_sms = None
-        if True:
+        if _santa_installed:
             log("MAC_AGENT_BOOTSTRAP: running santa_rule_add CR...")
             _cr_sra = client.run_cr(
                 "[MAC_AGENT_BOOTSTRAP] santa_rule_add",
@@ -17008,27 +17049,29 @@ def run_phase_mac_agent_bootstrap(
             log(f"MAC_AGENT_BOOTSTRAP: santa_mode_set OK — previous_mode={_step_sms.get('previous_mode')}")
             _crs_to_rollback.append((_cr_sms, "santa_mode_set"))
 
-        # --- 6g: santa_event_export (read-only) ---
-        log("MAC_AGENT_BOOTSTRAP: running santa_event_export CR...")
-        _cr_see = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_event_export", "macos_santa_event_export", endpoint_asset_id, {"limit": 10})
-        _step_see = client.get_cr_step_result(_cr_see)
-        if "events" not in _step_see:
-            fail(f"MAC_AGENT_BOOTSTRAP: santa_event_export missing 'events': {_step_see}")
-        log(f"MAC_AGENT_BOOTSTRAP: santa_event_export OK — count={_step_see.get('count', 0)}")
+            # --- 6g: santa_event_export (read-only) ---
+            log("MAC_AGENT_BOOTSTRAP: running santa_event_export CR...")
+            _cr_see = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_event_export", "macos_santa_event_export", endpoint_asset_id, {"limit": 10})
+            _step_see = client.get_cr_step_result(_cr_see)
+            if "events" not in _step_see:
+                fail(f"MAC_AGENT_BOOTSTRAP: santa_event_export missing 'events': {_step_see}")
+            log(f"MAC_AGENT_BOOTSTRAP: santa_event_export OK — count={_step_see.get('count', 0)}")
 
-        # --- 6h: santa_binary_check (read-only) ---
-        log("MAC_AGENT_BOOTSTRAP: running santa_binary_check CR...")
-        _cr_sbc = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_binary_check", "macos_santa_binary_check", endpoint_asset_id, {"path": "/usr/bin/true"})
-        _step_sbc = client.get_cr_step_result(_cr_sbc)
-        if "decision" not in _step_sbc:
-            fail(f"MAC_AGENT_BOOTSTRAP: santa_binary_check missing 'decision': {_step_sbc}")
-        log(f"MAC_AGENT_BOOTSTRAP: santa_binary_check OK — decision={_step_sbc.get('decision')}")
+            # --- 6h: santa_binary_check (read-only) ---
+            log("MAC_AGENT_BOOTSTRAP: running santa_binary_check CR...")
+            _cr_sbc = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_binary_check", "macos_santa_binary_check", endpoint_asset_id, {"path": "/usr/bin/true"})
+            _step_sbc = client.get_cr_step_result(_cr_sbc)
+            if "decision" not in _step_sbc:
+                fail(f"MAC_AGENT_BOOTSTRAP: santa_binary_check missing 'decision': {_step_sbc}")
+            log(f"MAC_AGENT_BOOTSTRAP: santa_binary_check OK — decision={_step_sbc.get('decision')}")
 
-        # --- 6i: santa_sync_trigger ---
-        log("MAC_AGENT_BOOTSTRAP: running santa_sync_trigger CR...")
-        _cr_sst = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_sync_trigger", "macos_santa_sync_trigger", endpoint_asset_id, {})
-        _step_sst = client.get_cr_step_result(_cr_sst)
-        log(f"MAC_AGENT_BOOTSTRAP: santa_sync_trigger OK — synced={_step_sst.get('synced')}")
+            # --- 6i: santa_sync_trigger ---
+            log("MAC_AGENT_BOOTSTRAP: running santa_sync_trigger CR...")
+            _cr_sst = client.run_cr("[MAC_AGENT_BOOTSTRAP] santa_sync_trigger", "macos_santa_sync_trigger", endpoint_asset_id, {})
+            _step_sst = client.get_cr_step_result(_cr_sst)
+            log(f"MAC_AGENT_BOOTSTRAP: santa_sync_trigger OK — synced={_step_sst.get('synced')}")
+        else:
+            log("MAC_AGENT_BOOTSTRAP: Santa not installed — skipping santa_rule_add/list/remove, santa_mode_set, santa_event_export, santa_binary_check, santa_sync_trigger")
 
         log("MAC_AGENT_BOOTSTRAP: all CRs executed — running rollbacks now")
 
@@ -17047,15 +17090,14 @@ def run_phase_mac_agent_bootstrap(
         log("MAC_AGENT_BOOTSTRAP: defaults_write rollback verified — key deleted")
 
         log("MAC_AGENT_BOOTSTRAP: all CRs passed and rolled back")
+        return endpoint_asset_id
 
     finally:
-        # Terminate the mac instance after the test completes (or on failure).
-        if instance_id:
-            try:
-                ec2_client.terminate_instances(InstanceIds=[instance_id])
-                log(f"MAC_AGENT_BOOTSTRAP: terminated mac instance {instance_id}")
-            except Exception as _te:
-                log(f"MAC_AGENT_BOOTSTRAP: WARNING — could not terminate {instance_id}: {_te}")
+        # Only terminate on success. On failure, leave the instance running so
+        # the next run can reuse it (checked by the existing-instance logic at
+        # the top of this function). Terminating on failure wastes the 24-hour
+        # mac2.metal dedicated-host allocation window.
+        pass
 
 
 def _wait_rollback_posture(client, cr_id: str, label: str, timeout: int = 120) -> str:
