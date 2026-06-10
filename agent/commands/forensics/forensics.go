@@ -68,18 +68,11 @@ func UploadBundle(ctx context.Context, uploadURL string, body io.Reader, size in
 }
 
 func (c ForensicsConfig) validate() error {
-	if c.UploadURL == "" {
-		return fmt.Errorf("upload_url is required")
-	}
-	if c.AssetID == "" {
-		return fmt.Errorf("asset_id is required")
-	}
 	return nil
 }
 
-// Collect gathers all artifacts, assembles them into a tar.gz, uploads to
-// UploadURL, and returns the manifest. BundleID must be assigned by the caller
-// (control plane) after this call returns.
+// Collect gathers all artifacts, assembles them into a tar.gz, optionally
+// uploads to UploadURL if provided, and returns the manifest.
 func Collect(ctx context.Context, cfg ForensicsConfig) (*ForensicBundle, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -90,9 +83,11 @@ func Collect(ctx context.Context, cfg ForensicsConfig) (*ForensicBundle, error) 
 		return nil, fmt.Errorf("artifact collection: %w", err)
 	}
 
-	size := int64(archive.Len())
-	if err := UploadBundle(ctx, cfg.UploadURL, bytes.NewReader(archive.Bytes()), size); err != nil {
-		return nil, fmt.Errorf("upload: %w", err)
+	if cfg.UploadURL != "" {
+		size := int64(archive.Len())
+		if err := UploadBundle(ctx, cfg.UploadURL, bytes.NewReader(archive.Bytes()), size); err != nil {
+			return nil, fmt.Errorf("upload: %w", err)
+		}
 	}
 
 	return &ForensicBundle{
