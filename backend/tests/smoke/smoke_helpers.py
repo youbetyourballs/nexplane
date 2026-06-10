@@ -418,9 +418,36 @@ def _get_aws_boto3_client(service: str):
                 "session_token": _os.environ.get("AWS_SESSION_TOKEN"),
             }
     if not _aws_creds_cache:
+        # When running outside Docker (Python 3.9 on EC2 host), app.config uses 3.10+
+        # union syntax — try fetching credentials via docker exec instead.
+        import subprocess as _sp, json as _json
+        try:
+            _script = (
+                "import asyncio,json,sys\n"
+                "async def _m():\n"
+                "    from app.database import AsyncSessionLocal\n"
+                "    from app.services.connector_service import _attach_credentials\n"
+                "    from app.models.connector import Connector,ConnectorType\n"
+                "    from sqlalchemy import select\n"
+                "    async with AsyncSessionLocal() as db:\n"
+                "        r=await db.execute(select(Connector).where(Connector.connector_type==ConnectorType.aws))\n"
+                "        conn=r.scalars().first()\n"
+                "        if not conn: sys.exit(1)\n"
+                "        await _attach_credentials(conn,db)\n"
+                "        print(json.dumps(getattr(conn,'credentials',{})))\n"
+                "asyncio.run(_m())\n"
+            )
+            _out = _sp.check_output(
+                ["docker", "exec", "nexplane-backend-1", "python3", "-c", _script],
+                timeout=15, stderr=_sp.DEVNULL,
+            )
+            _aws_creds_cache = _json.loads(_out.strip())
+        except Exception:
+            pass
+    if not _aws_creds_cache:
         try:
             from app.config import settings
-        except ImportError:
+        except (ImportError, TypeError):
             return None
         from app.models.connector import Connector, ConnectorType
         from app.services.connector_service import _attach_credentials
