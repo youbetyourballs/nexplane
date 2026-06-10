@@ -17206,24 +17206,28 @@ def run_phase_mac_posture_audit(client, mac_endpoint_asset_id: str, ssh_host: st
             f"fim check missing violations field: {result_fim_check}"
         log(f"MAC_POSTURE_AUDIT: FIM check OK — violations={result_fim_check.get('violations')}")
 
-        # --- 5. configure_apparmor (darwin: Santa rules) ---
-        log("MAC_POSTURE_AUDIT: configure_apparmor (Santa rule)...")
-        _test_sha = "a" * 64
-        cr_aa = client.run_cr(
-            "[MAC_POSTURE_AUDIT] configure_apparmor santa_rule",
-            "configure_apparmor",
-            mac_endpoint_asset_id,
-            {
-                "profile_name": "nexplane_smoke_test",
-                "profile_content": f'[{{"sha256":"{_test_sha}","comment":"nexplane_smoke_test"}}]',
-                "mode": "enforce",
-            },
-        )
-        result_aa = client.get_cr_step_result(cr_aa)
-        assert result_aa.get("snapshot") is not None, \
-            f"apparmor result missing snapshot: {result_aa}"
-        rollback_stack.append((cr_aa["id"], "configure_apparmor"))
-        log(f"MAC_POSTURE_AUDIT: configure_apparmor OK — mode={result_aa.get('mode_applied')}")
+        # --- 5. configure_apparmor (darwin: Santa rules) — skip if Santa not installed ---
+        _santa_present = ssh_run("which santactl 2>/dev/null && echo YES || echo NO").strip() == "YES"
+        if _santa_present:
+            log("MAC_POSTURE_AUDIT: configure_apparmor (Santa rule)...")
+            _test_sha = "a" * 64
+            cr_aa = client.run_cr(
+                "[MAC_POSTURE_AUDIT] configure_apparmor santa_rule",
+                "configure_apparmor",
+                mac_endpoint_asset_id,
+                {
+                    "profile_name": "nexplane_smoke_test",
+                    "profile_content": f'[{{"sha256":"{_test_sha}","comment":"nexplane_smoke_test"}}]',
+                    "mode": "enforce",
+                },
+            )
+            result_aa = client.get_cr_step_result(cr_aa)
+            assert result_aa.get("snapshot") is not None, \
+                f"apparmor result missing snapshot: {result_aa}"
+            rollback_stack.append((cr_aa["id"], "configure_apparmor"))
+            log(f"MAC_POSTURE_AUDIT: configure_apparmor OK — mode={result_aa.get('mode_applied')}")
+        else:
+            log("MAC_POSTURE_AUDIT: Santa not installed — skipping configure_apparmor")
 
         # --- 6. discover_applications (read-only) ---
         log("MAC_POSTURE_AUDIT: discover_applications...")
