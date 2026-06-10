@@ -17333,7 +17333,7 @@ def run_phase_mac_auth_hardening(client, mac_endpoint_asset_id: str, ssh_host: s
         assert result_ntp.get("snapshot") is not None, f"ntp missing snapshot: {result_ntp}"
         rollback_stack.append((cr_ntp["id"], "configure_ntp"))
 
-        ntp_server = ssh_run("systemsetup -getnetworktimeserver 2>/dev/null || echo MISSING")
+        ntp_server = ssh_run("sudo systemsetup -getnetworktimeserver 2>/dev/null || echo MISSING")
         log(f"MAC_AUTH_HARDENING: NTP server: {ntp_server}")
         assert "cloudflare" in ntp_server or "apple" in ntp_server, \
             f"expected cloudflare/apple NTP; got: {ntp_server}"
