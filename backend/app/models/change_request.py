@@ -492,6 +492,19 @@ class ChangeType(str, enum.Enum):
     oci_discover_instances = "oci_discover_instances"
     # Vulnerability PoC validation
     vuln_poc_validate = "vuln_poc_validate"
+    # macOS posture / hardening / observability (SP2-SP7 agent CRs)
+    apply_sysctl_hardening = "apply_sysctl_hardening"
+    deploy_auditd_rules = "deploy_auditd_rules"
+    setup_file_integrity_monitoring = "setup_file_integrity_monitoring"
+    discover_applications = "discover_applications"
+    deep_discover = "deep_discover"
+    collect_forensics = "collect_forensics"
+    harden_ssh = "harden_ssh"
+    configure_ntp = "configure_ntp"
+    config_syslog = "config_syslog"
+    estimate_size = "estimate_size"
+    audit_software_inventory = "audit_software_inventory"
+    audit_cis_compliance = "audit_cis_compliance"
 
 
 class RiskLevel(str, enum.Enum):
