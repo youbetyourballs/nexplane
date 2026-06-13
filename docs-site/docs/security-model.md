@@ -4,12 +4,12 @@ Nexplane is designed with security as a first-class concern. This page documents
 
 ## Credential encryption
 
-All connector credentials are encrypted at rest using **AES-256** (via the `cryptography` library's Fernet implementation, which uses AES-128-CBC with HMAC-SHA256 — the outer envelope is referred to as AES-256 in the context of the key size used for the encryption key derivation).
+All connector credentials are encrypted at rest using **Fernet (AES-256)** via the `SecretsService`.
 
-- The encryption key is derived from the `ENCRYPTION_KEY` environment variable.
+- The encryption key is derived from the `SECRET_KEY` environment variable (the same key also underpins JWT signing).
 - Credentials are encrypted before being written to the database and decrypted in memory only at the moment an executor needs them.
 - The plaintext value of any credential is **never logged**, never returned in API responses after initial save, and never transmitted outside the control plane.
-- If the `ENCRYPTION_KEY` is rotated, existing credentials must be re-encrypted using the admin re-encryption utility.
+- Credentials produced mid-execution (new passwords, rotated keys) travel in process memory only between steps — never written to logs, the database, or temp files.
 
 ## Transport security
 
@@ -39,14 +39,14 @@ Audit log entries are append-only. Existing records cannot be modified or delete
 
 ## Authentication
 
-- Nexplane uses session-based authentication with CSRF protection for the web UI.
-- API authentication uses token-based auth (Bearer tokens).
-- Password hashing uses PBKDF2 with SHA-256 and a per-user salt (Django's default).
-- Multi-factor authentication (MFA/TOTP) is available as an optional setting.
+- **Local auth** — JWT + bcrypt. Users log in via `POST /auth/login` and receive a Bearer JWT required on every API call. This is the default for every organization.
+- **OIDC single sign-on** — login can be delegated to an external identity provider via the authorization-code flow. Auth mode is switched per organization (`local` or `idp`) by an admin. See the [Authentication & SSO](https://docs.nexplane.ai/security/authentication/) reference for the full flow and user-provisioning rules.
+- **Agent authentication** — each job payload dispatched to an agent is signed with an HMAC-SHA256 shared secret; the agent verifies the signature before executing and rejects unsigned or invalid jobs.
+- **Role-based access control** — Admin, Security Operator, Approver, and Auditor roles, plus an `ir_responder` role that can bypass change-freeze windows during an active incident.
 
 ## Threat model assumptions
 
-- The control plane host is trusted. An attacker with shell access to the control plane host could read the `ENCRYPTION_KEY` from the environment and decrypt stored credentials. Protect the host accordingly.
+- The control plane host is trusted. An attacker with shell access to the control plane host could read the `SECRET_KEY` from the environment and decrypt stored credentials. Protect the host accordingly.
 - The database is trusted. Credentials at rest are encrypted, but the database server is considered part of the trust boundary.
 - Network paths between the control plane and connector API endpoints (AWS, GCP, etc.) are protected by TLS.
 - Agent hosts are operator-controlled. Nexplane does not attest the integrity of the host where an agent runs.

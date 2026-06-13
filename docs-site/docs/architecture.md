@@ -6,9 +6,9 @@ Nexplane has a two-tier architecture: a **control plane** that you operate, and 
 
 The control plane consists of:
 
-- **Backend API** — A Python (FastAPI/Django) application that handles authentication, change request lifecycle, connector credential management, and execution orchestration. Runs on port 8000.
-- **Frontend** — A React single-page application that provides the user interface for creating, approving, and monitoring change requests. Runs on port 3000 (development) or port 80 (production).
-- **Database** — PostgreSQL stores all change requests, audit logs, connector accounts (credentials encrypted), and user data. SQLite is supported for local evaluation only.
+- **Backend API** — A Python **FastAPI** application that handles authentication, change request lifecycle, connector credential management, and execution orchestration. Runs on port 8000, bound to localhost (not exposed publicly).
+- **Frontend** — A React single-page application that provides the user interface for creating, approving, and monitoring change requests. Runs on port 3000 (development) or behind a TLS reverse proxy (production).
+- **Database** — PostgreSQL stores all change requests, audit logs, connector accounts (credentials encrypted), and user data.
 - **Connector executors** — Python modules loaded by the backend that implement the execution and rollback logic for each connector type. Executors run within the backend process and call out to external APIs (AWS, GCP, Vault, etc.) directly.
 
 ## Agent (optional)
@@ -60,4 +60,5 @@ The agent **phones home** to the control plane over outbound HTTPS. The control 
 |---|---|
 | Single-node Docker Compose | All components on one host; suitable for evaluation and small teams |
 | Docker Compose with external Postgres | Backend + frontend on one host, managed database |
-| Kubernetes (Helm) | Production-grade deployment with horizontal scaling — See [Helm chart](https://github.com/nexplane/nexplane/tree/master/helm/nexplane) for installation |
+| Docker Compose (production) | `docker-compose.prod.yml` adds an nginx TLS reverse proxy and a built frontend |
+| Kubernetes (Helm) | Production-grade deployment — See the [Helm chart](https://github.com/youbetyourballs/nexplane/tree/master/helm/nexplane) (`values.yaml`, `values-enterprise.yaml`) for installation |
