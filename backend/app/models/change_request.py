@@ -29,6 +29,7 @@ class ChangeType(str, enum.Enum):
     ssm_command = "ssm_command"
     tailscale_join = "tailscale_join"
     tailscale_remove = "tailscale_remove"
+    tailscale_generate_auth_key = "tailscale_generate_auth_key"
     deploy_nexplane_agent = "deploy_nexplane_agent"
     terraform_local_apply = "terraform_local_apply"
     ansible_local_playbook = "ansible_local_playbook"
