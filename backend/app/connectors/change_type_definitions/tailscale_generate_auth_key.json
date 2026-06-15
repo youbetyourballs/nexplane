@@ -1,0 +1,14 @@
+{
+  "change_type": "tailscale_generate_auth_key",
+  "display_name": "Generate Tailscale Auth Key",
+  "steps": [
+    {
+      "generic_action": "generate_auth_key",
+      "purpose": "execute",
+      "required": true,
+      "param_overrides": {}
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": []
+}

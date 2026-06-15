@@ -36,7 +36,8 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.ec2_stop, ChangeType.ec2_start, ChangeType.ec2_reboot,
     ChangeType.ec2_stop_start, ChangeType.ec2_launch, ChangeType.ssm_command,
     ChangeType.key_pair_create,
-    ChangeType.tailscale_join, ChangeType.tailscale_remove, ChangeType.deploy_nexplane_agent,
+    ChangeType.tailscale_join, ChangeType.tailscale_remove, ChangeType.tailscale_generate_auth_key,
+    ChangeType.deploy_nexplane_agent,
     ChangeType.terraform_local_apply,
     ChangeType.ansible_local_playbook,
     # Change types with CT-defined rollback_action (rollback is built into the change type):

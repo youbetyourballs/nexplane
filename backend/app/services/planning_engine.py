@@ -91,6 +91,12 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
             "hostname": desired.get("hostname", ""),
         },
         "tailscale_remove":       {"instance_id": desired.get("instance_id", "")},
+        "tailscale_generate_auth_key": {
+            "expiry_seconds": desired.get("expiry_seconds", 86400),
+            "reusable":       desired.get("reusable", False),
+            "ephemeral":      desired.get("ephemeral", False),
+            "tags":           desired.get("tags", []),
+        },
         "deploy_nexplane_agent":  {
             "instance_id": desired.get("instance_id", ""),
             "nexplane_url": desired.get("nexplane_url", ""),
