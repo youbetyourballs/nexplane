@@ -56,4 +56,21 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": False, "reason": "auth keys expire automatically"}
+    creds = getattr(connector, 'credentials', {})
+    key_id = execution_result.get("id", "")
+    source = execution_result.get("source", "")
+
+    if source == "stored" or not key_id:
+        return {"rolled_back": False, "reason": "stored_key_or_no_key_id — key expires automatically"}
+
+    if not creds.get("oauth_client_id"):
+        return {"rolled_back": False, "reason": "no_oauth_credentials"}
+
+    from ._client import ts_delete
+    tailnet = creds.get("tailnet") or "-"
+    try:
+        await ts_delete(f"/tailnet/{tailnet}/keys/{key_id}", creds)
+    except Exception as exc:
+        return {"rolled_back": False, "reason": str(exc)}
+
+    return {"rolled_back": True, "key_id": key_id, "action": "key_revoked"}
