@@ -47,6 +47,8 @@ def create_cr(client: httpx.Client, token: str, name: str) -> str:
                 "expiry_seconds": EXPIRY_SECONDS,
                 "reusable": False,
                 "ephemeral": False,
+                "force_generate": True,
+                "_locked_connector_id": "c471972f-c616-4611-8a3a-81fadcd5a832",
             },
         },
         timeout=30,

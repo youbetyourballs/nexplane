@@ -92,10 +92,11 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
         },
         "tailscale_remove":       {"instance_id": desired.get("instance_id", "")},
         "tailscale_generate_auth_key": {
-            "expiry_seconds": desired.get("expiry_seconds", 86400),
-            "reusable":       desired.get("reusable", False),
-            "ephemeral":      desired.get("ephemeral", False),
-            "tags":           desired.get("tags", []),
+            "expiry_seconds":  desired.get("expiry_seconds", 86400),
+            "reusable":        desired.get("reusable", False),
+            "ephemeral":       desired.get("ephemeral", False),
+            "tags":            desired.get("tags", []),
+            "force_generate":  desired.get("force_generate", False),
         },
         "deploy_nexplane_agent":  {
             "instance_id": desired.get("instance_id", ""),
@@ -150,8 +151,10 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
         if asset_with_connector.connector is not None:
             locked_connector_type = asset_with_connector.connector.connector_type.value
 
-    # Allow callers to hint a specific connector_type via desired_outcome._locked_connector_type.
+    # Allow callers to hint a specific connector via desired_outcome._locked_connector_type / _locked_connector_id.
     # This is used by smoke tests and programmatic CR creation to bypass asset-based inference.
+    if not locked_connector_id and desired.get("_locked_connector_id"):
+        locked_connector_id = desired["_locked_connector_id"]
     if not locked_connector_type and desired.get("_locked_connector_type"):
         locked_connector_type = desired["_locked_connector_type"]
 
