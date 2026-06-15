@@ -21,7 +21,7 @@ ADMIN_PASSWORD = "admin123"
 UI_URL = "http://100.101.186.39:3000"
 DEMO_EMAIL = "admin@acme.example"
 DEMO_PASSWORD = "admin123"
-EXPIRY_SECONDS = 86400  # 24 hours
+EXPIRY_SECONDS = 2592000  # 30 days
 
 
 def login(client: httpx.Client, email: str, password: str) -> str:
@@ -142,7 +142,7 @@ Hi {first}! To access the Nexplane demo:
    Email:    {DEMO_EMAIL}
    Password: {DEMO_PASSWORD}
 
-The key expires in 24 hours. Reply here if you run into anything!
+The key expires in 30 days. Reply here if you run into anything!
 """)
     print("=" * 60)
     print(f"(Platform CR for this invite: {BASE_URL.replace('localhost', '100.101.186.39')}/change-requests/{cr_id})")
