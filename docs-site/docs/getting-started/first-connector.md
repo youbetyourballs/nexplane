@@ -14,7 +14,7 @@ An **account** is a set of credentials tied to one connector type (e.g. your pro
 
 ## Credential security
 
-- Credentials are encrypted with AES-256 using the `ENCRYPTION_KEY` from your environment before being written to the database.
+- Credentials are encrypted with Fernet (AES-256) via the `SecretsService`, keyed from `SECRET_KEY`, before being written to the database.
 - The plaintext value is never logged and is only decrypted in memory at the moment a change is executed.
 - If you rotate credentials in the target system, update the account in Nexplane immediately — stale credentials will cause execution failures.
 

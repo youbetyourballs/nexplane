@@ -13,7 +13,7 @@ This guide gets a fully functional Nexplane instance running on your local machi
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/nexplane/nexplane.git
+git clone https://github.com/youbetyourballs/nexplane.git
 cd nexplane
 ```
 
@@ -29,9 +29,11 @@ Key variables in `.env`:
 
 | Variable | Default | Description |
 |---|---|---|
-| `SECRET_KEY` | generated | Django secret key — change in production |
-| `DATABASE_URL` | sqlite:///db.sqlite3 | Use a Postgres URL for production |
-| `ENCRYPTION_KEY` | generated | AES-256 key used to encrypt connector credentials |
+| `SECRET_KEY` | dev key | JWT signing + Fernet credential-encryption key derivation — **change in production** (≥32 chars) |
+| `DATABASE_URL` | internal Postgres | PostgreSQL connection string |
+| `AI_MODEL` | `claude-sonnet-4-6` | AI model used by the planning assistant (Anthropic or OpenAI) |
+| `WEBHOOK_SECRET` | dev key | HMAC key for vulnerability-scanner webhook verification |
+| `INSTANCE_URL` | `http://localhost:8000` | Public instance URL used for OIDC redirect URIs and email |
 
 ### 3. Start the stack
 
@@ -41,9 +43,9 @@ docker compose up -d
 
 This starts:
 
-- **backend** — FastAPI/Django API on `http://localhost:8000`
+- **backend** — FastAPI control plane API on `http://localhost:8000` (bound to localhost — not exposed publicly)
 - **frontend** — React UI on `http://localhost:3000`
-- **db** — PostgreSQL (if configured) or uses SQLite by default
+- **db** — PostgreSQL
 
 Wait about 15–20 seconds for migrations to complete. You can follow logs with:
 
@@ -53,16 +55,23 @@ docker compose logs -f backend
 
 Look for `Application startup complete` before proceeding.
 
-### 4. Create the admin account
+### 4. Log in
 
-Open `http://localhost:3000` in your browser. On first load you will be prompted to create an administrator account. Enter a username, email address, and password.
+Open `http://localhost:3000` in your browser. The default stack seeds demo accounts you can log in with immediately:
 
-!!! note
-    This admin account has full access to all connectors and change types. In production, create individual user accounts and assign roles.
+| Email | Password | Role |
+|-------|----------|------|
+| admin@acme.example | admin123 | Admin |
+| operator@acme.example | operator123 | Security Operator |
+| approver@acme.example | approver123 | Approver |
+| auditor@acme.example | auditor123 | Auditor |
+
+!!! warning "Production"
+    Replace the demo accounts with real users and set `SECRET_KEY` to a stable random value before exposing the instance — the auto-generated key changes on restart and invalidates all sessions.
 
 ### 5. Verify the installation
 
-Navigate to **Settings → System** in the UI. You should see green status indicators for the API, database, and encryption service.
+Interactive API docs are available at `http://localhost:8000/docs`.
 
 ## Next steps
 

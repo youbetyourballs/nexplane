@@ -1,6 +1,6 @@
 site_name: Nexplane Docs
 site_url: https://docs.nexplane.ai
-repo_url: https://github.com/nexplane/nexplane
+repo_url: https://github.com/youbetyourballs/nexplane
 docs_dir: docs-site/docs
 theme:
   name: material
