@@ -19,11 +19,14 @@ Nexplane gives security teams a governed execution layer:
 - **Change Requests** — safety-reviewed, approval-gated, audited, with automatic rollback
 - **Composable Runbooks** — chain change types into reusable multi-step workflows with conditional branching and human checkpoints
 - **Asset Inventory** — servers, cloud accounts, firewalls, identities, applications — discoverable via connectors
-- **Connectors** — 38+ integrations spanning cloud, identity, EDR, IaC, ticketing, and observability — with real API calls when credentials are configured
-- **Nexplane Agent** — a cross-platform Go binary that runs on managed machines, reaches out to the control plane, and executes signed commands — no inbound SSH required
+- **Connectors** — 70+ integrations spanning cloud, identity, EDR, IaC, ticketing, and observability — with real API calls when credentials are configured
+- **Nexplane Agent** — a cross-platform Go binary (Linux, Windows, **macOS**) that runs on managed machines, reaches out to the control plane, and executes signed commands — no inbound SSH required
 - **Incident Response Playbooks** — pre-defined fast-path workflows for host isolation, account lockdown, evidence preservation, and phishing response
 - **Vulnerability Remediation Pipeline** — close the loop between scanner findings and automated remediation
 - **Compliance & Governance** — CIS benchmark enforcement, drift detection, change freeze windows, audit evidence collection
+- **Security Policy Auto-Generation** — observe live workload behavior, synthesize least-privilege seccomp / AppArmor / SELinux / eBPF policies, and roll them out behind a soak period before enforcement
+- **Single Sign-On (OIDC)** — delegate login to an external identity provider per organization, with `local` / `idp` auth modes and optional user auto-provisioning
+- **Guided First-Run Setup** — fresh instances bootstrap their first org and admin through a one-time, instance-bound setup token
 
 ---
 
@@ -46,13 +49,15 @@ Nexplane gives security teams a governed execution layer:
 │  SecretsService versioning (rotate + rollback with 7-day TTL)            │
 │  RunbookExecutor · IRExecutor · FleetExecutor · IaCExecutor              │
 │  VulnRemediationEngine · IdentityResolver · DriftDetection               │
+│  SecurityPolicyEngine (seccomp/AppArmor/SELinux/eBPF + soak)            │
+│  OIDC Service · SetupGuard middleware · Edition gating                   │
 │                                                                          │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │ Action Catalog  (per-connector JSON + executor modules)          │   │
 │  │   Tier 1: direct_api  ·  Tier 3: agent  ·  Tier 5: ssh          │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
-│  Connectors — change actions + ingest (38+ connectors)                   │
+│  Connectors — change actions + ingest (70+ connectors)                   │
 │  aws · azure · gcp · cloudflare · okta · paloalto · ssh                 │
 │  active_directory · entra_id · crowdstrike · tenable · kubernetes        │
 │  tailscale · terraform_local · ansible_local · ...                      │
@@ -64,15 +69,19 @@ Nexplane gives security teams a governed execution layer:
 │  Compliance API  (/compliance/baselines · /compliance/freeze-windows)    │
 │  Fleet API  (/maintenance-windows)                                       │
 │  Identity API  (/access-reviews · /change-requests[offboard/onboard])   │
+│  Security Policy API  (/security-policy/soak-sessions · /baselines)      │
+│  Auth/SSO API  (/identity-providers · /auth/oidc · /orgs/{id}/auth-mode) │
+│  Setup API  (/setup/token · /setup/consume — first-run bootstrap)        │
 └───────────────────────────┬─────────────────────────────────────────────┘
                             │ SQLAlchemy async
 ┌───────────────────────────▼─────────────────────────────────────────────┐
-│  PostgreSQL 16  (37+ Alembic migrations, 30+ tables)                     │
+│  PostgreSQL 16  (120+ Alembic migrations, 40+ tables)                    │
 └──────────────────────────────────────────────────────────────────────────┘
 
                     ┌──────────────────────────────────────┐
                     │  Nexplane Agent (Go)                  │
-                    │  linux/amd64 · arm64 · windows/amd64 │
+                    │  linux/amd64 · linux/arm64 ·          │
+                    │  windows/amd64 · darwin/arm64 (macOS) │
                     │                                       │
                     │  Self-updating — fetches version from │
                     │  S3, downloads + SHA256-verifies new  │
@@ -103,12 +112,13 @@ Nexplane gives security teams a governed execution layer:
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS, TanStack Query v5, React Router v6 |
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 async, Pydantic v2 |
 | Database | PostgreSQL 16 |
-| Migrations | Alembic (38+ migrations, 30+ tables) |
+| Migrations | Alembic (120+ migrations, 40+ tables) |
 | Workflow | Temporal-pattern abstraction (asyncio MVP, Temporal-ready) |
-| Auth | JWT + bcrypt |
+| Auth | JWT + bcrypt; OIDC SSO (per-org identity providers, `local` / `idp` auth modes); one-time setup-token bootstrap |
+| Editions | `core` (default) and `commercial` (`NEXPLANE_EDITION`); commercial CR catalog mounted from an overlay path |
 | AI | Anthropic Claude + OpenAI (multi-provider, default configurable) |
 | Secrets | `cryptography.fernet` (AES-256) with versioning for rotation; abstracted for HSM/Vault swap-out |
-| Agent | Go 1.26+, AWS SDK v2, `golang.org/x/sys`, lib/pq, go-sql-driver/mysql, go-mssqldb |
+| Agent | Go 1.26+, AWS SDK v2, `golang.org/x/sys`, lib/pq, go-sql-driver/mysql, go-mssqldb; cross-compiles for Linux, Windows, and macOS (darwin/arm64) |
 | Agent Distribution | AWS S3 (public bucket, `nexplane-agent-downloads`, us-east-1) |
 | IaC Runtime | Terraform CLI 1.7.5, Ansible + community.aws, AWS session-manager-plugin |
 | VPN | Tailscale (kernel TUN mode in Docker for agent deploy + smoke testing) |
@@ -181,6 +191,8 @@ Full lifecycle: Draft → Planned → Awaiting Approval → Approved → Executi
 | Backup / Recovery | `create_backup`, `verify_backup`, `restore_files`, `dr_failover`, `scheduled_reboot` |
 | Compliance | `enforce_cis_benchmark`, `collect_evidence` |
 | Telemetry | `telemetry_agent_deploy`, `remote_command` |
+| macOS | `macos_filevault_enable`, `macos_gatekeeper_enable`, `macos_santa_install`, `macos_santa_rule_add`, `macos_santa_mode_set`, `macos_softwareupdate_install`, `macos_profiles_install`, `macos_defaults_write`, `macos_sysinfo` … (23 macOS change types) |
+| Security Policy | `apply_seccomp_profile`, `apply_apparmor_profile`, `apply_selinux_policy`, `apply_ebpf_policy` (synthesized from soak sessions) |
 
 ### Composable Runbooks
 
@@ -243,6 +255,39 @@ Closes the loop between scanner findings and automated fixes:
 - **Drift Detection** — weekly scheduled scan compares hosts to their baseline; creates draft remediation CRs for drifted controls
 - **Change Freeze Enforcement** — declare a freeze window; approve/execute endpoints return 423 Locked; emergency bypass with mandatory justification header and audit log
 - **Audit Evidence Collection** — request evidence for a SOC2/PCI/ISO27001 control; agent collects config files and command outputs; backend packages as downloadable ZIP
+
+### Security Policy Auto-Generation
+
+Generate least-privilege host security policies from observed behavior instead of writing them by hand. The `SecurityPolicyEngine` drives a **soak session** lifecycle (`POST /security-policy/soak-sessions`):
+
+1. **Observe** — agents collect runtime behavior from target assets over a soak window
+2. **Synthesize** — a per-backend plugin turns observations into a candidate policy
+3. **Diff** — review the proposed policy against the current baseline (`GET /security-policy/soak-sessions/{id}/diff`)
+4. **Accept** — approve the diff to emit a hardening change request and persist a new baseline (`POST .../accept`)
+
+**Policy backends (plugins):** `seccomp`, `apparmor`, `selinux`, `ebpf_lsm` (eBPF LSM), `ebpf_network`. Per-project baselines are tracked (`GET/DELETE /security-policy/baselines/{project_id}`) so re-observed behavior is diffed against the last accepted policy. The **Security Policy Soak** panel in the UI surfaces active sessions, the live diff, and the accept action. Project phases support a configurable **soak period** (`soak_hours`, default 72h) so staged rollouts auto-advance only after the observation window closes clean.
+
+### Authentication & SSO
+
+- **Local auth** — JWT + bcrypt, the default for every org
+- **OIDC single sign-on** — delegate login to an external identity provider via the authorization-code flow (`GET /auth/oidc/{idp_id}/redirect` → issuer → `GET /auth/oidc/{idp_id}/callback`). Issuer metadata is discovered from `.well-known/openid-configuration`; state is verified on callback
+- **Identity provider CRUD** — manage providers per org (`/identity-providers`); `GET /identity-providers/active` is public so the login screen can render "Continue with …" buttons before authentication
+- **Per-org auth modes** — `local` or `idp`, switched atomically by an admin (`POST /orgs/{org_id}/auth-mode`). Switching to `idp` activates the chosen provider; switching back to `local` returns providers to `pending` so a tested provider can be re-enabled
+- **User provisioning** — on OIDC callback, users are matched by `(email, org)`. With `auto_provision` enabled an unknown email is provisioned as a `security_operator` (login only via the IdP); otherwise login is rejected so admins can pre-create accounts
+
+### First-Run Setup (commercial edition)
+
+Fresh `commercial`-edition instances ship locked until bootstrapped. `SetupGuardMiddleware` 307-redirects all non-exempt traffic to `/setup` until the first user exists (exempt: `/setup`, `/health`, `/docs`, `/openapi.json`, `/api/v1/setup`, …).
+
+- **`POST /setup/token`** — machine-to-machine; authenticated by the `X-Ops-Secret` header (sourced from `NEXPLANE_OPS_SECRET` or SSM `/nexplane/ops/instance-shared-secret`). Mints a one-time, instance-URL-bound setup token (24h TTL) and returns the setup URL
+- **`POST /setup/consume`** — unauthenticated; validates the token against the instance URL, creates the first org and admin user (12+ char password), marks the token used, and returns a JWT
+
+### Editions
+
+`NEXPLANE_EDITION` selects the edition (default `core`):
+
+- **`core`** — the full open platform: every connector, change type, runbook, and agent capability documented here
+- **`commercial`** — additionally enables the first-run setup token flow, the setup guard, and a **commercial CR catalog** loaded at runtime from `NEXPLANE_COMMERCIAL_CATALOG_PATH`. Commercial executors live outside the `nexplane` package and are mounted into the container, so no commercial code ships in the core image
 
 ### IaC Orchestration
 
@@ -365,23 +410,47 @@ Change actions (not just discovery) on previously read-only connectors:
 
 **Identity & Access**
 
-Okta · Microsoft Entra ID · HashiCorp Vault · GitHub
+Okta · Microsoft Entra ID · Azure AD (Graph) · Active Directory · LDAP · FreeIPA · Keycloak · Teleport · HashiCorp Vault · Infisical · Microsoft LAPS
+
+**Code & Version Control**
+
+GitHub · GitLab · Gitea · JFrog Xray
+
+**Security Tools / EDR**
+
+CrowdStrike · Microsoft Defender for Endpoint · SentinelOne · Wazuh · Falco
+
+**Vulnerability Scanners**
+
+Tenable · Snyk · Qualys · OpenVAS · Nessus · Wiz · RunZero · Elastic Security
 
 **SaaS**
 
 Google Workspace · Slack · Kubernetes · Helm
 
-**Security Tools / EDR**
+**Databases**
 
-SentinelOne · Microsoft Defender for Endpoint · Snyk · Qualys
+PostgreSQL · Redis · MongoDB
+
+**Windows Management**
+
+Microsoft Intune · SCCM / MECM · Windows Update for Business · WinRM
+
+**macOS / MDM & Binary Authorization**
+
+Jamf · MicroMDM · Santa Sync Server
+
+**Network, Firewall & Certificates**
+
+Cloudflare · Palo Alto · OPNsense · Tailscale · step-ca · BIND DNS
 
 **Cloud Security & Discovery**
 
-RunZero · Wiz · Zscaler
+OCI · RunZero · Wiz · Zscaler
 
 **Workflow & Observability**
 
-Jira · PagerDuty · ServiceNow · Splunk · Datadog
+Jira · PagerDuty · ServiceNow · Splunk · Datadog · SMTP
 
 ---
 
@@ -438,9 +507,12 @@ https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/
   nexplane-agent-linux-amd64-{VERSION}
   nexplane-agent-linux-arm64-{VERSION}
   nexplane-agent-windows-amd64-{VERSION}.exe
+  nexplane-agent-darwin-arm64-{VERSION}
   + .sha256 sidecar for each
   version  (plain text: current version)
 ```
+
+> The `darwin/arm64` (Apple Silicon) binary is built on macOS hardware and published to the same bucket; the Linux/Windows binaries are produced by the Docker multi-stage build.
 
 **Self-updating:** On startup the agent fetches the `version` file from S3, downloads and SHA256-verifies the new binary if behind, atomically replaces itself via `os.Rename` + `syscall.Exec`. Windows agents log a manual-update message.
 
@@ -469,8 +541,22 @@ https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com/
 | `ossecurity` | SELinux, AppArmor, seccomp, sysctl, iptables, kernel modules, mount hardening, auditd, FIM, eBPF | Linux |
 | `linuxauth` | PAM, SSH, CA certs, NTP, user/group audit, privesc audit | Linux |
 | `winharden` | LAPS, Credential Guard, PowerShell CLM, AppLocker, SMB, BitLocker, Windows Firewall, TLS, RDP, audit policy, registry | Windows |
-| `crossplatform` | TLS certificates, DNS resolver, software inventory, syslog forwarding | Both |
+| `crossplatform` | TLS certificates, DNS resolver, software inventory, syslog forwarding | Linux + Windows + macOS |
 | `linuxupgrade` | In-place or containerize-and-migrate OS upgrades | Linux |
+| `macos` | FileVault, Gatekeeper, **Santa** binary authorization (install, rules, monitor/lockdown mode, sync, event export), `softwareupdate`, configuration profiles, `defaults`, `launchctl`, Homebrew, system info | macOS |
+| `ebpf` | eBPF LSM + network policy posture audit, policy synthesis and deployment | Linux |
+| `appdiscovery` / `deepdiscover` | Running-service and listening-port discovery; deep application/dependency mapping | Linux + Windows + macOS |
+| `containerizebuild` / `containerizeretire` | Containerize a legacy workload (build + push image) and retire the source host | Linux |
+
+**macOS (darwin/arm64) support:**
+
+The agent runs natively on Apple Silicon macOS and exposes 23 macOS change types across three areas:
+
+- **Posture & encryption** — FileVault status/enable, Gatekeeper status/enable/disable, configuration profiles, system info
+- **Binary authorization (Santa)** — install Google/North Pole Security **Santa**, add/remove/list rules, switch monitor ↔ lockdown mode, trigger sync, export decisions, check a binary. When SIP blocks the system extension (e.g. unmanaged EC2 `mac2.metal`), `santa_install` returns `installed: true, activated: false` rather than failing, so the CR still completes and signals that MDM/SIP approval is pending
+- **Observability & hardening** — software inventory (`brew`/MacPorts/`pkgutil`), CIS compliance audit (SIP, Gatekeeper, ALF, NTP, SSH, auditd, Santa, screen lock), SSH hardening, NTP via `systemsetup`, syslog forwarding, network isolation via `pfctl`, software-update audit/install, fleet ops via `launchctl`/`brew`
+
+macOS smoke coverage runs against an EC2 `mac2.metal` instance on a Dedicated Host (`MAC_AGENT_BOOTSTRAP`, `MAC_POSTURE_AUDIT`, `MAC_AUTH_HARDENING`, `MAC_OBSERVABILITY` phases). See `docs/runbooks/mac-smoke-dedicated-host-setup.md`.
 
 ---
 
@@ -495,7 +581,7 @@ The demo environment includes 10 pre-seeded example projects covering real secur
 
 ```
 nexplane/
-├── VERSION                              # Single source of truth for agent version (0.1.0)
+├── VERSION                              # Single source of truth for agent version (0.1.2)
 ├── agent/                               # Nexplane Agent (Go)
 │   ├── main.go                          # Entry point — updater check, config, fingerprint, register, poll
 │   ├── go.mod                           # Go 1.26+, AWS SDK v2, DB drivers (pq, mysql, mssqldb)
@@ -527,32 +613,46 @@ nexplane/
 │       ├── ossecurity/                  # Linux MAC/kernel/integrity hardening
 │       ├── linuxauth/                   # PAM, SSH, CA certs, NTP, user audit
 │       ├── winharden/                   # Windows security hardening suite
-│       ├── crossplatform/               # TLS, DNS, software inventory
-│       └── linuxupgrade/                # Linux in-place and containerize-and-migrate
+│       ├── crossplatform/               # TLS, DNS, software inventory (Linux/Windows/macOS)
+│       ├── linuxupgrade/                # Linux in-place and containerize-and-migrate
+│       ├── macos/                       # macOS: FileVault, Gatekeeper, Santa, profiles, defaults
+│       ├── ebpf/                        # eBPF LSM + network policy posture and deploy
+│       ├── appdiscovery/ deepdiscover/  # Service/port discovery + deep dependency mapping
+│       └── containerizebuild/ containerizeretire/  # Legacy workload containerization
 │
 ├── backend/
 │   ├── Dockerfile                       # Multi-stage: Go agent binaries → Python backend
 │   │                                    # Includes: Tailscale, Terraform 1.7.5, Ansible,
 │   │                                    # community.aws collection, session-manager-plugin
 │   ├── seed.py                          # Demo data (org, users, assets, connectors, CRs, projects)
-│   ├── alembic/versions/                # 38+ migrations (001->038), 30+ tables
+│   ├── alembic/versions/                # 120+ migrations, 40+ tables
 │   └── app/
 │       ├── main.py                      # App factory + router registration
 │       ├── models/
-│       │   ├── change_request.py        # 48+ ChangeType values, fleet/IR status values
+│       │   ├── change_request.py        # 400+ ChangeType values, fleet/IR status values
 │       │   ├── connector.py             # ConnectorType including tailscale/terraform_local/ansible_local
 │       │   ├── asset.py                 # AssetType including key_pair, cloud_account, storage_bucket
+│       │   ├── setup_token.py           # First-run setup token (one-time, instance-bound, 24h TTL)
+│       │   ├── identity_provider.py     # OIDC/LDAP/SAML IdP config; Organization.auth_mode (local/idp)
 │       │   └── ...                      # runbook, vulnerability, compliance, maintenance_window, etc.
+│       ├── middleware/
+│       │   └── setup_guard.py           # Redirect to /setup until first admin exists (commercial)
 │       ├── routers/
+│       │   ├── setup.py                 # /setup/token (ops-secret) + /setup/consume
+│       │   ├── identity_providers.py    # IdP CRUD + /identity-providers/active
+│       │   ├── oidc.py                  # /auth/oidc/{idp}/redirect + /callback
+│       │   ├── org_auth_mode.py         # /orgs/{id}/auth-mode
+│       │   ├── security_policy.py       # /security-policy/soak-sessions + /baselines
 │       │   └── ...                      # change_requests, assets, connectors, projects, agent, etc.
 │       ├── services/
-│       │   └── ...                      # ai_service, ingest_service, safety/planning engine,
-│       │                                # connector_service (commit _auto_asset after each step)
+│       │   ├── oidc_service.py          # build_authorization_url, exchange_code
+│       │   ├── security_policy/         # seccomp/apparmor/selinux/ebpf plugins + soak_service
+│       │   └── ...                      # ai_service, ingest_service, safety/planning engine
 │       ├── workflows/
 │       │   └── activities.py            # DB session commit after each step; _auto_asset persistence
 │       └── connectors/
-│           ├── catalog/                 # Per-connector JSON catalogs (38+ connectors)
-│           ├── change_type_definitions/ # 180+ change type JSON definitions
+│           ├── catalog/                 # Per-connector JSON catalogs (70+ connectors)
+│           ├── change_type_definitions/ # 410+ change type JSON definitions
 │           └── executors/
 │               ├── aws/                 # EC2, IAM, S3, Route53, RDS, CloudWatch, ALB, EBS,
 │               │                        # security groups, key pairs, SSM, Tailscale, agent deploy
@@ -584,11 +684,17 @@ nexplane/
 │       │   └── ...                      # all other pages
 │       └── ...
 │
+├── deploy/
+│   └── nginx.conf                       # Production HTTPS reverse proxy (TLS, /api + /setup routing)
+│
+├── helm/nexplane/                       # Helm chart: values.yaml + values-enterprise/-managed
+│
 ├── docs/superpowers/
 │   ├── specs/                           # Design specs
 │   └── plans/                          # Implementation plans
 │
-└── docker-compose.yml                   # Backend bound to 127.0.0.1:8000 (not public internet)
+├── docker-compose.yml                   # Dev: backend bound to 127.0.0.1:8000 (not public internet)
+└── docker-compose.prod.yml              # Prod: nginx + built frontend + backend + Postgres
 ```
 
 ---
@@ -616,10 +722,11 @@ cd agent
 go test ./...
 
 # Build for current platform
-go build -ldflags="-X main.Version=0.1.0" -o dist/nexplane-agent ./
+go build -ldflags="-X main.Version=0.1.2" -o dist/nexplane-agent ./
 
 # Cross-compile
-GOOS=linux GOARCH=amd64 go build -ldflags="-X main.Version=0.1.0" -o dist/nexplane-agent-linux-amd64 ./
+GOOS=linux GOARCH=amd64 go build -ldflags="-X main.Version=0.1.2" -o dist/nexplane-agent-linux-amd64 ./
+GOOS=darwin GOARCH=arm64 go build -ldflags="-X main.Version=0.1.2" -o dist/nexplane-agent-darwin-arm64 ./
 ```
 
 ### Running the Agent
@@ -880,6 +987,7 @@ Each phase maintains a `rollback_stack: list[tuple[str, str]]` of `(cr_id, label
 | Connector credentials | Operator+ | Per-connector API credentials. Encrypted, never returned in GET. |
 | Remediation policies | Admin | Per-severity: auto-generate CR, auto-approve, SLA days. |
 | Maintenance windows | Admin | Cron-scheduled windows when changes are allowed. |
+| Identity providers (SSO) | Admin | OIDC provider config per org; switch org `auth_mode` between `local` and `idp`. |
 
 All secrets use `SecretsService` (Fernet AES-256 with versioned rotation), designed for HashiCorp Vault / AWS Secrets Manager / HSM swap-out.
 
@@ -924,7 +1032,7 @@ npm run dev
 cd backend
 pytest
 
-# Agent tests (22 packages)
+# Agent tests (29 command packages)
 cd agent
 go test ./...
 
@@ -953,8 +1061,49 @@ docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
 | `CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
 | `ENVIRONMENT` | `development` | Environment name |
 | `AI_MODEL` | `claude-sonnet-4-6` | Anthropic model for AI planning |
-| `WEBHOOK_SECRET` | (dev key) | HMAC key for vulnerability scanner webhook verification |
+| `WEBHOOK_SECRET` | (dev key) | HMAC key for vulnerability scanner webhook verification (must be ≥16 chars outside development) |
 | `NEXPLANE_AGENT_DOWNLOAD_URL` | `https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com` | S3 base URL for agent binary downloads; override for self-hosted distributions |
+| `NEXPLANE_EDITION` | `core` | Edition gate — `core` or `commercial` (enables setup flow + commercial CR catalog) |
+| `NEXPLANE_COMMERCIAL_CATALOG_PATH` | (unset) | Path to the mounted commercial CR catalog/executors (commercial edition only) |
+| `NEXPLANE_OPS_SECRET` | (unset) | Shared secret for the `X-Ops-Secret` setup-token endpoint; falls back to SSM `/nexplane/ops/instance-shared-secret` |
+| `INSTANCE_URL` | `http://localhost:8000` | Public instance URL used for OIDC redirect URIs, setup links, and email |
+
+---
+
+## Production Deployment
+
+The default `docker-compose.yml` is for local development. For a hardened single-node install, use the production stack, which adds an HTTPS reverse proxy and a built (non-dev) frontend:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+**What the production stack adds:**
+
+- **`nginx` reverse proxy** (`deploy/nginx.conf`) — terminates TLS (1.2+, strong ciphers; certs at `/etc/nginx/certs/{fullchain,privkey}.pem`), 301-redirects HTTP→HTTPS, proxies `/api/*` (strips the `/api` prefix) and `/setup/*` to the backend, and serves the SPA from the frontend
+- **Built frontend** (`frontend/Dockerfile.prod`) — Vite build served by nginx, with `VITE_API_URL` / `VITE_AGENT_DOWNLOAD_URL` baked in at build time
+- **Backend** — runs Alembic `upgrade head` on startup, then uvicorn with 2 workers; same image as dev (bundles Tailscale, Terraform, Ansible, the SSM plugin, and Helm)
+- **Postgres 16** with a healthcheck gate
+
+Set `SECRET_KEY` (≥32 chars), `WEBHOOK_SECRET` (≥16 chars), `INSTANCE_URL`, and `CORS_ORIGINS` for the deployment, plus SMTP variables if email is used.
+
+### Kubernetes (Helm)
+
+A Helm chart lives in `helm/nexplane/` with three values profiles:
+
+| Profile | Use | Notes |
+|---------|-----|-------|
+| `values.yaml` | Default / single-node | Bundled Postgres + Redis, 1 replica, ingress off |
+| `values-enterprise.yaml` | Self-hosted enterprise | External Postgres + Redis, 2 replicas, ingress + TLS |
+| `values-managed.yaml` | Nexplane-managed | Enterprise layout with tuned resource requests/limits |
+
+```bash
+helm install nexplane ./helm/nexplane -f helm/nexplane/values-enterprise.yaml
+```
+
+### Editions & the commercial overlay
+
+`core` is fully self-contained. To run a `commercial` instance, set `NEXPLANE_EDITION=commercial` and mount the commercial CR catalog/executors at `NEXPLANE_COMMERCIAL_CATALOG_PATH`. Commercial deployments support two delivery models: **managed** (Nexplane provisions one isolated instance per client) and **self-hosted** (the customer runs the Docker Compose bundle, a VM image, or the Helm chart). Either way, a fresh instance is bootstrapped through the first-run setup-token flow.
 
 ---
 
@@ -980,6 +1129,10 @@ The backend API binds to `127.0.0.1:8000` — it is not exposed to the public in
 | Step credential output | Never written to logs or DB — travels in memory only between steps |
 | IaC apply | Gated behind explicit plan review and approval |
 | DB replica promotion | `rollback_supported: false`; blast radius warning required in approval |
+| Unconfigured commercial instance | All non-exempt traffic 307-redirected to `/setup` until the first admin exists |
+| Setup token | One-time, instance-URL-bound, 24h TTL; `/setup/token` requires the `X-Ops-Secret` header |
+| OIDC login, unknown email | Rejected unless the provider has `auto_provision` enabled |
+| Security policy rollout | Enforced only after the soak window closes; the synthesized diff must be reviewed and accepted first |
 
 ---
 
@@ -999,6 +1152,11 @@ Key endpoint groups:
 - `/access-reviews/*` — collect, decisions, approve, auto-generate removal CRs
 - `/compliance/*` — baselines CRUD, drift alerts, evidence ZIP download, freeze windows
 - `/maintenance-windows/*` — CRUD, status check
+- `/security-policy/*` — soak sessions (create/stop/diff/accept), per-project baselines
+- `/identity-providers/*` — OIDC provider CRUD; `/identity-providers/active` (public)
+- `/auth/oidc/{idp_id}/*` — authorization-code redirect + callback
+- `/orgs/{id}/auth-mode` — switch org auth mode (`local` / `idp`)
+- `/setup/*` — first-run bootstrap: `token` (ops-secret) + `consume` (commercial edition)
 - `/agent/*` — agent registration, job dispatch, result reporting
 - `/settings/*` — AI providers, agent secret, remediation policies
 - `/downloads/*` — versioned agent binaries + SHA256 checksums + version file (served from backend for development; production uses S3)
