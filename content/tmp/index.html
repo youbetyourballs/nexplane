@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexplane — The Control Plane for Infrastructure Change</title>
+  <meta name="description" content="Plan, approve, execute, observe, and roll back infrastructure changes across cloud, network, identity, Kubernetes, endpoints, and security systems." />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="logo">Nexplane</a>
+    <div class="nav-links">
+      <a href="#platform">Platform</a>
+      <a href="#integrations">Integrations</a>
+      <a href="https://github.com/youbetyourballs/nexplane-docs" target="_blank" rel="noopener">Docs</a>
+      <a href="#request-demo" class="btn-nav">Request demo</a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-badge">Control plane for infrastructure change</div>
+    <h1>Infrastructure changes<br>are inevitable.<br><span class="gradient-text">Outages are optional.</span></h1>
+    <p class="hero-sub">
+      Plan, approve, execute, and roll back infrastructure changes across cloud, network, identity, Kubernetes, endpoints, and security systems — from one control plane.
+    </p>
+    <p class="hero-position">Nexplane is the control plane for infrastructure change.</p>
+    <div class="hero-cta">
+      <a href="#request-demo" class="btn-primary">Request demo</a>
+      <a href="https://github.com/youbetyourballs/nexplane-docs" target="_blank" rel="noopener" class="btn-secondary">Read docs →</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat"><span class="stat-num">80+</span><span class="stat-label">change types</span></div>
+      <div class="stat"><span class="stat-num">11</span><span class="stat-label">integration domains</span></div>
+      <div class="stat"><span class="stat-num">100%</span><span class="stat-label">rollback coverage</span></div>
+    </div>
+  </div>
+  <div class="hero-code">
+    <div class="code-window">
+      <div class="code-bar">
+        <span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>
+        <span class="code-title">Change Request · CR-4291</span>
+      </div>
+      <pre><code><span class="c-dim"># Patch critical Linux hosts across fleet</span>
+<span class="c-key">change_type:</span>  <span class="c-val">patch_os</span>
+<span class="c-key">targets:</span>      <span class="c-val">tag:criticality=high</span>  <span class="c-dim"># 34 hosts</span>
+<span class="c-key">prechecks:</span>    <span class="c-val">disk_space, service_health</span>
+<span class="c-key">postchecks:</span>   <span class="c-val">reachability, service_health</span>
+<span class="c-key">rollback:</span>     <span class="c-val">restore_snapshot</span>
+
+<span class="c-dim">&#9658; Lifecycle:  Discover &#8594; Plan &#8594; Approve &#8594; Execute</span>
+<span class="c-dim">&#9658; Blast radius: 34 hosts &#183; 0 dependent services at risk</span>
+<span class="c-dim">&#9658; Approved by: platform-lead@acme.com</span>
+<span class="c-green">&#10003; 34/34 hosts patched &#183; services healthy</span>
+<span class="c-green">&#10003; Rollback snapshot retained &#183; audit trail written</span></code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- LOGOS -->
+<section class="logos">
+  <p class="logos-label">Works across your infrastructure</p>
+  <div class="logo-row">
+    <span class="logo-pill">AWS</span>
+    <span class="logo-pill">GCP</span>
+    <span class="logo-pill">Azure</span>
+    <span class="logo-pill">Kubernetes</span>
+    <span class="logo-pill">Active Directory</span>
+    <span class="logo-pill">HashiCorp Vault</span>
+    <span class="logo-pill">Linux</span>
+    <span class="logo-pill">Windows Server</span>
+    <span class="logo-pill">Palo Alto</span>
+    <span class="logo-pill">Datadog</span>
+  </div>
+</section>
+
+<!-- PROBLEM -->
+<section class="problem" id="problem">
+  <div class="container">
+    <div class="section-eyebrow">The Problem</div>
+    <h2>Every infrastructure team has tools.<br><em>Nobody owns the change.</em></h2>
+    <p class="section-sub">
+      Terraform provisions. ServiceNow tickets. Datadog monitors. Backstage catalogs. Each tool owns a fragment. No system owns end-to-end infrastructure change execution — the gaps live between them.
+    </p>
+    <div class="problem-grid three-col">
+      <div class="problem-card">
+        <div class="problem-icon">&#127959;</div>
+        <h3>Provisioning tools</h3>
+        <p>Terraform, Pulumi, and CDK manage infrastructure state — but not operational changes, security remediations, or credential rotations.</p>
+      </div>
+      <div class="problem-card">
+        <div class="problem-icon">&#127915;</div>
+        <h3>Ticketing systems</h3>
+        <p>ServiceNow and Jira track intent. They don't execute changes, verify results, or maintain rollback state. The gap between ticket and action is manual.</p>
+      </div>
+      <div class="problem-card">
+        <div class="problem-icon">&#128202;</div>
+        <h3>Observability platforms</h3>
+        <p>Datadog and Prometheus tell you when something broke. They don't tell you which change caused it or how to undo it safely.</p>
+      </div>
+    </div>
+    <p class="problem-conclusion">The result: tribal knowledge, manual execution, no rollback plan, and an audit trail that lives in Slack.</p>
+  </div>
+</section>
+
+<!-- SOLUTION / LIFECYCLE -->
+<section class="solution-section" id="platform">
+  <div class="container">
+    <div class="section-eyebrow">How It Works</div>
+    <h2>One workflow for every<br><em>infrastructure change.</em></h2>
+    <p class="section-sub">
+      Nexplane turns scattered infrastructure work into controlled, auditable, reversible change workflows.
+    </p>
+    <div class="lifecycle-flow">
+      <div class="lifecycle-step">
+        <div class="lifecycle-num">01</div>
+        <div class="lifecycle-name">Discover</div>
+        <div class="lifecycle-desc">Map what exists across cloud, network, identity, and endpoints</div>
+      </div>
+      <div class="lifecycle-connector">&#8594;</div>
+      <div class="lifecycle-step">
+        <div class="lifecycle-num">02</div>
+        <div class="lifecycle-name">Understand</div>
+        <div class="lifecycle-desc">Graph dependencies, owners, and relationships before acting</div>
+      </div>
+      <div class="lifecycle-connector">&#8594;</div>
+      <div class="lifecycle-step">
+        <div class="lifecycle-num">03</div>
+        <div class="lifecycle-name">Plan</div>
+        <div class="lifecycle-desc">Simulate blast radius, generate prechecks and rollback strategy</div>
+      </div>
+      <div class="lifecycle-connector">&#8594;</div>
+      <div class="lifecycle-step">
+        <div class="lifecycle-num">04</div>
+        <div class="lifecycle-name">Approve</div>
+        <div class="lifecycle-desc">Risk-scored, human-gated approval before any change executes</div>
+      </div>
+      <div class="lifecycle-connector">&#8594;</div>
+      <div class="lifecycle-step">
+        <div class="lifecycle-num">05</div>
+        <div class="lifecycle-name">Execute</div>
+        <div class="lifecycle-desc">Parallel execution across your fleet with live progress tracking</div>
+      </div>
+      <div class="lifecycle-connector">&#8594;</div>
+      <div class="lifecycle-step">
+        <div class="lifecycle-num">06</div>
+        <div class="lifecycle-name">Observe</div>
+        <div class="lifecycle-desc">Postchecks confirm services are healthy after every change</div>
+      </div>
+      <div class="lifecycle-connector">&#8594;</div>
+      <div class="lifecycle-step">
+        <div class="lifecycle-num">07</div>
+        <div class="lifecycle-name">Rollback</div>
+        <div class="lifecycle-desc">One-click undo returns infrastructure to last-known-good state</div>
+      </div>
+      <div class="lifecycle-connector">&#8594;</div>
+      <div class="lifecycle-step">
+        <div class="lifecycle-num">08</div>
+        <div class="lifecycle-name">Document</div>
+        <div class="lifecycle-desc">Immutable audit trail with approvals, diffs, and rollback history</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOUR QUESTIONS -->
+<section class="questions-section" id="questions">
+  <div class="container">
+    <div class="section-eyebrow">The Platform</div>
+    <h2>Four questions.<br><em>One answer.</em></h2>
+    <div class="questions-grid">
+      <div class="question-card">
+        <div class="question-icon">&#128506;</div>
+        <div class="question-text">What do I have?</div>
+        <div class="question-capability">Infrastructure graph</div>
+        <div class="question-desc">A live, connected map of every asset, dependency, owner, and relationship across your entire infrastructure.</div>
+        <span class="question-tag">asset-graph</span>
+      </div>
+      <div class="question-card">
+        <div class="question-icon">&#128161;</div>
+        <div class="question-text">What should I change?</div>
+        <div class="question-capability">Recommendations engine</div>
+        <div class="question-desc">Continuous scanning surfaces prioritized, actionable recommendations — stale rules, expiring certs, exposed credentials, missing owners.</div>
+        <span class="question-tag">recommendations</span>
+      </div>
+      <div class="question-card">
+        <div class="question-icon">&#127919;</div>
+        <div class="question-text">What will happen if I change it?</div>
+        <div class="question-capability">Impact simulation</div>
+        <div class="question-desc">Simulate blast radius, map dependency chains, and run prechecks before a single change executes in production.</div>
+        <span class="question-tag">impact-simulation</span>
+      </div>
+      <div class="question-card">
+        <div class="question-icon">&#8617;</div>
+        <div class="question-text">Can I safely undo it?</div>
+        <div class="question-capability">Rollback center</div>
+        <div class="question-desc">Every change ships with a typed rollback plan, last-known-good snapshot, and one-click undo. Verified against live infrastructure before it ships.</div>
+        <span class="question-tag">rollback-center</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INFRASTRUCTURE MEMORY -->
+<section class="memory-section" id="memory">
+  <div class="container">
+    <div class="section-eyebrow">Infrastructure Memory</div>
+    <h2>Ask why anything exists.</h2>
+    <p class="section-sub">
+      Every enterprise has forgotten why infrastructure exists. Nexplane remembers the approvals, owners, dependencies, timelines, and rollback plans behind every change.
+    </p>
+    <div class="terminal-block">
+      <div class="terminal-bar">
+        <span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>
+        <span class="terminal-title">Infrastructure Memory</span>
+      </div>
+      <div class="terminal-body">
+        <div class="terminal-query">
+          <span class="t-prompt">$</span>
+          <span class="t-question">Why is port 8443 open on prod-gateway-01?</span>
+        </div>
+        <div class="terminal-answer">Approved by J. Terrill &middot; CR-1847 &middot; 2024-03-12 &middot; "Required for internal metrics pipeline to Datadog agent"</div>
+        <div class="terminal-query">
+          <span class="t-prompt">$</span>
+          <span class="t-question">Who approved the firewall rule allowing 10.2.0.0/16?</span>
+        </div>
+        <div class="terminal-answer">Approved by K. Chen &middot; CR-2203 &middot; 2023-11-04 &middot; Rollback available &middot; Last verified 2024-01-18</div>
+        <div class="terminal-query">
+          <span class="t-prompt">$</span>
+          <span class="t-question">Which applications depend on cert wildcard.acme.internal?</span>
+        </div>
+        <div class="terminal-answer">14 services &middot; expires in 23 days &middot; recommendation: rotate &middot; owner: platform-team</div>
+        <div class="terminal-query">
+          <span class="t-prompt">$</span>
+          <span class="t-question">Can prod-worker-07 be deleted?</span>
+        </div>
+        <div class="terminal-answer">&#9888; 3 dependent services &middot; last deployment 6 days ago &middot; no rollback snapshot &middot; requires approval</div>
+        <div class="terminal-query">
+          <span class="t-prompt">$</span>
+          <span class="t-question">What changed in the us-east-1 VPC yesterday?</span>
+        </div>
+        <div class="terminal-answer">4 changes &middot; 2 approved CRs &middot; 1 auto-remediation &middot; 1 rollback executed &middot; full timeline available</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SIMULATE -->
+<section class="simulate-section" id="simulate">
+  <div class="container">
+    <div class="section-eyebrow">Impact Simulation</div>
+    <h2>Know what breaks<br><em>before it breaks.</em></h2>
+    <p class="section-sub">
+      Most tools tell you what happened. Nexplane tells you what will happen — before you execute. Simulate blast radius, map dependency chains, and validate rollback strategy before any change touches production.
+    </p>
+    <div class="simulate-grid">
+      <div class="terminal-block simulate-terminal">
+        <div class="terminal-bar">
+          <span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>
+          <span class="terminal-title">Impact Simulation &middot; CR-4418</span>
+        </div>
+        <div class="terminal-body">
+          <div class="t-action"><span class="c-dim">change:</span> <span class="c-val">remove firewall rule fw-0a4b &middot; allow 0.0.0.0/0:443</span></div>
+          <div class="t-spacer"></div>
+          <div class="t-result warn"><span class="t-arrow">&#8594;</span> 12 assets affected</div>
+          <div class="t-result warn"><span class="t-arrow">&#8594;</span> 4 services at risk &middot; api-gateway, auth-svc, cdn-origin, metrics-proxy</div>
+          <div class="t-result ok"><span class="t-arrow">&#8594;</span> prechecks: 3 passing &middot; 0 failing</div>
+          <div class="t-result ok"><span class="t-arrow">&#8594;</span> rollback available &middot; estimated 45s</div>
+          <div class="t-result warn"><span class="t-arrow">&#8594;</span> approval required &middot; risk: medium</div>
+          <div class="t-spacer"></div>
+          <div class="t-result dim"><span class="t-arrow">&#8594;</span> confidence score: 91% &middot; based on 14 similar CRs</div>
+        </div>
+      </div>
+      <div class="simulate-features">
+        <div class="sim-feature">
+          <div class="sim-feature-title">Blast radius</div>
+          <div class="sim-feature-desc">Know exactly which assets, services, and users are affected before you act.</div>
+        </div>
+        <div class="sim-feature">
+          <div class="sim-feature-title">Dependency chains</div>
+          <div class="sim-feature-desc">Graph-aware simulation follows dependencies across cloud, network, and application layers.</div>
+        </div>
+        <div class="sim-feature">
+          <div class="sim-feature-title">Prechecks + postchecks</div>
+          <div class="sim-feature-desc">Automated validation before and after every change confirms systems are healthy.</div>
+        </div>
+        <div class="sim-feature">
+          <div class="sim-feature-title">Confidence scores</div>
+          <div class="sim-feature-desc">Risk scoring based on asset criticality, blast radius, and historical change patterns.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INFRASTRUCTURE GRAPH -->
+<section class="graph-section" id="graph">
+  <div class="container">
+    <div class="section-eyebrow">Infrastructure Graph</div>
+    <h2>Inventory is flat.<br><em>Infrastructure is connected.</em></h2>
+    <p class="section-sub">
+      Relationships are what make changes safe or dangerous. Nexplane maps the connections between every asset so you understand dependencies before you act.
+    </p>
+    <div class="graph-visual">
+      <div class="graph-center-node">Nexplane<br><span class="graph-node-sub">control plane</span></div>
+      <div class="graph-entities">
+        <div class="graph-entity-group">
+          <div class="graph-entity-label">Compute</div>
+          <div class="graph-pills">
+            <span class="graph-pill">EC2 instances</span>
+            <span class="graph-pill">VMs</span>
+            <span class="graph-pill">Containers</span>
+            <span class="graph-pill">Serverless</span>
+          </div>
+        </div>
+        <div class="graph-entity-group">
+          <div class="graph-entity-label">Identity</div>
+          <div class="graph-pills">
+            <span class="graph-pill">IAM roles</span>
+            <span class="graph-pill">Users</span>
+            <span class="graph-pill">Service accounts</span>
+            <span class="graph-pill">Groups</span>
+          </div>
+        </div>
+        <div class="graph-entity-group">
+          <div class="graph-entity-label">Network</div>
+          <div class="graph-pills">
+            <span class="graph-pill">Firewall rules</span>
+            <span class="graph-pill">Security groups</span>
+            <span class="graph-pill">DNS records</span>
+            <span class="graph-pill">Routes</span>
+          </div>
+        </div>
+        <div class="graph-entity-group">
+          <div class="graph-entity-label">Secrets &amp; Certs</div>
+          <div class="graph-pills">
+            <span class="graph-pill">API keys</span>
+            <span class="graph-pill">Certificates</span>
+            <span class="graph-pill">SSH keys</span>
+            <span class="graph-pill">DB credentials</span>
+          </div>
+        </div>
+        <div class="graph-entity-group">
+          <div class="graph-entity-label">Platform</div>
+          <div class="graph-pills">
+            <span class="graph-pill">K8s clusters</span>
+            <span class="graph-pill">Load balancers</span>
+            <span class="graph-pill">Storage</span>
+            <span class="graph-pill">Queues</span>
+          </div>
+        </div>
+        <div class="graph-entity-group">
+          <div class="graph-entity-label">Workflow</div>
+          <div class="graph-pills">
+            <span class="graph-pill">Tickets</span>
+            <span class="graph-pill">Source repos</span>
+            <span class="graph-pill">Monitoring alerts</span>
+            <span class="graph-pill">Owners</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- RECOMMENDATIONS -->
+<section class="recommendations-section" id="recommendations">
+  <div class="container">
+    <div class="section-eyebrow">Recommendations</div>
+    <h2>Dependabot<br><em>for infrastructure.</em></h2>
+    <p class="section-sub">
+      Continuous scanning surfaces prioritized, actionable recommendations. One click creates a change request — with prechecks, rollback plan, and approval gate already attached.
+    </p>
+    <div class="rec-grid">
+      <div class="rec-card">
+        <div class="rec-severity critical">Critical</div>
+        <div class="rec-title">Patch critical Linux hosts</div>
+        <div class="rec-detail">34 hosts &middot; CVE-2024-3094 &middot; kernel patch available</div>
+        <div class="rec-action">Create change request &rarr;</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-severity high">High</div>
+        <div class="rec-title">Rotate expiring certificates</div>
+        <div class="rec-detail">wildcard.acme.internal &middot; expires in 23 days &middot; 14 dependents</div>
+        <div class="rec-action">Create change request &rarr;</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-severity high">High</div>
+        <div class="rec-title">Reduce IAM exposure</div>
+        <div class="rec-detail">12 roles with AdministratorAccess &middot; 6 unused for 90+ days</div>
+        <div class="rec-action">Create change request &rarr;</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-severity medium">Medium</div>
+        <div class="rec-title">Remove stale firewall rules</div>
+        <div class="rec-detail">8 rules &middot; last matched traffic &gt;180 days ago</div>
+        <div class="rec-action">Create change request &rarr;</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-severity medium">Medium</div>
+        <div class="rec-title">Add missing owners</div>
+        <div class="rec-detail">47 assets without an assigned owner &middot; blocking rollback coverage</div>
+        <div class="rec-action">Assign owners &rarr;</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-severity medium">Medium</div>
+        <div class="rec-title">Improve rollback coverage</div>
+        <div class="rec-detail">19 change types missing rollback verification &middot; live smoke tests pending</div>
+        <div class="rec-action">View coverage report &rarr;</div>
+      </div>
+      <div class="rec-card">
+        <div class="rec-severity low">Low</div>
+        <div class="rec-title">Archive inactive users</div>
+        <div class="rec-detail">23 user accounts &middot; no login in 120+ days &middot; 3 with active permissions</div>
+        <div class="rec-action">Create change request &rarr;</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ROLLBACK -->
+<section class="rollback-section" id="rollback">
+  <div class="container">
+    <div class="section-eyebrow">Rollback Center</div>
+    <h2>Infrastructure should<br>be <em>reversible.</em></h2>
+    <p class="section-sub">
+      Every change should have a rollback plan, validation checks, last-known-good state, and audit trail. Most platforms claim rollback capability. Nexplane verifies it &mdash; every change type ships with a live smoke test that executes the change, triggers the rollback, and confirms the system returned to its prior state. Against real infrastructure, not mocks.
+    </p>
+    <div class="rollback-grid">
+      <div class="rollback-card">
+        <div class="rollback-icon">&#128274;</div>
+        <div class="rollback-action">Lock IAM user</div>
+        <div class="rollback-arrow">&#8596;</div>
+        <div class="rollback-undo">Restore previous policies</div>
+      </div>
+      <div class="rollback-card">
+        <div class="rollback-icon">&#128273;</div>
+        <div class="rollback-action">Rotate SSH key</div>
+        <div class="rollback-arrow">&#8596;</div>
+        <div class="rollback-undo">Restore prior authorized_keys</div>
+      </div>
+      <div class="rollback-card">
+        <div class="rollback-icon">&#128737;</div>
+        <div class="rollback-action">Apply seccomp profile</div>
+        <div class="rollback-arrow">&#8596;</div>
+        <div class="rollback-undo">Remove profile, restore baseline</div>
+      </div>
+      <div class="rollback-card">
+        <div class="rollback-icon">&#128272;</div>
+        <div class="rollback-action">Rotate DB credentials</div>
+        <div class="rollback-arrow">&#8596;</div>
+        <div class="rollback-undo">Restore previous credentials</div>
+      </div>
+      <div class="rollback-card">
+        <div class="rollback-icon">&#129139;</div>
+        <div class="rollback-action">Update firewall rule</div>
+        <div class="rollback-arrow">&#8596;</div>
+        <div class="rollback-undo">Delete rule, restore prior state</div>
+      </div>
+      <div class="rollback-card">
+        <div class="rollback-icon">&#9925;</div>
+        <div class="rollback-action">Modify security group</div>
+        <div class="rollback-arrow">&#8596;</div>
+        <div class="rollback-undo">Restore previous security group</div>
+      </div>
+      <div class="rollback-card">
+        <div class="rollback-icon">&#11014;</div>
+        <div class="rollback-action">Kernel / OS upgrade</div>
+        <div class="rollback-arrow">&#8596;</div>
+        <div class="rollback-undo">Restore pre-upgrade AMI snapshot</div>
+      </div>
+      <div class="rollback-card">
+        <div class="rollback-icon">&#128218;</div>
+        <div class="rollback-action">Shared library upgrade (glibc, OpenSSL)</div>
+        <div class="rollback-arrow">&#8596;</div>
+        <div class="rollback-undo">Restore prior packages + restart services</div>
+      </div>
+    </div>
+    <div class="rollback-compare">
+      <h3>No other platform covers this ground</h3>
+      <div class="compare-table-wrap">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Nexplane</th>
+              <th>Terraform</th>
+              <th>Ansible</th>
+              <th>ServiceNow</th>
+              <th>AWS SSM</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>End-to-end change workflow</td>
+              <td class="yes">&#10003;</td>
+              <td class="no">&#10007; (infra only)</td>
+              <td class="partial">partial</td>
+              <td class="partial">tickets only</td>
+              <td class="no">&#10007;</td>
+            </tr>
+            <tr>
+              <td>Typed rollback per operation</td>
+              <td class="yes">&#10003;</td>
+              <td class="no">&#10007; (destroy/re-apply)</td>
+              <td class="no">&#10007; (write your own)</td>
+              <td class="no">&#10007;</td>
+              <td class="no">&#10007;</td>
+            </tr>
+            <tr>
+              <td>Impact simulation</td>
+              <td class="yes">&#10003;</td>
+              <td class="no">&#10007;</td>
+              <td class="no">&#10007;</td>
+              <td class="no">&#10007;</td>
+              <td class="no">&#10007;</td>
+            </tr>
+            <tr>
+              <td>Infrastructure memory</td>
+              <td class="yes">&#10003;</td>
+              <td class="partial">state file only</td>
+              <td class="no">&#10007;</td>
+              <td class="partial">tickets only</td>
+              <td class="no">&#10007;</td>
+            </tr>
+            <tr>
+              <td>Live rollback verification</td>
+              <td class="yes">&#10003;</td>
+              <td class="no">&#10007;</td>
+              <td class="no">&#10007;</td>
+              <td class="no">&#10007;</td>
+              <td class="no">&#10007;</td>
+            </tr>
+            <tr>
+              <td>MCP server for AI agents</td>
+              <td class="yes">&#10003;</td>
+              <td class="no">&#10007;</td>
+              <td class="no">&#10007;</td>
+              <td class="no">&#10007;</td>
+              <td class="no">&#10007;</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MCP / AI AGENTS -->
+<section class="mcp-section" id="mcp">
+  <div class="container">
+    <div class="section-eyebrow">MCP Server</div>
+    <h2>Built for humans<br><em>and AI agents.</em></h2>
+    <p class="section-sub">
+      Everything available in the UI is accessible through Nexplane's MCP server. Claude, ChatGPT, Cursor, Codex, Windsurf, and internal agents can reason about and act on infrastructure &mdash; without direct cloud access.
+    </p>
+    <div class="mcp-grid">
+      <div class="mcp-flow">
+        <div class="mcp-flow-header">How it works</div>
+        <div class="ai-flow">
+          <div class="ai-flow-step">
+            <div class="flow-icon">&#128172;</div>
+            <div class="flow-label">Agent proposes a change</div>
+            <div class="flow-sub">"Rotate expiring certificates on prod cluster"</div>
+          </div>
+          <div class="flow-arrow">&#8595;</div>
+          <div class="ai-flow-step highlight-step">
+            <div class="flow-icon">&#128269;</div>
+            <div class="flow-label">Nexplane validates via MCP</div>
+            <div class="flow-sub">14 certs &middot; blast radius &middot; prechecks &middot; rollback plan generated</div>
+          </div>
+          <div class="flow-arrow">&#8595;</div>
+          <div class="ai-flow-step">
+            <div class="flow-icon">&#9878;</div>
+            <div class="flow-label">Human approval gate</div>
+            <div class="flow-sub">Risk: medium &middot; Approved by: platform-lead</div>
+          </div>
+          <div class="flow-arrow">&#8595;</div>
+          <div class="ai-flow-step">
+            <div class="flow-icon">&#9989;</div>
+            <div class="flow-label">Controlled execution + rollback ready</div>
+            <div class="flow-sub">14/14 rotated &middot; services verified &middot; audit trail written</div>
+          </div>
+        </div>
+        <p class="ai-solution-note">The agent never touches infrastructure directly. It proposes. The control plane validates, approves, executes, verifies &mdash; and can always undo.</p>
+      </div>
+      <div class="mcp-queries">
+        <div class="mcp-queries-header">Ask Nexplane anything</div>
+        <div class="terminal-block mcp-terminal">
+          <div class="terminal-bar">
+            <span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>
+            <span class="terminal-title">MCP Server &middot; nexplane</span>
+          </div>
+          <div class="terminal-body">
+            <div class="terminal-query">
+              <span class="t-prompt">agent</span>
+              <span class="t-question">What systems depend on the payroll service?</span>
+            </div>
+            <div class="terminal-answer">8 upstream dependencies &middot; 3 shared DB connections &middot; 2 certificate chains</div>
+            <div class="terminal-query">
+              <span class="t-prompt">agent</span>
+              <span class="t-question">What will break if I rotate wildcard.acme.internal?</span>
+            </div>
+            <div class="terminal-answer">14 services affected &middot; downtime risk: low &middot; rollback: 45s &middot; approval required</div>
+            <div class="terminal-query">
+              <span class="t-prompt">agent</span>
+              <span class="t-question">Generate a safe change plan to patch critical Linux hosts.</span>
+            </div>
+            <div class="terminal-answer">CR-4291 created &middot; 34 hosts &middot; prechecks configured &middot; rollback: restore_snapshot</div>
+            <div class="terminal-query">
+              <span class="t-prompt">agent</span>
+              <span class="t-question">Which assets lack rollback coverage?</span>
+            </div>
+            <div class="terminal-answer">19 change types &middot; 47 assets &middot; coverage report available</div>
+          </div>
+        </div>
+        <div class="mcp-compat">
+          <div class="mcp-compat-label">Works with</div>
+          <div class="logo-row mcp-logos">
+            <span class="logo-pill">Claude</span>
+            <span class="logo-pill">ChatGPT</span>
+            <span class="logo-pill">Cursor</span>
+            <span class="logo-pill">Codex</span>
+            <span class="logo-pill">Windsurf</span>
+            <span class="logo-pill">Internal agents</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INTEGRATIONS -->
+<section class="integrations-section" id="integrations">
+  <div class="container">
+    <div class="section-eyebrow">Integrations</div>
+    <h2>Everything connects.</h2>
+    <p class="section-sub">Organized by workflow domain &mdash; not a logo wall.</p>
+    <div class="integrations-grid">
+      <div class="integration-domain">
+        <div class="integration-domain-label">Cloud</div>
+        <div class="logo-row integration-pills">
+          <span class="logo-pill">AWS</span>
+          <span class="logo-pill">GCP</span>
+          <span class="logo-pill">Azure</span>
+          <span class="logo-pill">Oracle Cloud</span>
+        </div>
+      </div>
+      <div class="integration-domain">
+        <div class="integration-domain-label">Identity</div>
+        <div class="logo-row integration-pills">
+          <span class="logo-pill">Active Directory</span>
+          <span class="logo-pill">Okta</span>
+          <span class="logo-pill">Entra ID</span>
+          <span class="logo-pill">Keycloak</span>
+        </div>
+      </div>
+      <div class="integration-domain">
+        <div class="integration-domain-label">Network</div>
+        <div class="logo-row integration-pills">
+          <span class="logo-pill">Palo Alto</span>
+          <span class="logo-pill">Cisco</span>
+          <span class="logo-pill">pfSense</span>
+          <span class="logo-pill">iptables</span>
+        </div>
+      </div>
+      <div class="integration-domain">
+        <div class="integration-domain-label">Containers</div>
+        <div class="logo-row integration-pills">
+          <span class="logo-pill">Kubernetes</span>
+          <span class="logo-pill">Docker</span>
+          <span class="logo-pill">ECS</span>
+          <span class="logo-pill">Helm</span>
+        </div>
+      </div>
+      <div class="integration-domain">
+        <div class="integration-domain-label">Endpoints</div>
+        <div class="logo-row integration-pills">
+          <span class="logo-pill">Linux</span>
+          <span class="logo-pill">Windows Server</span>
+          <span class="logo-pill">macOS</span>
+        </div>
+      </div>
+      <div class="integration-domain">
+        <div class="integration-domain-label">Secrets</div>
+        <div class="logo-row integration-pills">
+          <span class="logo-pill">HashiCorp Vault</span>
+          <span class="logo-pill">AWS Secrets Manager</span>
+          <span class="logo-pill">Azure Key Vault</span>
+        </div>
+      </div>
+      <div class="integration-domain">
+        <div class="integration-domain-label">Certificates</div>
+        <div class="logo-row integration-pills">
+          <span class="logo-pill">Let's Encrypt</span>
+          <span class="logo-pill">DigiCert</span>
+          <span class="logo-pill">Internal PKI</span>
+        </div>
+      </div>
+      <div class="integration-domain">
+        <div class="integration-domain-label">Monitoring</div>
+        <div class="logo-row integration-pills">
+          <span class="logo-pill">Datadog</span>
+          <span class="logo-pill">Prometheus</span>
+          <span class="logo-pill">CloudWatch</span>
+          <span class="logo-pill">PagerDuty</span>
+        </div>
+      </div>
+      <div class="integration-domain">
+        <div class="integration-domain-label">Source Control</div>
+        <div class="logo-row integration-pills">
+          <span class="logo-pill">GitHub</span>
+          <span class="logo-pill">GitLab</span>
+          <span class="logo-pill">Bitbucket</span>
+        </div>
+      </div>
+      <div class="integration-domain">
+        <div class="integration-domain-label">Ticketing</div>
+        <div class="logo-row integration-pills">
+          <span class="logo-pill">Jira</span>
+          <span class="logo-pill">ServiceNow</span>
+          <span class="logo-pill">Linear</span>
+        </div>
+      </div>
+      <div class="integration-domain">
+        <div class="integration-domain-label">Compliance</div>
+        <div class="logo-row integration-pills">
+          <span class="logo-pill">CIS Controls</span>
+          <span class="logo-pill">SOC 2</span>
+          <span class="logo-pill">FedRAMP</span>
+          <span class="logo-pill">ISO 27001</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA + FORM -->
+<section class="early-access" id="request-demo">
+  <div class="container form-container">
+    <div class="form-copy">
+      <div class="section-eyebrow">Get Started</div>
+      <h2>Change infrastructure<br>with confidence.</h2>
+      <p>We'll walk you through the platform against a real or demo environment. No pressure, no contract.</p>
+      <ul class="form-benefits">
+        <li>&#10003; Live walkthrough against real or demo infrastructure</li>
+        <li>&#10003; Direct access to the founding team</li>
+        <li>&#10003; Shape the roadmap &mdash; tell us what's missing</li>
+        <li>&#10003; Preferred pricing at GA</li>
+      </ul>
+    </div>
+    <div class="form-panel">
+      <form id="interest-form">
+        <div class="form-row">
+          <div class="form-field">
+            <label>First name</label>
+            <input type="text" name="first_name" placeholder="Jane" required />
+          </div>
+          <div class="form-field">
+            <label>Last name</label>
+            <input type="text" name="last_name" placeholder="Smith" required />
+          </div>
+        </div>
+        <div class="form-field">
+          <label>Work email</label>
+          <input type="email" name="email" placeholder="jane@company.com" required />
+        </div>
+        <div class="form-field">
+          <label>Company</label>
+          <input type="text" name="company" placeholder="Acme Corp" required />
+        </div>
+        <div class="form-field">
+          <label>Role</label>
+          <select name="role">
+            <option value="">Select your role&hellip;</option>
+            <option>Platform Engineer</option>
+            <option>Infrastructure Engineer</option>
+            <option>Cloud Engineer</option>
+            <option>SRE / Production Engineer</option>
+            <option>Network Engineer</option>
+            <option>Security Engineer</option>
+            <option>Technology Operations</option>
+            <option>Engineering / Infrastructure Leadership</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>Fleet size</label>
+          <select name="fleet_size">
+            <option value="">How many servers / cloud VMs?</option>
+            <option>1&ndash;50</option>
+            <option>50&ndash;500</option>
+            <option>500&ndash;5,000</option>
+            <option>5,000+</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>What are you trying to solve?</label>
+          <textarea name="pain_point" rows="3" placeholder="e.g. We need a safer way to execute infrastructure changes across our fleet without the risk of outages&hellip;"></textarea>
+        </div>
+        <button type="submit" class="btn-submit" id="submit-btn">
+          <span id="btn-text">Request demo</span>
+          <span id="btn-spinner" style="display:none">Sending&hellip;</span>
+        </button>
+        <div id="form-success" class="form-success" style="display:none">
+          &#10003; Got it &mdash; we'll be in touch within 48 hours.
+        </div>
+        <div id="form-error" class="form-error" style="display:none">
+          Something went wrong. Email us directly at <a href="mailto:hello@nexplane.ai">hello@nexplane.ai</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-logo">Nexplane</div>
+    <p class="footer-tagline">The control plane for infrastructure change.</p>
+    <div class="footer-links">
+      <a href="mailto:hello@nexplane.ai">hello@nexplane.ai</a>
+    </div>
+    <p class="footer-copy">&copy; 2026 Nexplane. All rights reserved.</p>
+  </div>
+</footer>
+
+<script src="form.js"></script>
+</body>
+</html>
