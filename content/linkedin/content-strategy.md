@@ -322,19 +322,43 @@ commitments from network in advance, have a strong demo ready.
 
 ## Priority Order (What To Do First)
 
-1. **LinkedIn posts** — start now, Phase 1 posts ready to write
-2. **Blog posts on nexplane.ai** — start expanding LinkedIn posts to long-form
-   in parallel; even 2-3 solid blog posts before launch matters for SEO
-3. **Newsletter signup on nexplane.ai** — add a capture form now even if the
-   newsletter doesn't exist yet; collect the audience while building it
-4. **Podcast pitches** — begin outreach to 3-4 shows after the first 4-5
-   LinkedIn posts establish the voice and point of view
-5. **Conference CFPs** — submit to RSA and fwd:cloudsec; both have long
-   lead times; submit now even if the talk isn't fully formed
-6. **Reddit / HN** — begin genuine participation now; don't wait for content
-7. **Video** — start after LinkedIn cadence is established; don't overload
-   channel capacity early
-8. **Analyst briefings** — after first customers and proof points exist
+**The goal is design partners, not awareness.** Traditional conferences
+are deprioritized. Content and in-person meetups work together to surface
+practitioners who want to run Nexplane against real infrastructure.
+
+See `F:\Nexplane\nexplane\content\gtm\design-partner-strategy.md` for the
+full unified strategy. Summary:
+
+1. **LinkedIn posts** — Phase 1 posts drafted and ready. CTA is "if this
+   sounds familiar, I'd like to hear how your org handles it" — not a
+   product pitch. Design partner opener.
+2. **NYC meetup groups** — join all groups (reminder set for June 17, 2pm).
+   Register for June 23 SRE Tech Talks at Google NYC immediately.
+3. **Attend before speaking** — CoffeeOps, NYLUG, DOXNYC first as a listener.
+   Earn credibility, then propose a talk.
+4. **Blog posts on nexplane.ai** — expand LinkedIn posts to long-form for SEO.
+5. **Newsletter capture** — add signup form to nexplane.ai now.
+6. **Talk proposals** — DOXNYC first (lowest barrier), then SRE Tech Talks.
+   End every talk with an explicit design partner ask.
+7. **Reddit / HN** — genuine participation, Back to Basics posts when relevant.
+8. **Podcast pitches** — after 4-5 posts establish the voice.
+9. **Analyst briefings** — after design partners provide proof points.
+
+## Three Design Partner Research Questions
+
+All content and events are designed to surface answers to:
+
+1. **Coverage gaps** — what actions/problems does the platform not yet solve?
+   Attracted by: Back to Basics series, Execution Gap post, CoffeeOps conversations.
+
+2. **Open source vs. managed** — self-host preference, credential handling
+   concerns, managed vs. operational burden tradeoff.
+   Surfaced by: NYLUG, Unigroup, Red Hat UG conversations — ask directly.
+
+3. **AI mandate budget unlock** — are infrastructure leaders being asked to
+   demonstrate AI adoption? Is Nexplane their credible safe answer?
+   Attracted by: AI Safety Harness posts. Surfaced by asking "is your org
+   asking how you're embracing AI?" at SRE Tech Talks and Uptime NY.
 
 ---
 
