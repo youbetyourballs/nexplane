@@ -16,10 +16,13 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "mock": True,
         }
 
+    force_generate = parameters.get('force_generate', False)
+
     # If a pre-generated reusable auth key is stored in credentials, use it directly.
     # This is the simplest path — generate a reusable key in tailscale.com/admin/settings/keys
     # and store it as auth_key in the connector credentials.
-    if creds.get('auth_key'):
+    # force_generate=True bypasses this and always creates a fresh per-guest key via OAuth.
+    if creds.get('auth_key') and not force_generate:
         return {
             "action": "generate_auth_key",
             "auth_key": creds['auth_key'],

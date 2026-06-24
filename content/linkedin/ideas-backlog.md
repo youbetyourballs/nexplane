@@ -9,6 +9,59 @@ Captured from brainstorming session 2026-05-30. Running log — add to this, don
 
 ---
 
+## Core Framing: Nexplane as Operating System for Infrastructure Change
+
+This analogy came from John's time as a graduate CS professor at NYU teaching
+operating systems. It is the clearest explanation of what the category is and
+should appear in positioning, posts, pitch, design partner conversations, and
+the public website.
+
+**The OS analogy:**
+An operating system serves as an abstraction layer and resource manager —
+partly for security, partly to standardize around what would otherwise be
+hardware-specific protocols. You don't write to the disk controller directly.
+You write to the OS API, which enforces boundaries, manages resources, and
+abstracts away hardware details.
+
+Nexplane is the same idea, one layer up. It doesn't care whether you're on
+AWS or GCP or Azure, whether your identity is in AD or Okta, whether your
+secrets are in Vault or AWS Secrets Manager. It gives you cloud/OS-agnostic
+primitives — rotate credential, isolate host, apply policy, rollback — and
+abstracts away the connector-specific implementation. You define a change
+request, not a boto3 script.
+
+**The abstraction serves two purposes simultaneously — same as an OS:**
+- **Safety** — you don't get direct hardware access; you go through the kernel,
+  which enforces boundaries and prevents one process from corrupting another.
+  With Nexplane, you don't get direct cloud API access; you go through the
+  control plane, which enforces rollback, blast radius, and approval gates.
+- **Portability** — write once, run on any supported hardware. Define a change
+  once, execute against any supported connector.
+
+**Why this reframes the moat:**
+Nobody asks "why don't I just write kernel code directly?" The OS abstraction
+is load-bearing — not overhead, it's the point. Same argument applies to
+Nexplane vs. "why don't I just write a Python script against the AWS API."
+The abstraction is the product.
+
+**Why this reframes open source vs. managed:**
+Linux is open source. Red Hat charges for the guaranteed, supported, certified
+version. The core abstraction is free; the guarantee is the product. This maps
+cleanly onto Nexplane — the smoke test suite, rollback verification, and
+connector certification are the Red Hat layer.
+
+**Why this is the killer line for the AI mandate conversation:**
+Every major AI safety problem with infrastructure access is a missing
+operating system problem. The AI agent is a process. It needs a kernel —
+something that mediates its access to resources, enforces boundaries, and
+prevents it from corrupting things it shouldn't touch. That's Nexplane.
+
+**The category name this unlocks:**
+Not "security execution platform." Not "SOAR replacement."
+"The operating system for infrastructure change."
+
+---
+
 ## POST LIST — CONSOLIDATED
 
 ---
