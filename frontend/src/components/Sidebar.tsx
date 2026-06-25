@@ -31,12 +31,20 @@ import { DemoOrgSwitcher } from './DemoOrgSwitcher';
 
 // ── nav item definitions ─────────────────────────────────────────────────────
 
-const topNavItems = [
+const coreNavItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/change-requests", label: "Change Requests", icon: FileStack },
   { to: "/projects", label: "Projects", icon: FolderOpen },
+];
+
+const discoverNavItems = [
   { to: "/assets", label: "Assets", icon: Server },
   { to: "/connectors", label: "Connectors", icon: Plug },
+  { to: "/infrastructure-memory", label: "Infrastructure Memory", icon: Brain },
+];
+
+const observeNavItems = [
+  { to: "/impact-simulation", label: "Impact Simulation", icon: Zap },
 ];
 
 const operationsNavItems = [
@@ -53,9 +61,7 @@ const complianceNavItems = [
 ];
 
 const previewNavItems = [
-  { to: "/impact-simulation", label: "Impact Simulation", icon: Zap },
   { to: "/recommendations", label: "Recommendations", icon: Lightbulb },
-  { to: "/infrastructure-memory", label: "Infrastructure Memory", icon: Brain },
 ];
 
 const bottomNavItems = [
@@ -210,8 +216,8 @@ export function Sidebar() {
       )}
 
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {/* Top group — core workflow */}
-        {topNavItems.map(({ to, label, icon, exact }) => (
+        {/* Core workflow */}
+        {coreNavItems.map(({ to, label, icon, exact }) => (
           <NavItem
             key={to}
             to={to}
@@ -220,6 +226,26 @@ export function Sidebar() {
             exact={exact}
             badge={to === "/change-requests" && pendingCount > 0 ? pendingCount : undefined}
           />
+        ))}
+
+        {/* Discover */}
+        <div className="px-3 pt-4 pb-1">
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+            Discover
+          </span>
+        </div>
+        {discoverNavItems.map(({ to, label, icon }) => (
+          <NavItem key={to} to={to} label={label} icon={icon} />
+        ))}
+
+        {/* Observe */}
+        <div className="px-3 pt-4 pb-1">
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+            Observe
+          </span>
+        </div>
+        {observeNavItems.map(({ to, label, icon }) => (
+          <NavItem key={to} to={to} label={label} icon={icon} />
         ))}
 
         {/* Operations */}
