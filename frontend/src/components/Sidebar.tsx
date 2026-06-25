@@ -107,7 +107,7 @@ function NavItem({
           </span>
         )}
       </div>
-      <span className="flex-1">{label}</span>
+      <span className="flex-1 truncate min-w-0">{label}</span>
       {preview && (
         <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-400 border border-amber-400/40 rounded px-1 py-0.5 leading-none">
           Preview
@@ -188,7 +188,7 @@ export function Sidebar() {
   const incompleteSteps = checklist?.steps?.filter((s) => !s.complete) ?? [];
 
   return (
-    <aside className="fixed inset-y-0 left-0 w-60 bg-navy flex flex-col z-10">
+    <aside className="fixed inset-y-0 left-0 w-60 bg-navy flex flex-col z-10 overflow-hidden">
       {/* Logo */}
       <div className="flex items-center px-5 py-4 border-b border-navy-border">
         <img src="/title_white.png" alt="Nexplane" className="h-8 w-auto" />
@@ -215,7 +215,7 @@ export function Sidebar() {
         </div>
       )}
 
-      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full">
         {/* Core workflow */}
         {coreNavItems.map(({ to, label, icon, exact }) => (
           <NavItem
