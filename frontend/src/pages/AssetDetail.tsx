@@ -684,6 +684,34 @@ export function AssetDetail() {
     enabled: !!id && activeTab === "activity",
   });
 
+  const { data: graphData } = useQuery({
+    queryKey: ["asset-graph", id],
+    queryFn: () =>
+      apiClient
+        .get(`/assets/${id}/graph`)
+        .then(
+          (r) =>
+            r.data as {
+              asset: { id: string; name: string; asset_type: string };
+              neighbors: Array<{
+                id: string;
+                name: string;
+                asset_type: string;
+                relationship_type: string;
+                direction: "upstream" | "downstream";
+                rel_id: string;
+              }>;
+              edges: Array<{
+                id: string;
+                source_asset_id: string;
+                target_asset_id: string;
+                relationship_type: string;
+              }>;
+            }
+        ),
+    enabled: !!id,
+  });
+
   const updateMutation = useMutation({
     mutationFn: () => {
       let metadata: Record<string, unknown>;
@@ -1261,6 +1289,63 @@ export function AssetDetail() {
             </div>
           );
           })()}
+
+          {/* Relationships */}
+          <div className="bg-white border border-slate-200 rounded-lg p-5">
+            <h2 className="text-sm font-semibold text-slate-900 mb-3">Relationships</h2>
+            {!graphData?.neighbors || graphData.neighbors.length === 0 ? (
+              <p className="text-xs text-slate-400">No relationships recorded.</p>
+            ) : (() => {
+              const upstream = graphData.neighbors.filter((n) => n.direction === "upstream");
+              const downstream = graphData.neighbors.filter((n) => n.direction === "downstream");
+              return (
+                <div className="space-y-4">
+                  {upstream.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">
+                        Depends on
+                      </p>
+                      <div className="space-y-1">
+                        {upstream.map((n) => (
+                          <button
+                            key={n.rel_id}
+                            onClick={() => navigate(`/assets/${n.id}`)}
+                            className="w-full text-left flex items-center justify-between px-2.5 py-1.5 rounded-md border border-slate-100 hover:border-brand-200 hover:bg-brand-50 text-xs"
+                          >
+                            <span className="text-slate-800 font-medium truncate">{n.name}</span>
+                            <span className="ml-2 shrink-0 px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                              {n.relationship_type}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {downstream.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">
+                        Depended on by
+                      </p>
+                      <div className="space-y-1">
+                        {downstream.map((n) => (
+                          <button
+                            key={n.rel_id}
+                            onClick={() => navigate(`/assets/${n.id}`)}
+                            className="w-full text-left flex items-center justify-between px-2.5 py-1.5 rounded-md border border-slate-100 hover:border-brand-200 hover:bg-brand-50 text-xs"
+                          >
+                            <span className="text-slate-800 font-medium truncate">{n.name}</span>
+                            <span className="ml-2 shrink-0 px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                              {n.relationship_type}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
 
           <div className="bg-white border border-slate-200 rounded-lg p-5">
             <h2 className="text-sm font-semibold text-slate-900 mb-3">Change Requests</h2>
