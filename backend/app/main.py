@@ -40,6 +40,7 @@ from app.routers.org_auth_mode import router as org_auth_mode_router
 from app.routers.oidc import router as oidc_router
 from app.routers.infrastructure_memory import router as infrastructure_memory_router
 from app.routers.impact_simulation import router as impact_simulation_router
+from app.routers.recommendations import router as recommendations_router
 from app.middleware.setup_guard import SetupGuardMiddleware
 from app.mcp_server import create_mcp_app
 from app.services import scheduler_service
@@ -213,6 +214,7 @@ app.include_router(org_auth_mode_router)
 app.include_router(oidc_router)
 app.include_router(infrastructure_memory_router)
 app.include_router(impact_simulation_router)
+app.include_router(recommendations_router)
 import os as _os
 if _os.getenv("DEMO_MODE") == "true":
     from app.routers.demo import router as demo_router
