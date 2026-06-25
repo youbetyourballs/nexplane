@@ -138,22 +138,32 @@ async def test_create_relationship_returns_201():
     existing_result.scalar_one_or_none.return_value = None
     db.execute = AsyncMock(return_value=existing_result)
 
+    def _side_effect_refresh(r):
+        # After commit+refresh, the router reads fields off the rel object.
+        # Ensure it has the expected values from the POST body.
+        r.id = uuid.uuid4()
+        r.organization_id = org_id
+        r.source_asset_id = source_id
+        r.target_asset_id = target_id
+        r.relationship_type = "depends_on"
+        r.rel_metadata = {}
+        r.created_by = user.id
+        r.created_at = None
+
     db.add = MagicMock()
     db.commit = AsyncMock()
-    db.refresh = AsyncMock(side_effect=lambda r: None)
+    db.refresh = AsyncMock(side_effect=_side_effect_refresh)
 
-    # patch AssetRelationship constructor to return our mock rel
-    with patch("app.routers.asset_graph.AssetRelationship", return_value=rel):
-        app = _make_app(user, db)
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post(
-                f"/assets/{source_id}/relationships",
-                json={
-                    "target_asset_id": str(target_id),
-                    "relationship_type": "depends_on",
-                    "rel_metadata": {},
-                },
-            )
+    app = _make_app(user, db)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            f"/assets/{source_id}/relationships",
+            json={
+                "target_asset_id": str(target_id),
+                "relationship_type": "depends_on",
+                "rel_metadata": {},
+            },
+        )
 
     assert resp.status_code == 201
     data = resp.json()
