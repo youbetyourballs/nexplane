@@ -347,6 +347,26 @@ export const impactSimulationApi = {
       .then((r) => r.data),
 };
 
+// ─── Recommendations ─────────────────────────────────────────────────────────
+
+export interface Recommendation {
+  id: string;
+  asset_id: string;
+  asset_name: string;
+  asset_type: string;
+  criticality: string;
+  rule: string;
+  title: string;
+  description: string;
+  priority: "critical" | "high" | "medium" | "low";
+  action_link: string;
+}
+
+export const recommendationsApi = {
+  list: () =>
+    apiClient.get<Recommendation[]>("/recommendations").then((r) => r.data),
+};
+
 export const backupApi = {
   listTargets: () =>
     apiClient.get<BackupTarget[]>("/backup-targets").then((r) => r.data),
