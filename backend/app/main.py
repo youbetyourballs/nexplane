@@ -24,6 +24,7 @@ from app.routers import notifications as notifications_router
 from app.routers import current_user
 from app.routers.audit import list_cr_audit_events
 from app.routers.asset_timeline import router as asset_timeline_router
+from app.routers.asset_graph import router as asset_graph_router
 from app.routers.onboarding import router as onboarding_router
 from app.routers.credential_discovery import router as credential_discovery_router
 from app.routers.smoke_test_runs import router as smoke_test_runs_router
@@ -192,6 +193,7 @@ app.include_router(smoke_tests_router.router)
 app.include_router(access_reviews_router.router)
 app.include_router(notifications_router.router)
 app.include_router(asset_timeline_router)
+app.include_router(asset_graph_router)
 app.include_router(policy_generate_router)
 app.include_router(drift_alerts_router)
 app.include_router(onboarding_router)
