@@ -446,6 +446,13 @@ async def main():
     await seed()
     await seed_expansion()
     await seed_runbooks()
+    from app.seed.scenarios.saas import seed as seed_saas
+    from app.seed.scenarios.finserv import seed as seed_finserv
+    from app.seed.scenarios.defense import seed as seed_defense
+    async with AsyncSessionLocal() as db:
+        await seed_saas(db)
+        await seed_finserv(db)
+        await seed_defense(db)
 
 if __name__ == "__main__":
     asyncio.run(main())
