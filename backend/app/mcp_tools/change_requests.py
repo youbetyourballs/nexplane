@@ -27,8 +27,8 @@ async def _auth(token: str):
 @mcp.tool()
 async def list_change_types(token: str) -> list[dict[str, Any]]:
     """
-    List all available Change Request types with their display names and descriptions.
-    Use this to discover what CRs can be created before calling create_change_request.
+    Discover what infrastructure changes are available. Use this first to find the right
+    change_type before creating a CR.
     """
     from app.connectors.catalog_service import get_catalog
     user, db, db_cm = await _auth(token)
@@ -51,8 +51,8 @@ async def list_change_types(token: str) -> list[dict[str, Any]]:
 @mcp.tool()
 async def get_change_type(token: str, change_type: str) -> dict[str, Any]:
     """
-    Get the full schema for a specific Change Request type including all parameters and their types.
-    Use this to understand what parameters are required before creating a CR.
+    Get the full parameter schema for a change type including all parameters and their types.
+    Use to understand what's required before creating a CR.
     """
     from app.connectors.catalog_service import get_catalog
     user, db, db_cm = await _auth(token)
@@ -82,7 +82,8 @@ async def list_change_requests(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
-    List Change Requests for the org. Filter by status (draft/approved/executed/rolled_back/failed),
+    Query change history for the org. Use to answer: what changed recently, who approved it,
+    and what's in flight? Filter by status (draft/approved/executed/rolled_back/failed),
     change_type, or asset_id. Returns summary fields — use get_change_request for full detail.
     """
     from sqlalchemy import select
@@ -181,8 +182,8 @@ async def get_change_request(token: str, cr_id: str) -> dict[str, Any]:
 async def get_change_request_plan(token: str, cr_id: str) -> dict[str, Any]:
     """
     Get the AI-generated execution plan for a CR — steps, estimated impact, rollback path.
-    Automatically includes the asset context bundle so you can validate the plan is appropriate
-    before approving. Call this after create_change_request and before approve_change_request.
+    Review before approving. Call this after create_change_request and before approve_change_request.
+    Automatically includes the asset context bundle.
     """
     from sqlalchemy import select
     from app.models.change_request import ChangeRequest
@@ -233,10 +234,10 @@ async def create_change_request(
     parameters: dict,
 ) -> dict[str, Any]:
     """
-    Create a draft Change Request for a specific change_type against a target asset.
-    The CR is created in draft state — it must be approved and executed separately.
-    This tool NEVER executes a change directly. Returns the draft CR and asset context bundle
-    so you can validate the plan before approving. Use list_change_types to discover available types.
+    Create a draft Change Request for an infrastructure change against a target asset.
+    The CR is created in draft state — it must be reviewed, approved, and executed separately.
+    This tool NEVER executes a change directly. Use list_change_types to discover available types.
+    Returns the draft CR and asset context bundle so you can validate the plan before approving.
     """
     from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType
     from app.mcp_tools.context import build_asset_context
@@ -277,8 +278,8 @@ async def create_change_request(
 @mcp.tool()
 async def approve_change_request(token: str, cr_id: str, comment: str = None) -> dict[str, Any]:
     """
-    Approve a Change Request. Respects the authenticated user's role — tokens without approval
-    permission will be rejected. A user cannot approve a CR they created (platform-enforced).
+    Approve a Change Request. Respects role-based permissions — tokens without approval
+    permission are rejected. A user cannot approve a CR they created (platform-enforced).
     """
     from sqlalchemy import select
     from app.models.change_request import ChangeRequest, ChangeRequestStatus
@@ -358,7 +359,7 @@ async def reject_change_request(token: str, cr_id: str, reason: str) -> dict[str
 @mcp.tool()
 async def execute_change_request(token: str, cr_id: str) -> dict[str, Any]:
     """
-    Execute an approved Change Request. This triggers the executor against the target connector.
+    Execute an approved Change Request. Triggers the executor against the target connector.
     The CR must be in approved state. Execution is asynchronous — poll get_change_request for status.
     """
     from sqlalchemy import select
@@ -392,8 +393,8 @@ async def execute_change_request(token: str, cr_id: str) -> dict[str, Any]:
 @mcp.tool()
 async def rollback_change_request(token: str, cr_id: str) -> dict[str, Any]:
     """
-    Roll back an executed Change Request using the stored rollback snapshot.
-    Only executed CRs can be rolled back. Creates a rollback execution run.
+    Roll back an executed Change Request using the stored rollback snapshot. Only executed CRs
+    can be rolled back. Creates a rollback execution run. Returns rollback feasibility and steps.
     """
     from sqlalchemy import select
     from app.models.change_request import ChangeRequest, ChangeRequestStatus
@@ -534,5 +535,69 @@ async def get_cr_manifest(
         return {"count": len(entries), "entries": entries}
     except Exception as exc:
         return {"error": str(exc)}
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def explain_change_request(token: str, cr_id: str) -> dict[str, Any]:
+    """
+    Get a compact human-readable summary of a CR suitable for LLM reasoning: what it does,
+    what it touches, the risk level, who approved it, and whether rollback is available.
+    Use instead of get_change_request when you need a quick, structured overview.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from app.models.change_request import ChangeRequest
+    from app.models.approval import Approval
+    from app.models.change_plan import ChangePlan
+
+    user, db, db_cm = await _auth(token)
+    try:
+        result = await db.execute(
+            select(ChangeRequest).where(
+                ChangeRequest.id == _uuid.UUID(cr_id),
+                ChangeRequest.organization_id == user.organization_id,
+            ).options(selectinload(ChangeRequest.approvals))
+        )
+        cr = result.scalar_one_or_none()
+        if cr is None:
+            return {"error": "Change request not found"}
+
+        # Fetch latest plan for risk info
+        plan_result = await db.execute(
+            select(ChangePlan).where(ChangePlan.change_request_id == cr.id)
+            .order_by(ChangePlan.created_at.desc()).limit(1)
+        )
+        plan = plan_result.scalar_one_or_none()
+        plan_data = plan.plan_data if plan else {}
+
+        approvers = [
+            {
+                "approver_id": str(a.approver_id),
+                "decision": str(a.decision),
+                "comment": a.comment,
+                "decided_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in (cr.approvals or [])
+            if str(a.decision) == "approved"
+        ]
+
+        blast = plan_data.get("blast_radius", {})
+        rollback = plan_data.get("rollback_plan", {})
+
+        return {
+            "id": str(cr.id),
+            "title": cr.title,
+            "change_type": str(cr.change_type),
+            "lifecycle_stage": str(cr.status),
+            "description": cr.description,
+            "affected_asset_ids": cr.target_asset_ids or [],
+            "risk_level": blast.get("estimated_impact", "unknown"),
+            "rollback_available": rollback.get("automatic", False),
+            "rollback_strategy": rollback.get("strategy", "unknown"),
+            "approved_by": approvers,
+            "created_at": cr.created_at.isoformat() if cr.created_at else None,
+        }
     finally:
         await db_cm.__aexit__(None, None, None)
