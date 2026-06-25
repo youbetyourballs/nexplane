@@ -310,6 +310,43 @@ export const infrastructureMemoryApi = {
       .then((r) => r.data),
 };
 
+export interface ImpactSimulationResult {
+  asset: {
+    id: string;
+    name: string;
+    asset_type: string;
+    environment: string;
+    criticality: string;
+    owner: string | null;
+    why_exists: string | null;
+  };
+  upstream: Array<{
+    id: string;
+    name: string;
+    asset_type: string;
+    relationship_type: string;
+    depth: number;
+  }>;
+  downstream: Array<{
+    id: string;
+    name: string;
+    asset_type: string;
+    relationship_type: string;
+    depth: number;
+    criticality: string;
+  }>;
+  downstream_risk: { critical: number; high: number; total: number };
+  recent_crs: Array<{ id: string; title: string; status: string; created_at: string }>;
+  open_findings_count: number;
+}
+
+export const impactSimulationApi = {
+  analyze: (assetId: string) =>
+    apiClient
+      .get<ImpactSimulationResult>(`/impact-simulation`, { params: { asset_id: assetId } })
+      .then((r) => r.data),
+};
+
 export const backupApi = {
   listTargets: () =>
     apiClient.get<BackupTarget[]>("/backup-targets").then((r) => r.data),
