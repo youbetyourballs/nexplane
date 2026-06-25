@@ -27,6 +27,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { useAuth } from "../hooks/useAuth";
+import { DemoOrgSwitcher } from './DemoOrgSwitcher';
 
 // ── nav item definitions ─────────────────────────────────────────────────────
 
@@ -271,6 +272,8 @@ export function Sidebar() {
             </div>
           )}
         </div>
+
+        <DemoOrgSwitcher />
 
         {/* Bottom strip */}
         <div className="pt-2 border-t border-navy-border mt-2 space-y-0.5">
