@@ -958,6 +958,18 @@ export function AssetDetail() {
                 <dd className="text-sm text-slate-900 mt-0.5">{asset.environment}</dd>
                 {editing && <p className="text-xs text-slate-400 mt-0.5">Cannot be changed after creation.</p>}
               </div>
+              {asset.asset_metadata?.owner && (
+                <div>
+                  <dt className="text-xs text-slate-400">Owner</dt>
+                  <dd className="text-sm text-slate-900 mt-0.5">{asset.asset_metadata.owner as string}</dd>
+                </div>
+              )}
+              {asset.asset_metadata?.why_exists && (
+                <div className="col-span-2">
+                  <dt className="text-xs text-slate-400">Why it exists</dt>
+                  <dd className="text-sm text-slate-900 mt-0.5">{asset.asset_metadata.why_exists as string}</dd>
+                </div>
+              )}
             </dl>
           </div>
 
