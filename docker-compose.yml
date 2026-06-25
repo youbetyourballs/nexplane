@@ -29,6 +29,7 @@ services:
       ENVIRONMENT: development
       CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
       NEXPLANE_AGENT_DOWNLOAD_URL: "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com"
+      DEMO_MODE: "true"
     depends_on:
       db:
         condition: service_healthy
