@@ -23,6 +23,9 @@ import BackupRecovery from "../pages/BackupRecovery";
 import { MaintenanceWindows } from "../pages/MaintenanceWindows";
 import ScheduledOperations from "../pages/ScheduledOperations";
 import { Notifications } from "../pages/Notifications";
+import { ImpactSimulationPage } from "../pages/ImpactSimulationPage";
+import { RecommendationsPage } from "../pages/RecommendationsPage";
+import { InfrastructureMemoryPage } from "../pages/InfrastructureMemoryPage";
 import { useAuth } from "../hooks/useAuth";
 
 export function AppRoutes() {
@@ -59,6 +62,9 @@ export function AppRoutes() {
         <Route path="/scheduled-operations" element={<ScheduledOperations />} />
         <Route path="/smoke-tests" element={<SmokeTests />} />
         <Route path="/notifications" element={<Notifications />} />
+        <Route path="/impact-simulation" element={<ImpactSimulationPage />} />
+        <Route path="/recommendations" element={<RecommendationsPage />} />
+        <Route path="/infrastructure-memory" element={<InfrastructureMemoryPage />} />
       </Route>
     </Routes>
   );
