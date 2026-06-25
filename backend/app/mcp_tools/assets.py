@@ -31,8 +31,9 @@ async def list_assets(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
-    List assets for the org. Filter by asset_type (server/cloud_account/dns_zone/etc.),
-    environment (dev/staging/prod), criticality (low/medium/high/critical), or connector_id.
+    Enumerate infrastructure assets across connected systems. Use to answer: what do we have?
+    Filter by asset_type (server/cloud_account/dns_zone/etc.), environment (dev/staging/prod),
+    criticality (low/medium/high/critical), or connector_id.
     Returns summary fields — use get_asset for full detail.
     """
     from sqlalchemy import select
@@ -76,7 +77,8 @@ async def list_assets(
 @mcp.tool()
 async def get_asset(token: str, asset_id: str) -> dict[str, Any]:
     """
-    Get an asset record including metadata, tags, and linked connector.
+    Get full context for an asset including owner, connector source, and recent changes.
+    Use before creating a CR to understand what you're touching.
     """
     from sqlalchemy import select
     from app.models.asset import Asset
@@ -110,9 +112,8 @@ async def get_asset(token: str, asset_id: str) -> dict[str, Any]:
 @mcp.tool()
 async def get_asset_context(token: str, asset_id: str) -> dict[str, Any]:
     """
-    Get a full planning context bundle for an asset: asset record, installed software (from last
-    discovery), open findings, recent CRs (last 10), recent timeline events (last 20), connected
-    connectors. Use this before creating a CR to ensure the plan is appropriate.
+    Get a full planning context bundle for an asset: recent CRs, open findings, timeline, and
+    connector. Use before creating a CR to ensure the plan is appropriate for this asset.
     """
     from app.mcp_tools.context import build_asset_context
 
@@ -135,8 +136,8 @@ async def list_asset_findings(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
-    List all findings for a specific asset with severity and status.
-    Filter by status (open/actionable/remediating/etc.) or severity (critical/high/medium/low).
+    List open security findings for an asset. Use to identify what needs remediation before or
+    after a change. Filter by status (open/actionable/remediating/etc.) or severity (critical/high/medium/low).
     """
     from sqlalchemy import select
     from app.models.vulnerability import VulnerabilityFinding
@@ -188,8 +189,9 @@ async def get_asset_timeline(
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     """
-    Get recent change and event history for an asset. Returns the last N timeline events
-    including CR executions, finding ingests, and scan events.
+    Get ordered change and event history for an asset. Use to answer: what changed recently
+    and who approved it? Returns the last N timeline events including CR executions, finding
+    ingests, and scan events.
     """
     from sqlalchemy import select
     from app.models.asset import Asset
@@ -226,6 +228,54 @@ async def get_asset_timeline(
                 "timestamp": cr.created_at.isoformat() if cr.created_at else None,
             }
             for cr in asset_crs
+        ]
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def search_assets(
+    token: str,
+    query: str,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """
+    Search assets by name substring or tag value. Use to find assets when you don't know
+    the exact ID. Returns the same fields as list_assets.
+    """
+    from sqlalchemy import select
+    from app.models.asset import Asset
+
+    user, db, db_cm = await _auth(token)
+    try:
+        stmt = (
+            select(Asset)
+            .where(Asset.organization_id == user.organization_id)
+            .order_by(Asset.created_at.desc())
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        assets = result.scalars().all()
+
+        q = query.lower()
+        matched = [
+            a for a in assets
+            if q in a.name.lower()
+            or any(q in str(tag).lower() for tag in (a.tags or []))
+        ]
+
+        return [
+            {
+                "id": str(a.id),
+                "name": a.name,
+                "asset_type": str(a.asset_type),
+                "environment": str(a.environment),
+                "criticality": str(a.criticality),
+                "connector_id": str(a.connector_id) if a.connector_id else None,
+                "tags": a.tags,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in matched
         ]
     finally:
         await db_cm.__aexit__(None, None, None)
