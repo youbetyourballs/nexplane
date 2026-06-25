@@ -284,6 +284,32 @@ export interface RestoreCrCreate {
   notes?: string;
 }
 
+// ─── Infrastructure Memory ────────────────────────────────────────────────────
+
+export interface InfrastructureMemoryItem {
+  id: string;
+  name: string;
+  asset_type: string;
+  environment: string;
+  criticality: string;
+  owner: string | null;
+  why_exists: string | null;
+}
+
+export interface InfrastructureMemoryResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  items: InfrastructureMemoryItem[];
+}
+
+export const infrastructureMemoryApi = {
+  list: (params: { q?: string; page?: number; page_size?: number }) =>
+    apiClient
+      .get<InfrastructureMemoryResponse>("/infrastructure-memory", { params })
+      .then((r) => r.data),
+};
+
 export const backupApi = {
   listTargets: () =>
     apiClient.get<BackupTarget[]>("/backup-targets").then((r) => r.data),
