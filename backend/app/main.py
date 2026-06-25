@@ -207,6 +207,10 @@ app.include_router(setup_router)
 app.include_router(identity_providers_router)
 app.include_router(org_auth_mode_router)
 app.include_router(oidc_router)
+import os as _os
+if _os.getenv("DEMO_MODE") == "true":
+    from app.routers.demo import router as demo_router
+    app.include_router(demo_router, prefix="/demo", tags=["demo"])
 app.mount("/mcp", create_mcp_app())
 
 
