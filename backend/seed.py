@@ -3,6 +3,7 @@ Seed script - idempotent (skips if org already exists).
 Run: python seed.py
 """
 import asyncio
+import os
 import uuid
 
 from sqlalchemy import select
@@ -446,16 +447,19 @@ async def main():
     await seed()
     await seed_expansion()
     await seed_runbooks()
-    from app.seed.scenarios.saas import seed as seed_saas
-    from app.seed.scenarios.finserv import seed as seed_finserv
-    from app.seed.scenarios.defense import seed as seed_defense
-    async with AsyncSessionLocal() as db:
-        await seed_saas(db)
-        await seed_finserv(db)
-        await seed_defense(db)
-    from app.seed.seed_asset_graph import seed_asset_graph
-    async with AsyncSessionLocal() as db:
-        await seed_asset_graph(db)
+    if os.getenv("DEMO_MODE") == "true":
+        from app.seed.scenarios.saas import seed as seed_saas
+        from app.seed.scenarios.finserv import seed as seed_finserv
+        from app.seed.scenarios.defense import seed as seed_defense
+        async with AsyncSessionLocal() as db:
+            await seed_saas(db)
+            await seed_finserv(db)
+            await seed_defense(db)
+        from app.seed.seed_asset_graph import seed_asset_graph
+        async with AsyncSessionLocal() as db:
+            await seed_asset_graph(db)
+    else:
+        print("DEMO_MODE not set — skipping demo org seeds.")
 
 if __name__ == "__main__":
     asyncio.run(main())
