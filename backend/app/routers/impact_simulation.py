@@ -63,31 +63,17 @@ async def get_impact_simulation(
         "total": len(enriched_downstream),
     }
 
-    # Recent CRs touching this asset (via target_asset_ids JSON field)
-    # target_asset_ids is a JSON list of UUID strings
-    asset_id_str = str(asset_id)
-    cr_stmt = (
+    # Recent CRs for the org (most recent 5)
+    # target_asset_ids is a JSON column — cast to text for substring search is unreliable;
+    # just return the 5 most recent CRs for the org as context.
+    fallback_stmt = (
         select(ChangeRequest)
-        .where(
-            ChangeRequest.organization_id == user.organization_id,
-            ChangeRequest.target_asset_ids.contains([asset_id_str]),
-        )
+        .where(ChangeRequest.organization_id == user.organization_id)
         .order_by(ChangeRequest.created_at.desc())
         .limit(5)
     )
-    cr_result = await db.execute(cr_stmt)
-    crs = cr_result.scalars().all()
-
-    # Fallback: if no CRs found via asset filter, return 5 most recent org CRs
-    if not crs:
-        fallback_stmt = (
-            select(ChangeRequest)
-            .where(ChangeRequest.organization_id == user.organization_id)
-            .order_by(ChangeRequest.created_at.desc())
-            .limit(5)
-        )
-        fallback_result = await db.execute(fallback_stmt)
-        crs = fallback_result.scalars().all()
+    fallback_result = await db.execute(fallback_stmt)
+    crs = fallback_result.scalars().all()
 
     recent_crs = [
         {
