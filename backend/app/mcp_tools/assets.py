@@ -279,3 +279,72 @@ async def search_assets(
         ]
     finally:
         await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def get_asset_neighbors(
+    token: str,
+    asset_id: str,
+) -> dict[str, Any]:
+    """
+    Get the immediate relationship neighborhood of an asset.
+    Returns upstream (what this asset depends on) and downstream (what depends on this asset).
+    Use before planning changes to understand blast radius and dependency chain.
+    """
+    from sqlalchemy import select
+    from app.services.asset_graph import get_neighbors
+    from app.models.asset import Asset
+
+    user, db, db_cm = await _auth(token)
+    try:
+        asset_uuid = _uuid.UUID(asset_id)
+        result = await db.execute(
+            select(Asset).where(
+                Asset.id == asset_uuid,
+                Asset.organization_id == user.organization_id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            return {"error": "Asset not found"}
+
+        neighbors = await get_neighbors(db, asset_uuid, user.organization_id, direction="both")
+        return {
+            "asset_id": asset_id,
+            "upstream": [n for n in neighbors if n["direction"] == "upstream"],
+            "downstream": [n for n in neighbors if n["direction"] == "downstream"],
+        }
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def get_asset_upstream(
+    token: str,
+    asset_id: str,
+    max_depth: int = 3,
+) -> list[dict[str, Any]]:
+    """
+    BFS traversal of all assets this asset transitively depends on (upstream chain).
+    max_depth controls how many hops to follow (default 3).
+    Returns list: id, name, asset_type, relationship_type, direction, depth.
+    Use to understand what infrastructure this asset ultimately relies on.
+    """
+    from sqlalchemy import select
+    from app.services.asset_graph import get_upstream
+    from app.models.asset import Asset
+
+    user, db, db_cm = await _auth(token)
+    try:
+        asset_uuid = _uuid.UUID(asset_id)
+        result = await db.execute(
+            select(Asset).where(
+                Asset.id == asset_uuid,
+                Asset.organization_id == user.organization_id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            return [{"error": "Asset not found"}]
+
+        return await get_upstream(db, asset_uuid, user.organization_id, max_depth=max_depth)
+    finally:
+        await db_cm.__aexit__(None, None, None)
