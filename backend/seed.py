@@ -97,7 +97,7 @@ async def seed():
         assets = [
             Asset(id=ASSET_IDS["finance_app"], organization_id=ORG_ID, name="Prod Finance Application",
                   asset_type=AssetType.application, environment=Environment.prod, criticality=Criticality.critical,
-                  asset_metadata={"owner": "finance-team", "why_exists": "Core financial reporting and ERP system", "region": "us-east-1", "tier": "tier-1", "depends_on": ["Linux Server Group (App Tier)", "AWS Prod Account"]}),
+                  asset_metadata={"owner": "finance-team", "why_exists": "Core financial reporting and ERP system", "region": "us-east-1", "tier": "tier-1", "depends_on": ["Linux Server Group (App Tier)", "AWS · 123456789012 (demo)"]}),
             Asset(id=ASSET_IDS["dns_zone"], organization_id=ORG_ID, name="Prod DNS Zone (acme.example)",
                   asset_type=AssetType.dns_zone, environment=Environment.prod, criticality=Criticality.high,
                   asset_metadata={"owner": "platform-ops", "why_exists": "Authoritative DNS for acme.example domain", "zone": "acme.example", "provider": "cloudflare", "records": 247, "depends_on": []}),
@@ -109,7 +109,7 @@ async def seed():
                   asset_metadata={"owner": "network-sec", "why_exists": "Perimeter firewall enforcing north-south traffic policy", "model": "PA-5220", "software": "PAN-OS 11.0", "depends_on": []}),
             Asset(id=ASSET_IDS["linux_servers"], organization_id=ORG_ID, name="Linux Server Group (App Tier)",
                   asset_type=AssetType.server, environment=Environment.prod, criticality=Criticality.high,
-                  asset_metadata={"owner": "platform-ops", "why_exists": "App tier servers running the finance application workloads", "count": 12, "os": "Ubuntu 22.04", "purpose": "app-tier", "depends_on": ["AWS Prod Account", "Palo Alto Prod Firewall"]}),
+                  asset_metadata={"owner": "platform-ops", "why_exists": "App tier servers running the finance application workloads", "count": 12, "os": "Ubuntu 22.04", "purpose": "app-tier", "depends_on": ["AWS · 123456789012 (demo)", "Palo Alto Prod Firewall"]}),
         ]
         db.add_all(assets)
 
