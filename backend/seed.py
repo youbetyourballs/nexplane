@@ -453,6 +453,9 @@ async def main():
         await seed_saas(db)
         await seed_finserv(db)
         await seed_defense(db)
+    from app.seed.seed_asset_graph import seed_asset_graph
+    async with AsyncSessionLocal() as db:
+        await seed_asset_graph(db)
 
 if __name__ == "__main__":
     asyncio.run(main())
