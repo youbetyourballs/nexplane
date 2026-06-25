@@ -8,7 +8,7 @@ Eliminate uncertainty before every infrastructure change.
 
 | Question | How Nexplane helps |
 |----------|--------------------|
-| **What do I have?** | Asset inventory across 70+ connectors — cloud, identity, network, endpoints, secrets |
+| **What do I have?** | Asset inventory across 70+ connectors — cloud, identity, network, endpoints, secrets — continuously synced via configured connectors |
 | **What will happen if I change it?** | Impact simulation shows affected assets, dependencies, and blast radius before execution |
 | **Who needs to approve it?** | Approval gates with role-based routing, audit trail, and human checkpoints |
 | **Can I safely undo it?** | Every change ships with a rollback plan. Rollback is a first-class operation, not an afterthought |
@@ -101,6 +101,8 @@ docker compose up -d
 # MCP:     http://localhost:8000/mcp
 ```
 
+> ⚠️ The default Docker Compose config binds to localhost only. Never expose Nexplane to the public internet — use Tailscale or a site-to-site VPN for remote access.
+
 Default credentials (demo only): `admin@acme.example` / `admin123`
 
 ---
@@ -118,10 +120,20 @@ Default credentials (demo only): `admin@acme.example` / `admin123`
 | Auth | JWT + OIDC support |
 | Deployment | Docker Compose; Helm charts for Kubernetes |
 
-The agent uses outbound long-poll — no inbound ports required on managed hosts.
+The agent uses outbound long-poll — no inbound ports required on managed hosts. This eliminates inbound attack surface on managed infrastructure and removes the need for firewall rule changes on the managed side.
 
 ---
 
 ## Connectors (70+)
 
-Cloud: AWS, Azure, GCP, OCI, Cloudflare · Identity: Active Directory, Entra ID, Okta, Google Workspace, Keycloak, LDAP · Security: CrowdStrike, Wiz, Tenable, Snyk, SentinelOne · IaC: Terraform, Ansible, Pulumi, Helm · Endpoints: Jamf, Intune, SCCM · Observability: Datadog, Splunk, Elastic · Ticketing: Jira, ServiceNow, PagerDuty · Source control: GitHub, GitLab · And more.
+| Category | Connectors |
+|----------|-----------|
+| Cloud | AWS, Azure, GCP, OCI, Cloudflare |
+| Identity & Access | Active Directory, Entra ID, Okta, Google Workspace, Keycloak, LDAP |
+| Security | CrowdStrike, Wiz, Tenable, Snyk, SentinelOne, OpenVAS |
+| IaC & Config | Terraform, Ansible, Pulumi, Helm, CloudFormation |
+| Endpoints & MDM | Jamf, Intune, SCCM |
+| Observability | Datadog, Splunk, Elastic, Datadog |
+| Ticketing | Jira, ServiceNow, PagerDuty |
+| Source Control | GitHub, GitLab |
+| Other | SSH, WinRM, HashiCorp Vault, PostgreSQL, Redis, and more |
