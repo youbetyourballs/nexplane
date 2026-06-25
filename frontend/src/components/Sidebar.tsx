@@ -23,6 +23,7 @@ import {
   Lightbulb,
   Brain,
   Lock,
+  FlaskConical,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
@@ -303,6 +304,9 @@ export function Sidebar() {
 
         {/* Bottom strip */}
         <div className="pt-2 border-t border-navy-border mt-2 space-y-0.5">
+          {user?.role === "admin" && (
+            <NavItem to="/smoke-tests" label="Smoke Tests" icon={FlaskConical} />
+          )}
           {bottomNavItems.map(({ to, label, icon }) => (
             <NavItem
               key={to}
