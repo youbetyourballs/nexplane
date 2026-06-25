@@ -33,14 +33,14 @@ async def list_infrastructure_memory(
         stmt = stmt.where(
             or_(
                 Asset.name.ilike(pattern),
-                cast(Asset.asset_metadata["owner"].astext, String).ilike(pattern),
-                cast(Asset.asset_metadata["why_exists"].astext, String).ilike(pattern),
+                cast(Asset.asset_metadata["owner"], String).ilike(pattern),
+                cast(Asset.asset_metadata["why_exists"], String).ilike(pattern),
             )
         )
 
     if owner:
         stmt = stmt.where(
-            cast(Asset.asset_metadata["owner"].astext, String).ilike(owner)
+            cast(Asset.asset_metadata["owner"], String).ilike(owner)
         )
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
