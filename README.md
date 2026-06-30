@@ -87,19 +87,37 @@ MCP endpoint: `https://<your-nexplane-host>/mcp` (SSE transport, Bearer token au
 
 ## Quick start
 
+### One-line install
+
 ```bash
-# Clone and start
+curl -fsSL https://raw.githubusercontent.com/youbetyourballs/nexplane/master/install.sh | sh
+```
+
+Or with wget:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/youbetyourballs/nexplane/master/install.sh | sh
+```
+
+The script checks for Docker, Docker Compose, git, and curl/wget — installing any that are missing — then clones the repo, generates a `.env` with random credentials, and starts all services. Takes about 2 minutes on a fresh machine.
+
+### Manual install
+
+```bash
 git clone https://github.com/youbetyourballs/nexplane
 cd nexplane
 cp .env.example .env          # edit as needed
 docker compose up -d
-
-# Access
-# UI:      http://localhost:3000
-# API:     http://localhost:8000
-# Docs:    http://localhost:8000/docs
-# MCP:     http://localhost:8000/mcp
 ```
+
+### Access
+
+| Service | URL |
+|---------|-----|
+| UI | http://localhost:3000 |
+| API | http://localhost:8000 |
+| API docs | http://localhost:8000/docs |
+| MCP | http://localhost:8000/mcp |
 
 > ⚠️ The default Docker Compose config binds to localhost only. Never expose Nexplane to the public internet — use Tailscale or a site-to-site VPN for remote access.
 
