@@ -10,6 +10,7 @@ import type {
   Connector, ConnectorCreate, ConnectorTestResult, IngestResponse,
   ChangeRequest, ChangeRequestSummary, ChangeRequestCreate,
   ChangePlan, Approval, ApprovalCreate, ExecutionRun, AuditEvent,
+  AgentTunnelStatus, TunnelConfigUpdate,
 } from "../types/api";
 
 // Auth
@@ -383,4 +384,10 @@ export const backupApi = {
     apiClient.post<{ id: string; status: string; title: string }>("/restore-crs", data).then((r) => r.data),
   getBackupContext: (crId: string) =>
     apiClient.get<BackupContext>(`/change-requests/${crId}/backup-context`).then((r) => r.data),
+};
+
+export const agentTunnelsApi = {
+  list: () => apiClient.get<AgentTunnelStatus[]>("/agents/tunnel").then((r) => r.data),
+  set: (agentId: string, body: TunnelConfigUpdate) =>
+    apiClient.put<AgentTunnelStatus>(`/agents/${agentId}/tunnel`, body).then((r) => r.data),
 };

@@ -659,3 +659,16 @@ export interface AIProviders {
   default: string | null;
   providers: Record<string, AIProviderInfo>;
 }
+
+export interface AgentTunnelStatus {
+  agent_id: string;
+  asset_id: string | null;
+  hostname: string;
+  tunnel_enabled: boolean;
+  tunnel_allowlist: string[];
+  online: boolean;
+}
+export interface TunnelConfigUpdate {
+  enabled: boolean;
+  allowlist: string[];
+}
