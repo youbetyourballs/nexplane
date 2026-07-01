@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2024-2026 Nexplane, Inc.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { agentTunnelsApi } from "../api/endpoints";
 import type { AgentTunnelStatus } from "../types/api";
@@ -52,6 +52,8 @@ function AgentRow({ agent, pending, onToggle, onSave }: {
   const [draft, setDraft] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
+  useEffect(() => setEntries(agent.tunnel_allowlist), [agent.tunnel_allowlist]);
+
   const add = () => {
     const msg = validateAllowlistEntry(draft);
     if (msg) { setErr(msg); return; }
@@ -76,7 +78,7 @@ function AgentRow({ agent, pending, onToggle, onSave }: {
       <div className="flex flex-wrap gap-1 mb-2">
         {entries.map((e, i) => (
           <span key={`${e}-${i}`} className="inline-flex items-center bg-slate-100 text-slate-600 text-xs px-1.5 py-0.5 rounded font-mono">
-            {e}<button className="ml-1 text-slate-400 hover:text-red-500" onClick={() => setEntries(entries.filter((_, j) => j !== i))}>x</button>
+            {e}<button className="ml-1 text-slate-400 hover:text-red-500" onClick={() => setEntries(entries.filter((_, j) => j !== i))}>&times;</button>
           </span>
         ))}
       </div>
