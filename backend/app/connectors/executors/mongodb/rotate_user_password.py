@@ -3,6 +3,7 @@
 
 """Executor: rotate a MongoDB user's password."""
 from __future__ import annotations
+import asyncio
 import secrets
 import string
 
@@ -20,7 +21,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         raise ValueError("username is required")
     db_name = parameters.get("db_name", "admin")
 
-    client = get_mongo_client(connector)
+    client = await get_mongo_client(connector)
     if not client:
         return {
             "action": "rotate_mongodb_password",
@@ -31,7 +32,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         }
 
     new_password = _generate_password()
-    client.rotate_user_password(username, new_password, db_name=db_name)
+    # Run blocking pymongo call off the event loop so the in-process forwarder
+    # can accept the routed connection (avoids loop deadlock).
+    await asyncio.to_thread(client.rotate_user_password, username, new_password, db_name)
 
     return {
         "action": "rotate_mongodb_password",
@@ -55,9 +58,9 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         }
 
     # After rotation the connector creds still hold the admin credentials
-    client = get_mongo_client(connector)
+    client = await get_mongo_client(connector)
     if not client:
         return {"rolled_back": False, "reason": "no_mongodb_credentials"}
 
-    client.rotate_user_password(username, old_password, db_name=db_name)
+    await asyncio.to_thread(client.rotate_user_password, username, old_password, db_name)
     return {"rolled_back": True, "username": username}
