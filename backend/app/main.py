@@ -59,6 +59,7 @@ from app.routers.version import router as version_router
 from app.services.upgrade_verify import run_startup_verify as _run_upgrade_verify
 
 _escalation_scheduler: AsyncIOScheduler | None = None
+_socks_server = None  # app.tunnel.socks.SocksServer, started when TUNNEL_SOCKS_ENABLED
 
 
 @asynccontextmanager
@@ -117,10 +118,43 @@ async def lifespan(app: FastAPI):
     from app.services.project_rollback_service import resume_interrupted as _resume_rollbacks
     await _resume_rollbacks()
     await _run_upgrade_verify(AsyncSessionLocal)
+    await _start_socks_proxy()
     yield
+    await _stop_socks_proxy()
     scheduler_service.stop()
     if _escalation_scheduler and _escalation_scheduler.running:
         _escalation_scheduler.shutdown(wait=False)
+
+
+async def _start_socks_proxy() -> None:
+    """Start the reverse-tunnel SOCKS5 consumption proxy if enabled.
+
+    Off by default; when on, any backend component / connector reaches an
+    agent's network by pointing a SOCKS5 client at this proxy (username =
+    agent id). The TunnelManager enforces each agent's allowlist per dial.
+    """
+    global _socks_server
+    if not settings.TUNNEL_SOCKS_ENABLED:
+        return
+    import logging
+    from app.tunnel.manager import get_manager
+    from app.tunnel.socks import SocksServer
+
+    _socks_server = SocksServer(
+        get_manager(),
+        host=settings.TUNNEL_SOCKS_HOST,
+        port=settings.TUNNEL_SOCKS_PORT,
+        auth_token=settings.TUNNEL_SOCKS_TOKEN,
+    )
+    host, port = await _socks_server.start()
+    logging.getLogger(__name__).info("Reverse-tunnel SOCKS5 proxy listening on %s:%d", host, port)
+
+
+async def _stop_socks_proxy() -> None:
+    global _socks_server
+    if _socks_server is not None:
+        await _socks_server.stop()
+        _socks_server = None
 
 
 async def _scrub_orphaned_crs() -> None:
