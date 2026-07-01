@@ -8,9 +8,10 @@ import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Edit, Save, X, Plus, Zap, Network, Clock } from "lucide-react";
-import { assetsApi } from "../api/endpoints";
+import { assetsApi, agentTunnelsApi } from "../api/endpoints";
 import { changeRequestsApi } from "../api/endpoints";
 import { apiClient } from "../api/client";
+import AgentTunnelManager from "../components/AgentTunnelManager";
 import { RiskBadge } from "../components/RiskBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { PageLoading } from "../components/LoadingSpinner";
@@ -656,13 +657,16 @@ export function AssetDetail() {
   const [scanPkgsLoading, setScanPkgsLoading] = useState(false);
   const [scanPkgsError, setScanPkgsError] = useState<string | null>(null);
   const [pkgFilter, setPkgFilter] = useState("");
-  const [activeTab, setActiveTab] = useState<"overview" | "activity">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "activity" | "tunnel">("overview");
 
   const { data: asset, isLoading } = useQuery({
     queryKey: ["asset", id],
     queryFn: () => assetsApi.get(id!),
     enabled: !!id,
   });
+
+  const { data: tunnels = [] } = useQuery({ queryKey: ["agent-tunnels"], queryFn: agentTunnelsApi.list });
+  const agent = tunnels.find((t) => t.asset_id === asset?.id);
 
   const { data: allTags } = useQuery({
     queryKey: ["asset-tags"],
@@ -893,6 +897,19 @@ export function AssetDetail() {
           <Clock className="w-3.5 h-3.5" />
           Activity
         </button>
+        {agent && (
+          <button
+            onClick={() => setActiveTab("tunnel")}
+            className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-md border-b-2 transition-colors ${
+              activeTab === "tunnel"
+                ? "border-brand-600 text-brand-700 bg-brand-50"
+                : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <Network className="w-3.5 h-3.5" />
+            Tunnel
+          </button>
+        )}
       </div>
 
       {/* Activity tab */}
@@ -924,6 +941,13 @@ export function AssetDetail() {
               ))}
             </ol>
           )}
+        </div>
+      )}
+
+      {/* Tunnel tab */}
+      {activeTab === "tunnel" && agent && (
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <AgentTunnelManager agentId={agent.agent_id} />
         </div>
       )}
 
