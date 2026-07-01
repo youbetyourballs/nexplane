@@ -11,8 +11,8 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: ghcr.io/nexplane/nexplane-backend
-  FRONTEND_IMAGE: ghcr.io/nexplane/nexplane-frontend
+  BACKEND_IMAGE: ghcr.io/youbetyourballs/nexplane-backend
+  FRONTEND_IMAGE: ghcr.io/youbetyourballs/nexplane-frontend
 
 jobs:
   build-and-release:
