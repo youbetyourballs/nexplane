@@ -17,6 +17,17 @@ def test_frame_roundtrip():
     assert f.stream_id == 7 and f.type == p.DATA and f.payload == b"hello"
 
 
+def test_frame_golden_vectors():
+    # Locks the wire format byte-for-byte against the Go agent codec
+    # (agent/tunnel/frame.go). The SAME hex vectors are asserted in
+    # agent/tunnel/tunnel_test.go::TestFrameGoldenVectors — if either side
+    # changes the layout, one of the two conformance tests fails.
+    assert p.encode(0x01020304, p.DATA, b"hi").hex() == "01020304046869"
+    assert p.open_frame(1, "db.internal", 5432).hex() == "000000010164622e696e7465726e616c3a35343332"
+    assert p.encode(7, p.OPEN_OK).hex() == "0000000702"
+    assert p.encode(255, p.CLOSE).hex() == "000000ff05"
+
+
 def test_open_frame_and_parse():
     raw = p.open_frame(42, "db.internal", 5432)
     f = p.decode(raw)

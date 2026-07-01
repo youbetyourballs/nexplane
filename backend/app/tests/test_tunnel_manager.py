@@ -125,6 +125,28 @@ def test_dial_timeout_when_agent_silent():
     asyncio.run(run())
 
 
+def test_stream_close_unblocks_pending_reader():
+    # Regression: TunnelStream.close() must feed EOF locally. The agent's echoed
+    # CLOSE arrives after we've forgotten the stream, so without the local EOF a
+    # reader blocked in stream.read() would hang forever (the SOCKS relay bug).
+    async def run():
+        cp, agent = _pair()
+        at = asyncio.ensure_future(_fake_agent(agent))
+        s = TunnelSession(cp); s.start()
+        stream = await s.dial("echo.local", 5432)
+
+        async def reader():
+            return await stream.read()
+
+        read_task = asyncio.ensure_future(reader())
+        await asyncio.sleep(0.05)          # let the reader block on an empty stream
+        await stream.close()               # must unblock it with EOF
+        got = await asyncio.wait_for(read_task, timeout=1.0)
+        assert got == b""
+        await s.close(); at.cancel()
+    asyncio.run(run())
+
+
 def test_session_close_feeds_eof():
     async def run():
         cp, agent = _pair()
