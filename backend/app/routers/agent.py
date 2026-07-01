@@ -145,6 +145,8 @@ async def register_agent(
     return AgentRegisterResponse(
         agent_id=registration.id,
         asset_id=registration.asset_id,
+        tunnel_enabled=bool(registration.tunnel_enabled),
+        tunnel_allowlist=list(registration.tunnel_allowlist or []),
     )
 
 

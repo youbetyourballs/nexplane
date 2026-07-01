@@ -19,6 +19,10 @@ class AgentRegisterRequest(BaseModel):
 class AgentRegisterResponse(BaseModel):
     agent_id: uuid.UUID
     asset_id: uuid.UUID
+    # Reverse-tunnel config: tells the agent whether to open its outbound
+    # tunnel and which destinations it may bridge (deny-by-default allowlist).
+    tunnel_enabled: bool = False
+    tunnel_allowlist: list[str] = []
 
 
 class AgentJobResponse(BaseModel):
