@@ -58,6 +58,7 @@ from app.services.runbook_executor import tick_all_executions as _tick_runbooks
 from app.services.version_poller import poll_version as _poll_version
 from app.routers.version import router as version_router
 from app.services.upgrade_verify import run_startup_verify as _run_upgrade_verify
+from app.routers import catalog as catalog_router
 
 _escalation_scheduler: AsyncIOScheduler | None = None
 _socks_server = None  # app.tunnel.socks.SocksServer, started when TUNNEL_SOCKS_ENABLED
@@ -260,6 +261,7 @@ app.include_router(infrastructure_memory_router)
 app.include_router(impact_simulation_router)
 app.include_router(recommendations_router)
 app.include_router(version_router)
+app.include_router(catalog_router.router)
 import os as _os
 if _os.getenv("DEMO_MODE") == "true":
     from app.routers.demo import router as demo_router
