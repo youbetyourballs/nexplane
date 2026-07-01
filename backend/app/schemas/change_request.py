@@ -13,7 +13,7 @@ class ChangeRequestCreate(BaseModel):
     title: str
     description: str = ""
     change_type: ChangeType
-    target_asset_ids: list[uuid.UUID]
+    target_asset_ids: list[uuid.UUID] = []
     desired_outcome: dict
     finding_ids: list[str] = []
     snapshot_before: bool = False
