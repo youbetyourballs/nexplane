@@ -92,7 +92,7 @@ async def get_redis_client(connector) -> "RedisClient | None":
         port = ep_port
         if has_ssl and getattr(connector, "network_tls_skip_verify", False):
             ssl_check_hostname = False
-            ssl_cert_reqs = None  # disables cert validation
+            ssl_cert_reqs = "none"  # string "none" disables cert validation in redis-py
 
     return RedisClient(
         host=host,
