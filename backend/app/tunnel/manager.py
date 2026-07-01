@@ -78,6 +78,10 @@ class TunnelStream:
             await self._session._send(proto.encode(self.stream_id, proto.CLOSE))
         except Exception:
             pass
+        # Unblock any local reader: once we close, no more data is expected on
+        # this stream (and the agent's echoed CLOSE would arrive after we've
+        # forgotten the stream, so it can't feed EOF for us).
+        self._feed_eof()
         self._session._forget(self.stream_id)
 
     # --- internal (driven by the session read loop) ---
