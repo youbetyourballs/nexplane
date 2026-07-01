@@ -147,6 +147,18 @@ class ActionCatalogService:
             raise ImportError(f"Executor module '{module_path}' not found: {exc}") from exc
 
 
+    def list_all_actions(self) -> list[dict]:
+        """Every action across all connector types, each tagged with its connector_type."""
+        out: list[dict] = []
+        for connector_type, actions in self._catalog.items():
+            for action in actions:
+                out.append({"connector_type": connector_type, **action})
+        return out
+
+
+# Alias for external consumers (e.g. discovery API, tests)
+CatalogService = ActionCatalogService
+
 _catalog_service: ActionCatalogService | None = None
 
 
