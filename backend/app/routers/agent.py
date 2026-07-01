@@ -5,11 +5,12 @@ import uuid
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Response
+from fastapi import APIRouter, Depends, HTTPException, Header, Response, WebSocket
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.tunnel.relay import run_agent_tunnel
 from app.models.agent import AgentRegistration, AgentJob, AgentJobStatus, OsType
 from app.models.org_settings import OrganizationSettings
 from app.models.asset import Asset, AssetType, Environment, Criticality
@@ -25,6 +26,14 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
 _LONG_POLL_SECONDS = 30
 _POLL_INTERVAL_SECONDS = 2
 _TERMINAL_STATUSES = {AgentJobStatus.completed, AgentJobStatus.failed}
+
+
+@router.websocket("/tunnel")
+async def agent_tunnel(websocket: WebSocket, db: AsyncSession = Depends(get_db)):
+    """Reverse-tunnel: the agent dials out here; the control plane reaches
+    allowlisted destinations in the agent's network through it. Auth + scoping
+    handled in app.tunnel.relay."""
+    await run_agent_tunnel(websocket, db)
 
 
 def _secrets() -> SecretsService:
