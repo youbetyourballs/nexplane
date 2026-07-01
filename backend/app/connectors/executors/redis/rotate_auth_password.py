@@ -3,10 +3,11 @@
 
 """Executor: rotate Redis requirepass (auth password)."""
 from __future__ import annotations
+import asyncio
 import secrets
 import string
 
-from ._client import get_redis_client
+from ._client import get_redis_client, RedisClient
 
 
 def _generate_password(length: int = 32) -> str:
@@ -16,7 +17,7 @@ def _generate_password(length: int = 32) -> str:
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
-    client = get_redis_client(connector)
+    client = await get_redis_client(connector)
     if not client:
         return {
             "action": "rotate_redis_password",
@@ -25,14 +26,15 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "_asset_ids": [str(a) for a in asset_ids],
         }
 
-    # Capture old password for rollback
+    # Capture old password for rollback — run blocking call off the event loop
+    # so the in-process forwarder can service the routed connection.
     try:
-        old_password = client.get_requirepass()
+        old_password = await asyncio.to_thread(client.get_requirepass)
     except Exception:
         old_password = ""
 
     new_password = _generate_password()
-    client.set_requirepass(new_password)
+    await asyncio.to_thread(client.set_requirepass, new_password)
 
     return {
         "action": "rotate_redis_password",
@@ -49,14 +51,25 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     if not new_password:
         return {"rolled_back": False, "reason": "new_password_not_in_result"}
 
-    # Reconnect with new password to restore old one
+    # Reconnect with new password to restore old one.
+    # Route the rollback connection the same way as execute.
     creds = getattr(connector, "credentials", None) or {}
-    from ._client import RedisClient
-    host = creds.get("host") or creds.get("hostname", "")
-    port = int(creds.get("port", 6379))
-    rollback_client = RedisClient(host=host, port=port, password=new_password)
+
+    # Build a temporary connector-like object that uses new_password so we can
+    # route through tcp_endpoint again.  We call get_redis_client but override
+    # the password afterward because we need the forwarder endpoint.
+    rollback_client = await get_redis_client(connector)
+    if rollback_client is None:
+        # Fallback: construct directly (unrouted) — best-effort.
+        host = creds.get("host") or creds.get("hostname", "")
+        port = int(creds.get("port", 6379))
+        rollback_client = RedisClient(host=host, port=port, password=new_password)
+    else:
+        # Override password so we auth with the new (post-rotate) credential.
+        rollback_client.password = new_password
+
     try:
-        rollback_client.set_requirepass(old_password)
+        await asyncio.to_thread(rollback_client.set_requirepass, old_password)
         return {"rolled_back": True}
     except Exception as exc:
         return {"rolled_back": False, "reason": str(exc)}

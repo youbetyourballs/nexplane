@@ -4,15 +4,22 @@
 """MongoDB client wrapper using pymongo."""
 from __future__ import annotations
 
+from app.tunnel.routing import tcp_endpoint
+
 
 class MongoClient:
-    def __init__(self, uri: str, auth_db: str = "admin"):
+    def __init__(self, uri: str, auth_db: str = "admin",
+                 tls_allow_invalid_hostnames: bool = False):
         self.uri = uri
         self.auth_db = auth_db
+        self.tls_allow_invalid_hostnames = tls_allow_invalid_hostnames
 
     def _connect(self):
         from pymongo import MongoClient as PyMongoClient  # type: ignore
-        return PyMongoClient(self.uri, serverSelectionTimeoutMS=10000)
+        kw: dict = dict(serverSelectionTimeoutMS=10000)
+        if self.tls_allow_invalid_hostnames:
+            kw["tlsAllowInvalidHostnames"] = True
+        return PyMongoClient(self.uri, **kw)
 
     def rotate_user_password(self, username: str, new_password: str,
                              db_name: str = "admin") -> None:
@@ -40,7 +47,7 @@ class MongoClient:
             return False
 
 
-def get_mongo_client(connector) -> "MongoClient | None":
+async def get_mongo_client(connector) -> "MongoClient | None":
     creds = getattr(connector, "credentials", None) or {}
     host = creds.get("host") or creds.get("hostname")
     if not host:
@@ -49,8 +56,23 @@ def get_mongo_client(connector) -> "MongoClient | None":
     user = creds.get("user") or creds.get("username", "")
     password = creds.get("password", "")
     auth_db = creds.get("auth_db") or creds.get("authSource", "admin")
+    has_tls = bool(creds.get("tls"))
+
+    ep_host, ep_port = await tcp_endpoint(connector, host, port)
+
+    tls_allow_invalid_hostnames = False
+
+    if (ep_host, ep_port) != (host, port):
+        # Routed via forwarder: rebuild URI with forwarded host:port
+        host = ep_host
+        port = ep_port
+        if has_tls and getattr(connector, "network_tls_skip_verify", False):
+            tls_allow_invalid_hostnames = True
+
     if user and password:
         uri = f"mongodb://{user}:{password}@{host}:{port}/{auth_db}"
     else:
         uri = f"mongodb://{host}:{port}/"
-    return MongoClient(uri=uri, auth_db=auth_db)
+
+    return MongoClient(uri=uri, auth_db=auth_db,
+                       tls_allow_invalid_hostnames=tls_allow_invalid_hostnames)
