@@ -98,6 +98,40 @@ func (c *Client) PostResult(ctx context.Context, jobID string, result JobResult)
 	return c.post(ctx, fmt.Sprintf("/agent/jobs/%s/result", jobID), result, nil)
 }
 
+type TunnelConfig struct {
+	Enabled   bool     `json:"enabled"`
+	Allowlist []string `json:"allowlist"`
+}
+
+// GetTunnelConfig fetches this agent's current reverse-tunnel config so the
+// supervisor can reconcile live (enable/disable/allowlist change) without a
+// restart.
+func (c *Client) GetTunnelConfig(ctx context.Context, agentID string) (*TunnelConfig, error) {
+	url := fmt.Sprintf("%s/agent/tunnel-config?agent_id=%s", c.baseURL, agentID)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.secret)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("tunnel-config returned %d: %s", resp.StatusCode, body)
+	}
+
+	var cfg TunnelConfig
+	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("decoding tunnel config: %w", err)
+	}
+	return &cfg, nil
+}
+
 func (c *Client) post(ctx context.Context, path string, body, out any) error {
 	data, err := json.Marshal(body)
 	if err != nil {

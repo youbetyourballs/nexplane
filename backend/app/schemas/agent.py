@@ -39,6 +39,12 @@ class AgentJobResultRequest(BaseModel):
     error: str | None = None
 
 
+class AgentTunnelConfigResponse(BaseModel):
+    """Live tunnel config the agent polls to reconcile without restarting."""
+    enabled: bool = False
+    allowlist: list[str] = []
+
+
 class TunnelConfigUpdate(BaseModel):
     """Admin request to set an agent's reverse-tunnel config."""
     enabled: bool

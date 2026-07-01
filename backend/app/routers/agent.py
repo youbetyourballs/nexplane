@@ -17,6 +17,7 @@ from app.models.asset import Asset, AssetType, Environment, Criticality
 from app.schemas.agent import (
     AgentRegisterRequest, AgentRegisterResponse,
     AgentJobResponse, AgentJobResultRequest,
+    AgentTunnelConfigResponse,
 )
 from app.services.secrets_service import SecretsService
 from app import config as app_config
@@ -147,6 +148,38 @@ async def register_agent(
         asset_id=registration.asset_id,
         tunnel_enabled=bool(registration.tunnel_enabled),
         tunnel_allowlist=list(registration.tunnel_allowlist or []),
+    )
+
+
+@router.get("/tunnel-config", response_model=AgentTunnelConfigResponse)
+async def get_tunnel_config(
+    agent_id: uuid.UUID,
+    org_settings: OrganizationSettings = Depends(_get_org_settings_by_secret),
+    db: AsyncSession = Depends(get_db),
+):
+    """Current reverse-tunnel config for this agent.
+
+    The agent polls this to reconcile live: enabling/disabling the tunnel or
+    changing the allowlist takes effect within one poll interval, without a
+    restart. Polling also refreshes ``last_seen`` so a tunnel-only agent still
+    reads as alive.
+    """
+    result = await db.execute(
+        select(AgentRegistration).where(
+            and_(
+                AgentRegistration.id == agent_id,
+                AgentRegistration.organization_id == org_settings.organization_id,
+            )
+        )
+    )
+    reg = result.scalar_one_or_none()
+    if reg is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    reg.last_seen = datetime.now(timezone.utc)
+    await db.commit()
+    return AgentTunnelConfigResponse(
+        enabled=bool(reg.tunnel_enabled),
+        allowlist=list(reg.tunnel_allowlist or []),
     )
 
 

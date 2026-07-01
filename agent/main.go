@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"nexplane-agent/client"
 	"nexplane-agent/commands/changip"
@@ -17,9 +18,13 @@ import (
 	"nexplane-agent/installer"
 	"nexplane-agent/poller"
 	"nexplane-agent/registration"
-	"nexplane-agent/tunnel"
+	"nexplane-agent/tunnelsupervisor"
 	"nexplane-agent/updater"
 )
+
+// tunnelConfigPollInterval is how often the agent reconciles its reverse-tunnel
+// config with the control plane (live enable/disable + allowlist changes).
+const tunnelConfigPollInterval = 30 * time.Second
 
 // Version is injected at build time via -ldflags "-X main.Version=<version>".
 // Falls back to "dev" for local builds.
@@ -71,18 +76,18 @@ func main() {
 	}
 	log.Printf("Registered: agent_id=%s asset_id=%s", info.AgentID, info.AssetID)
 
-	// Reverse tunnel: if the control plane enabled it for this agent, open the
-	// outbound tunnel in the background so the control plane can reach
-	// allowlisted destinations in this network. It reconnects on its own and
-	// stops when ctx is cancelled; a tunnel failure never blocks job polling.
-	if info.TunnelEnabled {
-		log.Printf("[tunnel] enabled; %d allowlist rule(s)", len(info.TunnelAllowlist))
-		go func() {
-			if err := tunnel.Run(ctx, cfg.ControlPlane, cfg.Secret, info.AgentID, info.TunnelAllowlist); err != nil && ctx.Err() == nil {
-				log.Printf("[tunnel] stopped: %v", err)
-			}
-		}()
-	}
+	// Reverse tunnel: run the supervisor in the background. It opens the
+	// outbound tunnel when the control plane has enabled it for this agent (so
+	// the control plane can reach allowlisted destinations in this network) and
+	// reconciles live — enable/disable and allowlist changes take effect within
+	// one poll interval, no restart. Always started (even when initially
+	// disabled) so a later admin enable is picked up. A tunnel failure never
+	// blocks job polling.
+	go tunnelsupervisor.Run(
+		ctx, c, cfg.ControlPlane, cfg.Secret, info.AgentID,
+		client.TunnelConfig{Enabled: info.TunnelEnabled, Allowlist: info.TunnelAllowlist},
+		tunnelConfigPollInterval,
+	)
 
 	if err := changip.CheckPendingRollback(func(params map[string]any) {
 		result := executor.Dispatch("change_ip", params, true, params)
