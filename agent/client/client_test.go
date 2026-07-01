@@ -83,6 +83,45 @@ func TestRegisterDefaultsTunnelDisabled(t *testing.T) {
 	}
 }
 
+func TestGetTunnelConfigDecodes(t *testing.T) {
+	var gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path + "?" + r.URL.RawQuery
+		gotAuth = r.Header.Get("Authorization")
+		json.NewEncoder(w).Encode(map[string]any{
+			"enabled":   true,
+			"allowlist": []string{"10.0.0.0/8:5432"},
+		})
+	}))
+	defer srv.Close()
+
+	c := client.New(srv.URL, "sek")
+	cfg, err := c.GetTunnelConfig(context.Background(), "agent-77")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotPath != "/agent/tunnel-config?agent_id=agent-77" {
+		t.Errorf("got path %q", gotPath)
+	}
+	if gotAuth != "Bearer sek" {
+		t.Errorf("got auth %q", gotAuth)
+	}
+	if !cfg.Enabled || len(cfg.Allowlist) != 1 || cfg.Allowlist[0] != "10.0.0.0/8:5432" {
+		t.Errorf("unexpected config: %+v", cfg)
+	}
+}
+
+func TestGetTunnelConfigErrorsOnNon200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	c := client.New(srv.URL, "s")
+	if _, err := c.GetTunnelConfig(context.Background(), "ghost"); err == nil {
+		t.Error("expected error on 404, got nil")
+	}
+}
+
 func TestClientHandles401(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
