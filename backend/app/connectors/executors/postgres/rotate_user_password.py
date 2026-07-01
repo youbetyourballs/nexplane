@@ -3,6 +3,7 @@
 
 """Executor: rotate a PostgreSQL user's password."""
 from __future__ import annotations
+import asyncio
 import secrets
 import string
 
@@ -19,7 +20,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not username:
         raise ValueError("username is required")
 
-    client = get_postgres_client(connector)
+    client = await get_postgres_client(connector)
     if not client:
         return {
             "action": "rotate_postgres_password",
@@ -30,7 +31,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         }
 
     new_password = _generate_password()
-    client.alter_user_password(username, new_password)
+    # Run the blocking psycopg2 call off the event loop so the in-process
+    # forwarder can accept the routed connection (avoids a loop deadlock).
+    await asyncio.to_thread(client.alter_user_password, username, new_password)
 
     return {
         "action": "rotate_postgres_password",
@@ -54,9 +57,9 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
             "username": username,
         }
 
-    client = get_postgres_client(connector)
+    client = await get_postgres_client(connector)
     if not client:
         return {"rolled_back": False, "reason": "no_postgres_credentials"}
 
-    client.alter_user_password(username, old_password)
+    await asyncio.to_thread(client.alter_user_password, username, old_password)
     return {"rolled_back": True, "username": username}
