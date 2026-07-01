@@ -35,8 +35,8 @@ jobs:
           file: backend/Dockerfile
           push: true
           tags: |
-            ghcr.io/nexplane/nexplane-backend:nightly
-            ghcr.io/nexplane/nexplane-backend:${{ steps.date.outputs.tag }}
+            ghcr.io/youbetyourballs/nexplane-backend:nightly
+            ghcr.io/youbetyourballs/nexplane-backend:${{ steps.date.outputs.tag }}
 
   build-frontend:
     runs-on: ubuntu-latest
@@ -61,5 +61,5 @@ jobs:
           file: frontend/Dockerfile
           push: true
           tags: |
-            ghcr.io/nexplane/nexplane-frontend:nightly
-            ghcr.io/nexplane/nexplane-frontend:${{ steps.date.outputs.tag }}
+            ghcr.io/youbetyourballs/nexplane-frontend:nightly
+            ghcr.io/youbetyourballs/nexplane-frontend:${{ steps.date.outputs.tag }}
