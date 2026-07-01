@@ -54,6 +54,7 @@ class TunnelConfigUpdate(BaseModel):
 
 class AgentTunnelStatus(BaseModel):
     agent_id: uuid.UUID
+    asset_id: uuid.UUID | None = None
     hostname: str
     tunnel_enabled: bool
     tunnel_allowlist: list[str]

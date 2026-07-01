@@ -32,6 +32,7 @@ router = APIRouter(prefix="/agents", tags=["Agent Tunnel"])
 def _to_status(reg: AgentRegistration) -> AgentTunnelStatus:
     return AgentTunnelStatus(
         agent_id=reg.id,
+        asset_id=getattr(reg, "asset_id", None),
         hostname=reg.hostname,
         tunnel_enabled=bool(reg.tunnel_enabled),
         tunnel_allowlist=list(reg.tunnel_allowlist or []),
