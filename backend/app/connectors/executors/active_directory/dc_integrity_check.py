@@ -170,7 +170,9 @@ def _winrm_checks(creds: dict, dc_hostname: str, baseline_gpo_hash: str | None) 
 def _ldap_checks(creds: dict) -> dict:
     from ldap3 import ALL, Connection, Server
 
-    server = Server(creds["server"], port=int(creds.get("port", 389)), get_info=ALL)
+    server = Server(creds.get("_forward_host", creds["server"]),
+                    port=int(creds.get("_forward_port", creds.get("port", 389))),
+                    get_info=ALL)
     conn = Connection(server, user=creds["bind_dn"], password=creds["bind_password"], auto_bind=True)
     base_dn = creds["base_dn"]
 
@@ -253,7 +255,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # LDAP checks
     if has_ldap:
-        ldap_data = await loop.run_in_executor(None, lambda: _ldap_checks(creds))
+        from ._client import prepare_ad_target
+        ldap_creds = await prepare_ad_target(connector, creds)
+        ldap_data = await loop.run_in_executor(None, lambda: _ldap_checks(ldap_creds))
         result["ldap_checks"] = ldap_data
     else:
         result["ldap_checks"] = "skipped"

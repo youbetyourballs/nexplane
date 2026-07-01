@@ -28,7 +28,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             raise RuntimeError(f"Add-ADGroupMember failed (rc={rc}): {err or out}")
     else:
         from ldap3 import Server, Connection, ALL, MODIFY_ADD
-        from ._client import get_connection
+        from ._client import get_connection, prepare_ad_target
+        creds = await prepare_ad_target(connector, creds)
 
         def _ldap():
             conn = get_connection(creds)
@@ -83,7 +84,8 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
             return {"rolled_back": False, "reason": f"Remove-ADGroupMember failed: {err or out}"}
     else:
         from ldap3 import MODIFY_DELETE
-        from ._client import get_connection
+        from ._client import get_connection, prepare_ad_target
+        creds = await prepare_ad_target(connector, creds)
 
         def _ldap():
             conn = get_connection(creds)

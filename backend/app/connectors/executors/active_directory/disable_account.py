@@ -62,6 +62,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "disabled": True,
             "disabled_at": datetime.now(timezone.utc).isoformat(),
         }
+    from ._client import prepare_ad_target
+    creds = await prepare_ad_target(connector, creds)
     return await _real_execute(parameters, creds)
 
 

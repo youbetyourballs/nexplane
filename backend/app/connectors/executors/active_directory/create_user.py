@@ -14,9 +14,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "simulated": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-    from ._client import has_ssm_transport
+    from ._client import has_ssm_transport, prepare_ad_target
     if has_ssm_transport(creds):
         return await _ssm_execute(parameters, creds)
+    creds = await prepare_ad_target(connector, creds)
     return await _real_execute(parameters, creds)
 
 
@@ -27,9 +28,10 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         return {"rolled_back": False, "reason": "no dn in execution_result — cannot delete"}
     if not creds:
         return {"rolled_back": True, "simulated": True, "dn": dn}
-    from ._client import has_ssm_transport
+    from ._client import has_ssm_transport, prepare_ad_target
     if has_ssm_transport(creds):
         return await _ssm_rollback(dn, creds)
+    creds = await prepare_ad_target(connector, creds)
     return await _real_rollback(dn, creds)
 
 

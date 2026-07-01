@@ -74,6 +74,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})
     if not creds:
         return _mock_response()
+    from ._client import prepare_ad_target
+    creds = await prepare_ad_target(connector, creds)
     return await _real_execute(creds)
 
 

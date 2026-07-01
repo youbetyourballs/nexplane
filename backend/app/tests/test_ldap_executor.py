@@ -12,6 +12,7 @@ async def test_ldap_disable_user_skips_without_credentials():
     assert result["reason"] == "no_ldap_credentials"
 
 
-def test_ldap_client_requires_host():
+@pytest.mark.asyncio
+async def test_ldap_client_requires_host():
     from app.connectors.executors.ldap._client import get_ldap_client
-    assert get_ldap_client(None) is None
+    assert await get_ldap_client(None) is None

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
-﻿import asyncio
+import asyncio
 import random
 from datetime import datetime, timezone
 
@@ -71,5 +71,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> list:
     creds = getattr(connector, "credentials", {})
     if not creds:
         return _mock_response()
+    from ._client import prepare_ad_target
+    creds = await prepare_ad_target(connector, creds)
     return await _real_execute(creds)
 

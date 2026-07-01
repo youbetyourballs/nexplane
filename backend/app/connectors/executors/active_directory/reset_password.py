@@ -28,6 +28,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})
     if not creds:
         return {"action": "reset_password", "username": parameters.get("username"), "must_change_on_next_login": True, "reset_at": datetime.now(timezone.utc).isoformat()}
+    from ._client import prepare_ad_target
+    creds = await prepare_ad_target(connector, creds)
     return await _real_execute(parameters, creds)
 
 

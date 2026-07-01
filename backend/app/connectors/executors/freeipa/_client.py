@@ -2,22 +2,24 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 from __future__ import annotations
-import httpx
+
+from app.connectors.executors.common.tunnel_http import tunnel_http_client
 
 
 class FreeIPAClient:
     """FreeIPA JSON-RPC client.  Authenticates with username/password to get
     a session cookie, then calls JSON-RPC endpoints at /ipa/session/json."""
 
-    def __init__(self, url, username, password, verify_ssl=False):
+    def __init__(self, url, username, password, verify_ssl=False, connector=None):
         self.url = url.rstrip("/")
         self.username = username
         self.password = password
         self.verify_ssl = verify_ssl
+        self._connector = connector
         self._session_cookie = None
 
     async def _login(self):
-        async with httpx.AsyncClient(verify=self.verify_ssl) as c:
+        async with await tunnel_http_client(self._connector, verify=self.verify_ssl) as c:
             resp = await c.post(
                 f"{self.url}/ipa/session/login_password",
                 data={"user": self.username, "password": self.password},
@@ -41,7 +43,7 @@ class FreeIPAClient:
             "Cookie": self._session_cookie,
             "Referer": f"{self.url}/ipa",
         }
-        async with httpx.AsyncClient(verify=self.verify_ssl) as c:
+        async with await tunnel_http_client(self._connector, verify=self.verify_ssl) as c:
             resp = await c.post(f"{self.url}/ipa/session/json",
                                 json=payload, headers=headers)
             resp.raise_for_status()
@@ -76,4 +78,5 @@ def get_freeipa_client(connector):
         username=username,
         password=password,
         verify_ssl=creds.get("verify_ssl", False),
+        connector=connector,
     )

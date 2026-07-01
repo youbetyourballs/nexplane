@@ -15,6 +15,7 @@ async def execute(parameters, asset_ids, connector):
             username=parameters.get("freeipa_username", "admin"),
             password=parameters.get("freeipa_password", ""),
             verify_ssl=False,
+            connector=connector,
         )
     if not client:
         return {"action": "freeipa_disable_user", "status": "skipped",
@@ -37,6 +38,7 @@ async def rollback(parameters, execution_result, connector):
             username=parameters.get("freeipa_username", "admin"),
             password=parameters.get("freeipa_password", ""),
             verify_ssl=False,
+            connector=connector,
         )
     if not client:
         return {"rolled_back": False, "reason": "no_freeipa_credentials"}

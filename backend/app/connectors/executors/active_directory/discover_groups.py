@@ -21,7 +21,9 @@ async def _real_execute(creds: dict) -> dict:
     loop = asyncio.get_event_loop()
 
     def _call():
-        server = Server(creds['server'], port=int(creds.get('port', 389)), get_info=ALL)
+        server = Server(creds.get('_forward_host', creds['server']),
+                        port=int(creds.get('_forward_port', creds.get('port', 389))),
+                        get_info=ALL)
         conn = Connection(server, user=creds['bind_dn'], password=creds['bind_password'], auto_bind=True)
         conn.search(creds['base_dn'], '(objectClass=group)', attributes=['cn', 'distinguishedName', 'groupType', 'member'])
         assets = []
@@ -43,6 +45,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, 'credentials', {})
     if not creds:
         return _mock_response()
+    from ._client import prepare_ad_target
+    creds = await prepare_ad_target(connector, creds)
     return await _real_execute(creds)
 
 

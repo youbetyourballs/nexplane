@@ -17,9 +17,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"rolled_back": True, "simulated": True, "dn": dn, "username": username}
 
-    from ._client import has_ssm_transport
+    from ._client import has_ssm_transport, prepare_ad_target
     if has_ssm_transport(creds):
         return await _ssm_execute(dn or username, creds)
+    creds = await prepare_ad_target(connector, creds)
     return await _real_execute(dn, creds)
 
 
