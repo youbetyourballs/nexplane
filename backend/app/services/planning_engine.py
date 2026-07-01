@@ -234,6 +234,30 @@ def generate_plan(
 
     ct = change_request.change_type
     desired = change_request.desired_outcome or {}
+
+    if ct == ChangeType.catalog_action:
+        connector_type = desired.get("connector_type", "")
+        action_id = desired.get("action_id", "")
+        params = desired.get("params", {}) or {}
+        # Validate the action exists in the (core+commercial) catalog.
+        catalog.get_action_def(connector_type, action_id)  # raises KeyError if unknown
+        step = {
+            "step_number": 1,
+            "connector_type": connector_type,
+            "action_id": action_id,
+            "parameters": params,
+            "purpose": "execute",
+            "options": [{"connector_type": connector_type, "action_id": action_id, "execution_tier": 0}],
+            "rollback_connector_type": None,
+        }
+        return ChangePlanData(
+            generated_steps=[step],
+            preflight_checks=[],
+            blast_radius=_calculate_blast_radius(change_request, assets, safety_result),
+            rollback_plan={},
+            verification_plan={},
+        )
+
     change_def = _load_change_type_def(ct)
     steps = [
         _resolve_step(step_def, i + 1, desired, assets, catalog)
