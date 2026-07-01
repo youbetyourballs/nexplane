@@ -19,6 +19,7 @@ def _reg(enabled=False, allowlist=None):
         id=uuid.uuid4(),
         hostname="agent-host",
         organization_id=uuid.uuid4(),
+        asset_id=uuid.uuid4(),
         tunnel_enabled=enabled,
         tunnel_allowlist=allowlist or [],
     )
@@ -131,3 +132,12 @@ def test_put_disable_allows_empty_allowlist():
     assert reg.tunnel_enabled is False
     assert reg.tunnel_allowlist == []
     assert session.committed is True
+
+
+def test_list_includes_asset_id():
+    reg = _reg(enabled=True, allowlist=["10.0.0.0/8:5432"])
+    reg.asset_id = uuid.uuid4()
+    client, _ = _client([reg])
+    resp = client.get("/agents/tunnel")
+    assert resp.status_code == 200
+    assert resp.json()[0]["asset_id"] == str(reg.asset_id)
