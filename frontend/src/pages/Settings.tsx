@@ -9,6 +9,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Key, Terminal, Copy } from "lucide-react";
 import { ApiTokenManager } from "../components/ApiTokenManager";
 import { AgentTokenManager } from "../components/AgentTokenManager";
+import AgentTunnelManager from "../components/AgentTunnelManager";
 import { settingsApi } from "../api/endpoints";
 import { apiClient } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
@@ -432,6 +433,15 @@ export function Settings() {
             </div>
           );
         })()}
+      </div>
+
+      {/* Reverse Tunnels */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 mb-4">
+        <h3 className="text-sm font-semibold text-gray-900 mb-1">Reverse Tunnels</h3>
+        <p className="text-xs text-gray-500 mb-4">
+          Enable an onsite agent&apos;s outbound tunnel and scope which destinations it may reach.
+        </p>
+        <AgentTunnelManager />
       </div>
 
       <ApiTokenManager />
