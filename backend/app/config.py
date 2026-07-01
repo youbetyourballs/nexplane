@@ -37,6 +37,16 @@ class Settings(BaseSettings):
     NEXPLANE_COMMERCIAL_CATALOG_PATH: str | None = None
     INSTANCE_URL: str = "http://localhost:8000"
 
+    # Reverse-tunnel consumption interface (SOCKS5 front-end). Off by default so
+    # community/core deployments open no extra listener. When enabled, backend
+    # components / connectors reach an agent's network by pointing a SOCKS5
+    # client at this proxy (username = agent id). Bind to localhost/internal
+    # only; require a token outside development.
+    TUNNEL_SOCKS_ENABLED: bool = False
+    TUNNEL_SOCKS_HOST: str = "127.0.0.1"
+    TUNNEL_SOCKS_PORT: int = 1080
+    TUNNEL_SOCKS_TOKEN: str | None = None
+
     @model_validator(mode="after")
     def reject_weak_secrets_in_production(self) -> "Settings":
         if self.ENVIRONMENT.lower() in _DEV_ENVIRONMENTS:
@@ -50,6 +60,12 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"WEBHOOK_SECRET is a development default for ENVIRONMENT={self.ENVIRONMENT!r}. "
                 "Set a strong WEBHOOK_SECRET in your environment."
+            )
+        if self.TUNNEL_SOCKS_ENABLED and (not self.TUNNEL_SOCKS_TOKEN or len(self.TUNNEL_SOCKS_TOKEN) < 16):
+            raise ValueError(
+                f"TUNNEL_SOCKS_ENABLED requires a TUNNEL_SOCKS_TOKEN (>=16 chars) for "
+                f"ENVIRONMENT={self.ENVIRONMENT!r}. The SOCKS proxy bridges into agent "
+                "networks; it must not accept any password."
             )
         return self
 

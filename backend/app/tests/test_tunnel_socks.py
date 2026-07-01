@@ -101,6 +101,35 @@ def test_socks_denied_destination():
     asyncio.run(run())
 
 
+def test_socks_rejects_wrong_token():
+    async def run():
+        m, session, at = _setup_manager()
+        server = SocksServer(m, host="127.0.0.1", port=0, auth_token="s3cret-token")
+        h, port = await server.start()
+        # RFC 1929 auth must fail (status 0x01) when the password != token.
+        r, w = await asyncio.open_connection(h, port)
+        w.write(bytes([0x05, 0x01, 0x02])); await w.drain()
+        assert await r.readexactly(2) == bytes([0x05, 0x02])
+        u = b"agent-x"; p = b"wrong"
+        w.write(bytes([0x01, len(u)]) + u + bytes([len(p)]) + p); await w.drain()
+        assert await r.readexactly(2) == bytes([0x01, 0x01])  # auth failure
+        w.close()
+        await server.stop(); await session.close(); at.cancel()
+    asyncio.run(run())
+
+
+def test_socks_accepts_correct_token():
+    async def run():
+        m, session, at = _setup_manager()
+        server = SocksServer(m, host="127.0.0.1", port=0, auth_token="s3cret-token")
+        h, port = await server.start()
+        r, w, rep = await _socks_connect(h, port, "agent-x", "echo.local", 5432, password="s3cret-token")
+        assert rep == 0x00
+        w.close()
+        await server.stop(); await session.close(); at.cancel()
+    asyncio.run(run())
+
+
 def test_socks_unknown_agent():
     async def run():
         m = TunnelManager()
