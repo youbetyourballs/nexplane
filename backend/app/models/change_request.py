@@ -510,6 +510,8 @@ class ChangeType(str, enum.Enum):
     audit_software_inventory = "audit_software_inventory"
     audit_cis_compliance = "audit_cis_compliance"
     platform_upgrade = "platform_upgrade"
+    # Generic catalog action
+    catalog_action = "catalog_action"
 
 
 class RiskLevel(str, enum.Enum):
