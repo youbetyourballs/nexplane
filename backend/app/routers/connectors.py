@@ -8,9 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.agent import AgentRegistration
 from app.models.connector import Connector
 from app.models.user import User
 from app.routers import current_user
+from app.tunnel.routing import ROUTABLE_CONNECTOR_TYPES
 from app.schemas.connector import ConnectorCreate, ConnectorRead, ConnectorTestResult, IngestResponse
 from app.schemas.asset import AssetRead
 from app.schemas.credential import CredentialRead, CredentialWrite, CredentialField
@@ -24,6 +26,26 @@ from app.models.connector_credential import ConnectorCredential
 from app.models.scheduled_ingest import ScheduledIngest
 
 router = APIRouter(prefix="/connectors", tags=["Connectors"])
+
+
+async def _validate_network_path(network_path: str, connector_type, org_id, db) -> None:
+    if not network_path or network_path == "direct":
+        return
+    if not network_path.startswith("via_agent:"):
+        raise HTTPException(status_code=400, detail="network_path must be 'direct' or 'via_agent:<agent_id>'")
+    ctype = getattr(connector_type, "value", connector_type)
+    if ctype not in ROUTABLE_CONNECTOR_TYPES:
+        raise HTTPException(status_code=400, detail=f"Routing via agent is not supported for connector type '{ctype}'")
+    aid = network_path.split(":", 1)[1]
+    try:
+        auuid = uuid.UUID(aid)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid agent id in network_path")
+    result = await db.execute(select(AgentRegistration).where(
+        AgentRegistration.id == auuid, AgentRegistration.organization_id == org_id))
+    reg = result.scalar_one_or_none()
+    if reg is None or not reg.tunnel_enabled:
+        raise HTTPException(status_code=400, detail="Referenced agent is not a tunnel-enabled agent in this organization")
 
 
 @router.get("", response_model=list[ConnectorRead])
@@ -41,6 +63,7 @@ async def create_connector(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _validate_network_path(body.network_path, body.connector_type, user.organization_id, db)
     connector = Connector(organization_id=user.organization_id, **body.model_dump())
     db.add(connector)
     await db.flush()
