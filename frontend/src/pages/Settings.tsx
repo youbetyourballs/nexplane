@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2024-2026 Nexplane, Inc.
 
-// SPDX-License-Identifier: AGPL-3.0-only
-// Copyright (C) 2024-2026 Nexplane, Inc.
-
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Key, Terminal, Copy } from "lucide-react";
@@ -16,6 +13,7 @@ import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
 import { useAuth } from "../hooks/useAuth";
 import type { AIProviders } from "../types/api";
+import { AGENT_DOWNLOAD_URL } from "../lib/env";
 
 export function Settings() {
   const { user } = useAuth();
@@ -45,7 +43,7 @@ export function Settings() {
   const aiProviders403 = aiProvidersError && (aiProvidersRawError as { response?: { status?: number } })?.response?.status === 403;
 
   const S3_DOWNLOAD_BASE =
-    (import.meta.env.VITE_AGENT_DOWNLOAD_URL as string) ||
+    AGENT_DOWNLOAD_URL ||
     "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com";
 
   const { data: agentVersion } = useQuery<string | null>({
@@ -436,13 +434,15 @@ export function Settings() {
       </div>
 
       {/* Reverse Tunnels */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 mb-4">
-        <h3 className="text-sm font-semibold text-gray-900 mb-1">Reverse Tunnels</h3>
-        <p className="text-xs text-gray-500 mb-4">
-          Enable an onsite agent&apos;s outbound tunnel and scope which destinations it may reach.
-        </p>
-        <AgentTunnelManager />
-      </div>
+      {isAdmin && (
+        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-4">
+          <h3 className="text-sm font-semibold text-gray-900 mb-1">Reverse Tunnels</h3>
+          <p className="text-xs text-gray-500 mb-4">
+            Enable an onsite agent&apos;s outbound tunnel and scope which destinations it may reach.
+          </p>
+          <AgentTunnelManager />
+        </div>
+      )}
 
       <ApiTokenManager />
 
