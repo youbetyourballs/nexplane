@@ -3,22 +3,30 @@
 
 """LDAP client wrapper using ldap3."""
 from __future__ import annotations
-from ldap3 import Server, Connection, ALL, MODIFY_REPLACE, SUBTREE
+import ssl
+
+from ldap3 import Server, Connection, ALL, MODIFY_REPLACE, SUBTREE, Tls
 from ldap3.core.exceptions import LDAPException
+
+from app.tunnel.routing import tcp_endpoint
 
 
 class LDAPClient:
     def __init__(self, host: str, port: int, bind_dn: str, bind_password: str,
-                 base_dn: str, use_ssl: bool = False):
+                 base_dn: str, use_ssl: bool = False, tls: "Tls | None" = None):
         self.host = host
         self.port = port
         self.bind_dn = bind_dn
         self.bind_password = bind_password
         self.base_dn = base_dn
         self.use_ssl = use_ssl
+        # When routed via a localhost forwarder over LDAPS the real cert host
+        # cannot be verified, so callers may pass a Tls(validate=CERT_NONE).
+        self.tls = tls
 
     def _connect(self) -> Connection:
-        server = Server(self.host, port=self.port, use_ssl=self.use_ssl, get_info=ALL)
+        server = Server(self.host, port=self.port, use_ssl=self.use_ssl,
+                        get_info=ALL, tls=self.tls)
         conn = Connection(server, user=self.bind_dn, password=self.bind_password, auto_bind=True)
         return conn
 
@@ -111,7 +119,7 @@ class LDAPClient:
     def verify_bind(self, username: str, password: str) -> bool:
         """Try to bind as the user — returns True if auth succeeds."""
         try:
-            server = Server(self.host, port=self.port, use_ssl=self.use_ssl)
+            server = Server(self.host, port=self.port, use_ssl=self.use_ssl, tls=self.tls)
             admin_conn = self._connect()
             admin_conn.search(self.base_dn, f"(|(uid={username})(sAMAccountName={username}))",
                               SUBTREE, attributes=["sAMAccountName"])
@@ -125,18 +133,32 @@ class LDAPClient:
             return False
 
 
-def get_ldap_client(connector) -> LDAPClient | None:
+async def get_ldap_client(connector) -> LDAPClient | None:
     creds = getattr(connector, "credentials", None) or {}
     host = creds.get("host") or creds.get("hostname") or creds.get("server")
     if not host:
         return None
     raw_ssl = creds.get("use_ssl", False)
     use_ssl = raw_ssl if isinstance(raw_ssl, bool) else str(raw_ssl).lower() not in ("false", "0", "no", "")
+    port = int(creds.get("port", 389))
+
+    # Route the raw LDAP TCP connection through the agent tunnel when configured.
+    ep_host, ep_port = await tcp_endpoint(connector, host, port)
+    tls = None
+    if (ep_host, ep_port) != (host, port):
+        host, port = ep_host, ep_port
+        # A routed LDAPS connection targets a localhost forwarder, so the real
+        # server cert host cannot be verified — same limitation as winrm and the
+        # postgres subprocess path. Honor skip-verify by disabling validation.
+        if use_ssl and getattr(connector, "network_tls_skip_verify", False):
+            tls = Tls(validate=ssl.CERT_NONE)
+
     return LDAPClient(
         host=host,
-        port=int(creds.get("port", 389)),
+        port=port,
         bind_dn=creds.get("bind_dn", ""),
         bind_password=creds.get("bind_password") or creds.get("password", ""),
         base_dn=creds.get("base_dn", "dc=example,dc=com"),
         use_ssl=use_ssl,
+        tls=tls,
     )

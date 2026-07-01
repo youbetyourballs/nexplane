@@ -11,10 +11,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "unlock_account", "username": username, "mock": True}
     import asyncio
     from ldap3 import Server, Connection, ALL, MODIFY_REPLACE
+    from ._client import prepare_ad_target
+    creds = await prepare_ad_target(connector, creds)
     loop = asyncio.get_event_loop()
 
     def _call():
-        server = Server(creds['server'], port=int(creds.get('port', 389)), get_info=ALL)
+        server = Server(creds.get('_forward_host', creds['server']),
+                        port=int(creds.get('_forward_port', creds.get('port', 389))),
+                        get_info=ALL)
         conn = Connection(server, user=creds['bind_dn'], password=creds['bind_password'], auto_bind=True)
         conn.search(creds['base_dn'], f'(sAMAccountName={username})', attributes=['distinguishedName'])
         if not conn.entries:
