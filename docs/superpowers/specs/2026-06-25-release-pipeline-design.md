@@ -190,6 +190,21 @@ The cross-repo dispatch uses a PAT (`DEPLOY_DISPATCH_TOKEN`) scoped to `nexplane
 
 ---
 
+## Nightly Builds
+
+`.github/workflows/nightly.yml` triggers on every push to `master` and on a daily schedule (02:00 UTC). It builds and pushes:
+
+```
+ghcr.io/nexplane/nexplane-backend:nightly
+ghcr.io/nexplane/nexplane-frontend:nightly
+```
+
+Tags are overwritten on each run — `nightly` always points to the latest master commit. A `nightly-<YYYY-MM-DD>` dated tag is also pushed and retained for 30 days (pruned by a separate cleanup workflow), giving contributors a stable reference if they need to pin a specific day's build.
+
+Nightly builds are explicitly **not** published to `releases.nexplane.ai` — the version poller only surfaces versioned releases to operators. Nightly is for contributors and internal testing only.
+
+---
+
 ## Cutting a Release (Operator Runbook)
 
 ```bash
@@ -222,8 +237,9 @@ This can also be run on your behalf: say "cut a release at v1.x.x" and it will b
 | File | Change |
 |------|--------|
 | `.github/workflows/release.yml` | New — tag-triggered release workflow |
+| `.github/workflows/nightly.yml` | New — master-tracking nightly image build |
 | `release.yml` | New — per-release metadata (severity, notes, etc.) |
-| `.github/workflows/publish-images.yml` | Remove `push: branches: [master]` trigger — images now only publish on tags via `release.yml` |
+| `.github/workflows/publish-images.yml` | Remove `push: branches: [master]` trigger — superseded by `nightly.yml` and `release.yml` |
 
 ### nexplane-deploy
 
