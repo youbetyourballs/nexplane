@@ -1,5 +1,5 @@
 # release.yml — edit before running: git tag v1.2.3 && git push --tags
 severity: recommended        # recommended | security | critical
 min_compatible_version: 1.0.0
-changelog_url: https://docs.nexplane.ai/changelog/1.0.0
-notes: "Initial automated release"
+changelog_url: https://docs.nexplane.ai/changelog/1.0.1
+notes: "Patch release: Docker port binding fix, EC2 login URL correction, GHCR namespace fixes"
