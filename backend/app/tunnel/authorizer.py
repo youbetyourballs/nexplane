@@ -18,6 +18,16 @@ Allowlist entries (strings):
 Host in a dial may be an IP or a hostname. IP dials are matched against CIDR /
 IP rules; hostname dials are matched against hostname rules (exact,
 case-insensitive). Hostname->IP resolution and its re-check happen at the agent.
+
+Trust model (DNS):
+  Allowing a *hostname* rule ("db.internal:5432") trusts however that name
+  resolves inside the agent's network at dial time — the agent resolves and
+  dials it directly, with no IP re-pinning. If the destination's DNS is
+  attacker-controlled, a hostname rule can be pointed elsewhere (DNS rebinding).
+  Operators who need to pin to specific addresses should use CIDR / IP rules
+  ("10.0.0.0/8:5432"), which are matched against the resolved IP on both ends.
+  This is a deliberate trade-off: hostname rules are convenient for stable
+  internal names; CIDR rules are the safe default for untrusted resolution.
 """
 from __future__ import annotations
 

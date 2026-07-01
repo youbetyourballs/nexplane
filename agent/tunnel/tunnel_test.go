@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"encoding/hex"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,30 @@ import (
 )
 
 // ---- Frame encode/decode tests ----
+
+// TestFrameGoldenVectors locks the wire format byte-for-byte against the Python
+// relay codec (backend/app/tunnel/protocol.py). The SAME hex vectors are
+// asserted in backend/app/tests/test_tunnel_protocol_authorizer.py — if either
+// side changes the layout, one of the two conformance tests fails.
+func TestFrameGoldenVectors(t *testing.T) {
+	cases := []struct {
+		streamID uint32
+		typ      byte
+		payload  string
+		wantHex  string
+	}{
+		{0x01020304, OpData, "hi", "01020304046869"},
+		{1, OpOpen, "db.internal:5432", "000000010164622e696e7465726e616c3a35343332"},
+		{7, OpOpenOK, "", "0000000702"},
+		{255, OpClose, "", "000000ff05"},
+	}
+	for _, c := range cases {
+		got := hex.EncodeToString(Encode(c.streamID, c.typ, []byte(c.payload)))
+		if got != c.wantHex {
+			t.Errorf("Encode(%d,%d,%q) = %s, want %s", c.streamID, c.typ, c.payload, got, c.wantHex)
+		}
+	}
+}
 
 func TestEncodeDecodeRoundtrip(t *testing.T) {
 	cases := []struct {

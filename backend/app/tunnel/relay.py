@@ -9,6 +9,15 @@ uses, verifies the agent registration has ``tunnel_enabled``, loads its
 allowlist, and hands the socket to a ``TunnelSession`` registered with the
 process-wide ``TunnelManager``. Runs until the agent disconnects.
 
+Auth posture: the tunnel reuses the org's long-lived agent secret (same trust
+boundary as the agent's register/poll calls) and additionally requires the
+per-agent ``tunnel_enabled`` flag, so enabling the tunnel is an explicit,
+per-agent, admin-gated decision — a valid secret alone is not sufficient. The
+agent is loaded scoped to the authenticated org, so one org's secret can never
+open another org's agent. A future hardening (tracked as a follow-up) is to
+mint short-lived, per-connection tunnel tokens instead of reusing the org
+secret; the relay interface here does not change when that lands.
+
 Wire the route in with (in app/routers/agent.py or main):
 
     from app.tunnel.relay import run_agent_tunnel
