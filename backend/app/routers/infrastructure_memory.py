@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, cast, String, or_
 from sqlalchemy.ext.asyncio import AsyncSession

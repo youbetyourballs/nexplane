@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
 // @ts-nocheck — RunbookStepResultOut.result is Record<string,unknown>; JSX unknown propagation pre-dates strict typing
 import React from "react";
 import { useParams, Link } from "react-router-dom";

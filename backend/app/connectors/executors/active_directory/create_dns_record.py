@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 create_dns_record — create an A, CNAME, or TXT record in an AD-integrated DNS zone via WinRM.
 

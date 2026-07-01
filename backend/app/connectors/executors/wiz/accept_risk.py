@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 MUTATION = """
 mutation AcceptRisk($id: ID!, $days: Int!, $note: String!) {
   updateIssue(input: {id: $id, status: IN_PROGRESS, dueAt: $days, note: $note}) {

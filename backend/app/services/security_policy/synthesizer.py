@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 # backend/app/services/security_policy/synthesizer.py
 """Security policy synthesizer — delegates to policy plugins."""
 

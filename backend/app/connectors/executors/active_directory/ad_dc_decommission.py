@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 ad_dc_decommission — terminate or shut down compromised DCs after a forest restore.
 

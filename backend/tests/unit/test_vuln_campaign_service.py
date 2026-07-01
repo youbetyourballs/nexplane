@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 import pytest
 from app.services.vuln_campaign_service import _build_batches, _should_abort
 import uuid

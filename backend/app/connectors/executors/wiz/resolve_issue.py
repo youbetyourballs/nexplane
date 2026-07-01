@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 MUTATION = """
 mutation ResolveIssue($id: ID!, $note: String!) {
   updateIssue(input: {id: $id, status: RESOLVED, note: $note}) {

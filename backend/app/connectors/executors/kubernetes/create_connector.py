@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Executor for register_kubernetes_connector action.
 
 Registers a Kubernetes cluster as a connector by storing its kubeconfig in

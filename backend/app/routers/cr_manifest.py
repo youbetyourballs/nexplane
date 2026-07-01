@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 from typing import Optional
 from fastapi import APIRouter, Depends
 from app.routers import current_user

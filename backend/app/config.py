@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 

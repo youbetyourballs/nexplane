@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 OS major version upgrade executor.
 Flow: preflight -> snapshot -> upgrade -> verify -> (auto-rollback on failure).

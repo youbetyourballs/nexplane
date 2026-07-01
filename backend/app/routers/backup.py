@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 # backend/app/routers/backup.py
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query

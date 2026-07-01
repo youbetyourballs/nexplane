@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 from __future__ import annotations
 """step-ca client — wraps the `step` CLI via subprocess.
 

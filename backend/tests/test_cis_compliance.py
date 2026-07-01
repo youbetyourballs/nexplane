@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 import pytest
 from app.compliance.cis_v8_map import CIS_V8_CONTROLS, compute_cis_summary
 

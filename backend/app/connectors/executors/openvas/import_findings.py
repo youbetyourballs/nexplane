@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 from __future__ import annotations
 """OpenVAS — import scan findings into Nexplane as vulnerabilities linked to assets."""
 from datetime import datetime, timezone

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 # backend/app/services/security_policy/soak_service.py
 """Orchestrates soak session lifecycle: observation dispatch, synthesis, CR creation."""
 from __future__ import annotations

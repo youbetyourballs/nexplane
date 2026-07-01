@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 import pytest
 from app.services.ai_service import _build_change_types_text, AIService
 from app.services.secrets_service import SecretsService

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 ﻿import pytest
 from app.services.connector_service import execute_action, run_preflight_checks, run_verification_checks, ConnectorError
 

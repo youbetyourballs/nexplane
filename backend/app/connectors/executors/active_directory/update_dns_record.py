@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 update_dns_record — update a DNS record in an AD-integrated zone via WinRM (delete + recreate).
 

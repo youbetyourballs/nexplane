@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 Backend integration tests for credential rotation connector actions.
 Uses pytest-asyncio and unittest.mock to avoid live cloud calls.

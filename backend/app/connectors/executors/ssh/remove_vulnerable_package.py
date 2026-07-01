@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Executor: remove a package that has no available patch and poses unacceptable risk."""
 from typing import Any
 

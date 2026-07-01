@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 #!/usr/bin/env python3
 """
 Nexplane Multi-Cloud Smoke Test — Parallel VM lifecycle across AWS, GCP, and Azure.

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Rotate an Azure service principal client secret."""
 from __future__ import annotations
 import os

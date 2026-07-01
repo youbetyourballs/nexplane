@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select

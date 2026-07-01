@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 ad_forest_restore — restore an AD forest from an IFM S3 snapshot onto a clean Windows Server.
 

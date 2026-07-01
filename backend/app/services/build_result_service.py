@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Service to persist containerize_build results to asset_metadata."""
 import uuid
 from app.models.asset import Asset

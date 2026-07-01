@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Unit tests for VaultClient.list_leases — recursive traversal and real TTL reading."""
 import pytest
 from unittest.mock import MagicMock, call

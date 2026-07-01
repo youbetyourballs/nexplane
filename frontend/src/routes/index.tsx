@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { Dashboard } from "../pages/Dashboard";

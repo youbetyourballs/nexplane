@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Executor: eks_create_cluster_terraform — create EKS cluster via terraform_local_apply."""
 from __future__ import annotations
 import asyncio

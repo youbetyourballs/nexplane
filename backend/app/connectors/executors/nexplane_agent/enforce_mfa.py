@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     from app.connectors.executors.aws.enforce_mfa_iam import execute as iam_mfa
     result = await iam_mfa(parameters, asset_ids, connector)

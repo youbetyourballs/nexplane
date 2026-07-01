@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 #!/usr/bin/env python3
 """Run inside Docker container to print GitHub token from platform DB."""
 import asyncio

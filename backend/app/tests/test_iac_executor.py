@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Unit tests for iac_executor.py — all I/O mocked."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch

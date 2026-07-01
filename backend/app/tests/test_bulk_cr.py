@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 def test_batch_create_schema():
     from app.schemas.change_request import BatchCreateRequest, BatchCreateItem
     req = BatchCreateRequest(items=[

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 ip_campaign executor — fleet IP migration using migrate_ip in rolling batches.
 

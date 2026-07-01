@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """IR forensics service — pre-signed URL generation and bundle manifest persistence."""
 import uuid
 from datetime import datetime, timezone

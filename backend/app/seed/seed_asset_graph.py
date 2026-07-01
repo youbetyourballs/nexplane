@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 Seed asset relationships from asset_metadata["depends_on"] lists.
 Idempotent: skips an org if it already has any relationships.

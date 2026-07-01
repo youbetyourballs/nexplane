@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 ﻿import pytest
 from app.connectors.executors.okta import suspend_user, unsuspend_user, deactivate_user, revoke_sessions, reset_mfa_factors
 from app.connectors.executors.ssh import validate_template, execute_template, collect_output, install_agent, uninstall_agent, check_prerequisites, download_package, start_service

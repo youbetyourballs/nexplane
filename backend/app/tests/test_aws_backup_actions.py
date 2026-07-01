@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Tests for AWS backup connector actions — all boto3 calls mocked."""
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock

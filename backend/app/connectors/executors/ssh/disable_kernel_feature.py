@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Executor: blacklist and unload a vulnerable Linux kernel module."""
 from typing import Any
 

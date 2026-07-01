@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Executor: verify_patch_status — verifies patch was applied by checking package version."""
 from __future__ import annotations
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Executor: immediately revoke a known-compromised credential.
 For aws_iam_key: reconstitution rollback — saves username before delete, creates new key on rollback.
 Other credential types: permanent, no rollback.

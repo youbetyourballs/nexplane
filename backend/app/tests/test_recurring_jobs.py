@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 import pytest
 from app.models.recurring_job import RecurringJob, RecurringJobType
 from app.schemas.recurring_job import RecurringJobCreate, RecurringJobRead, RecurringJobUpdate

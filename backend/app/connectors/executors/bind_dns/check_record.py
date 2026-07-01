@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Query a specific DNS record and return its current value(s)."""
 from __future__ import annotations
 

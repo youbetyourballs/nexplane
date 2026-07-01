@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Route to AWS Secrets Manager executor
     from app.connectors.executors.aws.rotate_secrets_manager_secret import execute as aws_rotate

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Unit tests for the seccomp profile synthesizer."""
 import pytest
 from app.services.security_policy.synthesizer import synthesize_seccomp, compute_delta

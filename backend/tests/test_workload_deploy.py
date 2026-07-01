@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Tests for k8s_workload_deploy executor and workload_deploy_service."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
 // Centralized API types — mirrors backend Pydantic schemas
 // In production: generate these from OpenAPI via `openapi-typescript`
 

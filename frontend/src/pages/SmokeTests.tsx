@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PhasePickerPanel } from '../components/smoke/PhasePickerPanel';
 import { SmokeRunCard } from '../components/smoke/SmokeRunCard';

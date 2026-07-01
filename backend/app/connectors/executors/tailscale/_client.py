@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 import httpx
 
 TAILSCALE_API_BASE = "https://api.tailscale.com/api/v2"

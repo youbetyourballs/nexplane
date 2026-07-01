@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 def test_cr_priority_schema():
     from app.schemas.change_request import ChangeRequestCreate
     cr = ChangeRequestCreate(

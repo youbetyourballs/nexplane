@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Create a DNS record via RFC 2136 dynamic update."""
 from __future__ import annotations
 from datetime import datetime, timezone

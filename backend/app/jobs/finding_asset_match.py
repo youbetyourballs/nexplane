@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

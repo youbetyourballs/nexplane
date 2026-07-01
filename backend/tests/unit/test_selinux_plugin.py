@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Unit tests for SELinux synthesizer plugin."""
 import pytest
 from app.services.security_policy.plugins.selinux import _synthesize, _delta_extract, _parse_avc_line

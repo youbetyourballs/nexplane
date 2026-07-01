@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 # backend/tests/smoke/test_secret_store_live.py
 """
 Live smoke test for external secret store backends.

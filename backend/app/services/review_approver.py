@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 Generates revocation change requests for approved review campaigns.
 One ChangeRequest per revoked ReviewEntry, using the appropriate connector action.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
 import { apiClient } from "./client";
 import type {
   Token, User, Asset, AssetCreate, AssetUpdate, AssetListParams, BulkTagBody,

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Demo org switcher endpoint — only active when DEMO_MODE=true."""
 import os
 from fastapi import APIRouter, HTTPException
