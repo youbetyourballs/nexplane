@@ -481,7 +481,8 @@ export type ChangeType =
   | "asr_audit"
   | "asr_enforce"
   | "sysmon_deploy"
-  | "sysmon_fim";
+  | "sysmon_fim"
+  | "platform_upgrade";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 

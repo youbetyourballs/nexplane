@@ -42,6 +42,7 @@ services:
     volumes:
       - ./backend:/app
       - tailscale_state:/var/lib/tailscale-state
+      - nexplane-data:/nexplane-data
     command: >
       sh -c "tailscaled --tun=userspace-networking --state=/var/lib/tailscale-state/tailscaled.state &
              sleep 3 &&
@@ -64,6 +65,22 @@ services:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
 
+  nexplane-watchdog:
+    build:
+      context: ./watchdog
+      dockerfile: Dockerfile
+    container_name: nexplane-watchdog-1
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexplane:nexplane_dev@db:5432/nexplane}
+      - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-nexplane}
+    volumes:
+      - nexplane-data:/nexplane-data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./.env:/nexplane-data/.env
+    depends_on:
+      - db
+
   mailhog:
     image: mailhog/mailhog:latest
     ports:
@@ -73,3 +90,9 @@ services:
 volumes:
   postgres_data:
   tailscale_state:
+  nexplane-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /home/ec2-user/nexplane-data

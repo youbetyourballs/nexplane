@@ -509,6 +509,7 @@ class ChangeType(str, enum.Enum):
     estimate_size = "estimate_size"
     audit_software_inventory = "audit_software_inventory"
     audit_cis_compliance = "audit_cis_compliance"
+    platform_upgrade = "platform_upgrade"
 
 
 class RiskLevel(str, enum.Enum):

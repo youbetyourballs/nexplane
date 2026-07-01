@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  packages: write
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/nexplane/nexplane-backend
+  FRONTEND_IMAGE: ghcr.io/nexplane/nexplane-frontend
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          # Strip leading 'v' for bare version number
+          echo "bare=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Read release metadata
+        id: meta
+        run: |
+          # yq is available on ubuntu-latest runners
+          SEVERITY=$(yq '.severity' release.yml)
+          MIN_VER=$(yq '.min_compatible_version' release.yml)
+          CHANGELOG=$(yq '.changelog_url' release.yml)
+          NOTES=$(yq '.notes' release.yml)
+          echo "severity=${SEVERITY}" >> "$GITHUB_OUTPUT"
+          echo "min_compatible_version=${MIN_VER}" >> "$GITHUB_OUTPUT"
+          echo "changelog_url=${CHANGELOG}" >> "$GITHUB_OUTPUT"
+          echo "notes=${NOTES}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.BACKEND_IMAGE }}:latest
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.FRONTEND_IMAGE }}:latest
+
+      - name: Create source bundle
+        id: bundle
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE="nexplane-src-${VERSION}.tar.gz"
+          git archive HEAD --format=tar.gz -o "${BUNDLE}"
+          SHA256=$(sha256sum "${BUNDLE}" | awk '{print $1}')
+          echo "bundle=${BUNDLE}" >> "$GITHUB_OUTPUT"
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload bundle to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE="${{ steps.bundle.outputs.bundle }}"
+          aws s3 cp "${BUNDLE}" "s3://nexplane-artifacts/releases/${VERSION}/${BUNDLE}"
+
+      - name: Dispatch to nexplane-deploy
+        env:
+          DEPLOY_DISPATCH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
+        run: |
+          curl -f -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${DEPLOY_DISPATCH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/youbetyourballs/nexplane-deploy/dispatches \
+            -d "$(jq -n \
+              --arg version "${{ steps.version.outputs.version }}" \
+              --arg bare "${{ steps.version.outputs.bare }}" \
+              --arg sha256 "${{ steps.bundle.outputs.sha256 }}" \
+              --arg bundle "nexplane-src-${{ steps.version.outputs.version }}.tar.gz" \
+              --arg severity "${{ steps.meta.outputs.severity }}" \
+              --arg min_compatible_version "${{ steps.meta.outputs.min_compatible_version }}" \
+              --arg changelog_url "${{ steps.meta.outputs.changelog_url }}" \
+              --arg notes "${{ steps.meta.outputs.notes }}" \
+              '{
+                "event_type": "cut_release",
+                "client_payload": {
+                  "version": $version,
+                  "bare_version": $bare,
+                  "sha256": $sha256,
+                  "bundle": $bundle,
+                  "severity": $severity,
+                  "min_compatible_version": $min_compatible_version,
+                  "changelog_url": $changelog_url,
+                  "notes": $notes
+                }
+              }')"

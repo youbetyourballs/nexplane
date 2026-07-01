@@ -1262,6 +1262,16 @@ const CHANGE_TYPE_META: Partial<Record<ChangeType, { label: string; description:
     description: "Configure Sysmon to monitor specific directories for file changes.",
     outcomeTemplate: JSON.stringify({ monitored_paths: ["C:\\Windows\\System32", "C:\\Program Files"], rollback_strategy: "restore_sysmon_config" }, null, 2),
   },
+  platform_upgrade: {
+    label: "Platform Upgrade",
+    description: "Upgrade the Nexplane backend to a new release version with snapshot, migration, watchdog cutover, and rollback.",
+    outcomeTemplate: JSON.stringify({
+      target_version: "",
+      image_sha256: "",
+      changelog_url: "",
+      require_approval: "true",
+    }, null, 2),
+  },
 };
 
 const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
@@ -1419,6 +1429,10 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
       "oci_alarm_delete",
       "oci_logging_enable",
     ] as ChangeType[],
+  },
+  {
+    label: "Platform",
+    types: ["platform_upgrade"] as ChangeType[],
   },
 ];
 
