@@ -5,7 +5,7 @@
 from __future__ import annotations
 import asyncio
 import re
-from ._client import get_ssh_client
+from ._client import get_ssh_client, prepare_ssh_target
 
 _DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 
@@ -38,6 +38,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"keys": [], "host": "mock", "mock": True}
 
+    creds = await prepare_ssh_target(connector, creds)
     loop = asyncio.get_event_loop()
 
     def _run(asset_id: str) -> dict:

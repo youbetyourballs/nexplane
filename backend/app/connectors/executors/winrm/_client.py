@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import winrm
 
+from app.tunnel.routing import tcp_endpoint
+
 CMD_ALLOWLIST = (
     "sc query",
     "sc qc",
@@ -108,4 +110,42 @@ def get_winrm_client(connector):
     use_ssl = use_ssl_raw is True or str(use_ssl_raw).lower() == "true"
     verify_ssl_raw = creds.get("verify_ssl", "false")
     verify_ssl = verify_ssl_raw is True or str(verify_ssl_raw).lower() == "true"
+    return WinRMClient(hostname, port, username, password, use_ssl, verify_ssl)
+
+
+async def prepare_winrm_client(connector):
+    # type: (...) -> WinRMClient
+    """Build a WinRMClient, routing the session target through the agent tunnel.
+
+    For ``via_agent`` connectors the WinRM session URL is pointed at the
+    in-process localhost forwarder (``127.0.0.1:<forwarded_port>``). When routed
+    over HTTPS the real server cert cannot be validated through the localhost
+    forwarder, so certificate validation is disabled if the connector has
+    ``network_tls_skip_verify`` set (otherwise the real cert verification would
+    fail against the forwarder endpoint).
+
+    Resolving here (in the async ``execute``) keeps the app event loop free to
+    service the forwarder's accept coroutine while the blocking pywinrm calls run
+    off the loop in ``run_in_executor``.
+    """
+    creds = getattr(connector, "credentials", {}) or {}
+    hostname = creds.get("hostname", "")
+    port = int(creds.get("port", 5985))
+    username = creds.get("username", "")
+    password = creds.get("password", "")
+    use_ssl_raw = creds.get("use_ssl", "false")
+    use_ssl = use_ssl_raw is True or str(use_ssl_raw).lower() == "true"
+    verify_ssl_raw = creds.get("verify_ssl", "false")
+    verify_ssl = verify_ssl_raw is True or str(verify_ssl_raw).lower() == "true"
+
+    eh, ep = await tcp_endpoint(connector, hostname, port)
+    if (eh, ep) != (hostname, port):
+        # Routed via the forwarder: connect to it, and disable cert validation
+        # when the operator opted into skip-verify (real cert can't validate
+        # against a localhost forwarder endpoint).
+        hostname = eh
+        port = ep
+        if getattr(connector, "network_tls_skip_verify", False):
+            verify_ssl = False
+
     return WinRMClient(hostname, port, username, password, use_ssl, verify_ssl)

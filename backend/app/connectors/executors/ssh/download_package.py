@@ -26,7 +26,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "mock": True,
         }
 
-    from ._client import get_ssh_client
+    from ._client import get_ssh_client, prepare_ssh_target
+    creds = await prepare_ssh_target(connector, creds)
     loop = asyncio.get_event_loop()
     host_results = []
 
