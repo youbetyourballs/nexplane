@@ -169,6 +169,14 @@ class TunnelSession:
                 stream._resolve_open_err("session closed")
         self._streams.clear()
 
+    async def wait(self) -> None:
+        """Block until the read loop finishes (transport closed)."""
+        if self._read_task:
+            try:
+                await self._read_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
     async def close(self) -> None:
         self._closed = True
         if self._read_task:
