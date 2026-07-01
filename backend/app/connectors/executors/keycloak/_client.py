@@ -3,22 +3,28 @@
 
 """Keycloak Admin REST API client."""
 from __future__ import annotations
-import httpx
 from datetime import datetime, timezone
+
+from app.connectors.executors.common.tunnel_http import tunnel_http_client
 
 
 class KeycloakClient:
     def __init__(self, url: str, realm: str, client_id: str,
                  client_secret: str | None = None,
-                 username: str | None = None, password: str | None = None):
+                 username: str | None = None, password: str | None = None,
+                 connector=None):
         self.url = url.rstrip("/")
         self.realm = realm
         self.client_id = client_id
         self.client_secret = client_secret
         self.username = username
         self.password = password
+        self._connector = connector
         self._token: str | None = None
         self._token_expiry: datetime | None = None
+
+    async def _http(self):
+        return await tunnel_http_client(self._connector) if self._connector is not None else __import__("httpx").AsyncClient()
 
     async def _get_token(self) -> str:
         if self._token and self._token_expiry and datetime.now(timezone.utc) < self._token_expiry:
@@ -29,7 +35,7 @@ class KeycloakClient:
             data.update({"username": self.username, "password": self.password})
         if self.client_secret:
             data["client_secret"] = self.client_secret
-        async with httpx.AsyncClient() as client:
+        async with await self._http() as client:
             resp = await client.post(
                 f"{self.url}/realms/{self.realm}/protocol/openid-connect/token", data=data)
             resp.raise_for_status()
@@ -42,7 +48,7 @@ class KeycloakClient:
         return {"Authorization": f"Bearer {await self._get_token()}", "Content-Type": "application/json"}
 
     async def get_user_by_username(self, username: str) -> dict | None:
-        async with httpx.AsyncClient() as client:
+        async with await self._http() as client:
             resp = await client.get(
                 f"{self.url}/admin/realms/{self.realm}/users",
                 headers=await self._headers(),
@@ -56,7 +62,7 @@ class KeycloakClient:
         if not user:
             return {"success": False, "error": f"User {username} not found"}
         user_id = user["id"]
-        async with httpx.AsyncClient() as client:
+        async with await self._http() as client:
             resp = await client.put(
                 f"{self.url}/admin/realms/{self.realm}/users/{user_id}",
                 headers=await self._headers(),
@@ -69,7 +75,7 @@ class KeycloakClient:
         if not user:
             return {"success": False, "error": f"User {username} not found"}
         user_id = user["id"]
-        async with httpx.AsyncClient() as client:
+        async with await self._http() as client:
             resp = await client.put(
                 f"{self.url}/admin/realms/{self.realm}/users/{user_id}",
                 headers=await self._headers(),
@@ -82,14 +88,14 @@ class KeycloakClient:
         if not user:
             return {"success": False, "error": f"User {username} not found"}
         user_id = user["id"]
-        async with httpx.AsyncClient() as client:
+        async with await self._http() as client:
             resp = await client.delete(
                 f"{self.url}/admin/realms/{self.realm}/users/{user_id}/sessions",
                 headers=await self._headers())
         return {"success": True, "user_id": user_id, "sessions_revoked": True}
 
     async def create_user(self, username: str, email: str, password: str) -> dict:
-        async with httpx.AsyncClient() as client:
+        async with await self._http() as client:
             resp = await client.post(
                 f"{self.url}/admin/realms/{self.realm}/users",
                 headers=await self._headers(),
@@ -107,7 +113,7 @@ class KeycloakClient:
         user = await self.get_user_by_username(username)
         if not user:
             return {"success": False, "error": f"User {username} not found"}
-        async with httpx.AsyncClient() as client:
+        async with await self._http() as client:
             resp = await client.delete(
                 f"{self.url}/admin/realms/{self.realm}/users/{user['id']}",
                 headers=await self._headers())
@@ -127,4 +133,5 @@ def get_keycloak_client(connector) -> KeycloakClient | None:
         client_secret=creds.get("client_secret"),
         username=creds.get("username") or creds.get("admin_username"),
         password=creds.get("password") or creds.get("admin_password"),
+        connector=connector,
     )
