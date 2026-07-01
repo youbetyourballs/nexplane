@@ -24,5 +24,9 @@ def test_guard_online_raises_when_offline(monkeypatch):
         routing.guard_online(_conn("via_agent:abc"))
 
 def test_routable_set_has_families():
-    for t in ["postgres", "redis", "mongodb", "ssh", "winrm", "ldap", "active_directory", "freeipa", "gitlab", "keycloak", "nessus"]:
+    wired = ["postgres", "redis", "mongodb", "ssh", "winrm", "ldap", "active_directory", "freeipa", "gitlab", "gitea", "keycloak"]
+    for t in wired:
         assert t in routing.ROUTABLE_CONNECTOR_TYPES
+    # Deferred/unwired types must NOT be in the set
+    for t in ["nessus", "openvas", "wazuh", "elastic", "opnsense", "teleport", "infisical"]:
+        assert t not in routing.ROUTABLE_CONNECTOR_TYPES

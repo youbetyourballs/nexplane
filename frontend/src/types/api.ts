@@ -272,6 +272,8 @@ export interface ConnectorCreate {
   connector_type: ConnectorType;
   name: string;
   scoped_permissions?: Record<string, unknown>;
+  network_path?: string;
+  network_tls_skip_verify?: boolean;
 }
 
 export interface ConnectorTestResult {
