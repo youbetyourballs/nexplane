@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from app.connectors.catalog_service import get_catalog_service
 from app.models.user import User, UserRole
 from app.routers import require_roles
+from app.services.connector_service import execute_action
 
 router = APIRouter(prefix="/catalog", tags=["Catalog"])
 
@@ -31,6 +32,26 @@ def _shape(a: dict) -> dict:
         "destructive": bool(a.get("destructive", False)),
         "order": a.get("order", 100),
     }
+
+
+class RunActionRequest(BaseModel):
+    connector_type: str
+    action_id: str
+    params: dict = {}
+
+
+@router.post("/run")
+async def run_action(
+    body: RunActionRequest,
+    user: User = Depends(require_roles(UserRole.admin)),
+):
+    try:
+        action_def = get_catalog_service().get_action_def(body.connector_type, body.action_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Action not found")
+    if not action_def.get("read_only", False):
+        raise HTTPException(status_code=400, detail="Only read-only actions may run here; use a change request")
+    return await execute_action(body.connector_type, body.action_id, body.params, asset_ids=[], connector=None)
 
 
 @router.get("/actions")
