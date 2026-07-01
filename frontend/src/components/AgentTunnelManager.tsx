@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { agentTunnelsApi } from "../api/endpoints";
@@ -20,7 +23,7 @@ export default function AgentTunnelManager({ agentId }: { agentId?: string }) {
   });
 
   if (user?.role !== "admin") return <p className="text-sm text-gray-500">Admin access required.</p>;
-  if (isLoading) return <p className="text-sm text-gray-500">Loading agents…</p>;
+  if (isLoading) return <p className="text-sm text-gray-500">Loading agents...</p>;
 
   const shown = agentId ? agents.filter((a) => a.agent_id === agentId) : agents;
   if (!shown.length) return <p className="text-sm text-gray-500">No agents.</p>;
@@ -73,7 +76,7 @@ function AgentRow({ agent, pending, onToggle, onSave }: {
       <div className="flex flex-wrap gap-1 mb-2">
         {entries.map((e, i) => (
           <span key={`${e}-${i}`} className="inline-flex items-center bg-slate-100 text-slate-600 text-xs px-1.5 py-0.5 rounded font-mono">
-            {e}<button className="ml-1 text-slate-400 hover:text-red-500" onClick={() => setEntries(entries.filter((_, j) => j !== i))}>×</button>
+            {e}<button className="ml-1 text-slate-400 hover:text-red-500" onClick={() => setEntries(entries.filter((_, j) => j !== i))}>x</button>
           </span>
         ))}
       </div>
