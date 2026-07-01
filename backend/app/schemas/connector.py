@@ -12,6 +12,8 @@ class ConnectorCreate(BaseModel):
     connector_type: ConnectorType
     name: str
     scoped_permissions: dict = {}
+    network_path: str = "direct"
+    network_tls_skip_verify: bool = False
 
 
 class ConnectorRead(BaseModel):
@@ -23,6 +25,8 @@ class ConnectorRead(BaseModel):
     name: str
     status: ConnectorStatus
     scoped_permissions: dict
+    network_path: str
+    network_tls_skip_verify: bool
     created_at: datetime
 
 
