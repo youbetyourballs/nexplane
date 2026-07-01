@@ -4,7 +4,7 @@
 import uuid
 import enum
 from datetime import datetime
-from sqlalchemy import String, DateTime, func, ForeignKey, Text, Enum as SAEnum, JSON, UniqueConstraint
+from sqlalchemy import String, DateTime, func, ForeignKey, Text, Enum as SAEnum, JSON, UniqueConstraint, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -41,6 +41,10 @@ class AgentRegistration(Base):
     agent_version: Mapped[str] = mapped_column(String(50), nullable=False, default="")
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Reverse-tunnel connectivity (opt-in, off by default). tunnel_allowlist is a
+    # list of "CIDR|IP|hostname:port[-port|*]" strings; deny-by-default.
+    tunnel_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    tunnel_allowlist: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
 
 
 class AgentJob(Base):
