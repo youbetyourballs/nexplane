@@ -37,3 +37,18 @@ class AgentJobResultRequest(BaseModel):
     status: AgentJobStatus
     result: dict | None = None
     error: str | None = None
+
+
+class TunnelConfigUpdate(BaseModel):
+    """Admin request to set an agent's reverse-tunnel config."""
+    enabled: bool
+    # Deny-by-default allowlist entries: "CIDR|IP|hostname:port|range|*".
+    allowlist: list[str] = []
+
+
+class AgentTunnelStatus(BaseModel):
+    agent_id: uuid.UUID
+    hostname: str
+    tunnel_enabled: bool
+    tunnel_allowlist: list[str]
+    online: bool  # currently connected to this control plane's relay
