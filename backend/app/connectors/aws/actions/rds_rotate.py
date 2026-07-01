@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """AWS RDS master password rotation and SSM Parameter Store update."""
 
 import boto3

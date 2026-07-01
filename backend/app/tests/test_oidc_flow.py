@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 import pytest
 from unittest.mock import AsyncMock, patch
 from app.services.oidc_service import build_authorization_url, OidcConfig, exchange_code_for_userinfo

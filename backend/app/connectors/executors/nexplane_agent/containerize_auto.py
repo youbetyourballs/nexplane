@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Executor for agent_containerize_auto change type.
 
 Orchestrates 7 stages: preflight_discovery, fleet_cross_reference, ai_analysis,

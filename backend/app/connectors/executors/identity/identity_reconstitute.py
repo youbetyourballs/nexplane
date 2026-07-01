@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 identity_reconstitute — compare current state to a snapshot, dry-run detects
 divergence, then operator-approved reconstitution recreates missing/corrupted accounts.

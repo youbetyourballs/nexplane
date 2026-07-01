@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Read and parse authorized_keys files on SSH-managed assets."""
 from __future__ import annotations
 import asyncio

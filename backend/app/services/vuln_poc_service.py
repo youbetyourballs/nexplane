@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """CISA KEV check, EPSS enrichment, PoC discovery, and exploitability state transitions."""
 from __future__ import annotations
 import logging

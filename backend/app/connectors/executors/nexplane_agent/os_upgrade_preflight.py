@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 Lightweight preflight executor for OS major version upgrades.
 Dispatches the preflight_os_upgrade agent command and returns the result.

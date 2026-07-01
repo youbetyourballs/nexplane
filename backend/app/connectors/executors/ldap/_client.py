@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """LDAP client wrapper using ldap3."""
 from __future__ import annotations
 from ldap3 import Server, Connection, ALL, MODIFY_REPLACE, SUBTREE

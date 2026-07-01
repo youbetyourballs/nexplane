@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
 export function LoadingSpinner({ className = "" }: { className?: string }) {
   return (
     <div className={`flex items-center justify-center ${className}`}>

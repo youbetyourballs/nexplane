@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """AI-guided mitigation suggestion service for vulnerability findings."""
 from __future__ import annotations
 import json

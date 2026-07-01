@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Orchestrates project-wide rollback: creates rollback record, runs steps in reverse order,
 handles reconstitution for permanent CRs, supports pause/resume and crash recovery."""
 import asyncio

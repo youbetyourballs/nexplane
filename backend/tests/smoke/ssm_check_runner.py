@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 import asyncio, sys, time
 sys.path.insert(0, '/app')
 from app.config import settings

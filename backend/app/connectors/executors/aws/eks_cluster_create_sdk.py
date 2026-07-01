@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Executor: eks_create_cluster_sdk — create EKS cluster via boto3."""
 from __future__ import annotations
 import asyncio

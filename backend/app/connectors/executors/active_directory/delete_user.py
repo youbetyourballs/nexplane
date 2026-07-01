@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Delete an AD user account. Called as the rollback action for create_user.
 

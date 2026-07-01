@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 Tests for runbook CRUD and trigger endpoints.
 All tests use the shared `client` fixture (AsyncClient with overridden auth).

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 dc_integrity_check — read-only DC health audit via WinRM PowerShell + LDAP.
 

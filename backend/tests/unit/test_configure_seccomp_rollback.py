@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Verify configure_seccomp rollback passes correct parameters to the agent dispatcher."""
 import pytest
 from unittest.mock import patch

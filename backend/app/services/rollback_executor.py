@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Shared CR rollback execution. Used by manual_rollback endpoint and project rollback service."""
 import uuid
 import logging

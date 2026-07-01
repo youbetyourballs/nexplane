@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 from __future__ import annotations
 """Elastic Security / Kibana REST API client using httpx (sync)."""
 from typing import Optional, List, Dict, Any

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 Patch campaign executor: dispatches agent patch jobs to affected assets in rolling batches.
 Uses software_inventory metadata populated by agent_listpkgs to find affected assets.

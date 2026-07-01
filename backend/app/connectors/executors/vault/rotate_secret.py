@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Rotate a Vault secret — reads current value, generates new one, writes back."""
 from __future__ import annotations
 import secrets

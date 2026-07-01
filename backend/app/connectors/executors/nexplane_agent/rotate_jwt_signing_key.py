@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Rotate JWT signing key — generates new RSA/EC key pair, updates app config, returns new public key."""
 from app.connectors.executors.nexplane_agent import _dispatch
 

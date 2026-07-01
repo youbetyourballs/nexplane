@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 from datetime import datetime, timezone
 from app.services.safety_engine import APPROVED_COMMAND_TEMPLATES
 

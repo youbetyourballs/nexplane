@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Removes the nexplane-emergency-lockout IAM inline policy from a user."""
 import os
 import boto3

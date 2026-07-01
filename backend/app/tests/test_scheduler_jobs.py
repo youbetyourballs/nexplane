@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Tests for new scheduler job functions."""
 import asyncio
 from datetime import datetime, timezone, timedelta

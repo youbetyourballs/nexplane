@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Service to mark an asset's applications as retired after agent_containerize_retire."""
 import uuid
 from app.models.asset import Asset

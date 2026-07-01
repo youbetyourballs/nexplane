@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Catalog-executor parity guard.
 
 Asserts that every action_id declared in a connector catalog JSON has a corresponding

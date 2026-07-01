@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Unit tests for EPSS score enrichment (vuln_poc_service)."""
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock

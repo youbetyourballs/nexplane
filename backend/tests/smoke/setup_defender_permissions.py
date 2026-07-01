@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 #!/usr/bin/env python3
 """
 Setup Defender for Endpoint API permissions on the existing Azure app registration.

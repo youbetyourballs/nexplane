@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Service to register a Kubernetes workload asset after k8s_workload_deploy."""
 import uuid
 from datetime import datetime, timezone

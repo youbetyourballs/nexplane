@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 ﻿import pytest
 from app.connectors.executors.aws import (
     health_check, create_snapshot, verify_snapshot,

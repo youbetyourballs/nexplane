@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Executor: apply_patches — dispatches apply_linux_patches or apply_windows_patches to the agent."""
 from __future__ import annotations
 from datetime import datetime, timezone

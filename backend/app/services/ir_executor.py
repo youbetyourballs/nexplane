@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """IR change request executor — parallel and sequential step orchestration."""
 import asyncio
 import uuid

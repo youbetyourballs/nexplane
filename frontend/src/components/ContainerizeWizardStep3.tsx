@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
 import { useState } from "react";
 import { Loader2, CheckCircle, Server, AlertCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";

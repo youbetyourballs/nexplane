@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 from __future__ import annotations
 """Block a specific IP by creating an alias + block rule in OPNsense."""
 from datetime import datetime, timezone

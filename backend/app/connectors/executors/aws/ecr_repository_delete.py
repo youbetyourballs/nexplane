@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Executor: ecr_delete_repository — delete ECR repository."""
 from __future__ import annotations
 

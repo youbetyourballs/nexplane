@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Unified execution entry point for all CR execution sources.
 
 All paths — manual, scheduled, recurring, AI-assisted — must go through

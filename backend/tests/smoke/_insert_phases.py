@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Insert OPENVAS_SCAN and NESSUS_SCAN phase functions into test_aws_live.py."""

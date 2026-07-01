@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 list_dns_records — enumerate DNS records in an AD-integrated zone via WinRM PowerShell.
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 Grant Microsoft Graph API permissions to the Azure app registration used by Nexplane.
 Permissions needed for AZURE_AD smoke: User.Read.All, User.ReadWrite.All, Group.Read.All.

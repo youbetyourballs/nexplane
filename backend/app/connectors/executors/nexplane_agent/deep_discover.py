@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Dispatch executor for the deep_discover agent command.
 
 Calls the Go agent's deep_discover command which performs full host enrichment:

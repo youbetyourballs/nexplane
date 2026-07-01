@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 from app.schemas.auth import Token, LoginRequest, UserRead
 from app.schemas.organization import OrganizationRead
 from app.schemas.asset import AssetRead, AssetCreate

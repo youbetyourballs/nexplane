@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 import os
 from functools import lru_cache
 from app.services.secret_backend import SecretBackend

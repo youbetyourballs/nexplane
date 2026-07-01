@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 Discovers assets that violate a patch age baseline.
 Uses agent audit_patch_status command + asset_metadata.last_security_patch_at.

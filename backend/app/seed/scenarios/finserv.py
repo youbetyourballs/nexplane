@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """Seed: Meridian Capital Partners — Financial Services scenario."""
 from __future__ import annotations
 import uuid

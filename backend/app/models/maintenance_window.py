@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 import uuid
 from sqlalchemy import Column, Integer, String, Boolean, JSON
 from sqlalchemy.dialects.postgresql import UUID

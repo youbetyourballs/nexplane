@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 ip_change_service — post-execution metadata update for change_ip and migrate_ip CRs.
 

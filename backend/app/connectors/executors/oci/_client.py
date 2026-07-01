@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 def get_oci_config(creds: dict) -> dict:
     """Build OCI SDK config dict from stored connector credentials."""
     return {

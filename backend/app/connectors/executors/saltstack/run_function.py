@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 ALLOWED_FUNCTIONS = {"sys.doc", "test.ping", "pkg.list_pkgs", "service.status"}
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:

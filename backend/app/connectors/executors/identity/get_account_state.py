@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """
 Read pre-state from raw_attributes stored in IdentityAccount.
 Called before any fan-out child CR executes its action.

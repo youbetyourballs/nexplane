@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
 import React, { useRef, useEffect } from 'react';
 import { useSmokeStream } from '../../hooks/useSmokeStream';
 import type { SmokeRun } from '../../api/smokeTestsApi';

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2024-2026 Nexplane, Inc.
+
 import { useState, useEffect, useRef } from "react";
 import { X, CheckCircle, XCircle, Loader2, Clock } from "lucide-react";
 import { useFireCR } from "../hooks/useFireCR";

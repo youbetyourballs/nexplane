@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """CR Manifest Builder — infers planning metadata from change type JSON definitions."""
 from __future__ import annotations
 

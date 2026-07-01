@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 def test_compliance_attestation_model_exists():
     from app.models.compliance_attestation import ComplianceAttestation
     assert hasattr(ComplianceAttestation, "control_id")

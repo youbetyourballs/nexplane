@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from __future__ import annotations  # Python 3.9 compat

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 """List all records in a DNS zone via AXFR zone transfer."""
 from __future__ import annotations
 import dns.query
