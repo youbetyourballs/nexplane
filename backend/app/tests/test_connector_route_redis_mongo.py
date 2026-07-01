@@ -80,6 +80,7 @@ def test_redis_via_agent_ssl_skip_verify(monkeypatch):
         assert client is not None
         assert client.ssl is True
         assert client.ssl_check_hostname is False
+        assert client.ssl_cert_reqs == "none"
 
     asyncio.run(run())
 
