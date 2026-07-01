@@ -5,6 +5,10 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 
+jest.mock("../../lib/env", () => ({
+  AGENT_DOWNLOAD_URL: "",
+}));
+
 jest.mock("../../components/AgentTunnelManager", () => ({
   __esModule: true,
   default: () => <div>agent-tunnel-manager</div>,
