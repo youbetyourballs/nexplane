@@ -24,13 +24,12 @@ async def execute(parameters, asset_ids, connector):
             "completed_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    from ._client import get_winrm_client
+    from ._client import prepare_winrm_client
 
+    client = await prepare_winrm_client(connector)
     loop = asyncio.get_event_loop()
 
     def _install():
-        client = get_winrm_client(connector)
-
         # Create service
         bin_path = '{} --secret "{}" --url "{}"'.format(AGENT_EXE, agent_secret, control_plane_url)
         stdout, stderr, rc = client.run_cmd(
@@ -71,13 +70,13 @@ async def rollback(parameters, execution_result, connector):
     if not creds:
         return {"rolled_back": True, "reason": "mock — nothing to remove"}
 
-    from ._client import get_winrm_client
+    from ._client import prepare_winrm_client
     import asyncio as _asyncio
 
+    client = await prepare_winrm_client(connector)
     loop = _asyncio.get_event_loop()
 
     def _uninstall():
-        client = get_winrm_client(connector)
         client.run_cmd("sc.exe stop {}".format(SERVICE_NAME))
         stdout, stderr, rc = client.run_cmd("sc.exe delete {}".format(SERVICE_NAME))
         return rc

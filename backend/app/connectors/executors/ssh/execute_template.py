@@ -44,6 +44,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         host_results = [{"asset_id": a, "exit_code": 0, "stdout": f"[mock] Executed '{template_id}'", "stderr": "", "duration_ms": random.randint(50, 500)} for a in asset_ids]
         return {"action": "execute_template", "template_id": template_id, "parameters": parameters.get("parameters", {}), "host_results": host_results, "completed_at": datetime.now(timezone.utc).isoformat()}
+    from ._client import prepare_ssh_target
+    creds = await prepare_ssh_target(connector, creds)
     return await _real_execute(parameters, asset_ids, creds)
 
 

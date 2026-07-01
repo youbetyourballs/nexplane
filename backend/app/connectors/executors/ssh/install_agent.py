@@ -3,7 +3,7 @@
 
 import asyncio
 from datetime import datetime, timezone
-from ._client import get_ssh_client
+from ._client import get_ssh_client, prepare_ssh_target
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
@@ -21,6 +21,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "completed_at": datetime.now(timezone.utc).isoformat(),
         }
 
+    creds = await prepare_ssh_target(connector, creds)
     loop = asyncio.get_event_loop()
     host_results = []
 

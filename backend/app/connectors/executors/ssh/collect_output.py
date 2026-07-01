@@ -20,10 +20,11 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "mock": True,
         }
 
-    from ._client import get_ssh_client, is_allowed
+    from ._client import get_ssh_client, is_allowed, prepare_ssh_target
     if not is_allowed(command):
         raise ValueError(f"Command not in SSH read allowlist: {command!r}")
 
+    creds = await prepare_ssh_target(connector, creds)
     loop = asyncio.get_event_loop()
     host_results = []
 

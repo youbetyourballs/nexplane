@@ -18,12 +18,12 @@ async def execute(parameters, asset_ids, connector):
             "completed_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    from ._client import get_winrm_client
+    from ._client import prepare_winrm_client
 
+    client = await prepare_winrm_client(connector)
     loop = asyncio.get_event_loop()
 
     def _check():
-        client = get_winrm_client(connector)
         checks = []
 
         # OS version — requires Windows Server 2016+ (build >= 14393)

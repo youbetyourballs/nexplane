@@ -25,12 +25,12 @@ async def execute(parameters, asset_ids, connector):
     if not agent_url:
         raise ValueError("agent_url parameter is required")
 
-    from ._client import get_winrm_client
+    from ._client import prepare_winrm_client
 
+    client = await prepare_winrm_client(connector)
     loop = asyncio.get_event_loop()
 
     def _download():
-        client = get_winrm_client(connector)
         # Create directory
         client.run_ps("New-Item -ItemType Directory -Force -Path 'C:\\nexplane'")
         # Download
@@ -69,13 +69,13 @@ async def rollback(parameters, execution_result, connector):
     if not creds:
         return {"rolled_back": True, "reason": "mock — nothing to remove"}
 
-    from ._client import get_winrm_client
+    from ._client import prepare_winrm_client
     import asyncio as _asyncio
 
+    client = await prepare_winrm_client(connector)
     loop = _asyncio.get_event_loop()
 
     def _remove():
-        client = get_winrm_client(connector)
         stdout, stderr, rc = client.run_ps(
             "Remove-Item '{}' -Force -ErrorAction SilentlyContinue".format(AGENT_DEST)
         )
