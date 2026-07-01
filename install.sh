@@ -5,6 +5,94 @@
 
 set -e
 
+# ── Recovery mode ─────────────────────────────────────────────────────────────
+# Usage: install.sh --recover
+# Reads the upgrade sentinel file and restores the previous version without Docker.
+
+recover_from_upgrade() {
+  NEXPLANE_DATA_DIR="${NEXPLANE_DATA_DIR:-/home/ec2-user/nexplane-data}"
+  SENTINEL="$NEXPLANE_DATA_DIR/upgrade/sentinel.json"
+  NEXPLANE_DIR="${NEXPLANE_DIR:-/home/ec2-user/nexplane}"
+  ENV_FILE="$NEXPLANE_DIR/.env"
+
+  printf '\n\033[1m=== Nexplane Recovery Mode ===\033[0m\n\n'
+
+  if [ ! -f "$SENTINEL" ]; then
+    printf '\033[31mERROR: Sentinel file not found at %s\033[0m\n' "$SENTINEL"
+    printf 'Nothing to recover. If the platform is running, no recovery is needed.\n'
+    exit 1
+  fi
+
+  STATE=$(python3 -c "import json,sys; d=json.load(open('$SENTINEL')); print(d.get('state','unknown'))")
+  PREVIOUS_TAG=$(python3 -c "import json,sys; d=json.load(open('$SENTINEL')); print(d.get('previous_image_tag',''))")
+  SNAPSHOT=$(python3 -c "import json,sys; d=json.load(open('$SENTINEL')); print(d.get('snapshot_path',''))")
+  PREV_VERSION=$(python3 -c "import json,sys; d=json.load(open('$SENTINEL')); print(d.get('previous_version','unknown'))")
+
+  printf '  Sentinel state : %s\n' "$STATE"
+  printf '  Previous image : %s\n' "$PREVIOUS_TAG"
+  printf '  Snapshot       : %s\n' "$SNAPSHOT"
+  printf '\n'
+
+  if [ "$STATE" = "upgrade_complete" ]; then
+    printf '\033[32mUpgrade completed successfully. No recovery needed.\033[0m\n'
+    exit 0
+  fi
+
+  printf 'Stopping backend container...\n'
+  cd "$NEXPLANE_DIR" && docker compose stop backend 2>/dev/null || true
+
+  # Restore IMAGE_TAG in .env
+  if [ -n "$PREVIOUS_TAG" ]; then
+    TAG_ONLY="${PREVIOUS_TAG##*:}"
+    if grep -q "^IMAGE_TAG=" "$ENV_FILE" 2>/dev/null; then
+      sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=$TAG_ONLY|" "$ENV_FILE"
+    else
+      printf 'IMAGE_TAG=%s\n' "$TAG_ONLY" >> "$ENV_FILE"
+    fi
+    printf 'Restored IMAGE_TAG=%s in %s\n' "$TAG_ONLY" "$ENV_FILE"
+  fi
+
+  # pg_restore from snapshot
+  if [ -n "$SNAPSHOT" ] && [ -f "$SNAPSHOT" ]; then
+    printf 'Running pg_restore from %s ...\n' "$SNAPSHOT"
+    # shellcheck disable=SC1090
+    . "$ENV_FILE" 2>/dev/null || true
+    DB_HOST="${DB_HOST:-localhost}"
+    DB_PORT="${DB_PORT:-5432}"
+    DB_USER="${DB_USER:-nexplane}"
+    DB_NAME="${DB_NAME:-nexplane}"
+    export PGPASSWORD="${DB_PASSWORD:-nexplane_dev}"
+    zcat "$SNAPSHOT" | pg_restore --clean --if-exists -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" "$DB_NAME" || true
+    printf 'pg_restore complete.\n'
+  else
+    printf '\033[33mWARNING: No valid snapshot found at '"'"'%s'"'"'. Skipping pg_restore.\033[0m\n' "$SNAPSHOT"
+  fi
+
+  # Restart on previous image
+  printf 'Starting backend on previous image...\n'
+  cd "$NEXPLANE_DIR" && docker compose up -d backend
+
+  # Update sentinel
+  python3 -c "
+import json
+with open('$SENTINEL') as f:
+    d = json.load(f)
+d['state'] = 'rollback_complete'
+d['rollback_reason'] = 'manual_recover'
+with open('$SENTINEL', 'w') as f:
+    json.dump(d, f, indent=2)
+"
+
+  printf '\n\033[1m=== Recovery complete ===\033[0m\n'
+  printf 'Platform restored to version: %s\n' "$PREV_VERSION"
+  printf 'Access the platform at your configured URL.\n'
+}
+
+if [ "${1:-}" = "--recover" ]; then
+  recover_from_upgrade
+  exit 0
+fi
+
 REPO_URL="https://github.com/youbetyourballs/nexplane"
 REPO_ZIP="https://github.com/youbetyourballs/nexplane/archive/refs/heads/master.zip"
 INSTALL_DIR="${NEXPLANE_DIR:-nexplane}"

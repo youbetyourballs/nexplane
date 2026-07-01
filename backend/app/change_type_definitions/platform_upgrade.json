@@ -1,0 +1,38 @@
+{
+  "change_type": "platform_upgrade",
+  "display_name": "Platform Upgrade",
+  "description": "Upgrade the Nexplane backend to a new release version with automatic snapshot, migration, cutover via watchdog, and rollback.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "target_version": {
+      "type": "string",
+      "required": true,
+      "label": "Target Version",
+      "description": "Exact semver tag to upgrade to (e.g. 1.4.2)"
+    },
+    "image_sha256": {
+      "type": "string",
+      "required": true,
+      "label": "Image SHA-256",
+      "description": "sha256 digest from release manifest; verified before cutover"
+    },
+    "changelog_url": {
+      "type": "string",
+      "required": false,
+      "label": "Changelog URL",
+      "description": "Link to release notes for the approver"
+    },
+    "require_approval": {
+      "type": "string",
+      "required": false,
+      "label": "Require Approval",
+      "description": "Set to 'false' to allow auto-execution (hosted ops path only)",
+      "default": "true"
+    }
+  },
+  "rollback": {
+    "strategy": "backup_restore",
+    "description": "Watchdog restores previous image tag and pg_restore from pre-upgrade snapshot"
+  }
+}

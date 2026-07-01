@@ -7,9 +7,14 @@ import { useQuery } from "@tanstack/react-query";
 import { Sidebar } from "./Sidebar";
 import { FreezeAlert } from "./FreezeAlert";
 import { apiClient } from "../api/client";
+import { useAuth } from "../hooks/useAuth";
+import UpdateBanner from "./UpdateBanner";
+import DegradedModeBanner from "./DegradedModeBanner";
 
 export function Layout() {
   const [freezeDismissed, setFreezeDismissed] = useState(false);
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const { data: activeFreeze } = useQuery({
     queryKey: ["active-freeze"],
     queryFn: () =>
@@ -22,6 +27,7 @@ export function Layout() {
 
   return (
     <>
+      <DegradedModeBanner isAdmin={isAdmin} />
       {activeFreeze && !freezeDismissed && (
         <FreezeAlert
           reason={activeFreeze.reason}
@@ -29,6 +35,7 @@ export function Layout() {
           onDismiss={() => setFreezeDismissed(true)}
         />
       )}
+      <UpdateBanner isAdmin={isAdmin} />
       <div className="min-h-screen bg-slate-50 flex">
         <Sidebar />
         <main className="flex-1 ml-60 min-h-screen">

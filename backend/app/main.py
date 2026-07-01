@@ -54,6 +54,9 @@ from app.workers.scheduled_cr_worker import execute_scheduled_crs
 from app.workers.drift_check_worker import check_policy_drift
 from app.workers.credential_expiry_worker import check_credential_expiry
 from app.services.runbook_executor import tick_all_executions as _tick_runbooks
+from app.services.version_poller import poll_version as _poll_version
+from app.routers.version import router as version_router
+from app.services.upgrade_verify import run_startup_verify as _run_upgrade_verify
 
 _escalation_scheduler: AsyncIOScheduler | None = None
 
@@ -81,6 +84,7 @@ async def lifespan(app: FastAPI):
     _escalation_scheduler.add_job(execute_scheduled_crs, "interval", minutes=1)
     _escalation_scheduler.add_job(check_policy_drift, "interval", hours=24)
     _escalation_scheduler.add_job(check_credential_expiry, "cron", hour=6, minute=0)
+    _escalation_scheduler.add_job(_poll_version, "interval", hours=6, id="version_poller", replace_existing=True, max_instances=1)
     async def _tick_runbooks_job():
         await _tick_runbooks(AsyncSessionLocal)
 
@@ -112,6 +116,7 @@ async def lifespan(app: FastAPI):
     await _scrub_orphaned_crs()
     from app.services.project_rollback_service import resume_interrupted as _resume_rollbacks
     await _resume_rollbacks()
+    await _run_upgrade_verify(AsyncSessionLocal)
     yield
     scheduler_service.stop()
     if _escalation_scheduler and _escalation_scheduler.running:
@@ -218,6 +223,7 @@ app.include_router(oidc_router)
 app.include_router(infrastructure_memory_router)
 app.include_router(impact_simulation_router)
 app.include_router(recommendations_router)
+app.include_router(version_router)
 import os as _os
 if _os.getenv("DEMO_MODE") == "true":
     from app.routers.demo import router as demo_router
