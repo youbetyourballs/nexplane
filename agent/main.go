@@ -17,6 +17,7 @@ import (
 	"nexplane-agent/installer"
 	"nexplane-agent/poller"
 	"nexplane-agent/registration"
+	"nexplane-agent/tunnel"
 	"nexplane-agent/updater"
 )
 
@@ -69,6 +70,19 @@ func main() {
 		log.Fatalf("Registration failed: %v", err)
 	}
 	log.Printf("Registered: agent_id=%s asset_id=%s", info.AgentID, info.AssetID)
+
+	// Reverse tunnel: if the control plane enabled it for this agent, open the
+	// outbound tunnel in the background so the control plane can reach
+	// allowlisted destinations in this network. It reconnects on its own and
+	// stops when ctx is cancelled; a tunnel failure never blocks job polling.
+	if info.TunnelEnabled {
+		log.Printf("[tunnel] enabled; %d allowlist rule(s)", len(info.TunnelAllowlist))
+		go func() {
+			if err := tunnel.Run(ctx, cfg.ControlPlane, cfg.Secret, info.AgentID, info.TunnelAllowlist); err != nil && ctx.Err() == nil {
+				log.Printf("[tunnel] stopped: %v", err)
+			}
+		}()
+	}
 
 	if err := changip.CheckPendingRollback(func(params map[string]any) {
 		result := executor.Dispatch("change_ip", params, true, params)

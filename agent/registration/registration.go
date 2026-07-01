@@ -12,8 +12,10 @@ import (
 )
 
 type Info struct {
-	AgentID string
-	AssetID string
+	AgentID         string
+	AssetID         string
+	TunnelEnabled   bool
+	TunnelAllowlist []string
 }
 
 // Register sends the registration payload to the control plane.
@@ -32,7 +34,12 @@ func Register(ctx context.Context, c *client.Client, machineID, hostname, osType
 	if err != nil {
 		return nil, fmt.Errorf("registering agent: %w", err)
 	}
-	return &Info{AgentID: resp.AgentID, AssetID: resp.AssetID}, nil
+	return &Info{
+		AgentID:         resp.AgentID,
+		AssetID:         resp.AssetID,
+		TunnelEnabled:   resp.TunnelEnabled,
+		TunnelAllowlist: resp.TunnelAllowlist,
+	}, nil
 }
 
 func getIPAddresses() []string {

@@ -36,8 +36,10 @@ type RegisterRequest struct {
 }
 
 type RegisterResponse struct {
-	AgentID string `json:"agent_id"`
-	AssetID string `json:"asset_id"`
+	AgentID         string   `json:"agent_id"`
+	AssetID         string   `json:"asset_id"`
+	TunnelEnabled   bool     `json:"tunnel_enabled"`
+	TunnelAllowlist []string `json:"tunnel_allowlist"`
 }
 
 type JobResponse struct {
