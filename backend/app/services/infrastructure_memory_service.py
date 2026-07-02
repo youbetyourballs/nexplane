@@ -62,9 +62,9 @@ async def get_asset_provenance(
                 ChangeRequestStatus.completed,
                 ChangeRequestStatus.rolled_back,
             ]),
-            ChangeRequest.target_asset_ids.contains([str(asset_id)]),
+            ChangeRequest.target_asset_ids.cast(String).contains(str(asset_id)),
         )
-        .order_by(ChangeRequest.applied_at.desc().nullslast())
+        .order_by(ChangeRequest.updated_at.desc().nullslast())
         .limit(50)
     )
     rows = await db.execute(stmt)
@@ -121,7 +121,7 @@ async def get_asset_provenance(
             "description": cr.description,
             "requester": requester.email,
             "status": cr.status.value if hasattr(cr.status, "value") else str(cr.status),
-            "applied_at": cr.applied_at.isoformat() if cr.applied_at else None,
+            "applied_at": cr.updated_at.isoformat() if cr.updated_at else None,
             "stateful_approved_at": cr.stateful_approved_at.isoformat() if cr.stateful_approved_at else None,
             "approvals": approvals_by_cr.get(cr.id, []),
             "rollback_available": rollback_available,
@@ -228,7 +228,7 @@ async def search_crs_by_parameter(
             "description": cr.description,
             "status": cr.status.value if hasattr(cr.status, "value") else str(cr.status),
             "requester": requester.email,
-            "applied_at": cr.applied_at.isoformat() if cr.applied_at else None,
+            "applied_at": cr.updated_at.isoformat() if cr.updated_at else None,
             "approvals": approvals_by_cr.get(cr.id, []),
             "rollback_available": bool(rp.get("automatic") or rp.get("steps")),
             "last_verified": last_verified,
@@ -390,24 +390,24 @@ async def can_asset_be_deleted(
         .where(
             ChangeRequest.organization_id == org_id,
             ChangeRequest.status == ChangeRequestStatus.completed,
-            ChangeRequest.target_asset_ids.contains([str(asset_id)]),
+            ChangeRequest.target_asset_ids.cast(String).contains(str(asset_id)),
         )
-        .order_by(ChangeRequest.applied_at.desc().nullslast())
+        .order_by(ChangeRequest.updated_at.desc().nullslast())
         .limit(1)
     )
     last_cr_row = await db.execute(last_cr_stmt)
     last_cr = last_cr_row.scalar_one_or_none()
-    last_deployed_at = last_cr.applied_at.isoformat() if (last_cr and last_cr.applied_at) else None
+    last_deployed_at = last_cr.updated_at.isoformat() if (last_cr and last_cr.updated_at) else None
 
     # Rollback snapshot — check artifact_refs across all completed CRs
     snap_stmt = (
         select(ChangeRequest)
         .where(
             ChangeRequest.organization_id == org_id,
-            ChangeRequest.target_asset_ids.contains([str(asset_id)]),
+            ChangeRequest.target_asset_ids.cast(String).contains(str(asset_id)),
             ChangeRequest.artifact_refs.isnot(None),
         )
-        .order_by(ChangeRequest.applied_at.desc().nullslast())
+        .order_by(ChangeRequest.updated_at.desc().nullslast())
         .limit(5)
     )
     snap_rows = await db.execute(snap_stmt)
@@ -528,7 +528,7 @@ async def get_timeline_summary(
             "status": status_val,
             "source": cr.source,
             "created_at": cr.created_at.isoformat() if cr.created_at else None,
-            "applied_at": cr.applied_at.isoformat() if cr.applied_at else None,
+            "applied_at": cr.updated_at.isoformat() if cr.updated_at else None,
             "target_asset_ids": cr.target_asset_ids,
             "is_auto_remediation": is_auto,
             "is_rollback": is_rollback,

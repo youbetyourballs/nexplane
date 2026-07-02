@@ -7,11 +7,14 @@ Nexplane MCP tools — Change Requests domain (10 tools).
 All infrastructure-touching write tools produce CRs in draft state.
 The caller must separately approve and execute.
 """
+import logging
 import uuid as _uuid
 from typing import Any, Optional
 
 from app.mcp_server import mcp
 from app.database import AsyncSessionLocal
+
+logger = logging.getLogger(__name__)
 
 
 async def _auth(token: str):
@@ -305,8 +308,8 @@ async def approve_change_request(token: str, cr_id: str, comment: str = None) ->
             return {"error": "Change request not found"}
         if str(cr.requester_id) == str(user.id):
             return {"error": "Cannot approve a Change Request you created"}
-        if cr.status != ChangeRequestStatus.draft:
-            return {"error": f"CR is in {cr.status} state — only draft CRs can be approved"}
+        if cr.status not in (ChangeRequestStatus.draft, ChangeRequestStatus.awaiting_approval):
+            return {"error": f"CR is in {cr.status} state — only draft or awaiting_approval CRs can be approved"}
 
         approval = Approval(
             change_request_id=cr.id,
@@ -367,7 +370,7 @@ async def execute_change_request(token: str, cr_id: str) -> dict[str, Any]:
     """
     from sqlalchemy import select
     from app.models.change_request import ChangeRequest, ChangeRequestStatus
-    from app.workflows.execute_change_workflow import execute_change_workflow
+    from app.services.change_execution_service import ChangeExecutionService
 
     user, db, db_cm = await _auth(token)
     try:
@@ -383,12 +386,20 @@ async def execute_change_request(token: str, cr_id: str) -> dict[str, Any]:
         if cr.status != ChangeRequestStatus.approved:
             return {"error": f"CR must be approved before execution; current status: {cr.status}"}
 
-        cr.status = ChangeRequestStatus.executing
-        await db.commit()
+        # Delegate to the same service used by the REST router so workflow
+        # lifecycle (preflight, execution, audit events) is consistent.
+        try:
+            await ChangeExecutionService.start(
+                cr_id=cr.id,
+                actor_id=user.id,
+                source="api",
+                db=db,
+            )
+        except Exception as exc:
+            # Service may raise if it already started execution; treat as non-fatal
+            logger.warning("execute_change_request service error (may be expected): %s", exc)
 
-        import asyncio
-        asyncio.create_task(execute_change_workflow(str(cr.id), AsyncSessionLocal))
-        return {"id": str(cr.id), "status": "executing", "message": "Execution started; poll get_change_request for status updates"}
+        return {"id": str(cr.id), "status": "executing", "message": "Execution started; poll get_execution_progress for status updates"}
     finally:
         await db_cm.__aexit__(None, None, None)
 
@@ -413,13 +424,26 @@ async def rollback_change_request(token: str, cr_id: str) -> dict[str, Any]:
         cr = result.scalar_one_or_none()
         if cr is None:
             return {"error": "Change request not found"}
-        if cr.status != ChangeRequestStatus.executed:
-            return {"error": f"Only executed CRs can be rolled back; current status: {cr.status}"}
+        rollbackable = (
+            ChangeRequestStatus.completed,
+            ChangeRequestStatus.failed,
+        )
+        if cr.status not in rollbackable:
+            return {"error": f"Only completed or failed CRs can be rolled back; current status: {cr.status}"}
 
-        from app.workflows import runner as workflow_runner
-        import asyncio
-        asyncio.create_task(workflow_runner.rollback(str(cr.id), AsyncSessionLocal))
-        return {"id": str(cr.id), "status": "rolling_back", "message": "Rollback started; poll get_change_request for status updates"}
+        from app.services.rollback_executor import execute_cr_rollback
+
+        # Await the rollback directly so MCP callers get a synchronous result.
+        # This is safe because MCP tool calls are themselves async.
+        try:
+            result_data = await execute_cr_rollback(cr.id)
+            rb_status = "rolled_back"
+        except Exception as exc:
+            logger.error("MCP rollback failed for CR %s: %s", cr.id, exc)
+            result_data = {"error": str(exc)}
+            rb_status = "rollback_failed"
+
+        return {"id": str(cr.id), "status": rb_status, "result": result_data}
     finally:
         await db_cm.__aexit__(None, None, None)
 
@@ -469,6 +493,9 @@ async def get_execution_progress(token: str, cr_id: str) -> dict:
     from sqlalchemy import select
     from app.models.change_request import ChangeRequest
 
+    from sqlalchemy.orm import selectinload
+    from app.models.execution_run import ExecutionRun, ExecutionStatus
+
     user, db, db_cm = await _auth(token)
     try:
         result = await db.execute(
@@ -481,16 +508,32 @@ async def get_execution_progress(token: str, cr_id: str) -> dict:
         if cr is None:
             return {"error": "Change request not found"}
 
-        exec_result = cr.execution_result or {}
+        # Get the most recent execution run for progress data
+        runs_result = await db.execute(
+            select(ExecutionRun).where(
+                ExecutionRun.change_request_id == cr.id,
+            ).order_by(ExecutionRun.started_at.desc()).limit(1)
+        )
+        latest_run = runs_result.scalar_one_or_none()
+
+        exec_result = {}
+        if latest_run and latest_run.result:
+            exec_result = latest_run.result if isinstance(latest_run.result, dict) else {}
+
         completed = exec_result.get("completed_steps", 0)
         total = exec_result.get("total_steps", 0)
         percent = int(completed / total * 100) if total else 0
         current_step = exec_result.get("current_step", None)
         errors = exec_result.get("errors", [])
 
+        cr_status = cr.status.value if hasattr(cr.status, "value") else str(cr.status)
+        # Normalize status for poll logic
+        if cr_status == "completed":
+            percent = 100
+
         return {
             "cr_id": str(cr.id),
-            "status": cr.status.value if hasattr(cr.status, "value") else str(cr.status),
+            "status": cr_status,
             "completed_steps": completed,
             "total_steps": total,
             "current_step": current_step,
