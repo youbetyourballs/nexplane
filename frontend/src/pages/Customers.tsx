@@ -18,6 +18,8 @@ interface Customer {
   instance_id?: string;
 }
 
+const ONBOARD_STEPS: string[] = ["create_customer", "provision_instance", "generate_setup_token"];
+
 export function Customers() {
   const { data: caps } = useCapabilities();
   const { user } = useAuth();
@@ -26,6 +28,15 @@ export function Customers() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedAction, setSelectedAction] = useState<CatalogAction | null>(null);
   const [inlineResult, setInlineResult] = useState<unknown>(null);
+
+  // Onboard wizard state
+  const [onboardOpen, setOnboardOpen] = useState(false);
+  const [onboardStep, setOnboardStep] = useState(0);
+  const [onboardCRs, setOnboardCRs] = useState<Array<{ action_id: string; cr_id: string }>>([]);
+
+  // Destructive typed-confirm state
+  const [destructiveAction, setDestructiveAction] = useState<{ action: CatalogAction; customer: Customer } | null>(null);
+  const [confirmInput, setConfirmInput] = useState("");
 
   const { data: customersData, isLoading: customersLoading } = useQuery({
     queryKey: ["customers", "list"],
@@ -52,6 +63,20 @@ export function Customers() {
     },
   });
 
+  const onboardCRMutation = useMutation({
+    mutationFn: (data: Parameters<typeof changeRequestsApi.create>[0]) =>
+      changeRequestsApi.create(data),
+    onSuccess: (data: { id?: string }) => {
+      const stepActionId = onboardStepActions[onboardStep]?.action_id ?? "";
+      setOnboardCRs((prev) => [...prev, { action_id: stepActionId, cr_id: data?.id ?? "" }]);
+      if (onboardStep < onboardStepActions.length - 1) {
+        setOnboardStep((s) => s + 1);
+      } else {
+        // wizard complete
+      }
+    },
+  });
+
   if (!caps?.commercial || user?.role !== "admin") {
     return (
       <div className="p-8 text-slate-400">
@@ -62,11 +87,19 @@ export function Customers() {
 
   const customers: Customer[] = (customersData as { customers?: Customer[] })?.customers ?? [];
 
+  // Compute onboard step actions from loaded catalog actions
+  const onboardStepActions: CatalogAction[] = ONBOARD_STEPS
+    .map((id) => actions.find((a) => a.action_id === id))
+    .filter((a): a is CatalogAction => a !== undefined);
+
   function handleActionSubmit(action: CatalogAction, params: Record<string, unknown>) {
     if (!selectedCustomer) return;
     const enrichedParams = { client_id: selectedCustomer.client_id, instance_id: selectedCustomer.instance_id, ...params };
     if (action.read_only) {
       runMutation.mutate({ connector_type: action.connector_type, action_id: action.action_id, params: enrichedParams });
+    } else if (action.destructive) {
+      setDestructiveAction({ action, customer: selectedCustomer });
+      setConfirmInput("");
     } else {
       crMutation.mutate({
         title: `${action.display_name} — ${selectedCustomer.display_name}`,
@@ -77,9 +110,42 @@ export function Customers() {
     }
   }
 
+  function handleOnboardSubmit(action: CatalogAction, params: Record<string, unknown>) {
+    onboardCRMutation.mutate({
+      title: `${action.display_name} — Onboard`,
+      change_type: "catalog_action",
+      target_asset_ids: [],
+      desired_outcome: { connector_type: action.connector_type, action_id: action.action_id, params },
+    });
+  }
+
+  function handleDestructiveConfirm() {
+    if (!destructiveAction) return;
+    const { action, customer } = destructiveAction;
+    const enrichedParams = { client_id: customer.client_id, instance_id: customer.instance_id };
+    crMutation.mutate({
+      title: `${action.display_name} — ${customer.display_name}`,
+      change_type: "catalog_action",
+      target_asset_ids: [],
+      desired_outcome: { connector_type: action.connector_type, action_id: action.action_id, params: enrichedParams },
+    });
+    setDestructiveAction(null);
+    setConfirmInput("");
+  }
+
+  const currentOnboardAction = onboardStepActions[onboardStep];
+
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-semibold text-white">Customers</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-white">Customers</h1>
+        <button
+          onClick={() => { setOnboardOpen(true); setOnboardStep(0); setOnboardCRs([]); }}
+          className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded hover:bg-brand-700 transition-colors"
+        >
+          Onboard Customer
+        </button>
+      </div>
 
       {customersLoading && <p className="text-slate-400">Loading customers…</p>}
 
@@ -164,6 +230,96 @@ export function Customers() {
               </pre>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Onboard wizard modal */}
+      {onboardOpen && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-navy rounded-xl border border-navy-border p-6 w-full max-w-lg space-y-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-white">
+                Onboard Customer — Step {onboardStep + 1} of {onboardStepActions.length || ONBOARD_STEPS.length}
+              </h2>
+              <button onClick={() => setOnboardOpen(false)} className="text-slate-400 hover:text-white text-xs">
+                Cancel
+              </button>
+            </div>
+
+            {/* Completed steps */}
+            {onboardCRs.length > 0 && (
+              <div className="space-y-1">
+                {onboardCRs.map((cr) => (
+                  <p key={cr.action_id} className="text-xs text-green-400">
+                    ✓ {cr.action_id} — CR: {cr.cr_id}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {currentOnboardAction ? (
+              <CatalogActionForm
+                action={currentOnboardAction}
+                initial={{}}
+                onSubmit={(params) => handleOnboardSubmit(currentOnboardAction, params)}
+                submitting={onboardCRMutation.isPending}
+              />
+            ) : (
+              <p className="text-slate-400 text-sm">
+                {onboardCRs.length === ONBOARD_STEPS.length
+                  ? "Onboarding complete!"
+                  : "Loading wizard steps…"}
+              </p>
+            )}
+
+            {onboardCRs.length === onboardStepActions.length && onboardStepActions.length > 0 && (
+              <button
+                onClick={() => setOnboardOpen(false)}
+                className="w-full px-4 py-2 bg-green-700 text-white text-sm rounded hover:bg-green-600"
+              >
+                Done
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Destructive typed-confirm modal */}
+      {destructiveAction && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-navy rounded-xl border border-red-700 p-6 w-full max-w-md space-y-4 shadow-xl">
+            <h2 className="text-lg font-semibold text-red-400">Confirm Destructive Action</h2>
+            <p className="text-sm text-slate-300">
+              You are about to run <strong>{destructiveAction.action.display_name}</strong> on customer{" "}
+              <strong>{destructiveAction.customer.display_name}</strong>. This action is destructive and cannot be undone.
+            </p>
+            <p className="text-sm text-slate-400">
+              Type <span className="font-mono text-white">{destructiveAction.customer.client_id}</span> to confirm:
+            </p>
+            <input
+              type="text"
+              value={confirmInput}
+              onChange={(e) => setConfirmInput(e.target.value)}
+              className="w-full border border-slate-600 rounded px-3 py-2 text-sm bg-navy-light text-white"
+              placeholder={destructiveAction.customer.client_id}
+              aria-label="Confirm client ID"
+            />
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => { setDestructiveAction(null); setConfirmInput(""); }}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-white rounded border border-navy-border"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDestructiveConfirm}
+                disabled={confirmInput !== destructiveAction.customer.client_id || crMutation.isPending}
+                className="px-4 py-2 text-sm bg-red-700 text-white rounded hover:bg-red-600 disabled:opacity-40"
+              >
+                {crMutation.isPending ? "Submitting…" : "Confirm"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
