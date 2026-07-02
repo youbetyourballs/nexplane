@@ -779,3 +779,330 @@ async def reorder_project_crs(
         return {"updated_sequence": updated_sequence}
     finally:
         await db_cm.__aexit__(None, None, None)
+
+
+# ── TOOL 11: execute_project_phase ───────────────────────────────────────────
+
+@mcp.tool()
+async def execute_project_phase(
+    token: str,
+    project_id: str,
+    cr_ids: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """
+    Execute one phase of the project. If cr_ids is provided, execute only those
+    specific CRs (they must be approved). If omitted, auto-selects all approved
+    CRs whose dependencies are all completed. Uses ChangeExecutionService so the
+    full workflow lifecycle (preflight, audit, execution) applies.
+    Returns {started_executions: [...], skipped: [...]}.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from app.models.project import Project, ProjectChangeRequest
+    from app.models.change_request import ChangeRequest, ChangeRequestStatus
+    from app.services.change_execution_service import ChangeExecutionService
+
+    user, db, db_cm = await _auth(token)
+    try:
+        proj_result = await db.execute(
+            select(Project)
+            .where(
+                Project.id == _uuid.UUID(project_id),
+                Project.organization_id == user.organization_id,
+            )
+            .options(
+                selectinload(Project.members).selectinload(ProjectChangeRequest.change_request)
+            )
+        )
+        project = proj_result.scalar_one_or_none()
+        if project is None:
+            return {"error": "Project not found"}
+
+        # Build pcr_id -> cr_status index for dependency resolution
+        pcr_status_map: dict[str, str] = {}
+        for m in project.members:
+            cr = m.change_request
+            pcr_status_map[str(m.id)] = (
+                cr.status.value if hasattr(cr.status, "value") else str(cr.status)
+            )
+
+        if cr_ids is not None:
+            # Execute specific CR IDs — find their PCRs
+            requested_cr_id_set = set(cr_ids)
+            candidates = [
+                m for m in project.members
+                if str(m.change_request_id) in requested_cr_id_set
+            ]
+            if not candidates:
+                return {"error": "None of the specified cr_ids are members of this project", "started_executions": [], "skipped": []}
+        else:
+            # Auto-select: approved + all deps completed
+            candidates = []
+            for m in project.members:
+                cr = m.change_request
+                cr_status = cr.status.value if hasattr(cr.status, "value") else str(cr.status)
+                if cr_status != "approved":
+                    continue
+                deps = m.depends_on or []
+                all_deps_done = all(
+                    pcr_status_map.get(str(dep_id)) == "completed"
+                    for dep_id in deps
+                )
+                if all_deps_done:
+                    candidates.append(m)
+
+        started = []
+        skipped = []
+
+        for m in candidates:
+            cr = m.change_request
+            cr_status = cr.status.value if hasattr(cr.status, "value") else str(cr.status)
+            if cr_status != "approved":
+                skipped.append(
+                    {
+                        "cr_id": str(cr.id),
+                        "reason": f"CR status is {cr_status!r}, must be 'approved'",
+                    }
+                )
+                continue
+            try:
+                await ChangeExecutionService.start(
+                    cr_id=cr.id,
+                    actor_id=user.id,
+                    source="api",
+                    db=db,
+                )
+                started.append({"cr_id": str(cr.id), "status": "executing"})
+            except Exception as exc:
+                logger.warning(
+                    "execute_project_phase: start failed for CR %s: %s", cr.id, exc
+                )
+                skipped.append({"cr_id": str(cr.id), "reason": str(exc)})
+
+        return {"started_executions": started, "skipped": skipped}
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+# ── TOOL 12: rollback_project ────────────────────────────────────────────────
+
+@mcp.tool()
+async def rollback_project(
+    token: str,
+    project_id: str,
+    notes: Optional[str] = None,
+    to_cr_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Initiate a full FILO rollback of a project. Rolls back all completed CRs in
+    reverse sequence order. to_cr_id is reserved for future partial rollback support
+    and is currently documented but not enforced. Returns rollback record ID.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from app.models.project import Project, ProjectChangeRequest
+    from app.services import project_rollback_service as prs
+
+    user, db, db_cm = await _auth(token)
+    try:
+        proj_result = await db.execute(
+            select(Project)
+            .where(
+                Project.id == _uuid.UUID(project_id),
+                Project.organization_id == user.organization_id,
+            )
+            .options(
+                selectinload(Project.members).selectinload(ProjectChangeRequest.change_request)
+            )
+        )
+        project = proj_result.scalar_one_or_none()
+        if project is None:
+            return {"error": "Project not found"}
+
+        cr_ids_filter = None
+        if to_cr_id is not None:
+            logger.info(
+                "rollback_project: to_cr_id=%s provided — partial rollback not yet enforced, "
+                "initiating full rollback",
+                to_cr_id,
+            )
+
+        rollback, warnings = await prs.initiate(
+            db=db,
+            project=project,
+            triggered_by_user_id=user.id,
+            notes=notes,
+            cr_ids=cr_ids_filter,
+        )
+
+        return {
+            "rollback_initiated": True,
+            "rollback_id": str(rollback.id),
+            "warnings": warnings,
+            "note": (
+                "to_cr_id is reserved for future partial rollback support"
+                if to_cr_id
+                else None
+            ),
+        }
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+# ── TOOL 13: materialize_project_plan ────────────────────────────────────────
+
+@mcp.tool()
+async def materialize_project_plan(
+    token: str,
+    project_id: str,
+    proposed_crs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """
+    Convert an AI-proposed plan into real CRs attached to the project.
+    Each item in proposed_crs must have: change_type, target_assets (list of asset names),
+    desired_outcome (dict), seq (int), depends_on (list of seq ints), rationale (str, optional).
+    Assets are resolved by name (case-insensitive match on name or hostname).
+    Returns {created_crs, errors}.
+    """
+    from sqlalchemy import select
+    from app.models.project import Project, ProjectChangeRequest
+    from app.models.change_request import ChangeRequest, ChangeRequestStatus
+    from app.models.asset import Asset
+
+    user, db, db_cm = await _auth(token)
+    try:
+        proj_result = await db.execute(
+            select(Project).where(
+                Project.id == _uuid.UUID(project_id),
+                Project.organization_id == user.organization_id,
+            )
+        )
+        project = proj_result.scalar_one_or_none()
+        if project is None:
+            return {"error": "Project not found", "created_crs": [], "errors": []}
+
+        # Determine the current max sequence_order in the project
+        existing_result = await db.execute(
+            select(ProjectChangeRequest).where(
+                ProjectChangeRequest.project_id == project.id
+            )
+        )
+        existing_members = existing_result.scalars().all()
+        existing_max_order = max((m.sequence_order for m in existing_members), default=0)
+
+        # Build seq -> pcr_id map for depends_on resolution (populated as we create)
+        seq_to_pcr_id: dict[int, str] = {}
+
+        created_crs = []
+        errors = []
+
+        for idx, item in enumerate(proposed_crs):
+            try:
+                change_type = item.get("change_type")
+                target_assets = item.get("target_assets", [])
+                desired_outcome = item.get("desired_outcome", {})
+                seq = item.get("seq", existing_max_order + idx + 1)
+                depends_on_seqs = item.get("depends_on", [])
+                rationale = item.get("rationale", "")
+
+                if not change_type:
+                    errors.append(
+                        {"item_index": idx, "error": "missing change_type", "change_type": None}
+                    )
+                    continue
+                if not target_assets:
+                    errors.append(
+                        {"item_index": idx, "error": "missing target_assets", "change_type": change_type}
+                    )
+                    continue
+
+                # Resolve first asset by name (ilike on name or hostname)
+                asset_name = target_assets[0]
+                asset_result = await db.execute(
+                    select(Asset).where(
+                        Asset.organization_id == user.organization_id,
+                        Asset.name.ilike(asset_name),
+                    ).limit(1)
+                )
+                asset = asset_result.scalar_one_or_none()
+
+                if asset is None:
+                    # Try hostname field if exists
+                    try:
+                        asset_result2 = await db.execute(
+                            select(Asset).where(
+                                Asset.organization_id == user.organization_id,
+                                Asset.hostname.ilike(asset_name),
+                            ).limit(1)
+                        )
+                        asset = asset_result2.scalar_one_or_none()
+                    except Exception:
+                        asset = None
+
+                if asset is None:
+                    errors.append(
+                        {
+                            "item_index": idx,
+                            "error": f"asset not found: {asset_name!r}",
+                            "change_type": change_type,
+                        }
+                    )
+                    continue
+
+                title = f"{change_type} on {asset.name}"
+                if rationale:
+                    title = f"{title} — {rationale[:80]}"
+
+                # Create the CR
+                cr = ChangeRequest(
+                    organization_id=user.organization_id,
+                    requester_id=user.id,
+                    change_type=change_type,
+                    target_asset_ids=[str(asset.id)],
+                    title=title,
+                    status=ChangeRequestStatus.draft,
+                    desired_outcome=desired_outcome,
+                )
+                db.add(cr)
+                await db.flush()
+
+                # Resolve depends_on seq ints -> pcr_ids
+                resolved_depends_on = [
+                    seq_to_pcr_id[s] for s in depends_on_seqs if s in seq_to_pcr_id
+                ]
+
+                sequence_order = existing_max_order + seq
+                pcr = ProjectChangeRequest(
+                    project_id=project.id,
+                    change_request_id=cr.id,
+                    sequence_order=sequence_order,
+                    depends_on=resolved_depends_on,
+                )
+                db.add(pcr)
+                await db.flush()
+
+                seq_to_pcr_id[seq] = str(pcr.id)
+                created_crs.append(
+                    {
+                        "cr_id": str(cr.id),
+                        "pcr_id": str(pcr.id),
+                        "change_type": change_type,
+                        "asset_id": str(asset.id),
+                        "asset_name": asset.name,
+                        "sequence_order": sequence_order,
+                    }
+                )
+            except Exception as exc:
+                logger.exception("materialize_project_plan: error on item %d", idx)
+                errors.append(
+                    {
+                        "item_index": idx,
+                        "error": str(exc),
+                        "change_type": item.get("change_type"),
+                    }
+                )
+
+        await db.commit()
+        return {"created_crs": created_crs, "errors": errors}
+    finally:
+        await db_cm.__aexit__(None, None, None)
