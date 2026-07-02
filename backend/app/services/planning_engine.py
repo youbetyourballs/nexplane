@@ -239,8 +239,12 @@ def generate_plan(
         connector_type = desired.get("connector_type", "")
         action_id = desired.get("action_id", "")
         params = desired.get("params", {}) or {}
+        from app.services.change_plan_service import PlanBlockedError
         # Validate the action exists in the (core+commercial) catalog.
-        catalog.get_action_def(connector_type, action_id)  # raises KeyError if unknown
+        try:
+            catalog.get_action_def(connector_type, action_id)
+        except KeyError:
+            raise PlanBlockedError([f"Unknown catalog action: {connector_type}.{action_id}"])
         step = {
             "step_number": 1,
             "connector_type": connector_type,
