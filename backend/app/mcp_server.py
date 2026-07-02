@@ -96,5 +96,6 @@ def create_mcp_app():
     import app.mcp_tools.connectors  # noqa: F401
     import app.mcp_tools.identity  # noqa: F401
     import app.mcp_tools.runbooks  # noqa: F401
+    import app.mcp_tools.host_intelligence  # noqa: F401
 
     return mcp.sse_app()

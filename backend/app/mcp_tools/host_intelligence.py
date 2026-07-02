@@ -7,8 +7,6 @@ Nexplane MCP tools — Host Intelligence (16 tools).
 Each tool is read-only. Results are cached 300 s per (org, asset, tool).
 No approval gate.
 """
-from __future__ import annotations
-
 import uuid as _uuid
 from typing import Any
 
