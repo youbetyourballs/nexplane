@@ -270,3 +270,194 @@ async def get_fleet_context(
         return rows
     finally:
         await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def find_similar_assets(
+    token: str,
+    asset_id: str,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """
+    Find assets similar to the given asset using Jaccard similarity on tags.
+
+    Matches assets of the same type and environment within the same org.
+    Similarity score = |shared_tags| / |union_tags| (0.0–1.0).
+
+    Returns sorted list with shared_tags and different_tags for each candidate.
+    Use to find peer assets when planning fleet-wide changes.
+    """
+    import uuid
+    from app.models.asset import Asset
+
+    _user, db, db_cm = await _auth(token)
+    try:
+        asset_uuid = uuid.UUID(asset_id)
+
+        # Fetch target asset
+        target_result = await db.execute(
+            select(Asset).where(
+                Asset.id == asset_uuid,
+                Asset.organization_id == _user.organization_id,
+            )
+        )
+        target = target_result.scalar_one_or_none()
+        if target is None:
+            return [{"error": "Asset not found"}]
+
+        target_tags = set(target.tags or [])
+
+        # Fetch candidates: same type + environment, different id
+        candidates_result = await db.execute(
+            select(Asset).where(
+                Asset.organization_id == _user.organization_id,
+                Asset.asset_type == target.asset_type,
+                Asset.environment == target.environment,
+                Asset.id != asset_uuid,
+            )
+        )
+        candidates = candidates_result.scalars().all()
+
+        scored = []
+        for c in candidates:
+            c_tags = set(c.tags or [])
+            union = target_tags | c_tags
+            shared = target_tags & c_tags
+            if not union:
+                score = 0.0
+            else:
+                score = len(shared) / len(union)
+
+            different = (target_tags | c_tags) - shared
+
+            scored.append({
+                "asset_id": str(c.id),
+                "name": c.name,
+                "similarity_score": round(score, 4),
+                "shared_tags": sorted(shared),
+                "different_tags": sorted(different),
+            })
+
+        scored.sort(key=lambda x: x["similarity_score"], reverse=True)
+        return scored[:limit]
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def get_migration_precedents(
+    token: str,
+    change_type: str,
+    asset_type: Optional[str] = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """
+    Return statistics on past executions of a specific change type in this org.
+
+    Covers completed, failed, and rolled_back CRs. Provides: success_rate,
+    avg_duration_minutes, rollback_frequency, and the top 5 failure error strings.
+
+    Use before creating a CR to understand historical risk and common failure modes.
+    """
+    import uuid
+    from collections import Counter
+    from app.models.change_request import ChangeRequest
+    from app.models.asset import Asset
+
+    _user, db, db_cm = await _auth(token)
+    try:
+        stmt = select(ChangeRequest).where(
+            ChangeRequest.organization_id == _user.organization_id,
+            ChangeRequest.change_type == change_type,
+            ChangeRequest.status.in_(["completed", "failed", "rolled_back"]),
+        ).order_by(ChangeRequest.created_at.desc()).limit(limit)
+
+        result = await db.execute(stmt)
+        crs = result.scalars().all()
+
+        if asset_type:
+            # Filter: keep only CRs that targeted at least one asset of the given type
+            filtered = []
+            for cr in crs:
+                if not cr.target_asset_ids:
+                    continue
+                for aid in cr.target_asset_ids:
+                    try:
+                        asset_result = await db.execute(
+                            select(Asset).where(Asset.id == uuid.UUID(aid))
+                        )
+                        a = asset_result.scalar_one_or_none()
+                        if a and (str(a.asset_type.value) if hasattr(a.asset_type, "value") else str(a.asset_type)) == asset_type:
+                            filtered.append(cr)
+                            break
+                    except Exception:
+                        continue
+            crs = filtered
+
+        total = len(crs)
+        if total == 0:
+            return {
+                "total_executions": 0,
+                "success_rate": None,
+                "avg_duration_minutes": None,
+                "rollback_frequency": None,
+                "common_failure_modes": [],
+                "sample_cr_ids": [],
+            }
+
+        completed = sum(1 for cr in crs if str(getattr(cr.status, "value", cr.status)) == "completed")
+        rolled_back = sum(1 for cr in crs if str(getattr(cr.status, "value", cr.status)) == "rolled_back")
+
+        success_rate = round(completed / total, 4)
+        rollback_frequency = round(rolled_back / total, 4)
+
+        # Duration: stateful_approved_at -> updated_at
+        durations_min = []
+        for cr in crs:
+            if cr.stateful_approved_at and cr.updated_at:
+                try:
+                    approved = cr.stateful_approved_at
+                    updated = cr.updated_at
+                    if approved.tzinfo is None:
+                        approved = approved.replace(tzinfo=timezone.utc)
+                    if updated.tzinfo is None:
+                        updated = updated.replace(tzinfo=timezone.utc)
+                    secs = (updated - approved).total_seconds()
+                    if secs > 0:
+                        durations_min.append(secs / 60.0)
+                except Exception:
+                    pass
+
+        avg_duration_minutes = round(sum(durations_min) / len(durations_min), 2) if durations_min else None
+
+        # Failure mode extraction via ExecutionRun
+        error_counter: Counter = Counter()
+        try:
+            from app.models.execution_run import ExecutionRun
+            failed_ids = [cr.id for cr in crs if str(getattr(cr.status, "value", cr.status)) in ("failed", "rolled_back")]
+            for cr_id in failed_ids:
+                runs_result = await db.execute(
+                    select(ExecutionRun).where(ExecutionRun.change_request_id == cr_id).limit(1)
+                )
+                run = runs_result.scalar_one_or_none()
+                if run and run.result:
+                    err = run.result.get("error") or run.result.get("message") or ""
+                    if err:
+                        error_counter[err] += 1
+        except ImportError:
+            pass
+
+        common_failures = [{"error": err, "count": cnt} for err, cnt in error_counter.most_common(5)]
+
+        sample_ids = [str(cr.id) for cr in crs[-5:]]
+
+        return {
+            "total_executions": total,
+            "success_rate": success_rate,
+            "avg_duration_minutes": avg_duration_minutes,
+            "rollback_frequency": rollback_frequency,
+            "common_failure_modes": common_failures,
+            "sample_cr_ids": sample_ids,
+        }
+    finally:
+        await db_cm.__aexit__(None, None, None)
