@@ -53,3 +53,4 @@ from app.models.setup_token import SetupToken  # noqa: F401
 from app.models.identity_provider import IdentityProvider, IdpType, IdpStatus  # noqa: F401
 from app.models.asset_dependency import AssetDependency  # noqa: F401
 from app.models.notification_routing_rule import NotificationRoutingRule  # noqa: F401
+from app.models.mcp_intelligence_cache import McpIntelligenceCache  # noqa: F401
