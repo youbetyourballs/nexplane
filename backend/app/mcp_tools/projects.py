@@ -1106,3 +1106,119 @@ async def materialize_project_plan(
         return {"created_crs": created_crs, "errors": errors}
     finally:
         await db_cm.__aexit__(None, None, None)
+
+
+# ── TOOL 14: define_success_criteria ─────────────────────────────────────────
+
+@mcp.tool()
+async def define_success_criteria(
+    token: str,
+    project_id: str,
+    criteria: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """
+    Define success criteria for a project. Each criterion has:
+    - type: cr_completed | host_state_check | service_check | port_check | manual
+    - description: human-readable label
+    - assertion: dict with type-specific fields (cr_id, asset_id, field, value, etc.)
+    Returns {criteria_ids, count}.
+    """
+    from sqlalchemy import select
+    from app.models.project import Project
+    from app.models.project_success_criteria import (
+        ProjectSuccessCriteria,
+        CriteriaType,
+    )
+
+    user, db, db_cm = await _auth(token)
+    try:
+        proj_result = await db.execute(
+            select(Project).where(
+                Project.id == _uuid.UUID(project_id),
+                Project.organization_id == user.organization_id,
+            )
+        )
+        project = proj_result.scalar_one_or_none()
+        if project is None:
+            return {"error": "Project not found"}
+
+        valid_types = {ct.value for ct in CriteriaType}
+        created = []
+        validation_errors = []
+
+        for i, item in enumerate(criteria):
+            ctype_str = item.get("type")
+            if ctype_str not in valid_types:
+                validation_errors.append(
+                    {
+                        "index": i,
+                        "error": f"Invalid type {ctype_str!r}. Valid: {sorted(valid_types)}",
+                    }
+                )
+                continue
+
+            description = item.get("description", "")
+            assertion = item.get("assertion", {})
+
+            c = ProjectSuccessCriteria(
+                project_id=project.id,
+                type=CriteriaType(ctype_str),
+                description=description,
+                assertion=assertion,
+            )
+            db.add(c)
+            await db.flush()
+            created.append(c)
+
+        if validation_errors:
+            await db_cm.__aexit__(None, None, None)
+            return {
+                "error": "Some criteria had validation errors",
+                "validation_errors": validation_errors,
+                "criteria_ids": [],
+                "count": 0,
+            }
+
+        await db.commit()
+        return {
+            "criteria_ids": [str(c.id) for c in created],
+            "count": len(created),
+        }
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+# ── TOOL 15: check_success_criteria ──────────────────────────────────────────
+
+@mcp.tool()
+async def check_success_criteria(token: str, project_id: str) -> dict[str, Any]:
+    """
+    Evaluate all success criteria for a project against live platform state.
+    Updates last_result and last_checked_at for each criterion in the DB.
+    Returns {overall: pass|fail|partial|not_checked, criteria: [...]}.
+    Use after execute_project_phase to verify outcomes.
+    """
+    from sqlalchemy import select
+    from app.models.project import Project
+    from app.services.success_criteria_service import evaluate_all_criteria
+
+    user, db, db_cm = await _auth(token)
+    try:
+        proj_result = await db.execute(
+            select(Project).where(
+                Project.id == _uuid.UUID(project_id),
+                Project.organization_id == user.organization_id,
+            )
+        )
+        project = proj_result.scalar_one_or_none()
+        if project is None:
+            return {"error": "Project not found"}
+
+        result = await evaluate_all_criteria(
+            db=db,
+            project_id=project.id,
+            org_id=user.organization_id,
+        )
+        return result
+    finally:
+        await db_cm.__aexit__(None, None, None)
