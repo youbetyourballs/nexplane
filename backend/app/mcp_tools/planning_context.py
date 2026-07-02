@@ -10,7 +10,7 @@ Read-only tools for AI agents to gather context before creating change requests.
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, text
 
 from app.mcp_server import mcp
 from app.database import AsyncSessionLocal
@@ -666,5 +666,250 @@ async def get_kernel_eol_status(
             })
 
         return rows
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def get_environment_diff(
+    token: str,
+    asset_ids: list[str],
+) -> dict[str, Any]:
+    """
+    Compare software, users, services, and ports across 2+ assets.
+
+    Reads from mcp_intelligence_cache table (most recent row per tool_name per asset).
+    Returns: common items present on all assets, per-asset differences, and missing_data
+    for assets where cache is unavailable.
+
+    Use to detect configuration drift across hosts before applying fleet-wide changes.
+    Requires at least 2 asset_ids.
+    """
+    if len(asset_ids) < 2:
+        return {"error": "At least 2 asset_ids required"}
+
+    from app.models.asset import Asset
+
+    _user, db, db_cm = await _auth(token)
+    try:
+        uuids = []
+        for aid in asset_ids:
+            try:
+                uuids.append(_uuid.UUID(aid))
+            except ValueError:
+                pass
+
+        if len(uuids) < 2:
+            return {"error": "At least 2 valid asset_ids required"}
+
+        # Fetch asset names
+        assets_result = await db.execute(
+            select(Asset).where(
+                Asset.id.in_(uuids),
+                Asset.organization_id == _user.organization_id,
+            )
+        )
+        assets_by_id = {a.id: a for a in assets_result.scalars().all()}
+
+        cache_types = ["packages", "users", "services", "ports"]
+        asset_data: dict[_uuid.UUID, dict[str, Any]] = {uid: {} for uid in uuids}
+        missing_data: list[dict] = []
+
+        for uid in uuids:
+            asset_name = assets_by_id.get(uid).name if uid in assets_by_id else str(uid)
+            missing_fields = []
+
+            for cache_type in cache_types:
+                try:
+                    cache_result = await db.execute(
+                        text(
+                            "SELECT result FROM mcp_intelligence_cache "
+                            "WHERE asset_id = :asset_id AND tool_name = :tool_name "
+                            "ORDER BY cached_at DESC LIMIT 1"
+                        ),
+                        {"asset_id": str(uid), "tool_name": cache_type},
+                    )
+                    row = cache_result.fetchone()
+                    if row:
+                        asset_data[uid][cache_type] = row[0]
+                    else:
+                        asset_data[uid][cache_type] = []
+                        missing_fields.append(cache_type)
+                except Exception:
+                    asset_data[uid][cache_type] = []
+                    missing_fields.append(cache_type)
+
+            if missing_fields:
+                missing_data.append({
+                    "asset_id": str(uid),
+                    "asset_name": asset_name,
+                    "missing_fields": missing_fields,
+                })
+
+        def _to_comparable(items: list, cache_type: str) -> set[str]:
+            """Convert cache data items to a set of comparable string keys."""
+            result_set = set()
+            if not items:
+                return result_set
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if cache_type == "packages":
+                    result_set.add(f"{item.get('name', '')}=={item.get('version', '')}")
+                elif cache_type == "users":
+                    result_set.add(f"{item.get('username', '')}:{item.get('uid', '')}:{item.get('shell', '')}")
+                elif cache_type == "services":
+                    result_set.add(f"{item.get('name', '')}:{item.get('status', '')}")
+                elif cache_type == "ports":
+                    result_set.add(f"{item.get('port', '')}:{item.get('protocol', '')}:{item.get('service', '')}")
+            return result_set
+
+        # Compute common (intersection across all assets per cache_type)
+        common: dict[str, list] = {}
+        differences: list[dict] = []
+
+        for cache_type in cache_types:
+            sets = [_to_comparable(asset_data[uid].get(cache_type, []), cache_type) for uid in uuids]
+            if not any(sets):
+                common[cache_type] = []
+                continue
+            intersection = sets[0]
+            for s in sets[1:]:
+                intersection = intersection & s
+            common[cache_type] = sorted(intersection)
+
+            # Differences: items not in the common set
+            for uid in uuids:
+                uid_name = assets_by_id.get(uid).name if uid in assets_by_id else str(uid)
+                unique_items = _to_comparable(asset_data[uid].get(cache_type, []), cache_type) - intersection
+                for item_str in sorted(unique_items):
+                    differences.append({
+                        "field": cache_type,
+                        "asset_id": str(uid),
+                        "asset_name": uid_name,
+                        "value": item_str,
+                    })
+
+        return {
+            "asset_ids": [str(u) for u in uuids],
+            "common": common,
+            "differences": differences,
+            "missing_data": missing_data,
+        }
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def get_project_precedents(
+    token: str,
+    goal: str,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """
+    Find projects with similar goals using PostgreSQL pg_trgm fuzzy matching.
+
+    Requires pg_trgm extension (enabled in Task 5). Returns projects with
+    similarity > 0.3, ordered by descending similarity score.
+
+    For each project returns: completion stats, rollback count, duration in days,
+    and the ordered CR sequence summary.
+
+    Use to find precedents before planning a new project.
+    """
+    from app.models.project import Project, ProjectChangeRequest
+    from app.models.change_request import ChangeRequest
+
+    _user, db, db_cm = await _auth(token)
+    try:
+        # pg_trgm similarity query via raw SQL
+        raw = await db.execute(
+            text(
+                "SELECT id, name, goal, similarity(goal, :goal) AS sim "
+                "FROM projects "
+                "WHERE organization_id = :org_id "
+                "  AND similarity(goal, :goal) > 0.3 "
+                "ORDER BY sim DESC "
+                "LIMIT :limit"
+            ),
+            {
+                "goal": goal,
+                "org_id": str(_user.organization_id),
+                "limit": limit,
+            },
+        )
+        rows = raw.fetchall()
+
+        results = []
+        for row in rows:
+            project_id = row[0]
+            project_name = row[1]
+            project_goal = row[2]
+            sim = float(row[3])
+
+            # Fetch CR sequence for this project
+            pcr_result = await db.execute(
+                select(ProjectChangeRequest).where(
+                    ProjectChangeRequest.project_id == project_id
+                ).order_by(ProjectChangeRequest.sequence_order)
+            )
+            pcrs = pcr_result.scalars().all()
+
+            total_crs = len(pcrs)
+            completed_crs = 0
+            rolled_back_crs = 0
+            cr_dates = []
+            cr_sequence_summary = []
+
+            for pcr in pcrs:
+                cr_result = await db.execute(
+                    select(ChangeRequest).where(ChangeRequest.id == pcr.change_request_id)
+                )
+                cr = cr_result.scalar_one_or_none()
+                if cr:
+                    status_str = str(getattr(cr.status, "value", cr.status))
+                    if status_str == "completed":
+                        completed_crs += 1
+                    if status_str == "rolled_back":
+                        rolled_back_crs += 1
+                    if cr.updated_at:
+                        cr_dates.append(cr.updated_at)
+
+                    cr_sequence_summary.append({
+                        "sequence_order": pcr.sequence_order,
+                        "change_type": str(getattr(cr.change_type, "value", cr.change_type)),
+                        "title": cr.title,
+                        "status": status_str,
+                    })
+
+            # Duration: project created_at to max CR updated_at
+            duration_days = None
+            if cr_dates:
+                proj_result = await db.execute(
+                    select(Project).where(Project.id == project_id)
+                )
+                proj = proj_result.scalar_one_or_none()
+                if proj and proj.created_at:
+                    max_updated = max(cr_dates)
+                    created = proj.created_at
+                    if created.tzinfo is None:
+                        created = created.replace(tzinfo=timezone.utc)
+                    if max_updated.tzinfo is None:
+                        max_updated = max_updated.replace(tzinfo=timezone.utc)
+                    duration_days = (max_updated - created).days
+
+            results.append({
+                "project_id": str(project_id),
+                "name": project_name,
+                "goal": project_goal,
+                "similarity_score": round(sim, 4),
+                "total_crs": total_crs,
+                "completed_crs": completed_crs,
+                "rolled_back_crs": rolled_back_crs,
+                "duration_days": duration_days,
+                "cr_sequence_summary": cr_sequence_summary,
+            })
+
+        return results
     finally:
         await db_cm.__aexit__(None, None, None)
