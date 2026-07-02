@@ -55,6 +55,21 @@ Discover → Understand → Plan → Approve → Execute → Observe → Rollbac
 
 ---
 
+## Execution hierarchy
+
+When executing a change, Nexplane selects the safest available mechanism for each step — preferring high-fidelity, API-native methods over lower-level remote execution:
+
+| Tier | Mechanism | Examples | Rollback model |
+|------|-----------|----------|----------------|
+| **1** | Native cloud / service APIs | AWS SDK, Azure SDK, GCP SDK, Okta API | Automatic — API call reversed via stored result |
+| **2** | Infrastructure-as-Code | Terraform, Ansible, Helm, Pulumi | Explicit — requires a paired destroy/revert action |
+| **3** | Management frameworks | SCCM, Jamf, Intune, Kubernetes | Agent-mediated — framework handles delivery |
+| **5** | Raw remote execution | SSH, WinRM | Captured state — pre-change snapshot restored on rollback |
+
+The planning engine always selects the lowest available tier for each step given connected connectors. Tier 5 execution carries an automatic risk-score penalty and requires explicit approval acknowledgement. Every executor at every tier is required to define a rollback path — either automatic reversal, a paired undo action, or pre-change state capture for reconstitution.
+
+---
+
 ## Key capabilities
 
 - **Asset inventory** — 70+ connectors across cloud, identity, network, endpoints, secrets, and observability
