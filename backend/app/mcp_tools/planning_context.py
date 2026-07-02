@@ -372,8 +372,19 @@ async def get_migration_precedents(
             ChangeRequest.status.in_(["completed", "failed", "rolled_back"]),
         ).order_by(ChangeRequest.created_at.desc()).limit(limit)
 
-        result = await db.execute(stmt)
-        crs = result.scalars().all()
+        try:
+            result = await db.execute(stmt)
+            crs = result.scalars().all()
+        except Exception:
+            # change_type is a PG enum — invalid values raise InvalidTextRepresentationError
+            return {
+                "total_executions": 0,
+                "success_rate": None,
+                "avg_duration_minutes": None,
+                "rollback_frequency": None,
+                "common_failure_modes": [],
+                "sample_cr_ids": [],
+            }
 
         if asset_type:
             # Filter: keep only CRs that targeted at least one asset of the given type
