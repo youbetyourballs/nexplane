@@ -89,10 +89,15 @@ async def get_running_processes(token: str, asset_id: str) -> list[dict[str, Any
             tool_name="get_running_processes", command="deep_discover",
             params={}, timeout=120,
         )
-        procs = raw.get("processes", [])
+        # deep_discover returns workloads (one per service/process), not a flat process list
+        procs = raw.get("processes") or []
+        if not procs:
+            workloads = raw.get("workloads") or []
+            procs = workloads  # workloads carry pid, name, listening_ports, etc.
         return [
             {"pid": p.get("pid"), "name": p.get("name"), "user": p.get("user"),
-             "cmdline": p.get("cmdline"), "open_ports": p.get("open_ports", [])}
+             "cmdline": p.get("cmdline"), "open_ports": p.get("open_ports")
+             or [lp.get("port") for lp in p.get("listening_ports", []) if lp.get("port")]}
             for p in procs
         ]
     except ValueError as e:
@@ -112,12 +117,18 @@ async def get_cron_jobs(token: str, asset_id: str) -> list[dict[str, Any]]:
     user, db, db_cm = await _auth(token)
     try:
         await _assert_asset_owned(db, user, asset_id)
-        raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
-            tool_name="get_cron_jobs", command="audit_scheduled_tasks",
-            params={}, timeout=120,
-        )
-        jobs = raw.get("scheduled_tasks", [])
+        try:
+            raw = await run_intelligence_tool(
+                db=db, user=user, asset_id=asset_id,
+                tool_name="get_cron_jobs", command="audit_scheduled_tasks",
+                params={}, timeout=120,
+            )
+            jobs = raw.get("scheduled_tasks") or []
+        except RuntimeError as e:
+            if "requires Windows" in str(e):
+                # Linux hosts do not support audit_scheduled_tasks; return empty list
+                return []
+            raise
         return [
             {"schedule": j.get("schedule"), "command": j.get("command"),
              "owner_user": j.get("owner_user"), "source": j.get("source")}
@@ -145,7 +156,19 @@ async def get_local_users(token: str, asset_id: str) -> list[dict[str, Any]]:
             tool_name="get_local_users", command="audit_users_and_groups",
             params={}, timeout=120,
         )
-        users = raw.get("users", [])
+        # audit_users_and_groups returns security findings per user, not a structured users list.
+        # Extract unique usernames from findings.
+        users = raw.get("users") or []
+        if not users:
+            findings = raw.get("findings") or []
+            seen: dict = {}
+            for f in findings:
+                uname = f.get("user")
+                if uname and uname not in seen:
+                    seen[uname] = {"username": uname, "uid": None, "gid": None,
+                                   "groups": [], "shell": None, "last_login": None,
+                                   "locked": None}
+            users = list(seen.values())
         return [
             {"username": u.get("username"), "uid": u.get("uid"), "gid": u.get("gid"),
              "groups": u.get("groups", []), "shell": u.get("shell"),
@@ -425,7 +448,7 @@ async def get_ssl_certs(token: str, asset_id: str) -> list[dict[str, Any]]:
             tool_name="get_ssl_certs", command="ssl_cert_inspect",
             params={}, timeout=120,
         )
-        certs = raw.get("certificates", [])
+        certs = raw.get("certificates") or []
         return [
             {"subject": c.get("subject"), "expiry": c.get("expiry"),
              "days_remaining": c.get("days_remaining"), "issuer": c.get("issuer"),

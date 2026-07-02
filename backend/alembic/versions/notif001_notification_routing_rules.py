@@ -8,7 +8,7 @@ Create Date: 2026-07-02
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 revision = "notif001"
 down_revision = "mem001"
@@ -22,7 +22,7 @@ def upgrade() -> None:
     if "notification_routing_rules" not in inspector.get_table_names():
         op.create_table(
             "notification_routing_rules",
-            sa.Column("id", sa.String, primary_key=True),
+            sa.Column("id", UUID(as_uuid=True), primary_key=True),
             sa.Column("name", sa.String, nullable=False),
             sa.Column("enabled", sa.Boolean, nullable=False, server_default=sa.text("true")),
             sa.Column("priority", sa.Integer, nullable=False, server_default=sa.text("100")),
@@ -36,7 +36,7 @@ def upgrade() -> None:
             sa.Column("notify_channels", JSONB, nullable=True),
             sa.Column("suppress_default", sa.Boolean, nullable=False, server_default=sa.text("false")),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-            sa.Column("created_by", sa.String, sa.ForeignKey("users.id"), nullable=True),
+            sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
         )
         op.create_index(
             "ix_notification_routing_rules_priority",
