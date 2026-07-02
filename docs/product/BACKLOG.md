@@ -1,5 +1,15 @@
 # Nexplane Backlog
 
+> The **P0–P2** sections below are the strategic product themes. The
+> **Platform & infrastructure** section tracks shipped platform components and
+> their follow-ups (component-organized). Deployment/ops and commercial-overlay
+> work — release pipeline, instance provisioning, operational-model providers,
+> ops→customer access, and commercial *catalog metadata* — lives in the private
+> deploy repo's backlog (`nexplane-deploy/docs/BACKLOG.md`). Rule: an item
+> belongs where its code change lands; core-code items are here.
+>
+> **Status legend** (Platform & infrastructure): ✅ done · ◑ partial · ☐ not started · ❓ decision needed
+
 ## P0 - Strategic Foundations
 
 ### Infrastructure Digital Twin
@@ -146,6 +156,46 @@ Provide leadership-level visibility into:
 - automation coverage
 - risk posture
 - change success rates
+
+---
+
+## Platform & infrastructure
+
+Shipped platform components and their remaining follow-ups. Deploy/overlay
+counterparts (commercial catalog metadata, provisioning executors,
+ops→customer access) live in `nexplane-deploy/docs/BACKLOG.md`.
+
+### Agent reverse tunnel
+
+- ✅ SOCKS5 relay + programmatic `manager.dial()` shipped (`TUNNEL_SOCKS_TOKEN`).
+- ☐ Short-lived per-connection tunnel tokens (+ optional mTLS) for the WS handshake — hardening beyond the reused `/agent` HMAC scheme.
+- ☐ WireGuard L3 option (full-subnet routing) — Phase 3, deferred by design.
+- ❓ Single shared SOCKS5 (agent chosen via credentials) vs. one listener per agent — scaling architecture.
+- ❓ Where the relay terminates — in the backend process vs. a dedicated relay service (HA/scaling).
+- ❓ Allowlist source of truth — agent-enrollment field (current) vs. a policy object.
+- ❓ Coexistence with the agent's Tailscale awareness (`changip_tailscale`) — tunnel vs. mesh selection.
+
+### Tunnel UI & connector routing
+
+- ☐ Extend HTTP routing to the remaining ~40 HTTP connector types — one-line each via the shared `tunnel_http_client` helper.
+- ☐ Idle forwarder-listener reaping + per-agent concurrency/rate limits (listeners persist per process today).
+- ☐ Per-connector audit of routed traffic (agent / destination / bytes) — the tunnel audits dials; connector-level correlation is a follow-up.
+- ☐ Routing for public cloud APIs (AWS/Azure/GCP) — public internet, one-line-addable via the shared helper.
+- ❓ Should `network_tls_skip_verify` require an extra confirmation / be policy-gated for auditors?
+
+### Commercial UI seams (edition-gated; ships in the core bundle)
+
+- ✅ First cut: generic `catalog_action` change type + discovery/run/capabilities APIs + schema-driven `CatalogActionForm` + edition-gated Customers page (v1.1.0). Inert unless the backend reports `edition=commercial`.
+- ☐ `CatalogActionForm` widget set for guided onboarding — autocomplete-with-source, enum/select, field grouping, inline validation, and a review step (the wizard is a dense free-text form today). Pairs with richer catalog `param_schema` metadata tracked in the deploy backlog.
+- ☐ Richer console rendering for the Customers/fleet page (versions, health, expiring grants) over the discovery/registry data.
+- ❓ Approval-workflow gate for `catalog_action` CRs — operator-executed today; can layer the existing approval machinery if governance needs it.
+- ❓ `ops_instance` / fleet-as-assets asset type — none today; a core data-model decision if fleet assets become desirable.
+- ☐ Billing/entitlements UI — out of first-cut scope.
+
+### Deployment integration (upstreaming generic capability)
+
+- ☐ Move the *generic* deployment executors into the product (`backend/app/deployment/`) so a core instance can **execute** deployment CRs (today execution requires the commercial overlay to be mounted). Commercial specifics stay in the overlay.
+- ❓ Generic deployment connector-type naming (`ops` vs `deployment`) and whether deployment change types are enum values vs. a free-form escape hatch (migration churn).
 
 ---
 
