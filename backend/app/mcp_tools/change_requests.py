@@ -395,9 +395,12 @@ async def execute_change_request(token: str, cr_id: str) -> dict[str, Any]:
                 source="api",
                 db=db,
             )
+        except ValueError as exc:
+            # Already in executing state — treat as informational
+            return {"id": str(cr.id), "status": "executing", "note": str(exc)}
         except Exception as exc:
-            # Service may raise if it already started execution; treat as non-fatal
-            logger.warning("execute_change_request service error (may be expected): %s", exc)
+            logger.exception("execute_change_request: start failed for CR %s", cr.id)
+            return {"error": f"Failed to start execution: {exc}"}
 
         return {"id": str(cr.id), "status": "executing", "message": "Execution started; poll get_execution_progress for status updates"}
     finally:

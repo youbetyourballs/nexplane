@@ -986,12 +986,17 @@ async def materialize_project_plan(
     from app.models.change_request import ChangeRequest, ChangeRequestStatus
     from app.models.asset import Asset
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
+        from app.models.user import User as _User
+        if isinstance(principal, _User):
+            actor_id = principal.id
+        else:
+            actor_id = getattr(principal, "created_by_user_id", None) or principal.id
         proj_result = await db.execute(
             select(Project).where(
                 Project.id == _uuid.UUID(project_id),
-                Project.organization_id == user.organization_id,
+                Project.organization_id == principal.organization_id,
             )
         )
         project = proj_result.scalar_one_or_none()
@@ -1037,7 +1042,7 @@ async def materialize_project_plan(
                 asset_name = target_assets[0]
                 asset_result = await db.execute(
                     select(Asset).where(
-                        Asset.organization_id == user.organization_id,
+                        Asset.organization_id == principal.organization_id,
                         Asset.name.ilike(asset_name),
                     ).limit(1)
                 )
@@ -1048,7 +1053,7 @@ async def materialize_project_plan(
                     try:
                         asset_result2 = await db.execute(
                             select(Asset).where(
-                                Asset.organization_id == user.organization_id,
+                                Asset.organization_id == principal.organization_id,
                                 Asset.hostname.ilike(asset_name),
                             ).limit(1)
                         )
@@ -1072,8 +1077,8 @@ async def materialize_project_plan(
 
                 # Create the CR
                 cr = ChangeRequest(
-                    organization_id=user.organization_id,
-                    requester_id=user.id,
+                    organization_id=principal.organization_id,
+                    requester_id=actor_id,
                     change_type=change_type,
                     target_asset_ids=[str(asset.id)],
                     title=title,

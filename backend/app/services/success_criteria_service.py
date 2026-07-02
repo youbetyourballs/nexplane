@@ -92,10 +92,14 @@ async def evaluate_criterion(
             if intel is None:
                 return CriteriaResult.fail, f"no intelligence data for asset {asset_id}"
             services = intel.get("running_services", [])
-            match = next((s for s in services if s.get("name") == service_name), None)
+            match = next(
+                (s for s in services
+                 if (s.get("name") == service_name if isinstance(s, dict) else s == service_name)),
+                None,
+            )
             if match is None:
                 return CriteriaResult.fail, f"service {service_name} not found in host intel"
-            actual_state = match.get("state", "unknown")
+            actual_state = match.get("state", "unknown") if isinstance(match, dict) else "unknown"
             if actual_state == expected_state:
                 return CriteriaResult.pass_, f"service {service_name} state={actual_state}"
             return (
@@ -123,7 +127,16 @@ async def evaluate_criterion(
             if intel is None:
                 return CriteriaResult.fail, f"no intelligence data for asset {asset_id}"
             open_ports = intel.get("open_ports", [])
-            port_open = int(port) in [int(p) for p in open_ports]
+            port_numbers = []
+            for p in open_ports:
+                if isinstance(p, dict):
+                    port_numbers.append(int(p.get("port", -1)))
+                else:
+                    try:
+                        port_numbers.append(int(p))
+                    except (TypeError, ValueError):
+                        pass
+            port_open = int(port) in port_numbers
             if port_open == expected_open:
                 state = "open" if port_open else "closed"
                 return CriteriaResult.pass_, f"port {port} is {state} as expected"

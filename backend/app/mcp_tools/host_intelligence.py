@@ -22,20 +22,21 @@ async def _auth(token: str):
     db = await db_cm.__aenter__()
     try:
         user, agent_token = await resolve_mcp_token(token, db)
-        return user, db, db_cm
+        principal = user if user is not None else agent_token
+        return principal, db, db_cm
     except HTTPException:
         await db_cm.__aexit__(None, None, None)
         raise
 
 
-async def _assert_asset_owned(db, user, asset_id: str) -> None:
+async def _assert_asset_owned(db, principal, asset_id: str) -> None:
     from sqlalchemy import select
     from app.models.asset import Asset
 
     result = await db.execute(
         select(Asset).where(
             Asset.id == _uuid.UUID(asset_id),
-            Asset.organization_id == user.organization_id,
+            Asset.organization_id == principal.organization_id,
         )
     )
     if result.scalar_one_or_none() is None:
@@ -52,11 +53,11 @@ async def get_kernel_info(token: str, asset_id: str) -> dict[str, Any]:
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_kernel_info", command="deep_discover",
             params={}, timeout=120,
         )
@@ -81,11 +82,11 @@ async def get_running_processes(token: str, asset_id: str) -> list[dict[str, Any
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_running_processes", command="deep_discover",
             params={}, timeout=120,
         )
@@ -114,12 +115,12 @@ async def get_cron_jobs(token: str, asset_id: str) -> list[dict[str, Any]]:
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         try:
             raw = await run_intelligence_tool(
-                db=db, user=user, asset_id=asset_id,
+                db=db, user=principal, asset_id=asset_id,
                 tool_name="get_cron_jobs", command="audit_scheduled_tasks",
                 params={}, timeout=120,
             )
@@ -148,11 +149,11 @@ async def get_local_users(token: str, asset_id: str) -> list[dict[str, Any]]:
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_local_users", command="audit_users_and_groups",
             params={}, timeout=120,
         )
@@ -189,11 +190,11 @@ async def get_installed_packages(token: str, asset_id: str) -> list[dict[str, An
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_installed_packages", command="audit_software_inventory",
             params={}, timeout=120,
         )
@@ -216,11 +217,11 @@ async def get_running_services(token: str, asset_id: str) -> list[dict[str, Any]
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_running_services", command="deep_discover",
             params={}, timeout=120,
         )
@@ -244,11 +245,11 @@ async def get_open_ports(token: str, asset_id: str) -> list[dict[str, Any]]:
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_open_ports", command="deep_discover",
             params={}, timeout=120,
         )
@@ -273,11 +274,11 @@ async def get_security_posture(token: str, asset_id: str) -> dict[str, Any]:
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_security_posture", command="audit_os_security_posture",
             params={}, timeout=120,
         )
@@ -302,11 +303,11 @@ async def get_seccomp_policy(token: str, asset_id: str) -> dict[str, Any]:
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_seccomp_policy", command="audit_ebpf_posture",
             params={}, timeout=120,
         )
@@ -329,11 +330,11 @@ async def get_apparmor_profiles(token: str, asset_id: str) -> list[dict[str, Any
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_apparmor_profiles", command="audit_os_security_posture",
             params={}, timeout=120,
         )
@@ -357,11 +358,11 @@ async def get_selinux_policy(token: str, asset_id: str) -> dict[str, Any]:
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_selinux_policy", command="audit_os_security_posture",
             params={}, timeout=120,
         )
@@ -385,11 +386,11 @@ async def get_sudoers(token: str, asset_id: str) -> list[dict[str, Any]]:
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_sudoers", command="sudoers_audit",
             params={}, timeout=120,
         )
@@ -412,11 +413,11 @@ async def get_authorized_keys(token: str, asset_id: str) -> list[dict[str, Any]]
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_authorized_keys", command="authorized_keys_audit",
             params={}, timeout=120,
         )
@@ -440,11 +441,11 @@ async def get_ssl_certs(token: str, asset_id: str) -> list[dict[str, Any]]:
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_ssl_certs", command="ssl_cert_inspect",
             params={}, timeout=120,
         )
@@ -469,11 +470,11 @@ async def get_patch_status(token: str, asset_id: str) -> dict[str, Any]:
     """
     from app.services.host_intelligence_service import run_intelligence_tool
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
         raw = await run_intelligence_tool(
-            db=db, user=user, asset_id=asset_id,
+            db=db, user=principal, asset_id=asset_id,
             tool_name="get_patch_status", command="audit_patch_status",
             params={}, timeout=120,
         )
@@ -502,9 +503,9 @@ async def get_host_full_context(token: str, asset_id: str) -> dict[str, Any]:
     """
     import asyncio
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
-        await _assert_asset_owned(db, user, asset_id)
+        await _assert_asset_owned(db, principal, asset_id)
     except ValueError as e:
         await db_cm.__aexit__(None, None, None)
         return {"error": str(e)}
