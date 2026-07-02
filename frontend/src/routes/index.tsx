@@ -32,6 +32,7 @@ import { Notifications } from "../pages/Notifications";
 import { ImpactSimulationPage } from "../pages/ImpactSimulationPage";
 import { RecommendationsPage } from "../pages/RecommendationsPage";
 import { InfrastructureMemoryPage } from "../pages/InfrastructureMemoryPage";
+import { Customers } from "../pages/Customers";
 import { useAuth } from "../hooks/useAuth";
 
 export function AppRoutes() {
@@ -71,6 +72,7 @@ export function AppRoutes() {
         <Route path="/impact-simulation" element={<ImpactSimulationPage />} />
         <Route path="/recommendations" element={<RecommendationsPage />} />
         <Route path="/infrastructure-memory" element={<InfrastructureMemoryPage />} />
+        <Route path="/customers" element={<Customers />} />
       </Route>
     </Routes>
   );
