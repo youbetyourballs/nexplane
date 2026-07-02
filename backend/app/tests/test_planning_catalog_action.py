@@ -26,6 +26,19 @@ def _cr(desired):
     )
 
 
+class _UnknownCatalog:
+    def get_action_def(self, connector_type, action_id):
+        raise KeyError(f"{connector_type}.{action_id}")
+
+
+def test_unknown_catalog_action_raises_plan_blocked_error():
+    from app.services.change_plan_service import PlanBlockedError
+    import pytest
+    cr = _cr({"connector_type": "nonexistent", "action_id": "bogus_action", "params": {}})
+    with pytest.raises(PlanBlockedError):
+        pe.generate_plan(cr, assets=[], safety_result=_FakeSafety(), catalog=_UnknownCatalog())
+
+
 def test_catalog_action_synthesizes_single_step():
     cr = _cr({"connector_type": "commercial", "action_id": "provision_instance", "params": {"client_id": "acme", "mode": "managed_single_ec2"}})
     plan = pe.generate_plan(cr, assets=[], safety_result=_FakeSafety(), catalog=_FakeCatalog())
