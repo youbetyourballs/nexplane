@@ -155,8 +155,8 @@ Provide leadership-level visibility into:
 
 Status: Not Started — **blocker for open-sourcing**
 
-A real Tailscale auth key (`tskey-auth-kTYui1NBwG11CNTRL-…`) was committed to this
-repo (in `docker-compose.override.yml` and several `docs/superpowers/plans/*.md`,
+A real Tailscale auth key (a `tskey-auth-…` value) was committed to this repo
+(in `docker-compose.override.yml` and several `docs/superpowers/plans/*.md`,
 first introduced in commit `75dfced`). As of 2026-07-02 the key has been removed
 from the working tree/current commits — the override now reads `${TS_AUTHKEY}`
 (supplied via a gitignored `.env`), and the docs are redacted — but **it still
