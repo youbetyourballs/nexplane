@@ -50,6 +50,15 @@ class Project(Base):
         "ProjectRollback", back_populates="project", cascade="all, delete-orphan"
     )
 
+    last_chat_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    success_criteria: Mapped[list["ProjectSuccessCriteria"]] = relationship(
+        "ProjectSuccessCriteria",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="ProjectSuccessCriteria.created_at",
+    )
+
 
 class ProjectChangeRequest(Base):
     __tablename__ = "project_change_requests"
