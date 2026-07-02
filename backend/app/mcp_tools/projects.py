@@ -424,3 +424,358 @@ async def estimate_project_risk(token: str, project_id: str) -> dict[str, Any]:
         }
     finally:
         await db_cm.__aexit__(None, None, None)
+
+
+# ── TOOL 6: create_project ───────────────────────────────────────────────────
+
+@mcp.tool()
+async def create_project(
+    token: str,
+    name: str,
+    goal: str,
+    description: str = "",
+    template: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Create a new project in draft status. A project is a named, goal-driven sequence
+    of Change Requests. Use chat_with_project to build the plan interactively, then
+    add_cr_to_project to assemble the CR sequence.
+    """
+    from app.models.project import Project, ProjectStatus
+
+    user, db, db_cm = await _auth(token)
+    try:
+        project = Project(
+            organization_id=user.organization_id,
+            created_by=user.id,
+            name=name,
+            goal=goal,
+            description=description,
+            status=ProjectStatus.draft,
+            ai_context=[],
+            template=template,
+        )
+        db.add(project)
+        await db.flush()
+        await db.commit()
+        await db.refresh(project)
+        return {
+            "id": str(project.id),
+            "name": project.name,
+            "goal": project.goal,
+            "status": project.status.value,
+        }
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+# ── TOOL 7: chat_with_project ────────────────────────────────────────────────
+
+@mcp.tool()
+async def chat_with_project(
+    token: str,
+    project_id: str,
+    message: str,
+) -> dict[str, Any]:
+    """
+    Send a message to the AI project planner. The AI has full context of the project
+    goal and all registered assets. It will ask clarifying questions and eventually
+    produce a proposed_crs plan you can materialise with materialize_project_plan.
+    Returns {reply, proposed_crs}.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from app.models.project import Project
+    from app.models.asset import Asset
+
+    user, db, db_cm = await _auth(token)
+    try:
+        # Load project
+        proj_result = await db.execute(
+            select(Project).where(
+                Project.id == _uuid.UUID(project_id),
+                Project.organization_id == user.organization_id,
+            )
+        )
+        project = proj_result.scalar_one_or_none()
+        if project is None:
+            return {"error": "Project not found"}
+
+        # Load org AI settings
+        try:
+            from app.models.org_settings import OrganizationSettings
+            from app.services.ai_service import AIService, _resolve_provider_config
+            from app.services.secrets_service import SecretsService
+            from app.config import settings as app_settings
+        except ImportError:
+            return {"reply": "AI service not configured", "proposed_crs": []}
+
+        settings_result = await db.execute(
+            select(OrganizationSettings).where(
+                OrganizationSettings.organization_id == user.organization_id
+            )
+        )
+        org_settings = settings_result.scalar_one_or_none()
+        if not org_settings or (
+            not org_settings.anthropic_api_key_encrypted
+            and not org_settings.ai_providers_encrypted
+        ):
+            return {"reply": "AI service not configured", "proposed_crs": []}
+
+        secrets = SecretsService(app_settings.SECRET_KEY)
+        try:
+            provider, api_key, model = _resolve_provider_config(org_settings, secrets)
+        except ValueError:
+            return {"reply": "AI service not configured", "proposed_crs": []}
+
+        # Load assets for context
+        assets_result = await db.execute(
+            select(Asset)
+            .options(selectinload(Asset.connector))
+            .where(Asset.organization_id == user.organization_id)
+            .limit(50)
+        )
+        assets = assets_result.scalars().all()
+        asset_context = [
+            {
+                "name": a.name,
+                "asset_type": a.asset_type.value if hasattr(a.asset_type, "value") else str(a.asset_type),
+                "environment": a.environment.value if hasattr(a.environment, "value") else str(a.environment),
+                "criticality": (
+                    a.criticality.value
+                    if a.criticality and hasattr(a.criticality, "value")
+                    else None
+                ),
+                "connector_type": (
+                    a.connector.connector_type.value
+                    if a.connector and hasattr(a.connector.connector_type, "value")
+                    else None
+                ),
+                "tags": a.tags or [],
+            }
+            for a in assets
+        ]
+
+        # Build conversation and call AI
+        conversation = list(project.ai_context or [])
+        conversation.append({"role": "user", "content": message})
+
+        ai_service = AIService(secrets)
+        try:
+            result_dict = await ai_service.chat(
+                provider=provider,
+                api_key=api_key,
+                model=model,
+                conversation=conversation,
+                project_goal=project.goal or project.name,
+                asset_context=asset_context,
+            )
+        except Exception as exc:
+            logger.exception("AI service error for project %s", project_id)
+            return {"error": f"AI service error: {exc}"}
+
+        reply = result_dict.get("reply", "")
+        proposed_crs = result_dict.get("proposed_crs")
+
+        # Save conversation + summary
+        conversation.append({"role": "assistant", "content": reply})
+        project.ai_context = conversation
+        if reply:
+            project.last_chat_summary = reply[:500]
+        await db.commit()
+
+        return {"reply": reply, "proposed_crs": proposed_crs}
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+# ── TOOL 8: add_cr_to_project ────────────────────────────────────────────────
+
+@mcp.tool()
+async def add_cr_to_project(
+    token: str,
+    project_id: str,
+    cr_id: str,
+    sequence_order: Optional[int] = None,
+    depends_on: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """
+    Add an existing Change Request to a project. sequence_order defaults to
+    max(existing)+1. depends_on is a list of ProjectChangeRequest IDs that must
+    complete before this CR is eligible for execution.
+    """
+    from sqlalchemy import select
+    from app.models.project import Project, ProjectChangeRequest
+    from app.models.change_request import ChangeRequest
+
+    user, db, db_cm = await _auth(token)
+    try:
+        # Load project
+        proj_result = await db.execute(
+            select(Project).where(
+                Project.id == _uuid.UUID(project_id),
+                Project.organization_id == user.organization_id,
+            )
+        )
+        project = proj_result.scalar_one_or_none()
+        if project is None:
+            return {"error": "Project not found"}
+
+        # Load CR and verify org ownership
+        cr_result = await db.execute(
+            select(ChangeRequest).where(
+                ChangeRequest.id == _uuid.UUID(cr_id),
+                ChangeRequest.organization_id == user.organization_id,
+            )
+        )
+        cr = cr_result.scalar_one_or_none()
+        if cr is None:
+            return {"error": "Change request not found or belongs to a different organisation"}
+
+        # Determine sequence_order
+        if sequence_order is None:
+            existing_result = await db.execute(
+                select(ProjectChangeRequest).where(
+                    ProjectChangeRequest.project_id == project.id
+                )
+            )
+            existing = existing_result.scalars().all()
+            max_order = max((m.sequence_order for m in existing), default=0)
+            sequence_order = max_order + 1
+
+        pcr = ProjectChangeRequest(
+            project_id=project.id,
+            change_request_id=cr.id,
+            sequence_order=sequence_order,
+            depends_on=depends_on or [],
+        )
+        db.add(pcr)
+        await db.flush()
+        await db.commit()
+        await db.refresh(pcr)
+
+        return {
+            "project_id": project_id,
+            "cr_id": cr_id,
+            "pcr_id": str(pcr.id),
+            "sequence_order": pcr.sequence_order,
+            "depends_on": pcr.depends_on,
+        }
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+# ── TOOL 9: remove_cr_from_project ───────────────────────────────────────────
+
+@mcp.tool()
+async def remove_cr_from_project(
+    token: str,
+    project_id: str,
+    cr_id: str,
+) -> dict[str, Any]:
+    """
+    Remove a Change Request from a project. Automatically re-numbers remaining
+    members to preserve a contiguous sequence_order starting at 1.
+    """
+    from sqlalchemy import select
+    from app.models.project import Project, ProjectChangeRequest
+
+    user, db, db_cm = await _auth(token)
+    try:
+        # Verify project ownership
+        proj_result = await db.execute(
+            select(Project).where(
+                Project.id == _uuid.UUID(project_id),
+                Project.organization_id == user.organization_id,
+            )
+        )
+        project = proj_result.scalar_one_or_none()
+        if project is None:
+            return {"error": "Project not found"}
+
+        # Find the PCR to remove
+        pcr_result = await db.execute(
+            select(ProjectChangeRequest).where(
+                ProjectChangeRequest.project_id == project.id,
+                ProjectChangeRequest.change_request_id == _uuid.UUID(cr_id),
+            )
+        )
+        pcr = pcr_result.scalar_one_or_none()
+        if pcr is None:
+            return {"error": "CR is not a member of this project"}
+
+        await db.delete(pcr)
+        await db.flush()
+
+        # Re-number remaining members in current sequence_order
+        remaining_result = await db.execute(
+            select(ProjectChangeRequest)
+            .where(ProjectChangeRequest.project_id == project.id)
+            .order_by(ProjectChangeRequest.sequence_order)
+        )
+        remaining = remaining_result.scalars().all()
+        updated_sequence = []
+        for i, m in enumerate(remaining, start=1):
+            m.sequence_order = i
+            db.add(m)
+            updated_sequence.append({"cr_id": str(m.change_request_id), "sequence_order": i})
+
+        await db.commit()
+        return {"removed": True, "updated_sequence": updated_sequence}
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+# ── TOOL 10: reorder_project_crs ─────────────────────────────────────────────
+
+@mcp.tool()
+async def reorder_project_crs(
+    token: str,
+    project_id: str,
+    ordered_cr_ids: list[str],
+) -> dict[str, Any]:
+    """
+    Reorder CRs in a project by providing the desired ordered list of CR IDs.
+    sequence_order is set to 1-based index matching the provided list.
+    All CR IDs must already be members of the project.
+    """
+    from sqlalchemy import select
+    from app.models.project import Project, ProjectChangeRequest
+
+    user, db, db_cm = await _auth(token)
+    try:
+        proj_result = await db.execute(
+            select(Project).where(
+                Project.id == _uuid.UUID(project_id),
+                Project.organization_id == user.organization_id,
+            )
+        )
+        project = proj_result.scalar_one_or_none()
+        if project is None:
+            return {"error": "Project not found"}
+
+        # Load all PCRs for this project keyed by cr_id
+        pcr_result = await db.execute(
+            select(ProjectChangeRequest).where(
+                ProjectChangeRequest.project_id == project.id
+            )
+        )
+        all_pcrs = pcr_result.scalars().all()
+        pcr_by_cr_id = {str(m.change_request_id): m for m in all_pcrs}
+
+        # Validate all provided cr_ids are members
+        missing = [cid for cid in ordered_cr_ids if cid not in pcr_by_cr_id]
+        if missing:
+            return {"error": f"CR IDs not in project: {missing}"}
+
+        updated_sequence = []
+        for idx, cr_id in enumerate(ordered_cr_ids, start=1):
+            pcr = pcr_by_cr_id[cr_id]
+            pcr.sequence_order = idx
+            db.add(pcr)
+            updated_sequence.append({"cr_id": cr_id, "sequence_order": idx})
+
+        await db.commit()
+        return {"updated_sequence": updated_sequence}
+    finally:
+        await db_cm.__aexit__(None, None, None)
