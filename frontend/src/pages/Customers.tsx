@@ -66,14 +66,10 @@ export function Customers() {
   const onboardCRMutation = useMutation({
     mutationFn: (data: Parameters<typeof changeRequestsApi.create>[0]) =>
       changeRequestsApi.create(data),
-    onSuccess: (data: { id?: string }) => {
-      const stepActionId = onboardStepActions[onboardStep]?.action_id ?? "";
-      setOnboardCRs((prev) => [...prev, { action_id: stepActionId, cr_id: data?.id ?? "" }]);
-      if (onboardStep < onboardStepActions.length - 1) {
-        setOnboardStep((s) => s + 1);
-      } else {
-        // wizard complete
-      }
+    onSuccess: (data: { id?: string }, variables: Parameters<typeof changeRequestsApi.create>[0]) => {
+      const stepActionId = (variables?.desired_outcome as { action_id?: string })?.action_id ?? "";
+      setOnboardCRs((prev) => [...prev, { action_id: String(stepActionId), cr_id: data?.id ?? "" }]);
+      setOnboardStep((s) => (s < onboardStepActions.length - 1 ? s + 1 : s));
     },
   });
 
