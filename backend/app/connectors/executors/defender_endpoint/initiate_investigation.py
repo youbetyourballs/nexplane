@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "initiate_investigation", "machine_id": machine_id, "investigation_id": "mock-inv-1"}
     from ._client import get_access_token, get_client
     token = await get_access_token(creds)
-    async with get_client(token) as client:
+    async with await get_client(token, connector) as client:
         resp = await client.post(f"/machines/{machine_id}/startInvestigation", json={"Comment": "Investigation triggered by Nexplane"})
         resp.raise_for_status()
         result = resp.json()

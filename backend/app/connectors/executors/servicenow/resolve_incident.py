@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "resolve_incident", "sys_id": sys_id, "state": "6"}
     from ._client import get_client
     body = {"state": "6", "close_code": "Solved (Permanently)", "close_notes": parameters.get("resolution_notes", "Resolved by Nexplane")}
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.patch(f"/incident/{sys_id}", json=body)
         resp.raise_for_status()
     return {"action": "resolve_incident", "sys_id": sys_id, "state": "6"}

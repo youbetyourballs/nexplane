@@ -9,7 +9,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "dismiss_secret_alert", "repo": repo, "alert_number": alert_number, "dismissed": True}
     from ._client import get_client
     org = creds["org"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.patch(f"/repos/{org}/{repo}/secret-scanning/alerts/{alert_number}", json={"state": "resolved", "resolution": parameters["reason"]})
         resp.raise_for_status()
     return {"action": "dismiss_secret_alert", "repo": repo, "alert_number": alert_number, "dismissed": True}

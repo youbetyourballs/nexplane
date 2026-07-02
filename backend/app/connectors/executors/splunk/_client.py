@@ -5,8 +5,11 @@ import httpx
 from typing import Optional, List, Dict, Any
 
 
-def get_rest_client(creds: dict) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
+async def get_rest_client(connector) -> httpx.AsyncClient:
+    from app.connectors.executors.common.tunnel_http import tunnel_http_client
+    creds = getattr(connector, "credentials", {}) or {}
+    return await tunnel_http_client(
+        connector,
         base_url=creds["base_url"].rstrip("/"),
         headers={"Authorization": f"Bearer {creds['token']}"},
         timeout=60.0,
@@ -14,9 +17,12 @@ def get_rest_client(creds: dict) -> httpx.AsyncClient:
     )
 
 
-def get_hec_client(creds: dict) -> httpx.AsyncClient:
+async def get_hec_client(connector) -> httpx.AsyncClient:
+    from app.connectors.executors.common.tunnel_http import tunnel_http_client
+    creds = getattr(connector, "credentials", {}) or {}
     hec_url = creds.get("hec_url", creds["base_url"].replace(":8089", ":8088"))
-    return httpx.AsyncClient(
+    return await tunnel_http_client(
+        connector,
         base_url=hec_url,
         headers={"Authorization": f"Splunk {creds['token']}"},
         timeout=30.0,
@@ -28,13 +34,14 @@ class SplunkClient:
     """Sync HTTP client for Splunk REST API using session key auth (port 8089)."""
 
     def __init__(self, base_url: str, username: str, password: str,
-                 verify_ssl: bool = False) -> None:
+                 verify_ssl: bool = False, proxy: Optional[str] = None) -> None:
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
         self.verify_ssl = verify_ssl
         self._session_key: Optional[str] = None
-        self._http = httpx.Client(verify=self.verify_ssl, timeout=60.0)
+        self._http = httpx.Client(verify=self.verify_ssl, timeout=60.0,
+                                   **({"proxy": proxy} if proxy else {}))
 
     def _get_session_key(self) -> str:
         if self._session_key:
@@ -132,17 +139,20 @@ class SplunkClient:
         self._http.close()
 
 
-def get_splunk_client(connector) -> Optional["SplunkClient"]:
+async def get_splunk_client(connector) -> Optional["SplunkClient"]:
     """Build a SplunkClient from connector credentials. Returns None if missing creds."""
+    from app.tunnel.routing import http_proxy
     creds = getattr(connector, "credentials", None) or {}
     base_url = creds.get("base_url", "")
     username = creds.get("username", "admin")
     password = creds.get("password", "")
     if not base_url or not password:
         return None
+    proxy = await http_proxy(connector)
     return SplunkClient(
         base_url=base_url,
         username=username,
         password=password,
         verify_ssl=creds.get("verify_ssl", False),
+        proxy=proxy,
     )

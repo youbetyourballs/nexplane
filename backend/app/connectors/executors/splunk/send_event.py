@@ -13,7 +13,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         payload["sourcetype"] = parameters["sourcetype"]
     if parameters.get("index"):
         payload["index"] = parameters["index"]
-    async with get_hec_client(creds) as client:
+    async with await get_hec_client(connector) as client:
         resp = await client.post("/services/collector/event", json=payload)
         resp.raise_for_status()
     return {"action": "send_event", "sent": True}

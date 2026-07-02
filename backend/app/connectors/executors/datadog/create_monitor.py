@@ -10,7 +10,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     body = {"name": name, "type": parameters["type"], "query": parameters["query"]}
     if parameters.get("message"):
         body["message"] = parameters["message"]
-    async with get_v1_client(creds) as client:
+    async with await get_v1_client(connector) as client:
         resp = await client.post("/monitor", json=body)
         resp.raise_for_status()
         monitor = resp.json()

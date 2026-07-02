@@ -9,7 +9,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         ], "count": 1}
     from ._client import get_access_token, get_graph_client
     token = await get_access_token(creds)
-    async with get_graph_client(token) as client:
+    async with await get_graph_client(token, connector) as client:
         resp = await client.get("/users", params={"$select": "id,userPrincipalName,displayName,accountEnabled,lastSignInDateTime", "$top": 999})
         resp.raise_for_status()
         users = [{"id": u["id"], "upn": u.get("userPrincipalName"), "display_name": u.get("displayName"), "account_enabled": u.get("accountEnabled")} for u in resp.json().get("value", [])]

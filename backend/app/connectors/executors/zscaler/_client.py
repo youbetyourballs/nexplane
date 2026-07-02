@@ -19,10 +19,18 @@ def obfuscate_api_key(api_key: str) -> tuple:
     return obf, timestamp
 
 
-async def get_session(creds: dict) -> httpx.AsyncClient:
+async def get_session(creds: dict, connector=None) -> httpx.AsyncClient:
+    from app.connectors.executors.common.tunnel_http import tunnel_http_client
     cloud = creds["cloud"]
     obf_key, ts = obfuscate_api_key(creds["api_key"])
-    client = httpx.AsyncClient(base_url=f"https://zsapi.{cloud}/api/v1", timeout=30.0)
+    if connector is not None:
+        client = await tunnel_http_client(
+            connector,
+            base_url=f"https://zsapi.{cloud}/api/v1",
+            timeout=30.0,
+        )
+    else:
+        client = httpx.AsyncClient(base_url=f"https://zsapi.{cloud}/api/v1", timeout=30.0)
     resp = await client.post("/authenticatedSession", json={
         "apiKey": obf_key,
         "username": creds["username"],

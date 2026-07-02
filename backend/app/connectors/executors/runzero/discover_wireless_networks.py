@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "discover_wireless_networks", "networks": [], "count": 0}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get("/org/wireless", params={"_oid": creds["org_id"]})
         resp.raise_for_status()
         networks = resp.json()

@@ -19,8 +19,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "factor_id": "mock-factor-id",
             "mock": True,
         }
-    import httpx
-    from ._client import okta_headers, okta_base
+    from ._client import okta_headers, okta_base, get_client
     base = okta_base(creds)
     headers = okta_headers(creds)
     # provider mapping for TOTP
@@ -30,7 +29,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     }
     provider = provider_map.get(factor_type, "GOOGLE")
     payload = {"factorType": factor_type, "provider": provider}
-    async with httpx.AsyncClient() as client:
+    async with await get_client(connector) as client:
         resp = await client.post(f"{base}/users/{user_id}/factors", headers=headers, json=payload)
         resp.raise_for_status()
         factor = resp.json()
@@ -53,11 +52,10 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         return {"rolled_back": False, "reason": "no factor_id to unenroll"}
     if not creds:
         return {"rolled_back": True, "factor_id": factor_id, "mock": True}
-    import httpx
-    from ._client import okta_headers, okta_base
+    from ._client import okta_headers, okta_base, get_client
     base = okta_base(creds)
     headers = okta_headers(creds)
-    async with httpx.AsyncClient() as client:
+    async with await get_client(connector) as client:
         resp = await client.delete(f"{base}/users/{user_id}/factors/{factor_id}", headers=headers)
         resp.raise_for_status()
     return {"rolled_back": True, "factor_id": factor_id, "action": "unenroll_factor"}

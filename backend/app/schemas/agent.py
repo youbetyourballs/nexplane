@@ -50,6 +50,8 @@ class TunnelConfigUpdate(BaseModel):
     enabled: bool
     # Deny-by-default allowlist entries: "CIDR|IP|hostname:port|range|*".
     allowlist: list[str] = []
+    # Maximum concurrent streams through the tunnel (default 10).
+    max_concurrent: int = 10
 
 
 class AgentTunnelStatus(BaseModel):

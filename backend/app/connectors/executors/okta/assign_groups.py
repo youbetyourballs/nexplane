@@ -2,8 +2,7 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 from datetime import datetime, timezone
-import httpx
-from ._client import okta_headers, okta_base
+from ._client import okta_headers, okta_base, get_client
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
@@ -23,7 +22,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     base = okta_base(creds)
     headers = okta_headers(creds)
     assigned = []
-    async with httpx.AsyncClient() as client:
+    async with await get_client(connector) as client:
         for gid in group_ids:
             resp = await client.put(f"{base}/groups/{gid}/users/{user_id}", headers=headers)
             resp.raise_for_status()
@@ -48,7 +47,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     base = okta_base(creds)
     headers = okta_headers(creds)
     removed = []
-    async with httpx.AsyncClient() as client:
+    async with await get_client(connector) as client:
         for gid in assigned_groups:
             resp = await client.delete(f"{base}/groups/{gid}/users/{user_id}", headers=headers)
             if resp.status_code not in (200, 204, 404):

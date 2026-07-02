@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "get_scan_status", "task_id": task_id, "status": "completed", "progress": 100}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get(f"/org/tasks/{task_id}", params={"_oid": creds["org_id"]})
         resp.raise_for_status()
         task = resp.json()

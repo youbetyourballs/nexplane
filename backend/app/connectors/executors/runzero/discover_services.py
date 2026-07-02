@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             {"asset_id": "mock-asset-1", "port": 22, "protocol": "tcp", "service": "ssh", "banner": "OpenSSH 8.x"}
         ], "count": 1}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get("/org/services", params={"_oid": creds["org_id"]})
         resp.raise_for_status()
         services = resp.json()

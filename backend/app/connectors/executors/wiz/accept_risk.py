@@ -16,8 +16,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "accept_risk", "issue_id": issue_id, "duration_days": parameters.get("duration_days"), "accepted": True}
     from ._client import get_access_token, graphql_query
-    token = await get_access_token(creds)
-    data = await graphql_query(token, MUTATION, {"id": issue_id, "days": parameters["duration_days"], "note": parameters["reason"]})
+    token = await get_access_token(creds, connector)
+    data = await graphql_query(token, MUTATION, {"id": issue_id, "days": parameters["duration_days"], "note": parameters["reason"]}, connector=connector)
     return {"action": "accept_risk", "issue_id": issue_id, "result": data.get("data", {})}
 
 

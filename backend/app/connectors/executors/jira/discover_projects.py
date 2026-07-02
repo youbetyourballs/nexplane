@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             {"key": "SEC", "name": "Security", "type": "software", "lead": "alice"}
         ], "count": 1}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get("/project/search", params={"maxResults": 200})
         resp.raise_for_status()
         projects = [{"key": p["key"], "name": p["name"], "type": p.get("projectTypeKey"), "lead": p.get("lead", {}).get("displayName")} for p in resp.json().get("values", [])]

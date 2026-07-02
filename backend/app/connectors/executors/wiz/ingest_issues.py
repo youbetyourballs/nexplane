@@ -15,8 +15,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "ingest_issues", "issues": [], "count": 0}
     from ._client import get_access_token, graphql_query
-    token = await get_access_token(creds)
-    data = await graphql_query(token, QUERY, {"first": 500})
+    token = await get_access_token(creds, connector)
+    data = await graphql_query(token, QUERY, {"first": 500}, connector=connector)
     issues = data.get("data", {}).get("issues", {}).get("nodes", [])
     return {"action": "ingest_issues", "issues": issues, "count": len(issues)}
 

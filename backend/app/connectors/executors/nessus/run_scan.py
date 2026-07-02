@@ -87,7 +87,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     username = creds.get("username", "admin")
     password = creds.get("password", "")
 
-    client = NessusClient(base_url=base_url, username=username, password=password)
+    from app.tunnel.routing import http_proxy as _http_proxy
+    _proxy = await _http_proxy(connector)
+    client = NessusClient(base_url=base_url, username=username, password=password, proxy=_proxy)
     client.login()
 
     scan_id: Optional[int] = None
@@ -154,7 +156,9 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     username = creds.get("username", "admin")
     password = creds.get("password", "")
 
-    client = NessusClient(base_url=base_url, username=username, password=password)
+    from app.tunnel.routing import http_proxy as _http_proxy
+    _proxy = await _http_proxy(connector)
+    client = NessusClient(base_url=base_url, username=username, password=password, proxy=_proxy)
     client.login()
 
     try:

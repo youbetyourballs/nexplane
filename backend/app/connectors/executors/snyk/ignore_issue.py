@@ -9,7 +9,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "ignore_issue", "project_id": project_id, "issue_id": issue_id, "ignored": True}
     from ._client import get_client
     org_id = creds["org_id"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post(f"/orgs/{org_id}/projects/{project_id}/ignores/{issue_id}", json={"reason": parameters["reason"]}, params={"version": "2023-05-29"})
         resp.raise_for_status()
     return {"action": "ignore_issue", "project_id": project_id, "issue_id": issue_id, "ignored": True}

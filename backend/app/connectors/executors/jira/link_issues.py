@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "link_issues", "inward": parameters.get("inward_issue_key"), "outward": parameters.get("outward_issue_key"), "linked": True}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/issueLink", json={"type": {"name": parameters["link_type"]}, "inwardIssue": {"key": parameters["inward_issue_key"]}, "outwardIssue": {"key": parameters["outward_issue_key"]}})
         resp.raise_for_status()
     return {"action": "link_issues", "inward": parameters["inward_issue_key"], "outward": parameters["outward_issue_key"], "linked": True}

@@ -23,7 +23,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not workspace_id or not environment or not secret_name:
         raise ValueError("workspace_id, environment, and secret_name are required")
 
-    client = get_infisical_client(connector)
+    client = await get_infisical_client(connector)
     if client is None:
         return {
             "action": "rotate_infisical_secret",
@@ -69,7 +69,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     if old_value is None:
         return {"rolled_back": False, "reason": "no_old_value_stored"}
 
-    client = get_infisical_client(connector)
+    client = await get_infisical_client(connector)
     if client is None:
         return {"rolled_back": False, "reason": "no_infisical_credentials"}
 

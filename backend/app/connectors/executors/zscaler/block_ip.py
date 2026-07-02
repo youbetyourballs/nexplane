@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "block_ip", "ip_address": ip_address, "blocked": True}
     from ._client import get_session
-    async with await get_session(creds) as client:
+    async with await get_session(creds, connector) as client:
         resp = await client.get("/ipSourceGroups")
         resp.raise_for_status()
         groups = resp.json()

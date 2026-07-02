@@ -10,7 +10,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     from ._client import get_client
     org = creds["org"]
     protection = {"required_status_checks": None, "enforce_admins": True, "required_pull_request_reviews": {"required_approving_review_count": 1}, "restrictions": None}
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.put(f"/repos/{org}/{repo}/branches/{branch}/protection", json=protection)
         resp.raise_for_status()
     return {"action": "enable_branch_protection", "repo": repo, "branch": branch, "enabled": True}

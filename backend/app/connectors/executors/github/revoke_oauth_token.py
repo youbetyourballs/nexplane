@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "revoke_oauth_token", "token_id": token_id, "revoked": True}
     from ._client import get_client
     org = creds["org"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.delete(f"/orgs/{org}/credential-authorizations/{token_id}")
         resp.raise_for_status()
     return {"action": "revoke_oauth_token", "token_id": token_id, "revoked": True}

@@ -19,7 +19,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         fields["labels"] = parameters["labels"]
     if parameters.get("assignee_id"):
         fields["assignee"] = {"id": parameters["assignee_id"]}
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/issue", json={"fields": fields})
         resp.raise_for_status()
         issue = resp.json()

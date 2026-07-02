@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "discover_org_members", "members": [{"login": "mock-user", "role": "member"}], "count": 1}
     from ._client import get_client
     org = creds["org"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get(f"/orgs/{org}/members", params={"per_page": 100})
         resp.raise_for_status()
         members = [{"login": m["login"], "id": m["id"]} for m in resp.json()]

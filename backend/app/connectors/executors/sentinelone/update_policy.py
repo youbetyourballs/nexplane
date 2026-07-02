@@ -10,7 +10,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     policy_data = {}
     if parameters.get("detection_mode"):
         policy_data["detectionMode"] = parameters["detection_mode"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.put(f"/groups/{group_id}/policy", json=policy_data)
         resp.raise_for_status()
     return {"action": "update_policy", "group_id": group_id, "updated": True}

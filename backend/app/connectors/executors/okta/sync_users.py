@@ -21,15 +21,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "synced_at": datetime.now(timezone.utc).isoformat(),
             "mock": True,
         }
-    import httpx
-    from ._client import okta_headers, okta_base
+    from ._client import okta_headers, okta_base, get_client
     base = okta_base(creds)
     headers = okta_headers(creds)
     users = []
     url = f"{base}/users?limit=200"
     if filter_str:
         url += f"&filter={filter_str}"
-    async with httpx.AsyncClient() as client:
+    async with await get_client(connector) as client:
         while url:
             resp = await client.get(url, headers=headers)
             resp.raise_for_status()

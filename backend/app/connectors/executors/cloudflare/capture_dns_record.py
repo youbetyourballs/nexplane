@@ -20,7 +20,7 @@ async def _real_execute(parameters: dict, creds: dict) -> dict:
     record_name = parameters.get("record_name")
     record_type = parameters.get("record_type", "A")
     params = f"?name={record_name}&type={record_type}" if record_name else ""
-    data = await cf_get(f"/zones/{zone_id}/dns_records{params}", creds)
+    data = await cf_get(f"/zones/{zone_id}/dns_records{params}", creds, connector)
     records = data.get("result", [])
     if records:
         rec = records[0]

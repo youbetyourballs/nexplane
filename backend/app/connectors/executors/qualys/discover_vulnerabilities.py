@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "discover_vulnerabilities", "vulnerabilities": [], "count": 0}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/api/2.0/fo/asset/host/vm/detection/", data={"action": "list", "show_results": 1, "status": "New,Active"})
         resp.raise_for_status()
         root = ET.fromstring(resp.text)

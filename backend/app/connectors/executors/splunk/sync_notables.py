@@ -26,7 +26,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     _gsc = get_splunk_client
     if _gsc is None:
         from ._client import get_splunk_client as _gsc  # type: ignore[assignment]
-    client = _gsc(connector)
+    client = await _gsc(connector)
     if client is None:
         return {
             "action": "splunk_sync_notables",

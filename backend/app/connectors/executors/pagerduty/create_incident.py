@@ -10,7 +10,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     payload = {"incident": {"type": "incident", "title": parameters["title"], "service": {"id": service_id, "type": "service_reference"}, "urgency": parameters.get("urgency", "high")}}
     if parameters.get("body"):
         payload["incident"]["body"] = {"type": "incident_body", "details": parameters["body"]}
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/incidents", json=payload)
         resp.raise_for_status()
         inc = resp.json()["incident"]

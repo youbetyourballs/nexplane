@@ -78,12 +78,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         }
 
     from ._client import OpenVASClient
+    from app.tunnel.routing import http_proxy as _http_proxy
 
     base_url = creds.get("base_url") or creds.get("url", "")
     username = creds.get("username", "admin")
     password = creds.get("password", "")
+    _proxy = await _http_proxy(connector)
 
-    client = OpenVASClient(base_url=base_url, username=username, password=password)
+    client = OpenVASClient(base_url=base_url, username=username, password=password, proxy=_proxy)
     client.authenticate()
 
     target_id: Optional[str] = None
@@ -167,12 +169,14 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         return {"rolled_back": False, "reason": "nothing_to_rollback"}
 
     from ._client import OpenVASClient
+    from app.tunnel.routing import http_proxy as _http_proxy
 
     base_url = creds.get("base_url") or creds.get("url", "")
     username = creds.get("username", "admin")
     password = creds.get("password", "")
+    _proxy = await _http_proxy(connector)
 
-    client = OpenVASClient(base_url=base_url, username=username, password=password)
+    client = OpenVASClient(base_url=base_url, username=username, password=password, proxy=_proxy)
     client.authenticate()
 
     errors = []

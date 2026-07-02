@@ -9,7 +9,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "search", "query": query, "results": [], "count": 0}
     from ._client import get_rest_client
-    async with get_rest_client(creds) as client:
+    async with await get_rest_client(connector) as client:
         # Create search job
         resp = await client.post("/services/search/jobs", data={"search": query, "earliest_time": parameters.get("earliest", "-24h"), "latest_time": parameters.get("latest", "now"), "output_mode": "json"})
         resp.raise_for_status()

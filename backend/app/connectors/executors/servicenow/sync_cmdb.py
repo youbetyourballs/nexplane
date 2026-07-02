@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "sync_cmdb", "name": name, "synced": True}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         # Check if CI already exists
         resp = await client.get("/cmdb_ci", params={"sysparm_query": f"name={name}", "sysparm_limit": 1, "sysparm_fields": "sys_id"})
         resp.raise_for_status()

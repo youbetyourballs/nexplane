@@ -27,7 +27,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     _gec = get_elastic_client
     if _gec is None:
         from ._client import get_elastic_client as _gec  # type: ignore[assignment]
-    client = _gec(connector)
+    client = await _gec(connector)
     if client is None:
         return {
             "action": "elastic_sync_alerts",

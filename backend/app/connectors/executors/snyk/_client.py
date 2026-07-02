@@ -75,9 +75,11 @@ class SnykClient:
         resp.raise_for_status()
 
 
-# Legacy factory used by existing executors (discover_*, trigger_test, etc.)
-def get_client(creds: dict) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
+async def get_client(connector) -> httpx.AsyncClient:
+    from app.connectors.executors.common.tunnel_http import tunnel_http_client
+    creds = getattr(connector, "credentials", {}) or {}
+    return await tunnel_http_client(
+        connector,
         base_url="https://api.snyk.io/rest",
         headers={"Authorization": f"token {creds['api_token']}", "Content-Type": "application/json"},
         timeout=30.0,

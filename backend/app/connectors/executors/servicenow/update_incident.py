@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "update_incident", "sys_id": sys_id, "updated": True}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.patch(f"/incident/{sys_id}", json=fields)
         resp.raise_for_status()
     return {"action": "update_incident", "sys_id": sys_id, "updated": True}

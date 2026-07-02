@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "add_comment", "issue_key": issue_key, "comment_id": "mock-comment-id"}
     from ._client import get_client
     body = {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": parameters["comment"]}]}]}
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post(f"/issue/{issue_key}/comment", json={"body": body})
         resp.raise_for_status()
         comment = resp.json()

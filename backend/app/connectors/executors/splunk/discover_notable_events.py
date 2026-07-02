@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "discover_notable_events", "events": [], "count": 0}
     from ._client import get_rest_client
     query = "| inputlookup notable_xref | search status!=5 | head 100"
-    async with get_rest_client(creds) as client:
+    async with await get_rest_client(connector) as client:
         resp = await client.post("/services/search/jobs/export", data={"search": query, "output_mode": "json"})
         resp.raise_for_status()
         events = []

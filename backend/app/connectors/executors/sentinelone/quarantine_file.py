@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "quarantine_file", "agent_id": agent_id, "file_hash": file_hash, "quarantined": True}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/threats/actions/quarantine", json={"filter": {"agentIds": [agent_id]}, "data": {"hash": file_hash}})
         resp.raise_for_status()
     return {"action": "quarantine_file", "agent_id": agent_id, "file_hash": file_hash, "quarantined": True}

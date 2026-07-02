@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "discover_container_images", "images": [], "count": 0}
     from ._client import get_client
     org_id = creds["org_id"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get(f"/orgs/{org_id}/projects", params={"version": "2023-05-29", "limit": 100, "types": "dockerfileScan,containerImage"})
         resp.raise_for_status()
         images = [{"id": p["id"], "name": p["attributes"]["name"], "type": p["attributes"].get("type")} for p in resp.json().get("data", [])]

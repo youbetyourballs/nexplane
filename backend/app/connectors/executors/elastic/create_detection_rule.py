@@ -34,7 +34,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     _gec = get_elastic_client
     if _gec is None:
         from ._client import get_elastic_client as _gec  # type: ignore[assignment]
-    client = _gec(connector)
+    client = await _gec(connector)
     if client is None:
         rule_id = parameters.get("rule_id", str(_uuid.uuid4()))
         return {
@@ -87,7 +87,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     if not rule_id:
         return {"rolled_back": False, "reason": "no rule_id in execution_result"}
 
-    client = _gec(connector)
+    client = await _gec(connector)
     if client is None:
         return {"rolled_back": False, "reason": "no credentials"}
 

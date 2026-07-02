@@ -12,7 +12,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         body["tags"] = parameters["tags"]
     if parameters.get("alert_type"):
         body["alert_type"] = parameters["alert_type"]
-    async with get_v1_client(creds) as client:
+    async with await get_v1_client(connector) as client:
         resp = await client.post("/events", json=body)
         resp.raise_for_status()
     return {"action": "send_event", "title": title, "sent": True}

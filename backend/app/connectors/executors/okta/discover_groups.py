@@ -15,14 +15,14 @@ def _mock_response():
     }
 
 
-async def _real_execute(creds: dict) -> dict:
-    import httpx
-    from ._client import okta_headers, okta_base
+async def _real_execute(connector) -> dict:
+    from ._client import okta_headers, okta_base, get_client
+    creds = getattr(connector, "credentials", {}) or {}
     base = okta_base(creds)
     headers = okta_headers(creds)
     assets = []
     url = f"{base}/groups?limit=200"
-    async with httpx.AsyncClient() as client:
+    async with await get_client(connector) as client:
         while url:
             resp = await client.get(url, headers=headers)
             resp.raise_for_status()
@@ -51,7 +51,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, 'credentials', {})
     if not creds:
         return _mock_response()
-    return await _real_execute(creds)
+    return await _real_execute(connector)
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:

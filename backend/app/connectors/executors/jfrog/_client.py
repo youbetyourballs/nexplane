@@ -8,14 +8,18 @@ import httpx
 class JFrogClient:
     """Thin async client for JFrog Artifactory + Xray REST APIs."""
 
-    def __init__(self, base_url: str, username: str, password_or_token: str) -> None:
+    def __init__(self, base_url: str, username: str, password_or_token: str,
+                 proxy: str | None = None) -> None:
         self._base = base_url.rstrip("/")
-        self._http = httpx.AsyncClient(
-            auth=(username, password_or_token),
-            headers={"Content-Type": "application/json"},
-            timeout=60.0,
-            verify=False,  # free-tier certs may be self-signed
-        )
+        client_kwargs: dict = {
+            "auth": (username, password_or_token),
+            "headers": {"Content-Type": "application/json"},
+            "timeout": 60.0,
+            "verify": False,  # free-tier certs may be self-signed
+        }
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        self._http = httpx.AsyncClient(**client_kwargs)
 
     async def __aenter__(self) -> "JFrogClient":
         return self

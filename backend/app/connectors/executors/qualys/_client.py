@@ -4,10 +4,14 @@
 import httpx
 import base64
 
+from app.connectors.executors.common.tunnel_http import tunnel_http_client
 
-def get_client(creds: dict) -> httpx.AsyncClient:
+
+async def get_client(connector) -> httpx.AsyncClient:
+    creds = getattr(connector, "credentials", {}) or {}
     credentials = base64.b64encode(f"{creds['username']}:{creds['password']}".encode()).decode()
-    return httpx.AsyncClient(
+    return await tunnel_http_client(
+        connector,
         base_url=creds["api_url"].rstrip("/"),
         headers={"Authorization": f"Basic {credentials}", "X-Requested-With": "Nexplane"},
         timeout=60.0,

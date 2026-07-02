@@ -34,21 +34,21 @@ async def _real_execute(parameters: dict, creds: dict) -> dict:
     proxied = parameters.get("proxied", False)
 
     params = f"?name={record_name}&type={record_type}" if record_name else ""
-    data = await cf_get(f"/zones/{zone_id}/dns_records{params}", creds)
+    data = await cf_get(f"/zones/{zone_id}/dns_records{params}", creds, connector)
     records = data.get("result", [])
     previous_value = records[0].get("content") if records else None
     record_id = records[0].get("id") if records else None
 
     body = {"type": record_type, "name": record_name, "content": new_value, "ttl": ttl, "proxied": proxied}
     if record_id:
-        resp = await cf_put(f"/zones/{zone_id}/dns_records/{record_id}", body, creds)
+        resp = await cf_put(f"/zones/{zone_id}/dns_records/{record_id}", body, creds, connector)
     else:
-        resp = await cf_post(f"/zones/{zone_id}/dns_records", body, creds)
+        resp = await cf_post(f"/zones/{zone_id}/dns_records", body, creds, connector)
 
     result_rec = resp.get("result", {})
     final_record_id = result_rec.get("id", record_id)
 
-    verify = await cf_get(f"/zones/{zone_id}/dns_records/{final_record_id}", creds)
+    verify = await cf_get(f"/zones/{zone_id}/dns_records/{final_record_id}", creds, connector)
     verified_value = verify.get("result", {}).get("content")
     if verified_value != new_value:
         raise RuntimeError(f"DNS record write unconfirmed: expected {new_value!r}, got {verified_value!r}")

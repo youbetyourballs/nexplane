@@ -18,7 +18,7 @@ import asyncio
 import ipaddress
 import struct
 
-from .manager import TunnelManager, TunnelStream, DestinationDenied, TunnelUnavailable, DialError
+from .manager import TunnelManager, TunnelStream, DestinationDenied, TunnelUnavailable, DialError, ConcurrencyLimitExceeded
 
 _VER = 0x05
 _AUTH_USERPASS = 0x02
@@ -100,6 +100,9 @@ async def handle_socks_connection(
             await _reply(writer, _REP_NOT_ALLOWED); writer.close(); return
         except TunnelUnavailable:
             await _reply(writer, _REP_UNREACHABLE); writer.close(); return
+        except ConcurrencyLimitExceeded:
+            # SOCKS5 does not have a "too many connections" code; use general error
+            await _reply(writer, _REP_GENERAL); writer.close(); return
         except DialError:
             await _reply(writer, _REP_REFUSED); writer.close(); return
         except Exception:

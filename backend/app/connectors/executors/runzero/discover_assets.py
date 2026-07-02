@@ -9,7 +9,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
              "type": "server", "first_seen": "2025-01-01T00:00:00Z", "last_seen": "2025-06-01T00:00:00Z"}
         ], "count": 1}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get("/org/assets", params={"_oid": creds["org_id"], "fields": "id,addresses,hostnames,os,type,first_seen,last_seen,tags"})
         resp.raise_for_status()
         data = resp.json()

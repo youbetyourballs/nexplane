@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "discover_threats", "threats": [], "count": 0}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get("/threats", params={"limit": 1000, "resolved": "false"})
         resp.raise_for_status()
         threats = [{"id": t["id"], "name": t.get("threatInfo", {}).get("threatName"), "severity": t.get("threatInfo", {}).get("confidenceLevel"), "agent_id": t.get("agentDetectionInfo", {}).get("agentId")} for t in resp.json().get("data", [])]

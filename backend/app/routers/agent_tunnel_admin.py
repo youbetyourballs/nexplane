@@ -97,6 +97,7 @@ async def set_agent_tunnel(
 
     reg.tunnel_enabled = body.enabled
     reg.tunnel_allowlist = list(body.allowlist)
+    reg.tunnel_max_concurrent = max(1, body.max_concurrent)
     await record_event(
         db,
         user.organization_id,
@@ -105,6 +106,7 @@ async def set_agent_tunnel(
             "agent_id": str(agent_id),
             "enabled": body.enabled,
             "allowlist": list(body.allowlist),
+            "max_concurrent": reg.tunnel_max_concurrent,
         },
         actor_id=user.id,
     )

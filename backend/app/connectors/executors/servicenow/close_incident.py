@@ -26,7 +26,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "close_code": close_code,
         "close_notes": close_notes,
     }
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.patch(f"/incident/{sys_id}", json=body)
         resp.raise_for_status()
         inc = resp.json().get("result", {})
@@ -47,7 +47,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     if not creds:
         return {"rolled_back": True, "sys_id": sys_id, "simulated": True}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.patch(f"/incident/{sys_id}", json={"state": "2"})  # 2 = In Progress
         resp.raise_for_status()
     return {"rolled_back": True, "sys_id": sys_id, "state": "2"}

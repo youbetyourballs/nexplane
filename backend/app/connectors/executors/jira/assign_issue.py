@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "assign_issue", "issue_key": issue_key, "assignee_id": assignee_id, "assigned": True}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.put(f"/issue/{issue_key}/assignee", json={"accountId": assignee_id})
         resp.raise_for_status()
     return {"action": "assign_issue", "issue_key": issue_key, "assignee_id": assignee_id, "assigned": True}

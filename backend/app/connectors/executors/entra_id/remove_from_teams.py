@@ -22,7 +22,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     token = await get_access_token(creds)
     graph = "https://graph.microsoft.com/v1.0"
 
-    async with get_graph_client(token) as client:
+    async with await get_graph_client(token, connector) as client:
         resp = await client.get(f"/users/{user_id}/joinedTeams")
         resp.raise_for_status()
         teams = resp.json().get("value", [])
@@ -66,7 +66,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
 
     restored = []
     errors = []
-    async with get_graph_client(token) as client:
+    async with await get_graph_client(token, connector) as client:
         for team in teams:
             team_id = team["teamId"]
             body = {"@odata.id": f"{graph}/directoryObjects/{user_id}"}

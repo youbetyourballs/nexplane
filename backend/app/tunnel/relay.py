@@ -223,7 +223,7 @@ async def run_agent_tunnel(websocket: WebSocket, db) -> None:
     session = TunnelSession(WebSocketTransport(websocket))
     session.start()
     manager = get_manager()
-    manager.register(str(reg.id), session, allowlist)
+    manager.register(str(reg.id), session, allowlist, max_concurrent=reg.tunnel_max_concurrent or 10)
     try:
         await session.wait()  # until the agent disconnects
     finally:

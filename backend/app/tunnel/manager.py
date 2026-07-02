@@ -191,17 +191,71 @@ class TunnelSession:
                 pass
 
 
+_DEFAULT_MAX_CONCURRENT: int = 10
+
+
+class ConcurrencyLimitExceeded(TunnelError):
+    """The agent has reached its maximum concurrent stream limit."""
+
+
+class _CountedStream:
+    """Wraps a TunnelStream and decrements the active-count on close."""
+
+    def __init__(self, stream: "TunnelStream", manager: "TunnelManager", agent_id: str):
+        self._stream = stream
+        self._manager = manager
+        self._agent_id = agent_id
+        self._counted = True
+
+    @property
+    def stream_id(self) -> int:
+        return self._stream.stream_id
+
+    async def write(self, data: bytes) -> None:
+        await self._stream.write(data)
+
+    async def read(self) -> bytes:
+        return await self._stream.read()
+
+    async def close(self) -> None:
+        if self._counted:
+            self._counted = False
+            self._manager._active_count[self._agent_id] = max(
+                0, self._manager._active_count.get(self._agent_id, 1) - 1
+            )
+        await self._stream.close()
+
+    def _feed(self, data: bytes) -> None:
+        self._stream._feed(data)
+
+    def _feed_eof(self) -> None:
+        self._stream._feed_eof()
+
+    def _resolve_open_ok(self) -> None:
+        self._stream._resolve_open_ok()
+
+    def _resolve_open_err(self, reason: str) -> None:
+        self._stream._resolve_open_err(reason)
+
+
 class TunnelManager:
     """Registry of connected agents + the authorization gate for dials."""
 
     def __init__(self):
         self._sessions: dict[str, tuple[TunnelSession, list[Rule]]] = {}
+        self._max_concurrent: dict[str, int] = {}       # agent_id → limit
+        self._active_count: dict[str, int] = {}         # agent_id → open streams
 
-    def register(self, agent_id: str, session: TunnelSession, allowlist: list[Rule]) -> None:
+    def register(self, agent_id: str, session: TunnelSession, allowlist: list[Rule],
+                 max_concurrent: int = _DEFAULT_MAX_CONCURRENT) -> None:
         self._sessions[agent_id] = (session, allowlist)
+        self._max_concurrent[agent_id] = max_concurrent
+        self._active_count[agent_id] = 0
 
     def unregister(self, agent_id: str) -> None:
         self._sessions.pop(agent_id, None)
+        self._max_concurrent.pop(agent_id, None)
+        self._active_count.pop(agent_id, None)
 
     def is_online(self, agent_id: str) -> bool:
         return agent_id in self._sessions
@@ -209,14 +263,35 @@ class TunnelManager:
     def online_agents(self) -> list[str]:
         return list(self._sessions)
 
+    def active_stream_count(self, agent_id: str) -> int:
+        return self._active_count.get(agent_id, 0)
+
     async def dial(self, agent_id: str, host: str, port: int, *, timeout: float = 10.0) -> TunnelStream:
         entry = self._sessions.get(agent_id)
         if entry is None:
             raise TunnelUnavailable(f"agent {agent_id!r} is not connected")
         session, allowlist = entry
+
+        # Enforce concurrency limit before opening a new stream
+        limit = self._max_concurrent.get(agent_id, _DEFAULT_MAX_CONCURRENT)
+        current = self._active_count.get(agent_id, 0)
+        if current >= limit:
+            raise ConcurrencyLimitExceeded(
+                f"agent {agent_id!r} has reached its concurrency limit of {limit} streams"
+            )
+
         if not is_allowed(allowlist, host, port):
             raise DestinationDenied(f"{host}:{port} is not allowed for agent {agent_id!r}")
-        return await session.dial(host, port, timeout=timeout)
+
+        self._active_count[agent_id] = current + 1
+        try:
+            stream = await session.dial(host, port, timeout=timeout)
+        except Exception:
+            self._active_count[agent_id] = max(0, self._active_count.get(agent_id, 1) - 1)
+            raise
+
+        # Wrap the stream so we decrement the counter when it closes
+        return _CountedStream(stream, self, agent_id)
 
 
 # Process-wide manager instance (the relay endpoint registers agents here).

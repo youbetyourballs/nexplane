@@ -15,8 +15,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "ingest_attack_paths", "attack_paths": [], "count": 0}
     from ._client import get_access_token, graphql_query
-    token = await get_access_token(creds)
-    data = await graphql_query(token, QUERY, {"first": 200})
+    token = await get_access_token(creds, connector)
+    data = await graphql_query(token, QUERY, {"first": 200}, connector=connector)
     paths = data.get("data", {}).get("attackPaths", {}).get("nodes", [])
     return {"action": "ingest_attack_paths", "attack_paths": paths, "count": len(paths)}
 

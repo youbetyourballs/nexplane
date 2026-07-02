@@ -14,15 +14,15 @@ async def _real_execute(parameters: dict, creds: dict) -> dict:
     proxied = parameters.get("proxied", False)
 
     params = f"?name={record_name}&type={record_type}" if record_name else ""
-    data = await cf_get(f"/zones/{zone_id}/dns_records{params}", creds)
+    data = await cf_get(f"/zones/{zone_id}/dns_records{params}", creds, connector)
     records = data.get("result", [])
     record_id = records[0].get("id") if records else None
 
     body = {"type": record_type, "name": record_name, "content": previous_value, "ttl": ttl, "proxied": proxied}
     if record_id:
-        await cf_put(f"/zones/{zone_id}/dns_records/{record_id}", body, creds)
+        await cf_put(f"/zones/{zone_id}/dns_records/{record_id}", body, creds, connector)
     else:
-        await cf_post(f"/zones/{zone_id}/dns_records", body, creds)
+        await cf_post(f"/zones/{zone_id}/dns_records", body, creds, connector)
 
     return {
         "action": "restore_dns_record",

@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "discover_oncall", "oncall": [{"schedule": "Primary", "user": "alice@example.com"}], "count": 1}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get("/oncalls", params={"limit": 100})
         resp.raise_for_status()
         oncall = [{"schedule": o.get("schedule", {}).get("summary"), "user": o.get("user", {}).get("email"), "start": o.get("start"), "end": o.get("end")} for o in resp.json().get("oncalls", [])]

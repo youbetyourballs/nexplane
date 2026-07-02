@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "discover_policies", "policies": [], "count": 0}
     from ._client import get_session
-    async with await get_session(creds) as client:
+    async with await get_session(creds, connector) as client:
         resp = await client.get("/urlFilteringRules")
         resp.raise_for_status()
         policies = [{"id": p.get("id"), "name": p.get("name"), "action": p.get("action"), "state": p.get("state")} for p in resp.json()]

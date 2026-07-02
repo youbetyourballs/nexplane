@@ -2,8 +2,7 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 from datetime import datetime, timezone
-import httpx
-from ._client import okta_headers, okta_base
+from ._client import okta_headers, okta_base, get_client
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
@@ -18,7 +17,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "reset_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    async with httpx.AsyncClient() as client:
+    async with await get_client(connector) as client:
         resp = await client.post(
             f"{okta_base(creds)}/users/{user_id}/lifecycle/reset_password?sendEmail=false",
             headers=okta_headers(creds),

@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "update_url_category", "category_id": category_id, "updated": True}
     from ._client import get_session
-    async with await get_session(creds) as client:
+    async with await get_session(creds, connector) as client:
         resp = await client.get(f"/urlCategories/{category_id}")
         resp.raise_for_status()
         current = resp.json()

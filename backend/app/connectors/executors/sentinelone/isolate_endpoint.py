@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "isolate_endpoint", "agent_id": agent_id, "isolated": True}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/agents/actions/disconnect", json={"filter": {"ids": [agent_id]}})
         resp.raise_for_status()
     return {"action": "isolate_endpoint", "agent_id": agent_id, "isolated": True}

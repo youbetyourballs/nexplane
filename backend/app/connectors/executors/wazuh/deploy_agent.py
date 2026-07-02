@@ -13,7 +13,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not agent_name:
         raise ValueError("agent_name is required")
 
-    client = get_wazuh_client(connector)
+    client = await get_wazuh_client(connector)
     if client is None:
         return {
             "action": "wazuh_deploy_agent",
@@ -41,7 +41,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     if not agent_id:
         return {"rolled_back": False, "reason": "no_agent_id_in_result"}
 
-    client = get_wazuh_client(connector)
+    client = await get_wazuh_client(connector)
     if client is None:
         return {"rolled_back": False, "reason": "no_wazuh_credentials"}
 

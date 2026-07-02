@@ -16,15 +16,31 @@ from .connector_proxy import get_connector_proxy
 
 _VIA = "via_agent:"
 
-# Connector types whose outbound client we route through the tunnel this sprint.
-# Deferred (unwired) follow-ups removed from this set: nessus, openvas, wazuh,
-# elastic, opnsense, teleport, infisical — Tasks 9/13 did not wire those clients.
+# Connector types whose outbound client is routed through the tunnel.
 ROUTABLE_CONNECTOR_TYPES: set[str] = {
     # raw TCP
     "postgres", "redis", "mongodb", "ssh", "winrm",
     "ldap", "active_directory", "freeipa",
-    # on-prem HTTP
+    # on-prem HTTP (original set)
     "gitlab", "gitea", "keycloak",
+    # SaaS identity / directory
+    "okta", "entra_id", "azure_ad",
+    # endpoint security
+    "sentinelone", "defender_endpoint",
+    # cloud security / vuln mgmt
+    "wiz", "snyk", "qualys", "runzero",
+    # ITSM / ticketing
+    "jira", "servicenow", "pagerduty",
+    # observability
+    "datadog", "splunk",
+    # SCM
+    "github",
+    # network / infra
+    "cloudflare", "zscaler",
+    # on-prem HTTP (deferred in Tasks 9/13 — now wired)
+    "elastic", "nessus", "openvas", "wazuh", "infisical",
+    # artifact / supply-chain
+    "jfrog",
 }
 
 

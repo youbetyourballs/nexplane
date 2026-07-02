@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "transition_issue", "issue_key": issue_key, "new_status": transition_name}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get(f"/issue/{issue_key}/transitions")
         resp.raise_for_status()
         transitions = {t["name"]: t["id"] for t in resp.json().get("transitions", [])}

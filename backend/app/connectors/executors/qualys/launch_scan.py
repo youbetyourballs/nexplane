@@ -15,7 +15,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         params["asset_group_ids"] = parameters["asset_group_ids"]
     if parameters.get("option_profile_id"):
         params["option_id"] = parameters["option_profile_id"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/api/2.0/fo/scan/", data=params)
         resp.raise_for_status()
         root = ET.fromstring(resp.text)

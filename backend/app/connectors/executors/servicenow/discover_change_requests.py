@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "discover_change_requests", "changes": [], "count": 0}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get("/change_request", params={"sysparm_query": "active=true", "sysparm_limit": 100, "sysparm_fields": "number,short_description,state,type,risk,sys_id"})
         resp.raise_for_status()
         changes = resp.json().get("result", [])

@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "discover_monitors", "monitors": [], "count": 0}
     from ._client import get_v1_client
-    async with get_v1_client(creds) as client:
+    async with await get_v1_client(connector) as client:
         resp = await client.get("/monitor", params={"page_size": 100})
         resp.raise_for_status()
         monitors = [{"id": m["id"], "name": m["name"], "type": m["type"], "status": m.get("overall_state")} for m in resp.json()]

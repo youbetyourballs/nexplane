@@ -12,7 +12,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     params = {"action": "launch", "policy_id": policy_id}
     if parameters.get("target_ips"):
         params["ip"] = parameters["target_ips"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/api/2.0/fo/scan/compliance/", data=params)
         resp.raise_for_status()
     return {"action": "launch_compliance_scan", "policy_id": policy_id, "launched": True}

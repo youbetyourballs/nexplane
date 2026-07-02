@@ -9,11 +9,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     user_id = parameters['user_id']
     if not creds:
         return {"action": "reset_mfa_factors", "user_id": user_id, "mock": True}
-    import httpx
-    from ._client import okta_headers, okta_base
+    from ._client import okta_headers, okta_base, get_client
     base = okta_base(creds)
     headers = okta_headers(creds)
-    async with httpx.AsyncClient() as client:
+    async with await get_client(connector) as client:
         # List and delete all enrolled factors
         resp = await client.get(f"{base}/users/{user_id}/factors", headers=headers)
         resp.raise_for_status()

@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "enable_user", "user_id": user_id, "account_enabled": True}
     from ._client import get_access_token, get_graph_client
     token = await get_access_token(creds)
-    async with get_graph_client(token) as client:
+    async with await get_graph_client(token, connector) as client:
         resp = await client.patch(f"/users/{user_id}", json={"accountEnabled": True})
         resp.raise_for_status()
     return {"action": "enable_user", "user_id": user_id, "account_enabled": True}

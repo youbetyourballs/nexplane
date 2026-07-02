@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "discover_saved_searches", "searches": [], "count": 0}
     from ._client import get_rest_client
-    async with get_rest_client(creds) as client:
+    async with await get_rest_client(connector) as client:
         resp = await client.get("/services/saved/searches", params={"output_mode": "json", "count": 100})
         resp.raise_for_status()
         searches = [{"name": s["name"], "search": s["content"].get("search")} for s in resp.json().get("entry", [])]

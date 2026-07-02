@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "rollback_threat", "threat_id": threat_id, "rolled_back": True}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/threats/actions/rollback-remediation", json={"filter": {"ids": [threat_id]}})
         resp.raise_for_status()
     return {"action": "rollback_threat", "threat_id": threat_id, "rolled_back": True}

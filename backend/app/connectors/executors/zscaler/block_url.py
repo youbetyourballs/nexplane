@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "block_url", "url": url, "blocked": True}
     from ._client import get_session
-    async with await get_session(creds) as client:
+    async with await get_session(creds, connector) as client:
         # Get current custom block category
         resp = await client.get("/urlCategories", params={"customOnly": True})
         resp.raise_for_status()

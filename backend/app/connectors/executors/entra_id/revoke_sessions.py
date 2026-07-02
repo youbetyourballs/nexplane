@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "revoke_sessions", "user_id": user_id, "sessions_revoked": True}
     from ._client import get_access_token, get_graph_client
     token = await get_access_token(creds)
-    async with get_graph_client(token) as client:
+    async with await get_graph_client(token, connector) as client:
         resp = await client.post(f"/users/{user_id}/revokeSignInSessions")
         resp.raise_for_status()
     return {"action": "revoke_sessions", "user_id": user_id, "sessions_revoked": True}

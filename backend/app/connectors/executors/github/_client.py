@@ -3,9 +3,13 @@
 
 import httpx
 
+from app.connectors.executors.common.tunnel_http import tunnel_http_client
 
-def get_client(creds: dict) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
+
+async def get_client(connector) -> httpx.AsyncClient:
+    creds = getattr(connector, "credentials", {}) or {}
+    return await tunnel_http_client(
+        connector,
         base_url="https://api.github.com",
         headers={"Authorization": f"Bearer {creds['token']}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
         timeout=30.0,

@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "discover_groups", "groups": [{"id": "mock-group", "name": "Default", "type": "static"}], "count": 1}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get("/groups", params={"limit": 200})
         resp.raise_for_status()
         groups = [{"id": g["id"], "name": g.get("name"), "type": g.get("type")} for g in resp.json().get("data", [])]

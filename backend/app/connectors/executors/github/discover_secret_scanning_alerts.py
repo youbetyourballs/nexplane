@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "discover_secret_scanning_alerts", "alerts": [], "count": 0}
     from ._client import get_client
     org = creds["org"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get(f"/orgs/{org}/secret-scanning/alerts", params={"state": "open", "per_page": 100})
         resp.raise_for_status()
         alerts = [{"number": a["number"], "secret_type": a.get("secret_type"), "repo": a.get("repository", {}).get("name"), "state": a.get("state")} for a in resp.json()]

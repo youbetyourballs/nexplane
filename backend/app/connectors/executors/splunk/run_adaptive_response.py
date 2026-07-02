@@ -9,7 +9,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "run_adaptive_response", "event_id": event_id, "action_name": action_name, "triggered": True}
     from ._client import get_rest_client
     data = {"ruleUIDs[]": event_id, "action_name": action_name}
-    async with get_rest_client(creds) as client:
+    async with await get_rest_client(connector) as client:
         resp = await client.post("/services/notable_adaptive_response", data=data)
         resp.raise_for_status()
     return {"action": "run_adaptive_response", "event_id": event_id, "action_name": action_name, "triggered": True}

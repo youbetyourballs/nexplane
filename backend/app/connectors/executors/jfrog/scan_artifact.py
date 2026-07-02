@@ -13,7 +13,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     from ._client import JFrogClient
 
-    async with JFrogClient(creds["base_url"], creds["username"], creds["password_or_token"]) as client:
+    from app.tunnel.routing import http_proxy as _hp
+    _proxy = await _hp(connector)
+    async with JFrogClient(creds["base_url"], creds["username"], creds["password_or_token"], proxy=_proxy) as client:
         scan_result = await client.scan_artifact(repo, path)
         # Xray returns violations asynchronously; fetch them
         violations_raw = await client.get_violations(

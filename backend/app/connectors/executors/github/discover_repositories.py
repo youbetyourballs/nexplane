@@ -9,7 +9,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         ], "count": 1}
     from ._client import get_client
     org = creds["org"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get(f"/orgs/{org}/repos", params={"per_page": 100, "type": "all"})
         resp.raise_for_status()
         repos = [{"name": r["name"], "visibility": r.get("visibility"), "language": r.get("language"), "default_branch": r.get("default_branch")} for r in resp.json()]

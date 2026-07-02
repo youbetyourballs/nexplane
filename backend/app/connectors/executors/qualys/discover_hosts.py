@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "discover_hosts", "hosts": [{"ip": "10.0.0.1", "hostname": "mock-host", "os": "Linux"}], "count": 1}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get("/api/2.0/fo/asset/host/", params={"action": "list", "details": "All", "truncation_limit": 500})
         resp.raise_for_status()
         root = ET.fromstring(resp.text)

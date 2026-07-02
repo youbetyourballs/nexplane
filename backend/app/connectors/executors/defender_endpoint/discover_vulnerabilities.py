@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "discover_vulnerabilities", "vulnerabilities": [], "count": 0}
     from ._client import get_access_token, get_client
     token = await get_access_token(creds)
-    async with get_client(token) as client:
+    async with await get_client(token, connector) as client:
         resp = await client.get("/vulnerabilities/machinesVulnerabilities", params={"$top": 1000})
         resp.raise_for_status()
         vulns = [{"cve_id": v.get("cveId"), "machine_id": v.get("machineId"), "severity": v.get("severity")} for v in resp.json().get("value", [])]

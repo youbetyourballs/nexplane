@@ -11,7 +11,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         body["description"] = parameters["description"]
     if parameters.get("type"):
         body["type"] = parameters["type"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/change_request", json=body)
         resp.raise_for_status()
         chg = resp.json()["result"]

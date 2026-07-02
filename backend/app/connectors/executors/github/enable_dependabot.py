@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "enable_dependabot", "repo": repo, "enabled": True}
     from ._client import get_client
     org = creds["org"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.put(f"/repos/{org}/{repo}/vulnerability-alerts")
         resp.raise_for_status()
     return {"action": "enable_dependabot", "repo": repo, "enabled": True}

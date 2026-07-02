@@ -11,16 +11,16 @@ class ElasticClient:
     """Thin sync wrapper around the Elasticsearch + Kibana HTTP APIs."""
 
     def __init__(self, base_url: str, username: str, password: str,
-                 kibana_url: Optional[str] = None, verify_ssl: bool = False):
+                 kibana_url: Optional[str] = None, verify_ssl: bool = False,
+                 proxy: Optional[str] = None):
         self.base_url = base_url.rstrip("/")          # e.g. http://10.0.0.5:9200
         self.kibana_url = (kibana_url or base_url.replace(":9200", ":5601")).rstrip("/")
         self.auth = (username, password)
         self.verify_ssl = verify_ssl
-        self._session = httpx.Client(
-            auth=self.auth,
-            verify=self.verify_ssl,
-            timeout=60.0,
-        )
+        client_kwargs: Dict[str, Any] = {"auth": self.auth, "verify": self.verify_ssl, "timeout": 60.0}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        self._session = httpx.Client(**client_kwargs)
 
     # ------------------------------------------------------------------
     # Elasticsearch index operations
@@ -142,18 +142,21 @@ class ElasticClient:
         self._session.close()
 
 
-def get_elastic_client(connector) -> Optional[ElasticClient]:
+async def get_elastic_client(connector) -> Optional[ElasticClient]:
     """Build an ElasticClient from connector credentials. Returns None if no creds."""
+    from app.tunnel.routing import http_proxy
     creds = getattr(connector, "credentials", None) or {}
     base_url = creds.get("base_url") or creds.get("url", "")
     username = creds.get("username", "elastic")
     password = creds.get("password", "")
     if not base_url or not password:
         return None
+    proxy = await http_proxy(connector)
     return ElasticClient(
         base_url=base_url,
         username=username,
         password=password,
         kibana_url=creds.get("kibana_url"),
         verify_ssl=creds.get("verify_ssl", False),
+        proxy=proxy,
     )

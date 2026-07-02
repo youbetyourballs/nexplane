@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "discover_conditional_access", "policies": [], "count": 0}
     from ._client import get_access_token, get_graph_client
     token = await get_access_token(creds)
-    async with get_graph_client(token) as client:
+    async with await get_graph_client(token, connector) as client:
         resp = await client.get("/identity/conditionalAccess/policies")
         resp.raise_for_status()
         policies = [{"id": p["id"], "name": p.get("displayName"), "state": p.get("state")} for p in resp.json().get("value", [])]

@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "verify_remediation", "host_ip": host_ip, "qid": qid, "scan_launched": True}
     from ._client import get_client
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/api/2.0/fo/scan/", data={"action": "launch", "scan_title": f"Remediation Verify {qid}", "ip": host_ip, "target_from": "assets"})
         resp.raise_for_status()
     return {"action": "verify_remediation", "host_ip": host_ip, "qid": qid, "scan_launched": True}

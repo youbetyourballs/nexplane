@@ -19,7 +19,15 @@ async def get_access_token(creds: dict) -> str:
     return result["access_token"]
 
 
-def get_graph_client(token: str) -> httpx.AsyncClient:
+async def get_graph_client(token: str, connector=None) -> httpx.AsyncClient:
+    from app.connectors.executors.common.tunnel_http import tunnel_http_client
+    if connector is not None:
+        return await tunnel_http_client(
+            connector,
+            base_url=GRAPH_URL,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30.0,
+        )
     return httpx.AsyncClient(
         base_url=GRAPH_URL,
         headers={"Authorization": f"Bearer {token}"},

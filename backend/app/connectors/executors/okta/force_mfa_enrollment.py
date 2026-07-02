@@ -11,11 +11,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "force_mfa_enrollment", "user_id": user_id, "mock": True}
     # Okta enforces MFA enrollment via sign-on policy assignment.
     # This implementation resets factors which forces re-enrollment on next login.
-    import httpx
-    from ._client import okta_headers, okta_base
+    from ._client import okta_headers, okta_base, get_client
     base = okta_base(creds)
     headers = okta_headers(creds)
-    async with httpx.AsyncClient() as client:
+    async with await get_client(connector) as client:
         resp = await client.post(f"{base}/users/{user_id}/lifecycle/reset_factors", headers=headers)
         resp.raise_for_status()
     return {"action": "force_mfa_enrollment", "user_id": user_id, "executed_at": datetime.now(timezone.utc).isoformat()}

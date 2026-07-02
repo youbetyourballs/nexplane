@@ -14,13 +14,16 @@ class OpenVASClient:
     """
 
     def __init__(self, base_url: str, username: str, password: str,
-                 verify_ssl: bool = False, timeout: float = 60.0):
+                 verify_ssl: bool = False, timeout: float = 60.0,
+                 proxy: Optional[str] = None):
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
         self.verify_ssl = verify_ssl
         self.timeout = timeout
         self._token: Optional[str] = None
+        self._http = httpx.Client(verify=self.verify_ssl, timeout=self.timeout,
+                                   **({"proxy": proxy} if proxy else {}))
 
     # ------------------------------------------------------------------
     # Auth
@@ -28,11 +31,9 @@ class OpenVASClient:
 
     def authenticate(self) -> str:
         """POST /login, store session token, return token string."""
-        resp = httpx.post(
+        resp = self._http.post(
             f"{self.base_url}/api/v1/authentication",
             json={"username": self.username, "password": self.password},
-            verify=self.verify_ssl,
-            timeout=self.timeout,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -53,33 +54,27 @@ class OpenVASClient:
         }
 
     def _get(self, path: str, params: Optional[dict] = None) -> dict:
-        resp = httpx.get(
+        resp = self._http.get(
             f"{self.base_url}{path}",
             headers=self._headers(),
             params=params,
-            verify=self.verify_ssl,
-            timeout=self.timeout,
         )
         resp.raise_for_status()
         return resp.json()
 
     def _post(self, path: str, json: Optional[dict] = None) -> dict:
-        resp = httpx.post(
+        resp = self._http.post(
             f"{self.base_url}{path}",
             headers=self._headers(),
             json=json or {},
-            verify=self.verify_ssl,
-            timeout=self.timeout,
         )
         resp.raise_for_status()
         return resp.json()
 
     def _delete(self, path: str) -> dict:
-        resp = httpx.delete(
+        resp = self._http.delete(
             f"{self.base_url}{path}",
             headers=self._headers(),
-            verify=self.verify_ssl,
-            timeout=self.timeout,
         )
         resp.raise_for_status()
         return resp.json() if resp.content else {}

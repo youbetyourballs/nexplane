@@ -13,7 +13,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     filters = parameters.get("filters", {"pagination": {"order_by": "created", "limit": 100}})
 
-    async with JFrogClient(creds["base_url"], creds["username"], creds["password_or_token"]) as client:
+    from app.tunnel.routing import http_proxy as _hp
+    _proxy = await _hp(connector)
+    async with JFrogClient(creds["base_url"], creds["username"], creds["password_or_token"], proxy=_proxy) as client:
         violations_raw = await client.get_violations(filters)
 
     findings = [

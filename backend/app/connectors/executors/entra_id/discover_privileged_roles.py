@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "discover_privileged_roles", "role_assignments": [], "count": 0}
     from ._client import get_access_token, get_graph_client
     token = await get_access_token(creds)
-    async with get_graph_client(token) as client:
+    async with await get_graph_client(token, connector) as client:
         resp = await client.get("/roleManagement/directory/roleAssignments", params={"$expand": "principal,roleDefinition", "$top": 999})
         resp.raise_for_status()
         assignments = [{"user_id": a.get("principalId"), "role_name": a.get("roleDefinition", {}).get("displayName"), "role_id": a.get("roleDefinitionId")} for a in resp.json().get("value", [])]

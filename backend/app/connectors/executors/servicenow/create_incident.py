@@ -15,7 +15,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         body["impact"] = str(parameters["impact"])
     if parameters.get("category"):
         body["category"] = parameters["category"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.post("/incident", json=body)
         resp.raise_for_status()
         inc = resp.json()["result"]

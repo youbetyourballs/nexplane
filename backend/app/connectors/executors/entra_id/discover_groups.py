@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "discover_groups", "groups": [{"id": "mock-group", "name": "All Users", "type": "security"}], "count": 1}
     from ._client import get_access_token, get_graph_client
     token = await get_access_token(creds)
-    async with get_graph_client(token) as client:
+    async with await get_graph_client(token, connector) as client:
         resp = await client.get("/groups", params={"$select": "id,displayName,groupTypes,membershipRule", "$top": 999})
         resp.raise_for_status()
         groups = [{"id": g["id"], "name": g.get("displayName"), "types": g.get("groupTypes", [])} for g in resp.json().get("value", [])]

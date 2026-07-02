@@ -6,7 +6,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "discover_logs_indexes", "indexes": [{"name": "main", "daily_limit": 0}], "count": 1}
     from ._client import get_v1_client
-    async with get_v1_client(creds) as client:
+    async with await get_v1_client(connector) as client:
         resp = await client.get("/logs/config/indexes")
         resp.raise_for_status()
         indexes = [{"name": i["name"], "daily_limit": i.get("daily_limit", {}).get("num_events")} for i in resp.json().get("indexes", [])]

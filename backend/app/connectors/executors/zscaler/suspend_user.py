@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"action": "suspend_user", "user_id": user_id, "suspended": True}
     from ._client import get_session
-    async with await get_session(creds) as client:
+    async with await get_session(creds, connector) as client:
         resp = await client.patch(f"/users/{user_id}", json={"disabled": True})
         resp.raise_for_status()
     return {"action": "suspend_user", "user_id": user_id, "suspended": True}

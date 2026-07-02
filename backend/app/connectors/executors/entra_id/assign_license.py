@@ -15,7 +15,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     from ._client import get_access_token, get_graph_client
     token = await get_access_token(creds)
 
-    async with get_graph_client(token) as client:
+    async with await get_graph_client(token, connector) as client:
         current_resp = await client.get(f"/users/{user_id}?$select=assignedLicenses")
         current_resp.raise_for_status()
         previous_licenses = current_resp.json().get("assignedLicenses", [])

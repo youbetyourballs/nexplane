@@ -8,7 +8,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "reset_mfa", "user_id": user_id, "methods_deleted": 0}
     from ._client import get_access_token, get_graph_client
     token = await get_access_token(creds)
-    async with get_graph_client(token) as client:
+    async with await get_graph_client(token, connector) as client:
         resp = await client.get(f"/users/{user_id}/authentication/methods")
         resp.raise_for_status()
         methods = resp.json().get("value", [])

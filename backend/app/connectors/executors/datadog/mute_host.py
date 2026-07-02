@@ -10,7 +10,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     body = {}
     if parameters.get("end"):
         body["end"] = parameters["end"]
-    async with get_v1_client(creds) as client:
+    async with await get_v1_client(connector) as client:
         resp = await client.post(f"/host/{hostname}/mute", json=body)
         resp.raise_for_status()
     return {"action": "mute_host", "hostname": hostname, "muted": True}

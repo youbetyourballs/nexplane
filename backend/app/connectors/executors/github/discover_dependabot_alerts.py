@@ -7,7 +7,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"action": "discover_dependabot_alerts", "alerts": [], "count": 0}
     from ._client import get_client
     org = creds["org"]
-    async with get_client(creds) as client:
+    async with await get_client(connector) as client:
         resp = await client.get(f"/orgs/{org}/dependabot/alerts", params={"state": "open", "per_page": 100})
         resp.raise_for_status()
         alerts = [{"number": a["number"], "severity": a.get("security_advisory", {}).get("severity"), "package": a.get("dependency", {}).get("package", {}).get("name"), "repo": a.get("repository", {}).get("name")} for a in resp.json()]
