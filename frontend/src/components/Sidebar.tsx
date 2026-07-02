@@ -72,6 +72,7 @@ const previewNavItems = [
 
 const bottomNavItems = [
   { to: "/notifications", label: "Notifications", icon: Bell },
+  { to: "/notification-rules", label: "Notification Rules", icon: Wrench },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 

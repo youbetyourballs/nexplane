@@ -60,6 +60,7 @@ from app.routers.version import router as version_router
 from app.services.upgrade_verify import run_startup_verify as _run_upgrade_verify
 from app.routers import catalog as catalog_router
 from app.routers import capabilities as capabilities_router
+from app.routers.notification_routing import router as notification_routing_router
 
 _escalation_scheduler: AsyncIOScheduler | None = None
 _socks_server = None  # app.tunnel.socks.SocksServer, started when TUNNEL_SOCKS_ENABLED
@@ -265,6 +266,7 @@ app.include_router(recommendations_router)
 app.include_router(version_router)
 app.include_router(catalog_router.router)
 app.include_router(capabilities_router.router)
+app.include_router(notification_routing_router)
 import os as _os
 if _os.getenv("DEMO_MODE") == "true":
     from app.routers.demo import router as demo_router
