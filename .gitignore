@@ -12,3 +12,7 @@ check_*.py
 provision_*.py
 register_*.py
 validate_impl.py
+# Internal brainstorming docs (live in nexplane-docs repo)
+docs/superpowers/
+# Marketing and GTM content (live in nexplane-site repo)
+content/
