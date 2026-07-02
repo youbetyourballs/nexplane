@@ -85,9 +85,12 @@ func (s *supervisor) stop() {
 // polls the control plane every interval to reconcile live. Blocks until ctx is
 // cancelled. Always run it (even when initially disabled) so a later admin
 // enable is picked up without an agent restart.
+//
+// The client is used both as the config poller and as the TokenFetcher so the
+// tunnel fetches a short-lived per-connection token before each WS dial.
 func Run(ctx context.Context, c *client.Client, controlPlane, secret, agentID string, initial client.TunnelConfig, interval time.Duration) {
 	run := func(rctx context.Context, allowlist []string) {
-		if err := tunnel.Run(rctx, controlPlane, secret, agentID, allowlist); err != nil && rctx.Err() == nil {
+		if err := tunnel.Run(rctx, controlPlane, secret, agentID, allowlist, c); err != nil && rctx.Err() == nil {
 			log.Printf("[tunnel] stopped: %v", err)
 		}
 	}

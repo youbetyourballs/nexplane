@@ -132,6 +132,42 @@ func (c *Client) GetTunnelConfig(ctx context.Context, agentID string) (*TunnelCo
 	return &cfg, nil
 }
 
+// tunnelTokenResponse is the JSON shape of POST /agents/{agent_id}/tunnel-token.
+type tunnelTokenResponse struct {
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// FetchTunnelToken exchanges the agent's long-lived HMAC secret for a
+// short-lived, single-use tunnel connection token. The returned token is
+// valid for 60 s and must be used immediately for the WS handshake.
+// Satisfies the tunnel.TokenFetcher interface.
+func (c *Client) FetchTunnelToken(ctx context.Context, agentID string) (string, error) {
+	url := fmt.Sprintf("%s/agents/%s/tunnel-token", c.baseURL, agentID)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.secret)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("tunnel-token returned %d: %s", resp.StatusCode, body)
+	}
+
+	var out tunnelTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("decoding tunnel-token response: %w", err)
+	}
+	return out.Token, nil
+}
+
 func (c *Client) post(ctx context.Context, path string, body, out any) error {
 	data, err := json.Marshal(body)
 	if err != nil {

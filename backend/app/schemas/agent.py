@@ -59,3 +59,14 @@ class AgentTunnelStatus(BaseModel):
     tunnel_enabled: bool
     tunnel_allowlist: list[str]
     online: bool  # currently connected to this control plane's relay
+
+
+class TunnelTokenResponse(BaseModel):
+    """Returned by POST /agents/{agent_id}/tunnel-token.
+
+    ``token`` is a 64-character hex string (32 bytes of entropy). It must be
+    used within ``expires_at`` and is single-use — the relay consumes it on
+    handshake acceptance.
+    """
+    token: str
+    expires_at: datetime

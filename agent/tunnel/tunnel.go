@@ -22,10 +22,22 @@ const (
 	backoffMax       = 30 * time.Second
 )
 
+// TokenFetcher is the minimal interface the tunnel needs to obtain a
+// short-lived per-connection token before each WS dial. The *client.Client
+// satisfies this interface via FetchTunnelToken.
+type TokenFetcher interface {
+	FetchTunnelToken(ctx context.Context, agentID string) (token string, err error)
+}
+
 // Run connects to the control plane tunnel endpoint and serves reverse-tunnel
 // streams until ctx is cancelled. It reconnects with exponential backoff on
 // any disconnection.
-func Run(ctx context.Context, baseURL, secret, agentID string, allowlist []string) error {
+//
+// If fetcher is non-nil, Run obtains a short-lived per-connection token from
+// the control plane immediately before each WS dial and uses that token for
+// the handshake instead of the long-lived secret. On a 401 (e.g., the server
+// has not yet been upgraded) it falls back to the HMAC secret transparently.
+func Run(ctx context.Context, baseURL, secret, agentID string, allowlist []string, fetcher TokenFetcher) error {
 	rules, err := ParseAllowlist(allowlist)
 	if err != nil {
 		return fmt.Errorf("invalid allowlist: %w", err)
@@ -39,7 +51,28 @@ func Run(ctx context.Context, baseURL, secret, agentID string, allowlist []strin
 			return ctx.Err()
 		}
 
-		err := runOnce(ctx, wsURL, secret, rules)
+		// Obtain a short-lived token immediately before dialling so it is
+		// consumed fresh and cannot be replayed from a prior connection.
+		connSecret := secret
+		if fetcher != nil {
+			tok, err := fetcher.FetchTunnelToken(ctx, agentID)
+			if err != nil {
+				log.Printf("tunnel: could not fetch short-lived token (%v), falling back to HMAC secret", err)
+			} else {
+				connSecret = tok
+			}
+		}
+
+		err := runOnce(ctx, wsURL, connSecret, rules)
+
+		// If the server rejected our short-lived token (e.g., server not yet
+		// upgraded) retry once with the long-lived HMAC secret.  This handles
+		// the mixed-version window during rollout without requiring a restart.
+		if err != nil && connSecret != secret {
+			log.Printf("tunnel: short-lived token rejected (%v), retrying with HMAC secret", err)
+			err = runOnce(ctx, wsURL, secret, rules)
+		}
+
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

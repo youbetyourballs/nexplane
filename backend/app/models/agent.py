@@ -4,7 +4,7 @@
 import uuid
 import enum
 from datetime import datetime
-from sqlalchemy import String, DateTime, func, ForeignKey, Text, Enum as SAEnum, JSON, UniqueConstraint, Boolean
+from sqlalchemy import String, DateTime, func, ForeignKey, Text, Enum as SAEnum, JSON, UniqueConstraint, Boolean, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -45,6 +45,29 @@ class AgentRegistration(Base):
     # list of "CIDR|IP|hostname:port[-port|*]" strings; deny-by-default.
     tunnel_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     tunnel_allowlist: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
+
+
+class TunnelConnectionToken(Base):
+    """Short-lived, single-use token issued immediately before a tunnel WS connection.
+
+    The agent calls POST /agents/{agent_id}/tunnel-token (authenticated with its
+    long-lived HMAC secret) to obtain a 32-byte random token valid for 60 seconds.
+    That token is used *once* for the WS handshake; the relay marks it used_at on
+    acceptance and rejects any reuse or expired token.  A stolen WS bearer token
+    therefore cannot be replayed — it is already consumed after the handshake.
+    """
+    __tablename__ = "tunnel_connection_tokens"
+    __table_args__ = (
+        Index("ix_tunnel_connection_tokens_token_hash", "token_hash"),
+        Index("ix_tunnel_connection_tokens_agent_id", "agent_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    agent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_registrations.id"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class AgentJob(Base):
