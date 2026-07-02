@@ -9,6 +9,16 @@ import pathlib
 import types
 from dataclasses import dataclass
 
+# Canonical tier definitions — used by safety_engine, planning_engine, and UI display.
+# Tier 4 is intentionally omitted: there is no category between management frameworks
+# and raw remote execution at this time. Reserved for future use.
+TIER_DEFINITIONS = {
+    1: "Native cloud/service APIs — automatic rollback via stored API result",
+    2: "Infrastructure-as-Code (Terraform, Ansible, Helm, Pulumi) — explicit paired undo action required",
+    3: "Management frameworks (SCCM, Jamf, Intune, Kubernetes) — agent-mediated delivery",
+    5: "Raw remote execution (SSH, WinRM) — pre-change state capture required for rollback",
+}
+
 
 @dataclass
 class ActionOption:

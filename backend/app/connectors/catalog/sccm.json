@@ -66,7 +66,7 @@
           "description": "Required or Available"
         }
       ], 
-      "execution_tier": 5, 
+      "execution_tier": 3,
       "rollback_action": "sccm_remove_deployment", 
       "estimated_duration_seconds": 30, 
       "blast_radius_hint": "collection_wide", 
@@ -90,14 +90,14 @@
           "description": "SCCM DeploymentID to remove"
         }
       ], 
-      "execution_tier": 5, 
-      "estimated_duration_seconds": 15, 
+      "execution_tier": 3,
+      "estimated_duration_seconds": 15,
       "applicable_asset_types": [
-        "server", 
+        "server",
         "endpoint"
-      ], 
-      "action_type": "change", 
-      "executor": "sccm.deploy_application", 
+      ],
+      "action_type": "change",
+      "executor": "sccm.deploy_application",
       "generic_action": "sccm_remove_deployment", 
       "action_id": "remove_deployment"
     }, 
@@ -118,7 +118,7 @@
           "description": "Target collection ID"
         }
       ], 
-      "execution_tier": 5, 
+      "execution_tier": 3,
       "estimated_duration_seconds": 60, 
       "blast_radius_hint": "collection_wide", 
       "applicable_asset_types": [
@@ -144,12 +144,12 @@
           "description": "NetBIOS name of the device as registered in SCCM"
         }
       ], 
-      "execution_tier": 5, 
-      "estimated_duration_seconds": 15, 
+      "execution_tier": 3,
+      "estimated_duration_seconds": 15,
       "applicable_asset_types": [
-        "server", 
+        "server",
         "endpoint"
-      ], 
+      ],
       "action_type": "read", 
       "executor": "sccm.collect_inventory", 
       "generic_action": "sccm_collect_inventory", 
@@ -172,7 +172,7 @@
           "description": "MachinePolicyRetrieve | SoftwareInventory | HardwareInventory | UpdateDeploymentReEval"
         }
       ], 
-      "execution_tier": 5, 
+      "execution_tier": 3,
       "estimated_duration_seconds": 10, 
       "applicable_asset_types": [
         "server", 

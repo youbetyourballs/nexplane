@@ -2,14 +2,20 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 from __future__ import annotations
+import importlib.util
+import inspect
 import json
+import logging
 import pathlib
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from app.models.asset import Asset
 from app.models.change_request import ChangeRequest, ChangeType
 from app.services.safety_engine import SafetyReviewResult
+
+log = logging.getLogger(__name__)
 
 CHANGE_TYPE_DEFS_DIR = pathlib.Path(__file__).parent.parent / "connectors" / "change_type_definitions"
 
@@ -192,7 +198,41 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
     best = options[0]
     action_def = best.action_def
     rollback_action = action_def.get("rollback_action")
-    return {
+
+    # --- Executor contract validation ---
+    # Fail fast at planning time rather than at execution time.
+    rollback_warning: str | None = None
+    try:
+        executor_module = catalog.get_executor(best.connector_type, best.action_id)
+        if not (hasattr(executor_module, "execute") and hasattr(executor_module, "rollback")):
+            raise ValueError(
+                f"Executor module for {best.connector_type}.{best.action_id} does not expose "
+                f"required 'execute' and 'rollback' attributes — ExecutorProtocol contract violated"
+            )
+
+        # Warn when the step has a rollback_action but the executor's rollback is a known no-op.
+        # Detect no-op rollbacks by inspecting the module source for the pattern.
+        if rollback_action:
+            try:
+                source_file = inspect.getfile(executor_module)
+                source_text = pathlib.Path(source_file).read_text(encoding="utf-8")
+                if re.search(r"rolled_back.*?False", source_text):
+                    rollback_warning = (
+                        f"Executor {best.connector_type}.{best.action_id} declares a rollback_action "
+                        f"('{rollback_action}') but its rollback() implementation returns rolled_back=False. "
+                        f"Reconstitution rollback may be incomplete — review before approving."
+                    )
+                    log.warning("Planning: %s", rollback_warning)
+            except (TypeError, OSError):
+                # Built-in or bytecode-only module — skip source inspection
+                pass
+    except ImportError as exc:
+        # Executor module not yet implemented — surface as planning warning, not hard failure,
+        # since some actions are catalog-declared before implementation ships.
+        log.warning("Planning: executor module not importable for %s.%s: %s", best.connector_type, best.action_id, exc)
+        rollback_warning = f"Executor module not found for {best.connector_type}.{best.action_id} — step cannot execute"
+
+    step: dict[str, Any] = {
         "step_number": step_number,
         "name": action_def.get("display_name", generic_action.replace("_", " ").title()),
         "description": action_def.get("description", ""),
@@ -211,6 +251,9 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
         "estimated_duration_seconds": action_def.get("estimated_duration_seconds", 30),
         "blast_radius_hint": action_def.get("blast_radius_hint"),
     }
+    if rollback_warning is not None:
+        step["rollback_warning"] = rollback_warning
+    return step
 
 
 @dataclass
