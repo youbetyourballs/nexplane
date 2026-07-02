@@ -51,3 +51,4 @@ from app.models.security_policy import SecurityPolicySoakSession, SecurityPolicy
 from app.models.project_rollback import ProjectRollback, ProjectRollbackStep  # noqa: F401
 from app.models.setup_token import SetupToken  # noqa: F401
 from app.models.identity_provider import IdentityProvider, IdpType, IdpStatus  # noqa: F401
+from app.models.asset_dependency import AssetDependency  # noqa: F401

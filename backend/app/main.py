@@ -42,7 +42,7 @@ from app.routers.setup import router as setup_router
 from app.routers.identity_providers import router as identity_providers_router
 from app.routers.org_auth_mode import router as org_auth_mode_router
 from app.routers.oidc import router as oidc_router
-from app.routers.infrastructure_memory import router as infrastructure_memory_router
+from app.routers.infrastructure_memory import router as infrastructure_memory_router, _legacy_router as infrastructure_memory_legacy_router
 from app.routers.impact_simulation import router as impact_simulation_router
 from app.routers.recommendations import router as recommendations_router
 from app.middleware.setup_guard import SetupGuardMiddleware
@@ -259,6 +259,7 @@ app.include_router(identity_providers_router)
 app.include_router(org_auth_mode_router)
 app.include_router(oidc_router)
 app.include_router(infrastructure_memory_router)
+app.include_router(infrastructure_memory_legacy_router)
 app.include_router(impact_simulation_router)
 app.include_router(recommendations_router)
 app.include_router(version_router)
