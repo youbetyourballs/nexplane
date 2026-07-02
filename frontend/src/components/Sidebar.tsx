@@ -27,10 +27,12 @@ import {
   Brain,
   Lock,
   FlaskConical,
+  Users,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { useAuth } from "../hooks/useAuth";
+import { useCapabilities } from "../hooks/useCapabilities";
 import { DemoOrgSwitcher } from './DemoOrgSwitcher';
 
 // ── nav item definitions ─────────────────────────────────────────────────────
@@ -151,8 +153,11 @@ function SectionHeader({
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 
+const customersItem = { to: "/customers", label: "Customers", icon: Users };
+
 export function Sidebar() {
   const { user, logout } = useAuth();
+  const { data: caps } = useCapabilities();
   const [operationsOpen, setOperationsOpen] = useState(true);
   const [complianceOpen, setComplianceOpen] = useState(true);
   const [previewOpen, setPreviewOpen] = useState(true);
@@ -262,7 +267,7 @@ export function Sidebar() {
           />
           {operationsOpen && (
             <div className="mt-0.5 space-y-0.5 pl-2">
-              {operationsNavItems.map(({ to, label, icon }) => (
+              {(caps?.commercial ? [...operationsNavItems, customersItem] : operationsNavItems).map(({ to, label, icon }) => (
                 <NavItem key={to} to={to} label={label} icon={icon} />
               ))}
             </div>
