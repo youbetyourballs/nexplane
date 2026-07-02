@@ -45,7 +45,8 @@ async def list_projects(
     Use get_project for full detail including CR list.
     """
     from sqlalchemy import select
-    from app.models.project import Project, ProjectStatus
+    from sqlalchemy.orm import selectinload
+    from app.models.project import Project, ProjectStatus, ProjectChangeRequest
 
     user, db, db_cm = await _auth(token)
     try:
@@ -54,6 +55,9 @@ async def list_projects(
             .where(Project.organization_id == user.organization_id)
             .order_by(Project.created_at.desc())
             .limit(limit)
+            .options(
+                selectinload(Project.members).selectinload(ProjectChangeRequest.change_request)
+            )
         )
         if status:
             try:
@@ -272,6 +276,7 @@ async def get_project_timeline(token: str, project_id: str) -> list[dict[str, An
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
     from app.models.project import Project, ProjectChangeRequest
+    from app.models.change_request import ChangeRequest
 
     user, db, db_cm = await _auth(token)
     try:
@@ -282,7 +287,9 @@ async def get_project_timeline(token: str, project_id: str) -> list[dict[str, An
                 Project.organization_id == user.organization_id,
             )
             .options(
-                selectinload(Project.members).selectinload(ProjectChangeRequest.change_request)
+                selectinload(Project.members)
+                .selectinload(ProjectChangeRequest.change_request)
+                .selectinload(ChangeRequest.requester)
             )
         )
         project = result.scalar_one_or_none()
@@ -297,6 +304,13 @@ async def get_project_timeline(token: str, project_id: str) -> list[dict[str, An
             cr = m.change_request
             cr_status = cr.status.value if hasattr(cr.status, "value") else str(cr.status)
             rolled_back = cr_status == "rolled_back"
+            executor_email = None
+            try:
+                requester = cr.requester
+                if requester is not None:
+                    executor_email = getattr(requester, "email", None)
+            except Exception:
+                pass
             timeline.append(
                 {
                     "cr_id": str(cr.id),
@@ -308,6 +322,7 @@ async def get_project_timeline(token: str, project_id: str) -> list[dict[str, An
                     "outcome": cr_status,
                     "rolled_back": rolled_back,
                     "sequence_order": m.sequence_order,
+                    "executor": executor_email,
                 }
             )
         return timeline
