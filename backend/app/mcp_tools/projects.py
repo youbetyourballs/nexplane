@@ -174,6 +174,7 @@ async def get_project(token: str, project_id: str) -> dict[str, Any]:
             "created_at": project.created_at.isoformat() if project.created_at else None,
             "updated_at": project.updated_at.isoformat() if project.updated_at else None,
             "members": members_out,
+            "change_requests": members_out,
             "pending_approvals": pending_approvals,
             "rollbacks": rollbacks_out,
         }
@@ -416,6 +417,7 @@ async def estimate_project_risk(token: str, project_id: str) -> dict[str, Any]:
 
         return {
             "project_id": project_id,
+            "blast_radius": len(all_asset_ids),
             "blast_radius_assets": len(all_asset_ids),
             "total_crs": total_crs,
             "rollback_coverage_pct": rollback_coverage_pct,
@@ -443,11 +445,16 @@ async def create_project(
     """
     from app.models.project import Project, ProjectStatus
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
+        from app.models.user import User as _User
+        if isinstance(principal, _User):
+            actor_id = principal.id
+        else:
+            actor_id = getattr(principal, "created_by_user_id", None) or principal.id
         project = Project(
-            organization_id=user.organization_id,
-            created_by=user.id,
+            organization_id=principal.organization_id,
+            created_by=actor_id,
             name=name,
             goal=goal,
             description=description,
@@ -802,13 +809,18 @@ async def execute_project_phase(
     from app.models.change_request import ChangeRequest, ChangeRequestStatus
     from app.services.change_execution_service import ChangeExecutionService
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
+        from app.models.user import User as _User
+        if isinstance(principal, _User):
+            actor_id = principal.id
+        else:
+            actor_id = getattr(principal, "created_by_user_id", None) or principal.id
         proj_result = await db.execute(
             select(Project)
             .where(
                 Project.id == _uuid.UUID(project_id),
-                Project.organization_id == user.organization_id,
+                Project.organization_id == principal.organization_id,
             )
             .options(
                 selectinload(Project.members).selectinload(ProjectChangeRequest.change_request)
@@ -868,7 +880,7 @@ async def execute_project_phase(
             try:
                 await ChangeExecutionService.start(
                     cr_id=cr.id,
-                    actor_id=user.id,
+                    actor_id=actor_id,
                     source="api",
                     db=db,
                 )
@@ -903,13 +915,18 @@ async def rollback_project(
     from app.models.project import Project, ProjectChangeRequest
     from app.services import project_rollback_service as prs
 
-    user, db, db_cm = await _auth(token)
+    principal, db, db_cm = await _auth(token)
     try:
+        from app.models.user import User as _User
+        if isinstance(principal, _User):
+            actor_id = principal.id
+        else:
+            actor_id = getattr(principal, "created_by_user_id", None) or principal.id
         proj_result = await db.execute(
             select(Project)
             .where(
                 Project.id == _uuid.UUID(project_id),
-                Project.organization_id == user.organization_id,
+                Project.organization_id == principal.organization_id,
             )
             .options(
                 selectinload(Project.members).selectinload(ProjectChangeRequest.change_request)
@@ -930,7 +947,7 @@ async def rollback_project(
         rollback, warnings = await prs.initiate(
             db=db,
             project=project,
-            triggered_by_user_id=user.id,
+            triggered_by_user_id=actor_id,
             notes=notes,
             cr_ids=cr_ids_filter,
         )
@@ -1180,10 +1197,17 @@ async def define_success_criteria(
             }
 
         await db.commit()
-        return {
-            "criteria_ids": [str(c.id) for c in created],
-            "count": len(created),
-        }
+        for c in created:
+            await db.refresh(c)
+        return [
+            {
+                "criteria_id": str(c.id),
+                "type": c.type.value if hasattr(c.type, "value") else str(c.type),
+                "description": c.description,
+                "assertion": c.assertion,
+            }
+            for c in created
+        ]
     finally:
         await db_cm.__aexit__(None, None, None)
 
@@ -1214,11 +1238,26 @@ async def check_success_criteria(token: str, project_id: str) -> dict[str, Any]:
         if project is None:
             return {"error": "Project not found"}
 
-        result = await evaluate_all_criteria(
+        raw = await evaluate_all_criteria(
             db=db,
             project_id=project.id,
             org_id=user.organization_id,
         )
-        return result
+        # Normalise to canonical shape expected by callers
+        criteria_results = raw.get("criteria_results") or raw.get("criteria") or []
+        pass_count = sum(1 for c in criteria_results if c.get("result") == "pass")
+        fail_count = sum(1 for c in criteria_results if c.get("result") == "fail")
+        pending_count = sum(
+            1 for c in criteria_results
+            if c.get("result") in ("pending_manual", "not_checked", None)
+        )
+        return {
+            "pass_count": pass_count,
+            "fail_count": fail_count,
+            "pending_count": pending_count,
+            "all_pass": fail_count == 0 and pending_count == 0 and pass_count > 0,
+            "criteria_results": criteria_results,
+            "overall": raw.get("overall"),
+        }
     finally:
         await db_cm.__aexit__(None, None, None)
