@@ -484,7 +484,8 @@ export type ChangeType =
   | "asr_enforce"
   | "sysmon_deploy"
   | "sysmon_fim"
-  | "platform_upgrade";
+  | "platform_upgrade"
+  | "catalog_action";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
@@ -673,4 +674,12 @@ export interface AgentTunnelStatus {
 export interface TunnelConfigUpdate {
   enabled: boolean;
   allowlist: string[];
+}
+
+export interface Capabilities { edition: string; commercial: boolean; domains: string[]; }
+export interface CatalogParam { name: string; type: string; required?: boolean; default?: unknown; enum?: string[]; description?: string; secret?: boolean; }
+export interface CatalogAction {
+  connector_type: string; action_id: string; generic_action: string;
+  display_name: string; description: string; group: string; domain: string;
+  param_schema: CatalogParam[]; read_only: boolean; destructive: boolean; order: number;
 }
