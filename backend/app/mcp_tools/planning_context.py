@@ -10,7 +10,7 @@ Read-only tools for AI agents to gather context before creating change requests.
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 
 from app.mcp_server import mcp
 from app.database import AsyncSessionLocal
@@ -459,5 +459,212 @@ async def get_migration_precedents(
             "common_failure_modes": common_failures,
             "sample_cr_ids": sample_ids,
         }
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+import uuid as _uuid  # noqa: E402 — used by tools below
+
+
+@mcp.tool()
+async def get_cross_host_dependency_map(
+    token: str,
+    asset_ids: list[str],
+) -> dict[str, Any]:
+    """
+    Build a dependency graph for a set of assets.
+
+    Queries asset_dependencies for all edges where either endpoint is in asset_ids.
+    Classifies edges as internal (both endpoints in the set) or external (one endpoint outside).
+    Also identifies CRs that touch 2+ assets in the set (shared_services).
+
+    Use before planning multi-host changes to understand blast radius and coordination needs.
+    """
+    from app.models.asset_dependency import AssetDependency
+    from app.models.asset import Asset
+
+    _user, db, db_cm = await _auth(token)
+    try:
+        asset_uuid_set = set()
+        for aid in asset_ids:
+            try:
+                asset_uuid_set.add(_uuid.UUID(aid))
+            except ValueError:
+                pass
+
+        if not asset_uuid_set:
+            return {"edges": [], "external_dependencies": []}
+
+        # Query all dependency edges touching the set
+        deps_result = await db.execute(
+            select(AssetDependency).where(
+                AssetDependency.organization_id == _user.organization_id,
+                or_(
+                    AssetDependency.dependent_asset_id.in_(asset_uuid_set),
+                    AssetDependency.dependency_asset_id.in_(asset_uuid_set),
+                ),
+            )
+        )
+        deps = deps_result.scalars().all()
+
+        edges = []
+        external_ids: set[_uuid.UUID] = set()
+
+        for dep in deps:
+            from_id = dep.dependent_asset_id
+            to_id = dep.dependency_asset_id
+            internal = (from_id in asset_uuid_set) and (to_id in asset_uuid_set)
+
+            edges.append({
+                "from_asset_id": str(from_id),
+                "to_asset_id": str(to_id),
+                "dependency_type": dep.dependency_type,
+                "internal": internal,
+            })
+
+            if from_id not in asset_uuid_set:
+                external_ids.add(from_id)
+            if to_id not in asset_uuid_set:
+                external_ids.add(to_id)
+
+        # Resolve external asset names
+        external_dependencies = []
+        for ext_id in external_ids:
+            asset_result = await db.execute(
+                select(Asset).where(Asset.id == ext_id)
+            )
+            ext_asset = asset_result.scalar_one_or_none()
+            name = ext_asset.name if ext_asset else str(ext_id)
+
+            # Determine direction
+            direction_set = set()
+            for dep in deps:
+                if dep.dependent_asset_id == ext_id:
+                    direction_set.add("upstream")  # ext depends on something in our set
+                if dep.dependency_asset_id == ext_id:
+                    direction_set.add("downstream")  # something in our set depends on ext
+
+            dep_type = next(
+                (dep.dependency_type for dep in deps
+                 if dep.dependent_asset_id == ext_id or dep.dependency_asset_id == ext_id),
+                "unknown"
+            )
+
+            external_dependencies.append({
+                "asset_id": str(ext_id),
+                "name": name,
+                "direction": ",".join(sorted(direction_set)),
+                "dependency_type": dep_type,
+            })
+
+        return {
+            "edges": edges,
+            "external_dependencies": external_dependencies,
+        }
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+# Kernel EOL lookup table — major.minor -> ISO date string
+_KERNEL_EOL: dict[str, str] = {
+    "4.14": "2024-01-01",
+    "4.19": "2024-12-31",
+    "5.4": "2025-12-31",
+    "5.10": "2026-12-31",
+    "5.15": "2026-10-31",
+    "6.1": "2026-12-31",
+    "6.6": "2026-12-31",
+    "al2": "2025-06-30",
+    "al2023": "2028-03-15",
+}
+
+
+def _classify_kernel_version(raw: str) -> Optional[str]:
+    """Map a raw kernel version string to a known EOL key."""
+    if not raw:
+        return None
+    raw_lower = raw.lower()
+    if "amzn2023" in raw_lower:
+        return "al2023"
+    if "amzn2" in raw_lower:
+        return "al2"
+    # Extract major.minor
+    import re
+    m = re.match(r"(\d+)\.(\d+)", raw)
+    if m:
+        return f"{m.group(1)}.{m.group(2)}"
+    return None
+
+
+@mcp.tool()
+async def get_kernel_eol_status(
+    token: str,
+    asset_ids: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    """
+    Report kernel end-of-life status for Linux/EC2 assets.
+
+    Reads kernel_version from asset.metadata. Matches to hardcoded EOL table.
+    Returns supported status, EOL date, and days_until_eol (negative = already EOL).
+
+    If asset_ids is None, scans all org assets where connector type is nexplane_agent
+    or asset_type contains 'server'/'endpoint'/'ec2'.
+    """
+    from app.models.asset import Asset
+
+    _user, db, db_cm = await _auth(token)
+    try:
+        if asset_ids:
+            uuids = []
+            for aid in asset_ids:
+                try:
+                    uuids.append(_uuid.UUID(aid))
+                except ValueError:
+                    pass
+            stmt = select(Asset).where(
+                Asset.organization_id == _user.organization_id,
+                Asset.id.in_(uuids),
+            )
+        else:
+            stmt = select(Asset).where(
+                Asset.organization_id == _user.organization_id,
+                or_(
+                    Asset.asset_type.in_(["server", "endpoint"]),
+                )
+            )
+
+        result = await db.execute(stmt)
+        assets = result.scalars().all()
+
+        from datetime import date
+        today = datetime.now(timezone.utc).date()
+        rows = []
+
+        for asset in assets:
+            meta = asset.asset_metadata or {}
+            raw_kv = meta.get("kernel_version") or ""
+
+            eol_key = _classify_kernel_version(raw_kv)
+            eol_date_str = _KERNEL_EOL.get(eol_key) if eol_key else None
+
+            if eol_date_str:
+                eol_date = date.fromisoformat(eol_date_str)
+                days_until_eol = (eol_date - today).days
+                supported = eol_date >= today
+            else:
+                eol_date_str = None
+                days_until_eol = None
+                supported = None
+
+            rows.append({
+                "asset_id": str(asset.id),
+                "name": asset.name,
+                "kernel_version": raw_kv or None,
+                "eol_date": eol_date_str,
+                "supported": supported,
+                "days_until_eol": days_until_eol,
+            })
+
+        return rows
     finally:
         await db_cm.__aexit__(None, None, None)
