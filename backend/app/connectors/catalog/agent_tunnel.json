@@ -1,0 +1,53 @@
+{
+    "connector_type": "agent_tunnel",
+    "display_name": "Agent Tunnel",
+    "credential_fields": [],
+    "actions": [
+        {
+            "action_id": "enable_reverse_tunnel",
+            "generic_action": "agent_reverse_tunnel_enable",
+            "action_type": "change",
+            "execution_tier": 1,
+            "display_name": "Enable Reverse Tunnel",
+            "description": "Enable the reverse tunnel on an agent, allowing the platform to route connector traffic through the agent to its local network.",
+            "applicable_asset_types": ["server"],
+            "parameters": [
+                {
+                    "name": "allowed_connector_types",
+                    "type": "array",
+                    "required": false,
+                    "description": "Connector types this tunnel may route traffic for"
+                },
+                {
+                    "name": "allowlist",
+                    "type": "array",
+                    "required": false,
+                    "description": "Allowlist entries in 'host:port[-port|*]' format. Defaults to RFC1918 ranges on all ports if omitted."
+                },
+                {
+                    "name": "max_concurrent_connections",
+                    "type": "integer",
+                    "required": false,
+                    "default": 10,
+                    "description": "Maximum concurrent connections through this tunnel"
+                }
+            ],
+            "rollback_action": "disable_reverse_tunnel",
+            "estimated_duration_seconds": 5,
+            "blast_radius_hint": "network_routing_change"
+        },
+        {
+            "action_id": "disable_reverse_tunnel",
+            "generic_action": "agent_reverse_tunnel_disable",
+            "action_type": "change",
+            "execution_tier": 1,
+            "display_name": "Disable Reverse Tunnel",
+            "description": "Disable the reverse tunnel on an agent, stopping all traffic routing through it.",
+            "applicable_asset_types": ["server"],
+            "parameters": [],
+            "rollback_action": "enable_reverse_tunnel",
+            "estimated_duration_seconds": 5,
+            "blast_radius_hint": "network_routing_change"
+        }
+    ]
+}

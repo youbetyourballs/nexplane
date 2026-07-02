@@ -510,6 +510,9 @@ class ChangeType(str, enum.Enum):
     audit_software_inventory = "audit_software_inventory"
     audit_cis_compliance = "audit_cis_compliance"
     platform_upgrade = "platform_upgrade"
+    # Agent tunnel management
+    agent_reverse_tunnel_enable = "agent_reverse_tunnel_enable"
+    agent_reverse_tunnel_disable = "agent_reverse_tunnel_disable"
     # Generic catalog action
     catalog_action = "catalog_action"
 

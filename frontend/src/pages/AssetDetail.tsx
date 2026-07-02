@@ -946,8 +946,87 @@ export function AssetDetail() {
 
       {/* Tunnel tab */}
       {activeTab === "tunnel" && agent && (
-        <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <AgentTunnelManager agentId={agent.agent_id} />
+        <div className="space-y-4">
+          {/* Tunnel status panel with CR quick actions */}
+          <div className="bg-white border border-slate-200 rounded-lg p-5">
+            <h2 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+              <Network className="w-4 h-4 text-slate-400" />
+              Tunnel Status
+            </h2>
+            <div className="flex items-center gap-3 mb-4">
+              <span
+                className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                  agent.tunnel_enabled
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {agent.tunnel_enabled ? "Enabled" : "Disabled"}
+              </span>
+              <span
+                className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                  agent.online
+                    ? "bg-blue-100 text-blue-700"
+                    : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {agent.online ? "Connected" : "Offline"}
+              </span>
+            </div>
+            {agent.tunnel_enabled && agent.tunnel_allowlist.length > 0 && (
+              <div className="mb-4">
+                <p className="text-xs text-slate-400 mb-1">Allowlist</p>
+                <div className="flex flex-wrap gap-1">
+                  {agent.tunnel_allowlist.map((entry, i) => (
+                    <span
+                      key={`${entry}-${i}`}
+                      className="inline-flex items-center bg-slate-100 text-slate-600 text-xs px-1.5 py-0.5 rounded font-mono"
+                    >
+                      {entry}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex gap-2">
+              {!agent.tunnel_enabled ? (
+                <button
+                  onClick={() => {
+                    const params = new URLSearchParams({
+                      changeType: "agent_reverse_tunnel_enable",
+                      assetId: asset.id,
+                      title: `Enable reverse tunnel on ${asset.name}`,
+                      description: `Enable the reverse tunnel on agent ${agent.hostname}, allowing the platform to route connector traffic through it to its local network.`,
+                    });
+                    navigate(`/change-requests/new?${params.toString()}`);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-brand-600 text-white rounded-md hover:bg-brand-700 transition-colors"
+                >
+                  Enable Tunnel
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    const params = new URLSearchParams({
+                      changeType: "agent_reverse_tunnel_disable",
+                      assetId: asset.id,
+                      title: `Disable reverse tunnel on ${asset.name}`,
+                      description: `Disable the reverse tunnel on agent ${agent.hostname}, stopping all traffic routing through it.`,
+                    });
+                    navigate(`/change-requests/new?${params.toString()}`);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 text-slate-700 rounded-md hover:bg-slate-50 transition-colors"
+                >
+                  Disable Tunnel
+                </button>
+              )}
+            </div>
+          </div>
+          {/* Full tunnel manager for allowlist editing */}
+          <div className="bg-white border border-slate-200 rounded-lg p-5">
+            <h2 className="text-sm font-semibold text-slate-900 mb-4">Tunnel Configuration</h2>
+            <AgentTunnelManager agentId={agent.agent_id} />
+          </div>
         </div>
       )}
 
