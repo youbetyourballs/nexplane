@@ -1023,7 +1023,8 @@ async def materialize_project_plan(
                 change_type = item.get("change_type")
                 target_assets = item.get("target_assets", [])
                 desired_outcome = item.get("desired_outcome", {})
-                seq = item.get("seq", existing_max_order + idx + 1)
+                raw_seq = item.get("seq")
+                seq = raw_seq if raw_seq is not None else (idx + 1)
                 depends_on_seqs = item.get("depends_on", [])
                 rationale = item.get("rationale", "")
 
@@ -1143,7 +1144,7 @@ async def define_success_criteria(
     - type: cr_completed | host_state_check | service_check | port_check | manual
     - description: human-readable label
     - assertion: dict with type-specific fields (cr_id, asset_id, field, value, etc.)
-    Returns {criteria_ids, count}.
+    Returns list of {criteria_id, type, description, assertion}.
     """
     from sqlalchemy import select
     from app.models.project import Project
@@ -1193,7 +1194,6 @@ async def define_success_criteria(
             created.append(c)
 
         if validation_errors:
-            await db_cm.__aexit__(None, None, None)
             return {
                 "error": "Some criteria had validation errors",
                 "validation_errors": validation_errors,
