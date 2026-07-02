@@ -37,6 +37,7 @@ export const assetsApi = {
   bulkTag: (data: BulkTagBody) =>
     apiClient.patch<{ updated: number }>("/assets/bulk-tag", data).then((r) => r.data),
   delete: (id: string) => apiClient.delete(`/assets/${id}`),
+  rollbackAll: (id: string) => apiClient.post<{ rolled_back: string[]; failed_at: string | null; errors: string[] }>(`/assets/${id}/rollback-all`).then((r) => r.data),
 };
 
 // Rollback types

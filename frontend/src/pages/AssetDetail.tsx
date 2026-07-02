@@ -655,6 +655,9 @@ export function AssetDetail() {
   const [scanPkgsError, setScanPkgsError] = useState<string | null>(null);
   const [pkgFilter, setPkgFilter] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "activity" | "tunnel">("overview");
+  const [showRollbackAllModal, setShowRollbackAllModal] = useState(false);
+  const [rollbackAllLoading, setRollbackAllLoading] = useState(false);
+  const [rollbackAllResult, setRollbackAllResult] = useState<{ rolled_back: string[]; failed_at: string | null; errors: string[] } | null>(null);
 
   const { data: asset, isLoading } = useQuery({
     queryKey: ["asset", id],
@@ -1387,24 +1390,122 @@ export function AssetDetail() {
           </div>
 
           <div className="bg-white border border-slate-200 rounded-lg p-5">
-            <h2 className="text-sm font-semibold text-slate-900 mb-3">Change Requests</h2>
+            {/* FILO rollback-all modal */}
+            {showRollbackAllModal && (() => {
+              const appliedCRs = (linkedCRs ?? [])
+                .filter((c) => c.status === "completed" && (c as any).application_sequence != null)
+                .sort((a, b) => ((b as any).application_sequence ?? 0) - ((a as any).application_sequence ?? 0));
+              return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                  <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+                    <h3 className="text-base font-semibold text-slate-900 mb-2">Rollback All Applied Changes</h3>
+                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+                      This will unwind all {appliedCRs.length} applied change{appliedCRs.length !== 1 ? "s" : ""} in
+                      reverse order. Each rollback runs sequentially and stops on the first failure.
+                    </p>
+                    <div className="space-y-1 mb-4 max-h-48 overflow-y-auto">
+                      {appliedCRs.map((c, i) => (
+                        <div key={c.id} className="flex items-center gap-2 text-xs text-slate-700 p-1.5 bg-slate-50 rounded">
+                          <span className="font-mono text-slate-400 w-4 text-right">{i + 1}.</span>
+                          <span className="truncate">{c.title}</span>
+                          <span className="ml-auto text-slate-400">seq {(c as any).application_sequence}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {rollbackAllResult && (
+                      <div className={`text-xs rounded p-2 mb-3 ${rollbackAllResult.failed_at ? "bg-red-50 text-red-700 border border-red-200" : "bg-green-50 text-green-700 border border-green-200"}`}>
+                        {rollbackAllResult.failed_at
+                          ? `Stopped at CR ${rollbackAllResult.failed_at}. Rolled back: ${rollbackAllResult.rolled_back.length}. Errors: ${rollbackAllResult.errors.join("; ")}`
+                          : `Successfully rolled back ${rollbackAllResult.rolled_back.length} change${rollbackAllResult.rolled_back.length !== 1 ? "s" : ""}.`}
+                      </div>
+                    )}
+                    <div className="flex gap-2 justify-end">
+                      <button
+                        onClick={() => { setShowRollbackAllModal(false); setRollbackAllResult(null); }}
+                        className="px-3 py-1.5 text-sm text-slate-600 border border-slate-300 rounded hover:bg-slate-50"
+                      >Cancel</button>
+                      <button
+                        disabled={rollbackAllLoading || !!rollbackAllResult}
+                        onClick={async () => {
+                          setRollbackAllLoading(true);
+                          try {
+                            const res = await apiClient.post(`/assets/${id}/rollback-all`);
+                            setRollbackAllResult(res.data);
+                            qc.invalidateQueries({ queryKey: ["change-requests", { asset_id: id }] });
+                          } catch (err: any) {
+                            setRollbackAllResult({ rolled_back: [], failed_at: "unknown", errors: [err?.response?.data?.detail ?? err?.message ?? "Unknown error"] });
+                          } finally {
+                            setRollbackAllLoading(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 text-sm font-medium bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {rollbackAllLoading ? "Rolling back…" : "Confirm Rollback All"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-slate-900">Change Requests</h2>
+              {(() => {
+                const appliedCount = (linkedCRs ?? []).filter(
+                  (c) => c.status === "completed" && (c as any).application_sequence != null
+                ).length;
+                return appliedCount >= 2 ? (
+                  <button
+                    onClick={() => setShowRollbackAllModal(true)}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded hover:bg-red-100"
+                  >
+                    Rollback All ({appliedCount})
+                  </button>
+                ) : null;
+              })()}
+            </div>
             {!linkedCRs || linkedCRs.length === 0 ? (
               <p className="text-xs text-slate-400">No change requests targeting this asset.</p>
             ) : (
               <div className="space-y-2">
-                {linkedCRs.slice(0, 10).map((cr) => (
-                  <button key={cr.id}
-                    onClick={() => navigate(`/change-requests/${cr.id}`)}
-                    className="w-full text-left p-2 rounded hover:bg-slate-50 border border-transparent hover:border-slate-200">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-medium text-slate-900 truncate">{cr.title}</span>
-                      <StatusBadge status={cr.status} size="sm" />
-                    </div>
-                    <div className="text-xs text-slate-400 mt-0.5">
-                      {new Date(cr.created_at).toLocaleDateString()}
-                    </div>
-                  </button>
-                ))}
+                {(() => {
+                  const maxSeq = Math.max(
+                    ...linkedCRs
+                      .filter((c) => c.status === "completed" && (c as any).application_sequence != null)
+                      .map((c) => (c as any).application_sequence as number),
+                    -Infinity,
+                  );
+                  return linkedCRs.slice(0, 10).map((cr) => {
+                    const seq = (cr as any).application_sequence as number | null | undefined;
+                    const isApplied = cr.status === "completed" && seq != null;
+                    const isNotLatest = isApplied && seq < maxSeq;
+                    return (
+                      <div key={cr.id}>
+                        {isNotLatest && (
+                          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-1">
+                            Later changes are applied — rolling back this CR individually may cause conflicts. Use Rollback All to unwind in order.
+                          </div>
+                        )}
+                        <button
+                          onClick={() => navigate(`/change-requests/${cr.id}`)}
+                          className="w-full text-left p-2 rounded hover:bg-slate-50 border border-transparent hover:border-slate-200">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-slate-900 truncate">{cr.title}</span>
+                            <div className="flex items-center gap-1.5">
+                              {seq != null && (
+                                <span className="text-xs text-slate-400 font-mono">#{seq}</span>
+                              )}
+                              <StatusBadge status={cr.status} size="sm" />
+                            </div>
+                          </div>
+                          <div className="text-xs text-slate-400 mt-0.5">
+                            {new Date(cr.created_at).toLocaleDateString()}
+                          </div>
+                        </button>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             )}
           </div>

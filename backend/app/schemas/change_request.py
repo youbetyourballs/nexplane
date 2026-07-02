@@ -35,6 +35,8 @@ class ChangeRequestSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     requester: UserRead
+    application_sequence: int | None = None
+    applied_at: datetime | None = None
 
 
 class ChangeRequestRead(BaseModel):
@@ -61,6 +63,9 @@ class ChangeRequestRead(BaseModel):
     status: ChangeRequestStatus
     created_at: datetime
     updated_at: datetime
+    # FILO rollback stack fields
+    application_sequence: int | None = None
+    applied_at: datetime | None = None
     requester: UserRead
     change_plan: "ChangePlanRead | None" = None
     approvals: "list[ApprovalRead]" = []

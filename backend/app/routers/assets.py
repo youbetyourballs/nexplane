@@ -5,6 +5,7 @@ import asyncio
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -352,4 +353,93 @@ async def discover_applications(
         "cr_id": str(cr.id) if cr else None,
         "status": cr.status.value if cr else "timeout",
         "applications": applications,
+    }
+
+
+# ---------------------------------------------------------------------------
+# FILO rollback-all endpoint
+# ---------------------------------------------------------------------------
+
+@router.post("/{asset_id}/rollback-all")
+async def rollback_all(
+    asset_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unwind all applied CRs on an asset in reverse application_sequence order (FILO).
+
+    Stops at the first failure and reports which CRs were rolled back, which
+    failed, and the errors encountered.
+    """
+    from app.models.user import UserRole
+    from app.services.rollback_executor import execute_cr_rollback
+
+    if user.role not in (UserRole.admin, UserRole.approver):
+        raise HTTPException(status_code=403, detail="Only admins and approvers can roll back all changes")
+
+    # Verify asset belongs to org
+    asset_result = await db.execute(
+        select(Asset).where(Asset.id == asset_id, Asset.organization_id == user.organization_id)
+    )
+    asset = asset_result.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    asset_id_str = str(asset_id)
+
+    # Find all completed CRs targeting this asset, ordered newest-first (FILO)
+    from sqlalchemy.dialects.postgresql import JSONB as _JSONB
+    crs_result = await db.execute(
+        select(ChangeRequest).where(
+            ChangeRequest.organization_id == user.organization_id,
+            ChangeRequest.status == ChangeRequestStatus.completed,
+            ChangeRequest.application_sequence.isnot(None),
+            ChangeRequest.target_asset_ids.cast(_JSONB).op("?")([asset_id_str]),
+        ).order_by(ChangeRequest.application_sequence.desc())
+    )
+    applied_crs = crs_result.scalars().all()
+
+    if not applied_crs:
+        return {"rolled_back": [], "failed_at": None, "errors": [], "message": "No applied CRs found for this asset"}
+
+    rolled_back: list[str] = []
+    errors: list[str] = []
+    failed_at: str | None = None
+
+    for cr in applied_crs:
+        try:
+            # Mark executing
+            cr.status = ChangeRequestStatus.executing
+            cr.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+
+            result = await execute_cr_rollback(cr.id)
+
+            # Mark rolled_back and clear sequence so it can be re-applied
+            async with AsyncSessionLocal() as s:
+                cr2 = await s.get(ChangeRequest, cr.id)
+                if cr2:
+                    cr2.status = ChangeRequestStatus.rolled_back
+                    cr2.application_sequence = None
+                    cr2.applied_at = None
+                    cr2.updated_at = datetime.now(timezone.utc)
+                    await s.commit()
+
+            rolled_back.append(str(cr.id))
+        except Exception as exc:
+            failed_at = str(cr.id)
+            errors.append(f"CR {cr.id}: {exc}")
+            # Restore the CR to failed so it's visible
+            async with AsyncSessionLocal() as s:
+                cr2 = await s.get(ChangeRequest, cr.id)
+                if cr2:
+                    cr2.status = ChangeRequestStatus.failed
+                    cr2.updated_at = datetime.now(timezone.utc)
+                    await s.commit()
+            break  # Stop on first failure — FILO requires sequential unwind
+
+    return {
+        "rolled_back": rolled_back,
+        "failed_at": failed_at,
+        "errors": errors,
     }

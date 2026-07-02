@@ -520,6 +520,35 @@ async def manual_rollback(
     if user.role not in (UserRole.admin, UserRole.approver):
         raise HTTPException(status_code=403, detail="Only admins and approvers can initiate manual rollback")
 
+    # FILO check: refuse if later CRs on the same asset(s) are still applied
+    if cr.application_sequence is not None and cr.target_asset_ids:
+        asset_ids = [str(a) for a in cr.target_asset_ids]
+        from sqlalchemy.dialects.postgresql import JSONB as _JSONB
+        blocking_result = await db.execute(
+            select(ChangeRequest.id).where(
+                ChangeRequest.organization_id == user.organization_id,
+                ChangeRequest.id != cr.id,
+                ChangeRequest.application_sequence > cr.application_sequence,
+                ChangeRequest.status == ChangeRequestStatus.completed,
+                ChangeRequest.target_asset_ids.cast(_JSONB).op("?|")(asset_ids),
+            ).order_by(ChangeRequest.application_sequence.asc())
+        )
+        blocking_ids = [str(row[0]) for row in blocking_result.all()]
+        if blocking_ids:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "out_of_order_rollback",
+                    "message": (
+                        f"Cannot roll back CR {cr.id} — {len(blocking_ids)} later "
+                        f"change(s) are still applied on this asset. Roll back in "
+                        f"reverse order or use POST /assets/{{asset_id}}/rollback-all."
+                    ),
+                    "blocking_crs": blocking_ids,
+                },
+            )
+
     # Use the completed run — it has the execution result with resolved values like instance_id.
     # Fall back to the most recent run if no completed run exists.
     completed_run_result = await db.execute(

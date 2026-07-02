@@ -61,6 +61,26 @@ async def update_change_request_status(change_request_id: str, status: str) -> N
         if cr:
             cr.status = ChangeRequestStatus(status)
             cr.updated_at = datetime.now(timezone.utc)
+            # FILO rollback stack: stamp application_sequence when a CR completes
+            if status == "completed" and cr.application_sequence is None:
+                from sqlalchemy import func as _func
+                from app.models.change_request import ChangeRequest as _CR
+                # Find the max sequence across all CRs touching any of the same assets
+                asset_ids = [str(a) for a in (cr.target_asset_ids or [])]
+                if asset_ids:
+                    # Use a subquery to find max sequence among CRs that overlap this asset set
+                    existing = await db.execute(
+                        select(_func.max(_CR.application_sequence)).where(
+                            _CR.id != cr.id,
+                            _CR.application_sequence.isnot(None),
+                            _CR.target_asset_ids.cast(
+                                __import__("sqlalchemy.dialects.postgresql", fromlist=["JSONB"]).JSONB
+                            ).op("?|")(asset_ids),
+                        )
+                    )
+                    max_seq = existing.scalar_one_or_none()
+                    cr.application_sequence = (max_seq or 0) + 1
+                    cr.applied_at = datetime.now(timezone.utc)
             await db.commit()
     # Notify project rollback service if this CR belongs to a project and has failed
     if status == "failed":

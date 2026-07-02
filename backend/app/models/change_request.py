@@ -4,7 +4,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Text, Boolean
+from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Text, Boolean, Integer
 from sqlalchemy.dialects.postgresql import JSONB as _JSONB
 from sqlalchemy import ARRAY, String as _String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -599,6 +599,9 @@ class ChangeRequest(Base):
     execute_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     access_expiry_hours: Mapped[float | None] = mapped_column(nullable=True)
     scheduled_rollback_cr_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # FILO rollback stack — monotonically increasing per-asset execution order
+    application_sequence: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    applied_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     parent_change_request: Mapped[Optional["ChangeRequest"]] = relationship(
         "ChangeRequest",
