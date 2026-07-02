@@ -11,6 +11,7 @@ import type {
   ChangeRequest, ChangeRequestSummary, ChangeRequestCreate,
   ChangePlan, Approval, ApprovalCreate, ExecutionRun, AuditEvent,
   AgentTunnelStatus, TunnelConfigUpdate,
+  Capabilities, CatalogAction,
 } from "../types/api";
 
 // Auth
@@ -390,4 +391,15 @@ export const agentTunnelsApi = {
   list: () => apiClient.get<AgentTunnelStatus[]>("/agents/tunnel").then((r) => r.data),
   set: (agentId: string, body: TunnelConfigUpdate) =>
     apiClient.put<AgentTunnelStatus>(`/agents/${agentId}/tunnel`, body).then((r) => r.data),
+};
+
+export const capabilitiesApi = {
+  get: () => apiClient.get<Capabilities>("/capabilities").then((r) => r.data),
+};
+
+export const catalogApi = {
+  actions: (domain?: string) =>
+    apiClient.get<CatalogAction[]>("/catalog/actions", { params: domain ? { domain } : {} }).then((r) => r.data),
+  run: (body: { connector_type: string; action_id: string; params: Record<string, unknown> }) =>
+    apiClient.post<Record<string, unknown>>("/catalog/run", body).then((r) => r.data),
 };
