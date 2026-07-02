@@ -23446,6 +23446,7 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     ec2_client = _boto3.client("ec2", region_name="us-east-1")
     instance_asset = None
     instance_id = None
+    instance_type = "unknown"
     for _ in range(48):
         _time.sleep(5)
         candidates = [a for a in client.get("/assets", params={"q": instance_name})
@@ -23455,17 +23456,20 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
             if not cid:
                 continue
             try:
-                state = ec2_client.describe_instances(InstanceIds=[cid])["Reservations"][0]["Instances"][0]["State"]["Name"]
+                reservation = ec2_client.describe_instances(InstanceIds=[cid])["Reservations"][0]["Instances"][0]
+                state = reservation["State"]["Name"]
                 if state in ("pending", "running"):
                     instance_asset = c
                     instance_id = cid
+                    instance_type = reservation.get("InstanceType", "unknown")
                     break
             except Exception:
                 pass
         if instance_asset:
             break
     assert instance_asset, f"Instance {instance_name} not found in inventory within 4min"
-    log(f"Instance {instance_id} in inventory as asset {instance_asset['id']}")
+    log(f"Instance {instance_id} (type={instance_type}) in inventory as asset {instance_asset['id']}")
+    log(f"EC2 instance type: {instance_type} — eBPF availability depends on kernel and instance capabilities")
 
     log("Waiting 3min for SSM agent...")
     _time.sleep(180)
@@ -23552,8 +23556,27 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     net_cr_id = session["cr_id"]
     profile = session.get("synthesized_profile", {})
     rules = profile.get("rules", [])
-    assert len(rules) > 0, "Network soak returned no flow rules (expected at least DNS)"
-    log(f"Network soak synthesized — {len(rules)} rules (DNS present: {any(r['dst_port']==53 for r in rules)})")
+    dns_rules = [r for r in rules if r.get("dst_port") == 53 or r.get("protocol") == "dns"]
+    log(f"Network soak synthesized — {len(rules)} rules total, {len(dns_rules)} DNS rules "
+        f"(instance_type={instance_type})")
+    if not rules:
+        # The warmup retry loop in the executor already exhausted its attempts.  Emit a
+        # diagnostics-rich assertion message so the failure log immediately tells us
+        # whether this is a kernel/capability gap or a genuine eBPF hook regression.
+        raw_obs = session.get("raw_observations", {})
+        assert rules, (
+            f"eBPF network soak returned zero flow rules including zero DNS rules. "
+            f"instance_type={instance_type} "
+            f"raw_observations_keys={list(raw_obs.keys())} "
+            f"raw_observations_sample={str(raw_obs)[:500]} "
+            f"Check ebpf_diagnostics on the configure_ebpf_network CR result for "
+            f"kernel_version/cap_bpf/cap_net_admin details. "
+            f"t3.small and some Nitro instance types do not expose CAP_BPF in the "
+            f"default NexplaneEC2TestProfile IAM + launch config; switch to m5.large or "
+            f"add SYS_ADMIN/BPF capabilities to the launch profile."
+        )
+
+    log(f"Network soak rules: {len(rules)} (DNS present: {bool(dns_rules)})")
 
     log("Approving and executing auto-proposed network configure CR...")
     client.post(f"/change-requests/{net_cr_id}/plan")
@@ -23563,6 +23586,17 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     client.post(f"/change-requests/{net_cr_id}/execute")
     cr_net = client._wait_timeout(net_cr_id, "[EBPF_POLICY] configure_ebpf_network", 300)
     result_net = client.get_cr_step_result(cr_net)
+    # Surface kernel/capability diagnostics captured during configure so they appear
+    # in the smoke log regardless of whether the rest of the phase passes or fails.
+    net_diag = result_net.get("ebpf_diagnostics", {})
+    log(f"eBPF diagnostics (network): kernel={net_diag.get('kernel_version')} "
+        f"bpf_syscall={net_diag.get('bpf_syscall_available')} "
+        f"cap_bpf={net_diag.get('cap_bpf_present')} "
+        f"cap_net_admin={net_diag.get('cap_net_admin_present')} "
+        f"tc_qdisc={net_diag.get('tc_qdisc_available')} "
+        f"kprobe={net_diag.get('kprobe_available')} "
+        f"prog_types={net_diag.get('bpf_prog_types_supported')} "
+        f"preflight_error={net_diag.get('preflight_error')}")
     assert result_net.get("snapshot_id"), f"configure_ebpf_network missing snapshot_id: {result_net}"
     log(f"Network policy loaded — snapshot_id={result_net['snapshot_id']}")
 
@@ -23619,8 +23653,18 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     lsm_cr_id = lsm_session["cr_id"]
     lsm_profile = lsm_session.get("synthesized_profile", {})
     lsm_rules = lsm_profile.get("rules", [])
-    assert len(lsm_rules) > 0, "LSM soak returned no event rules"
-    log(f"LSM soak synthesized — {len(lsm_rules)} rules")
+    log(f"LSM soak synthesized — {len(lsm_rules)} rules (instance_type={instance_type})")
+    if not lsm_rules:
+        lsm_raw_obs = lsm_session.get("raw_observations", {})
+        assert lsm_rules, (
+            f"eBPF LSM soak returned zero event rules. "
+            f"instance_type={instance_type} "
+            f"raw_observations_keys={list(lsm_raw_obs.keys())} "
+            f"raw_observations_sample={str(lsm_raw_obs)[:500]} "
+            f"Check ebpf_diagnostics on the configure_ebpf_lsm CR result for "
+            f"kernel_version/cap_bpf details. "
+            f"BPF LSM requires kernel >= 5.7 with CONFIG_BPF_LSM=y and lsm=bpf in kernel cmdline."
+        )
 
     log("Approving and executing auto-proposed LSM configure CR...")
     client.post(f"/change-requests/{lsm_cr_id}/plan")
@@ -23630,6 +23674,14 @@ def run_phase_ebpf_policy(client, base_url, cloud_account_id=None,
     client.post(f"/change-requests/{lsm_cr_id}/execute")
     cr_lsm = client._wait_timeout(lsm_cr_id, "[EBPF_POLICY] configure_ebpf_lsm", 300)
     result_lsm = client.get_cr_step_result(cr_lsm)
+    # Surface LSM diagnostics for triage regardless of pass/fail.
+    lsm_diag = result_lsm.get("ebpf_diagnostics", {})
+    log(f"eBPF diagnostics (LSM): kernel={lsm_diag.get('kernel_version')} "
+        f"bpf_syscall={lsm_diag.get('bpf_syscall_available')} "
+        f"cap_bpf={lsm_diag.get('cap_bpf_present')} "
+        f"cap_net_admin={lsm_diag.get('cap_net_admin_present')} "
+        f"prog_types={lsm_diag.get('bpf_prog_types_supported')} "
+        f"preflight_error={lsm_diag.get('preflight_error')}")
     assert result_lsm.get("snapshot_id"), f"configure_ebpf_lsm missing snapshot_id: {result_lsm}"
     log(f"LSM policy loaded — kernel_lsm={result_lsm.get('kernel_lsm')}, snapshot_id={result_lsm['snapshot_id']}")
 
