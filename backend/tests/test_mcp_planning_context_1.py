@@ -170,15 +170,14 @@ async def test_get_fleet_context_no_filters_returns_all():
     findings_count1.scalar.return_value = 0
     findings_count2 = MagicMock()
     findings_count2.scalar.return_value = 2
-    cr_result1 = MagicMock()
-    cr_result1.scalars.return_value.all.return_value = []
-    cr_result2 = MagicMock()
-    cr_result2.scalars.return_value.all.return_value = []
-    # sequence: assets, then per-asset: findings, cr_result (full)
+    cr_hoisted = MagicMock()
+    cr_hoisted.scalars.return_value.all.return_value = []
+    # sequence: assets, hoisted CR fetch, then per-asset: findings
     mock_db.execute = AsyncMock(side_effect=[
         assets_result,
-        findings_count1, cr_result1,
-        findings_count2, cr_result2,
+        cr_hoisted,
+        findings_count1,
+        findings_count2,
     ])
 
     mock_db_cm = AsyncMock()
@@ -207,11 +206,13 @@ async def test_get_fleet_context_os_filter():
     assets_result.scalars.return_value.all.return_value = [linux_asset, windows_asset]
     findings_count = MagicMock()
     findings_count.scalar.return_value = 0
-    cr_full = MagicMock()
-    cr_full.scalars.return_value.all.return_value = []
+    cr_hoisted = MagicMock()
+    cr_hoisted.scalars.return_value.all.return_value = []
+    # sequence: assets, hoisted CR fetch, then per-asset: findings (only linux_asset passes os filter)
     mock_db.execute = AsyncMock(side_effect=[
         assets_result,
-        findings_count, cr_full,
+        cr_hoisted,
+        findings_count,
     ])
 
     mock_db_cm = AsyncMock()
@@ -240,13 +241,15 @@ async def test_get_fleet_context_has_open_findings_false():
     assets_result.scalars.return_value.all.return_value = [clean_asset, dirty_asset]
     findings_clean = MagicMock()
     findings_clean.scalar.return_value = 0
-    cr_clean = MagicMock()
-    cr_clean.scalars.return_value.all.return_value = []
+    cr_hoisted = MagicMock()
+    cr_hoisted.scalars.return_value.all.return_value = []
     findings_dirty = MagicMock()
     findings_dirty.scalar.return_value = 3
+    # sequence: assets, hoisted CR fetch, then per-asset: findings_clean, findings_dirty
     mock_db.execute = AsyncMock(side_effect=[
         assets_result,
-        findings_clean, cr_clean,
+        cr_hoisted,
+        findings_clean,
         findings_dirty,
     ])
 

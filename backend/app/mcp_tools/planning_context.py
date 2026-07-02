@@ -7,7 +7,6 @@ Nexplane MCP tools — Planning Context domain (8 tools).
 Read-only tools for AI agents to gather context before creating change requests.
 """
 
-import uuid as _uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
@@ -214,6 +213,14 @@ async def get_fleet_context(
 
             filtered.append(asset)
 
+        # Hoist CR fetch: one query for all org CRs, filter per-asset in Python
+        cr_full_result = await db.execute(
+            select(ChangeRequest).where(
+                ChangeRequest.organization_id == principal.organization_id
+            ).order_by(ChangeRequest.created_at.desc()).limit(500)
+        )
+        all_crs = cr_full_result.scalars().all()
+
         rows = []
         for asset in filtered:
             # connector_type check
@@ -243,13 +250,7 @@ async def get_fleet_context(
             if has_open_findings is False and open_findings_count > 0:
                 continue
 
-            # last CR: load all org CRs (capped) and filter in Python for JSON containment
-            cr_full_result = await db.execute(
-                select(ChangeRequest).where(
-                    ChangeRequest.organization_id == principal.organization_id
-                ).order_by(ChangeRequest.created_at.desc()).limit(500)
-            )
-            all_crs = cr_full_result.scalars().all()
+            # last CR: filter the already-fetched org CRs in Python for JSON containment
             asset_id_str = str(asset.id)
             asset_crs = [cr for cr in all_crs if asset_id_str in (cr.target_asset_ids or [])]
             last_cr_at = max(cr.created_at for cr in asset_crs).isoformat() if asset_crs else None
