@@ -1464,7 +1464,7 @@ docker compose exec \
   backend python tests/smoke/run_on_ec2.py \
     --email admin@acme.example --password admin123 \
     --phases A,OSSEC_WIRE \
-    --tailscale-auth-key REDACTED_TSKEY
+    --tailscale-auth-key tskey-auth-REDACTED
 ```
 Expected: `✅ ALL SELECTED PHASES PASSED`
 

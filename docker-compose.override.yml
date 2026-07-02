@@ -8,7 +8,7 @@ services:
     command: >
       sh -c "tailscaled --tun=userspace-networking --state=/var/lib/tailscale-state/tailscaled.state &
              sleep 3 &&
-             tailscale up --authkey=REDACTED_TSKEY --hostname=nexplane-backend --accept-dns=false --accept-routes &&
+             tailscale up --authkey=${TS_AUTHKEY:?set TS_AUTHKEY in .env} --hostname=nexplane-backend --accept-dns=false --accept-routes &&
              alembic upgrade head &&
              python seed.py &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app --reload-exclude /app/tests --reload-exclude /app/alembic"

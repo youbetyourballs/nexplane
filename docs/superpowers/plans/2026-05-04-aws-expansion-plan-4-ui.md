@@ -667,12 +667,12 @@ docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --base-url http://localhost:8000 \
   --email admin@acme.example --password admin123 \
   --phases A,B,C,D,E,F,G,H,I,K \
-  --tailscale-auth-key REDACTED_TSKEY
+  --tailscale-auth-key tskey-auth-REDACTED
 
 # Full including RDS (~35 min extra):
 docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --base-url http://localhost:8000 \
   --email admin@acme.example --password admin123 \
   --phases A,B,C,D,E,F,G,H,I,J,K \
-  --tailscale-auth-key REDACTED_TSKEY
+  --tailscale-auth-key tskey-auth-REDACTED
 ```

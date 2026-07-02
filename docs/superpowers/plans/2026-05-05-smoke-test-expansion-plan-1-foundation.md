@@ -627,7 +627,7 @@ docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --email admin@acme.example \
   --password admin123 \
   --phases C \
-  --tailscale-auth-key REDACTED_TSKEY 2>&1 | tail -10
+  --tailscale-auth-key tskey-auth-REDACTED 2>&1 | tail -10
 ```
 
 Expected: `✅ ALL SELECTED PHASES PASSED` (Phase C is Terraform, no EC2 needed, fast to verify)

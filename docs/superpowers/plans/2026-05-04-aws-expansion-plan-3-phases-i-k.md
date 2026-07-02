@@ -230,7 +230,7 @@ docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --email admin@acme.example \
   --password admin123 \
   --phases I \
-  --tailscale-auth-key REDACTED_TSKEY 2>&1
+  --tailscale-auth-key tskey-auth-REDACTED 2>&1
 ```
 
 Expected: `✅ ALL SELECTED PHASES PASSED`
@@ -483,7 +483,7 @@ docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --email admin@acme.example \
   --password admin123 \
   --phases J \
-  --tailscale-auth-key REDACTED_TSKEY 2>&1
+  --tailscale-auth-key tskey-auth-REDACTED 2>&1
 ```
 
 Expected: `✅ ALL SELECTED PHASES PASSED` (after ~25-35 minutes)
@@ -659,7 +659,7 @@ docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --email admin@acme.example \
   --password admin123 \
   --phases A,K \
-  --tailscale-auth-key REDACTED_TSKEY 2>&1
+  --tailscale-auth-key tskey-auth-REDACTED 2>&1
 ```
 
 Expected: `✅ ALL SELECTED PHASES PASSED`
@@ -685,7 +685,7 @@ docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --email admin@acme.example \
   --password admin123 \
   --phases A,B,C,D,E,F,G,H,I,K \
-  --tailscale-auth-key REDACTED_TSKEY 2>&1
+  --tailscale-auth-key tskey-auth-REDACTED 2>&1
 ```
 
 Expected: `✅ ALL SELECTED PHASES PASSED`

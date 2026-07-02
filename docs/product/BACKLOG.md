@@ -149,6 +149,34 @@ Provide leadership-level visibility into:
 
 ---
 
+## Pre-open-source (MUST do before making this repo public)
+
+### Purge leaked Tailscale auth key from git history
+
+Status: Not Started — **blocker for open-sourcing**
+
+A real Tailscale auth key (`tskey-auth-kTYui1NBwG11CNTRL-…`) was committed to this
+repo (in `docker-compose.override.yml` and several `docs/superpowers/plans/*.md`,
+first introduced in commit `75dfced`). As of 2026-07-02 the key has been removed
+from the working tree/current commits — the override now reads `${TS_AUTHKEY}`
+(supplied via a gitignored `.env`), and the docs are redacted — but **it still
+exists in git history**.
+
+Before the repo goes public:
+
+1. **Rotate the key** — revoke the old key in the Tailscale admin console and
+   issue a new one. Coordinate the cutover so the active EC2 hosts (nexplane-ops,
+   nexplane-dev) don't lose tailnet connectivity: set the new key as `TS_AUTHKEY`
+   in each host's local `.env`, then recreate the backend container.
+2. **Scrub history** — `git filter-repo --replace-text` (or BFG) to purge the key
+   string from every commit, then force-push and re-sync any live clones
+   (ops `/opt/nexplane-src` is rebuilt from the release bundle; dev
+   `/home/ec2-user/nexplane` would need a re-clone/reset).
+3. **Scan** — run a secret scanner (gitleaks/trufflehog) over the full history to
+   confirm no other secrets remain before publishing.
+
+---
+
 ## Ongoing
 
 Every backlog item should be evaluated against:

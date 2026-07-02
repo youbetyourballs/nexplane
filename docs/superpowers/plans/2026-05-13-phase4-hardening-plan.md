@@ -1061,7 +1061,7 @@ docker compose exec \
   backend python tests/smoke/run_on_ec2.py \
     --email admin@acme.example --password admin123 \
     --phases A,SECCOMP_PIPELINE \
-    --tailscale-auth-key REDACTED_TSKEY
+    --tailscale-auth-key tskey-auth-REDACTED
 ```
 
 ```bash

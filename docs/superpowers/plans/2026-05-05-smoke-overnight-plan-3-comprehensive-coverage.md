@@ -427,7 +427,7 @@ docker exec nexplane-backend-1 python -c "import ast; ast.parse(open('tests/smok
 docker exec nexplane-backend-1 python tests/smoke/test_aws_live.py \
   --base-url http://localhost:8000 --email admin@acme.example --password admin123 \
   --phases A,U \
-  --tailscale-auth-key REDACTED_TSKEY 2>&1 | tail -20
+  --tailscale-auth-key tskey-auth-REDACTED 2>&1 | tail -20
 ```
 
 Expected: Phase A passes, Phase U passes, cleanup completes.
