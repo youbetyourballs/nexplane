@@ -88,9 +88,12 @@ async def test_server_backup_rollback_deletes_artifacts():
             "storage_type": "s3",
             "bucket_or_path": "test-bucket",
             "prefix": "backups/org/asset/cr/",
-            "artifacts": {"snapshot_ids": ["snap-123"]},
+            "artifacts": {"snapshot_ids": ["snap-123", "snap-456"]},
         },
     }
+
+    mock_ec2 = MagicMock()
+    mock_ec2.delete_snapshot = MagicMock()
 
     with patch(
         "app.connectors.executors.nexplane_agent.server_backup._delete_s3_prefix",
@@ -100,6 +103,9 @@ async def test_server_backup_rollback_deletes_artifacts():
         "app.connectors.executors.nexplane_agent.server_backup._load_aws_creds",
         new_callable=AsyncMock,
         return_value={},
+    ), patch(
+        "app.connectors.executors.nexplane_agent.server_backup._ec2_client",
+        return_value=mock_ec2,
     ):
         result = await rollback(
             parameters={},
@@ -108,3 +114,6 @@ async def test_server_backup_rollback_deletes_artifacts():
         )
 
     assert result.get("rolled_back") is True
+    assert result.get("deleted_snapshots") == ["snap-123", "snap-456"]
+    mock_ec2.delete_snapshot.assert_any_call(SnapshotId="snap-123")
+    mock_ec2.delete_snapshot.assert_any_call(SnapshotId="snap-456")

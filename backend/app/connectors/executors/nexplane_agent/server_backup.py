@@ -176,6 +176,8 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     storage_type = artifact_refs.get("storage_type", "s3")
     bucket = artifact_refs.get("bucket_or_path", "")
     prefix = artifact_refs.get("prefix", "")
+    artifacts = artifact_refs.get("artifacts", {})
+    snapshot_ids = artifacts.get("snapshot_ids", [])
 
     if not bucket or not prefix:
         return {"rolled_back": False, "reason": "no artifact_refs in execution_result"}
@@ -183,8 +185,23 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     aws_connector_id = parameters.get("aws_connector_id", "")
     creds = await _load_aws_creds(aws_connector_id, connector)
 
+    # Delete EBS snapshots first
+    deleted_snapshots = []
+    if snapshot_ids:
+        ec2 = _ec2_client(creds)
+        for snap_id in snapshot_ids:
+            try:
+                ec2.delete_snapshot(SnapshotId=snap_id)
+                deleted_snapshots.append(snap_id)
+            except Exception as exc:
+                logger.warning("Failed to delete snapshot %s: %s", snap_id, exc)
+
     if storage_type == "s3":
         delete_result = await _delete_s3_prefix(creds, bucket, prefix)
-        return {"rolled_back": True, **delete_result}
+        return {
+            "rolled_back": True,
+            "deleted_snapshots": deleted_snapshots,
+            **delete_result,
+        }
 
     return {"rolled_back": False, "reason": f"rollback not implemented for storage_type={storage_type}"}
