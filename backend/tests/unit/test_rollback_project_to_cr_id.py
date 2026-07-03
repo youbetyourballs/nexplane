@@ -135,6 +135,7 @@ async def test_to_cr_id_not_executed_returns_error():
             )
 
     assert result["error"] == "cr_not_executed"
+    assert result["cr_id"] == to_cr_id
 
 
 async def test_to_cr_id_filters_to_sequence_order_gte():
