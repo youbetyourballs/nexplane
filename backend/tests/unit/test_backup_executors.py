@@ -225,6 +225,71 @@ async def test_server_capture_execute_has_all_artifact_keys():
 
 
 @pytest.mark.asyncio
+async def test_restore_server_same_target_without_confirm_raises():
+    from app.connectors.executors.nexplane_agent.restore_server import execute
+
+    with pytest.raises(RuntimeError, match="confirm_same_target"):
+        await execute(
+            parameters={
+                "source_backup_cr_id": "00000000-0000-0000-0000-000000000010",
+                "restore_mode": "full",
+                "target": {"type": "same"},
+                "aws_connector_id": "00000000-0000-0000-0000-000000000001",
+                "confirm_same_target": False,
+            },
+            asset_ids=["00000000-0000-0000-0000-000000000003"],
+            connector=MagicMock(credentials={}),
+        )
+
+
+@pytest.mark.asyncio
+async def test_restore_server_rollback_terminates_instance():
+    from app.connectors.executors.nexplane_agent.restore_server import rollback
+
+    execution_result = {
+        "_asset_ids": ["00000000-0000-0000-0000-000000000003"],
+        "new_instance_id": "i-0new123",
+        "restore_mode": "hybrid",
+    }
+
+    with patch(
+        "app.connectors.executors.nexplane_agent.restore_server._load_aws_creds",
+        new_callable=AsyncMock, return_value={"aws_region": "us-east-1"},
+    ), patch(
+        "app.connectors.executors.nexplane_agent.restore_server._terminate_instance",
+        new_callable=AsyncMock, return_value={"rolled_back": True, "terminated_instance_id": "i-0new123"},
+    ):
+        result = await rollback(
+            parameters={"aws_connector_id": "00000000-0000-0000-0000-000000000001"},
+            execution_result=execution_result,
+            connector=MagicMock(credentials={}),
+        )
+
+    assert result["rolled_back"] is True
+
+
+@pytest.mark.asyncio
+async def test_restore_server_rollback_same_target_raises():
+    from app.connectors.executors.nexplane_agent.restore_server import rollback, IrreversibleOperationError
+
+    execution_result = {
+        "_asset_ids": ["00000000-0000-0000-0000-000000000003"],
+        "new_instance_id": "i-0new123",
+        "restore_mode": "full",
+    }
+
+    with pytest.raises(IrreversibleOperationError):
+        await rollback(
+            parameters={
+                "aws_connector_id": "00000000-0000-0000-0000-000000000001",
+                "confirm_same_target": True,
+            },
+            execution_result=execution_result,
+            connector=MagicMock(credentials={}),
+        )
+
+
+@pytest.mark.asyncio
 async def test_server_capture_rollback_cleans_all_artifacts():
     from app.connectors.executors.nexplane_agent.server_capture import rollback
 
