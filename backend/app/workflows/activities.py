@@ -388,10 +388,27 @@ async def activity_execute_rollback(
             step_asset_ids = prior_result.get("_asset_ids") or []
 
             try:
-                result = await execute_action(
-                    rollback_connector, rollback_action, rollback_params, step_asset_ids,
-                    connector=connector, db=db if connector else None,
-                )
+                # Prefer the executor module's rollback() method when available.
+                # This is critical for agent-dispatching executors: their rollback()
+                # builds a clean, minimal parameters dict that round-trips cleanly
+                # through HMAC verification. Calling execute() with merged prior_result
+                # passes unexpected keys that can break HMAC on the agent side.
+                from app.connectors.catalog_service import get_catalog_service as _get_catalog
+                _catalog = _get_catalog()
+                _exec_mod = None
+                try:
+                    _exec_mod = _catalog.get_executor(rollback_connector, rollback_action)
+                except Exception:
+                    pass
+                if _exec_mod and hasattr(_exec_mod, "rollback"):
+                    result = await _exec_mod.rollback(
+                        rollback_params, prior_result, connector
+                    )
+                else:
+                    result = await execute_action(
+                        rollback_connector, rollback_action, rollback_params, step_asset_ids,
+                        connector=connector, db=db if connector else None,
+                    )
                 # Remove the asset from inventory if the rollback terminated an instance
                 instance_id = prior_result.get("instance_id") or rollback_params.get("instance_id")
                 if rollback_action == "terminate_instance" and instance_id and connector:
