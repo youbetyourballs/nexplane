@@ -117,3 +117,63 @@ async def test_server_backup_rollback_deletes_artifacts():
     assert result.get("deleted_snapshots") == ["snap-123", "snap-456"]
     mock_ec2.delete_snapshot.assert_any_call(SnapshotId="snap-123")
     mock_ec2.delete_snapshot.assert_any_call(SnapshotId="snap-456")
+
+
+@pytest.mark.asyncio
+async def test_server_snapshot_execute_returns_ami_id():
+    from app.connectors.executors.nexplane_agent.server_snapshot import execute
+
+    with patch(
+        "app.connectors.executors.nexplane_agent.server_snapshot._load_aws_creds",
+        new_callable=AsyncMock,
+        return_value={"aws_region": "us-east-1"},
+    ), patch(
+        "app.connectors.executors.nexplane_agent.server_snapshot._do_snapshot",
+        new_callable=AsyncMock,
+        return_value={
+            "status": "completed",
+            "artifact_refs": {
+                "ami_id": "ami-0abc123",
+                "snapshot_ids": ["snap-456"],
+                "captured_at": "2026-07-03T00:00:00Z",
+            },
+        },
+    ):
+        result = await execute(
+            parameters={"aws_connector_id": "00000000-0000-0000-0000-000000000001", "instance_id": "i-0abc"},
+            asset_ids=["00000000-0000-0000-0000-000000000003"],
+            connector=MagicMock(credentials={}),
+        )
+
+    assert result["artifact_refs"]["ami_id"] == "ami-0abc123"
+    assert result["_asset_ids"] == ["00000000-0000-0000-0000-000000000003"]
+
+
+@pytest.mark.asyncio
+async def test_server_snapshot_rollback_deregisters_ami_and_deletes_snapshots():
+    from app.connectors.executors.nexplane_agent.server_snapshot import rollback
+
+    execution_result = {
+        "_asset_ids": ["00000000-0000-0000-0000-000000000003"],
+        "artifact_refs": {
+            "ami_id": "ami-0abc123",
+            "snapshot_ids": ["snap-456"],
+        },
+    }
+
+    with patch(
+        "app.connectors.executors.nexplane_agent.server_snapshot._load_aws_creds",
+        new_callable=AsyncMock,
+        return_value={"aws_region": "us-east-1"},
+    ), patch(
+        "app.connectors.executors.nexplane_agent.server_snapshot._deregister_ami",
+        new_callable=AsyncMock,
+        return_value={"rolled_back": True, "ami_id": "ami-0abc123", "snapshots_deleted": 1},
+    ):
+        result = await rollback(
+            parameters={"aws_connector_id": "00000000-0000-0000-0000-000000000001"},
+            execution_result=execution_result,
+            connector=MagicMock(credentials={}),
+        )
+
+    assert result["rolled_back"] is True
