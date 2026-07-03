@@ -5,9 +5,12 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import logging
 import pathlib
 import types
 from dataclasses import dataclass
+
+_log = logging.getLogger(__name__)
 
 # Canonical tier definitions — used by safety_engine, planning_engine, and UI display.
 # Tier 4 is intentionally omitted: there is no category between management frameworks
@@ -46,7 +49,26 @@ class ActionCatalogService:
         for json_file in sorted(catalog_dir.glob("*.json")):
             data = json.loads(json_file.read_text())
             connector_type = data["connector_type"]
-            actions = data.get("actions", [])
+            raw_actions = data.get("actions", [])
+
+            # Gate: commercial mutating actions must carry smoke_verified=true before
+            # they are allowed into the catalog. Core domain actions are exempt —
+            # they are covered by per-connector smoke suites.
+            actions: list[dict] = []
+            for action_def in raw_actions:
+                if (
+                    action_def.get("domain") == "commercial"
+                    and not action_def.get("read_only", True)
+                    and not action_def.get("smoke_verified", False)
+                ):
+                    _log.error(
+                        "Commercial mutating action %s.%s is not smoke-verified — skipping",
+                        connector_type,
+                        action_def.get("action_id", "?"),
+                    )
+                    continue
+                actions.append(action_def)
+
             self._catalog[connector_type] = actions
             self._raw[connector_type] = data
             for action_def in actions:
