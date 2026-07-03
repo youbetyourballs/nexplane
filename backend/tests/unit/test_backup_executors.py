@@ -177,3 +177,91 @@ async def test_server_snapshot_rollback_deregisters_ami_and_deletes_snapshots():
         )
 
     assert result["rolled_back"] is True
+
+
+@pytest.mark.asyncio
+async def test_server_capture_execute_has_all_artifact_keys():
+    from app.connectors.executors.nexplane_agent.server_capture import execute
+
+    fake_result = {
+        "status": "completed",
+        "artifact_refs": {
+            "ami_id": "ami-0abc",
+            "snapshot_ids": ["snap-789"],
+            "storage_type": "s3",
+            "bucket_or_path": "test-bucket",
+            "prefix": "captures/org/asset/cr/",
+            "artifacts": {
+                "process_list": "captures/.../processes.json",
+                "network_state": "captures/.../netstat.json",
+                "kernel_modules": "captures/.../lsmod.json",
+                "infra_config": "captures/.../infra.json",
+            },
+        },
+    }
+
+    with patch(
+        "app.connectors.executors.nexplane_agent.server_capture._load_aws_creds",
+        new_callable=AsyncMock, return_value={"aws_region": "us-east-1"},
+    ), patch(
+        "app.connectors.executors.nexplane_agent.server_capture._load_storage_config",
+        new_callable=AsyncMock, return_value={"storage_type": "s3", "config": {"bucket": "b", "prefix": "p/"}},
+    ), patch(
+        "app.connectors.executors.nexplane_agent.server_capture._do_capture",
+        new_callable=AsyncMock, return_value=fake_result,
+    ):
+        result = await execute(
+            parameters={
+                "aws_connector_id": "00000000-0000-0000-0000-000000000001",
+                "backup_storage_id": "00000000-0000-0000-0000-000000000002",
+                "instance_id": "i-0abc",
+            },
+            asset_ids=["00000000-0000-0000-0000-000000000003"],
+            connector=MagicMock(credentials={}),
+        )
+
+    required_keys = {"process_list", "network_state", "kernel_modules", "infra_config"}
+    assert required_keys.issubset(set(result["artifact_refs"]["artifacts"].keys()))
+
+
+@pytest.mark.asyncio
+async def test_server_capture_rollback_cleans_all_artifacts():
+    from app.connectors.executors.nexplane_agent.server_capture import rollback
+
+    execution_result = {
+        "_asset_ids": ["00000000-0000-0000-0000-000000000003"],
+        "artifact_refs": {
+            "ami_id": "ami-0abc",
+            "snapshot_ids": ["snap-789"],
+            "storage_type": "s3",
+            "bucket_or_path": "test-bucket",
+            "prefix": "captures/org/asset/cr/",
+            "artifacts": {
+                "process_list": "captures/.../processes.json",
+                "network_state": "captures/.../netstat.json",
+                "kernel_modules": "captures/.../lsmod.json",
+                "infra_config": "captures/.../infra.json",
+            },
+        },
+    }
+
+    with patch(
+        "app.connectors.executors.nexplane_agent.server_capture._load_aws_creds",
+        new_callable=AsyncMock, return_value={"aws_region": "us-east-1"},
+    ), patch(
+        "app.connectors.executors.nexplane_agent.server_capture._delete_s3_prefix",
+        new_callable=AsyncMock, return_value={"deleted_count": 4},
+    ) as mock_s3_delete, patch(
+        "app.connectors.executors.nexplane_agent.server_capture._deregister_ami",
+        new_callable=AsyncMock, return_value={"rolled_back": True, "ami_id": "ami-0abc", "snapshots_deleted": 1},
+    ) as mock_deregister:
+        result = await rollback(
+            parameters={"aws_connector_id": "00000000-0000-0000-0000-000000000001"},
+            execution_result=execution_result,
+            connector=MagicMock(credentials={}),
+        )
+
+    assert result["rolled_back"] is True
+    assert result["errors"] == []
+    mock_s3_delete.assert_awaited_once_with({"aws_region": "us-east-1"}, "test-bucket", "captures/org/asset/cr/")
+    mock_deregister.assert_awaited_once_with({"aws_region": "us-east-1"}, "ami-0abc", ["snap-789"])
