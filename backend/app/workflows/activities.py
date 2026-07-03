@@ -68,14 +68,18 @@ async def update_change_request_status(change_request_id: str, status: str) -> N
                 # Find the max sequence across all CRs touching any of the same assets
                 asset_ids = [str(a) for a in (cr.target_asset_ids or [])]
                 if asset_ids:
+                    from sqlalchemy import String, type_coerce
+                    from sqlalchemy.dialects.postgresql import ARRAY as _PG_ARRAY
+                    from sqlalchemy.dialects.postgresql import JSONB as _JSONB
                     # Use a subquery to find max sequence among CRs that overlap this asset set
+                    # ?| requires text[] on the right — type_coerce tells SQLAlchemy the param type
                     existing = await db.execute(
                         select(_func.max(_CR.application_sequence)).where(
                             _CR.id != cr.id,
                             _CR.application_sequence.isnot(None),
-                            _CR.target_asset_ids.cast(
-                                __import__("sqlalchemy.dialects.postgresql", fromlist=["JSONB"]).JSONB
-                            ).op("?|")(asset_ids),
+                            _CR.target_asset_ids.cast(_JSONB).op("?|")(
+                                type_coerce(asset_ids, _PG_ARRAY(String))
+                            ),
                         )
                     )
                     max_seq = existing.scalar_one_or_none()
