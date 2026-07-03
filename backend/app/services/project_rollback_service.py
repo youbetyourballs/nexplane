@@ -125,7 +125,9 @@ async def initiate(
 
     def _rollback_sort_key(m):
         app_seq = m.change_request.application_sequence
-        return app_seq if app_seq is not None else m.sequence_order
+        if app_seq is not None:
+            return (1, app_seq)
+        return (0, m.sequence_order)
 
     sorted_members = sorted(eligible_members, key=_rollback_sort_key, reverse=True)
 

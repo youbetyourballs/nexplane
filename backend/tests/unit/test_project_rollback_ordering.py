@@ -151,3 +151,47 @@ async def test_emits_warning_when_ordering_diverges(caplog):
     assert any("diverges" in record.message for record in caplog.records), (
         "Expected a warning about ordering divergence, got: " + str([r.message for r in caplog.records])
     )
+
+
+async def test_sequenced_cr_before_unsequenced_cr():
+    """Mixed project: member with app_seq=500 is rolled back before member with app_seq=None (seq_order=3)."""
+    member_a = _make_member(seq_order=1, app_seq=500)   # sequenced
+    member_b = _make_member(seq_order=3, app_seq=None)  # unsequenced
+
+    mock_project = MagicMock()
+    mock_project.id = uuid.uuid4()
+    mock_project.members = [member_a, member_b]
+    mock_project.status = "active"
+
+    mock_rollback = MagicMock()
+    mock_rollback.id = uuid.uuid4()
+    mock_step_cls = MagicMock()
+
+    with (
+        patch("app.services.project_rollback_service.asyncio.ensure_future"),
+        patch("app.services.project_rollback_service.ProjectRollback", return_value=mock_rollback),
+        patch("app.services.project_rollback_service.ProjectRollbackStep", mock_step_cls),
+        patch("app.services.project_rollback_service._build_preflight_warnings", return_value=[]),
+        patch("app.services.project_rollback_service._get_permanent_types", return_value=set()),
+    ):
+        mock_db = AsyncMock()
+        mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        from app.services import project_rollback_service as prs
+        await prs.initiate(
+            db=mock_db,
+            project=mock_project,
+            triggered_by_user_id=uuid.uuid4(),
+            notes=None,
+            cr_ids=None,
+        )
+
+        calls = mock_step_cls.call_args_list
+        first_step_cr_id = calls[0].kwargs["change_request_id"]
+        assert first_step_cr_id == member_a.change_request.id, (
+            f"Expected member_a (app_seq=500) to be rolled back before member_b (app_seq=None), "
+            f"got {first_step_cr_id}"
+        )
