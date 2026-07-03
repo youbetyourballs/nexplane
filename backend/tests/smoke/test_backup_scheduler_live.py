@@ -48,6 +48,7 @@ from smoke_helpers import (
 
 SMOKE_BUCKET = "nexplane-smoke-backup-scheduler"
 SMOKE_BACKUP_VAULT = "nexplane-smoke-scheduler-vault"
+SMOKE_IAM_PROFILE = "NexplaneEC2TestProfile"
 
 
 def _ensure_s3_bucket(s3_boto, bucket: str) -> None:
@@ -391,7 +392,7 @@ def run_phase_backup_scheduler(
                     "instance_type": "t3.micro",
                     "subnet_id": subnet_id,
                     "security_group_ids": sg_ids,
-                    "iam_instance_profile": "NexplaneEC2TestProfile",
+                    "iam_instance_profile": SMOKE_IAM_PROFILE,
                 },
                 "aws_connector_id": aws_connector_id,
             },
@@ -728,7 +729,7 @@ def run_phase_ad_member_tiers(client: NexplaneClient, cloud_account_id: str) -> 
                     MinCount=1,
                     MaxCount=1,
                     SubnetId=subnet["SubnetId"],
-                    IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+                    IamInstanceProfile={"Name": SMOKE_IAM_PROFILE},
                     TagSpecifications=[{
                         "ResourceType": "instance",
                         "Tags": [
@@ -1091,7 +1092,7 @@ def main() -> None:
                 InstanceType="t3.small",
                 MinCount=1,
                 MaxCount=1,
-                IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+                IamInstanceProfile={"Name": SMOKE_IAM_PROFILE},
                 TagSpecifications=[{
                     "ResourceType": "instance",
                     "Tags": [{"Key": "Name", "Value": f"nexplane-smoke-backup-{run_ts_main}"}],
