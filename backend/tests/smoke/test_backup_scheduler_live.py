@@ -1141,7 +1141,7 @@ def main() -> None:
                 "config": {
                     "bucket": SMOKE_BUCKET,
                     "prefix": f"smoke/{run_ts_main}/",
-                    "region": aws_session_main.region_name or "us-east-1",
+                    "region": _db_creds_main.get("region", _aws_region_main),
                 },
                 "is_org_default": False,
             })
