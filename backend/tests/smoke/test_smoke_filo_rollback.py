@@ -21,7 +21,6 @@ Phases:
 import asyncio
 import hashlib
 import os
-import uuid
 
 import httpx
 import pytest
