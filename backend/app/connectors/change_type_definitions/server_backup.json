@@ -1,0 +1,9 @@
+{
+  "change_type": "server_backup",
+  "display_name": "Server Backup (EBS + S3)",
+  "steps": [
+    {"generic_action": "server_backup", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}

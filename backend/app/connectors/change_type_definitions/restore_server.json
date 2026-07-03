@@ -1,0 +1,9 @@
+{
+  "change_type": "restore_server",
+  "display_name": "Restore Server (Launch from AMI)",
+  "steps": [
+    {"generic_action": "restore_server", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"]
+}
