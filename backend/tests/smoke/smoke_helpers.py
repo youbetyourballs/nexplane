@@ -969,3 +969,38 @@ def make_base_parser(description: str) -> argparse.ArgumentParser:
              "backend is already joined to Tailscale by the EC2 runner script."
     )
     return parser
+
+
+def _check_smoke_ami_cache(ssm_client, ec2_client, cache_key: str, setup_hash: str):
+    """Check SSM for a cached AMI matching setup_hash. Returns AMI ID string or None."""
+    import json
+    param_name = f"/nexplane/smoke-amis/{cache_key}/{setup_hash}"
+    try:
+        resp = ssm_client.get_parameter(Name=param_name)
+        data = json.loads(resp["Parameter"]["Value"])
+        ami_id = data.get("ami_id", "")
+        if not ami_id:
+            return None
+        images = ec2_client.describe_images(ImageIds=[ami_id]).get("Images", [])
+        if images and images[0].get("State") == "available":
+            return ami_id
+    except Exception:
+        pass
+    return None
+
+
+def _wait_ssm_ready_win(ssm_client, instance_id: str, timeout: int = 600) -> None:
+    """Poll until the Windows instance is reachable via SSM."""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            resp = ssm_client.describe_instance_information(
+                Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+            )
+            if resp.get("InstanceInformationList"):
+                return
+        except Exception:
+            pass
+        time.sleep(10)
+    raise TimeoutError(f"SSM not ready for {instance_id} after {timeout}s")
