@@ -222,10 +222,11 @@ def run_phase_backup_scheduler(
     Parameters come from the smoke test harness which provisions the EC2
     instance, AWS connector, and BackupStorage before calling this function.
     """
-    import boto3
+    import boto3, os as _os_bkp
 
-    s3 = boto3.client("s3")
-    ec2 = boto3.client("ec2")
+    _bkp_region = _os_bkp.environ.get("AWS_DEFAULT_REGION") or _os_bkp.environ.get("AWS_REGION") or "us-east-1"
+    s3 = boto3.client("s3", region_name=_bkp_region)
+    ec2 = boto3.client("ec2", region_name=_bkp_region)
     _ensure_s3_bucket(s3, SMOKE_BUCKET)
 
     run_ts = str(int(time.time()))
@@ -1060,8 +1061,10 @@ def main() -> None:
         if "BACKUP_SCHEDULER" in phases:
             print("\n=== PHASE: BACKUP_SCHEDULER_SMOKE ===")
             import boto3 as _boto3_main
+            import os as _os_main
 
-            ec2_main = _boto3_main.client("ec2")
+            _aws_region_main = _os_main.environ.get("AWS_DEFAULT_REGION") or _os_main.environ.get("AWS_REGION") or "us-east-1"
+            ec2_main = _boto3_main.client("ec2", region_name=_aws_region_main)
             run_ts_main = str(int(time.time()))
 
             # Provision EC2 instance for backup smoke
