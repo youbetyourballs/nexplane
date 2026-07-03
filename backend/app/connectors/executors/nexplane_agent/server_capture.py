@@ -21,10 +21,10 @@ def _ssm_client(creds: dict):
     import boto3
     return boto3.client(
         "ssm",
-        region_name=creds.get("aws_region", "us-east-1"),
-        aws_access_key_id=creds.get("aws_access_key_id"),
-        aws_secret_access_key=creds.get("aws_secret_access_key"),
-        aws_session_token=creds.get("aws_session_token"),
+        region_name=creds.get("region", creds.get("aws_region", "us-east-1")),
+        aws_access_key_id=creds.get("access_key_id", creds.get("aws_access_key_id")),
+        aws_secret_access_key=creds.get("secret_access_key", creds.get("aws_secret_access_key")),
+        aws_session_token=creds.get("session_token", creds.get("aws_session_token")),
     )
 
 
@@ -128,6 +128,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     result = await _do_capture(creds, storage_config, instance_id, prefix)
     result["_asset_ids"] = [str(a) for a in asset_ids]
+    result["_aws_connector_id"] = aws_connector_id
     return result
 
 
@@ -138,7 +139,11 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     bucket = artifact_refs.get("bucket_or_path", "")
     prefix = artifact_refs.get("prefix", "")
 
-    aws_connector_id = parameters.get("aws_connector_id", "")
+    aws_connector_id = (
+        parameters.get("aws_connector_id")
+        or execution_result.get("_aws_connector_id")
+        or ""
+    )
     creds = await _load_aws_creds(aws_connector_id, connector)
 
     errors = []

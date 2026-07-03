@@ -86,6 +86,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = await _load_aws_creds(aws_connector_id, connector)
     result = await _do_snapshot(creds, instance_id, no_reboot)
     result["_asset_ids"] = [str(a) for a in asset_ids]
+    result["_aws_connector_id"] = aws_connector_id
     return result
 
 
@@ -97,6 +98,10 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     if not ami_id:
         return {"rolled_back": False, "reason": "no ami_id in execution_result"}
 
-    aws_connector_id = parameters.get("aws_connector_id", "")
+    aws_connector_id = (
+        parameters.get("aws_connector_id")
+        or execution_result.get("_aws_connector_id")
+        or ""
+    )
     creds = await _load_aws_creds(aws_connector_id, connector)
     return await _deregister_ami(creds, ami_id, snapshot_ids)

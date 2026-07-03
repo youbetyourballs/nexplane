@@ -15,15 +15,34 @@ class IrreversibleOperationError(Exception):
 
 
 async def _load_source_artifact_refs(source_backup_cr_id: str) -> dict:
-    """Load artifact_refs from the source backup CR."""
+    """Load artifact_refs from the source backup CR's execution run."""
     import uuid as _uuid
     from app.database import AsyncSessionLocal
     from app.models.change_request import ChangeRequest
+    from app.models.execution_run import ExecutionRun
+    from sqlalchemy import select
     async with AsyncSessionLocal() as db:
         cr = await db.get(ChangeRequest, _uuid.UUID(source_backup_cr_id))
         if not cr:
             raise RuntimeError(f"Source backup CR {source_backup_cr_id} not found")
-        return cr.artifact_refs or {}
+        # Prefer top-level artifact_refs if populated
+        if cr.artifact_refs:
+            return cr.artifact_refs
+        # Fall back to nested result in latest execution run
+        result = await db.execute(
+            select(ExecutionRun)
+            .where(ExecutionRun.change_request_id == cr.id)
+            .order_by(ExecutionRun.started_at.desc())
+            .limit(1)
+        )
+        er = result.scalar_one_or_none()
+        if not er or not er.result:
+            return {}
+        for step in (er.result.get("execution") or {}).get("steps", []):
+            refs = (step.get("result") or {}).get("artifact_refs")
+            if refs:
+                return refs
+        return {}
 
 
 async def _launch_from_ami(creds: dict, ami_id: str, target: dict) -> str:
@@ -113,6 +132,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "ami_id": ami_id,
             "launched_at": datetime.now(timezone.utc).isoformat(),
             "_asset_ids": [str(a) for a in asset_ids],
+            "_aws_connector_id": aws_connector_id,
         }
 
     # same-target restore: SSM-based (confirm flag already enforced above)
@@ -137,6 +157,10 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     if parameters.get("confirm_same_target"):
         raise IrreversibleOperationError("Cannot terminate the original asset's replacement instance")
 
-    aws_connector_id = parameters.get("aws_connector_id", "")
+    aws_connector_id = (
+        parameters.get("aws_connector_id")
+        or execution_result.get("_aws_connector_id")
+        or ""
+    )
     creds = await _load_aws_creds(aws_connector_id, connector)
     return await _terminate_instance(creds, new_instance_id)
