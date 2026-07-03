@@ -123,7 +123,26 @@ async def initiate(
     db.add(rollback)
     await db.flush()
 
-    sorted_members = sorted(eligible_members, key=lambda m: m.sequence_order, reverse=True)
+    def _rollback_sort_key(m):
+        app_seq = m.change_request.application_sequence
+        return app_seq if app_seq is not None else m.sequence_order
+
+    sorted_members = sorted(eligible_members, key=_rollback_sort_key, reverse=True)
+
+    plan_order_ids = [
+        m.change_request_id
+        for m in sorted(eligible_members, key=lambda m: m.sequence_order, reverse=True)
+    ]
+    actual_order_ids = [m.change_request_id for m in sorted_members]
+    if plan_order_ids != actual_order_ids:
+        logger.warning(
+            "project rollback order diverges from plan order for project %s: "
+            "plan_order=%s actual_order=%s",
+            project.id,
+            [str(i) for i in plan_order_ids],
+            [str(i) for i in actual_order_ids],
+        )
+
     for i, member in enumerate(sorted_members):
         cr = member.change_request
         ct = str(cr.change_type)
