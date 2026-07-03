@@ -907,8 +907,9 @@ async def rollback_project(
 ) -> dict[str, Any]:
     """
     Initiate a full FILO rollback of a project. Rolls back all completed CRs in
-    reverse sequence order. to_cr_id is reserved for future partial rollback support
-    and is currently documented but not enforced. Returns rollback record ID.
+    reverse sequence order. to_cr_id: if provided, rolls back from the most recent CR
+    down to and including this CR (FILO order). CRs with sequence_order < to_cr_id's
+    order are left untouched. Returns rollback record ID.
     """
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
@@ -938,11 +939,32 @@ async def rollback_project(
 
         cr_ids_filter = None
         if to_cr_id is not None:
-            logger.info(
-                "rollback_project: to_cr_id=%s provided — partial rollback not yet enforced, "
-                "initiating full rollback",
-                to_cr_id,
+            try:
+                to_cr_uuid = _uuid.UUID(to_cr_id)
+            except ValueError:
+                return {"error": "cr_not_in_project", "cr_id": to_cr_id}
+
+            target_member = next(
+                (m for m in project.members if m.change_request_id == to_cr_uuid),
+                None,
             )
+            if target_member is None:
+                return {"error": "cr_not_in_project", "cr_id": to_cr_id}
+
+            from app.models.change_request import ChangeRequestStatus as _CRStatus
+            if target_member.change_request.status != _CRStatus.completed:
+                return {"error": "cr_not_executed", "cr_id": to_cr_id}
+
+            cr_ids_filter = [
+                m.change_request_id
+                for m in project.members
+                if (
+                    m.sequence_order >= target_member.sequence_order
+                    and m.change_request.status == _CRStatus.completed
+                )
+            ]
+            if not cr_ids_filter:
+                return {"rollback_id": None, "message": "no executed CRs to roll back in range"}
 
         rollback, warnings = await prs.initiate(
             db=db,
@@ -956,11 +978,6 @@ async def rollback_project(
             "rollback_initiated": True,
             "rollback_id": str(rollback.id),
             "warnings": warnings,
-            "note": (
-                "to_cr_id is reserved for future partial rollback support"
-                if to_cr_id
-                else None
-            ),
         }
     finally:
         await db_cm.__aexit__(None, None, None)
