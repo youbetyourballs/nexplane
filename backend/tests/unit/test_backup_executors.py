@@ -23,3 +23,88 @@ def test_catalog_has_new_actions():
     assert "server_snapshot" in action_ids
     assert "server_capture" in action_ids
     assert "restore_server" in action_ids
+
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+@pytest.mark.asyncio
+async def test_server_backup_execute_returns_artifact_refs():
+    from app.connectors.executors.nexplane_agent.server_backup import execute
+
+    mock_connector = MagicMock()
+    mock_connector.credentials = {
+        "aws_access_key_id": "AKIATEST",
+        "aws_secret_access_key": "secret",
+        "aws_region": "us-east-1",
+    }
+
+    fake_result = {
+        "status": "completed",
+        "artifact_refs": {
+            "storage_type": "s3",
+            "bucket_or_path": "test-bucket",
+            "prefix": "backups/org/asset/cr/",
+            "artifacts": {"snapshot_ids": ["snap-123"]},
+        },
+    }
+
+    with patch(
+        "app.connectors.executors.nexplane_agent.server_backup._do_backup",
+        new_callable=AsyncMock,
+        return_value=fake_result,
+    ), patch(
+        "app.connectors.executors.nexplane_agent.server_backup._load_aws_creds",
+        new_callable=AsyncMock,
+        return_value=mock_connector.credentials,
+    ), patch(
+        "app.connectors.executors.nexplane_agent.server_backup._load_storage_config",
+        new_callable=AsyncMock,
+        return_value={"storage_type": "s3", "config": {"bucket": "test-bucket", "prefix": "backups/org/asset/cr/"}},
+    ):
+        result = await execute(
+            parameters={
+                "aws_connector_id": "00000000-0000-0000-0000-000000000001",
+                "backup_storage_id": "00000000-0000-0000-0000-000000000002",
+                "instance_id": "i-0abc123",
+            },
+            asset_ids=["00000000-0000-0000-0000-000000000003"],
+            connector=mock_connector,
+        )
+
+    assert result["status"] == "completed"
+    assert "artifact_refs" in result
+    assert result["_asset_ids"] == ["00000000-0000-0000-0000-000000000003"]
+
+
+@pytest.mark.asyncio
+async def test_server_backup_rollback_deletes_artifacts():
+    from app.connectors.executors.nexplane_agent.server_backup import rollback
+
+    execution_result = {
+        "_asset_ids": ["00000000-0000-0000-0000-000000000003"],
+        "artifact_refs": {
+            "storage_type": "s3",
+            "bucket_or_path": "test-bucket",
+            "prefix": "backups/org/asset/cr/",
+            "artifacts": {"snapshot_ids": ["snap-123"]},
+        },
+    }
+
+    with patch(
+        "app.connectors.executors.nexplane_agent.server_backup._delete_s3_prefix",
+        new_callable=AsyncMock,
+        return_value={"deleted_count": 1},
+    ), patch(
+        "app.connectors.executors.nexplane_agent.server_backup._load_aws_creds",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        result = await rollback(
+            parameters={},
+            execution_result=execution_result,
+            connector=MagicMock(credentials={}),
+        )
+
+    assert result.get("rolled_back") is True
