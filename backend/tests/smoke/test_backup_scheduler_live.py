@@ -1123,10 +1123,10 @@ def main() -> None:
             if _raw_creds_main is not None:
                 _raw_creds_main = _raw_creds_main.get_frozen_credentials()
             client.put(f"/connectors/{connector_id_main}/credentials", json={"credentials": {
-                "aws_access_key_id": getattr(_raw_creds_main, "access_key", "") or "",
-                "aws_secret_access_key": getattr(_raw_creds_main, "secret_key", "") or "",
-                "aws_session_token": getattr(_raw_creds_main, "token", "") or "",
-                "aws_region": aws_session_main.region_name or _aws_region_main,
+                "access_key_id": getattr(_raw_creds_main, "access_key", "") or "",
+                "secret_access_key": getattr(_raw_creds_main, "secret_key", "") or "",
+                "session_token": getattr(_raw_creds_main, "token", "") or "",
+                "region": aws_session_main.region_name or _aws_region_main,
             }})
 
             # Register asset for the EC2 instance
