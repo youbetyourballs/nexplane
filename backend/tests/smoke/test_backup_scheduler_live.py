@@ -39,6 +39,7 @@ from smoke_helpers import (
     _check_smoke_ami_cache,
     _wait_ssm_ready_win,
     make_base_parser,
+    get_connector_creds_from_db,
 )
 
 
@@ -222,11 +223,8 @@ def run_phase_backup_scheduler(
     Parameters come from the smoke test harness which provisions the EC2
     instance, AWS connector, and BackupStorage before calling this function.
     """
-    import boto3, os as _os_bkp
-
-    _bkp_region = _os_bkp.environ.get("AWS_DEFAULT_REGION") or _os_bkp.environ.get("AWS_REGION") or "us-east-1"
-    s3 = boto3.client("s3", region_name=_bkp_region)
-    ec2 = boto3.client("ec2", region_name=_bkp_region)
+    s3 = _get_aws_boto3_client("s3")
+    ec2 = _get_aws_boto3_client("ec2")
     _ensure_s3_bucket(s3, SMOKE_BUCKET)
 
     run_ts = str(int(time.time()))
@@ -1060,11 +1058,8 @@ def main() -> None:
     try:
         if "BACKUP_SCHEDULER" in phases:
             print("\n=== PHASE: BACKUP_SCHEDULER_SMOKE ===")
-            import boto3 as _boto3_main
-            import os as _os_main
-
-            _aws_region_main = _os_main.environ.get("AWS_DEFAULT_REGION") or _os_main.environ.get("AWS_REGION") or "us-east-1"
-            ec2_main = _boto3_main.client("ec2", region_name=_aws_region_main)
+            _aws_region_main = "us-east-1"
+            ec2_main = _get_aws_boto3_client("ec2")
             run_ts_main = str(int(time.time()))
 
             # Provision EC2 instance for backup smoke
@@ -1118,15 +1113,12 @@ def main() -> None:
                 conn_resp_main = conn_resp_main.json() if hasattr(conn_resp_main, "json") else {}
             connector_id_main = conn_resp_main.get("id") or conn_resp_main.get("connector_id")
 
-            aws_session_main = _boto3_main.session.Session()
-            _raw_creds_main = aws_session_main.get_credentials()
-            if _raw_creds_main is not None:
-                _raw_creds_main = _raw_creds_main.get_frozen_credentials()
+            _db_creds_main = get_connector_creds_from_db("aws")
             client.put(f"/connectors/{connector_id_main}/credentials", json={"credentials": {
-                "access_key_id": getattr(_raw_creds_main, "access_key", "") or "",
-                "secret_access_key": getattr(_raw_creds_main, "secret_key", "") or "",
-                "session_token": getattr(_raw_creds_main, "token", "") or "",
-                "region": aws_session_main.region_name or _aws_region_main,
+                "access_key_id": _db_creds_main.get("access_key_id", ""),
+                "secret_access_key": _db_creds_main.get("secret_access_key", ""),
+                "session_token": _db_creds_main.get("session_token", ""),
+                "region": _db_creds_main.get("region", _aws_region_main),
             }})
 
             # Register asset for the EC2 instance
