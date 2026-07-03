@@ -1132,6 +1132,8 @@ def main() -> None:
             # Register asset for the EC2 instance
             asset_resp_main = client.post("/assets", json={
                 "asset_type": "server",
+                "environment": "staging",
+                "criticality": "medium",
                 "name": f"smoke-backup-{run_ts_main}",
                 "connector_id": connector_id_main,
                 "asset_metadata": {"instance_id": instance_id_main},
