@@ -2,19 +2,31 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 # backend/app/routers/backup.py
+import hashlib
+import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.backup_storage import BackupStorage, RecoveryToken
 from app.models.backup_target import BackupTarget, BackupTargetStatus
 from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType, RiskLevel
 from app.models.user import User
 from app.routers import current_user
 from app.schemas.backup import (
-    BackupTargetCreate, BackupTargetRead,
-    BackupHistoryRead, RestoreCrCreate, BackupContextRead,
+    BackupContextRead,
+    BackupHistoryRead,
+    BackupStorageCreate,
+    BackupStorageRead,
+    BackupStorageUpdate,
+    BackupTargetCreate,
+    BackupTargetRead,
+    RecoveryTokenRead,
+    RestoreCrCreate,
 )
 from app.services.backup_target_service import compute_status
 from pydantic import BaseModel as PydanticBaseModel
@@ -190,4 +202,178 @@ async def get_backup_context(
         artifact=None,
         backup_cr_id=bt.last_successful_backup_cr_id,
         overdue=(status == BackupTargetStatus.overdue),
+    )
+
+
+# ---------------------------------------------------------------------------
+# BackupStorage CRUD
+# ---------------------------------------------------------------------------
+
+
+@router.post("/backup-storage", response_model=BackupStorageRead, status_code=201)
+async def create_backup_storage(
+    body: BackupStorageCreate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if body.is_org_default:
+        existing = await db.execute(
+            select(BackupStorage).where(
+                BackupStorage.organization_id == user.organization_id,
+                BackupStorage.is_org_default == True,
+            )
+        )
+        for bs in existing.scalars().all():
+            bs.is_org_default = False
+        await db.flush()
+
+    bs = BackupStorage(
+        organization_id=user.organization_id,
+        name=body.name,
+        storage_type=body.storage_type,
+        config=body.config,
+        is_org_default=body.is_org_default,
+    )
+    db.add(bs)
+    await db.commit()
+    await db.refresh(bs)
+    return BackupStorageRead(
+        id=str(bs.id),
+        name=bs.name,
+        storage_type=bs.storage_type,
+        is_org_default=bs.is_org_default,
+        created_at=bs.created_at.isoformat(),
+    )
+
+
+@router.get("/backup-storage", response_model=list[BackupStorageRead])
+async def list_backup_storage(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(BackupStorage)
+        .where(BackupStorage.organization_id == user.organization_id)
+        .order_by(BackupStorage.is_org_default.desc(), BackupStorage.created_at.desc())
+    )
+    return [
+        BackupStorageRead(
+            id=str(bs.id),
+            name=bs.name,
+            storage_type=bs.storage_type,
+            is_org_default=bs.is_org_default,
+            created_at=bs.created_at.isoformat(),
+        )
+        for bs in result.scalars().all()
+    ]
+
+
+@router.get("/backup-storage/{storage_id}", response_model=BackupStorageRead)
+async def get_backup_storage(
+    storage_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    bs = await db.get(BackupStorage, storage_id)
+    if not bs or bs.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="BackupStorage not found")
+    return BackupStorageRead(
+        id=str(bs.id),
+        name=bs.name,
+        storage_type=bs.storage_type,
+        is_org_default=bs.is_org_default,
+        created_at=bs.created_at.isoformat(),
+    )
+
+
+@router.patch("/backup-storage/{storage_id}", response_model=BackupStorageRead)
+async def update_backup_storage(
+    storage_id: uuid.UUID,
+    body: BackupStorageUpdate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    bs = await db.get(BackupStorage, storage_id)
+    if not bs or bs.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="BackupStorage not found")
+    if body.name is not None:
+        bs.name = body.name
+    if body.config is not None:
+        bs.config = body.config
+    if body.is_org_default is not None:
+        if body.is_org_default:
+            existing = await db.execute(
+                select(BackupStorage).where(
+                    BackupStorage.organization_id == user.organization_id,
+                    BackupStorage.is_org_default == True,
+                    BackupStorage.id != storage_id,
+                )
+            )
+            for other in existing.scalars().all():
+                other.is_org_default = False
+        bs.is_org_default = body.is_org_default
+    await db.commit()
+    await db.refresh(bs)
+    return BackupStorageRead(
+        id=str(bs.id),
+        name=bs.name,
+        storage_type=bs.storage_type,
+        is_org_default=bs.is_org_default,
+        created_at=bs.created_at.isoformat(),
+    )
+
+
+@router.delete("/backup-storage/{storage_id}", status_code=204)
+async def delete_backup_storage(
+    storage_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    bs = await db.get(BackupStorage, storage_id)
+    if not bs or bs.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="BackupStorage not found")
+    await db.delete(bs)
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Recovery token for bootstrap restore
+# ---------------------------------------------------------------------------
+
+
+@router.post("/backup-storage/{storage_id}/generate-recovery-token", response_model=RecoveryTokenRead, status_code=201)
+async def generate_recovery_token(
+    storage_id: uuid.UUID,
+    asset_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    bs = await db.get(BackupStorage, storage_id)
+    if not bs or bs.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="BackupStorage not found")
+
+    from app.models.asset import Asset
+    asset = await db.get(Asset, asset_id)
+    if not asset or asset.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    raw = secrets.token_hex(32)
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=60)
+
+    rt = RecoveryToken(
+        organization_id=user.organization_id,
+        token_hash=token_hash,
+        asset_id=asset_id,
+        expires_at=expires_at,
+        used=False,
+    )
+    db.add(rt)
+    await db.commit()
+    await db.refresh(rt)
+    return RecoveryTokenRead(
+        token=raw,
+        asset_id=str(asset_id),
+        expires_at=expires_at.isoformat(),
+        token_id=str(rt.id),
     )

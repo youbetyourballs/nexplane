@@ -54,3 +54,39 @@ class BackupContextRead(BaseModel):
     artifact: dict | None = None
     backup_cr_id: uuid.UUID | None = None
     overdue: bool = False
+
+
+# ---------------------------------------------------------------------------
+# BackupStorage schemas
+# ---------------------------------------------------------------------------
+from typing import Any
+
+
+class BackupStorageCreate(BaseModel):
+    name: str
+    storage_type: str  # "s3" | "gcs" | "azure_blob" | "nfs" | "local"
+    config: dict[str, Any]
+    is_org_default: bool = False
+
+
+class BackupStorageRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    name: str
+    storage_type: str
+    is_org_default: bool
+    created_at: str
+
+
+class BackupStorageUpdate(BaseModel):
+    name: str | None = None
+    config: dict[str, Any] | None = None
+    is_org_default: bool | None = None
+
+
+class RecoveryTokenRead(BaseModel):
+    token: str
+    asset_id: str
+    expires_at: str
+    token_id: str
