@@ -383,9 +383,13 @@ async def activity_execute_rollback(
                 "confirm_terminate": True,  # rollback implies confirmation
             }
 
+            # Recover asset_ids from the stored execution result (_asset_ids is set by
+            # agent-based executors like apply_sysctl_hardening during forward execution).
+            step_asset_ids = prior_result.get("_asset_ids") or []
+
             try:
                 result = await execute_action(
-                    rollback_connector, rollback_action, rollback_params, [],
+                    rollback_connector, rollback_action, rollback_params, step_asset_ids,
                     connector=connector, db=db if connector else None,
                 )
                 # Remove the asset from inventory if the rollback terminated an instance

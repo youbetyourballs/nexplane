@@ -394,7 +394,7 @@ async def rollback_all(
             ChangeRequest.organization_id == user.organization_id,
             ChangeRequest.status == ChangeRequestStatus.completed,
             ChangeRequest.application_sequence.isnot(None),
-            ChangeRequest.target_asset_ids.cast(_JSONB).op("?")([asset_id_str]),
+            ChangeRequest.target_asset_ids.cast(_JSONB).op("?")(asset_id_str),
         ).order_by(ChangeRequest.application_sequence.desc())
     )
     applied_crs = crs_result.scalars().all()

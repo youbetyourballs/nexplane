@@ -177,6 +177,7 @@ async def get_change_request(token: str, cr_id: str) -> dict[str, Any]:
             "desired_outcome": cr.desired_outcome,
             "target_asset_ids": asset_ids,
             "created_at": cr.created_at.isoformat() if cr.created_at else None,
+            "application_sequence": cr.application_sequence,
             "approvals": approvals,
             "asset_context": ctx,
         }

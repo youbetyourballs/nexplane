@@ -523,6 +523,8 @@ async def manual_rollback(
     # FILO check: refuse if later CRs on the same asset(s) are still applied
     if cr.application_sequence is not None and cr.target_asset_ids:
         asset_ids = [str(a) for a in cr.target_asset_ids]
+        from sqlalchemy import String, type_coerce
+        from sqlalchemy.dialects.postgresql import ARRAY as _PG_ARRAY
         from sqlalchemy.dialects.postgresql import JSONB as _JSONB
         blocking_result = await db.execute(
             select(ChangeRequest.id).where(
@@ -530,7 +532,9 @@ async def manual_rollback(
                 ChangeRequest.id != cr.id,
                 ChangeRequest.application_sequence > cr.application_sequence,
                 ChangeRequest.status == ChangeRequestStatus.completed,
-                ChangeRequest.target_asset_ids.cast(_JSONB).op("?|")(asset_ids),
+                ChangeRequest.target_asset_ids.cast(_JSONB).op("?|")(
+                    type_coerce(asset_ids, _PG_ARRAY(String))
+                ),
             ).order_by(ChangeRequest.application_sequence.asc())
         )
         blocking_ids = [str(row[0]) for row in blocking_result.all()]
