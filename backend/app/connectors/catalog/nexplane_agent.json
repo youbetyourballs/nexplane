@@ -2414,6 +2414,77 @@
                       "executor": "nexplane_agent.audit_cis_compliance",
                       "estimated_duration_seconds": 60,
                       "execution_tier": 1
+                    },
+                    {
+                        "display_name": "Server Backup",
+                        "description": "Back up server filesystem and EBS volumes to object storage. Supports servers, workstations, and shared drives.",
+                        "parameters": [
+                            {"required": true, "type": "string", "name": "aws_connector_id"},
+                            {"required": true, "type": "string", "name": "backup_storage_id"},
+                            {"required": false, "type": "string", "name": "asset_type"},
+                            {"required": false, "type": "boolean", "name": "dry_run"}
+                        ],
+                        "execution_tier": 2,
+                        "rollback_action": "server_backup",
+                        "estimated_duration_seconds": 300,
+                        "applicable_asset_types": ["server", "workstation", "shared_drive"],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.server_backup",
+                        "generic_action": "server_backup",
+                        "action_id": "server_backup"
+                    },
+                    {
+                        "display_name": "Server Snapshot",
+                        "description": "Create a cloud-native point-in-time AMI snapshot of the server instance.",
+                        "parameters": [
+                            {"required": true, "type": "string", "name": "aws_connector_id"},
+                            {"required": false, "type": "string", "name": "instance_id"},
+                            {"required": false, "type": "boolean", "name": "no_reboot"}
+                        ],
+                        "execution_tier": 2,
+                        "rollback_action": "server_snapshot",
+                        "estimated_duration_seconds": 60,
+                        "applicable_asset_types": ["server", "workstation"],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.server_snapshot",
+                        "generic_action": "server_snapshot",
+                        "action_id": "server_snapshot"
+                    },
+                    {
+                        "display_name": "Full Forensic Capture",
+                        "description": "Capture disk snapshot plus live process list, network state, kernel modules, and infrastructure config to object storage.",
+                        "parameters": [
+                            {"required": true, "type": "string", "name": "aws_connector_id"},
+                            {"required": true, "type": "string", "name": "backup_storage_id"},
+                            {"required": false, "type": "string", "name": "instance_id"}
+                        ],
+                        "execution_tier": 3,
+                        "rollback_action": "server_capture",
+                        "estimated_duration_seconds": 120,
+                        "applicable_asset_types": ["server", "workstation"],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.server_capture",
+                        "generic_action": "server_capture",
+                        "action_id": "server_capture"
+                    },
+                    {
+                        "display_name": "Restore Server",
+                        "description": "Restore a server from a previous backup or snapshot. Supports full (EBS restore), hybrid (launch from AMI), and rebuild (replay infra config) modes.",
+                        "parameters": [
+                            {"required": true, "type": "string", "name": "source_backup_cr_id"},
+                            {"required": true, "type": "string", "name": "restore_mode"},
+                            {"required": true, "type": "object", "name": "target"},
+                            {"required": true, "type": "string", "name": "aws_connector_id"},
+                            {"required": false, "type": "boolean", "name": "confirm_same_target"}
+                        ],
+                        "execution_tier": 3,
+                        "rollback_action": "restore_server",
+                        "estimated_duration_seconds": 120,
+                        "applicable_asset_types": ["server", "workstation"],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.restore_server",
+                        "generic_action": "restore_server",
+                        "action_id": "restore_server"
                     }
                 ]
 }

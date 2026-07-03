@@ -135,6 +135,10 @@ class ChangeType(str, enum.Enum):
     restore_files = "restore_files"
     dr_failover = "dr_failover"
     scheduled_reboot = "scheduled_reboot"
+    server_backup = "server_backup"
+    server_snapshot = "server_snapshot"
+    server_capture = "server_capture"
+    restore_server = "restore_server"
     # Compliance
     enforce_cis_benchmark = "enforce_cis_benchmark"
     collect_evidence = "collect_evidence"
