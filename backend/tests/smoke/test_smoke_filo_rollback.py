@@ -289,9 +289,7 @@ async def test_PHASE_0_provision(request):
         if instance_id:
             _terminate_instance(instance_id)
         if asset_id:
-            asyncio.get_event_loop().run_until_complete(
-                _delete_smoke_asset(asset_id, token)
-            )
+            asyncio.run(_delete_smoke_asset(asset_id, token))
 
     request.addfinalizer(_finalizer)
 
@@ -358,14 +356,14 @@ async def test_PHASE_0_provision(request):
 
     # Poll for agent asset registration (agent phones home and registers as a server asset)
     print("  Waiting up to 120s for agent to register with platform...")
-    deadline = asyncio.get_event_loop().time() + 120
+    deadline = asyncio.get_running_loop().time() + 120
     agent_asset_id = None
     async with httpx.AsyncClient(
         base_url=_BASE_URL,
         headers={"Authorization": f"Bearer {jwt}"},
         timeout=30,
     ) as client:
-        while asyncio.get_event_loop().time() < deadline:
+        while asyncio.get_running_loop().time() < deadline:
             r = await client.get(
                 "/assets",
                 params={"q": "nexplane-smoke-filo", "asset_type": "server"},
