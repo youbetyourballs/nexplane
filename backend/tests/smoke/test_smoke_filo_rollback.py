@@ -362,9 +362,12 @@ async def test_PHASE_0_provision(request):
     ec2_asset_id = ec2_asset["id"]
     instance_id = (ec2_asset.get("asset_metadata") or {}).get("instance_id")
     assert instance_id, f"instance_id not found in asset metadata: {ec2_asset}"
+    private_ip = (ec2_asset.get("asset_metadata") or {}).get("private_ip", "")
+    # EC2 internal hostname format: ip-{dashes}.ec2.internal
+    ec2_internal_hostname = f"ip-{private_ip.replace('.', '-')}.ec2.internal" if private_ip else ""
     _STATE["instance_id"] = instance_id
     _STATE["provisioned"] = True
-    print(f"  EC2 instance launched: {instance_id}, asset: {ec2_asset_id}")
+    print(f"  EC2 instance launched: {instance_id} ({private_ip}), asset: {ec2_asset_id}")
 
     # Wait for SSM agent to register on the new instance (required before deploy)
     print("  Waiting 180s for SSM agent to register on the new instance...")
@@ -381,15 +384,15 @@ async def test_PHASE_0_provision(request):
             "instance_id": instance_id,
             "nexplane_url": nexplane_url,
             "nexplane_secret": agent_secret,
-            "hostname": "nexplane-smoke-filo",
         },
         timeout=300,
     )
     print("  deploy_nexplane_agent CR completed")
 
-    # Poll for agent asset registration (agent phones home and registers as a server asset)
-    print("  Waiting up to 120s for agent to register with platform...")
-    deadline = asyncio.get_running_loop().time() + 120
+    # Poll for agent asset registration (agent phones home under EC2 internal hostname)
+    # The agent registers using the EC2 internal hostname (e.g. ip-172-31-28-69.ec2.internal)
+    print(f"  Waiting up to 180s for agent to register (expected hostname: {ec2_internal_hostname})...")
+    deadline = asyncio.get_running_loop().time() + 180
     agent_asset_id = None
     async with httpx.AsyncClient(
         base_url=_BASE_URL,
@@ -397,31 +400,27 @@ async def test_PHASE_0_provision(request):
         timeout=30,
     ) as client:
         while asyncio.get_running_loop().time() < deadline:
+            # Search by EC2 internal hostname (agent registers under this name)
+            search_q = ec2_internal_hostname if ec2_internal_hostname else "nexplane-smoke"
             r = await client.get(
                 "/assets",
-                params={"q": "nexplane-smoke-filo", "asset_type": "server"},
+                params={"q": search_q, "asset_type": "server"},
             )
-            # After agent registration there will be an asset with the agent's hostname.
-            # The agent registers under hostname="nexplane-smoke-filo" passed above.
-            # Filter to the asset whose metadata indicates an active agent connection
-            # (has_agent=True or agent_last_seen is set), or fall back to any match.
-            candidates = r.json()
-            agent_candidates = [
-                a for a in candidates
-                if a.get("has_agent") or a.get("agent_last_seen")
+            candidates = [
+                a for a in r.json()
+                if (a.get("asset_metadata") or {}).get("agent_version")
             ]
-            if agent_candidates:
-                agent_asset_id = agent_candidates[0]["id"]
+            if candidates:
+                agent_asset_id = candidates[0]["id"]
                 break
-            # If no agent-flagged asset yet, wait and retry
             await asyncio.sleep(15)
 
     assert agent_asset_id, (
-        "Nexplane agent did not register within 120s. "
-        f"Check instance {instance_id} via AWS console."
+        "Nexplane agent did not register within 180s. "
+        f"Check instance {instance_id} (expected hostname {ec2_internal_hostname}) via AWS console."
     )
     _STATE["asset_id"] = agent_asset_id
-    print(f"  Agent registered as asset: {agent_asset_id}")
+    print(f"  Agent registered as asset: {agent_asset_id} ({ec2_internal_hostname})")
 
 
 # ---------------------------------------------------------------------------
