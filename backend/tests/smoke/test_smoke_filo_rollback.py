@@ -43,21 +43,39 @@ _BASE_URL = "http://localhost:8000/api/v1"
 
 
 async def _get_backend_private_ip() -> str:
-    """Return this EC2 instance's private IP. Tries metadata endpoint; falls back to boto3."""
+    """Return this EC2 instance's private IP using IMDSv2, with boto3 fallback."""
     import urllib.request
-    try:
-        with urllib.request.urlopen(
-            "http://169.254.169.254/latest/meta-data/local-ipv4", timeout=2
-        ) as resp:
+
+    def _imds_get(path: str, imds_token: str) -> str:
+        req = urllib.request.Request(
+            f"http://169.254.169.254{path}",
+            headers={"X-aws-ec2-metadata-token": imds_token},
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
             return resp.read().decode().strip()
+
+    try:
+        # IMDSv2: acquire session token first, then fetch metadata
+        token_req = urllib.request.Request(
+            "http://169.254.169.254/latest/api/token",
+            method="PUT",
+            headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+        )
+        with urllib.request.urlopen(token_req, timeout=2) as resp:
+            imds_token = resp.read().decode().strip()
+        return _imds_get("/latest/meta-data/local-ipv4", imds_token)
     except Exception:
         pass
     # Fallback: use boto3 to describe this instance
     try:
-        with urllib.request.urlopen(
-            "http://169.254.169.254/latest/meta-data/instance-id", timeout=2
-        ) as resp:
-            own_id = resp.read().decode().strip()
+        token_req = urllib.request.Request(
+            "http://169.254.169.254/latest/api/token",
+            method="PUT",
+            headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+        )
+        with urllib.request.urlopen(token_req, timeout=2) as resp:
+            imds_token = resp.read().decode().strip()
+        own_id = _imds_get("/latest/meta-data/instance-id", imds_token)
         ec2 = boto3.client("ec2")
         reservations = ec2.describe_instances(InstanceIds=[own_id])["Reservations"]
         return reservations[0]["Instances"][0]["PrivateIpAddress"]
@@ -553,6 +571,8 @@ async def test_PHASE_5_project_rollback_with_to_cr_id():
     )
 
     token = _env("API_TOKEN")
+    if "asset_id" not in _STATE:
+        pytest.skip("PHASE_0 did not run")
     asset_id = _STATE["asset_id"]
 
     # Create project
