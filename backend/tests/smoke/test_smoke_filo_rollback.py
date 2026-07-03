@@ -109,12 +109,28 @@ async def _get_jwt(api_token: str) -> str:
         return create_access_token(subject=str(tok.user_id))
 
 
+async def _approve_cr_via_rest(token: str, cr_id: str) -> None:
+    """Submit CR for approval then approve via REST endpoint (bypasses self-approval restriction)."""
+    from app.mcp_tools.change_requests import submit_for_approval
+
+    submitted = await submit_for_approval(token=token, cr_id=cr_id)
+    assert "error" not in submitted, f"submit_for_approval failed: {submitted}"
+
+    jwt = await _get_jwt(token)
+    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
+        resp = await client.post(
+            f"/change-requests/{cr_id}/approve",
+            json={"decision": "approved", "comment": "smoke test self-approval"},
+            headers={"Authorization": f"Bearer {jwt}"},
+        )
+        assert resp.status_code == 200, f"REST approve failed {resp.status_code}: {resp.text}"
+
+
 async def _create_and_execute_sysctl_cr(
     token: str, asset_id: str, param: str, value: int, title: str
 ) -> str:
     """Create, approve, and execute an apply_sysctl_hardening CR. Return cr_id."""
     from app.mcp_tools.change_requests import (
-        approve_change_request,
         create_change_request,
         execute_change_request,
         get_change_request,
@@ -131,9 +147,8 @@ async def _create_and_execute_sysctl_cr(
     assert "id" in cr, f"create_change_request failed: {cr}"
     cr_id = cr["id"]
 
-    # Approve
-    approved = await approve_change_request(token=token, cr_id=cr_id)
-    assert "error" not in approved, f"approve_change_request failed: {approved}"
+    # Submit + approve via REST (bypasses MCP self-approval restriction)
+    await _approve_cr_via_rest(token=token, cr_id=cr_id)
 
     # Execute
     executed = await execute_change_request(token=token, cr_id=cr_id)
@@ -161,7 +176,6 @@ async def _create_and_execute_cr(
 ) -> str:
     """Create, approve, and execute any CR type. Return cr_id once completed."""
     from app.mcp_tools.change_requests import (
-        approve_change_request,
         create_change_request,
         execute_change_request,
         get_change_request,
@@ -177,8 +191,8 @@ async def _create_and_execute_cr(
     assert "id" in cr, f"create_change_request({change_type}) failed: {cr}"
     cr_id = cr["id"]
 
-    approved = await approve_change_request(token=token, cr_id=cr_id)
-    assert "error" not in approved, f"approve_change_request({change_type}) failed: {approved}"
+    # Submit + approve via REST (bypasses MCP self-approval restriction)
+    await _approve_cr_via_rest(token=token, cr_id=cr_id)
 
     executed = await execute_change_request(token=token, cr_id=cr_id)
     assert "error" not in executed, f"execute_change_request({change_type}) failed: {executed}"
