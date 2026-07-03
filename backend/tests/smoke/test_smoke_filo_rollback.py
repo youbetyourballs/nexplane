@@ -109,21 +109,27 @@ async def _get_jwt(api_token: str) -> str:
         return create_access_token(subject=str(tok.user_id))
 
 
-async def _approve_cr_via_rest(token: str, cr_id: str) -> None:
-    """Submit CR for approval then approve via REST endpoint (bypasses self-approval restriction)."""
-    from app.mcp_tools.change_requests import submit_for_approval
-
-    submitted = await submit_for_approval(token=token, cr_id=cr_id)
-    assert "error" not in submitted, f"submit_for_approval failed: {submitted}"
-
+async def _plan_and_approve_cr_via_rest(token: str, cr_id: str) -> None:
+    """Generate plan, submit for approval, then approve via REST (bypasses self-approval restriction)."""
     jwt = await _get_jwt(token)
-    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
-        resp = await client.post(
+    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=60) as client:
+        headers = {"Authorization": f"Bearer {jwt}"}
+
+        # Generate change plan (draft → planned)
+        r = await client.post(f"/change-requests/{cr_id}/plan", headers=headers)
+        assert r.status_code == 200, f"POST /plan failed {r.status_code}: {r.text}"
+
+        # Submit for approval (planned → awaiting_approval)
+        r = await client.post(f"/change-requests/{cr_id}/submit-for-approval", headers=headers)
+        assert r.status_code == 200, f"POST /submit-for-approval failed {r.status_code}: {r.text}"
+
+        # Approve via REST (no self-approval restriction here)
+        r = await client.post(
             f"/change-requests/{cr_id}/approve",
             json={"decision": "approved", "comment": "smoke test self-approval"},
-            headers={"Authorization": f"Bearer {jwt}"},
+            headers=headers,
         )
-        assert resp.status_code == 200, f"REST approve failed {resp.status_code}: {resp.text}"
+        assert r.status_code == 200, f"POST /approve failed {r.status_code}: {r.text}"
 
 
 async def _create_and_execute_sysctl_cr(
@@ -147,8 +153,8 @@ async def _create_and_execute_sysctl_cr(
     assert "id" in cr, f"create_change_request failed: {cr}"
     cr_id = cr["id"]
 
-    # Submit + approve via REST (bypasses MCP self-approval restriction)
-    await _approve_cr_via_rest(token=token, cr_id=cr_id)
+    # Generate plan + submit + approve via REST (bypasses MCP self-approval restriction)
+    await _plan_and_approve_cr_via_rest(token=token, cr_id=cr_id)
 
     # Execute
     executed = await execute_change_request(token=token, cr_id=cr_id)
@@ -191,8 +197,8 @@ async def _create_and_execute_cr(
     assert "id" in cr, f"create_change_request({change_type}) failed: {cr}"
     cr_id = cr["id"]
 
-    # Submit + approve via REST (bypasses MCP self-approval restriction)
-    await _approve_cr_via_rest(token=token, cr_id=cr_id)
+    # Generate plan + submit + approve via REST (bypasses MCP self-approval restriction)
+    await _plan_and_approve_cr_via_rest(token=token, cr_id=cr_id)
 
     executed = await execute_change_request(token=token, cr_id=cr_id)
     assert "error" not in executed, f"execute_change_request({change_type}) failed: {executed}"
