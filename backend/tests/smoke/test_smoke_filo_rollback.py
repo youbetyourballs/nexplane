@@ -39,7 +39,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 _STATE: dict = {}
 
-_BASE_URL = "http://localhost:8000/api/v1"
+_BASE_URL = "http://localhost:8000"
 
 
 async def _get_backend_private_ip() -> str:
