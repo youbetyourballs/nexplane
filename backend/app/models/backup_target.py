@@ -5,7 +5,7 @@
 import uuid
 import enum
 from datetime import datetime
-from sqlalchemy import Integer, ForeignKey, Enum as SAEnum, Text, DateTime, func
+from sqlalchemy import Integer, ForeignKey, Enum as SAEnum, Text, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from app.database import Base
@@ -40,3 +40,8 @@ class BackupTarget(Base):
         SAEnum(BackupTargetStatus, name="backup_target_status", native_enum=False), nullable=False, default=BackupTargetStatus.unprotected
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    storage_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("backup_storage.id", ondelete="SET NULL"), nullable=True
+    )
+    # "server" | "workstation" | "shared_drive"
+    asset_type: Mapped[str] = mapped_column(String(50), nullable=False, default="server")
