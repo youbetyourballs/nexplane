@@ -116,6 +116,8 @@ def _invoke_mcp_tool_inprocess(tool_name: str, arguments: dict) -> dict:
             import app.mcp_tools.identity as _mt_id
             import app.mcp_tools.runbooks as _mt_rb
             import app.mcp_tools.findings as _mt_find
+            import app.mcp_tools.host_intelligence as _mt_hi
+            import app.mcp_tools.planning_context as _mt_pc
             import app.services.rollback_executor as _rollback_executor
             import app.services.change_execution_service as _exec_svc
             from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -131,6 +133,7 @@ def _invoke_mcp_tool_inprocess(tool_name: str, arguments: dict) -> dict:
             # so they all use our loop-local factory (not the main uvicorn loop's factory).
             _patch_modules = [
                 _mt_assets, _mt_cr, _mt_conn, _mt_id, _mt_rb, _mt_find,
+                _mt_hi, _mt_pc,
                 _rollback_executor, _exec_svc,
             ]
             _orig_db = _db_module.AsyncSessionLocal
