@@ -172,8 +172,8 @@ async def get_change_request(token: str, cr_id: str) -> dict[str, Any]:
         return {
             "id": str(cr.id),
             "title": cr.title,
-            "change_type": str(cr.change_type),
-            "status": str(cr.status),
+            "change_type": cr.change_type.value if hasattr(cr.change_type, "value") else str(cr.change_type),
+            "status": cr.status.value if hasattr(cr.status, "value") else str(cr.status),
             "desired_outcome": cr.desired_outcome,
             "target_asset_ids": asset_ids,
             "created_at": cr.created_at.isoformat() if cr.created_at else None,
