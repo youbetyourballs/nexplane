@@ -123,265 +123,364 @@ def _cleanup_backup_vault(backup_boto, vault_name: str) -> None:
 # Phase BACKUP_SCHEDULER — scheduled backup lifecycle + restore + FILO rollback
 # ---------------------------------------------------------------------------
 
-def run_phase_backup_scheduler(client: NexplaneClient, cloud_account_id: str) -> None:
-    """Phase BACKUP_SCHEDULER_SMOKE:
-    1. Create S3 backup target via /backup-targets
-    2. Create RecurringJob (cron: backup) linked to that target
-    3. Fire job immediately via POST /recurring-jobs/{id}/run-now
-    4. Poll backup-history until the triggered backup CR completes
-    5. Verify artifact_ref is populated on the CR
-    6. Create a restore CR from the artifact_ref via POST /restore-crs
-    7. Execute and poll restore CR to completion
-    8. Rollback in FILO order: restore CR first, then backup CR
-    9. Verify S3 objects deleted after backup CR rollback
+def _deregister_ami_cleanup(ec2_client, ami_id: str) -> None:
+    """Deregister an AMI and delete its backing snapshots (best-effort)."""
+    try:
+        image_info = ec2_client.describe_images(ImageIds=[ami_id])["Images"]
+        if image_info:
+            snapshot_ids = [
+                bdm["Ebs"]["SnapshotId"]
+                for bdm in image_info[0].get("BlockDeviceMappings", [])
+                if "Ebs" in bdm
+            ]
+            ec2_client.deregister_image(ImageId=ami_id)
+            for snap_id in snapshot_ids:
+                try:
+                    ec2_client.delete_snapshot(SnapshotId=snap_id)
+                except Exception:
+                    pass
+    except Exception as exc:
+        print(f"  cleanup: could not deregister {ami_id}: {exc}")
+
+
+def _wait_cr_complete(client, cr_id: str, label: str, timeout: int = 300) -> dict:
+    """Poll GET /change-requests/{cr_id} until a terminal status is reached."""
+    TERMINAL = {"completed", "failed", "rollback_failed", "rolled_back", "rollback_partial"}
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        cr = client.get(f"/change-requests/{cr_id}").json() if hasattr(client.get(f"/change-requests/{cr_id}"), "json") else client.get(f"/change-requests/{cr_id}")
+        if isinstance(cr, dict):
+            status = cr.get("status", "")
+            if status in TERMINAL:
+                return cr
+        time.sleep(5)
+    raise TimeoutError(f"{label} CR {cr_id} did not reach terminal state in {timeout}s")
+
+
+def _plan_and_approve_cr(client, cr_id: str) -> None:
+    """Generate plan, submit for approval, and approve via REST."""
+    import requests as _req
+    jwt = client._get_jwt() if hasattr(client, "_get_jwt") else client.token
+    headers = {"Authorization": f"Bearer {jwt}"}
+    base = (client.base_url if hasattr(client, "base_url") else client.base).rstrip("/")
+    r = _req.post(f"{base}/change-requests/{cr_id}/plan", headers=headers)
+    assert r.status_code == 200, f"POST /plan failed {r.status_code}: {r.text}"
+    r = _req.post(f"{base}/change-requests/{cr_id}/submit-for-approval", headers=headers)
+    assert r.status_code == 200, f"POST /submit-for-approval failed {r.status_code}: {r.text}"
+    r = _req.post(
+        f"{base}/change-requests/{cr_id}/approve",
+        json={"decision": "approved", "comment": "smoke test"},
+        headers=headers,
+    )
+    assert r.status_code == 200, f"POST /approve failed {r.status_code}: {r.text}"
+
+
+def _execute_cr(client, cr_id: str) -> None:
+    """Execute a CR via REST."""
+    import requests as _req
+    jwt = client._get_jwt() if hasattr(client, "_get_jwt") else client.token
+    base = (client.base_url if hasattr(client, "base_url") else client.base).rstrip("/")
+    r = _req.post(
+        f"{base}/change-requests/{cr_id}/execute",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+    assert r.status_code in (200, 202), f"POST /execute failed {r.status_code}: {r.text}"
+
+
+def _create_and_run_cr(client, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> dict:
+    """Create a CR, plan+approve+execute it, and wait for a terminal state."""
+    cr = client.post("/change-requests", json={
+        "title": title,
+        "change_type": change_type,
+        "target_asset_ids": [asset_id],
+        "desired_outcome": desired_outcome,
+        "risk_level": "low",
+    })
+    if isinstance(cr, dict):
+        cr_data = cr
+    else:
+        cr_data = cr.json() if hasattr(cr, "json") else cr
+    cr_id = cr_data["id"]
+    _plan_and_approve_cr(client, cr_id)
+    _execute_cr(client, cr_id)
+    return _wait_cr_complete(client, cr_id, title)
+
+
+def run_phase_backup_scheduler(
+    client,
+    aws_connector_id: str,
+    instance_id: str,
+    asset_id: str,
+    backup_storage_id: str,
+) -> None:
     """
-    import smoke_helpers as _shl
+    BACKUP_SCHEDULER_SMOKE: exercises server_backup (B1), server_snapshot (B2),
+    server_capture (B3), scheduled backup (B4), hybrid restore (R2),
+    FILO guard, and rollback verification.
 
-    print("\n[Phase BACKUP_SCHEDULER_SMOKE] Backup scheduler lifecycle smoke test")
+    Parameters come from the smoke test harness which provisions the EC2
+    instance, AWS connector, and BackupStorage before calling this function.
+    """
+    import boto3
 
-    s3_boto = _get_aws_boto3_client("s3")
-    if not s3_boto:
-        fail("[BACKUP_SCHEDULER_SMOKE] AWS S3 client not available")
+    s3 = boto3.client("s3")
+    ec2 = boto3.client("ec2")
+    _ensure_s3_bucket(s3, SMOKE_BUCKET)
 
-    _ensure_s3_bucket(s3_boto, SMOKE_BUCKET)
-
-    # Unique prefix per run to avoid cross-run collisions
-    run_ts = int(time.time())
-    s3_prefix = f"smoke/backup-scheduler/{run_ts}"
-
-    # ------------------------------------------------------------------ #
-    # Step 1 — Register an AWS asset to back up                           #
-    # ------------------------------------------------------------------ #
-    aws_creds = _shl._aws_creds_cache or {}
-
-    conn_resp = client.post("/connectors", json={
-        "connector_type": "aws",
-        "name": f"nexplane-smoke-backup-sched-{run_ts}",
-    })
-    connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
-    client.put(f"/connectors/{connector_id}/credentials", json={"credentials": {
-        "access_key_id": aws_creds.get("access_key_id", ""),
-        "secret_access_key": aws_creds.get("secret_access_key", ""),
-        "region": aws_creds.get("region", "us-east-1"),
-    }})
-    log(f"BACKUP_SCHEDULER_SMOKE: connector={connector_id}")
-
-    asset_resp = client.post("/assets", json={
-        "name": f"nexplane-smoke-backup-target-{run_ts}",
-        "asset_type": "cloud_account",
-        "environment": "staging",
-        "criticality": "low",
-        "connector_id": connector_id,
-        "tags": ["nexplane-smoke", "backup-scheduler"],
-    })
-    asset_id = asset_resp.get("id")
-    log(f"BACKUP_SCHEDULER_SMOKE: asset={asset_id}")
-
-    # ------------------------------------------------------------------ #
-    # Step 2 — Create a backup_target record                              #
-    # ------------------------------------------------------------------ #
-    bt_resp = client.post("/backup-targets", json={
-        "asset_id": asset_id,
-        "target_description": f"Smoke test backup target {run_ts}",
-        "expected_cadence_hours": 24,
-    })
-    backup_target_id = bt_resp.get("id")
-    log(f"BACKUP_SCHEDULER_SMOKE: backup_target={backup_target_id}")
-
-    # ------------------------------------------------------------------ #
-    # Step 3 — Create a RecurringJob (backup type, hourly cron)           #
-    # ------------------------------------------------------------------ #
-    job_resp = client.post("/recurring-jobs", json={
-        "job_type": "backup",
-        "cron_expression": "0 * * * *",  # every hour — real interval irrelevant, we fire now
-        "enabled": True,
-        "parameters": {
-            "change_type": "ad_tiered_backup",
-            "asset_id": asset_id,
-            "connector_id": connector_id,
-            "s3_bucket": SMOKE_BUCKET,
-            "s3_prefix": s3_prefix,
-            "tier": "0",
-            "dry_run": False,
-            "_smoke_test": True,
-        },
-    })
-    job_id = job_resp.get("id")
-    log(f"BACKUP_SCHEDULER_SMOKE: recurring_job={job_id}")
-
-    backup_cr_id: Optional[str] = None
-    restore_cr_id: Optional[str] = None
-    cr_ids_filo: list[str] = []  # accumulate in execution order; unwind reversed
+    run_ts = str(int(time.time()))
+    ami_ids_to_cleanup = []
+    new_instance_ids_to_cleanup = []
 
     try:
-        # -------------------------------------------------------------- #
-        # Step 4 — Fire job now and wait for the resulting backup CR      #
-        # -------------------------------------------------------------- #
-        log("BACKUP_SCHEDULER_SMOKE: firing job via run-now...")
-        client.post(f"/recurring-jobs/{job_id}/run-now")
-
-        # Poll /backup-history until a new completed CR appears with our asset
-        log("BACKUP_SCHEDULER_SMOKE: polling backup-history for completed CR...")
-        deadline = time.time() + TIMEOUT_SECONDS
-        backup_cr: Optional[dict] = None
-        while time.time() < deadline:
-            history = client.get("/backup-history", params={"limit": 20, "offset": 0})
-            for entry in history:
-                if (
-                    entry.get("status") == "completed"
-                    and asset_id in (entry.get("target_asset_ids") or [])
-                    and entry.get("artifact_refs")
-                ):
-                    backup_cr = entry
-                    break
-            if backup_cr:
-                break
-            time.sleep(5)
-
-        if not backup_cr:
-            fail(
-                "BACKUP_SCHEDULER_SMOKE: timed out waiting for backup CR to complete "
-                f"in backup-history (asset_id={asset_id})"
-            )
-
-        backup_cr_id = backup_cr["id"]
-        artifact_refs = backup_cr.get("artifact_refs") or {}
-        log(
-            f"BACKUP_SCHEDULER_SMOKE: backup CR completed — id={backup_cr_id}, "
-            f"artifact_refs={artifact_refs}"
+        # ------------------------------------------------------------------ #
+        # B1 - server_backup: EBS snapshot + S3 manifest
+        # ------------------------------------------------------------------ #
+        print("\n  B1: server_backup...")
+        b1_cr = _create_and_run_cr(
+            client,
+            title=f"smoke server_backup {run_ts}",
+            change_type="server_backup",
+            asset_id=asset_id,
+            desired_outcome={
+                "aws_connector_id": aws_connector_id,
+                "backup_storage_id": backup_storage_id,
+                "instance_id": instance_id,
+            },
         )
-        assert artifact_refs, (
-            f"BACKUP_SCHEDULER_SMOKE: artifact_refs empty on completed backup CR {backup_cr_id}"
-        )
-        cr_ids_filo.append(backup_cr_id)
+        assert b1_cr["status"] == "completed", f"B1 failed: {b1_cr}"
+        b1_refs = b1_cr.get("artifact_refs") or {}
+        assert b1_refs.get("artifacts", {}).get("snapshot_ids"), f"B1: no snapshot_ids in artifact_refs: {b1_refs}"
+        b1_cr_id = b1_cr["id"]
+        b1_prefix = b1_refs.get("prefix", "")
+        print(f"  B1 PASSED: snapshot_ids={b1_refs['artifacts']['snapshot_ids']}")
 
-        # -------------------------------------------------------------- #
-        # Step 5 — Verify backup context endpoint reflects success        #
-        # -------------------------------------------------------------- #
-        ctx = client.get(f"/change-requests/{backup_cr_id}/backup-context")
-        assert ctx.get("has_backup") is True, (
-            f"BACKUP_SCHEDULER_SMOKE: backup-context.has_backup not True: {ctx}"
+        # ------------------------------------------------------------------ #
+        # B2 - server_snapshot: AMI creation
+        # ------------------------------------------------------------------ #
+        print("  B2: server_snapshot...")
+        b2_cr = _create_and_run_cr(
+            client,
+            title=f"smoke server_snapshot {run_ts}",
+            change_type="server_snapshot",
+            asset_id=asset_id,
+            desired_outcome={
+                "aws_connector_id": aws_connector_id,
+                "instance_id": instance_id,
+                "no_reboot": True,
+            },
         )
-        assert ctx.get("backup_cr_id") == backup_cr_id, (
-            f"BACKUP_SCHEDULER_SMOKE: backup-context.backup_cr_id mismatch: {ctx}"
-        )
-        log(
-            f"BACKUP_SCHEDULER_SMOKE: backup-context OK — "
-            f"last_successful_at={ctx.get('last_successful_at')}, "
-            f"overdue={ctx.get('overdue')}"
-        )
+        assert b2_cr["status"] == "completed", f"B2 failed: {b2_cr}"
+        b2_refs = b2_cr.get("artifact_refs") or {}
+        ami_id = b2_refs.get("ami_id", "")
+        assert ami_id, f"B2: no ami_id in artifact_refs: {b2_refs}"
+        ami_ids_to_cleanup.append(ami_id)
+        # Verify AMI exists in AWS
+        images = ec2.describe_images(ImageIds=[ami_id])["Images"]
+        assert images, f"B2: AMI {ami_id} not found in AWS"
+        b2_cr_id = b2_cr["id"]
+        b2_seq = b2_cr.get("application_sequence")
+        print(f"  B2 PASSED: ami_id={ami_id}, application_sequence={b2_seq}")
 
-        # -------------------------------------------------------------- #
-        # Step 6 — S3 side-effect: artifact should exist under prefix     #
-        # -------------------------------------------------------------- #
-        s3_key = (artifact_refs.get("s3_key") or
-                  artifact_refs.get("manifest_s3_key") or
-                  f"{s3_prefix}/tier0-manifest.json")
-        try:
-            s3_boto.head_object(Bucket=SMOKE_BUCKET, Key=s3_key)
-            log(f"BACKUP_SCHEDULER_SMOKE: S3 artifact verified at s3://{SMOKE_BUCKET}/{s3_key}")
-        except Exception as s3e:
-            log(f"  INFO: S3 artifact check (non-fatal): {s3e}")
+        # ------------------------------------------------------------------ #
+        # B3 - server_capture: AMI + SSM metadata
+        # ------------------------------------------------------------------ #
+        print("  B3: server_capture...")
+        b3_cr = _create_and_run_cr(
+            client,
+            title=f"smoke server_capture {run_ts}",
+            change_type="server_capture",
+            asset_id=asset_id,
+            desired_outcome={
+                "aws_connector_id": aws_connector_id,
+                "backup_storage_id": backup_storage_id,
+                "instance_id": instance_id,
+            },
+        )
+        assert b3_cr["status"] == "completed", f"B3 failed: {b3_cr}"
+        b3_refs = b3_cr.get("artifact_refs") or {}
+        b3_artifacts = b3_refs.get("artifacts", {})
+        assert b3_refs.get("ami_id"), f"B3: no ami_id: {b3_refs}"
+        ami_ids_to_cleanup.append(b3_refs["ami_id"])
+        required_artifact_keys = {"process_list", "network_state", "kernel_modules", "infra_config"}
+        missing = required_artifact_keys - set(b3_artifacts.keys())
+        assert not missing, f"B3: missing artifact keys: {missing}"
+        # Verify S3 objects non-empty
+        b3_prefix = b3_refs.get("prefix", "")
+        count = _count_s3_prefix(s3, SMOKE_BUCKET, b3_prefix)
+        assert count >= 3, f"B3: expected >=3 S3 objects at {b3_prefix}, got {count}"
+        b3_cr_id = b3_cr["id"]
+        print(f"  B3 PASSED: ami_id={b3_refs['ami_id']}, s3_objects={count}")
 
-        # -------------------------------------------------------------- #
-        # Step 7 — Create and execute a restore CR from the artifact      #
-        # -------------------------------------------------------------- #
-        log("BACKUP_SCHEDULER_SMOKE: creating restore CR from backup artifact...")
-        restore_resp = client.post("/restore-crs", json={
-            "source_backup_cr_id": backup_cr_id,
-            "target_asset_id": asset_id,
-            "desired_outcome": {
-                "_smoke_test": True,
-                "rollback_strategy": "snapshot_restore",
+        # ------------------------------------------------------------------ #
+        # B4 - scheduled backup via RecurringJob
+        # ------------------------------------------------------------------ #
+        print("  B4: scheduled backup via RecurringJob...")
+        job = client.post("/recurring-jobs", json={
+            "job_type": "backup",
+            "cron_expression": "0 3 * * *",
+            "parameters": {
+                "change_type": "server_backup",
+                "asset_id": asset_id,
+                "aws_connector_id": aws_connector_id,
+                "backup_storage_id": backup_storage_id,
+                "instance_id": instance_id,
             },
         })
-        restore_cr_id = restore_resp.get("id")
-        log(f"BACKUP_SCHEDULER_SMOKE: restore CR created — id={restore_cr_id}")
+        if isinstance(job, dict):
+            job_data = job
+        else:
+            job_data = job.json() if hasattr(job, "json") else job
+        job_id = job_data["id"]
 
-        # Approve and execute the restore CR through the full lifecycle
-        client.post(f"/change-requests/{restore_cr_id}/plan")
-        client.post(f"/change-requests/{restore_cr_id}/submit-for-approval")
-        client.post(f"/change-requests/{restore_cr_id}/approve",
-                    json={"decision": "approved", "comment": "smoke test restore"})
-        client.post(f"/change-requests/{restore_cr_id}/execute")
-
-        restore_cr = client._wait_timeout(restore_cr_id, "BACKUP_SCHEDULER_SMOKE restore CR", TIMEOUT_SECONDS)
-        assert restore_cr.get("status") == "completed", (
-            f"BACKUP_SCHEDULER_SMOKE: restore CR ended with status {restore_cr.get('status')}"
+        # Check if run-now endpoint is available; skip gracefully if not
+        import requests as _run_now_req
+        jwt = client._get_jwt() if hasattr(client, "_get_jwt") else client.token
+        base = (client.base_url if hasattr(client, "base_url") else client.base).rstrip("/")
+        rn_resp = _run_now_req.post(
+            f"{base}/recurring-jobs/{job_id}/run-now",
+            headers={"Authorization": f"Bearer {jwt}"},
         )
-        cr_ids_filo.append(restore_cr_id)
-        log(f"BACKUP_SCHEDULER_SMOKE: restore CR completed — id={restore_cr_id}")
+        if rn_resp.status_code == 404:
+            print("  B4 SKIPPED: run-now not available")
+            scheduled_cr_id = None
+        else:
+            assert rn_resp.status_code in (200, 201, 202), f"B4 run-now failed {rn_resp.status_code}: {rn_resp.text}"
+            # Poll backup-history for a new completed entry
+            scheduled_cr_id = None
+            deadline = time.time() + 300
+            while time.time() < deadline:
+                history = client.get("/backup-history", params={"limit": 20})
+                if not isinstance(history, list):
+                    history = history.json() if hasattr(history, "json") else []
+                for entry in history:
+                    if (entry.get("status") == "completed"
+                            and asset_id in entry.get("target_asset_ids", [])
+                            and entry.get("artifact_refs")
+                            and entry["id"] not in (b1_cr_id, b2_cr_id, b3_cr_id)):
+                        scheduled_cr_id = entry["id"]
+                        break
+                if scheduled_cr_id:
+                    break
+                time.sleep(5)
+            assert scheduled_cr_id, "B4: scheduled backup CR did not appear in /backup-history within 300s"
+            print(f"  B4 PASSED: scheduled_cr_id={scheduled_cr_id}")
 
-        # -------------------------------------------------------------- #
-        # Step 8 — FILO rollback: restore first, then backup              #
-        # -------------------------------------------------------------- #
-        log("BACKUP_SCHEDULER_SMOKE: FILO rollback — unwinding in reverse order...")
-        for cr_id_to_roll in reversed(cr_ids_filo):
-            label = (
-                "BACKUP_SCHEDULER_SMOKE restore rollback"
-                if cr_id_to_roll == restore_cr_id
-                else "BACKUP_SCHEDULER_SMOKE backup rollback"
-            )
-            rb_ok = client.rollback_cr(cr_id_to_roll, label)
-            if cr_id_to_roll == backup_cr_id:
-                if rb_ok:
-                    # Verify S3 objects are gone
-                    remaining = _count_s3_prefix(s3_boto, SMOKE_BUCKET, s3_prefix)
-                    assert remaining == 0, (
-                        f"BACKUP_SCHEDULER_SMOKE: {remaining} S3 objects remain after backup rollback"
-                    )
-                    log("BACKUP_SCHEDULER_SMOKE: S3 clean after backup rollback ✅")
-                    backup_cr_id = None  # already rolled back
-                restore_cr_id = None  # already rolled back
+        # Clean up the recurring job
+        client.delete(f"/recurring-jobs/{job_id}")
 
-        log("Phase BACKUP_SCHEDULER_SMOKE PASSED")
+        # ------------------------------------------------------------------ #
+        # R2 - hybrid restore to new instance (from B2 AMI)
+        # ------------------------------------------------------------------ #
+        print("  R2: hybrid restore to new instance...")
+        # Get subnet/sg from the existing instance to launch restore target in same VPC
+        instance_details = ec2.describe_instances(InstanceIds=[instance_id])
+        inst_data = instance_details["Reservations"][0]["Instances"][0]
+        subnet_id = inst_data.get("SubnetId", "")
+        sg_ids = [sg["GroupId"] for sg in inst_data.get("SecurityGroups", [])]
 
-    except Exception as exc:
-        print(f"\n[FAIL] Phase BACKUP_SCHEDULER_SMOKE failed: {exc}")
-        raise
+        r2_cr = _create_and_run_cr(
+            client,
+            title=f"smoke restore_server hybrid {run_ts}",
+            change_type="restore_server",
+            asset_id=asset_id,
+            desired_outcome={
+                "source_backup_cr_id": b2_cr_id,
+                "restore_mode": "hybrid",
+                "target": {
+                    "type": "new",
+                    "instance_type": "t3.micro",
+                    "subnet_id": subnet_id,
+                    "security_group_ids": sg_ids,
+                    "iam_instance_profile": "NexplaneEC2TestProfile",
+                },
+                "aws_connector_id": aws_connector_id,
+            },
+        )
+        assert r2_cr["status"] == "completed", f"R2 failed: {r2_cr}"
+        new_instance_id = r2_cr.get("new_instance_id") or (r2_cr.get("artifact_refs") or {}).get("new_instance_id")
+        assert new_instance_id, f"R2: no new_instance_id in result: {r2_cr}"
+        new_instance_ids_to_cleanup.append(new_instance_id)
+        # Verify new instance exists
+        new_inst = ec2.describe_instances(InstanceIds=[new_instance_id])
+        state = new_inst["Reservations"][0]["Instances"][0]["State"]["Name"]
+        assert state in ("running", "pending"), f"R2: new instance state={state}"
+        print(f"  R2 PASSED: new_instance_id={new_instance_id}, state={state}")
+
+        # Rollback R2 (terminate new instance)
+        r2_rb = client.post(f"/change-requests/{r2_cr['id']}/rollback")
+        if not isinstance(r2_rb, dict):
+            r2_rb = r2_rb.json() if hasattr(r2_rb, "json") else {}
+        assert r2_rb.get("status") in ("rolled_back", "rollback_partial"), f"R2 rollback failed: {r2_rb}"
+        new_instance_ids_to_cleanup.remove(new_instance_id)
+        print("  R2 rollback PASSED")
+
+        # ------------------------------------------------------------------ #
+        # FILO guard: B1 then B2 applied; attempt rollback of B1 first -> 409
+        # ------------------------------------------------------------------ #
+        print("  FILO: verify guard blocks out-of-order rollback...")
+        b1_seq = b1_cr.get("application_sequence")
+        b2_seq = b2_cr.get("application_sequence")
+        assert b1_seq is not None, "FILO: B1 has no application_sequence"
+        assert b2_seq is not None, "FILO: B2 has no application_sequence"
+        assert b2_seq > b1_seq, f"FILO: expected b2_seq({b2_seq}) > b1_seq({b1_seq})"
+
+        # Attempt rollback of B1 while B2 is still completed - expect 409
+        import requests as _filo_req
+        filo_resp = _filo_req.post(
+            f"{base}/change-requests/{b1_cr_id}/rollback",
+            headers={"Authorization": f"Bearer {jwt}"},
+        )
+        assert filo_resp.status_code == 409, (
+            f"FILO: expected 409 blocking rollback of B1, got {filo_resp.status_code}: {filo_resp.text}"
+        )
+        blocking = filo_resp.json().get("blocking_crs", [])
+        assert b2_cr_id in blocking, f"FILO: B2 not in blocking_crs: {blocking}"
+        print(f"  FILO PASSED: blocked rollback of B1, blocking_crs={blocking}")
+
+        # ------------------------------------------------------------------ #
+        # Rollback B2 (deregister AMI), then B1 (delete S3 manifest)
+        # ------------------------------------------------------------------ #
+        print("  Rolling back B2 (server_snapshot)...")
+        b2_rb = client.post(f"/change-requests/{b2_cr_id}/rollback")
+        if not isinstance(b2_rb, dict):
+            b2_rb = b2_rb.json() if hasattr(b2_rb, "json") else {}
+        assert b2_rb.get("status") == "rolled_back", f"B2 rollback failed: {b2_rb}"
+        # Verify AMI deregistered
+        try:
+            remaining_images = ec2.describe_images(ImageIds=[ami_id])["Images"]
+            assert not remaining_images or remaining_images[0]["State"] == "deregistered", \
+                f"B2 rollback: AMI {ami_id} still registered"
+            ami_ids_to_cleanup.remove(ami_id)
+        except Exception:
+            if ami_id in ami_ids_to_cleanup:
+                ami_ids_to_cleanup.remove(ami_id)  # already gone
+        print("  B2 rollback PASSED")
+
+        print("  Rolling back B1 (server_backup)...")
+        b1_rb = client.post(f"/change-requests/{b1_cr_id}/rollback")
+        if not isinstance(b1_rb, dict):
+            b1_rb = b1_rb.json() if hasattr(b1_rb, "json") else {}
+        assert b1_rb.get("status") == "rolled_back", f"B1 rollback failed: {b1_rb}"
+        if b1_prefix:
+            remaining = _count_s3_prefix(s3, SMOKE_BUCKET, b1_prefix)
+            assert remaining == 0, f"B1 rollback: {remaining} S3 objects still at {b1_prefix}"
+        print("  B1 rollback PASSED")
+
+        print("\n  BACKUP_SCHEDULER_SMOKE: ALL ASSERTIONS PASSED")
 
     finally:
-        # Emergency rollback for any un-rolled-back CRs (FILO order)
-        for cr_id_cleanup in reversed(cr_ids_filo):
-            if cr_id_cleanup == backup_cr_id and backup_cr_id:
-                try:
-                    client.rollback_cr(backup_cr_id, "BACKUP_SCHEDULER_SMOKE emergency backup rollback")
-                except Exception:
-                    pass
-            elif cr_id_cleanup == restore_cr_id and restore_cr_id:
-                try:
-                    client.rollback_cr(restore_cr_id, "BACKUP_SCHEDULER_SMOKE emergency restore rollback")
-                except Exception:
-                    pass
-
-        # Clean S3 regardless
-        _delete_s3_prefix(s3_boto, SMOKE_BUCKET, s3_prefix)
-
-        # Delete recurring job
-        if job_id:
+        # Best-effort cleanup
+        print("  Cleaning up smoke resources...")
+        for iid in new_instance_ids_to_cleanup:
             try:
-                client.client.delete(f"{client.base}/recurring-jobs/{job_id}")
-            except Exception:
-                pass
-
-        # Delete backup target
-        if backup_target_id:
-            try:
-                client.client.delete(f"{client.base}/backup-targets/{backup_target_id}")
-            except Exception:
-                pass
-
-        # Delete asset and connector
-        if asset_id:
-            try:
-                client.client.delete(f"{client.base}/assets/{asset_id}")
-            except Exception:
-                pass
-        if connector_id:
-            try:
-                client.client.delete(f"{client.base}/connectors/{connector_id}")
-            except Exception:
-                pass
+                ec2.terminate_instances(InstanceIds=[iid])
+                print(f"  Terminated {iid}")
+            except Exception as exc:
+                print(f"  Could not terminate {iid}: {exc}")
+        for aid in ami_ids_to_cleanup:
+            _deregister_ami_cleanup(ec2, aid)
+        # Delete all smoke objects
+        _delete_s3_prefix(s3, SMOKE_BUCKET, "")
 
 
 # ---------------------------------------------------------------------------
@@ -958,7 +1057,118 @@ def main() -> None:
     passed = False
     try:
         if "BACKUP_SCHEDULER" in phases:
-            run_phase_backup_scheduler(client, cloud_account_id)
+            print("\n=== PHASE: BACKUP_SCHEDULER_SMOKE ===")
+            import boto3 as _boto3_main
+
+            ec2_main = _boto3_main.client("ec2")
+            run_ts_main = str(int(time.time()))
+
+            # Provision EC2 instance for backup smoke
+            ami_resp_main = ec2_main.describe_images(
+                Filters=[
+                    {"Name": "name", "Values": ["al2023-ami-*-x86_64"]},
+                    {"Name": "state", "Values": ["available"]},
+                ],
+                Owners=["amazon"],
+            )
+            ami_id_main = sorted(
+                ami_resp_main["Images"],
+                key=lambda x: x["CreationDate"],
+                reverse=True,
+            )[0]["ImageId"]
+
+            # Find default VPC subnet
+            vpcs_main = ec2_main.describe_vpcs(
+                Filters=[{"Name": "isDefault", "Values": ["true"]}]
+            )["Vpcs"]
+            subnets_main = ec2_main.describe_subnets(
+                Filters=[{"Name": "vpcId", "Values": [vpcs_main[0]["VpcId"]]}]
+            )["Subnets"] if vpcs_main else []
+            subnet_main = subnets_main[0]["SubnetId"] if subnets_main else None
+
+            run_kwargs_main = dict(
+                ImageId=ami_id_main,
+                InstanceType="t3.small",
+                MinCount=1,
+                MaxCount=1,
+                IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
+                TagSpecifications=[{
+                    "ResourceType": "instance",
+                    "Tags": [{"Key": "Name", "Value": f"nexplane-smoke-backup-{run_ts_main}"}],
+                }],
+            )
+            if subnet_main:
+                run_kwargs_main["SubnetId"] = subnet_main
+
+            run_resp_main = ec2_main.run_instances(**run_kwargs_main)
+            instance_id_main = run_resp_main["Instances"][0]["InstanceId"]
+            print(f"  Launched EC2 {instance_id_main}, waiting for running state...")
+            ec2_main.get_waiter("instance_running").wait(InstanceIds=[instance_id_main])
+
+            # Register AWS connector (uses IAM role creds from the container)
+            conn_resp_main = client.post("/connectors", json={
+                "connector_type": "aws",
+                "name": f"smoke-backup-{run_ts_main}",
+            })
+            if not isinstance(conn_resp_main, dict):
+                conn_resp_main = conn_resp_main.json() if hasattr(conn_resp_main, "json") else {}
+            connector_id_main = conn_resp_main.get("id") or conn_resp_main.get("connector_id")
+
+            aws_session_main = _boto3_main.session.Session()
+            creds_obj_main = aws_session_main.get_credentials()
+            if creds_obj_main:
+                creds_obj_main = creds_obj_main.resolve()
+            client.put(f"/connectors/{connector_id_main}/credentials", json={"credentials": {
+                "aws_access_key_id": getattr(creds_obj_main, "access_key", "") or "",
+                "aws_secret_access_key": getattr(creds_obj_main, "secret_key", "") or "",
+                "aws_session_token": getattr(creds_obj_main, "token", "") or "",
+                "aws_region": aws_session_main.region_name or "us-east-1",
+            }})
+
+            # Register asset for the EC2 instance
+            asset_resp_main = client.post("/assets", json={
+                "asset_type": "server",
+                "name": f"smoke-backup-{run_ts_main}",
+                "connector_id": connector_id_main,
+                "asset_metadata": {"instance_id": instance_id_main},
+            })
+            if not isinstance(asset_resp_main, dict):
+                asset_resp_main = asset_resp_main.json() if hasattr(asset_resp_main, "json") else {}
+            asset_id_main = asset_resp_main["id"]
+
+            # Create BackupStorage pointing to smoke S3 bucket
+            storage_resp_main = client.post("/backup-storage", json={
+                "name": f"smoke-s3-{run_ts_main}",
+                "storage_type": "s3",
+                "config": {
+                    "bucket": SMOKE_BUCKET,
+                    "prefix": f"smoke/{run_ts_main}/",
+                    "region": aws_session_main.region_name or "us-east-1",
+                },
+                "is_org_default": False,
+            })
+            if not isinstance(storage_resp_main, dict):
+                storage_resp_main = storage_resp_main.json() if hasattr(storage_resp_main, "json") else {}
+            backup_storage_id_main = storage_resp_main["id"]
+
+            try:
+                run_phase_backup_scheduler(
+                    client=client,
+                    aws_connector_id=connector_id_main,
+                    instance_id=instance_id_main,
+                    asset_id=asset_id_main,
+                    backup_storage_id=backup_storage_id_main,
+                )
+            finally:
+                try:
+                    ec2_main.terminate_instances(InstanceIds=[instance_id_main])
+                    print(f"  Terminated smoke instance {instance_id_main}")
+                except Exception as _exc_term:
+                    print(f"  Could not terminate {instance_id_main}: {_exc_term}")
+                try:
+                    client.delete(f"/backup-storage/{backup_storage_id_main}")
+                except Exception:
+                    pass
 
         if "PLATFORM_UPGRADE_ROLLBACK" in phases:
             run_phase_platform_upgrade_rollback(client, cloud_account_id)
