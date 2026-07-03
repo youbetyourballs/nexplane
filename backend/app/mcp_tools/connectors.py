@@ -167,7 +167,7 @@ async def list_connector_change_types(token: str, connector_id: str) -> list[dic
     """
     from sqlalchemy import select
     from app.models.connector import Connector
-    from app.connectors.catalog_service import get_catalog
+    from app.connectors.catalog_service import get_catalog_service
 
     user, db, db_cm = await _auth(token)
     try:
@@ -182,18 +182,17 @@ async def list_connector_change_types(token: str, connector_id: str) -> list[dic
             return [{"error": "Connector not found"}]
 
         try:
-            catalog = get_catalog()
-            connector_type_str = str(c.connector_type)
-            matching = [
+            svc = get_catalog_service()
+            connector_type_str = c.connector_type.value if hasattr(c.connector_type, "value") else str(c.connector_type)
+            actions = svc._catalog.get(connector_type_str, [])
+            return [
                 {
-                    "change_type": ct.change_type,
-                    "display_name": ct.display_name,
-                    "description": ct.description,
+                    "change_type": a.get("action_id", ""),
+                    "display_name": a.get("display_name", ""),
+                    "description": a.get("description", ""),
                 }
-                for ct in catalog.values()
-                if hasattr(ct, "connector_type") and str(ct.connector_type) == connector_type_str
+                for a in actions
             ]
-            return matching if matching else list(catalog.values())[:5]
         except Exception:
             return []
     finally:

@@ -241,6 +241,11 @@ _smoke_state: dict = {
     "approver_id": "",         # user id of approver
     "cr_created_at": "",       # ISO timestamp
     "dependent_asset_id": "",  # asset with a known downstream neighbour (MCP_DEPENDENCY)
+    "seeded_finding_id": "",   # finding created by MCP_FINDINGS if org had none
+    "finding_id": "",          # finding used for MCP_FINDINGS assertions
+    "connector_id": "",        # connector used for MCP_CONNECTORS assertions
+    "seeded_runbook_id": "",   # runbook created by MCP_RUNBOOKS if org had none
+    "runbook_id": "",          # runbook used for MCP_RUNBOOKS assertions
 }
 
 
@@ -299,24 +304,125 @@ def _get_approver_token(client: NexplaneClient) -> str:
     return ""
 
 
+def _seed_finding_direct(org_id: str, asset_id: str) -> str:
+    """Create a VulnerabilityFinding directly in the DB. Returns finding id str."""
+    import uuid as _uuid_sf
+    from app.models.vulnerability import VulnerabilityFinding as _VF_sf
+
+    async def _do(SessionLocal):
+        async with SessionLocal() as db:
+            f = _VF_sf(
+                id=_uuid_sf.uuid4(),
+                organization_id=_uuid_sf.UUID(org_id),
+                asset_id=_uuid_sf.UUID(asset_id) if asset_id else None,
+                scanner="mcp-smoke",
+                source="webhook",
+                finding_type="misconfiguration",
+                severity="medium",
+                title="mcp-smoke-finding",
+                status="open",
+            )
+            db.add(f)
+            await db.commit()
+            return str(f.id)
+
+    return _run_db_check(_do)
+
+
+def _run_db_check(coro_factory):
+    """
+    Run an async DB coroutine in a fresh thread + event loop with a fresh engine.
+    coro_factory is a callable that receives (AsyncSessionLocal) and returns a coroutine.
+    Returns the coroutine's return value or raises on error.
+    """
+    result_holder: list = [None]
+    error_holder: list = [None]
+
+    def _run():
+        async def _inner():
+            from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            db_url = os.environ.get(
+                "DATABASE_URL",
+                "postgresql+asyncpg://postgres:postgres@db:5432/nexplane",
+            )
+            engine = create_async_engine(db_url, pool_size=1, max_overflow=0)
+            factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            try:
+                result_holder[0] = await coro_factory(factory)
+            finally:
+                await engine.dispose()
+        try:
+            asyncio.run(_inner())
+        except Exception as exc:
+            error_holder[0] = exc
+
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=20)
+    if error_holder[0]:
+        raise error_holder[0]
+    return result_holder[0]
+
+
+def _delete_finding_direct(finding_id: str) -> None:
+    """Delete a VulnerabilityFinding directly from the DB."""
+    import uuid as _uuid_df
+    from app.models.vulnerability import VulnerabilityFinding as _VF_df
+
+    async def _do(SessionLocal):
+        async with SessionLocal() as db:
+            f = await db.get(_VF_df, _uuid_df.UUID(finding_id))
+            if f:
+                await db.delete(f)
+                await db.commit()
+
+    try:
+        _run_db_check(_do)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Phase: MCP_TOOL_ENUM
 # ---------------------------------------------------------------------------
 
 EXPECTED_TOOLS = {
-    "list_change_types",
-    "create_change_request",
-    "submit_for_approval",
-    "approve_change_request",
-    "execute_change_request",
-    "rollback_change_request",
-    "get_execution_progress",
-    "list_assets",
-    "list_findings",
+    # change_requests (10)
+    "list_change_types", "get_change_type", "list_change_requests",
+    "get_change_request", "create_change_request", "submit_for_approval",
+    "approve_change_request", "execute_change_request",
+    "get_execution_progress", "rollback_change_request",
+    # assets (6)
+    "list_assets", "get_asset", "get_asset_context",
+    "list_asset_findings", "get_asset_neighbors", "get_asset_timeline",
+    # findings (12)
+    "list_findings", "get_finding", "update_finding_status",
+    "assign_finding", "accept_risk", "mark_false_positive",
+    "trigger_poc_validation", "get_poc_result", "challenge_exploitability",
+    "trigger_verification", "get_verification_result",
+    "list_finding_change_requests",
+    # connectors (5)
+    "list_connectors", "get_connector", "test_connector",
+    "get_connector_status", "list_connector_change_types",
+    # identity (6)
+    "list_identities", "get_identity", "list_identity_findings",
+    "get_identity_graph", "list_access_reviews", "get_access_review",
+    # runbooks (4)
+    "list_runbooks", "get_runbook", "execute_runbook",
+    "get_runbook_execution_status",
+    # host_intelligence (16)
+    "get_kernel_info", "get_running_processes", "get_cron_jobs",
+    "get_local_users", "get_installed_packages", "get_running_services",
+    "get_open_ports", "get_security_posture", "get_seccomp_policy",
+    "get_apparmor_profiles", "get_selinux_policy", "get_sudoers",
+    "get_authorized_keys", "get_ssl_certs", "get_patch_status",
+    "get_host_full_context",
+    # planning_context (8)
+    "get_asset_history", "get_fleet_context", "find_similar_assets",
+    "get_migration_precedents", "get_cross_host_dependency_map",
+    "get_kernel_eol_status", "get_environment_diff", "get_project_precedents",
+    # provenance
     "explain_change_request",
-    "get_change_request",
-    "get_asset_neighbors",
-    "get_asset_timeline",
 }
 
 
@@ -337,12 +443,15 @@ def phase_mcp_tool_enum(client: NexplaneClient, base_url: str) -> None:
 
         def _run():
             async def _inner():
-                import app.mcp_tools.assets          # noqa: F401
-                import app.mcp_tools.change_requests  # noqa: F401
-                import app.mcp_tools.connectors       # noqa: F401
-                import app.mcp_tools.identity         # noqa: F401
-                import app.mcp_tools.runbooks         # noqa: F401
-                import app.mcp_tools.findings         # noqa: F401
+                import app.mcp_tools.assets              # noqa: F401
+                import app.mcp_tools.change_requests     # noqa: F401
+                import app.mcp_tools.connectors          # noqa: F401
+                import app.mcp_tools.identity            # noqa: F401
+                import app.mcp_tools.runbooks            # noqa: F401
+                import app.mcp_tools.findings            # noqa: F401
+                import app.mcp_tools.host_intelligence   # noqa: F401
+                import app.mcp_tools.planning_context    # noqa: F401
+                import app.mcp_tools.projects            # noqa: F401
                 from app.mcp_server import mcp
                 return list(mcp._tool_manager._tools.keys())
 
@@ -974,6 +1083,588 @@ def phase_mcp_timeline(client: NexplaneClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase: MCP_FINDINGS
+# ---------------------------------------------------------------------------
+
+def phase_mcp_findings(client: NexplaneClient) -> None:
+    print("\n[MCP_FINDINGS] list_findings, get_finding (DB-verified), list_finding_change_requests", flush=True)
+
+    api_token = _smoke_state["api_token"]
+    assert api_token, "api_token not set — run MCP_TOOL_ENUM first"
+
+    # ── 1. list_findings ──────────────────────────────────────────────────────
+    findings = _invoke_mcp_tool_inprocess("list_findings", {
+        "token": api_token,
+        "limit": 50,
+    })
+    assert isinstance(findings, list), f"list_findings returned non-list: {type(findings)}"
+    log(f"list_findings returned {len(findings)} findings")
+
+    # ── 2. Ensure we have a finding to work with ──────────────────────────────
+    if findings:
+        finding_id = findings[0]["id"]
+        _smoke_state["finding_id"] = finding_id
+        log(f"Using existing finding {finding_id}")
+    else:
+        from app.models.user import User as _User_f
+        from sqlalchemy import select as _select_f
+
+        async def _get_org_check(SessionLocal):
+            async with SessionLocal() as db:
+                r = await db.execute(_select_f(_User_f).where(_User_f.email == "admin@acme.example"))
+                u = r.scalar_one_or_none()
+                return str(u.organization_id) if u else None
+
+        org_id = _run_db_check(_get_org_check)
+        assert org_id, "Could not determine org_id for finding seed"
+
+        finding_id = _seed_finding_direct(org_id, _smoke_state.get("asset_id", ""))
+        _smoke_state["seeded_finding_id"] = finding_id
+        _smoke_state["finding_id"] = finding_id
+        log(f"Seeded finding {finding_id} directly via DB")
+
+    # ── 3. get_finding ────────────────────────────────────────────────────────
+    mcp_finding = _invoke_mcp_tool_inprocess("get_finding", {
+        "token": api_token,
+        "finding_id": finding_id,
+    })
+    assert isinstance(mcp_finding, dict), f"get_finding returned non-dict: {type(mcp_finding)}"
+    assert "id" in mcp_finding, f"get_finding missing 'id': {mcp_finding}"
+    assert mcp_finding["id"] == finding_id, f"id mismatch: {mcp_finding['id']} != {finding_id}"
+
+    # ── 4. DB cross-check ─────────────────────────────────────────────────────
+    import uuid as _uuid_f
+    from app.models.vulnerability import VulnerabilityFinding as _VF
+
+    async def _finding_db_check(SessionLocal):
+        async with SessionLocal() as db:
+            f = await db.get(_VF, _uuid_f.UUID(finding_id))
+            assert f is not None, f"Finding {finding_id} not in DB"
+            return {"id": str(f.id), "severity": f.severity, "title": f.title}
+
+    try:
+        db_data = [_run_db_check(_finding_db_check)]
+    except Exception as exc:
+        fail(f"DB lookup for finding {finding_id} failed: {exc}")
+
+    assert mcp_finding["severity"] == db_data[0]["severity"], (
+        f"severity mismatch: MCP={mcp_finding['severity']} DB={db_data[0]['severity']}"
+    )
+    assert mcp_finding["title"] == db_data[0]["title"], (
+        f"title mismatch: MCP={mcp_finding['title']} DB={db_data[0]['title']}"
+    )
+    log(f"get_finding DB-verified: id/severity/title match (severity={mcp_finding['severity']})")
+
+    # ── 5. list_finding_change_requests ───────────────────────────────────────
+    finding_crs = _invoke_mcp_tool_inprocess("list_finding_change_requests", {
+        "token": api_token,
+        "finding_id": finding_id,
+    })
+    assert isinstance(finding_crs, list), f"list_finding_change_requests returned non-list: {type(finding_crs)}"
+    log(f"list_finding_change_requests returned {len(finding_crs)} CRs (empty is OK)")
+
+    print("[MCP_FINDINGS] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase: MCP_CONNECTORS
+# ---------------------------------------------------------------------------
+
+def phase_mcp_connectors(client: NexplaneClient) -> None:
+    print("\n[MCP_CONNECTORS] list_connectors (non-empty), get_connector (DB-verified, no cred leak), list_connector_change_types", flush=True)
+
+    api_token = _smoke_state["api_token"]
+    assert api_token, "api_token not set — run MCP_TOOL_ENUM first"
+
+    # ── 1. list_connectors ────────────────────────────────────────────────────
+    connectors = _invoke_mcp_tool_inprocess("list_connectors", {
+        "token": api_token,
+    })
+    assert isinstance(connectors, list), f"list_connectors returned non-list: {type(connectors)}"
+    assert connectors, "list_connectors returned empty list — org must have at least one connector"
+    connector_id = connectors[0]["id"]
+    _smoke_state["connector_id"] = connector_id
+    log(f"list_connectors: {len(connectors)} connectors, using {connector_id}")
+
+    # ── 2. get_connector ──────────────────────────────────────────────────────
+    mcp_conn = _invoke_mcp_tool_inprocess("get_connector", {
+        "token": api_token,
+        "connector_id": connector_id,
+    })
+    assert isinstance(mcp_conn, dict), f"get_connector returned non-dict: {type(mcp_conn)}"
+    assert mcp_conn.get("id") == connector_id, f"id mismatch: {mcp_conn.get('id')} != {connector_id}"
+
+    # Security: credentials must NOT be in the MCP response
+    cred_keys = {"credentials", "access_key_id", "secret_access_key", "password", "token", "api_key"}
+    leaked = cred_keys & set(mcp_conn.keys())
+    assert not leaked, f"Credential keys leaked in get_connector response: {leaked}"
+    log("Security check passed: no credential keys in get_connector response")
+
+    # ── 3. DB cross-check ─────────────────────────────────────────────────────
+    import uuid as _uuid_c
+    from app.models.connector import Connector as _Connector
+
+    async def _connector_db_check(SessionLocal):
+        async with SessionLocal() as db:
+            c = await db.get(_Connector, _uuid_c.UUID(connector_id))
+            assert c is not None, f"Connector {connector_id} not in DB"
+            return {"id": str(c.id), "connector_type": c.connector_type.value}
+
+    try:
+        db_conn = [_run_db_check(_connector_db_check)]
+    except Exception as exc:
+        fail(f"DB lookup for connector {connector_id} failed: {exc}")
+
+    mcp_ct = mcp_conn.get("connector_type", "")
+    # Normalize: MCP may return "ConnectorType.aws" or just "aws"
+    if "." in str(mcp_ct):
+        mcp_ct = str(mcp_ct).split(".")[-1]
+    assert mcp_ct == db_conn[0]["connector_type"], (
+        f"connector_type mismatch: MCP={mcp_conn.get('connector_type')} DB={db_conn[0]['connector_type']}"
+    )
+    log(f"get_connector DB-verified: connector_type={db_conn[0]['connector_type']}")
+
+    # ── 4. list_connector_change_types ────────────────────────────────────────
+    change_types = _invoke_mcp_tool_inprocess("list_connector_change_types", {
+        "token": api_token,
+        "connector_id": connector_id,
+    })
+    assert isinstance(change_types, list), f"list_connector_change_types returned non-list: {type(change_types)}"
+    log(f"list_connector_change_types: {len(change_types)} change types")
+
+    print("[MCP_CONNECTORS] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase: MCP_IDENTITY
+# ---------------------------------------------------------------------------
+
+def phase_mcp_identity(client: NexplaneClient) -> None:
+    print("\n[MCP_IDENTITY] list_identities, list_access_reviews, get_access_review (grounded non-error)", flush=True)
+
+    api_token = _smoke_state["api_token"]
+    assert api_token, "api_token not set — run MCP_TOOL_ENUM first"
+
+    # ── 1. list_identities ────────────────────────────────────────────────────
+    identities = _invoke_mcp_tool_inprocess("list_identities", {
+        "token": api_token,
+        "limit": 20,
+    })
+    assert isinstance(identities, list), f"list_identities returned non-list: {type(identities)}"
+    log(f"list_identities: {len(identities)} identities (empty is OK for demo org)")
+
+    if identities:
+        identity_id = identities[0]["id"]
+        identity = _invoke_mcp_tool_inprocess("get_identity", {
+            "token": api_token,
+            "identity_id": identity_id,
+        })
+        assert isinstance(identity, dict), f"get_identity returned non-dict: {type(identity)}"
+        assert identity.get("id") == identity_id, "id mismatch in get_identity"
+        log(f"get_identity: returned dict with id={identity_id}")
+
+    # ── 2. list_access_reviews ────────────────────────────────────────────────
+    reviews = _invoke_mcp_tool_inprocess("list_access_reviews", {
+        "token": api_token,
+        "limit": 10,
+    })
+    assert isinstance(reviews, list), f"list_access_reviews returned non-list: {type(reviews)}"
+    log(f"list_access_reviews: {len(reviews)} reviews (empty is OK)")
+
+    if reviews:
+        review_id = reviews[0]["id"]
+        review = _invoke_mcp_tool_inprocess("get_access_review", {
+            "token": api_token,
+            "review_id": review_id,
+        })
+        assert isinstance(review, dict), f"get_access_review returned non-dict: {type(review)}"
+        assert "id" in review, "get_access_review missing 'id' key"
+        log(f"get_access_review: returned dict with id={review_id}")
+
+    print("[MCP_IDENTITY] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase: MCP_RUNBOOKS
+# ---------------------------------------------------------------------------
+
+def phase_mcp_runbooks(client: NexplaneClient) -> None:
+    print("\n[MCP_RUNBOOKS] list_runbooks, get_runbook (DB-verified)", flush=True)
+
+    api_token = _smoke_state["api_token"]
+    assert api_token, "api_token not set — run MCP_TOOL_ENUM first"
+
+    # ── 1. list_runbooks ──────────────────────────────────────────────────────
+    runbooks = _invoke_mcp_tool_inprocess("list_runbooks", {
+        "token": api_token,
+        "limit": 20,
+    })
+    assert isinstance(runbooks, list), f"list_runbooks returned non-list: {type(runbooks)}"
+    log(f"list_runbooks: {len(runbooks)} runbooks")
+
+    # ── 2. Ensure we have a runbook to work with ──────────────────────────────
+    if runbooks:
+        runbook_id = runbooks[0]["id"]
+        _smoke_state["runbook_id"] = runbook_id
+        log(f"Using existing runbook {runbook_id}")
+    else:
+        base = client.base.rstrip("/")
+        auth_header = client.client.headers.get("Authorization", "")
+        resp = client.client.post(
+            f"{base}/api/runbooks",
+            json={
+                "name": "mcp-smoke-runbook",
+                "description": "Created by MCP smoke test",
+                "tags": [],
+                "auto_execute": False,
+                "steps": [{
+                    "step_number": 1,
+                    "name": "smoke-checkpoint",
+                    "type": "human_checkpoint",
+                    "prompt": "MCP smoke test checkpoint — approve to continue",
+                    "required_role": "admin",
+                    "on_failure": "abort",
+                }],
+            },
+        )
+        assert resp.status_code == 201, f"POST /api/runbooks failed {resp.status_code}: {resp.text}"
+        runbook_id = resp.json()["id"]
+        _smoke_state["seeded_runbook_id"] = runbook_id
+        _smoke_state["runbook_id"] = runbook_id
+        log(f"Seeded runbook {runbook_id} via POST /api/runbooks")
+
+    # ── 3. get_runbook ────────────────────────────────────────────────────────
+    mcp_runbook = _invoke_mcp_tool_inprocess("get_runbook", {
+        "token": api_token,
+        "runbook_id": runbook_id,
+    })
+    assert isinstance(mcp_runbook, dict), f"get_runbook returned non-dict: {type(mcp_runbook)}"
+    assert mcp_runbook.get("id") == runbook_id, f"id mismatch: {mcp_runbook.get('id')} != {runbook_id}"
+
+    # ── 4. DB cross-check ─────────────────────────────────────────────────────
+    import uuid as _uuid_rb
+    from app.models.runbook import Runbook as _Runbook
+
+    async def _runbook_db_check(SessionLocal):
+        async with SessionLocal() as db:
+            rb = await db.get(_Runbook, _uuid_rb.UUID(runbook_id))
+            assert rb is not None, f"Runbook {runbook_id} not in DB"
+            return {"id": str(rb.id), "name": rb.name}
+
+    try:
+        db_rb = [_run_db_check(_runbook_db_check)]
+    except Exception as exc:
+        fail(f"DB lookup for runbook {runbook_id} failed: {exc}")
+
+    assert mcp_runbook.get("name") == db_rb[0]["name"], (
+        f"name mismatch: MCP={mcp_runbook.get('name')} DB={db_rb[0]['name']}"
+    )
+    log(f"get_runbook DB-verified: name={db_rb[0]['name']}")
+
+    print("[MCP_RUNBOOKS] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase: MCP_HOST_INTEL
+# ---------------------------------------------------------------------------
+
+def phase_mcp_host_intel(client: NexplaneClient) -> None:
+    print("\n[MCP_HOST_INTEL] All 16 host_intelligence tools — structure verified, empty OK", flush=True)
+
+    api_token = _smoke_state["api_token"]
+    asset_id = _smoke_state["asset_id"]
+    assert api_token, "api_token not set — run MCP_TOOL_ENUM first"
+    assert asset_id, "asset_id not set — run MCP_CR_ROUNDTRIP first"
+
+    list_tools = [
+        "get_running_processes",
+        "get_cron_jobs",
+        "get_local_users",
+        "get_installed_packages",
+        "get_running_services",
+        "get_open_ports",
+        "get_apparmor_profiles",
+        "get_sudoers",
+        "get_authorized_keys",
+        "get_ssl_certs",
+    ]
+    dict_tools = [
+        "get_kernel_info",
+        "get_security_posture",
+        "get_seccomp_policy",
+        "get_selinux_policy",
+        "get_patch_status",
+    ]
+
+    # Tools raise RuntimeError("No agent registered...") for non-enrolled assets.
+    # That is acceptable — assert no other exception type is raised.
+    _no_agent_msg = "No agent registered"
+
+    for tool_name in list_tools:
+        try:
+            result = _invoke_mcp_tool_inprocess(tool_name, {
+                "token": api_token,
+                "asset_id": asset_id,
+            })
+            assert isinstance(result, list), f"{tool_name} returned non-list: {type(result)}"
+            log(f"{tool_name}: list with {len(result)} items")
+        except RuntimeError as exc:
+            if _no_agent_msg in str(exc):
+                log(f"{tool_name}: no agent enrolled (acceptable for smoke asset)")
+            else:
+                raise
+
+    for tool_name in dict_tools:
+        try:
+            result = _invoke_mcp_tool_inprocess(tool_name, {
+                "token": api_token,
+                "asset_id": asset_id,
+            })
+            assert isinstance(result, dict), f"{tool_name} returned non-dict: {type(result)}"
+            log(f"{tool_name}: dict with keys={list(result.keys())[:5]}")
+        except RuntimeError as exc:
+            if _no_agent_msg in str(exc):
+                log(f"{tool_name}: no agent enrolled (acceptable for smoke asset)")
+            else:
+                raise
+
+    try:
+        full_ctx = _invoke_mcp_tool_inprocess("get_host_full_context", {
+            "token": api_token,
+            "asset_id": asset_id,
+        })
+        assert isinstance(full_ctx, dict), f"get_host_full_context returned non-dict: {type(full_ctx)}"
+        log(f"get_host_full_context: keys={list(full_ctx.keys())} (empty OK for non-agent asset)")
+    except RuntimeError as exc:
+        if _no_agent_msg in str(exc):
+            log("get_host_full_context: no agent enrolled (acceptable for smoke asset)")
+        else:
+            raise
+
+    print("[MCP_HOST_INTEL] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase: MCP_PLANNING_CTX
+# ---------------------------------------------------------------------------
+
+def phase_mcp_planning_ctx(client: NexplaneClient) -> None:
+    print("\n[MCP_PLANNING_CTX] get_asset_history (DB-verified accuracy) + fleet/similarity tools", flush=True)
+
+    api_token = _smoke_state["api_token"]
+    asset_id = _smoke_state["asset_id"]
+    cr_id = _smoke_state["cr_id"]
+    assert api_token, "api_token not set — run MCP_TOOL_ENUM first"
+    assert asset_id, "asset_id not set — run MCP_CR_ROUNDTRIP first"
+    assert cr_id, "cr_id not set — run MCP_CR_ROUNDTRIP first"
+
+    # ── 1. get_asset_history — DB-verified accuracy ───────────────────────────
+    history = _invoke_mcp_tool_inprocess("get_asset_history", {
+        "token": api_token,
+        "asset_id": asset_id,
+        "since_days": 90,
+    })
+    assert isinstance(history, list), f"get_asset_history returned non-list: {type(history)}"
+    log(f"get_asset_history: {len(history)} entries")
+
+    matching = [e for e in history if e.get("cr_id") == cr_id]
+    assert matching, (
+        f"CR {cr_id} not found in get_asset_history. "
+        f"Entry cr_ids: {[e.get('cr_id') for e in history[:10]]}"
+    )
+    entry = matching[0]
+
+    import uuid as _uuid_cr
+    from app.models.change_request import ChangeRequest as _ChangeRequest
+
+    async def _cr_db_check(SessionLocal):
+        async with SessionLocal() as db:
+            cr = await db.get(_ChangeRequest, _uuid_cr.UUID(cr_id))
+            assert cr is not None, f"CR {cr_id} not in DB"
+            return {"change_type": cr.change_type.value, "status": cr.status.value}
+
+    try:
+        db_cr = [_run_db_check(_cr_db_check)]
+    except Exception as exc:
+        fail(f"DB lookup for CR {cr_id} failed: {exc}")
+
+    assert entry["change_type"] == db_cr[0]["change_type"], (
+        f"change_type mismatch: history={entry['change_type']} DB={db_cr[0]['change_type']}"
+    )
+    assert entry["status"] == db_cr[0]["status"], (
+        f"status mismatch: history={entry['status']} DB={db_cr[0]['status']}"
+    )
+    log(f"get_asset_history DB-verified: change_type={entry['change_type']}, status={entry['status']}")
+
+    # ── 2. get_fleet_context — grounded non-empty ─────────────────────────────
+    fleet = _invoke_mcp_tool_inprocess("get_fleet_context", {
+        "token": api_token,
+    })
+    if isinstance(fleet, list):
+        assert fleet, "get_fleet_context returned empty list"
+        log(f"get_fleet_context: {len(fleet)} assets")
+    else:
+        assert isinstance(fleet, dict), f"get_fleet_context returned unexpected type: {type(fleet)}"
+        log(f"get_fleet_context: dict keys={list(fleet.keys())[:5]}")
+
+    # ── 3. find_similar_assets — non-error ────────────────────────────────────
+    similar = _invoke_mcp_tool_inprocess("find_similar_assets", {
+        "token": api_token,
+        "asset_id": asset_id,
+    })
+    assert similar is not None, "find_similar_assets returned None"
+    log(f"find_similar_assets: {type(similar).__name__}")
+
+    # ── 4. get_cross_host_dependency_map — non-error ──────────────────────────
+    dep_map = _invoke_mcp_tool_inprocess("get_cross_host_dependency_map", {
+        "token": api_token,
+        "asset_ids": [asset_id],
+    })
+    assert dep_map is not None, "get_cross_host_dependency_map returned None"
+    assert isinstance(dep_map, dict), f"get_cross_host_dependency_map returned non-dict: {type(dep_map)}"
+    log(f"get_cross_host_dependency_map: dict with {len(dep_map)} keys")
+
+    # ── 5. get_migration_precedents — non-error ───────────────────────────────
+    precedents = _invoke_mcp_tool_inprocess("get_migration_precedents", {
+        "token": api_token,
+        "change_type": "tag_resource",
+    })
+    assert precedents is not None, "get_migration_precedents returned None"
+    log(f"get_migration_precedents: {type(precedents).__name__}")
+
+    # ── 6. get_kernel_eol_status — non-error ─────────────────────────────────
+    eol = _invoke_mcp_tool_inprocess("get_kernel_eol_status", {
+        "token": api_token,
+        "asset_ids": [asset_id],
+    })
+    assert eol is not None, "get_kernel_eol_status returned None"
+    assert isinstance(eol, list), f"get_kernel_eol_status returned non-list: {type(eol)}"
+    log(f"get_kernel_eol_status: {len(eol)} entries")
+
+    # ── 7. get_environment_diff — non-error ───────────────────────────────────
+    env_diff = _invoke_mcp_tool_inprocess("get_environment_diff", {
+        "token": api_token,
+        "asset_ids": [asset_id],
+    })
+    assert env_diff is not None, "get_environment_diff returned None"
+    log(f"get_environment_diff: {type(env_diff).__name__}")
+
+    # ── 8. get_project_precedents — non-error ─────────────────────────────────
+    proj_prec = _invoke_mcp_tool_inprocess("get_project_precedents", {
+        "token": api_token,
+        "goal": "security hardening",
+    })
+    assert proj_prec is not None, "get_project_precedents returned None"
+    log(f"get_project_precedents: {type(proj_prec).__name__}")
+
+    print("[MCP_PLANNING_CTX] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase: MCP_MEMORY_ACCURACY
+# ---------------------------------------------------------------------------
+
+def phase_mcp_memory_accuracy(client: NexplaneClient) -> None:
+    print("\n[MCP_MEMORY_ACCURACY] Cross-tool consistency + DB accuracy for the roundtrip CR", flush=True)
+
+    api_token = _smoke_state["api_token"]
+    asset_id = _smoke_state["asset_id"]
+    cr_id = _smoke_state["cr_id"]
+    assert api_token and asset_id and cr_id, (
+        "api_token/asset_id/cr_id not set — run MCP_TOOL_ENUM and MCP_CR_ROUNDTRIP first"
+    )
+
+    # ── 1. DB ground truth ────────────────────────────────────────────────────
+    import uuid as _uuid_ma
+    from app.models.change_request import ChangeRequest as _CR_ma
+    from app.models.approval import Approval as _Approval_ma
+    from sqlalchemy import select as _select_ma
+
+    async def _ground_db_check(SessionLocal):
+        async with SessionLocal() as db:
+            cr = await db.get(_CR_ma, _uuid_ma.UUID(cr_id))
+            assert cr is not None, f"CR {cr_id} not in DB"
+            r = await db.execute(
+                _select_ma(_Approval_ma).where(_Approval_ma.change_request_id == cr.id).limit(1)
+            )
+            approval = r.scalar_one_or_none()
+            return {
+                "change_type": cr.change_type.value,
+                "status": cr.status.value,
+                "approver_id": str(approval.approver_id) if approval else None,
+            }
+
+    try:
+        db_ground = [_run_db_check(_ground_db_check)]
+    except Exception as exc:
+        fail(f"DB ground truth query failed: {exc}")
+    log(f"DB ground truth: change_type={db_ground[0]['change_type']}, status={db_ground[0]['status']}")
+
+    # ── 2. get_change_request ─────────────────────────────────────────────────
+    cr_from_mcp = _invoke_mcp_tool_inprocess("get_change_request", {
+        "token": api_token,
+        "cr_id": cr_id,
+    })
+    assert isinstance(cr_from_mcp, dict), f"get_change_request returned non-dict: {type(cr_from_mcp)}"
+    assert cr_from_mcp.get("id") == cr_id, "id mismatch in get_change_request"
+    assert cr_from_mcp.get("change_type") == db_ground[0]["change_type"], (
+        f"get_change_request change_type mismatch: MCP={cr_from_mcp.get('change_type')} DB={db_ground[0]['change_type']}"
+    )
+    assert cr_from_mcp.get("status") == db_ground[0]["status"], (
+        f"get_change_request status mismatch: MCP={cr_from_mcp.get('status')} DB={db_ground[0]['status']}"
+    )
+    log("get_change_request: change_type and status match DB")
+
+    if db_ground[0]["approver_id"]:
+        approvals = cr_from_mcp.get("approvals", []) or []
+        if approvals:
+            mcp_approver_id = approvals[0].get("approver_id") or (approvals[0].get("approver") or {}).get("id")
+            if mcp_approver_id:
+                assert mcp_approver_id == db_ground[0]["approver_id"], (
+                    f"approver_id mismatch: MCP={mcp_approver_id} DB={db_ground[0]['approver_id']}"
+                )
+                log(f"Approver consistency verified: {mcp_approver_id}")
+
+    # ── 3. get_asset_history ──────────────────────────────────────────────────
+    history = _invoke_mcp_tool_inprocess("get_asset_history", {
+        "token": api_token,
+        "asset_id": asset_id,
+        "since_days": 90,
+    })
+    assert isinstance(history, list)
+    h_entry = next((e for e in history if e.get("cr_id") == cr_id), None)
+    assert h_entry is not None, (
+        f"CR {cr_id} not found in get_asset_history. cr_ids: {[e.get('cr_id') for e in history[:10]]}"
+    )
+    assert h_entry["change_type"] == db_ground[0]["change_type"], (
+        f"get_asset_history change_type mismatch: history={h_entry['change_type']} DB={db_ground[0]['change_type']}"
+    )
+    log("get_asset_history: change_type matches DB")
+
+    # ── 4. get_asset_timeline ─────────────────────────────────────────────────
+    timeline = _invoke_mcp_tool_inprocess("get_asset_timeline", {
+        "token": api_token,
+        "asset_id": asset_id,
+    })
+    events = timeline if isinstance(timeline, list) else (timeline.get("events", []) if isinstance(timeline, dict) else [])
+    cr_in_timeline = any(cr_id in str(e) for e in events)
+    assert cr_in_timeline, (
+        f"CR {cr_id} not found in get_asset_timeline. "
+        f"Timeline has {len(events)} events."
+    )
+    log("get_asset_timeline: CR present in timeline")
+
+    # ── 5. Cross-tool consistency ─────────────────────────────────────────────
+    assert cr_from_mcp.get("change_type") == h_entry["change_type"], (
+        f"Cross-tool inconsistency: get_change_request={cr_from_mcp.get('change_type')} "
+        f"get_asset_history={h_entry['change_type']}"
+    )
+    log("Cross-tool consistency: get_change_request and get_asset_history agree on change_type")
+
+    print("[MCP_MEMORY_ACCURACY] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
 # Phase registry + main
 # ---------------------------------------------------------------------------
 
@@ -986,6 +1677,13 @@ ALL_PHASES = [
     "MCP_DEPENDENCY",
     "MCP_SAFETY_QUERY",
     "MCP_TIMELINE",
+    "MCP_FINDINGS",
+    "MCP_CONNECTORS",
+    "MCP_IDENTITY",
+    "MCP_RUNBOOKS",
+    "MCP_HOST_INTEL",
+    "MCP_PLANNING_CTX",
+    "MCP_MEMORY_ACCURACY",
 ]
 
 
@@ -1017,24 +1715,50 @@ def main() -> None:
         "MCP_DEPENDENCY":       lambda: phase_mcp_dependency(client),
         "MCP_SAFETY_QUERY":     lambda: phase_mcp_safety_query(client),
         "MCP_TIMELINE":         lambda: phase_mcp_timeline(client),
+        "MCP_FINDINGS":         lambda: phase_mcp_findings(client),
+        "MCP_CONNECTORS":       lambda: phase_mcp_connectors(client),
+        "MCP_IDENTITY":         lambda: phase_mcp_identity(client),
+        "MCP_RUNBOOKS":         lambda: phase_mcp_runbooks(client),
+        "MCP_HOST_INTEL":       lambda: phase_mcp_host_intel(client),
+        "MCP_PLANNING_CTX":     lambda: phase_mcp_planning_ctx(client),
+        "MCP_MEMORY_ACCURACY":  lambda: phase_mcp_memory_accuracy(client),
     }
 
     passed = []
     failed = []
-    for phase in ALL_PHASES:
-        if phase not in requested:
-            continue
-        try:
-            phase_fns[phase]()
-            passed.append(phase)
-        except SystemExit:
-            failed.append(phase)
-            print(f"[{phase}] FAILED", flush=True)
-        except Exception as exc:
-            failed.append(phase)
-            print(f"[{phase}] FAILED with exception: {exc}", flush=True)
-            import traceback
-            traceback.print_exc()
+    try:
+        for phase in ALL_PHASES:
+            if phase not in requested:
+                continue
+            try:
+                phase_fns[phase]()
+                passed.append(phase)
+            except SystemExit:
+                failed.append(phase)
+                print(f"[{phase}] FAILED", flush=True)
+            except Exception as exc:
+                failed.append(phase)
+                print(f"[{phase}] FAILED with exception: {exc}", flush=True)
+                import traceback
+                traceback.print_exc()
+    finally:
+        # Clean up seeded finding (if created by MCP_FINDINGS)
+        if _smoke_state.get("seeded_finding_id"):
+            try:
+                _delete_finding_direct(_smoke_state["seeded_finding_id"])
+                log(f"Cleaned up seeded finding {_smoke_state['seeded_finding_id']}")
+            except Exception as exc:
+                log(f"Could not clean up finding: {exc}", ok=False)
+
+        # Clean up seeded runbook (if created by MCP_RUNBOOKS)
+        if _smoke_state.get("seeded_runbook_id"):
+            try:
+                resp = client.client.delete(
+                    f"{client.base.rstrip('/')}/api/runbooks/{_smoke_state['seeded_runbook_id']}",
+                )
+                log(f"Cleaned up seeded runbook {_smoke_state['seeded_runbook_id']}: {resp.status_code}")
+            except Exception as exc:
+                log(f"Could not clean up runbook: {exc}", ok=False)
 
     print(f"\n{'='*60}", flush=True)
     print(f"MCP_SERVER_SMOKE summary: {len(passed)}/{len(passed)+len(failed)} passed", flush=True)
