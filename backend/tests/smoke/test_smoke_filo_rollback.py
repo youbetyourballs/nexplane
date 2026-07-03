@@ -343,17 +343,7 @@ async def test_PHASE_0_provision(request):
         timeout=300,
     )
 
-    # Get instance_id from CR execution result
-    from app.mcp_tools.change_requests import get_change_request
-    ec2_cr = await get_change_request(token=token, cr_id=ec2_cr_id)
-    execution_result = ec2_cr.get("execution_result") or {}
-    instance_id = execution_result.get("instance_id")
-    assert instance_id, f"instance_id not found in ec2_launch CR result: {ec2_cr}"
-    _STATE["instance_id"] = instance_id
-    _STATE["provisioned"] = True
-    print(f"  EC2 instance launched: {instance_id}")
-
-    # Find the auto-created server asset for this instance
+    # Find the auto-created server asset (ec2_launch creates it via _auto_asset)
     async with httpx.AsyncClient(
         base_url=_BASE_URL,
         headers={"Authorization": f"Bearer {jwt}"},
@@ -362,8 +352,13 @@ async def test_PHASE_0_provision(request):
         r = await client.get("/assets", params={"q": "nexplane-smoke-filo", "asset_type": "server"})
         ec2_assets = r.json()
     assert ec2_assets, "Server asset not found in inventory after ec2_launch"
-    ec2_asset_id = ec2_assets[0]["id"]
-    print(f"  EC2 server asset: {ec2_asset_id}")
+    ec2_asset = ec2_assets[0]
+    ec2_asset_id = ec2_asset["id"]
+    instance_id = (ec2_asset.get("asset_metadata") or {}).get("instance_id")
+    assert instance_id, f"instance_id not found in asset metadata: {ec2_asset}"
+    _STATE["instance_id"] = instance_id
+    _STATE["provisioned"] = True
+    print(f"  EC2 instance launched: {instance_id}, asset: {ec2_asset_id}")
 
     # Wait for SSM agent to register on the new instance (required before deploy)
     print("  Waiting 180s for SSM agent to register on the new instance...")
