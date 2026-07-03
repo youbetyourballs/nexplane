@@ -162,9 +162,9 @@ def _wait_cr_complete(client, cr_id: str, label: str, timeout: int = 300) -> dic
 def _plan_and_approve_cr(client, cr_id: str) -> None:
     """Generate plan, submit for approval, and approve via REST."""
     import requests as _req
-    jwt = client._get_jwt() if hasattr(client, "_get_jwt") else client.token
-    headers = {"Authorization": f"Bearer {jwt}"}
-    base = (client.base_url if hasattr(client, "base_url") else client.base).rstrip("/")
+    auth_header = client.client.headers.get("Authorization", "")
+    headers = {"Authorization": auth_header}
+    base = (getattr(client, "base_url", None) or getattr(client, "base", "")).rstrip("/")
     r = _req.post(f"{base}/change-requests/{cr_id}/plan", headers=headers)
     assert r.status_code == 200, f"POST /plan failed {r.status_code}: {r.text}"
     r = _req.post(f"{base}/change-requests/{cr_id}/submit-for-approval", headers=headers)
@@ -180,11 +180,11 @@ def _plan_and_approve_cr(client, cr_id: str) -> None:
 def _execute_cr(client, cr_id: str) -> None:
     """Execute a CR via REST."""
     import requests as _req
-    jwt = client._get_jwt() if hasattr(client, "_get_jwt") else client.token
-    base = (client.base_url if hasattr(client, "base_url") else client.base).rstrip("/")
+    auth_header = client.client.headers.get("Authorization", "")
+    base = (getattr(client, "base_url", None) or getattr(client, "base", "")).rstrip("/")
     r = _req.post(
         f"{base}/change-requests/{cr_id}/execute",
-        headers={"Authorization": f"Bearer {jwt}"},
+        headers={"Authorization": auth_header},
     )
     assert r.status_code in (200, 202), f"POST /execute failed {r.status_code}: {r.text}"
 
@@ -334,11 +334,11 @@ def run_phase_backup_scheduler(
 
         # Check if run-now endpoint is available; skip gracefully if not
         import requests as _run_now_req
-        jwt = client._get_jwt() if hasattr(client, "_get_jwt") else client.token
-        base = (client.base_url if hasattr(client, "base_url") else client.base).rstrip("/")
+        _rn_auth = client.client.headers.get("Authorization", "")
+        base = (getattr(client, "base_url", None) or getattr(client, "base", "")).rstrip("/")
         rn_resp = _run_now_req.post(
             f"{base}/recurring-jobs/{job_id}/run-now",
-            headers={"Authorization": f"Bearer {jwt}"},
+            headers={"Authorization": _rn_auth},
         )
         if rn_resp.status_code == 404:
             print("  B4 SKIPPED: run-now not available")
@@ -426,9 +426,11 @@ def run_phase_backup_scheduler(
 
         # Attempt rollback of B1 while B2 is still completed - expect 409
         import requests as _filo_req
+        _filo_auth = client.client.headers.get("Authorization", "")
+        _filo_base = (getattr(client, "base_url", None) or getattr(client, "base", "")).rstrip("/")
         filo_resp = _filo_req.post(
-            f"{base}/change-requests/{b1_cr_id}/rollback",
-            headers={"Authorization": f"Bearer {jwt}"},
+            f"{_filo_base}/change-requests/{b1_cr_id}/rollback",
+            headers={"Authorization": _filo_auth},
         )
         assert filo_resp.status_code == 409, (
             f"FILO: expected 409 blocking rollback of B1, got {filo_resp.status_code}: {filo_resp.text}"
