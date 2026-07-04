@@ -130,13 +130,15 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         log_file = r"C:\Windows\Temp\disk2vhd_out.txt"
         # Clean any stale sentinel from a prior run.  Use a fresh session here since
         # the exe-upload loop may have exhausted the original session's WinRM connection.
+        # Do NOT use _ps_check here — Remove-Item with -ErrorAction SilentlyContinue is
+        # inherently safe (no-ops if files don't exist) and the first WinRM call on a
+        # fresh session can return CLIXML noise that sets status_code=1 even on success.
         clean_init_sess = winrm.Session(
             winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
         )
-        _ps_check(
-            clean_init_sess,
-            f"Remove-Item -Force -ErrorAction SilentlyContinue '{sentinel}','{log_file}'",
-            "clean sentinel",
+        clean_init_sess.run_ps(
+            f"$ProgressPreference = 'SilentlyContinue'; "
+            f"Remove-Item -Force -ErrorAction SilentlyContinue '{sentinel}','{log_file}'"
         )
         # Start disk2vhd as a detached process; a wrapper script waits for it and writes
         # exit code to the sentinel file.  Start-Process persists across WinRM sessions.
