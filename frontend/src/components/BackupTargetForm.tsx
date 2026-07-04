@@ -90,7 +90,6 @@ export function BackupTargetForm({ target, onClose, onSaved, initialAssetId }: P
   }, [recommendation, showAdvanced]);
 
   const selectedAsset = assets.find((a) => a.id === assetId);
-  const selectedStorage = storages.find((s: BackupStorage) => s.id === storageId);
   const defaultStorage = storages.find((s: BackupStorage) => s.is_org_default);
 
   const filteredAssets = assets.filter((a) =>
