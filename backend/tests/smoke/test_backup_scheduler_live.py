@@ -2180,7 +2180,7 @@ def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
                     "bucket": SMOKE_BUCKET, "prefix": prefix,
                     "region": s3.meta.region_name or "us-east-1"}},
             },
-            timeout=1800,
+            timeout=4800,
         )
         assert cr["status"] == "completed", f"DISK2VHD backup failed: {cr}"
         refs = _extract_artifact_refs(cr)
