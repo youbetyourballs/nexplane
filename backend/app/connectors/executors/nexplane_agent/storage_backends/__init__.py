@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
+import importlib
 from types import ModuleType
 
 from app.connectors.executors.nexplane_agent.storage_backends import s3
@@ -12,8 +13,7 @@ _REGISTRY: dict[str, ModuleType] = {
 
 # Lazy-register stubs so they appear in the registry but raise on use
 for _name in _STUB_NAMES:
-    import importlib as _importlib
-    _mod = _importlib.import_module(
+    _mod = importlib.import_module(
         f"app.connectors.executors.nexplane_agent.storage_backends.{_name}"
     )
     _REGISTRY[_name] = _mod

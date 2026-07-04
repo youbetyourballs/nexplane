@@ -3,15 +3,11 @@
 _NAME = "gcs"
 
 
-async def put(key: str, data: bytes, config: dict) -> str:
+async def upload(local_path: str, dest_key: str, config: dict) -> str:
     raise NotImplementedError(f"Storage backend '{_NAME}' is not yet implemented")
 
 
-async def put_file(key: str, local_path: str, config: dict) -> str:
-    raise NotImplementedError(f"Storage backend '{_NAME}' is not yet implemented")
-
-
-async def delete_prefix(prefix: str, config: dict) -> dict:
+async def download(uri: str, local_path: str, config: dict) -> None:
     raise NotImplementedError(f"Storage backend '{_NAME}' is not yet implemented")
 
 
