@@ -134,7 +134,7 @@ async def _delete_auto_asset(asset_id: str, db) -> None:
     asset = result.scalar_one_or_none()
     if asset:
         await db.delete(asset)
-        await db.commit()
+        await db.flush()
 
 
 async def run_preflight_checks(preflight_checks: list[dict]) -> dict:

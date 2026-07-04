@@ -20,4 +20,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Postgres does not support removing enum values; downgrade is intentionally a no-op.
     pass
