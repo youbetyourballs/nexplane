@@ -220,10 +220,12 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         up_sess = winrm.Session(
             winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
         )
-        _ps_check(
-            up_sess,
-            f"Remove-Item -Force -ErrorAction SilentlyContinue '{up_sentinel}','{up_log}'",
-            "clean upload sentinel",
+        # Do NOT use _ps_check here — Remove-Item with -ErrorAction SilentlyContinue is
+        # inherently safe (no-ops if files don't exist) and the first WinRM call on a
+        # fresh session can return CLIXML noise that sets status_code=1 even on success.
+        up_sess.run_ps(
+            f"$ProgressPreference = 'SilentlyContinue'; "
+            f"Remove-Item -Force -ErrorAction SilentlyContinue '{up_sentinel}','{up_log}'"
         )
         up_wrapper = (
             f"try {{"
