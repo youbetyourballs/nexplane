@@ -519,6 +519,7 @@ class ChangeType(str, enum.Enum):
     agent_reverse_tunnel_disable = "agent_reverse_tunnel_disable"
     # Generic catalog action
     catalog_action = "catalog_action"
+    catalog_workflow = "catalog_workflow"
 
 
 class RiskLevel(str, enum.Enum):

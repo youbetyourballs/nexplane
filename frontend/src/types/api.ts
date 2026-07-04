@@ -485,7 +485,8 @@ export type ChangeType =
   | "sysmon_deploy"
   | "sysmon_fim"
   | "platform_upgrade"
-  | "catalog_action";
+  | "catalog_action"
+  | "catalog_workflow";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 

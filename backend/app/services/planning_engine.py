@@ -283,11 +283,14 @@ def generate_plan(
         action_id = desired.get("action_id", "")
         params = desired.get("params", {}) or {}
         from app.services.change_plan_service import PlanBlockedError
-        # Validate the action exists in the (core+commercial) catalog.
         try:
-            catalog.get_action_def(connector_type, action_id)
+            action_def = catalog.get_action_def(connector_type, action_id)
         except KeyError:
             raise PlanBlockedError([f"Unknown catalog action: {connector_type}.{action_id}"])
+
+        rollback_action = action_def.get("rollback_action")
+        rollback_ct = action_def.get("rollback_connector_type")
+
         step = {
             "step_number": 1,
             "connector_type": connector_type,
@@ -295,10 +298,43 @@ def generate_plan(
             "parameters": params,
             "purpose": "execute",
             "options": [{"connector_type": connector_type, "action_id": action_id, "execution_tier": 0}],
-            "rollback_connector_type": None,
+            "rollback_connector_type": rollback_ct,
+            "rollback_action_id": rollback_action,
         }
         return ChangePlanData(
             generated_steps=[step],
+            preflight_checks=[],
+            blast_radius=_calculate_blast_radius(change_request, assets, safety_result),
+            rollback_plan={},
+            verification_plan={},
+        )
+
+    if ct == ChangeType.catalog_workflow:
+        steps_spec = desired.get("steps", [])
+        if not steps_spec:
+            from app.services.change_plan_service import PlanBlockedError
+            raise PlanBlockedError(["catalog_workflow requires at least one step"])
+        generated_steps = []
+        for i, spec in enumerate(steps_spec, start=1):
+            conn_t = spec.get("connector_type", "")
+            act_id = spec.get("action_id", "")
+            try:
+                action_def = catalog.get_action_def(conn_t, act_id)
+            except KeyError:
+                from app.services.change_plan_service import PlanBlockedError
+                raise PlanBlockedError([f"Unknown catalog action at step {i}: {conn_t}.{act_id}"])
+            generated_steps.append({
+                "step_number": i,
+                "connector_type": conn_t,
+                "action_id": act_id,
+                "parameters": spec.get("params", {}),
+                "purpose": "execute",
+                "options": [{"connector_type": conn_t, "action_id": act_id, "execution_tier": 0}],
+                "rollback_connector_type": action_def.get("rollback_connector_type"),
+                "rollback_action_id": action_def.get("rollback_action"),
+            })
+        return ChangePlanData(
+            generated_steps=generated_steps,
             preflight_checks=[],
             blast_radius=_calculate_blast_radius(change_request, assets, safety_result),
             rollback_plan={},
