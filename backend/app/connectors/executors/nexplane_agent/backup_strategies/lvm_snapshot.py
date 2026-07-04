@@ -40,7 +40,6 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
     asset_id = str(asset_ids[0]) if asset_ids else "unknown"
     captured_at = datetime.now(timezone.utc).isoformat()
     ts = captured_at.replace(":", "-")
-    remote_img = f"/tmp/lvm_snap_{ts}.img.gz"
     snap_lv = f"{lv_name}_snap"
     archive_key = f"{prefix}{asset_id}/{ts}.img.gz"
 
@@ -63,21 +62,27 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
                 f"/dev/{vg_name}/{lv_name}"
             )
             try:
-                _run(
-                    f"sudo dd if=/dev/{vg_name}/{snap_lv} bs=4M 2>/dev/null | "
-                    f"gzip -c | sudo tee {remote_img} >/dev/null"
-                )
-                size_bytes = int(_run(f"stat -c %s {remote_img}").decode().strip())
+                # Stream directly from remote dd|gzip into a local temp file —
+                # avoids staging the gzip on the (often small) remote root volume.
                 with tempfile.NamedTemporaryFile(suffix=".img.gz", delete=False) as tmp:
                     local_tmp = tmp.name
-                sftp = ssh.open_sftp()
-                try:
-                    sftp.get(remote_img, local_tmp)
-                finally:
-                    sftp.close()
+                    _, stdout, stderr = ssh.exec_command(
+                        f"sudo dd if=/dev/{vg_name}/{snap_lv} bs=4M 2>/dev/null | gzip -c"
+                    )
+                    while True:
+                        chunk = stdout.read(65536)
+                        if not chunk:
+                            break
+                        tmp.write(chunk)
+                    exit_code = stdout.channel.recv_exit_status()
+                    if exit_code not in (0,):
+                        raise RuntimeError(
+                            f"lvm_snapshot: dd|gzip exit={exit_code}: "
+                            f"{stderr.read(2048).decode(errors='replace')}"
+                        )
+                size_bytes = os.path.getsize(local_tmp)
             finally:
                 _run(f"sudo lvremove -f /dev/{vg_name}/{snap_lv}", ok=(0, 5))
-                _run(f"sudo rm -f {remote_img}", ok=(0,))
             return local_tmp, size_bytes
         finally:
             ssh.close()
