@@ -2081,6 +2081,7 @@ New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985
     run_kwargs = dict(
         ImageId=image_id, InstanceType="t3.medium", MinCount=1, MaxCount=1,
         KeyName=key_name, SubnetId=subnet_id, SecurityGroupIds=[sg_id],
+        IamInstanceProfile={"Name": SMOKE_IAM_PROFILE},
         TagSpecifications=[{"ResourceType": "instance",
                             "Tags": [{"Key": "Name", "Value": "nexplane-smoke-disk2vhd"}]}],
     )
