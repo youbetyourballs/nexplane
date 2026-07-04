@@ -63,6 +63,7 @@ from app.routers import capabilities as capabilities_router
 from app.routers.notification_routing import router as notification_routing_router
 from app.routers.logs import router as logs_router
 from app.routers.metrics import router as metrics_router
+from app.routers.tunnel_metrics import router as tunnel_metrics_router
 
 _escalation_scheduler: AsyncIOScheduler | None = None
 _socks_server = None  # app.tunnel.socks.SocksServer, started when TUNNEL_SOCKS_ENABLED
@@ -271,6 +272,7 @@ app.include_router(capabilities_router.router)
 app.include_router(notification_routing_router)
 app.include_router(logs_router)
 app.include_router(metrics_router)
+app.include_router(tunnel_metrics_router)
 import os as _os
 if _os.getenv("DEMO_MODE") == "true":
     from app.routers.demo import router as demo_router

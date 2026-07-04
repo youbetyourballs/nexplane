@@ -20,10 +20,15 @@ interface.
 from __future__ import annotations
 
 import asyncio
+import logging
+import uuid
+from datetime import datetime, timezone
 from typing import Protocol
 
 from . import protocol as proto
 from .authorizer import Rule, is_allowed
+
+_log = logging.getLogger(__name__)
 
 
 class TransportClosed(Exception):
@@ -198,31 +203,107 @@ class ConcurrencyLimitExceeded(TunnelError):
     """The agent has reached its maximum concurrent stream limit."""
 
 
+def _fire(coro) -> None:
+    """Schedule a coroutine as a background task (fire-and-forget)."""
+    asyncio.ensure_future(coro)
+
+
+async def _insert_audit(agent_id: str, host: str, port: int) -> uuid.UUID | None:
+    """Insert a tunnel_dial_audit row and return its id, or None on failure."""
+    try:
+        from app.database import AsyncSessionLocal
+        from app.models.tunnel_audit import TunnelDialAudit
+        audit_id = uuid.uuid4()
+        async with AsyncSessionLocal() as db:
+            row = TunnelDialAudit(
+                id=audit_id,
+                agent_id=uuid.UUID(agent_id),
+                destination_host=host,
+                destination_port=port,
+                opened_at=datetime.now(timezone.utc),
+            )
+            db.add(row)
+            await db.commit()
+        return audit_id
+    except Exception as exc:
+        _log.debug("tunnel audit insert failed: %s", exc)
+        return None
+
+
+async def _close_audit(
+    audit_id: uuid.UUID,
+    *,
+    bytes_sent: int = 0,
+    bytes_recv: int = 0,
+    close_reason: str = "normal",
+) -> None:
+    """Update a tunnel_dial_audit row with close stats."""
+    try:
+        from sqlalchemy import update
+        from app.database import AsyncSessionLocal
+        from app.models.tunnel_audit import TunnelDialAudit
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                update(TunnelDialAudit)
+                .where(TunnelDialAudit.id == audit_id)
+                .values(
+                    closed_at=datetime.now(timezone.utc),
+                    bytes_sent=bytes_sent,
+                    bytes_recv=bytes_recv,
+                    close_reason=close_reason,
+                )
+            )
+            await db.commit()
+    except Exception as exc:
+        _log.debug("tunnel audit close failed: %s", exc)
+
+
 class _CountedStream:
     """Wraps a TunnelStream and decrements the active-count on close."""
 
-    def __init__(self, stream: "TunnelStream", manager: "TunnelManager", agent_id: str):
+    def __init__(
+        self,
+        stream: "TunnelStream",
+        manager: "TunnelManager",
+        agent_id: str,
+        *,
+        audit_id: uuid.UUID | None = None,
+    ):
         self._stream = stream
         self._manager = manager
         self._agent_id = agent_id
         self._counted = True
+        self._audit_id = audit_id
+        self._bytes_sent: int = 0
+        self._bytes_recv: int = 0
 
     @property
     def stream_id(self) -> int:
         return self._stream.stream_id
 
     async def write(self, data: bytes) -> None:
+        self._bytes_sent += len(data)
         await self._stream.write(data)
 
     async def read(self) -> bytes:
-        return await self._stream.read()
+        chunk = await self._stream.read()
+        self._bytes_recv += len(chunk)
+        return chunk
 
-    async def close(self) -> None:
+    async def close(self, *, close_reason: str = "normal") -> None:
         if self._counted:
             self._counted = False
             self._manager._active_count[self._agent_id] = max(
                 0, self._manager._active_count.get(self._agent_id, 1) - 1
             )
+        if self._audit_id is not None:
+            _fire(_close_audit(
+                self._audit_id,
+                bytes_sent=self._bytes_sent,
+                bytes_recv=self._bytes_recv,
+                close_reason=close_reason,
+            ))
+            self._audit_id = None
         await self._stream.close()
 
     def _feed(self, data: bytes) -> None:
@@ -291,6 +372,12 @@ class TunnelManager:
             )
 
         if not is_allowed(allowlist, host, port):
+            # Record denied dial (fire-and-forget, non-blocking)
+            async def _denied_audit():
+                aid = await _insert_audit(agent_id, host, port)
+                if aid is not None:
+                    await _close_audit(aid, close_reason="denied")
+            _fire(_denied_audit())
             raise DestinationDenied(f"{host}:{port} is not allowed for agent {agent_id!r}")
 
         self._active_count[agent_id] = current + 1
@@ -300,8 +387,15 @@ class TunnelManager:
             self._active_count[agent_id] = max(0, self._active_count.get(agent_id, 1) - 1)
             raise
 
+        # Fire-and-forget audit insert (non-blocking)
+        audit_id: uuid.UUID | None = None
+        try:
+            audit_id = await asyncio.wait_for(_insert_audit(agent_id, host, port), timeout=2.0)
+        except Exception as exc:
+            _log.debug("tunnel audit insert skipped: %s", exc)
+
         # Wrap the stream so we decrement the counter when it closes
-        return _CountedStream(stream, self, agent_id)
+        return _CountedStream(stream, self, agent_id, audit_id=audit_id)
 
 
 # Process-wide manager instance (the relay endpoint registers agents here).
