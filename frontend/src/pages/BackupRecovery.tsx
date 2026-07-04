@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2024-2026 Nexplane, Inc.
 
-// SPDX-License-Identifier: AGPL-3.0-only
-// Copyright (C) 2024-2026 Nexplane, Inc.
-
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
