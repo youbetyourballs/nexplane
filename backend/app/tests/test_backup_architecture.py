@@ -151,3 +151,58 @@ class TestBackupStrategyRegistry:
         assert refs["capture_strategy"] == "ebs_snapshot"
         assert refs["restore_strategy"] == "launch_ami"
         assert refs["backup_tier"] == "machine"
+
+
+class TestRestoreStrategyRegistry:
+    def test_get_launch_ami_returns_module(self):
+        from app.connectors.executors.nexplane_agent.restore_strategies import get_strategy
+        mod = get_strategy("launch_ami")
+        assert hasattr(mod, "restore")
+        assert hasattr(mod, "rollback")
+
+    def test_get_unknown_restore_strategy_raises(self):
+        from app.connectors.executors.nexplane_agent.restore_strategies import get_strategy
+        with pytest.raises(ValueError, match="Unknown restore strategy"):
+            get_strategy("does_not_exist_xyz")
+
+    def test_stub_restore_strategies_raise_not_implemented(self):
+        from app.connectors.executors.nexplane_agent.restore_strategies import get_strategy
+        for name in ("import_image", "database_restore", "storage_restore"):
+            mod = get_strategy(name)
+            with pytest.raises(NotImplementedError):
+                asyncio.run(mod.restore({}, [], None))
+
+    def test_launch_ami_restore_calls_run_instances(self):
+        from unittest.mock import MagicMock, patch
+        from app.connectors.executors.nexplane_agent.restore_strategies import launch_ami
+
+        mock_ec2 = MagicMock()
+        mock_ec2.run_instances.return_value = {
+            "Instances": [{"InstanceId": "i-restored"}]
+        }
+
+        with patch(
+            "app.connectors.executors.nexplane_agent.aws_utils._ec2_client",
+            return_value=mock_ec2,
+        ), patch(
+            "app.connectors.executors.nexplane_agent.aws_utils._load_aws_creds",
+            return_value={},
+        ):
+            with patch(
+                "app.connectors.executors.nexplane_agent.restore_strategies.launch_ami._load_source_artifact_refs",
+                return_value={"ami_id": "ami-test123", "capture_strategy": "ebs_snapshot"},
+            ):
+                result = asyncio.run(
+                    launch_ami.restore(
+                        {
+                            "source_backup_cr_id": "fake-cr-id",
+                            "restore_mode": "hybrid",
+                            "target": {"type": "new", "instance_type": "t3.micro"},
+                            "aws_connector_id": "",
+                        },
+                        ["asset-uuid"],
+                        None,
+                    )
+                )
+        assert result["new_instance_id"] == "i-restored"
+        assert result["status"] == "completed"
