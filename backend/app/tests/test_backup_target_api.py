@@ -77,3 +77,12 @@ async def test_recommend_strategy_data(auth_client: AsyncClient):
     data = resp.json()
     assert data["capture_strategy"] == "local_files"
     assert data["backup_tier"] == "data"
+
+
+@pytest.mark.asyncio
+async def test_recommend_strategy_unknown_type(auth_client: AsyncClient):
+    resp = await auth_client.get(
+        "/backup-targets/recommend-strategy",
+        params={"backup_type": "invalid_type"},
+    )
+    assert resp.status_code == 422

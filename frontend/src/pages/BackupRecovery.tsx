@@ -264,7 +264,7 @@ export function BackupRecovery() {
   const [formTarget, setFormTarget] = useState<BackupTarget | null | undefined>(undefined);
   // undefined = closed, null = create mode, BackupTarget = edit mode
 
-  const { data: targets = [], isLoading: targetsLoading, refetch: refetchTargets } = useQuery({
+  const { data: targets = [], isLoading: targetsLoading } = useQuery({
     queryKey: ["backup-targets"],
     queryFn: () => backupApi.listTargets(),
     refetchInterval: 60_000,
@@ -357,7 +357,7 @@ export function BackupRecovery() {
         <BackupTargetForm
           target={formTarget}
           onClose={() => setFormTarget(undefined)}
-          onSaved={() => refetchTargets()}
+          onSaved={() => {}}
         />
       )}
     </div>
