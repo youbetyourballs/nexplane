@@ -2082,6 +2082,12 @@ New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985
         ImageId=image_id, InstanceType="t3.medium", MinCount=1, MaxCount=1,
         KeyName=key_name, SubnetId=subnet_id, SecurityGroupIds=[sg_id],
         IamInstanceProfile={"Name": SMOKE_IAM_PROFILE},
+        # Attach a 60 GB GP3 data volume so disk2vhd can write the VHDx to D:\
+        # instead of C:\ (which lacks sufficient free space to hold the output).
+        BlockDeviceMappings=[{
+            "DeviceName": "/dev/sdf",
+            "Ebs": {"VolumeSize": 60, "VolumeType": "gp3", "DeleteOnTermination": True},
+        }],
         TagSpecifications=[{"ResourceType": "instance",
                             "Tags": [{"Key": "Name", "Value": "nexplane-smoke-disk2vhd"}]}],
     )
@@ -2093,6 +2099,35 @@ New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985
     desc = ec2.describe_instances(InstanceIds=[instance_id])["Reservations"][0]["Instances"][0]
     private_ip = desc["PrivateIpAddress"]
     _wait_ssm_ready_win(ssm, instance_id, timeout=600)
+
+    # Initialize the /dev/sdf (D:) data volume via diskpart so disk2vhd can write
+    # the VHDx there instead of on C: (which has insufficient free space).
+    diskpart_script = (
+        "Get-Disk | Where-Object {$_.PartitionStyle -eq 'RAW'} | "
+        "ForEach-Object { "
+        "  $_ | Initialize-Disk -PartitionStyle MBR -PassThru | "
+        "  New-Partition -DriveLetter D -UseMaximumSize | "
+        "  Format-Volume -FileSystem NTFS -NewFileSystemLabel 'Data' -Confirm:$false | "
+        "  Out-Null "
+        "}; "
+        "'DISK_INIT_DONE'"
+    )
+    disk_resp = ssm.send_command(
+        InstanceIds=[instance_id],
+        DocumentName='AWS-RunPowerShellScript',
+        Parameters={'commands': [diskpart_script]},
+        TimeoutSeconds=120,
+    )
+    disk_cmd_id = disk_resp['Command']['CommandId']
+    for _ in range(30):
+        _t.sleep(5)
+        disk_out = ssm.get_command_invocation(CommandId=disk_cmd_id, InstanceId=instance_id)
+        if disk_out['Status'] not in ('Pending', 'InProgress', 'Delayed'):
+            if disk_out['Status'] != 'Success':
+                raise RuntimeError(f"D: init failed: {disk_out['StandardErrorContent']}")
+            break
+    else:
+        raise TimeoutError('D: disk init timed out')
 
     if cached_ami:
         # Reset Administrator password via SSM RunCommand so we use the fresh win_password
@@ -2176,6 +2211,9 @@ def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
                 "winrm_username": "Administrator",
                 "winrm_password": win_password,
                 "disk_list": ["C:"],
+                # Write VHDx to D:\ (secondary EBS volume) — C:\ lacks sufficient
+                # free space to hold the output while also being the source drive.
+                "_vhdx_output_dir": r"D:\\",
                 "_storage_config": {"storage_type": "s3", "config": {
                     "bucket": SMOKE_BUCKET, "prefix": prefix,
                     "region": s3.meta.region_name or "us-east-1"}},

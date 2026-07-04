@@ -82,7 +82,10 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
     archive_key = f"{prefix}{asset_id}/{vhdx_name}"
     disk2vhd_s3_key = params.get("_disk2vhd_s3_key", "tools/disk2vhd.exe")
     remote_exe = r"C:\Windows\Temp\disk2vhd.exe"
-    remote_vhdx = rf"C:\Windows\Temp\{vhdx_name}"
+    # Allow caller to override the output directory (e.g. D:\ when C: has insufficient
+    # free space to hold the VHDx while also being the source drive).
+    _vhdx_dir = params.get("_vhdx_output_dir", r"C:\Windows\Temp")
+    remote_vhdx = rf"{_vhdx_dir}\{vhdx_name}"
 
     # Resolve the disk2vhd.exe bytes: prefer local override (tests), else fetch from S3.
     local_exe = params.get("_disk2vhd_local_path")
@@ -311,12 +314,15 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             ).std_out.decode(errors="replace")
             raise RuntimeError(f"disk2vhd: upload failed (exit={up_ec}): {up_out}")
 
-        # Cleanup remote files
+        # Cleanup remote files and scheduled tasks
         clean_sess = winrm.Session(
             winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
         )
         clean_sess.run_ps(
-            f"Remove-Item -Force -ErrorAction SilentlyContinue '{remote_vhdx}','{remote_exe}'"
+            f"Remove-Item -Force -ErrorAction SilentlyContinue '{remote_vhdx}','{remote_exe}',"
+            f"'{wrapper_script}','{up_wrapper_script}';"
+            f"Unregister-ScheduledTask -TaskName '{task_name}' -Confirm:$false -ErrorAction SilentlyContinue;"
+            f"Unregister-ScheduledTask -TaskName '{up_task_name}' -Confirm:$false -ErrorAction SilentlyContinue"
         )
         return size_bytes
 
