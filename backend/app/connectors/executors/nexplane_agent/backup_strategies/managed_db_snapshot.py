@@ -30,9 +30,8 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         raise RuntimeError("managed_db_snapshot: db_instance_identifier is required")
 
     creds = await _load_aws_creds(aws_connector_id, connector)
-    captured_at = datetime.now(timezone.utc).isoformat()
-    ts_safe = captured_at.replace(":", "-").replace(".", "-")
-    snapshot_id = f"nexplane-snap-{db_instance_identifier}-{ts_safe}"[:255]
+    captured_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    snapshot_id = f"nexplane-snap-{db_instance_identifier}-{captured_at}"[:255]
 
     def _sync_snapshot():
         rds = _rds_client(creds)
