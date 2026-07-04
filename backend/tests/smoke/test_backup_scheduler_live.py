@@ -220,7 +220,7 @@ def _rollback_cr(client, cr_id: str) -> None:
     assert r.status_code in (200, 202), f"POST /rollback failed {r.status_code}: {r.text}"
 
 
-def _create_and_run_cr(client, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> dict:
+def _create_and_run_cr(client, title: str, change_type: str, asset_id: str, desired_outcome: dict, timeout: int = 300) -> dict:
     """Create a CR, plan+approve+execute it, and wait for a terminal state."""
     cr = client.post("/change-requests", json={
         "title": title,
@@ -236,7 +236,7 @@ def _create_and_run_cr(client, title: str, change_type: str, asset_id: str, desi
     cr_id = cr_data["id"]
     _plan_and_approve_cr(client, cr_id)
     _execute_cr(client, cr_id)
-    return _wait_cr_complete(client, cr_id, title)
+    return _wait_cr_complete(client, cr_id, title, timeout=timeout)
 
 
 def run_phase_backup_scheduler(
@@ -2180,6 +2180,7 @@ def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
                     "bucket": SMOKE_BUCKET, "prefix": prefix,
                     "region": s3.meta.region_name or "us-east-1"}},
             },
+            timeout=1800,
         )
         assert cr["status"] == "completed", f"DISK2VHD backup failed: {cr}"
         refs = _extract_artifact_refs(cr)
