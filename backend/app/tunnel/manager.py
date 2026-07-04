@@ -266,6 +266,16 @@ class TunnelManager:
     def active_stream_count(self, agent_id: str) -> int:
         return self._active_count.get(agent_id, 0)
 
+    def agent_stats(self) -> dict[str, dict[str, object]]:
+        """Return per-agent stats: ``{agent_id: {online: bool, active_streams: int}}``."""
+        return {
+            agent_id: {
+                "online": True,
+                "active_streams": self._active_count.get(agent_id, 0),
+            }
+            for agent_id in self._sessions
+        }
+
     async def dial(self, agent_id: str, host: str, port: int, *, timeout: float = 10.0) -> TunnelStream:
         entry = self._sessions.get(agent_id)
         if entry is None:
