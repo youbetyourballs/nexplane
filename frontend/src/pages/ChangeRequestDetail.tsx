@@ -52,6 +52,7 @@ function PlanOutputPanel({ title, output }: { title: string; output: string }) {
   );
 }
 import { AutoMigrationStepper } from "../components/AutoMigrationStepper";
+import { CrLogTail } from "../components/CrLogTail";
 import { changeRequestsApi, backupApi, BackupContext } from "../api/endpoints";
 import { apiClient } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
@@ -683,6 +684,21 @@ export function ChangeRequestDetail() {
             </>
           );
         })()}
+
+        {(cr.status === "executing" || cr.status === "rolling_back") && (
+          <div>
+            <div className="flex items-center gap-2 px-5 py-3.5 border border-slate-200 border-b-0 rounded-t-lg bg-slate-50">
+              <Terminal className="w-4 h-4 text-slate-500" />
+              <h3 className="text-sm font-semibold text-slate-700">Live Execution Log</h3>
+            </div>
+            <CrLogTail
+              crId={cr.id}
+              onDone={() => {
+                invalidate();
+              }}
+            />
+          </div>
+        )}
 
         {auditEvents && auditEvents.length > 0 && (
           <Section title="Audit Trail" icon={FileText}>
