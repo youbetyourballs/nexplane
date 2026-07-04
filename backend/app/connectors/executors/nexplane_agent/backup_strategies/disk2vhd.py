@@ -4,8 +4,6 @@
 import asyncio
 import base64
 import logging
-import os
-import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -100,33 +98,120 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             "decode exe",
         )
 
-        # Run disk2vhd (synchronous; run_ps blocks until it exits)
+        # Run disk2vhd detached (Start-Job) so the WinRM TCP connection is not held
+        # open for the entire capture.  Each polling call re-establishes WinRM.
         drives_str = " ".join(disk_list)
-        _ps_check(
-            sess,
-            f"& '{remote_exe}' {drives_str} '{remote_vhdx}' /accepteula",
-            "run disk2vhd",
+        job_id_r = sess.run_ps(
+            f"$j = Start-Job -ScriptBlock {{"
+            f"  & '{remote_exe}' {drives_str} '{remote_vhdx}' /accepteula"
+            f"}}; $j.Id"
         )
+        if job_id_r.status_code != 0:
+            raise RuntimeError(
+                f"disk2vhd: start capture job failed: "
+                f"{job_id_r.std_err.decode(errors='replace')}"
+            )
+        job_id = int(job_id_r.std_out.decode().strip())
+        logger.info("disk2vhd: capture job %d started", job_id)
+
+        # Poll job state; each call is a fresh short-lived WinRM request.
+        import time as _time
+        capture_timeout = params.get("_capture_timeout_s", 3600)
+        poll_start = _time.monotonic()
+        while True:
+            _time.sleep(30)
+            # Re-create session each poll so there is no long-lived idle TCP connection.
+            poll_sess = winrm.Session(
+                winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+            )
+            state_r = poll_sess.run_ps(f"(Get-Job -Id {job_id}).State")
+            state = state_r.std_out.decode().strip()
+            logger.info("disk2vhd: capture job %d state=%s", job_id, state)
+            if state in ("Completed", "Failed", "Stopped"):
+                break
+            if _time.monotonic() - poll_start > capture_timeout:
+                raise RuntimeError(
+                    f"disk2vhd: capture job timed out after {capture_timeout}s"
+                )
+        # Collect job output / errors
+        result_sess = winrm.Session(
+            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+        )
+        job_out_r = result_sess.run_ps(
+            f"Receive-Job -Id {job_id} -Wait -AutoRemoveJob 2>&1 | Out-String"
+        )
+        if state == "Failed" or not result_sess.run_ps(
+            f"Test-Path '{remote_vhdx}'"
+        ).std_out.decode().strip().lower().startswith("true"):
+            raise RuntimeError(
+                f"disk2vhd: capture failed. job output: "
+                f"{job_out_r.std_out.decode(errors='replace')}"
+            )
 
         # Size of produced vhdx
-        size_r = _ps_check(sess, f"(Get-Item '{remote_vhdx}').Length", "stat vhdx")
+        size_sess = winrm.Session(
+            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+        )
+        size_r = _ps_check(size_sess, f"(Get-Item '{remote_vhdx}').Length", "stat vhdx")
         size_bytes = int(size_r.std_out.decode().strip())
 
-        # Stream vhdx directly to S3 via presigned PUT
+        # Upload vhdx to S3 via presigned PUT, also detached so WinRM does not time out.
         presigned = s3.generate_presigned_url(
             "put_object",
             Params={"Bucket": bucket, "Key": archive_key},
-            ExpiresIn=3600,
+            ExpiresIn=7200,
         )
-        _ps_check(
-            sess,
-            f"Invoke-RestMethod -Method PUT -Uri '{presigned}' -InFile '{remote_vhdx}' "
-            f"-ContentType 'application/octet-stream'",
-            "upload vhdx to S3",
+        up_sess = winrm.Session(
+            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
         )
+        up_job_r = up_sess.run_ps(
+            f"$j = Start-Job -ScriptBlock {{"
+            f"  Invoke-WebRequest -Method PUT -Uri '{presigned}'"
+            f"    -InFile '{remote_vhdx}'"
+            f"    -ContentType 'application/octet-stream'"
+            f"    -UseBasicParsing"
+            f"}}; $j.Id"
+        )
+        if up_job_r.status_code != 0:
+            raise RuntimeError(
+                f"disk2vhd: start upload job failed: "
+                f"{up_job_r.std_err.decode(errors='replace')}"
+            )
+        up_job_id = int(up_job_r.std_out.decode().strip())
+        logger.info("disk2vhd: upload job %d started", up_job_id)
+
+        upload_timeout = params.get("_upload_timeout_s", 3600)
+        up_poll_start = _time.monotonic()
+        while True:
+            _time.sleep(30)
+            up_poll_sess = winrm.Session(
+                winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+            )
+            up_state_r = up_poll_sess.run_ps(f"(Get-Job -Id {up_job_id}).State")
+            up_state = up_state_r.std_out.decode().strip()
+            logger.info("disk2vhd: upload job %d state=%s", up_job_id, up_state)
+            if up_state in ("Completed", "Failed", "Stopped"):
+                break
+            if _time.monotonic() - up_poll_start > upload_timeout:
+                raise RuntimeError(
+                    f"disk2vhd: upload job timed out after {upload_timeout}s"
+                )
+        if up_state != "Completed":
+            up_res_sess = winrm.Session(
+                winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+            )
+            up_out = up_res_sess.run_ps(
+                f"Receive-Job -Id {up_job_id} -Wait -AutoRemoveJob 2>&1 | Out-String"
+            ).std_out.decode(errors="replace")
+            raise RuntimeError(f"disk2vhd: upload failed: {up_out}")
 
         # Cleanup remote files
-        sess.run_ps(f"Remove-Item -Force -ErrorAction SilentlyContinue '{remote_vhdx}','{remote_exe}'")
+        clean_sess = winrm.Session(
+            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+        )
+        clean_sess.run_ps(
+            f"Remove-Item -Force -ErrorAction SilentlyContinue '{remote_vhdx}','{remote_exe}'"
+        )
         return size_bytes
 
     loop = asyncio.get_running_loop()
