@@ -2103,6 +2103,19 @@ New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985
             Name=f"/nexplane/smoke-amis/{_DISK2VHD_CACHE_KEY}/{_DISK2VHD_SETUP_HASH}",
             Value=json.dumps({"ami_id": ami}), Type="String", Overwrite=True,
         )
+    # Wait for WinRM port 5985 to be responsive after instance_running/reboot
+    import socket as _sock
+    winrm_deadline = _t.time() + 300
+    while _t.time() < winrm_deadline:
+        try:
+            with _sock.create_connection((private_ip, 5985), timeout=5):
+                break
+        except OSError:
+            _t.sleep(10)
+    else:
+        raise TimeoutError(f"WinRM port 5985 not reachable on {private_ip} after 300s")
+    # Extra settle time for WinRM service and password propagation
+    _t.sleep(30)
     return instance_id, private_ip, bool(cached_ami)
 
 
