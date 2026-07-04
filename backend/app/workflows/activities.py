@@ -388,6 +388,13 @@ async def activity_execute_rollback(
             step_asset_ids = prior_result.get("_asset_ids") or []
 
             try:
+                # Delete auto-created asset before executing rollback so inventory
+                # stays clean even if the rollback executor itself never runs.
+                auto_asset_id = prior_result.get("_auto_asset_id")
+                if auto_asset_id:
+                    from app.services.connector_service import _delete_auto_asset
+                    await _delete_auto_asset(auto_asset_id, db)
+
                 # Prefer the executor module's rollback() method when available.
                 # This is critical for agent-dispatching executors: their rollback()
                 # builds a clean, minimal parameters dict that round-trips cleanly

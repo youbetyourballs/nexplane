@@ -75,11 +75,13 @@ async def execute_action(
     result = await executor.execute(parameters, asset_ids, connector)
     if "_auto_asset" in result and connector is not None and db is not None:
         connector_id = getattr(connector, 'id', None)
-        await _upsert_auto_asset(result.pop("_auto_asset"), connector.organization_id, db, connector_id=connector_id)
+        asset = await _upsert_auto_asset(result.pop("_auto_asset"), connector.organization_id, db, connector_id=connector_id)
+        if asset is not None:
+            result["_auto_asset_id"] = str(asset.id)
     return result
 
 
-async def _upsert_auto_asset(payload: dict, organization_id, db, connector_id=None) -> None:
+async def _upsert_auto_asset(payload: dict, organization_id, db, connector_id=None):
     from sqlalchemy import select
     from app.models.asset import Asset, AssetType, Environment, Criticality
     name = payload.get("name", "unnamed")
@@ -105,6 +107,7 @@ async def _upsert_auto_asset(payload: dict, organization_id, db, connector_id=No
         existing.asset_metadata = {**existing.asset_metadata, **payload.get("asset_metadata", {})}
         existing.tags = list(set(existing.tags or []) | set(payload.get("tags", [])))
         db.add(existing)
+        return existing
     else:
         asset = Asset(
             organization_id=organization_id,
@@ -118,6 +121,20 @@ async def _upsert_auto_asset(payload: dict, organization_id, db, connector_id=No
         )
         db.add(asset)
         await db.flush()
+        return asset
+
+
+async def _delete_auto_asset(asset_id: str, db) -> None:
+    from sqlalchemy import select
+    from app.models.asset import Asset
+    import uuid as _uuid
+    result = await db.execute(
+        select(Asset).where(Asset.id == _uuid.UUID(asset_id))
+    )
+    asset = result.scalar_one_or_none()
+    if asset:
+        await db.delete(asset)
+        await db.commit()
 
 
 async def run_preflight_checks(preflight_checks: list[dict]) -> dict:
