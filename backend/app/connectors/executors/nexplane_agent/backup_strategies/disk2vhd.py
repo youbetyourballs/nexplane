@@ -140,9 +140,13 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             f"$ProgressPreference = 'SilentlyContinue'; "
             f"Remove-Item -Force -ErrorAction SilentlyContinue '{sentinel}','{log_file}'"
         )
-        # Start disk2vhd as a detached process; a wrapper script waits for it and writes
-        # exit code to the sentinel file.  Start-Process persists across WinRM sessions.
-        wrapper = (
+        # Start disk2vhd via a Windows Scheduled Task so it truly outlives the WinRM
+        # session.  Start-Job / Start-Process jobs die when the WinRM agent session is
+        # torn down because they remain inside its Windows Job Object.  A schtask runs
+        # as SYSTEM in its own session and is not affected by WinRM lifecycle.
+        wrapper_script = r"C:\Windows\Temp\disk2vhd_wrapper.ps1"
+        task_name = "NexplaneDisk2vhd"
+        wrapper_body = (
             f"$p = Start-Process -FilePath '{remote_exe}' "
             f"-ArgumentList '{drives_str}','{remote_vhdx}','/accepteula' "
             f"-RedirectStandardOutput '{log_file}' "
@@ -150,20 +154,31 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             f"$p.WaitForExit(); "
             f"Set-Content -Path '{sentinel}' -Value $p.ExitCode"
         )
-        # Use a fresh session to start the capture job — the exe-upload session may be degraded.
+        # Use a fresh session to start the scheduled task.
         capture_sess = winrm.Session(
             winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
         )
-        wrap_r = capture_sess.run_ps(
-            f"$j = Start-Job -ScriptBlock {{ {wrapper} }}; $j.Id"
+        # Write the wrapper script and register + run the scheduled task in one go.
+        schtask_ps = (
+            f"Set-Content -Path '{wrapper_script}' -Value \"{wrapper_body}\" -Encoding UTF8; "
+            f"Unregister-ScheduledTask -TaskName '{task_name}' -Confirm:$false -ErrorAction SilentlyContinue; "
+            f"$action = New-ScheduledTaskAction -Execute 'powershell.exe' "
+            f"  -Argument '-NonInteractive -WindowStyle Hidden -File \"{wrapper_script}\"'; "
+            f"$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest; "
+            f"$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 3); "
+            f"$task = Register-ScheduledTask -TaskName '{task_name}' -Action $action "
+            f"  -Principal $principal -Settings $settings -Force; "
+            f"Start-ScheduledTask -TaskName '{task_name}'; "
+            f"'SCHTASK_STARTED'"
         )
-        if wrap_r.status_code != 0:
+        wrap_r = capture_sess.run_ps(schtask_ps)
+        if wrap_r.status_code != 0 or b"SCHTASK_STARTED" not in wrap_r.std_out:
             raise RuntimeError(
-                f"disk2vhd: start capture job failed: "
-                f"{wrap_r.std_err.decode(errors='replace')}"
+                f"disk2vhd: start capture schtask failed: "
+                f"{wrap_r.std_err.decode(errors='replace')} | "
+                f"stdout: {wrap_r.std_out.decode(errors='replace')}"
             )
-        job_id = int(wrap_r.std_out.decode().strip())
-        logger.info("disk2vhd: capture wrapper job %d started", job_id)
+        logger.info("disk2vhd: capture scheduled task '%s' started", task_name)
 
         # Poll for sentinel file; each poll is a fresh short-lived WinRM session.
         # Use a generous timeout: disk2vhd C: capture saturates disk I/O and can make
@@ -219,10 +234,12 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             Params={"Bucket": bucket, "Key": archive_key},
             ExpiresIn=7200,
         )
-        # Upload vhdx via a wrapper Start-Job that runs Invoke-WebRequest synchronously
-        # inside the job and writes a sentinel file.  Same pattern as capture above.
+        # Upload vhdx via a Windows Scheduled Task (same reason as capture: Start-Job
+        # dies when the WinRM session is torn down).
         up_sentinel = r"C:\Windows\Temp\disk2vhd_upload_done.txt"
         up_log = r"C:\Windows\Temp\disk2vhd_upload_out.txt"
+        up_wrapper_script = r"C:\Windows\Temp\disk2vhd_upload_wrapper.ps1"
+        up_task_name = "NexplaneDisk2vhdUpload"
         up_sess = winrm.Session(
             winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
         )
@@ -233,7 +250,7 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             f"$ProgressPreference = 'SilentlyContinue'; "
             f"Remove-Item -Force -ErrorAction SilentlyContinue '{up_sentinel}','{up_log}'"
         )
-        up_wrapper = (
+        up_wrapper_body = (
             f"try {{"
             f"  Invoke-WebRequest -Method PUT -Uri '{presigned}'"
             f"    -InFile '{remote_vhdx}'"
@@ -245,16 +262,26 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             f"  Set-Content -Path '{up_sentinel}' -Value 1"
             f"}}"
         )
-        up_job_r = up_sess.run_ps(
-            f"$j = Start-Job -ScriptBlock {{ {up_wrapper} }}; $j.Id"
+        up_schtask_ps = (
+            f"Set-Content -Path '{up_wrapper_script}' -Value \"{up_wrapper_body}\" -Encoding UTF8; "
+            f"Unregister-ScheduledTask -TaskName '{up_task_name}' -Confirm:$false -ErrorAction SilentlyContinue; "
+            f"$action = New-ScheduledTaskAction -Execute 'powershell.exe' "
+            f"  -Argument '-NonInteractive -WindowStyle Hidden -File \"{up_wrapper_script}\"'; "
+            f"$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest; "
+            f"$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 3); "
+            f"$task = Register-ScheduledTask -TaskName '{up_task_name}' -Action $action "
+            f"  -Principal $principal -Settings $settings -Force; "
+            f"Start-ScheduledTask -TaskName '{up_task_name}'; "
+            f"'SCHTASK_STARTED'"
         )
-        if up_job_r.status_code != 0:
+        up_job_r = up_sess.run_ps(up_schtask_ps)
+        if up_job_r.status_code != 0 or b"SCHTASK_STARTED" not in up_job_r.std_out:
             raise RuntimeError(
-                f"disk2vhd: start upload job failed: "
-                f"{up_job_r.std_err.decode(errors='replace')}"
+                f"disk2vhd: start upload schtask failed: "
+                f"{up_job_r.std_err.decode(errors='replace')} | "
+                f"stdout: {up_job_r.std_out.decode(errors='replace')}"
             )
-        up_job_id = int(up_job_r.std_out.decode().strip())
-        logger.info("disk2vhd: upload job %d started", up_job_id)
+        logger.info("disk2vhd: upload scheduled task '%s' started", up_task_name)
 
         upload_timeout = params.get("_upload_timeout_s", 3600)
         up_poll_start = _time.monotonic()
