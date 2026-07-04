@@ -166,13 +166,17 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         logger.info("disk2vhd: capture wrapper job %d started", job_id)
 
         # Poll for sentinel file; each poll is a fresh short-lived WinRM session.
+        # Use a generous timeout: disk2vhd C: capture saturates disk I/O and can make
+        # WinRM sluggish for 60-90s per response even when the instance is still alive.
         import time as _time
+        _poll_timeout = params.get("_winrm_poll_timeout_s", 120)
         capture_timeout = params.get("_capture_timeout_s", 3600)
         poll_start = _time.monotonic()
         while True:
             _time.sleep(30)
             poll_sess = winrm.Session(
-                winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+                winrm_host, auth=(winrm_username, winrm_password), transport="ntlm",
+                operation_timeout_s=_poll_timeout, read_timeout_s=_poll_timeout + 10,
             )
             sent_r = poll_sess.run_ps(f"Test-Path '{sentinel}'")
             done = sent_r.std_out.decode().strip().lower() == "true"
@@ -183,9 +187,10 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
                 raise RuntimeError(
                     f"disk2vhd: capture job timed out after {capture_timeout}s"
                 )
-        # Read exit code from sentinel
+        # Read exit code from sentinel — use same generous timeout as poll sessions.
         exit_sess = winrm.Session(
-            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm",
+            operation_timeout_s=_poll_timeout, read_timeout_s=_poll_timeout + 10,
         )
         ec_r = exit_sess.run_ps(f"Get-Content '{sentinel}'")
         exit_code_str = ec_r.std_out.decode().strip()
@@ -202,7 +207,8 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
 
         # Size of produced vhdx
         size_sess = winrm.Session(
-            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm",
+            operation_timeout_s=_poll_timeout, read_timeout_s=_poll_timeout + 10,
         )
         size_r = _ps_check(size_sess, f"(Get-Item '{remote_vhdx}').Length", "stat vhdx")
         size_bytes = int(size_r.std_out.decode().strip())
@@ -255,7 +261,8 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         while True:
             _time.sleep(30)
             up_poll_sess = winrm.Session(
-                winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+                winrm_host, auth=(winrm_username, winrm_password), transport="ntlm",
+                operation_timeout_s=_poll_timeout, read_timeout_s=_poll_timeout + 10,
             )
             up_sent_r = up_poll_sess.run_ps(f"Test-Path '{up_sentinel}'")
             up_done = up_sent_r.std_out.decode().strip().lower() == "true"
@@ -267,7 +274,8 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
                     f"disk2vhd: upload job timed out after {upload_timeout}s"
                 )
         up_ec_sess = winrm.Session(
-            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm",
+            operation_timeout_s=_poll_timeout, read_timeout_s=_poll_timeout + 10,
         )
         up_ec = up_ec_sess.run_ps(f"Get-Content '{up_sentinel}'").std_out.decode().strip()
         if up_ec != "0":
