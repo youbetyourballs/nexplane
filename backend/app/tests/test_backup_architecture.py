@@ -124,7 +124,7 @@ class TestBackupStrategyRegistry:
         mock_ec2.delete_snapshot.return_value = {}
 
         mock_s3_backend = AsyncMock()
-        mock_s3_backend.put.return_value = "s3://bucket/prefix/manifest.json"
+        mock_s3_backend._put.return_value = "s3://bucket/prefix/manifest.json"
 
         with patch(
             "app.connectors.executors.nexplane_agent.aws_utils._ec2_client",

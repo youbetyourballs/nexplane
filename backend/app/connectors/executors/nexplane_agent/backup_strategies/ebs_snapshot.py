@@ -59,7 +59,7 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             snapshot_ids.append(snap["SnapshotId"])
         return snapshot_ids
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     with ThreadPoolExecutor() as pool:
         snapshot_ids = await loop.run_in_executor(pool, _sync_snapshot)
 
@@ -72,7 +72,7 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         "snapshot_ids": snapshot_ids,
         "captured_at": captured_at,
     }
-    manifest_uri = await backend.put(manifest_key, json.dumps(manifest).encode(), cfg)
+    manifest_uri = await backend._put(manifest_key, json.dumps(manifest).encode(), cfg)
 
     artifact_refs = {
         "capture_strategy": "ebs_snapshot",
@@ -114,10 +114,12 @@ async def rollback(params: dict, execution_result: dict, connector) -> dict:
     creds = await _load_aws_creds(aws_connector_id, connector)
     ec2 = _ec2_client(creds)
 
+    loop = asyncio.get_running_loop()
     deleted_snapshots = []
     for snap_id in snapshot_ids:
         try:
-            ec2.delete_snapshot(SnapshotId=snap_id)
+            with ThreadPoolExecutor() as pool:
+                await loop.run_in_executor(pool, lambda: ec2.delete_snapshot(SnapshotId=snap_id))
             deleted_snapshots.append(snap_id)
         except Exception as exc:
             logger.warning("Failed to delete snapshot %s: %s", snap_id, exc)

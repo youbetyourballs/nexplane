@@ -60,7 +60,7 @@ async def delete(uri: str, config: dict) -> None:
         await loop.run_in_executor(pool, _sync)
 
 
-async def put(key: str, data: bytes, config: dict) -> str:
+async def _put(key: str, data: bytes, config: dict) -> str:
     """Put raw bytes at key in S3. Returns s3://bucket/key URI."""
     bucket = config["bucket"]
 
