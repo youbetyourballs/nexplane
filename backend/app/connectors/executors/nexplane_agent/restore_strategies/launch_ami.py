@@ -83,7 +83,7 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
         resp = ec2.run_instances(**run_kwargs)
         return resp["Instances"][0]["InstanceId"]
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     with ThreadPoolExecutor() as pool:
         new_instance_id = await loop.run_in_executor(pool, _sync_launch)
 
@@ -118,6 +118,6 @@ async def rollback(params: dict, execution_result: dict, connector) -> dict:
         ec2.terminate_instances(InstanceIds=[new_instance_id])
         return {"rolled_back": True, "terminated_instance_id": new_instance_id}
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     with ThreadPoolExecutor() as pool:
         return await loop.run_in_executor(pool, _sync_terminate)

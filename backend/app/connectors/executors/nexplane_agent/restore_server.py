@@ -20,7 +20,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if target.get("type") == "same":
         restore_strategy = "in_place"
     else:
-        restore_strategy = parameters.get("restore_strategy", "launch_ami")
+        artifact_refs = parameters.get("artifact_refs", {})
+        restore_strategy = (
+            artifact_refs.get("restore_strategy")
+            or parameters.get("restore_strategy")
+            or "launch_ami"
+        )
 
     strategy = get_strategy(restore_strategy)
     return await strategy.restore(parameters, asset_ids, connector)
