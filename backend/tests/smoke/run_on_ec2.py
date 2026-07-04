@@ -658,8 +658,22 @@ Examples:
                 engine = _cae2(_cfg2.DATABASE_URL, pool_pre_ping=False)
                 Session = _sm2(engine, class_=_AS2, expire_on_commit=False)
                 async with Session() as db:
-                    row = await db.execute(_select2(_Connector2).where(_Connector2.connector_type == "aws"))
+                    row = await db.execute(
+                        _select2(_Connector2).where(
+                            _Connector2.connector_type == "aws",
+                            _Connector2.name == "Amazon Web Services",
+                        )
+                    )
                     conn = row.scalar_one_or_none()
+                    if not conn:
+                        # fallback: first non-smoke connector
+                        row2 = await db.execute(
+                            _select2(_Connector2).where(
+                                _Connector2.connector_type == "aws",
+                                ~_Connector2.name.like("smoke-%"),
+                            ).limit(1)
+                        )
+                        conn = row2.scalars().first()
                     if not conn:
                         return {}
                     cred_row = await db.execute(_select2(_CC2).where(_CC2.connector_id == conn.id))
@@ -690,8 +704,11 @@ Examples:
                     "    from app.models.connector import Connector,ConnectorType\n"
                     "    from sqlalchemy import select\n"
                     "    async with AsyncSessionLocal() as db:\n"
-                    "        r=await db.execute(select(Connector).where(Connector.connector_type==ConnectorType.aws))\n"
+                    "        r=await db.execute(select(Connector).where(Connector.connector_type==ConnectorType.aws,Connector.name=='Amazon Web Services'))\n"
                     "        conn=r.scalars().first()\n"
+                    "        if not conn:\n"
+                    "            r2=await db.execute(select(Connector).where(Connector.connector_type==ConnectorType.aws).limit(1))\n"
+                    "            conn=r2.scalars().first()\n"
                     "        if not conn: sys.exit(1)\n"
                     "        await _attach_credentials(conn,db)\n"
                     "        print(json.dumps(getattr(conn,'credentials',{})))\n"
