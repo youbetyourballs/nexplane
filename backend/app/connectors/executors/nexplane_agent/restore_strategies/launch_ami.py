@@ -70,6 +70,12 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
         "launched_at": datetime.now(timezone.utc).isoformat(),
         "_asset_ids": [str(a) for a in asset_ids],
         "_aws_connector_id": aws_connector_id,
+        "artifact_refs": {
+            "restore_strategy": "launch_ami",
+            "backup_tier": "machine",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "new_instance_id": new_instance_id,
+        },
     }
 
 

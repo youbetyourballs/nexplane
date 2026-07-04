@@ -100,6 +100,13 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
         "target_path": target_path,
         "restored_at": datetime.now(timezone.utc).isoformat(),
         "_asset_ids": [str(a) for a in asset_ids],
+        "artifact_refs": {
+            "restore_strategy": "file_restore_to_path",
+            "backup_tier": "data",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "artifact_uri": artifact_refs.get("artifact_uri", ""),
+            "target_path": params.get("target_path", ""),
+        },
     }
 
 

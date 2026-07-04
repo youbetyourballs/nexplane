@@ -72,7 +72,7 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         "snapshot_ids": snapshot_ids,
         "captured_at": captured_at,
     }
-    manifest_uri = await backend._put(manifest_key, json.dumps(manifest).encode(), cfg)
+    manifest_uri = await backend.put_bytes(manifest_key, json.dumps(manifest).encode(), cfg)
 
     artifact_refs = {
         "capture_strategy": "ebs_snapshot",
@@ -131,7 +131,7 @@ async def rollback(params: dict, execution_result: dict, connector) -> dict:
         cfg["aws_secret_access_key"] = creds.get("secret_access_key", creds.get("aws_secret_access_key"))
         cfg["aws_session_token"] = creds.get("session_token")
         backend = get_backend("s3")
-        delete_result = await backend._delete_prefix(prefix, cfg)
+        delete_result = await backend.delete_prefix(prefix, cfg)
         return {
             "rolled_back": True,
             "deleted_snapshots": deleted_snapshots,

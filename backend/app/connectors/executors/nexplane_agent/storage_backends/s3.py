@@ -60,7 +60,7 @@ async def delete(uri: str, config: dict) -> None:
         await loop.run_in_executor(pool, _sync)
 
 
-async def _put(key: str, data: bytes, config: dict) -> str:
+async def put_bytes(key: str, data: bytes, config: dict) -> str:
     """Put raw bytes at key in S3. Returns s3://bucket/key URI."""
     bucket = config["bucket"]
 
@@ -74,8 +74,8 @@ async def _put(key: str, data: bytes, config: dict) -> str:
         return await loop.run_in_executor(pool, _sync)
 
 
-async def _delete_prefix(prefix: str, config: dict) -> dict:
-    """Delete all objects under prefix. Returns {deleted_count}. Private helper."""
+async def delete_prefix(prefix: str, config: dict) -> dict:
+    """Delete all objects under prefix. Returns {deleted_count}."""
     bucket = config["bucket"]
 
     def _sync():

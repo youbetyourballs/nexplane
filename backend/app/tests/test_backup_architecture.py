@@ -84,7 +84,7 @@ class TestStorageBackendRegistry:
         config = {"bucket": "mybucket", "region": "us-east-1"}
         with patch("boto3.client", return_value=mock_s3):
             result = asyncio.run(
-                s3_mod._delete_prefix("prefix/", config)
+                s3_mod.delete_prefix("prefix/", config)
             )
         assert result["deleted_count"] == 2
 
@@ -124,7 +124,7 @@ class TestBackupStrategyRegistry:
         mock_ec2.delete_snapshot.return_value = {}
 
         mock_s3_backend = AsyncMock()
-        mock_s3_backend._put.return_value = "s3://bucket/prefix/manifest.json"
+        mock_s3_backend.put_bytes.return_value = "s3://bucket/prefix/manifest.json"
 
         with patch(
             "app.connectors.executors.nexplane_agent.aws_utils._ec2_client",

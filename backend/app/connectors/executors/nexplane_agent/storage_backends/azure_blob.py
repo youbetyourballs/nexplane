@@ -13,3 +13,11 @@ async def download(uri: str, local_path: str, config: dict) -> None:
 
 async def delete(uri: str, config: dict) -> None:
     raise NotImplementedError(f"Storage backend '{_NAME}' is not yet implemented")
+
+
+async def put_bytes(key: str, data: bytes, config: dict) -> str:
+    raise NotImplementedError(f"Storage backend '{_NAME}' is not yet implemented")
+
+
+async def delete_prefix(prefix: str, config: dict) -> dict:
+    raise NotImplementedError(f"Storage backend '{_NAME}' is not yet implemented")
