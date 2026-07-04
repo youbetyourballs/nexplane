@@ -265,6 +265,23 @@ def run_phase_backup_scheduler(
         ssm = _get_aws_boto3_client("ssm")
         if not ssm:
             fail("B0: could not get SSM boto3 client")
+        # Wait for SSM agent on the source instance before sending sentinel
+        print(f"  B0: polling SSM reachability on {instance_id}...")
+        b0_ssm_ready = False
+        b0_ssm_deadline = time.time() + 180
+        while time.time() < b0_ssm_deadline:
+            try:
+                b0_ssm_info = ssm.describe_instance_information(
+                    Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+                )
+                if b0_ssm_info.get("InstanceInformationList"):
+                    b0_ssm_ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(5)
+        if not b0_ssm_ready:
+            fail(f"B0: SSM not reachable on source instance {instance_id} within 180s")
         b0_cmd = ssm.send_command(
             InstanceIds=[instance_id],
             DocumentName="AWS-RunShellScript",
@@ -395,41 +412,54 @@ def run_phase_backup_scheduler(
         if rn_resp.status_code not in (200, 201, 202):
             fail(f"B4: run-now failed with {rn_resp.status_code}: {rn_resp.text}")
 
-        # If the CR landed in awaiting_approval (no RecurringJobPolicy), approve it
+        # run-now returns the RecurringJob record; CR id is in last_cr_id
         rn_data = rn_resp.json() if rn_resp.text.strip() else {}
-        rn_cr_id = rn_data.get("id") or rn_data.get("change_request_id") or rn_data.get("cr_id")
+        rn_cr_id = rn_data.get("last_cr_id") or rn_data.get("change_request_id") or rn_data.get("cr_id")
         if rn_cr_id:
             cr_check = _rn_req.get(f"{base}/change-requests/{rn_cr_id}", headers={"Authorization": _rn_auth})
             if cr_check.status_code == 200:
                 cr_status = cr_check.json().get("status", "")
-                if cr_status == "awaiting_approval":
+                if cr_status in ("awaiting_approval", "planned", "pending_approval"):
                     approve = _rn_req.post(
                         f"{base}/change-requests/{rn_cr_id}/approve",
                         json={"decision": "approved", "comment": "smoke auto-approve"},
                         headers={"Authorization": _rn_auth},
                     )
-                    assert approve.status_code == 200, f"B4: approve failed {approve.status_code}: {approve.text}"
+                    if approve.status_code == 200:
+                        _execute_cr(client, rn_cr_id)
+                elif cr_status == "approved":
                     _execute_cr(client, rn_cr_id)
 
-        # Poll backup-history for a new completed entry against this asset
+        # If we have the CR id directly, wait for it to complete
         scheduled_cr_id = None
-        known_cr_ids = {b1_cr_id, b2_cr_id, b3_cr_id}
-        deadline = time.time() + 300
-        while time.time() < deadline:
-            history = client.get("/backup-history", params={"limit": 20})
-            if not isinstance(history, list):
-                history = history.json() if hasattr(history, "json") else []
-            for entry in history:
-                if (entry.get("status") == "completed"
-                        and asset_id in entry.get("target_asset_ids", [])
-                        and entry.get("artifact_refs")
-                        and entry["id"] not in known_cr_ids):
-                    scheduled_cr_id = entry["id"]
+        if rn_cr_id:
+            try:
+                b4_cr = _wait_cr_complete(client, rn_cr_id, "B4 recurring backup", timeout=300)
+                if b4_cr.get("status") == "completed":
+                    scheduled_cr_id = rn_cr_id
+                else:
+                    fail(f"B4: recurring job CR ended with status={b4_cr.get('status')}: {b4_cr}")
+            except TimeoutError:
+                fail("B4: recurring job CR did not complete within 300s")
+        else:
+            # Fallback: poll backup-history for a new completed entry against this asset
+            known_cr_ids = {b1_cr_id, b2_cr_id, b3_cr_id}
+            deadline = time.time() + 300
+            while time.time() < deadline:
+                history = client.get("/backup-history", params={"limit": 20})
+                if not isinstance(history, list):
+                    history = history.json() if hasattr(history, "json") else []
+                for entry in history:
+                    if (entry.get("status") == "completed"
+                            and asset_id in entry.get("target_asset_ids", [])
+                            and entry.get("artifact_refs")
+                            and entry["id"] not in known_cr_ids):
+                        scheduled_cr_id = entry["id"]
+                        break
+                if scheduled_cr_id:
                     break
-            if scheduled_cr_id:
-                break
-            time.sleep(5)
-        assert scheduled_cr_id, "B4: scheduled backup CR did not appear in /backup-history within 300s"
+                time.sleep(5)
+            assert scheduled_cr_id, "B4: scheduled backup CR did not appear in /backup-history within 300s"
         print(f"  B4 PASSED: scheduled_cr_id={scheduled_cr_id}")
 
         # Clean up the recurring job
@@ -468,11 +498,54 @@ def run_phase_backup_scheduler(
         new_instance_id = r2_cr.get("new_instance_id") or r2_step.get("new_instance_id")
         assert new_instance_id, f"R2: no new_instance_id in result: {r2_cr}"
         new_instance_ids_to_cleanup.append(new_instance_id)
-        # Verify new instance exists
-        new_inst = ec2.describe_instances(InstanceIds=[new_instance_id])
-        state = new_inst["Reservations"][0]["Instances"][0]["State"]["Name"]
-        assert state in ("running", "pending"), f"R2: new instance state={state}"
-        print(f"  R2 PASSED: new_instance_id={new_instance_id}, state={state}")
+        # Wait for SSM agent on the restored instance
+        print(f"  R2: polling SSM reachability on {new_instance_id}...")
+        ssm_ready = False
+        ssm_deadline = time.time() + 120
+        while time.time() < ssm_deadline:
+            try:
+                info = ssm.describe_instance_information(
+                    Filters=[{"Key": "InstanceIds", "Values": [new_instance_id]}]
+                )
+                if info.get("InstanceInformationList"):
+                    ssm_ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(5)
+        if not ssm_ready:
+            fail(f"R2: SSM not reachable on restored instance {new_instance_id} within 120s")
+
+        # Verify sentinel UUID on restored instance
+        sentinel_uuid = phase_state["sentinel_uuid"]
+        sentinel_path = phase_state["sentinel_path"]
+        verify_resp = ssm.send_command(
+            InstanceIds=[new_instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [f"cat {sentinel_path}"]},
+        )
+        verify_cmd_id = verify_resp["Command"]["CommandId"]
+        verify_inv = None
+        verify_deadline = time.time() + 60
+        while time.time() < verify_deadline:
+            try:
+                verify_inv = ssm.get_command_invocation(
+                    CommandId=verify_cmd_id, InstanceId=new_instance_id
+                )
+                if verify_inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+                    break
+            except Exception:
+                pass
+            time.sleep(3)
+        if not verify_inv or verify_inv["Status"] != "Success":
+            fail(f"R2: SSM sentinel read failed on restored instance: {verify_inv}")
+        restored_output = verify_inv.get("StandardOutputContent", "").strip()
+        if sentinel_uuid not in restored_output:
+            fail(
+                f"R2: sentinel UUID mismatch — expected '{sentinel_uuid}' "
+                f"in output of restored instance, got: '{restored_output}'"
+            )
+        print(f"  R2 PASSED: sentinel_uuid verified on restored instance {new_instance_id}")
 
         # Rollback R2 (terminate new instance)
         client.post(f"/change-requests/{r2_cr['id']}/rollback")
@@ -507,8 +580,14 @@ def run_phase_backup_scheduler(
         print(f"  FILO PASSED: blocked rollback of B1, blocking_crs={blocking}")
 
         # ------------------------------------------------------------------ #
-        # Rollback FILO order: B3 -> B2 -> B1
+        # Rollback FILO order: B4 -> B3 -> B2 -> B1
         # ------------------------------------------------------------------ #
+        print("  Rolling back B4 (scheduled backup)...")
+        client.post(f"/change-requests/{scheduled_cr_id}/rollback")
+        b4_rb_cr = _wait_cr_complete(client, scheduled_cr_id, "B4 rollback", timeout=120)
+        assert b4_rb_cr.get("status") == "rolled_back", f"B4 rollback failed: {b4_rb_cr.get('status')}"
+        print("  B4 rollback PASSED")
+
         print("  Rolling back B3 (server_capture)...")
         client.post(f"/change-requests/{b3_cr_id}/rollback")
         b3_rb_cr = _wait_cr_complete(client, b3_cr_id, "B3 rollback", timeout=120)

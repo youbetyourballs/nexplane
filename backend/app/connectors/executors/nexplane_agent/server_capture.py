@@ -8,13 +8,27 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-from app.connectors.executors.nexplane_agent.server_backup import (
-    _load_aws_creds,
-    _load_storage_config,
-    _s3_client,
-    _delete_s3_prefix,
-)
+from app.connectors.executors.nexplane_agent.aws_utils import _load_aws_creds, _s3_client
+from app.connectors.executors.nexplane_agent.backup_strategies import _load_storage_config
 from app.connectors.executors.nexplane_agent.server_snapshot import _do_snapshot, _deregister_ami
+
+
+async def _delete_s3_prefix(creds: dict, bucket: str, prefix: str) -> None:
+    """Delete all objects under prefix from S3 (best-effort)."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _sync_delete():
+        s3 = _s3_client(creds)
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            objects = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+            if objects:
+                s3.delete_objects(Bucket=bucket, Delete={"Objects": objects})
+
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        await loop.run_in_executor(pool, _sync_delete)
 
 
 def _ssm_client(creds: dict):

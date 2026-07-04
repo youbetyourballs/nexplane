@@ -115,6 +115,11 @@ async def _fire_recurring_job(job_id: str) -> None:
             )
             change_type = ChangeType.ssm_command
 
+        # Extract target_asset_ids from job parameters if present
+        _params = job.parameters or {}
+        _asset_id = _params.get("asset_id") or _params.get("target_asset_id")
+        _target_asset_ids = [_asset_id] if _asset_id else []
+
         cr = ChangeRequest(
             organization_id=job.organization_id,
             requester_id=job.created_by,
@@ -123,7 +128,7 @@ async def _fire_recurring_job(job_id: str) -> None:
             change_type=change_type,
             risk_level=RiskLevel.low,
             desired_outcome=job.parameters,
-            target_asset_ids=[],
+            target_asset_ids=_target_asset_ids,
             status=ChangeRequestStatus.draft,
             source="recurring_job",
         )
@@ -141,7 +146,7 @@ async def _fire_recurring_job(job_id: str) -> None:
 
         # Policy-gated auto-approval
         _policy = None
-        if job.policy_id:
+        if getattr(job, "policy_id", None):
             from app.models.recurring_job_policy import RecurringJobPolicy
             _policy = await db.get(RecurringJobPolicy, job.policy_id)
 
