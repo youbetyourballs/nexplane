@@ -206,3 +206,23 @@ class TestRestoreStrategyRegistry:
                 )
         assert result["new_instance_id"] == "i-restored"
         assert result["status"] == "completed"
+
+
+class TestBackupTargetModel:
+    def test_backup_target_has_backup_tier_column(self):
+        from app.models.backup_target import BackupTarget
+        import sqlalchemy.inspection as insp
+        cols = {c.name for c in BackupTarget.__table__.columns}
+        assert "backup_tier" in cols, "BackupTarget missing backup_tier column"
+        assert "capture_strategy" in cols, "BackupTarget missing capture_strategy column"
+
+    def test_backup_target_defaults(self):
+        from app.models.backup_target import BackupTarget
+        # Verify column defaults exist in the model
+        for col in BackupTarget.__table__.columns:
+            if col.name == "backup_tier":
+                assert col.server_default is not None, "backup_tier missing server_default"
+                assert col.server_default.arg == "machine"
+            if col.name == "capture_strategy":
+                assert col.server_default is not None, "capture_strategy missing server_default"
+                assert col.server_default.arg == "ebs_snapshot"

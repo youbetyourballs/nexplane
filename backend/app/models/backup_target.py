@@ -45,3 +45,7 @@ class BackupTarget(Base):
     )
     # "server" | "workstation" | "shared_drive"
     asset_type: Mapped[str] = mapped_column(String(50), nullable=False, default="server")
+    # "machine" | "data" — determines valid capture/restore strategy pairs
+    backup_tier: Mapped[str] = mapped_column(String(20), nullable=False, default="machine", server_default="machine")
+    # e.g. "ebs_snapshot" | "local_files" | "mgn_replication" | etc.
+    capture_strategy: Mapped[str] = mapped_column(String(50), nullable=False, default="ebs_snapshot", server_default="ebs_snapshot")
