@@ -678,7 +678,7 @@ export interface TunnelConfigUpdate {
 }
 
 export interface Capabilities { edition: string; commercial: boolean; domains: string[]; }
-export interface CatalogParam { name: string; type: string; required?: boolean; default?: unknown; enum?: string[]; description?: string; secret?: boolean; }
+export interface CatalogParam { name: string; type: string; required?: boolean; default?: unknown; enum?: string[]; description?: string; secret?: boolean; pattern?: string; maxLength?: number; }
 export interface CatalogAction {
   connector_type: string; action_id: string; generic_action: string;
   display_name: string; description: string; group: string; domain: string;
