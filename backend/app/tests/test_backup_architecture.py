@@ -226,3 +226,73 @@ class TestBackupTargetModel:
             if col.name == "capture_strategy":
                 assert col.server_default is not None, "capture_strategy missing server_default"
                 assert col.server_default.arg == "ebs_snapshot"
+
+
+class TestLocalFilesStrategy:
+    def test_local_files_backup_produces_correct_artifact_refs(self):
+        import asyncio
+        from unittest.mock import MagicMock, patch, AsyncMock
+        from app.connectors.executors.nexplane_agent.backup_strategies import local_files
+
+        mock_ssh = MagicMock()
+        mock_stdout = MagicMock()
+        mock_stdout.read.side_effect = [b"fake tar data", b""]
+        mock_stdout.channel.recv_exit_status.return_value = 0
+        mock_stderr = MagicMock()
+        mock_ssh.exec_command.return_value = (MagicMock(), mock_stdout, mock_stderr)
+
+        mock_backend = AsyncMock()
+        mock_backend.put_file.return_value = "s3://bucket/prefix/archive.tar.gz"
+
+        with patch("paramiko.SSHClient", return_value=mock_ssh), \
+             patch("paramiko.RSAKey.from_private_key", return_value=MagicMock()), \
+             patch("app.connectors.executors.nexplane_agent.storage_backends.get_backend",
+                   return_value=mock_backend):
+            mock_connector = MagicMock()
+            mock_connector.credentials = {
+                "host": "10.0.0.1",
+                "username": "ec2-user",
+                "private_key": "fake-key",
+            }
+            result = asyncio.run(
+                local_files.backup(
+                    {
+                        "source_path": "/var/app/data",
+                        "backup_storage_id": "fake-storage-id",
+                        "_storage_config": {"storage_type": "s3", "config": {"bucket": "b", "prefix": "p/"}},
+                    },
+                    ["asset-uuid"],
+                    mock_connector,
+                )
+            )
+        refs = result["artifact_refs"]
+        assert refs["capture_strategy"] == "local_files"
+        assert refs["restore_strategy"] == "file_restore_to_path"
+        assert refs["backup_tier"] == "data"
+        assert "artifact_uri" in refs
+
+    def test_local_files_rollback_deletes_artifact(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from app.connectors.executors.nexplane_agent.backup_strategies import local_files
+
+        mock_backend = AsyncMock()
+        mock_backend.delete.return_value = None
+
+        with patch("app.connectors.executors.nexplane_agent.storage_backends.get_backend",
+                   return_value=mock_backend):
+            result = asyncio.run(
+                local_files.rollback(
+                    {},
+                    {
+                        "artifact_refs": {
+                            "storage_type": "s3",
+                            "artifact_uri": "s3://bucket/key",
+                            "config": {"bucket": "bucket"},
+                        }
+                    },
+                    None,
+                )
+            )
+        assert result["rolled_back"] is True
+        mock_backend.delete.assert_called_once_with("s3://bucket/key", {"bucket": "bucket"})
