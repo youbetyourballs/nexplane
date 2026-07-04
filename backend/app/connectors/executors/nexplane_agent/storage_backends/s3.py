@@ -74,16 +74,6 @@ async def _put(key: str, data: bytes, config: dict) -> str:
         return await loop.run_in_executor(pool, _sync)
 
 
-async def put_file(dest_key: str, local_path: str, config: dict) -> str:
-    """Upload a local file to S3 by key. Returns s3://bucket/key URI."""
-    return await upload(local_path, dest_key, config)
-
-
-async def get_file(uri: str, local_path: str, config: dict) -> None:
-    """Download an S3 object by its s3://bucket/key URI to local_path."""
-    await download(uri, local_path, config)
-
-
 async def _delete_prefix(prefix: str, config: dict) -> dict:
     """Delete all objects under prefix. Returns {deleted_count}. Private helper."""
     bucket = config["bucket"]

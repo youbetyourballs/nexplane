@@ -33,7 +33,7 @@ def _ssh_connect(creds: dict):
 
 
 async def restore(params: dict, asset_ids: list, connector) -> dict:
-    from app.connectors.executors.nexplane_agent.restore_strategies.launch_ami import _load_source_artifact_refs
+    from app.connectors.executors.nexplane_agent.restore_strategies import _load_source_artifact_refs
     from app.connectors.executors.nexplane_agent.storage_backends import get_backend
 
     source_backup_cr_id = params.get("source_backup_cr_id", "")
@@ -61,7 +61,7 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
         tmp_path = tmp.name
 
     try:
-        await backend.get_file(artifact_uri, tmp_path, cfg)
+        await backend.download(artifact_uri, tmp_path, cfg)
 
         def _sync_extract():
             ssh = _ssh_connect(creds)
@@ -94,6 +94,7 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
 
     return {
         "status": "completed",
+        "restored": True,
         "restore_strategy": "file_restore_to_path",
         "artifact_uri": artifact_uri,
         "target_path": target_path,

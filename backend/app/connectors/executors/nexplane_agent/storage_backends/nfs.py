@@ -13,11 +13,3 @@ async def download(uri: str, local_path: str, config: dict) -> None:
 
 async def delete(uri: str, config: dict) -> None:
     raise NotImplementedError(f"Storage backend '{_NAME}' is not yet implemented")
-
-
-async def put_file(dest_key: str, local_path: str, config: dict) -> str:
-    raise NotImplementedError(f"Storage backend '{_NAME}' is not yet implemented")
-
-
-async def get_file(uri: str, local_path: str, config: dict) -> None:
-    raise NotImplementedError(f"Storage backend '{_NAME}' is not yet implemented")

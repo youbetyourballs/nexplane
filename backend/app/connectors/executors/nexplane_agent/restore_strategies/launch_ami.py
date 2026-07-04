@@ -6,35 +6,9 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+from app.connectors.executors.nexplane_agent.restore_strategies import _load_source_artifact_refs
+
 logger = logging.getLogger(__name__)
-
-
-async def _load_source_artifact_refs(source_backup_cr_id: str) -> dict:
-    import uuid as _uuid
-    from app.database import AsyncSessionLocal
-    from app.models.change_request import ChangeRequest
-    from app.models.execution_run import ExecutionRun
-    from sqlalchemy import select
-    async with AsyncSessionLocal() as db:
-        cr = await db.get(ChangeRequest, _uuid.UUID(source_backup_cr_id))
-        if not cr:
-            raise RuntimeError(f"Source backup CR {source_backup_cr_id} not found")
-        if cr.artifact_refs:
-            return cr.artifact_refs
-        result = await db.execute(
-            select(ExecutionRun)
-            .where(ExecutionRun.change_request_id == cr.id)
-            .order_by(ExecutionRun.started_at.desc())
-            .limit(1)
-        )
-        er = result.scalar_one_or_none()
-        if not er or not er.result:
-            return {}
-        for step in (er.result.get("execution") or {}).get("steps", []):
-            refs = (step.get("result") or {}).get("artifact_refs")
-            if refs:
-                return refs
-        return {}
 
 
 async def restore(params: dict, asset_ids: list, connector) -> dict:

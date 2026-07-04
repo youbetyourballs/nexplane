@@ -235,14 +235,23 @@ class TestLocalFilesStrategy:
         from app.connectors.executors.nexplane_agent.backup_strategies import local_files
 
         mock_ssh = MagicMock()
-        mock_stdout = MagicMock()
-        mock_stdout.read.side_effect = [b"fake tar data", b""]
-        mock_stdout.channel.recv_exit_status.return_value = 0
+        # exec_command is called 3 times: find|wc -l, du -sb, tar czf
+        mock_stdout_fc = MagicMock()
+        mock_stdout_fc.read.return_value = b"42"
+        mock_stdout_sz = MagicMock()
+        mock_stdout_sz.read.return_value = b"1024"
+        mock_stdout_tar = MagicMock()
+        mock_stdout_tar.read.side_effect = [b"fake tar data", b""]
+        mock_stdout_tar.channel.recv_exit_status.return_value = 0
         mock_stderr = MagicMock()
-        mock_ssh.exec_command.return_value = (MagicMock(), mock_stdout, mock_stderr)
+        mock_ssh.exec_command.side_effect = [
+            (MagicMock(), mock_stdout_fc, mock_stderr),
+            (MagicMock(), mock_stdout_sz, mock_stderr),
+            (MagicMock(), mock_stdout_tar, mock_stderr),
+        ]
 
         mock_backend = AsyncMock()
-        mock_backend.put_file.return_value = "s3://bucket/prefix/archive.tar.gz"
+        mock_backend.upload.return_value = "s3://bucket/prefix/archive.tar.gz"
 
         with patch("paramiko.SSHClient", return_value=mock_ssh), \
              patch("paramiko.RSAKey.from_private_key", return_value=MagicMock()), \
@@ -296,3 +305,74 @@ class TestLocalFilesStrategy:
             )
         assert result["rolled_back"] is True
         mock_backend.delete.assert_called_once_with("s3://bucket/key", {"bucket": "bucket"})
+
+
+class TestFileRestoreToPathStrategy:
+    def test_file_restore_to_path_restore_calls_download(self):
+        import asyncio
+        from unittest.mock import MagicMock, patch, AsyncMock
+        from app.connectors.executors.nexplane_agent.restore_strategies import file_restore_to_path
+
+        mock_backend = AsyncMock()
+        mock_backend.download.return_value = None
+
+        mock_ssh = MagicMock()
+        mock_mkdir_stdout = MagicMock()
+        mock_mkdir_stdout.channel.recv_exit_status.return_value = 0
+        mock_ssh.exec_command.side_effect = [
+            (MagicMock(), mock_mkdir_stdout, MagicMock()),
+            (MagicMock(), MagicMock(), MagicMock()),
+        ]
+        mock_tar_stdout = MagicMock()
+        mock_tar_stdout.channel.recv_exit_status.return_value = 0
+        # Second exec_command call (tar extract)
+        mock_ssh.exec_command.side_effect = [
+            (MagicMock(), mock_mkdir_stdout, MagicMock()),
+            (MagicMock(), mock_tar_stdout, MagicMock()),
+        ]
+
+        mock_sftp = MagicMock()
+        mock_ssh.open_sftp.return_value = mock_sftp
+
+        artifact_refs = {
+            "artifact_uri": "s3://bucket/prefix/archive.tar.gz",
+            "storage_type": "s3",
+            "config": {"bucket": "bucket"},
+        }
+
+        mock_connector = MagicMock()
+        mock_connector.credentials = {
+            "host": "10.0.0.1",
+            "username": "ec2-user",
+            "private_key": "fake-key",
+        }
+
+        with patch(
+            "app.connectors.executors.nexplane_agent.restore_strategies._load_source_artifact_refs",
+            return_value=artifact_refs,
+        ), patch(
+            "app.connectors.executors.nexplane_agent.storage_backends.get_backend",
+            return_value=mock_backend,
+        ), patch("paramiko.SSHClient", return_value=mock_ssh), \
+           patch("paramiko.RSAKey.from_private_key", return_value=MagicMock()):
+            result = asyncio.run(
+                file_restore_to_path.restore(
+                    {
+                        "source_backup_cr_id": "00000000-0000-0000-0000-000000000001",
+                        "target_path": "/var/app/data",
+                    },
+                    ["asset-uuid"],
+                    mock_connector,
+                )
+            )
+
+        assert result["restored"] is True
+
+    def test_file_restore_to_path_rollback_returns_not_reversed(self):
+        import asyncio
+        from app.connectors.executors.nexplane_agent.restore_strategies import file_restore_to_path
+
+        result = asyncio.run(
+            file_restore_to_path.rollback({}, {"artifact_refs": {}}, None)
+        )
+        assert result["rolled_back"] is False

@@ -62,6 +62,20 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
                 tmp_path = tmp.name
 
+            # Collect stats before tar
+            file_count = -1
+            size_bytes = -1
+            try:
+                _, stdout_fc, _ = ssh.exec_command(f"find {source_path} -type f | wc -l")
+                file_count = int(stdout_fc.read().decode().strip())
+            except Exception:
+                pass
+            try:
+                _, stdout_sz, _ = ssh.exec_command(f"du -sb {source_path} | cut -f1")
+                size_bytes = int(stdout_sz.read().decode().strip())
+            except Exception:
+                pass
+
             cmd = f"tar czf - --warning=no-file-changed {source_path}"
             stdin, stdout, stderr = ssh.exec_command(cmd)
             with open(tmp_path, "wb") as f:
@@ -75,17 +89,17 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             if exit_code not in (0, 1):
                 err = stderr.read(2048).decode(errors="replace")
                 raise RuntimeError(f"local_files: tar failed (exit={exit_code}): {err}")
-            return tmp_path
+            return tmp_path, file_count, size_bytes
         finally:
             ssh.close()
 
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor() as pool:
-        tmp_path = await loop.run_in_executor(pool, _sync_tar_and_upload)
+        tmp_path, file_count, size_bytes = await loop.run_in_executor(pool, _sync_tar_and_upload)
 
     try:
         backend = get_backend(storage_type)
-        artifact_uri = await backend.put_file(archive_key, tmp_path, cfg)
+        artifact_uri = await backend.upload(tmp_path, archive_key, cfg)
     finally:
         try:
             os.unlink(tmp_path)
@@ -101,6 +115,8 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         "config": cfg,
         "artifact_uri": artifact_uri,
         "source_path": source_path,
+        "file_count": file_count,
+        "size_bytes": size_bytes,
     }
     return {
         "status": "completed",
