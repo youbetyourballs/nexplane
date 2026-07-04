@@ -2034,6 +2034,142 @@ def run_phase_managed_db_snapshot(client, aws_connector_id: str, asset_id: str,
 
 
 # ---------------------------------------------------------------------------
+# Phase DISK2VHD — WinRM to Windows Server 2022, disk2vhd.exe, .vhdx to S3
+# ---------------------------------------------------------------------------
+
+_DISK2VHD_CACHE_KEY = "disk2vhd"
+_DISK2VHD_SETUP_HASH = "win2022-winrm-v1"
+
+
+def _ensure_disk2vhd_tool(s3) -> bool:
+    """Confirm disk2vhd.exe is present in the smoke bucket tools prefix."""
+    try:
+        s3.head_object(Bucket=SMOKE_BUCKET, Key="tools/disk2vhd.exe")
+        return True
+    except Exception:
+        return False
+
+
+def _provision_windows_instance(ec2, ssm, key_name: str, subnet_id: str,
+                                sg_id: str, win_password: str):
+    """Get-or-create a Windows Server 2022 EC2 with WinRM enabled. Returns
+    (instance_id, private_ip, from_cache)."""
+    import json
+    import time as _t
+    cached_ami = _check_smoke_ami_cache(ssm, ec2, _DISK2VHD_CACHE_KEY, _DISK2VHD_SETUP_HASH)
+    if cached_ami:
+        image_id = cached_ami
+        user_data = ""
+    else:
+        imgs = ec2.describe_images(
+            Owners=["amazon"],
+            Filters=[{"Name": "name", "Values": ["Windows_Server-2022-English-Full-Base-*"]},
+                     {"Name": "state", "Values": ["available"]}],
+        )["Images"]
+        imgs.sort(key=lambda i: i["CreationDate"], reverse=True)
+        image_id = imgs[0]["ImageId"]
+        user_data = f"""<powershell>
+net user Administrator "{win_password}"
+Enable-PSRemoting -Force
+Set-Item WSMan:\\localhost\\Service\\Auth\\Basic $true
+Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted $true
+winrm set winrm/config/service '@{{MaxConcurrentOperationsPerUser="4294967295"}}'
+New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow
+</powershell>
+<persist>true</persist>"""
+
+    run_kwargs = dict(
+        ImageId=image_id, InstanceType="t3.medium", MinCount=1, MaxCount=1,
+        KeyName=key_name, SubnetId=subnet_id, SecurityGroupIds=[sg_id],
+        TagSpecifications=[{"ResourceType": "instance",
+                            "Tags": [{"Key": "Name", "Value": "nexplane-smoke-disk2vhd"}]}],
+    )
+    if user_data:
+        run_kwargs["UserData"] = user_data
+    inst = ec2.run_instances(**run_kwargs)["Instances"][0]
+    instance_id = inst["InstanceId"]
+    ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+    desc = ec2.describe_instances(InstanceIds=[instance_id])["Reservations"][0]["Instances"][0]
+    private_ip = desc["PrivateIpAddress"]
+    _wait_ssm_ready_win(ssm, instance_id, timeout=600)
+
+    if not cached_ami:
+        ami = ec2.create_image(InstanceId=instance_id,
+                               Name=f"nexplane-smoke-disk2vhd-{int(_t.time())}",
+                               NoReboot=False)["ImageId"]
+        ec2.get_waiter("image_available").wait(ImageIds=[ami])
+        ssm.put_parameter(
+            Name=f"/nexplane/smoke-amis/{_DISK2VHD_CACHE_KEY}/{_DISK2VHD_SETUP_HASH}",
+            Value=json.dumps({"ami_id": ami}), Type="String", Overwrite=True,
+        )
+    return instance_id, private_ip, bool(cached_ami)
+
+
+def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
+                       key_name: str, subnet_id: str, sg_id: str) -> None:
+    """DISK2VHD: provision Windows EC2, capture C: as .vhdx, upload to S3,
+    verify, rollback, terminate EC2."""
+    import uuid as _uuid
+    import secrets
+    s3 = _get_aws_boto3_client("s3")
+    ec2 = _get_aws_boto3_client("ec2")
+    ssm = _get_aws_boto3_client("ssm")
+    _ensure_s3_bucket(s3, SMOKE_BUCKET)
+
+    if not _ensure_disk2vhd_tool(s3):
+        fail("DISK2VHD: s3://%s/tools/disk2vhd.exe missing — upload it before running this phase"
+             % SMOKE_BUCKET)
+
+    win_password = "Nx!" + secrets.token_urlsafe(14) + "9a"
+    instance_id, private_ip, from_cache = _provision_windows_instance(
+        ec2, ssm, key_name, subnet_id, sg_id, win_password)
+    print(f"  DISK2VHD infra: instance={instance_id} ip={private_ip} cache={from_cache}")
+
+    run_id = _uuid.uuid4().hex[:8]
+    prefix = f"smoke-disk2vhd-{run_id}/"
+    try:
+        cr = _create_and_run_cr(
+            client,
+            title=f"smoke disk2vhd {run_id}",
+            change_type="server_backup",
+            asset_id=asset_id,
+            desired_outcome={
+                "capture_strategy": "disk2vhd",
+                "aws_connector_id": aws_connector_id,
+                "winrm_host": private_ip,
+                "winrm_username": "Administrator",
+                "winrm_password": win_password,
+                "disk_list": ["C:"],
+                "_storage_config": {"storage_type": "s3", "config": {
+                    "bucket": SMOKE_BUCKET, "prefix": prefix,
+                    "region": s3.meta.region_name or "us-east-1"}},
+            },
+        )
+        assert cr["status"] == "completed", f"DISK2VHD backup failed: {cr}"
+        refs = _extract_artifact_refs(cr)
+        uri = refs.get("artifact_uri", "")
+        assert uri.endswith(".vhdx"), f"DISK2VHD: bad artifact_uri {uri}"
+        assert refs.get("size_bytes", 0) > 0, "DISK2VHD: vhdx size is 0"
+        key = uri.split(f"{SMOKE_BUCKET}/", 1)[1]
+        head = s3.head_object(Bucket=SMOKE_BUCKET, Key=key)
+        assert head["ContentLength"] > 0, "DISK2VHD: S3 object empty"
+        print(f"  DISK2VHD backup PASSED: {uri} ({head['ContentLength']} bytes)")
+
+        _rollback_cr(client, cr["id"])
+        rb = _wait_cr_complete(client, cr["id"], "disk2vhd rollback", timeout=180)
+        assert rb["status"] in ("rolled_back", "rollback_partial"), f"rollback status={rb['status']}"
+        assert _count_s3_prefix(s3, SMOKE_BUCKET, prefix) == 0, "DISK2VHD: artifact not deleted"
+        print("  DISK2VHD rollback PASSED")
+    finally:
+        _delete_s3_prefix(s3, SMOKE_BUCKET, prefix)
+        try:
+            ec2.terminate_instances(InstanceIds=[instance_id])
+            print(f"  DISK2VHD teardown: terminated {instance_id}")
+        except Exception as exc:
+            print(f"  DISK2VHD teardown WARNING: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -2053,6 +2189,7 @@ def main() -> None:
             "LVM_SNAPSHOT=LVM snapshot -> gzip image -> S3 + rollback verification. "
             "NFS_FILES=tar.gz of NFS export -> S3 + rollback; reuses LVM/NFS EC2 when combined with LVM_SNAPSHOT. "
             "MANAGED_DB_SNAPSHOT=RDS CreateDBSnapshot via CR + rollback + teardown. "
+            "DISK2VHD=Windows Server 2022 WinRM disk2vhd.exe .vhdx capture + S3 upload + rollback. "
             "Default: all three phases."
         ),
     )
@@ -2463,6 +2600,92 @@ def main() -> None:
             finally:
                 try:
                     client.delete(f"/assets/{_rds_asset_id}")
+                except Exception:
+                    pass
+
+        if "DISK2VHD" in phases:
+            print("\n=== PHASE: DISK2VHD ===")
+            from smoke_helpers import KEY_NAME as _SMOKE_KEY_NAME_D2V
+            _ec2_d2v = _get_aws_boto3_client("ec2")
+            _ssm_d2v = _get_aws_boto3_client("ssm")
+
+            # Resolve default VPC + subnet
+            _vpcs_d2v = _ec2_d2v.describe_vpcs(
+                Filters=[{"Name": "isDefault", "Values": ["true"]}]
+            )["Vpcs"]
+            if not _vpcs_d2v:
+                raise RuntimeError("DISK2VHD: no default VPC found")
+            _vpc_id_d2v = _vpcs_d2v[0]["VpcId"]
+            _subnets_d2v = _ec2_d2v.describe_subnets(
+                Filters=[{"Name": "vpcId", "Values": [_vpc_id_d2v]}]
+            )["Subnets"]
+            # Filter to AZs that support t3.medium
+            try:
+                _t3med_azs = {
+                    o["Location"]
+                    for o in _ec2_d2v.describe_instance_type_offerings(
+                        LocationType="availability-zone",
+                        Filters=[{"Name": "instance-type", "Values": ["t3.medium"]}],
+                    )["InstanceTypeOfferings"]
+                }
+                _subnets_d2v = [s for s in _subnets_d2v if s.get("AvailabilityZone") in _t3med_azs] or _subnets_d2v
+            except Exception:
+                pass
+            _subnets_d2v.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+            _subnet_d2v = _subnets_d2v[0]["SubnetId"] if _subnets_d2v else None
+
+            # Ensure a security group that allows WinRM (5985) from within the VPC
+            _sg_d2v = None
+            try:
+                _sgs_d2v = _ec2_d2v.describe_security_groups(
+                    Filters=[{"Name": "group-name", "Values": ["nexplane-smoke-disk2vhd"]},
+                             {"Name": "vpc-id", "Values": [_vpc_id_d2v]}]
+                )["SecurityGroups"]
+                if _sgs_d2v:
+                    _sg_d2v = _sgs_d2v[0]["GroupId"]
+            except Exception:
+                pass
+            if not _sg_d2v:
+                _sg_resp_d2v = _ec2_d2v.create_security_group(
+                    GroupName="nexplane-smoke-disk2vhd",
+                    Description="Nexplane smoke: disk2vhd WinRM",
+                    VpcId=_vpc_id_d2v,
+                )
+                _sg_d2v = _sg_resp_d2v["GroupId"]
+                try:
+                    _ec2_d2v.authorize_security_group_ingress(
+                        GroupId=_sg_d2v,
+                        IpPermissions=[{
+                            "IpProtocol": "tcp", "FromPort": 5985, "ToPort": 5985,
+                            "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
+                        }],
+                    )
+                except Exception:
+                    pass
+
+            # Register a minimal asset for the CR target
+            _d2v_asset_resp = client.post("/assets", json={
+                "asset_type": "server",
+                "environment": "staging",
+                "criticality": "low",
+                "name": f"smoke-disk2vhd-{int(time.time())}",
+                "tags": ["nexplane-smoke"],
+            })
+            _d2v_asset_data = _d2v_asset_resp if isinstance(_d2v_asset_resp, dict) else _d2v_asset_resp.json()
+            _d2v_asset_id = _d2v_asset_data.get("id") or _d2v_asset_data.get("asset_id")
+
+            try:
+                run_phase_disk2vhd(
+                    client=client,
+                    aws_connector_id=cloud_account_id,
+                    asset_id=_d2v_asset_id,
+                    key_name=_SMOKE_KEY_NAME_D2V,
+                    subnet_id=_subnet_d2v,
+                    sg_id=_sg_d2v,
+                )
+            finally:
+                try:
+                    client.delete(f"/assets/{_d2v_asset_id}")
                 except Exception:
                     pass
 
