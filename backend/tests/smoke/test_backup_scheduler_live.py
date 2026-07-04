@@ -2035,6 +2035,18 @@ def main() -> None:
             _subnets_lvm = _ec2_lvm.describe_subnets(
                 Filters=[{"Name": "vpcId", "Values": [_vpc_id_lvm]}]
             )["Subnets"]
+            # Filter out AZs that don't support t3.small (e.g. us-east-1e)
+            try:
+                _t3small_azs = {
+                    o["Location"]
+                    for o in _ec2_lvm.describe_instance_type_offerings(
+                        LocationType="availability-zone",
+                        Filters=[{"Name": "instance-type", "Values": ["t3.small"]}],
+                    )["InstanceTypeOfferings"]
+                }
+                _subnets_lvm = [s for s in _subnets_lvm if s.get("AvailabilityZone") in _t3small_azs] or _subnets_lvm
+            except Exception:
+                pass
             _subnets_lvm.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
             _subnet_lvm = _subnets_lvm[0]["SubnetId"] if _subnets_lvm else None
 
