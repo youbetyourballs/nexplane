@@ -1569,6 +1569,22 @@ def run_phase_storage_sync(client, aws_connector_id: str, asset_id: str) -> None
     src_prefix = f"smoke-storage-sync-src-{run_id}/"
     dest_prefix_holder = {}
 
+    # Create a temporary staging/low-criticality asset so the safety review passes.
+    smoke_asset_id = None
+    try:
+        asset_resp = client.post("/assets", json={
+            "asset_type": "server",
+            "environment": "staging",
+            "criticality": "low",
+            "name": f"smoke-storage-sync-{run_id}",
+            "tags": ["nexplane-smoke"],
+        })
+        asset_data = asset_resp if isinstance(asset_resp, dict) else asset_resp.json()
+        smoke_asset_id = asset_data.get("id") or asset_data.get("asset_id")
+    except Exception as _ae:
+        print(f"  STORAGE_SYNC: could not create temporary asset ({_ae}), using provided asset_id")
+        smoke_asset_id = asset_id
+
     try:
         # Setup: put 3 source objects
         for i in range(3):
@@ -1584,7 +1600,7 @@ def run_phase_storage_sync(client, aws_connector_id: str, asset_id: str) -> None
             client,
             title=f"smoke storage_sync {run_id}",
             change_type="server_backup",
-            asset_id=asset_id,
+            asset_id=smoke_asset_id,
             desired_outcome={
                 "capture_strategy": "storage_sync",
                 "aws_connector_id": aws_connector_id,
@@ -1613,6 +1629,11 @@ def run_phase_storage_sync(client, aws_connector_id: str, asset_id: str) -> None
         _delete_s3_prefix(s3, SMOKE_BUCKET, src_prefix)
         if dest_prefix_holder.get("p"):
             _delete_s3_prefix(s3, SMOKE_BUCKET, dest_prefix_holder["p"])
+        if smoke_asset_id and smoke_asset_id != asset_id:
+            try:
+                client.delete(f"/assets/{smoke_asset_id}")
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
