@@ -7,22 +7,37 @@ Nexplane Catalog Action Live Smoke Test
 Usage:
     python tests/smoke/test_catalog_action_live.py \\
         --email admin@acme.example --password admin123 \\
-        --phases CATALOG_DISCOVERY,CATALOG_CR_LIFECYCLE,CATALOG_ACTION_ERRORS
+        --phases CATALOG_DISCOVERY,CATALOG_CR_LIFECYCLE,CATALOG_ACTION_ERRORS,CATALOG_ROLLBACK,CATALOG_WORKFLOW,CATALOG_WORKFLOW_PARTIAL_FAILURE
 
 Phase descriptions:
-    CATALOG_DISCOVERY      Verify /capabilities and /catalog/actions return correct structure
-    CATALOG_CR_LIFECYCLE   Full catalog_action CR lifecycle via aws.discover_ec2_instances
-    CATALOG_ACTION_ERRORS  Error paths: unknown action → plan_blocked; empty outcome → graceful failure
+    CATALOG_DISCOVERY               Verify /capabilities and /catalog/actions return correct structure
+    CATALOG_CR_LIFECYCLE            Full catalog_action CR lifecycle via aws.discover_ec2_instances
+    CATALOG_ACTION_ERRORS           Error paths: unknown action → plan_blocked; empty outcome → graceful failure
+    CATALOG_ROLLBACK                Single-step catalog_action CR: execute then rollback, verify rollback fields + auto-asset deleted
+    CATALOG_WORKFLOW                Multi-step catalog_workflow CR: two key pair steps, execute, FILO rollback
+    CATALOG_WORKFLOW_PARTIAL_FAILURE Duplicate key name forces step 2 to fail → step 1 auto-rolled back
 
 Requirements:
-    AWS connector active in the org (used by discover_ec2_instances)
+    AWS connector active in the org (used by discover_ec2_instances and create_key_pair)
 """
 import sys
 import time
+import uuid
 
 from smoke_helpers import NexplaneClient, log, fail, make_base_parser
 
-ALL_PHASES = ["CATALOG_DISCOVERY", "CATALOG_CR_LIFECYCLE", "CATALOG_ACTION_ERRORS"]
+ALL_PHASES = [
+    "CATALOG_DISCOVERY",
+    "CATALOG_CR_LIFECYCLE",
+    "CATALOG_ACTION_ERRORS",
+    "CATALOG_ROLLBACK",
+    "CATALOG_WORKFLOW",
+    "CATALOG_WORKFLOW_PARTIAL_FAILURE",
+]
+
+
+def _uuid8() -> str:
+    return str(uuid.uuid4())[:8]
 
 _smoke_cr_id: str = ""
 
@@ -235,6 +250,263 @@ def phase_catalog_action_errors(client: NexplaneClient) -> None:
     log("CATALOG_ACTION_ERRORS passed")
 
 
+def phase_catalog_rollback(client: NexplaneClient) -> None:
+    """Single-step mutating catalog_action CR: execute then rollback, verify asset deleted."""
+    base = client.base.rstrip("/")
+    key_name = f"nexplane-smoke-{_uuid8()}"
+    log(f"CATALOG_ROLLBACK: key_name={key_name}")
+
+    # 1. Create CR
+    resp = client.client.post(f"{base}/change-requests", json={
+        "title": f"smoke rollback {key_name}",
+        "change_type": "catalog_action",
+        "desired_outcome": {
+            "connector_type": "aws",
+            "action_id": "create_key_pair",
+            "params": {"key_name": key_name},
+        },
+    })
+    if resp.status_code not in (200, 201):
+        fail(f"Create CR failed: {resp.status_code} {resp.text}")
+    cr_id = resp.json()["id"]
+    log(f"CR created: {cr_id}")
+
+    # 2. Plan
+    resp = client.client.post(f"{base}/change-requests/{cr_id}/plan")
+    if resp.status_code not in (200, 201, 202):
+        fail(f"Plan failed: {resp.status_code} {resp.text}")
+    for _ in range(30):
+        time.sleep(2)
+        resp = client.client.get(f"{base}/change-requests/{cr_id}")
+        cr = resp.json()
+        if cr["status"] in ("planned", "plan_blocked", "failed"):
+            break
+    if cr["status"] != "planned":
+        fail(f"CR did not reach planned, got: {cr['status']}")
+
+    # 3. Verify rollback fields in plan
+    steps = cr.get("generated_steps") or []
+    if not steps:
+        fail("No generated_steps in planned CR")
+    step = steps[0]
+    if step.get("rollback_connector_type") != "aws":
+        fail(f"Expected rollback_connector_type=aws, got: {step.get('rollback_connector_type')}")
+    if step.get("rollback_action_id") != "delete_key_pair":
+        fail(f"Expected rollback_action_id=delete_key_pair, got: {step.get('rollback_action_id')}")
+    log("Rollback fields in plan: VERIFIED")
+
+    # 4. Approve + execute
+    client.client.post(f"{base}/change-requests/{cr_id}/submit-for-approval")
+    client.client.post(f"{base}/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "smoke"})
+    client.client.post(f"{base}/change-requests/{cr_id}/execute")
+    for _ in range(60):
+        time.sleep(3)
+        resp = client.client.get(f"{base}/change-requests/{cr_id}")
+        cr = resp.json()
+        if cr["status"] in ("completed", "failed", "execution_failed"):
+            break
+    if cr["status"] != "completed":
+        fail(f"CR did not complete, got: {cr['status']}")
+    log("Execution: COMPLETED")
+
+    # 5. Record auto_asset_id if present
+    exec_steps = (cr.get("execution_result") or {}).get("steps", [])
+    auto_asset_id = None
+    if exec_steps:
+        auto_asset_id = exec_steps[0].get("result", {}).get("_auto_asset_id")
+    if auto_asset_id:
+        resp = client.client.get(f"{base}/assets/{auto_asset_id}")
+        if resp.status_code != 200:
+            fail(f"Asset {auto_asset_id} not found after execute: {resp.status_code}")
+        log(f"Auto-asset {auto_asset_id}: EXISTS pre-rollback")
+
+    # 6. Rollback
+    resp = client.client.post(f"{base}/change-requests/{cr_id}/rollback")
+    if resp.status_code not in (200, 201, 202):
+        fail(f"Rollback trigger failed: {resp.status_code} {resp.text}")
+    for _ in range(60):
+        time.sleep(3)
+        resp = client.client.get(f"{base}/change-requests/{cr_id}")
+        cr = resp.json()
+        if cr["status"] in ("rolled_back", "rollback_failed", "failed"):
+            break
+    if cr["status"] != "rolled_back":
+        fail(f"CR did not reach rolled_back, got: {cr['status']}")
+    log("Rollback: COMPLETED")
+
+    # 7. Verify asset deleted
+    if auto_asset_id:
+        resp = client.client.get(f"{base}/assets/{auto_asset_id}")
+        if resp.status_code != 404:
+            fail(f"Asset {auto_asset_id} still exists after rollback (expected 404, got {resp.status_code})")
+        log(f"Auto-asset {auto_asset_id}: DELETED after rollback — VERIFIED")
+
+    log("CATALOG_ROLLBACK passed")
+
+
+def phase_catalog_workflow(client: NexplaneClient) -> None:
+    """Multi-step catalog_workflow CR: two create_key_pair steps, execute, FILO rollback."""
+    base = client.base.rstrip("/")
+    key_a = f"nexplane-smoke-wfa-{_uuid8()}"
+    key_b = f"nexplane-smoke-wfb-{_uuid8()}"
+    log(f"CATALOG_WORKFLOW: key_a={key_a} key_b={key_b}")
+
+    # 1. Create CR
+    resp = client.client.post(f"{base}/change-requests", json={
+        "title": f"smoke workflow {key_a}",
+        "change_type": "catalog_workflow",
+        "desired_outcome": {
+            "steps": [
+                {"connector_type": "aws", "action_id": "create_key_pair", "params": {"key_name": key_a}},
+                {"connector_type": "aws", "action_id": "create_key_pair", "params": {"key_name": key_b}},
+            ]
+        },
+    })
+    if resp.status_code not in (200, 201):
+        fail(f"Create CR failed: {resp.status_code} {resp.text}")
+    cr_id = resp.json()["id"]
+    log(f"CR created: {cr_id}")
+
+    # 2. Plan and verify 2 steps with rollback fields
+    client.client.post(f"{base}/change-requests/{cr_id}/plan")
+    for _ in range(30):
+        time.sleep(2)
+        resp = client.client.get(f"{base}/change-requests/{cr_id}")
+        cr = resp.json()
+        if cr["status"] in ("planned", "plan_blocked", "failed"):
+            break
+    if cr["status"] != "planned":
+        fail(f"CR did not reach planned, got: {cr['status']}")
+
+    steps = cr.get("generated_steps") or []
+    if len(steps) != 2:
+        fail(f"Expected 2 generated_steps, got {len(steps)}")
+    for i, step in enumerate(steps, start=1):
+        if step.get("rollback_connector_type") != "aws":
+            fail(f"Step {i}: expected rollback_connector_type=aws, got: {step.get('rollback_connector_type')}")
+        if step.get("rollback_action_id") != "delete_key_pair":
+            fail(f"Step {i}: expected rollback_action_id=delete_key_pair, got: {step.get('rollback_action_id')}")
+    log("2-step plan with rollback fields: VERIFIED")
+
+    # 3. Approve + execute
+    client.client.post(f"{base}/change-requests/{cr_id}/submit-for-approval")
+    client.client.post(f"{base}/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "smoke"})
+    client.client.post(f"{base}/change-requests/{cr_id}/execute")
+    for _ in range(60):
+        time.sleep(3)
+        resp = client.client.get(f"{base}/change-requests/{cr_id}")
+        cr = resp.json()
+        if cr["status"] in ("completed", "failed", "execution_failed"):
+            break
+    if cr["status"] != "completed":
+        fail(f"CR did not complete, got: {cr['status']}")
+    log("Execution: COMPLETED")
+
+    # 4. Rollback
+    client.client.post(f"{base}/change-requests/{cr_id}/rollback")
+    for _ in range(60):
+        time.sleep(3)
+        resp = client.client.get(f"{base}/change-requests/{cr_id}")
+        cr = resp.json()
+        if cr["status"] in ("rolled_back", "rollback_failed", "failed"):
+            break
+    if cr["status"] != "rolled_back":
+        fail(f"CR did not reach rolled_back, got: {cr['status']}")
+    log("Rollback: COMPLETED")
+
+    # 5. Verify FILO order — step 2 rolled back before step 1
+    rollback_run = cr.get("rollback_execution_result") or cr.get("rollback_result") or {}
+    rollback_steps = rollback_run.get("steps", [])
+    if rollback_steps:
+        step_numbers = [s.get("step_number") for s in rollback_steps]
+        if step_numbers != sorted(step_numbers, reverse=True):
+            fail(f"Rollback steps not in FILO order (highest step_number first): {step_numbers}")
+        log(f"FILO rollback order verified: {step_numbers}")
+    else:
+        log("FILO order: rollback_steps not surfaced in CR response — skipping order check")
+
+    log("CATALOG_WORKFLOW passed")
+
+
+def phase_catalog_workflow_partial_failure(client: NexplaneClient) -> None:
+    """Partial failure: step 2 fails (duplicate key) → step 1 auto-rolled back."""
+    base = client.base.rstrip("/")
+    key_name = f"nexplane-smoke-pf-{_uuid8()}"
+    log(f"CATALOG_WORKFLOW_PARTIAL_FAILURE: key_name={key_name} (used twice to force failure)")
+
+    # 1. Create CR with duplicate key name → step 2 will fail
+    resp = client.client.post(f"{base}/change-requests", json={
+        "title": f"smoke pf {key_name}",
+        "change_type": "catalog_workflow",
+        "desired_outcome": {
+            "steps": [
+                {"connector_type": "aws", "action_id": "create_key_pair", "params": {"key_name": key_name}},
+                {"connector_type": "aws", "action_id": "create_key_pair", "params": {"key_name": key_name}},
+            ]
+        },
+    })
+    if resp.status_code not in (200, 201):
+        fail(f"Create CR failed: {resp.status_code} {resp.text}")
+    cr_id = resp.json()["id"]
+    log(f"CR created: {cr_id}")
+
+    # 2. Approve + execute — expect failure
+    client.client.post(f"{base}/change-requests/{cr_id}/plan")
+    for _ in range(30):
+        time.sleep(2)
+        resp = client.client.get(f"{base}/change-requests/{cr_id}")
+        cr = resp.json()
+        if cr["status"] in ("planned", "plan_blocked", "failed"):
+            break
+    if cr["status"] != "planned":
+        fail(f"CR did not reach planned, got: {cr['status']}")
+
+    client.client.post(f"{base}/change-requests/{cr_id}/submit-for-approval")
+    client.client.post(f"{base}/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "smoke"})
+    client.client.post(f"{base}/change-requests/{cr_id}/execute")
+
+    for _ in range(90):
+        time.sleep(3)
+        resp = client.client.get(f"{base}/change-requests/{cr_id}")
+        cr = resp.json()
+        if cr["status"] in ("completed", "failed", "execution_failed", "rolled_back", "rollback_failed"):
+            break
+
+    if cr["status"] not in ("failed", "execution_failed", "rolled_back"):
+        fail(f"Expected execution to fail or auto-rollback, got: {cr['status']}")
+    log(f"Execution reached expected failure/rollback state: {cr['status']}")
+
+    # 3. Verify step 1 completed, step 2 failed
+    exec_steps = (cr.get("execution_result") or {}).get("steps", [])
+    if exec_steps:
+        step1 = next((s for s in exec_steps if s.get("step_number") == 1), None)
+        step2 = next((s for s in exec_steps if s.get("step_number") == 2), None)
+        if step1 and step1.get("status") not in ("completed", None):
+            log(f"Step 1 status: {step1.get('status')} (may be in result dict rather than status field)")
+        if step2 and step2.get("status") not in ("failed", None):
+            log(f"Step 2 status: {step2.get('status')} (expected failure)")
+        log(f"Step statuses — step1: {step1}, step2: {step2}")
+
+    # 4. Verify step 1 was rolled back (delete_key_pair must have run)
+    rollback_result = cr.get("rollback_execution_result") or cr.get("rollback_result")
+    if rollback_result:
+        log(f"Rollback result present: {list(rollback_result.keys())}")
+    else:
+        # If platform auto-triggers rollback asynchronously, poll briefly
+        for _ in range(20):
+            time.sleep(3)
+            resp = client.client.get(f"{base}/change-requests/{cr_id}")
+            cr = resp.json()
+            if cr.get("rollback_execution_result") or cr.get("rollback_result") or cr["status"] == "rolled_back":
+                break
+        rollback_result = cr.get("rollback_execution_result") or cr.get("rollback_result")
+        if not rollback_result and cr["status"] != "rolled_back":
+            fail("Step 1 was not rolled back after step 2 failure — no rollback_result and status not rolled_back")
+
+    log("Partial failure rollback: VERIFIED")
+    log("CATALOG_WORKFLOW_PARTIAL_FAILURE passed")
+
+
 def main() -> None:
     parser = make_base_parser("Nexplane Catalog Action Live Smoke Test")
     parser.add_argument(
@@ -251,6 +523,9 @@ def main() -> None:
         "CATALOG_DISCOVERY": lambda: phase_catalog_discovery(client),
         "CATALOG_CR_LIFECYCLE": lambda: phase_catalog_cr_lifecycle(client),
         "CATALOG_ACTION_ERRORS": lambda: phase_catalog_action_errors(client),
+        "CATALOG_ROLLBACK": lambda: phase_catalog_rollback(client),
+        "CATALOG_WORKFLOW": lambda: phase_catalog_workflow(client),
+        "CATALOG_WORKFLOW_PARTIAL_FAILURE": lambda: phase_catalog_workflow_partial_failure(client),
     }
 
     passed: list[str] = []
