@@ -2094,6 +2094,28 @@ New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985
     private_ip = desc["PrivateIpAddress"]
     _wait_ssm_ready_win(ssm, instance_id, timeout=600)
 
+    if cached_ami:
+        # Reset Administrator password via SSM RunCommand so we use the fresh win_password
+        ps_reset = (
+            f'net user Administrator "{win_password}"'
+        )
+        reset_resp = ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName='AWS-RunPowerShellScript',
+            Parameters={'commands': [ps_reset]},
+            TimeoutSeconds=60,
+        )
+        reset_cmd_id = reset_resp['Command']['CommandId']
+        for _ in range(30):
+            _t.sleep(5)
+            reset_out = ssm.get_command_invocation(CommandId=reset_cmd_id, InstanceId=instance_id)
+            if reset_out['Status'] not in ('Pending', 'InProgress', 'Delayed'):
+                if reset_out['Status'] != 'Success':
+                    raise RuntimeError(f"Password reset failed: {reset_out['StandardErrorContent']}")
+                break
+        else:
+            raise TimeoutError('SSM password reset timed out')
+
     if not cached_ami:
         ami = ec2.create_image(InstanceId=instance_id,
                                Name=f"nexplane-smoke-disk2vhd-{int(_t.time())}",
