@@ -263,6 +263,34 @@ export interface BackupTarget {
   last_successful_backup_cr_id: string | null;
   last_successful_at: string | null;
   status: "healthy" | "overdue" | "unprotected";
+  backup_tier: string;
+  capture_strategy: string;
+  storage_id: string | null;
+  created_at: string;
+}
+
+export interface BackupTargetUpdate {
+  target_description?: string;
+  expected_cadence_hours?: number;
+  asset_id?: string | null;
+  backup_tier?: string;
+  capture_strategy?: string;
+  storage_id?: string | null;
+  recurring_job_id?: string | null;
+}
+
+export interface StrategyRecommendation {
+  capture_strategy: string;
+  backup_tier: string;
+  reason: string;
+  alternatives: { capture_strategy: string; label: string }[];
+}
+
+export interface BackupStorage {
+  id: string;
+  name: string;
+  storage_type: string;
+  is_org_default: boolean;
   created_at: string;
 }
 
@@ -378,8 +406,26 @@ export const backupApi = {
     apiClient.get<BackupTarget[]>("/backup-targets").then((r) => r.data),
   getTarget: (id: string) =>
     apiClient.get<BackupTarget>(`/backup-targets/${id}`).then((r) => r.data),
-  createTarget: (data: { target_description: string; expected_cadence_hours?: number; recurring_job_id?: string; asset_id?: string }) =>
+  createTarget: (data: {
+    target_description: string;
+    expected_cadence_hours?: number;
+    recurring_job_id?: string;
+    asset_id?: string;
+    backup_tier?: string;
+    capture_strategy?: string;
+    storage_id?: string;
+  }) =>
     apiClient.post<BackupTarget>("/backup-targets", data).then((r) => r.data),
+  updateTarget: (id: string, data: BackupTargetUpdate) =>
+    apiClient.patch<BackupTarget>(`/backup-targets/${id}`, data).then((r) => r.data),
+  recommendStrategy: (backupType: string, assetId?: string) =>
+    apiClient
+      .get<StrategyRecommendation>("/backup-targets/recommend-strategy", {
+        params: { backup_type: backupType, ...(assetId ? { asset_id: assetId } : {}) },
+      })
+      .then((r) => r.data),
+  listStorages: () =>
+    apiClient.get<BackupStorage[]>("/backup-storages").then((r) => r.data),
   listHistory: (limit = 50, offset = 0) =>
     apiClient.get<BackupHistoryItem[]>("/backup-history", { params: { limit, offset } }).then((r) => r.data),
   createRestoreCr: (data: RestoreCrCreate) =>
