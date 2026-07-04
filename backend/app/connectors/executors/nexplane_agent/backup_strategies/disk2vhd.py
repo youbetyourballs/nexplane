@@ -98,54 +98,71 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             "decode exe",
         )
 
-        # Run disk2vhd detached (Start-Job) so the WinRM TCP connection is not held
-        # open for the entire capture.  Each polling call re-establishes WinRM.
+        # Run disk2vhd via Start-Process (persists across WinRM sessions) with a
+        # sentinel file written on completion.  Polling reads the sentinel each time.
         drives_str = " ".join(disk_list)
-        job_id_r = sess.run_ps(
-            f"$j = Start-Job -ScriptBlock {{"
-            f"  & '{remote_exe}' {drives_str} '{remote_vhdx}' /accepteula"
-            f"}}; $j.Id"
+        sentinel = r"C:\Windows\Temp\disk2vhd_done.txt"
+        log_file = r"C:\Windows\Temp\disk2vhd_out.txt"
+        # Clean any stale sentinel from a prior run
+        _ps_check(
+            sess,
+            f"Remove-Item -Force -ErrorAction SilentlyContinue '{sentinel}','{log_file}'",
+            "clean sentinel",
         )
-        if job_id_r.status_code != 0:
+        # Start disk2vhd as a detached process; a wrapper script waits for it and writes
+        # exit code to the sentinel file.  Start-Process persists across WinRM sessions.
+        wrapper = (
+            f"$p = Start-Process -FilePath '{remote_exe}' "
+            f"-ArgumentList '{drives_str}','{remote_vhdx}','/accepteula' "
+            f"-RedirectStandardOutput '{log_file}' "
+            f"-NoNewWindow -PassThru; "
+            f"$p.WaitForExit(); "
+            f"Set-Content -Path '{sentinel}' -Value $p.ExitCode"
+        )
+        wrap_r = sess.run_ps(
+            f"$j = Start-Job -ScriptBlock {{ {wrapper} }}; $j.Id"
+        )
+        if wrap_r.status_code != 0:
             raise RuntimeError(
                 f"disk2vhd: start capture job failed: "
-                f"{job_id_r.std_err.decode(errors='replace')}"
+                f"{wrap_r.std_err.decode(errors='replace')}"
             )
-        job_id = int(job_id_r.std_out.decode().strip())
-        logger.info("disk2vhd: capture job %d started", job_id)
+        job_id = int(wrap_r.std_out.decode().strip())
+        logger.info("disk2vhd: capture wrapper job %d started", job_id)
 
-        # Poll job state; each call is a fresh short-lived WinRM request.
+        # Poll for sentinel file; each poll is a fresh short-lived WinRM session.
         import time as _time
         capture_timeout = params.get("_capture_timeout_s", 3600)
         poll_start = _time.monotonic()
         while True:
             _time.sleep(30)
-            # Re-create session each poll so there is no long-lived idle TCP connection.
             poll_sess = winrm.Session(
                 winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
             )
-            state_r = poll_sess.run_ps(f"(Get-Job -Id {job_id}).State")
-            state = state_r.std_out.decode().strip()
-            logger.info("disk2vhd: capture job %d state=%s", job_id, state)
-            if state in ("Completed", "Failed", "Stopped"):
+            sent_r = poll_sess.run_ps(f"Test-Path '{sentinel}'")
+            done = sent_r.std_out.decode().strip().lower() == "true"
+            logger.info("disk2vhd: capture sentinel present=%s", done)
+            if done:
                 break
             if _time.monotonic() - poll_start > capture_timeout:
                 raise RuntimeError(
                     f"disk2vhd: capture job timed out after {capture_timeout}s"
                 )
-        # Collect job output / errors
-        result_sess = winrm.Session(
+        # Read exit code from sentinel
+        exit_sess = winrm.Session(
             winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
         )
-        job_out_r = result_sess.run_ps(
-            f"Receive-Job -Id {job_id} -Wait -AutoRemoveJob 2>&1 | Out-String"
-        )
-        if state == "Failed" or not result_sess.run_ps(
+        ec_r = exit_sess.run_ps(f"Get-Content '{sentinel}'")
+        exit_code_str = ec_r.std_out.decode().strip()
+        logger.info("disk2vhd: capture exit code=%s", exit_code_str)
+        if exit_code_str != "0" or not exit_sess.run_ps(
             f"Test-Path '{remote_vhdx}'"
         ).std_out.decode().strip().lower().startswith("true"):
+            log_out = exit_sess.run_ps(
+                f"Get-Content -ErrorAction SilentlyContinue '{log_file}' | Out-String"
+            ).std_out.decode(errors="replace")
             raise RuntimeError(
-                f"disk2vhd: capture failed. job output: "
-                f"{job_out_r.std_out.decode(errors='replace')}"
+                f"disk2vhd: capture failed (exit={exit_code_str}). output: {log_out}"
             )
 
         # Size of produced vhdx
@@ -161,16 +178,32 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             Params={"Bucket": bucket, "Key": archive_key},
             ExpiresIn=7200,
         )
+        # Upload vhdx via a wrapper Start-Job that runs Invoke-WebRequest synchronously
+        # inside the job and writes a sentinel file.  Same pattern as capture above.
+        up_sentinel = r"C:\Windows\Temp\disk2vhd_upload_done.txt"
+        up_log = r"C:\Windows\Temp\disk2vhd_upload_out.txt"
         up_sess = winrm.Session(
             winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
         )
-        up_job_r = up_sess.run_ps(
-            f"$j = Start-Job -ScriptBlock {{"
+        _ps_check(
+            up_sess,
+            f"Remove-Item -Force -ErrorAction SilentlyContinue '{up_sentinel}','{up_log}'",
+            "clean upload sentinel",
+        )
+        up_wrapper = (
+            f"try {{"
             f"  Invoke-WebRequest -Method PUT -Uri '{presigned}'"
             f"    -InFile '{remote_vhdx}'"
             f"    -ContentType 'application/octet-stream'"
-            f"    -UseBasicParsing"
-            f"}}; $j.Id"
+            f"    -UseBasicParsing | Out-File '{up_log}';"
+            f"  Set-Content -Path '{up_sentinel}' -Value 0"
+            f"}} catch {{"
+            f"  $_ | Out-File '{up_log}';"
+            f"  Set-Content -Path '{up_sentinel}' -Value 1"
+            f"}}"
+        )
+        up_job_r = up_sess.run_ps(
+            f"$j = Start-Job -ScriptBlock {{ {up_wrapper} }}; $j.Id"
         )
         if up_job_r.status_code != 0:
             raise RuntimeError(
@@ -187,23 +220,24 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             up_poll_sess = winrm.Session(
                 winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
             )
-            up_state_r = up_poll_sess.run_ps(f"(Get-Job -Id {up_job_id}).State")
-            up_state = up_state_r.std_out.decode().strip()
-            logger.info("disk2vhd: upload job %d state=%s", up_job_id, up_state)
-            if up_state in ("Completed", "Failed", "Stopped"):
+            up_sent_r = up_poll_sess.run_ps(f"Test-Path '{up_sentinel}'")
+            up_done = up_sent_r.std_out.decode().strip().lower() == "true"
+            logger.info("disk2vhd: upload sentinel present=%s", up_done)
+            if up_done:
                 break
             if _time.monotonic() - up_poll_start > upload_timeout:
                 raise RuntimeError(
                     f"disk2vhd: upload job timed out after {upload_timeout}s"
                 )
-        if up_state != "Completed":
-            up_res_sess = winrm.Session(
-                winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
-            )
-            up_out = up_res_sess.run_ps(
-                f"Receive-Job -Id {up_job_id} -Wait -AutoRemoveJob 2>&1 | Out-String"
+        up_ec_sess = winrm.Session(
+            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+        )
+        up_ec = up_ec_sess.run_ps(f"Get-Content '{up_sentinel}'").std_out.decode().strip()
+        if up_ec != "0":
+            up_out = up_ec_sess.run_ps(
+                f"Get-Content -ErrorAction SilentlyContinue '{up_log}' | Out-String"
             ).std_out.decode(errors="replace")
-            raise RuntimeError(f"disk2vhd: upload failed: {up_out}")
+            raise RuntimeError(f"disk2vhd: upload failed (exit={up_ec}): {up_out}")
 
         # Cleanup remote files
         clean_sess = winrm.Session(
