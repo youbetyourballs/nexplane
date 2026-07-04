@@ -125,7 +125,6 @@ async def recommend_strategy(
     backup_type: str = Query(..., description="machine_image | file_archive | database_dump | storage_sync"),
     asset_id: uuid.UUID | None = Query(None),
     user: User = Depends(current_user),
-    db: AsyncSession = Depends(get_db),
 ):
     mapping = _STRATEGY_MAP.get(backup_type)
     if not mapping:
