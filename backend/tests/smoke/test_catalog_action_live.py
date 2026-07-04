@@ -285,7 +285,7 @@ def phase_catalog_rollback(client: NexplaneClient) -> None:
         fail(f"CR did not reach planned, got: {cr['status']}")
 
     # 3. Verify rollback fields in plan
-    steps = cr.get("generated_steps") or []
+    steps = (cr.get("change_plan") or {}).get("generated_steps") or cr.get("generated_steps") or []
     if not steps:
         fail("No generated_steps in planned CR")
     step = steps[0]
@@ -310,7 +310,9 @@ def phase_catalog_rollback(client: NexplaneClient) -> None:
     log("Execution: COMPLETED")
 
     # 5. Record auto_asset_id if present
-    exec_steps = (cr.get("execution_result") or {}).get("steps", [])
+    exec_runs = cr.get("execution_runs") or []
+    exec_result = cr.get("execution_result") or (exec_runs[0].get("result") if exec_runs else {}) or {}
+    exec_steps = exec_result.get("steps") or exec_result.get("execution", {}).get("steps", [])
     auto_asset_id = None
     if exec_steps:
         auto_asset_id = exec_steps[0].get("result", {}).get("_auto_asset_id")
@@ -378,7 +380,7 @@ def phase_catalog_workflow(client: NexplaneClient) -> None:
     if cr["status"] != "planned":
         fail(f"CR did not reach planned, got: {cr['status']}")
 
-    steps = cr.get("generated_steps") or []
+    steps = (cr.get("change_plan") or {}).get("generated_steps") or cr.get("generated_steps") or []
     if len(steps) != 2:
         fail(f"Expected 2 generated_steps, got {len(steps)}")
     for i, step in enumerate(steps, start=1):
@@ -477,7 +479,9 @@ def phase_catalog_workflow_partial_failure(client: NexplaneClient) -> None:
     log(f"Execution reached expected failure/rollback state: {cr['status']}")
 
     # 3. Verify step 1 completed, step 2 failed
-    exec_steps = (cr.get("execution_result") or {}).get("steps", [])
+    exec_runs = cr.get("execution_runs") or []
+    exec_result = cr.get("execution_result") or (exec_runs[0].get("result") if exec_runs else {}) or {}
+    exec_steps = exec_result.get("steps") or exec_result.get("execution", {}).get("steps", [])
     if exec_steps:
         step1 = next((s for s in exec_steps if s.get("step_number") == 1), None)
         step2 = next((s for s in exec_steps if s.get("step_number") == 2), None)
@@ -488,20 +492,24 @@ def phase_catalog_workflow_partial_failure(client: NexplaneClient) -> None:
         log(f"Step statuses — step1: {step1}, step2: {step2}")
 
     # 4. Verify step 1 was rolled back (delete_key_pair must have run)
+    def _has_rollback_run(cr_data: dict) -> bool:
+        runs = cr_data.get("execution_runs") or []
+        return len(runs) > 1 or cr_data.get("rollback_execution_result") or cr_data.get("rollback_result")
+
     rollback_result = cr.get("rollback_execution_result") or cr.get("rollback_result")
-    if rollback_result:
-        log(f"Rollback result present: {list(rollback_result.keys())}")
+    if rollback_result or _has_rollback_run(cr):
+        log(f"Rollback run present in execution_runs")
     else:
         # If platform auto-triggers rollback asynchronously, poll briefly
         for _ in range(20):
             time.sleep(3)
             resp = client.client.get(f"{base}/change-requests/{cr_id}")
             cr = resp.json()
-            if cr.get("rollback_execution_result") or cr.get("rollback_result") or cr["status"] == "rolled_back":
+            if _has_rollback_run(cr) or cr["status"] == "rolled_back":
                 break
         rollback_result = cr.get("rollback_execution_result") or cr.get("rollback_result")
-        if not rollback_result and cr["status"] != "rolled_back":
-            fail("Step 1 was not rolled back after step 2 failure — no rollback_result and status not rolled_back")
+        if not rollback_result and not _has_rollback_run(cr) and cr["status"] != "rolled_back":
+            fail("Step 1 was not rolled back after step 2 failure — no rollback run and status not rolled_back")
 
     log("Partial failure rollback: VERIFIED")
     log("CATALOG_WORKFLOW_PARTIAL_FAILURE passed")
