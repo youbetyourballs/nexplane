@@ -1557,6 +1557,65 @@ def run_phase_database_dump_backup(client, aws_connector_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase STORAGE_SYNC — S3->S3 server-side copy backup + rollback
+# ---------------------------------------------------------------------------
+
+def run_phase_storage_sync(client, aws_connector_id: str, asset_id: str) -> None:
+    """STORAGE_SYNC: S3 -> S3 copy backup + rollback. No infra to provision."""
+    import uuid as _uuid
+    s3 = _get_aws_boto3_client("s3")
+    _ensure_s3_bucket(s3, SMOKE_BUCKET)
+    run_id = _uuid.uuid4().hex[:8]
+    src_prefix = f"smoke-storage-sync-src-{run_id}/"
+    dest_prefix_holder = {}
+
+    try:
+        # Setup: put 3 source objects
+        for i in range(3):
+            s3.put_object(Bucket=SMOKE_BUCKET, Key=f"{src_prefix}file{i}.txt",
+                          Body=f"payload-{i}".encode())
+        print(f"  STORAGE_SYNC setup: wrote 3 objects under {src_prefix}")
+
+        inline_s3_cfg = {
+            "bucket": SMOKE_BUCKET,
+            "region": s3.meta.region_name or "us-east-1",
+        }
+        cr = _create_and_run_cr(
+            client,
+            title=f"smoke storage_sync {run_id}",
+            change_type="server_backup",
+            asset_id=asset_id,
+            desired_outcome={
+                "capture_strategy": "storage_sync",
+                "aws_connector_id": aws_connector_id,
+                "source_prefix": src_prefix,
+                "_source_config": {"storage_type": "s3", "config": inline_s3_cfg},
+                "_storage_config": {"storage_type": "s3",
+                                    "config": {**inline_s3_cfg, "prefix": "smoke-storage-sync-dst/"}},
+            },
+        )
+        assert cr["status"] == "completed", f"STORAGE_SYNC backup failed: {cr}"
+        refs = _extract_artifact_refs(cr)
+        assert refs.get("synced_count") == 3, f"expected 3 synced, got {refs.get('synced_count')}"
+        dest_prefix = refs["dest_prefix"]
+        dest_prefix_holder["p"] = dest_prefix
+        count = _count_s3_prefix(s3, SMOKE_BUCKET, dest_prefix)
+        assert count == 3, f"STORAGE_SYNC: expected 3 dest objects, got {count}"
+        print(f"  STORAGE_SYNC backup PASSED: dest_prefix={dest_prefix}")
+
+        _rollback_cr(client, cr["id"])
+        rb = _wait_cr_complete(client, cr["id"], "storage_sync rollback", timeout=180)
+        assert rb["status"] in ("rolled_back", "rollback_partial"), f"rollback status={rb['status']}"
+        count_after = _count_s3_prefix(s3, SMOKE_BUCKET, dest_prefix)
+        assert count_after == 0, f"STORAGE_SYNC: expected 0 dest objects after rollback, got {count_after}"
+        print("  STORAGE_SYNC rollback PASSED: dest prefix empty")
+    finally:
+        _delete_s3_prefix(s3, SMOKE_BUCKET, src_prefix)
+        if dest_prefix_holder.get("p"):
+            _delete_s3_prefix(s3, SMOKE_BUCKET, dest_prefix_holder["p"])
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1572,6 +1631,7 @@ def main() -> None:
             "AD_MEMBER_TIERS=AD member server backup tier1 (EBS) + tier2 (VSS) with FILO rollback. "
             "LOCAL_FILES_BACKUP=local_files capture strategy with rollback verification. "
             "DATABASE_DUMP_BACKUP=database_dump (postgres) capture strategy with rollback verification. "
+            "STORAGE_SYNC=S3->S3 server-side copy backup + rollback verification. "
             "Default: all three phases."
         ),
     )
@@ -1754,6 +1814,10 @@ def main() -> None:
 
         if "DATABASE_DUMP_BACKUP" in phases:
             run_phase_database_dump_backup(client, aws_connector_id=cloud_account_id)
+
+        if "STORAGE_SYNC" in phases:
+            print("\n=== PHASE: STORAGE_SYNC ===")
+            run_phase_storage_sync(client, aws_connector_id=cloud_account_id, asset_id=cloud_account_id)
 
         passed = True
 
