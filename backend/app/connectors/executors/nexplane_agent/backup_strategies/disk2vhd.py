@@ -77,7 +77,7 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         sess = winrm.Session(winrm_host, auth=(winrm_username, winrm_password), transport="ntlm")
 
         # Upload disk2vhd.exe via base64-chunked PowerShell writes
-        _ps_check(sess, f"Remove-Item -Force -ErrorAction SilentlyContinue '{remote_exe}'", "clear exe")
+        sess.run_ps(f"$ProgressPreference = 'SilentlyContinue'; Remove-Item -Force -ErrorAction SilentlyContinue '{remote_exe}'")
         b64 = base64.b64encode(exe_bytes).decode()
         chunk = 3000
         first = True
