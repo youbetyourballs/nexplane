@@ -926,7 +926,7 @@ Examples:
         # they're done. Run a blocking install so paramiko/cryptography are definitely present.
         print("  Installing MAC smoke dependencies on runner...")
         ssm_run(ssm, runner_id,
-                "pip3 install paramiko cryptography 2>/dev/null || true")
+                "pip3 install paramiko cryptography httpx requests boto3 2>/dev/null || true")
         print("  Dependencies installed")
 
         # Build the test command
