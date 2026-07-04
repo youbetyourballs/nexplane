@@ -250,7 +250,41 @@ def run_phase_backup_scheduler(
     ami_ids_to_cleanup = []
     new_instance_ids_to_cleanup = []
 
+    phase_state: dict = {}
+
     try:
+        # ------------------------------------------------------------------ #
+        # B0 - SSM sentinel: write UUID to source instance before any backup
+        # ------------------------------------------------------------------ #
+        print("\n  B0: writing SSM sentinel to source instance...")
+        import uuid as _uuid_mod
+        sentinel_uuid = str(_uuid_mod.uuid4())
+        sentinel_path = f"/home/ec2-user/nexplane-smoke-marker-{sentinel_uuid}"
+        phase_state["sentinel_uuid"] = sentinel_uuid
+        phase_state["sentinel_path"] = sentinel_path
+        ssm = _get_aws_boto3_client("ssm")
+        if not ssm:
+            fail("B0: could not get SSM boto3 client")
+        b0_cmd = ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [f'echo "{sentinel_uuid}" > {sentinel_path}']},
+        )
+        b0_cmd_id = b0_cmd["Command"]["CommandId"]
+        b0_deadline = time.time() + 60
+        b0_inv = None
+        while time.time() < b0_deadline:
+            try:
+                b0_inv = ssm.get_command_invocation(CommandId=b0_cmd_id, InstanceId=instance_id)
+                if b0_inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+                    break
+            except Exception:
+                pass
+            time.sleep(3)
+        if not b0_inv or b0_inv["Status"] != "Success":
+            fail(f"B0: SSM sentinel write failed: status={b0_inv['Status'] if b0_inv else 'timeout'}")
+        print(f"  B0 PASSED: sentinel_uuid={sentinel_uuid}")
+
         # ------------------------------------------------------------------ #
         # B1 - server_backup: EBS snapshot + S3 manifest
         # ------------------------------------------------------------------ #
@@ -331,7 +365,7 @@ def run_phase_backup_scheduler(
         print(f"  B3 PASSED: ami_id={b3_refs['ami_id']}, s3_objects={count}")
 
         # ------------------------------------------------------------------ #
-        # B4 - scheduled backup via RecurringJob
+        # B4 - scheduled backup via RecurringJob (run-now, mandatory approve)
         # ------------------------------------------------------------------ #
         print("  B4: scheduled backup via RecurringJob...")
         job = client.post("/recurring-jobs", json={
@@ -348,45 +382,55 @@ def run_phase_backup_scheduler(
                 "instance_id": instance_id,
             },
         })
-        if isinstance(job, dict):
-            job_data = job
-        else:
-            job_data = job.json() if hasattr(job, "json") else job
+        job_data = job if isinstance(job, dict) else job.json()
         job_id = job_data["id"]
 
-        # Check if run-now endpoint is available; skip gracefully if not
-        import requests as _run_now_req
+        import requests as _rn_req
         _rn_auth = client.client.headers.get("Authorization", "")
         base = (getattr(client, "base_url", None) or getattr(client, "base", "")).rstrip("/")
-        rn_resp = _run_now_req.post(
+        rn_resp = _rn_req.post(
             f"{base}/recurring-jobs/{job_id}/run-now",
             headers={"Authorization": _rn_auth},
         )
-        if rn_resp.status_code in (404, 500):
-            # 404: endpoint not available; 500: pre-existing run-now/policy_id bug
-            print(f"  B4 SKIPPED: run-now returned {rn_resp.status_code} (pre-existing platform issue)")
-            scheduled_cr_id = None
-        else:
-            assert rn_resp.status_code in (200, 201, 202), f"B4 run-now failed {rn_resp.status_code}: {rn_resp.text}"
-            # Poll backup-history for a new completed entry
-            scheduled_cr_id = None
-            deadline = time.time() + 300
-            while time.time() < deadline:
-                history = client.get("/backup-history", params={"limit": 20})
-                if not isinstance(history, list):
-                    history = history.json() if hasattr(history, "json") else []
-                for entry in history:
-                    if (entry.get("status") == "completed"
-                            and asset_id in entry.get("target_asset_ids", [])
-                            and entry.get("artifact_refs")
-                            and entry["id"] not in (b1_cr_id, b2_cr_id, b3_cr_id)):
-                        scheduled_cr_id = entry["id"]
-                        break
-                if scheduled_cr_id:
+        if rn_resp.status_code not in (200, 201, 202):
+            fail(f"B4: run-now failed with {rn_resp.status_code}: {rn_resp.text}")
+
+        # If the CR landed in awaiting_approval (no RecurringJobPolicy), approve it
+        rn_data = rn_resp.json() if rn_resp.text.strip() else {}
+        rn_cr_id = rn_data.get("id") or rn_data.get("change_request_id") or rn_data.get("cr_id")
+        if rn_cr_id:
+            cr_check = _rn_req.get(f"{base}/change-requests/{rn_cr_id}", headers={"Authorization": _rn_auth})
+            if cr_check.status_code == 200:
+                cr_status = cr_check.json().get("status", "")
+                if cr_status == "awaiting_approval":
+                    approve = _rn_req.post(
+                        f"{base}/change-requests/{rn_cr_id}/approve",
+                        json={"decision": "approved", "comment": "smoke auto-approve"},
+                        headers={"Authorization": _rn_auth},
+                    )
+                    assert approve.status_code == 200, f"B4: approve failed {approve.status_code}: {approve.text}"
+                    _execute_cr(client, rn_cr_id)
+
+        # Poll backup-history for a new completed entry against this asset
+        scheduled_cr_id = None
+        known_cr_ids = {b1_cr_id, b2_cr_id, b3_cr_id}
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            history = client.get("/backup-history", params={"limit": 20})
+            if not isinstance(history, list):
+                history = history.json() if hasattr(history, "json") else []
+            for entry in history:
+                if (entry.get("status") == "completed"
+                        and asset_id in entry.get("target_asset_ids", [])
+                        and entry.get("artifact_refs")
+                        and entry["id"] not in known_cr_ids):
+                    scheduled_cr_id = entry["id"]
                     break
-                time.sleep(5)
-            assert scheduled_cr_id, "B4: scheduled backup CR did not appear in /backup-history within 300s"
-            print(f"  B4 PASSED: scheduled_cr_id={scheduled_cr_id}")
+            if scheduled_cr_id:
+                break
+            time.sleep(5)
+        assert scheduled_cr_id, "B4: scheduled backup CR did not appear in /backup-history within 300s"
+        print(f"  B4 PASSED: scheduled_cr_id={scheduled_cr_id}")
 
         # Clean up the recurring job
         client.delete(f"/recurring-jobs/{job_id}")
