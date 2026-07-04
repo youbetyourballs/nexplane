@@ -1142,6 +1142,409 @@ def run_phase_ad_member_tiers(client: NexplaneClient, cloud_account_id: str) -> 
 
 
 # ---------------------------------------------------------------------------
+# Phase LOCAL_FILES_BACKUP — tar/gz via SSH + S3 upload + rollback
+# ---------------------------------------------------------------------------
+
+def run_phase_local_files_backup(client, aws_connector_id: str) -> None:
+    """Phase LOCAL_FILES_BACKUP:
+    1. Create a temp file on the platform EC2 instance via SSH.
+    2. Create + execute a local_files backup CR targeting that file.
+    3. Verify the S3 artifact exists.
+    4. Rollback the CR.
+    5. Verify the S3 artifact is gone.
+    """
+    import os as _os
+    import requests as _req
+
+    print("\n[Phase LOCAL_FILES_BACKUP] local_files capture strategy smoke")
+
+    run_ts = str(int(time.time()))
+    smoke_file_path = "/tmp/nexplane-smoke-local-files.txt"
+    cr_id = None
+    backup_storage_id = None
+    asset_id = None
+    ssh_connector_id = None
+
+    # Resolve SSH credentials for the platform EC2 host.
+    # When running inside a Docker container on EC2, the host is reachable at
+    # 172.18.0.1 (Docker bridge gateway). The private key is injected via
+    # NEXPLANE_SMOKE_SSH_KEY env var by the caller (or run_on_ec2.py).
+    ssh_creds = get_connector_creds_from_db("ssh")
+    if not ssh_creds or not ssh_creds.get("host"):
+        platform_ip = _os.environ.get("NEXPLANE_PLATFORM_IP", "172.18.0.1")
+        platform_key = _os.environ.get("NEXPLANE_SMOKE_SSH_KEY", "")
+        if not platform_key:
+            raise RuntimeError(
+                "LOCAL_FILES_BACKUP: no SSH key available — set NEXPLANE_SMOKE_SSH_KEY env var "
+                "with the EC2 private key, or register an ssh connector in the platform DB"
+            )
+        ssh_creds = {
+            "hostname": platform_ip,
+            "username": "ec2-user",
+            "private_key": platform_key,
+        }
+
+    s3 = _get_aws_boto3_client("s3")
+    _ensure_s3_bucket(s3, SMOKE_BUCKET)
+
+    try:
+        # Step 1: Write smoke file to platform instance
+        print(f"  LF1: writing smoke file {smoke_file_path} on platform instance...")
+        _write_file_on_platform(ssh_creds, smoke_file_path, "nexplane-local-files-smoke-content")
+        print("  LF1 PASSED: smoke file written")
+
+        # Step 2: Register SSH connector for platform instance
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "ssh",
+            "name": f"smoke-local-files-{run_ts}",
+        })
+        conn_data = conn_resp if isinstance(conn_resp, dict) else conn_resp.json()
+        ssh_connector_id = conn_data.get("id") or conn_data.get("connector_id")
+        client.put(f"/connectors/{ssh_connector_id}/credentials", json={"credentials": ssh_creds})
+
+        # Step 3: Register asset
+        asset_resp = client.post("/assets", json={
+            "asset_type": "server",
+            "environment": "staging",
+            "criticality": "low",
+            "name": f"smoke-local-files-{run_ts}",
+            "connector_id": ssh_connector_id,
+        })
+        asset_data = asset_resp if isinstance(asset_resp, dict) else asset_resp.json()
+        asset_id = asset_data["id"]
+
+        # Step 4: Create BackupStorage (S3)
+        _db_creds = get_connector_creds_from_db("aws")
+        storage_resp = client.post("/backup-storage", json={
+            "name": f"smoke-lf-s3-{run_ts}",
+            "storage_type": "s3",
+            "config": {
+                "bucket": SMOKE_BUCKET,
+                "prefix": f"smoke-lf/{run_ts}/",
+                "region": _db_creds.get("region", "us-east-1"),
+                "aws_access_key_id": _db_creds.get("access_key_id", ""),
+                "aws_secret_access_key": _db_creds.get("secret_access_key", ""),
+                "aws_session_token": _db_creds.get("session_token"),
+            },
+            "is_org_default": False,
+        })
+        storage_data = storage_resp if isinstance(storage_resp, dict) else storage_resp.json()
+        backup_storage_id = storage_data["id"]
+
+        # Step 5: Create + execute local_files backup CR
+        # Pass ssh_creds inline so the executor can SSH to the target host even
+        # when the nexplane_agent connector (used by server_backup) has no SSH creds.
+        print("  LF2: creating and running local_files backup CR...")
+        lf_cr = _create_and_run_cr(
+            client,
+            title=f"smoke local_files backup {run_ts}",
+            change_type="server_backup",
+            asset_id=asset_id,
+            desired_outcome={
+                "capture_strategy": "local_files",
+                "backup_storage_id": backup_storage_id,
+                "source_path": smoke_file_path,
+                "ssh_creds": ssh_creds,
+            },
+        )
+        assert lf_cr["status"] == "completed", f"LF2: CR failed: {lf_cr}"
+        cr_id = lf_cr["id"]
+        lf_refs = _extract_artifact_refs(lf_cr)
+        artifact_uri = lf_refs.get("artifact_uri", "")
+        assert artifact_uri, f"LF2: no artifact_uri in artifact_refs: {lf_refs}"
+        print(f"  LF2 PASSED: artifact_uri={artifact_uri}")
+
+        # Step 6: Verify S3 artifact exists
+        print("  LF3: verifying S3 artifact exists...")
+        parts = artifact_uri.replace("s3://", "").split("/", 1)
+        bucket, key = parts[0], parts[1] if len(parts) > 1 else ""
+        obj = s3.head_object(Bucket=bucket, Key=key)
+        assert obj["ContentLength"] > 0, f"LF3: S3 artifact is empty"
+        print(f"  LF3 PASSED: artifact size={obj['ContentLength']} bytes")
+
+        # Step 7: Rollback the CR
+        print("  LF4: rolling back local_files CR...")
+        auth_header = client.client.headers.get("Authorization", "")
+        base = (getattr(client, "base_url", None) or getattr(client, "base", "")).rstrip("/")
+        rb_resp = _req.post(
+            f"{base}/change-requests/{cr_id}/rollback",
+            headers={"Authorization": auth_header},
+        )
+        assert rb_resp.status_code in (200, 202), f"LF4: rollback request failed {rb_resp.status_code}: {rb_resp.text}"
+        rb_cr = _wait_cr_complete(client, cr_id, "LF rollback", timeout=120)
+        assert rb_cr.get("status") == "rolled_back", f"LF4: rollback ended with: {rb_cr.get('status')}"
+        print("  LF4 PASSED: CR rolled back")
+
+        # Step 8: Verify S3 artifact is gone
+        print("  LF5: verifying S3 artifact deleted...")
+        gone = False
+        try:
+            s3.head_object(Bucket=bucket, Key=key)
+        except Exception as exc:
+            if "404" in str(exc) or "NoSuchKey" in str(exc) or "Not Found" in str(exc):
+                gone = True
+        assert gone, f"LF5: S3 artifact still exists at s3://{bucket}/{key}"
+        print("  LF5 PASSED: S3 artifact confirmed deleted")
+
+        print("\n  Phase LOCAL_FILES_BACKUP PASSED")
+
+    except Exception as exc:
+        print(f"\n[FAIL] Phase LOCAL_FILES_BACKUP failed: {exc}")
+        raise
+
+    finally:
+        if backup_storage_id:
+            try:
+                client.delete(f"/backup-storage/{backup_storage_id}")
+            except Exception:
+                pass
+        if asset_id:
+            try:
+                client.delete(f"/assets/{asset_id}")
+            except Exception:
+                pass
+        if ssh_connector_id:
+            try:
+                auth_header = client.client.headers.get("Authorization", "")
+                base = (getattr(client, "base_url", None) or getattr(client, "base", "")).rstrip("/")
+                import requests as _r2
+                _r2.delete(f"{base}/connectors/{ssh_connector_id}", headers={"Authorization": auth_header})
+            except Exception:
+                pass
+        # Best-effort cleanup of leftover S3 smoke objects
+        _delete_s3_prefix(s3, SMOKE_BUCKET, f"smoke-lf/{run_ts}/")
+
+
+def _load_any_pkey(private_key_str: str):
+    """Load an SSH private key regardless of type (RSA, Ed25519, ECDSA)."""
+    import paramiko, io
+    for cls in (paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.RSAKey):
+        try:
+            return cls.from_private_key(io.StringIO(private_key_str))
+        except Exception:
+            continue
+    raise ValueError("Could not load private key — unsupported key type")
+
+
+def _write_file_on_platform(ssh_creds: dict, path: str, content: str) -> None:
+    """Write content to path on the platform EC2 instance via SSH."""
+    import paramiko, io
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    connect_kwargs: dict = {
+        "hostname": ssh_creds.get("hostname") or ssh_creds.get("host"),
+        "username": ssh_creds.get("username", "ec2-user"),
+        "port": int(ssh_creds.get("port", 22)),
+        "timeout": 30,
+    }
+    if ssh_creds.get("private_key"):
+        connect_kwargs["pkey"] = _load_any_pkey(ssh_creds["private_key"])
+    elif ssh_creds.get("password"):
+        connect_kwargs["password"] = ssh_creds["password"]
+    client.connect(**connect_kwargs)
+    try:
+        escaped = content.replace("'", "'\\''")
+        _, stdout, stderr = client.exec_command(f"echo '{escaped}' > {path}")
+        exit_code = stdout.channel.recv_exit_status()
+        if exit_code != 0:
+            err = stderr.read(512).decode(errors="replace")
+            raise RuntimeError(f"SSH write failed (exit={exit_code}): {err}")
+    finally:
+        client.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase DATABASE_DUMP_BACKUP — pg_dump via SSH + S3 upload + rollback
+# ---------------------------------------------------------------------------
+
+def run_phase_database_dump_backup(client, aws_connector_id: str) -> None:
+    """Phase DATABASE_DUMP_BACKUP:
+    1. Target the platform's own Postgres DB (nexplane database).
+    2. Create + execute a database_dump backup CR.
+    3. Verify S3 artifact exists.
+    4. Rollback.
+    5. Verify artifact deleted.
+    """
+    import os as _os
+    import requests as _req
+
+    print("\n[Phase DATABASE_DUMP_BACKUP] database_dump capture strategy smoke (postgres)")
+
+    run_ts = str(int(time.time()))
+    cr_id = None
+    backup_storage_id = None
+    asset_id = None
+    ssh_connector_id = None
+
+    # SSH creds for the platform EC2 host (Docker bridge gateway 172.18.0.1 from inside container).
+    # pg_dump will run on that host connecting to localhost postgres.
+    ssh_creds = get_connector_creds_from_db("ssh")
+    if not ssh_creds or not ssh_creds.get("host"):
+        platform_ip = _os.environ.get("NEXPLANE_PLATFORM_IP", "172.18.0.1")
+        platform_key = _os.environ.get("NEXPLANE_SMOKE_SSH_KEY", "")
+        if not platform_key:
+            raise RuntimeError(
+                "DATABASE_DUMP_BACKUP: no SSH key available — set NEXPLANE_SMOKE_SSH_KEY env var "
+                "with the EC2 private key, or register an ssh connector in the platform DB"
+            )
+        ssh_creds = {
+            "hostname": platform_ip,
+            "username": "ec2-user",
+            "private_key": platform_key,
+        }
+
+    # Platform postgres is exposed on 0.0.0.0:5432 of the EC2 host.
+    # pg_dump runs on the EC2 host (via SSH) and connects to localhost:5432.
+    # Credentials match docker-compose: nexplane / nexplane_dev.
+    postgres_creds = get_connector_creds_from_db("postgres")
+    db_host = "localhost"  # pg_dump runs on the EC2 host, postgres is on 0.0.0.0:5432
+    db_port = 5432
+    db_user = (
+        (postgres_creds.get("user") or postgres_creds.get("username", "nexplane"))
+        if postgres_creds else "nexplane"
+    )
+    db_password = postgres_creds.get("password", "nexplane_dev") if postgres_creds else "nexplane_dev"
+    db_name = "nexplane"
+
+    # Merge: SSH creds for host + DB creds embedded for executor
+    connector_creds = dict(ssh_creds)
+    connector_creds.update({
+        "db_host": db_host,
+        "db_port": str(db_port),
+        "db_user": db_user,
+        "db_password": db_password,
+    })
+
+    s3 = _get_aws_boto3_client("s3")
+    _ensure_s3_bucket(s3, SMOKE_BUCKET)
+
+    try:
+        # Register SSH connector with DB creds embedded
+        conn_resp = client.post("/connectors", json={
+            "connector_type": "ssh",
+            "name": f"smoke-db-dump-{run_ts}",
+        })
+        conn_data = conn_resp if isinstance(conn_resp, dict) else conn_resp.json()
+        ssh_connector_id = conn_data.get("id") or conn_data.get("connector_id")
+        client.put(f"/connectors/{ssh_connector_id}/credentials", json={"credentials": connector_creds})
+
+        # Register asset
+        asset_resp = client.post("/assets", json={
+            "asset_type": "server",
+            "environment": "staging",
+            "criticality": "low",
+            "name": f"smoke-db-dump-{run_ts}",
+            "connector_id": ssh_connector_id,
+        })
+        asset_data = asset_resp if isinstance(asset_resp, dict) else asset_resp.json()
+        asset_id = asset_data["id"]
+
+        # BackupStorage
+        _db_creds = get_connector_creds_from_db("aws")
+        storage_resp = client.post("/backup-storage", json={
+            "name": f"smoke-db-s3-{run_ts}",
+            "storage_type": "s3",
+            "config": {
+                "bucket": SMOKE_BUCKET,
+                "prefix": f"smoke-db/{run_ts}/",
+                "region": _db_creds.get("region", "us-east-1"),
+                "aws_access_key_id": _db_creds.get("access_key_id", ""),
+                "aws_secret_access_key": _db_creds.get("secret_access_key", ""),
+                "aws_session_token": _db_creds.get("session_token"),
+            },
+            "is_org_default": False,
+        })
+        storage_data = storage_resp if isinstance(storage_resp, dict) else storage_resp.json()
+        backup_storage_id = storage_data["id"]
+
+        # Create + execute database_dump CR
+        print(f"  DB1: creating and running database_dump CR (db={db_name})...")
+        db_cr = _create_and_run_cr(
+            client,
+            title=f"smoke database_dump backup {run_ts}",
+            change_type="server_backup",
+            asset_id=asset_id,
+            desired_outcome={
+                "capture_strategy": "database_dump",
+                "backup_storage_id": backup_storage_id,
+                "db_type": "postgres",
+                "database_name": db_name,
+                "db_host": "localhost",
+                "db_port": db_port,
+                "db_user": db_user,
+                "db_password": db_password,
+                "ssh_creds": ssh_creds,
+            },
+        )
+        assert db_cr["status"] == "completed", f"DB1: CR failed: {db_cr}"
+        cr_id = db_cr["id"]
+        db_refs = _extract_artifact_refs(db_cr)
+        artifact_uri = db_refs.get("artifact_uri", "")
+        assert artifact_uri, f"DB1: no artifact_uri in artifact_refs: {db_refs}"
+        print(f"  DB1 PASSED: artifact_uri={artifact_uri}")
+
+        # Verify S3 artifact exists
+        print("  DB2: verifying S3 artifact exists...")
+        parts = artifact_uri.replace("s3://", "").split("/", 1)
+        bucket, key = parts[0], parts[1] if len(parts) > 1 else ""
+        obj = s3.head_object(Bucket=bucket, Key=key)
+        assert obj["ContentLength"] > 0, "DB2: S3 artifact is empty"
+        print(f"  DB2 PASSED: artifact size={obj['ContentLength']} bytes")
+
+        # Rollback
+        print("  DB3: rolling back database_dump CR...")
+        auth_header = client.client.headers.get("Authorization", "")
+        base = (getattr(client, "base_url", None) or getattr(client, "base", "")).rstrip("/")
+        rb_resp = _req.post(
+            f"{base}/change-requests/{cr_id}/rollback",
+            headers={"Authorization": auth_header},
+        )
+        assert rb_resp.status_code in (200, 202), f"DB3: rollback request failed {rb_resp.status_code}: {rb_resp.text}"
+        rb_cr = _wait_cr_complete(client, cr_id, "DB rollback", timeout=120)
+        assert rb_cr.get("status") == "rolled_back", f"DB3: rollback ended with: {rb_cr.get('status')}"
+        print("  DB3 PASSED: CR rolled back")
+
+        # Verify artifact deleted
+        print("  DB4: verifying S3 artifact deleted...")
+        gone = False
+        try:
+            s3.head_object(Bucket=bucket, Key=key)
+        except Exception as exc:
+            if "404" in str(exc) or "NoSuchKey" in str(exc) or "Not Found" in str(exc):
+                gone = True
+        assert gone, f"DB4: S3 artifact still exists at s3://{bucket}/{key}"
+        print("  DB4 PASSED: S3 artifact confirmed deleted")
+
+        print("\n  Phase DATABASE_DUMP_BACKUP PASSED")
+
+    except Exception as exc:
+        print(f"\n[FAIL] Phase DATABASE_DUMP_BACKUP failed: {exc}")
+        raise
+
+    finally:
+        if backup_storage_id:
+            try:
+                client.delete(f"/backup-storage/{backup_storage_id}")
+            except Exception:
+                pass
+        if asset_id:
+            try:
+                client.delete(f"/assets/{asset_id}")
+            except Exception:
+                pass
+        if ssh_connector_id:
+            try:
+                auth_header = client.client.headers.get("Authorization", "")
+                base = (getattr(client, "base_url", None) or getattr(client, "base", "")).rstrip("/")
+                import requests as _r3
+                _r3.delete(f"{base}/connectors/{ssh_connector_id}", headers={"Authorization": auth_header})
+            except Exception:
+                pass
+        _delete_s3_prefix(s3, SMOKE_BUCKET, f"smoke-db/{run_ts}/")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1155,6 +1558,8 @@ def main() -> None:
             "BACKUP_SCHEDULER=scheduled backup lifecycle + restore + FILO rollback. "
             "PLATFORM_UPGRADE_ROLLBACK=watchdog pg_restore path (simulated failure). "
             "AD_MEMBER_TIERS=AD member server backup tier1 (EBS) + tier2 (VSS) with FILO rollback. "
+            "LOCAL_FILES_BACKUP=local_files capture strategy with rollback verification. "
+            "DATABASE_DUMP_BACKUP=database_dump (postgres) capture strategy with rollback verification. "
             "Default: all three phases."
         ),
     )
@@ -1331,6 +1736,12 @@ def main() -> None:
 
         if "AD_MEMBER_TIERS" in phases:
             run_phase_ad_member_tiers(client, cloud_account_id)
+
+        if "LOCAL_FILES_BACKUP" in phases:
+            run_phase_local_files_backup(client, aws_connector_id=cloud_account_id)
+
+        if "DATABASE_DUMP_BACKUP" in phases:
+            run_phase_database_dump_backup(client, aws_connector_id=cloud_account_id)
 
         passed = True
 

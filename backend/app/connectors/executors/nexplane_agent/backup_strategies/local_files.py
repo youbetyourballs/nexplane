@@ -17,15 +17,23 @@ def _ssh_connect(creds: dict):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     connect_kwargs = {
-        "hostname": creds["host"],
+        "hostname": creds.get("hostname") or creds.get("host"),
         "username": creds.get("username", "ec2-user"),
         "port": int(creds.get("port", 22)),
         "timeout": 30,
     }
     if creds.get("private_key"):
-        connect_kwargs["pkey"] = paramiko.RSAKey.from_private_key(
-            io.StringIO(creds["private_key"])
-        )
+        key_str = creds["private_key"]
+        pkey = None
+        for cls in (paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.RSAKey):
+            try:
+                pkey = cls.from_private_key(io.StringIO(key_str))
+                break
+            except Exception:
+                continue
+        if pkey is None:
+            raise RuntimeError("local_files: could not load private key — unsupported key type")
+        connect_kwargs["pkey"] = pkey
     elif creds.get("password"):
         connect_kwargs["password"] = creds["password"]
     client.connect(**connect_kwargs)
@@ -41,9 +49,38 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         raise RuntimeError("local_files: source_path is required")
 
     creds = getattr(connector, "credentials", {}) or {}
-    if not creds.get("host"):
+    # SSH creds may be passed directly in params (e.g. when the executor is
+    # invoked via server_backup with a nexplane_agent connector that has no SSH
+    # creds — the smoke test or operator passes them via desired_outcome).
+    if not (creds.get("hostname") or creds.get("host")):
+        inline = params.get("ssh_creds") or {}
+        if inline:
+            creds = dict(creds)
+            creds.update(inline)
+    if not (creds.get("hostname") or creds.get("host")):
+        # Load the asset's own connector creds (may be an SSH connector)
+        try:
+            asset_id_str = str(asset_ids[0]) if asset_ids else ""
+            if asset_id_str:
+                from app.database import AsyncSessionLocal
+                from app.models.asset import Asset
+                from app.models.connector import Connector as _Connector
+                from app.services.connector_service import _attach_credentials
+                import uuid as _uuid
+                async with AsyncSessionLocal() as db:
+                    asset = await db.get(Asset, _uuid.UUID(asset_id_str))
+                    if asset and asset.connector_id:
+                        conn = await db.get(_Connector, asset.connector_id)
+                        if conn:
+                            await _attach_credentials(conn, db)
+                            _creds = conn.credentials or {}
+                            if _creds.get("hostname") or _creds.get("host"):
+                                creds = _creds
+        except Exception as _exc:
+            logger.debug("local_files: could not load asset connector creds: %s", _exc)
+    if not (creds.get("hostname") or creds.get("host")):
         raise RuntimeError(
-            "local_files: connector must have SSH credentials (host, username, private_key/password)"
+            "local_files: connector must have SSH credentials (hostname/host, username, private_key/password)"
         )
 
     storage_config = params.get("_storage_config") or await _load_storage_config(
