@@ -1935,6 +1935,105 @@ def run_phase_nfs_files(client, aws_connector_id: str, asset_id: str,
 
 
 # ---------------------------------------------------------------------------
+# Phase MANAGED_DB_SNAPSHOT — RDS CreateDBSnapshot via CR + rollback
+# ---------------------------------------------------------------------------
+
+def run_phase_managed_db_snapshot(client, aws_connector_id: str, asset_id: str,
+                                  subnet_ids: list, sg_id: str) -> None:
+    """MANAGED_DB_SNAPSHOT: provision RDS MySQL, snapshot via CR, rollback, delete RDS."""
+    import uuid as _uuid
+    import secrets
+    import time as _t
+    rds = _get_aws_boto3_client("rds")
+    run_id = _uuid.uuid4().hex[:8]
+    db_id = f"nexplane-smoke-rds-{run_id}"
+    subnet_group = f"nexplane-smoke-subnet-grp-{run_id}"
+    master_pw = secrets.token_urlsafe(16)
+    cr_id = None
+    created_snapshot = None
+
+    try:
+        rds.create_db_subnet_group(
+            DBSubnetGroupName=subnet_group,
+            DBSubnetGroupDescription="nexplane smoke",
+            SubnetIds=subnet_ids,
+        )
+        rds.create_db_instance(
+            DBInstanceIdentifier=db_id,
+            DBInstanceClass="db.t3.micro",
+            Engine="mysql",
+            MasterUsername="smoke",
+            MasterUserPassword=master_pw,
+            AllocatedStorage=20,
+            VpcSecurityGroupIds=[sg_id],
+            DBSubnetGroupName=subnet_group,
+            MultiAZ=False,
+            PubliclyAccessible=False,
+            BackupRetentionPeriod=0,
+        )
+        print(f"  MANAGED_DB_SNAPSHOT: provisioning RDS {db_id} ...")
+        deadline = _t.time() + 900
+        while _t.time() < deadline:
+            st = rds.describe_db_instances(DBInstanceIdentifier=db_id)["DBInstances"][0]["DBInstanceStatus"]
+            if st == "available":
+                break
+            _t.sleep(20)
+        else:
+            fail(f"MANAGED_DB_SNAPSHOT: RDS {db_id} not available in time")
+        print(f"  MANAGED_DB_SNAPSHOT: RDS {db_id} available")
+
+        cr = _create_and_run_cr(
+            client,
+            title=f"smoke managed_db_snapshot {run_id}",
+            change_type="server_backup",
+            asset_id=asset_id,
+            desired_outcome={
+                "capture_strategy": "managed_db_snapshot",
+                "aws_connector_id": aws_connector_id,
+                "db_instance_identifier": db_id,
+            },
+        )
+        assert cr["status"] == "completed", f"MANAGED_DB_SNAPSHOT backup failed: {cr}"
+        cr_id = cr["id"]
+        refs = _extract_artifact_refs(cr)
+        created_snapshot = refs.get("snapshot_id")
+        assert created_snapshot, f"MANAGED_DB_SNAPSHOT: no snapshot_id in {refs}"
+        got = rds.describe_db_snapshots(DBSnapshotIdentifier=created_snapshot)["DBSnapshots"]
+        assert got and got[0]["Status"] == "available", "MANAGED_DB_SNAPSHOT: snapshot not available"
+        print(f"  MANAGED_DB_SNAPSHOT backup PASSED: {created_snapshot}")
+
+        _rollback_cr(client, cr_id)
+        rb = _wait_cr_complete(client, cr_id, "managed_db_snapshot rollback", timeout=400)
+        assert rb["status"] in ("rolled_back", "rollback_partial"), f"rollback status={rb['status']}"
+        try:
+            rds.describe_db_snapshots(DBSnapshotIdentifier=created_snapshot)
+            fail("MANAGED_DB_SNAPSHOT: snapshot still exists after rollback")
+        except rds.exceptions.DBSnapshotNotFoundFault:
+            pass
+        created_snapshot = None
+        print("  MANAGED_DB_SNAPSHOT rollback PASSED")
+    finally:
+        if created_snapshot:
+            try:
+                rds.delete_db_snapshot(DBSnapshotIdentifier=created_snapshot)
+            except Exception:
+                pass
+        try:
+            rds.delete_db_instance(DBInstanceIdentifier=db_id,
+                                   SkipFinalSnapshot=True, DeleteAutomatedBackups=True)
+            waiter = rds.get_waiter("db_instance_deleted")
+            waiter.wait(DBInstanceIdentifier=db_id,
+                        WaiterConfig={"Delay": 20, "MaxAttempts": 60})
+        except Exception as exc:
+            print(f"  MANAGED_DB_SNAPSHOT teardown WARNING (instance): {exc}")
+        try:
+            rds.delete_db_subnet_group(DBSubnetGroupName=subnet_group)
+        except Exception as exc:
+            print(f"  MANAGED_DB_SNAPSHOT teardown WARNING (subnet group): {exc}")
+        print("  MANAGED_DB_SNAPSHOT teardown complete")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1953,6 +2052,7 @@ def main() -> None:
             "STORAGE_SYNC=S3->S3 server-side copy backup + rollback verification. "
             "LVM_SNAPSHOT=LVM snapshot -> gzip image -> S3 + rollback verification. "
             "NFS_FILES=tar.gz of NFS export -> S3 + rollback; reuses LVM/NFS EC2 when combined with LVM_SNAPSHOT. "
+            "MANAGED_DB_SNAPSHOT=RDS CreateDBSnapshot via CR + rollback + teardown. "
             "Default: all three phases."
         ),
     )
@@ -2274,6 +2374,95 @@ def main() -> None:
                         print(f"  Could not terminate LVM/NFS instance: {_te}")
                 try:
                     client.delete(f"/assets/{_lvm_asset_id}")
+                except Exception:
+                    pass
+
+        if "MANAGED_DB_SNAPSHOT" in phases:
+            print("\n=== PHASE: MANAGED_DB_SNAPSHOT ===")
+            _ec2_rds = _get_aws_boto3_client("ec2")
+
+            # Resolve default VPC + two subnets in different AZs (required for DB subnet group)
+            _vpcs_rds = _ec2_rds.describe_vpcs(
+                Filters=[{"Name": "isDefault", "Values": ["true"]}]
+            )["Vpcs"]
+            if not _vpcs_rds:
+                raise RuntimeError("MANAGED_DB_SNAPSHOT: no default VPC found")
+            _vpc_id_rds = _vpcs_rds[0]["VpcId"]
+            _subnets_rds = _ec2_rds.describe_subnets(
+                Filters=[{"Name": "vpcId", "Values": [_vpc_id_rds]}]
+            )["Subnets"]
+            # Pick two subnets in different AZs
+            _az_seen: dict = {}
+            for _s in _subnets_rds:
+                _az = _s.get("AvailabilityZone", "")
+                if _az not in _az_seen:
+                    _az_seen[_az] = _s["SubnetId"]
+            _rds_subnet_ids = list(_az_seen.values())[:2]
+            if len(_rds_subnet_ids) < 2:
+                raise RuntimeError(
+                    f"MANAGED_DB_SNAPSHOT: need >= 2 subnets in different AZs, "
+                    f"found {len(_rds_subnet_ids)} in default VPC {_vpc_id_rds}"
+                )
+
+            # Ensure a security group exists for the RDS instance
+            _sg_rds = None
+            try:
+                _sgs_rds = _ec2_rds.describe_security_groups(
+                    Filters=[{"Name": "group-name", "Values": ["nexplane-smoke-rds"]},
+                             {"Name": "vpc-id", "Values": [_vpc_id_rds]}]
+                )["SecurityGroups"]
+                if _sgs_rds:
+                    _sg_rds = _sgs_rds[0]["GroupId"]
+            except Exception:
+                pass
+            if not _sg_rds:
+                _sg_resp_rds = _ec2_rds.create_security_group(
+                    GroupName="nexplane-smoke-rds",
+                    Description="Nexplane smoke: RDS managed_db_snapshot",
+                    VpcId=_vpc_id_rds,
+                )
+                _sg_rds = _sg_resp_rds["GroupId"]
+
+            # Register a minimal asset for the CR target
+            _rds_asset_resp = client.post("/assets", json={
+                "asset_type": "server",
+                "environment": "staging",
+                "criticality": "low",
+                "name": f"smoke-managed-db-snapshot-{int(time.time())}",
+                "tags": ["nexplane-smoke"],
+            })
+            _rds_asset_data = _rds_asset_resp if isinstance(_rds_asset_resp, dict) else _rds_asset_resp.json()
+            _rds_asset_id = _rds_asset_data.get("id") or _rds_asset_data.get("asset_id")
+
+            # Resolve aws_connector_id: use existing cloud_account_id or create one
+            _rds_aws_connector_id = cloud_account_id
+            if not _rds_aws_connector_id or _rds_aws_connector_id == "standalone":
+                _rds_ts = str(int(time.time()))
+                _rds_conn_resp = client.post("/connectors", json={
+                    "connector_type": "aws",
+                    "name": f"smoke-rds-{_rds_ts}",
+                })
+                _rds_conn_data = _rds_conn_resp if isinstance(_rds_conn_resp, dict) else _rds_conn_resp.json()
+                _rds_aws_connector_id = _rds_conn_data.get("id") or _rds_conn_data.get("connector_id")
+                _rds_db_creds = get_connector_creds_from_db("aws")
+                client.put(f"/connectors/{_rds_aws_connector_id}/credentials", json={"credentials": {
+                    "access_key_id": _rds_db_creds.get("access_key_id", ""),
+                    "secret_access_key": _rds_db_creds.get("secret_access_key", ""),
+                    "session_token": _rds_db_creds.get("session_token", ""),
+                    "region": _rds_db_creds.get("region", "us-east-1"),
+                }})
+
+            try:
+                run_phase_managed_db_snapshot(
+                    client=client,
+                    aws_connector_id=_rds_aws_connector_id,
+                    asset_id=_rds_asset_id,
+                    subnet_ids=_rds_subnet_ids,
+                    sg_id=_sg_rds,
+                )
+            finally:
+                try:
+                    client.delete(f"/assets/{_rds_asset_id}")
                 except Exception:
                     pass
 
