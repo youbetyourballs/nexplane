@@ -162,8 +162,12 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
         )
         # Write the wrapper script and register + run the scheduled task in one go.
+        # Escape $ -> `$ so PowerShell does not expand variables inside the double-quoted
+        # Set-Content -Value "..." string at write time (they must be preserved literally
+        # in the .ps1 file so the scheduled task can execute them).
+        escaped_wrapper_body = wrapper_body.replace("$", "`$")
         schtask_ps = (
-            f"Set-Content -Path '{wrapper_script}' -Value \"{wrapper_body}\" -Encoding UTF8; "
+            f"Set-Content -Path '{wrapper_script}' -Value \"{escaped_wrapper_body}\" -Encoding UTF8; "
             f"Unregister-ScheduledTask -TaskName '{task_name}' -Confirm:$false -ErrorAction SilentlyContinue; "
             f"$action = New-ScheduledTaskAction -Execute 'powershell.exe' "
             f"  -Argument '-NonInteractive -WindowStyle Hidden -File \"{wrapper_script}\"'; "
@@ -265,8 +269,10 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             f"  Set-Content -Path '{up_sentinel}' -Value 1"
             f"}}"
         )
+        # Same escaping: preserve $ signs in the upload wrapper body.
+        escaped_up_wrapper_body = up_wrapper_body.replace("$", "`$")
         up_schtask_ps = (
-            f"Set-Content -Path '{up_wrapper_script}' -Value \"{up_wrapper_body}\" -Encoding UTF8; "
+            f"Set-Content -Path '{up_wrapper_script}' -Value \"{escaped_up_wrapper_body}\" -Encoding UTF8; "
             f"Unregister-ScheduledTask -TaskName '{up_task_name}' -Confirm:$false -ErrorAction SilentlyContinue; "
             f"$action = New-ScheduledTaskAction -Execute 'powershell.exe' "
             f"  -Argument '-NonInteractive -WindowStyle Hidden -File \"{up_wrapper_script}\"'; "
