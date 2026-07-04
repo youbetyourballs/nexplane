@@ -955,6 +955,7 @@ Examples:
         BACKUP_SCHEDULER_PHASES = {
             "BACKUP_SCHEDULER", "PLATFORM_UPGRADE_ROLLBACK", "AD_MEMBER_TIERS",
             "LOCAL_FILES_BACKUP", "DATABASE_DUMP_BACKUP", "STORAGE_SYNC",
+            "LVM_SNAPSHOT", "NFS_FILES", "MANAGED_DB_SNAPSHOT", "DISK2VHD",
         }
         selected_phases = set(args.phases.split(","))
         if selected_phases & PLATFORM_PHASES:
