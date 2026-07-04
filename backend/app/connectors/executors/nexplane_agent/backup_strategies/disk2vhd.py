@@ -79,7 +79,7 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         # Upload disk2vhd.exe via base64-chunked PowerShell writes
         sess.run_ps(f"$ProgressPreference = 'SilentlyContinue'; Remove-Item -Force -ErrorAction SilentlyContinue '{remote_exe}'")
         b64 = base64.b64encode(exe_bytes).decode()
-        chunk = 3000
+        chunk = 800  # WinRM has ~2048-char cmd limit; 800 chars of b64 is safe
         first = True
         for i in range(0, len(b64), chunk):
             part = b64[i:i + chunk]
