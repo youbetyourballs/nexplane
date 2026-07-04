@@ -173,7 +173,7 @@ async def execute_cr_rollback(
             execution_result = {**execution_result, **extra_execution_result}
 
         steps = (plan.generated_steps if plan else []) or []
-        has_rollback_steps = any(s.get("rollback_action") for s in steps)
+        has_rollback_steps = any(s.get("rollback_action") or s.get("rollback_action_id") for s in steps)
 
         if has_rollback_steps:
             from app.workflows.activities import activity_execute_rollback

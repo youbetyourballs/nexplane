@@ -334,7 +334,7 @@ async def activity_execute_rollback(
 
     async with AsyncSessionLocal() as db:
         for step in reversed(generated_steps):
-            rollback_action = step.get("rollback_action")
+            rollback_action = step.get("rollback_action") or step.get("rollback_action_id")
             rollback_connector = step.get("rollback_connector_type")
             if not rollback_action or not rollback_connector:
                 continue
