@@ -1797,6 +1797,144 @@ def run_phase_lvm_snapshot(client, aws_connector_id: str, asset_id: str,
 
 
 # ---------------------------------------------------------------------------
+# Phase NFS_FILES — tar.gz of NFS export -> S3 + rollback (reuses LVM/NFS EC2)
+# ---------------------------------------------------------------------------
+
+def run_phase_nfs_files(client, aws_connector_id: str, asset_id: str,
+                        key_pem: str, shared_state: dict) -> None:
+    """NFS_FILES: reuse the LVM/NFS EC2 from LVM_SNAPSHOT, backup /srv/nfs-export,
+    verify, rollback, then terminate the shared EC2."""
+    import uuid as _uuid
+    s3 = _get_aws_boto3_client("s3")
+    ec2 = _get_aws_boto3_client("ec2")
+    ssm = _get_aws_boto3_client("ssm")
+    _ensure_s3_bucket(s3, SMOKE_BUCKET)
+
+    private_ip = shared_state.get("lvm_nfs_private_ip")
+    instance_id = shared_state.get("lvm_nfs_instance_id")
+
+    # Standalone mode: provision the LVM/NFS EC2 ourselves if not already done.
+    _provisioned_here = False
+    if not (private_ip and instance_id):
+        from smoke_helpers import KEY_NAME as _SMOKE_KEY_NAME
+        # Load SSH private key from SSM
+        _key_pem_local = key_pem
+        if not _key_pem_local:
+            for _kpath in ("/nexplane/smoke/ssh/private_key",
+                           "/nexplane/smoke/ec2-keypair-private-key"):
+                try:
+                    _key_pem_local = ssm.get_parameter(
+                        Name=_kpath, WithDecryption=True
+                    )["Parameter"]["Value"]
+                    if _key_pem_local:
+                        break
+                except Exception:
+                    pass
+        if not _key_pem_local:
+            raise RuntimeError(
+                "NFS_FILES: no SSH private key in shared_state or SSM "
+                "(/nexplane/smoke/ssh/private_key or /nexplane/smoke/ec2-keypair-private-key)"
+            )
+
+        _ec2 = _get_aws_boto3_client("ec2")
+        _vpcs = _ec2.describe_vpcs(
+            Filters=[{"Name": "isDefault", "Values": ["true"]}]
+        )["Vpcs"]
+        if not _vpcs:
+            raise RuntimeError("NFS_FILES standalone: no default VPC found")
+        _vpc_id = _vpcs[0]["VpcId"]
+        _subnets = _ec2.describe_subnets(
+            Filters=[{"Name": "vpcId", "Values": [_vpc_id]}]
+        )["Subnets"]
+        _subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+        _subnet_id = _subnets[0]["SubnetId"] if _subnets else None
+
+        _sg_id = None
+        try:
+            _sgs = _ec2.describe_security_groups(
+                Filters=[{"Name": "group-name", "Values": ["nexplane-smoke-lvm-nfs"]},
+                         {"Name": "vpc-id", "Values": [_vpc_id]}]
+            )["SecurityGroups"]
+            if _sgs:
+                _sg_id = _sgs[0]["GroupId"]
+        except Exception:
+            pass
+        if not _sg_id:
+            _sg_resp = _ec2.create_security_group(
+                GroupName="nexplane-smoke-lvm-nfs",
+                Description="Nexplane smoke: LVM/NFS instance SSH",
+                VpcId=_vpc_id,
+            )
+            _sg_id = _sg_resp["GroupId"]
+            try:
+                _ec2.authorize_security_group_ingress(
+                    GroupId=_sg_id,
+                    IpPermissions=[{
+                        "IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+                        "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
+                    }],
+                )
+            except Exception:
+                pass
+
+        instance_id, private_ip, _ = _provision_lvm_nfs_instance(
+            _ec2, ssm, _SMOKE_KEY_NAME, _key_pem_local, _subnet_id, _sg_id)
+        shared_state["lvm_nfs_instance_id"] = instance_id
+        shared_state["lvm_nfs_private_ip"] = private_ip
+        key_pem = _key_pem_local
+        _provisioned_here = True
+        print(f"  NFS_FILES standalone: provisioned instance={instance_id} ip={private_ip}")
+
+    run_id = _uuid.uuid4().hex[:8]
+    prefix = f"smoke-nfs-{run_id}/"
+    try:
+        # Sanity: export file exists
+        c = _wait_ssh_ready(private_ip, key_pem, timeout=60)
+        try:
+            _, out, _ = c.exec_command("test -f /srv/nfs-export/nfs1.txt && echo ok")
+            assert out.read().decode().strip() == "ok", "NFS_FILES: export file missing"
+        finally:
+            c.close()
+
+        cr = _create_and_run_cr(
+            client,
+            title=f"smoke nfs_files {run_id}",
+            change_type="server_backup",
+            asset_id=asset_id,
+            desired_outcome={
+                "capture_strategy": "nfs_files",
+                "nfs_export_path": "/srv/nfs-export",
+                "ssh_creds": {"host": private_ip, "username": "ec2-user", "private_key": key_pem},
+                "_storage_config": {"storage_type": "s3", "config": {
+                    "bucket": SMOKE_BUCKET, "prefix": prefix,
+                    "region": s3.meta.region_name or "us-east-1"}},
+            },
+        )
+        assert cr["status"] == "completed", f"NFS_FILES backup failed: {cr}"
+        refs = _extract_artifact_refs(cr)
+        assert refs.get("artifact_uri", "").endswith(".tar.gz"), f"NFS_FILES: bad uri {refs}"
+        assert refs.get("file_count", 0) >= 1, f"NFS_FILES: file_count={refs.get('file_count')}"
+        assert _count_s3_prefix(s3, SMOKE_BUCKET, prefix) == 1, "NFS_FILES: artifact missing"
+        print(f"  NFS_FILES backup PASSED: {refs['artifact_uri']}")
+
+        _rollback_cr(client, cr["id"])
+        rb = _wait_cr_complete(client, cr["id"], "nfs_files rollback", timeout=180)
+        assert rb["status"] in ("rolled_back", "rollback_partial"), f"rollback status={rb['status']}"
+        assert _count_s3_prefix(s3, SMOKE_BUCKET, prefix) == 0, "NFS_FILES: artifact not deleted"
+        print("  NFS_FILES rollback PASSED")
+    finally:
+        _delete_s3_prefix(s3, SMOKE_BUCKET, prefix)
+        # Terminate the shared LVM/NFS EC2 now that both phases are done.
+        try:
+            ec2.terminate_instances(InstanceIds=[instance_id])
+            print(f"  NFS_FILES teardown: terminated {instance_id}")
+        except Exception as exc:
+            print(f"  NFS_FILES teardown WARNING: {exc}")
+        shared_state.pop("lvm_nfs_instance_id", None)
+        shared_state.pop("lvm_nfs_private_ip", None)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1814,6 +1952,7 @@ def main() -> None:
             "DATABASE_DUMP_BACKUP=database_dump (postgres) capture strategy with rollback verification. "
             "STORAGE_SYNC=S3->S3 server-side copy backup + rollback verification. "
             "LVM_SNAPSHOT=LVM snapshot -> gzip image -> S3 + rollback verification. "
+            "NFS_FILES=tar.gz of NFS export -> S3 + rollback; reuses LVM/NFS EC2 when combined with LVM_SNAPSHOT. "
             "Default: all three phases."
         ),
     )
@@ -2001,8 +2140,7 @@ def main() -> None:
             print("\n=== PHASE: STORAGE_SYNC ===")
             run_phase_storage_sync(client, aws_connector_id=cloud_account_id, asset_id=cloud_account_id)
 
-        if "LVM_SNAPSHOT" in phases:
-            print("\n=== PHASE: LVM_SNAPSHOT ===")
+        if "LVM_SNAPSHOT" in phases or "NFS_FILES" in phases:
             from smoke_helpers import KEY_NAME as _SMOKE_KEY_NAME
             _ec2_lvm = _get_aws_boto3_client("ec2")
             _ssm_lvm = _get_aws_boto3_client("ssm")
@@ -2021,7 +2159,7 @@ def main() -> None:
                     pass
             if not _key_pem_lvm:
                 raise RuntimeError(
-                    "LVM_SNAPSHOT: no SSH private key in SSM "
+                    "LVM_SNAPSHOT/NFS_FILES: no SSH private key in SSM "
                     "(/nexplane/smoke/ssh/private_key or /nexplane/smoke/ec2-keypair-private-key)"
                 )
 
@@ -2030,7 +2168,7 @@ def main() -> None:
                 Filters=[{"Name": "isDefault", "Values": ["true"]}]
             )["Vpcs"]
             if not _vpcs_lvm:
-                raise RuntimeError("LVM_SNAPSHOT: no default VPC found")
+                raise RuntimeError("LVM_SNAPSHOT/NFS_FILES: no default VPC found")
             _vpc_id_lvm = _vpcs_lvm[0]["VpcId"]
             _subnets_lvm = _ec2_lvm.describe_subnets(
                 Filters=[{"Name": "vpcId", "Values": [_vpc_id_lvm]}]
@@ -2088,31 +2226,45 @@ def main() -> None:
                     PublicKeyMaterial=b"",  # placeholder — see note below
                 )
 
-            # Register a minimal asset for the LVM backup CR target
+            # Register a minimal asset for the LVM/NFS backup CR targets
             _lvm_asset_resp = client.post("/assets", json={
                 "asset_type": "server",
                 "environment": "staging",
                 "criticality": "low",
-                "name": f"smoke-lvm-snapshot-{int(time.time())}",
+                "name": f"smoke-lvm-nfs-{int(time.time())}",
                 "tags": ["nexplane-smoke"],
             })
             _lvm_asset_data = _lvm_asset_resp if isinstance(_lvm_asset_resp, dict) else _lvm_asset_resp.json()
             _lvm_asset_id = _lvm_asset_data.get("id") or _lvm_asset_data.get("asset_id")
             _lvm_shared_state: dict = {}
+
             try:
-                run_phase_lvm_snapshot(
-                    client=client,
-                    aws_connector_id=cloud_account_id,
-                    asset_id=_lvm_asset_id,
-                    key_name=_SMOKE_KEY_NAME,
-                    key_pem=_key_pem_lvm,
-                    subnet_id=_subnet_lvm,
-                    sg_id=_sg_lvm,
-                    shared_state=_lvm_shared_state,
-                )
+                if "LVM_SNAPSHOT" in phases:
+                    print("\n=== PHASE: LVM_SNAPSHOT ===")
+                    run_phase_lvm_snapshot(
+                        client=client,
+                        aws_connector_id=cloud_account_id,
+                        asset_id=_lvm_asset_id,
+                        key_name=_SMOKE_KEY_NAME,
+                        key_pem=_key_pem_lvm,
+                        subnet_id=_subnet_lvm,
+                        sg_id=_sg_lvm,
+                        shared_state=_lvm_shared_state,
+                    )
+
+                if "NFS_FILES" in phases:
+                    print("\n=== PHASE: NFS_FILES ===")
+                    run_phase_nfs_files(
+                        client=client,
+                        aws_connector_id=cloud_account_id,
+                        asset_id=_lvm_asset_id,
+                        key_pem=_key_pem_lvm,
+                        shared_state=_lvm_shared_state,
+                    )
             finally:
-                # Terminate the LVM/NFS instance only if NFS_FILES phase is not also running
-                if "NFS_FILES" not in phases and _lvm_shared_state.get("lvm_nfs_instance_id"):
+                # Terminate the LVM/NFS instance if NFS_FILES did not already do it
+                # (NFS_FILES always terminates; LVM_SNAPSHOT alone leaves it for NFS_FILES)
+                if _lvm_shared_state.get("lvm_nfs_instance_id"):
                     try:
                         _ec2_lvm.terminate_instances(
                             InstanceIds=[_lvm_shared_state["lvm_nfs_instance_id"]]
