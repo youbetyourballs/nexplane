@@ -952,9 +952,15 @@ Examples:
             "RUNBOOK_ONBOARDING", "RUNBOOK_ACCOUNT_COMPROMISE", "RUNBOOK_PATCH_CAMPAIGN",
             "ACCESS_REVIEW", "PROJECT_MICROSEG", "VULN_PIPELINE",
         }
+        BACKUP_SCHEDULER_PHASES = {
+            "BACKUP_SCHEDULER", "PLATFORM_UPGRADE_ROLLBACK", "AD_MEMBER_TIERS",
+            "LOCAL_FILES_BACKUP", "DATABASE_DUMP_BACKUP", "STORAGE_SYNC",
+        }
         selected_phases = set(args.phases.split(","))
         if selected_phases & PLATFORM_PHASES:
             test_script = "test_platform_live.py"
+        elif selected_phases & BACKUP_SCHEDULER_PHASES:
+            test_script = "test_backup_scheduler_live.py"
         else:
             test_script = "test_aws_live.py"
         test_cmd_parts = [
