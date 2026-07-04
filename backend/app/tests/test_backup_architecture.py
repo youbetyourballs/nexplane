@@ -103,7 +103,7 @@ class TestBackupStrategyRegistry:
 
     def test_stub_strategies_raise_not_implemented(self):
         from app.connectors.executors.nexplane_agent.backup_strategies import get_strategy
-        for name in ("mgn_replication", "disk2vhd", "lvm_snapshot", "database_dump",
+        for name in ("mgn_replication", "disk2vhd", "lvm_snapshot",
                      "managed_db_snapshot", "storage_sync"):
             mod = get_strategy(name)
             with pytest.raises(NotImplementedError):
@@ -254,7 +254,7 @@ class TestLocalFilesStrategy:
         mock_backend.upload.return_value = "s3://bucket/prefix/archive.tar.gz"
 
         with patch("paramiko.SSHClient", return_value=mock_ssh), \
-             patch("paramiko.RSAKey.from_private_key", return_value=MagicMock()), \
+             patch("paramiko.Ed25519Key.from_private_key", return_value=MagicMock()), \
              patch("app.connectors.executors.nexplane_agent.storage_backends.get_backend",
                    return_value=mock_backend):
             mock_connector = MagicMock()

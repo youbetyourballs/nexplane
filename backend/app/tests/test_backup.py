@@ -28,6 +28,9 @@ def test_backup_target_read_schema():
         last_successful_backup_cr_id=None,
         last_successful_at=None,
         status=BackupTargetStatus.unprotected,
+        backup_tier="machine",
+        capture_strategy="ebs_snapshot",
+        storage_id=None,
         created_at=datetime.now(tz=timezone.utc),
     )
     assert bt.status == BackupTargetStatus.unprotected

@@ -146,7 +146,7 @@ async def _socks_connect(host, port, agent_id, dst_ip, dst_port, password="tok")
 
 def _patch_relay_auth(monkeypatch, agent_id: uuid.UUID, allowlist: list[str], enabled: bool = True):
     org = types.SimpleNamespace(organization_id=uuid.uuid4())
-    reg = types.SimpleNamespace(id=agent_id, tunnel_enabled=enabled, tunnel_allowlist=allowlist)
+    reg = types.SimpleNamespace(id=agent_id, tunnel_enabled=enabled, tunnel_allowlist=allowlist, tunnel_max_concurrent=10)
 
     async def fake_resolve(_authz, _db):
         return org
