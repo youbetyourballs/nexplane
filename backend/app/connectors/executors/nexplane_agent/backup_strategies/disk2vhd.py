@@ -21,13 +21,38 @@ def _s3_client_from_creds(creds: dict):
     )
 
 
-def _ps_check(sess, script: str, label: str):
+def _ps_check(sess, script: str, label: str, retries: int = 3):
     # Prepend progress suppression to avoid CLIXML noise on first WinRM connection
     full_script = "$ProgressPreference = 'SilentlyContinue'; " + script
-    r = sess.run_ps(full_script)
-    if r.status_code != 0:
-        raise RuntimeError(f"disk2vhd: {label} failed: {r.std_err.decode(errors='replace')}")
-    return r
+    import time as _time
+    last_err = None
+    for attempt in range(retries):
+        try:
+            r = sess.run_ps(full_script)
+            if r.status_code != 0:
+                err_msg = r.std_err.decode(errors='replace')
+                if attempt < retries - 1:
+                    logger.warning(
+                        "disk2vhd: %s attempt %d/%d non-zero status: %s – retrying",
+                        label, attempt + 1, retries, err_msg,
+                    )
+                    _time.sleep(5 * (attempt + 1))
+                    continue
+                raise RuntimeError(f"disk2vhd: {label} failed: {err_msg}")
+            return r
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            last_err = exc
+            if attempt < retries - 1:
+                logger.warning(
+                    "disk2vhd: %s attempt %d/%d WinRM error: %s – retrying",
+                    label, attempt + 1, retries, exc,
+                )
+                _time.sleep(5 * (attempt + 1))
+            else:
+                raise RuntimeError(f"disk2vhd: {label} WinRM error: {exc}") from exc
+    raise RuntimeError(f"disk2vhd: {label} failed after {retries} attempts: {last_err}")
 
 
 async def backup(params: dict, asset_ids: list, connector) -> dict:
@@ -103,9 +128,13 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         drives_str = " ".join(disk_list)
         sentinel = r"C:\Windows\Temp\disk2vhd_done.txt"
         log_file = r"C:\Windows\Temp\disk2vhd_out.txt"
-        # Clean any stale sentinel from a prior run
+        # Clean any stale sentinel from a prior run.  Use a fresh session here since
+        # the exe-upload loop may have exhausted the original session's WinRM connection.
+        clean_init_sess = winrm.Session(
+            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+        )
         _ps_check(
-            sess,
+            clean_init_sess,
             f"Remove-Item -Force -ErrorAction SilentlyContinue '{sentinel}','{log_file}'",
             "clean sentinel",
         )
@@ -119,7 +148,11 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             f"$p.WaitForExit(); "
             f"Set-Content -Path '{sentinel}' -Value $p.ExitCode"
         )
-        wrap_r = sess.run_ps(
+        # Use a fresh session to start the capture job — the exe-upload session may be degraded.
+        capture_sess = winrm.Session(
+            winrm_host, auth=(winrm_username, winrm_password), transport="ntlm"
+        )
+        wrap_r = capture_sess.run_ps(
             f"$j = Start-Job -ScriptBlock {{ {wrapper} }}; $j.Id"
         )
         if wrap_r.status_code != 0:
