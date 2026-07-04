@@ -60,6 +60,20 @@ async def delete(uri: str, config: dict) -> None:
         await loop.run_in_executor(pool, _sync)
 
 
+async def put(key: str, data: bytes, config: dict) -> str:
+    """Put raw bytes at key in S3. Returns s3://bucket/key URI."""
+    bucket = config["bucket"]
+
+    def _sync():
+        s3 = _client(config)
+        s3.put_object(Bucket=bucket, Key=key, Body=data)
+        return f"s3://{bucket}/{key}"
+
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor() as pool:
+        return await loop.run_in_executor(pool, _sync)
+
+
 async def _delete_prefix(prefix: str, config: dict) -> dict:
     """Delete all objects under prefix. Returns {deleted_count}. Private helper."""
     bucket = config["bucket"]

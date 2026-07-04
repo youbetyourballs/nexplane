@@ -87,3 +87,67 @@ class TestStorageBackendRegistry:
                 s3_mod._delete_prefix("prefix/", config)
             )
         assert result["deleted_count"] == 2
+
+
+class TestBackupStrategyRegistry:
+    def test_get_ebs_snapshot_returns_module(self):
+        from app.connectors.executors.nexplane_agent.backup_strategies import get_strategy
+        mod = get_strategy("ebs_snapshot")
+        assert hasattr(mod, "backup")
+        assert hasattr(mod, "rollback")
+
+    def test_get_unknown_strategy_raises(self):
+        from app.connectors.executors.nexplane_agent.backup_strategies import get_strategy
+        with pytest.raises(ValueError, match="Unknown capture strategy"):
+            get_strategy("does_not_exist_xyz")
+
+    def test_stub_strategies_raise_not_implemented(self):
+        from app.connectors.executors.nexplane_agent.backup_strategies import get_strategy
+        for name in ("mgn_replication", "disk2vhd", "lvm_snapshot", "database_dump",
+                     "managed_db_snapshot", "storage_sync"):
+            mod = get_strategy(name)
+            with pytest.raises(NotImplementedError):
+                asyncio.run(mod.backup({}, [], None))
+
+    def test_ebs_snapshot_artifact_refs_contains_strategy_fields(self):
+        """artifact_refs from ebs_snapshot must include the 4 required base fields."""
+        from unittest.mock import MagicMock, patch, AsyncMock
+        from app.connectors.executors.nexplane_agent.backup_strategies import ebs_snapshot
+
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_instances.return_value = {
+            "Reservations": [{"Instances": [{"BlockDeviceMappings": [
+                {"Ebs": {"VolumeId": "vol-123"}}
+            ]}]}]
+        }
+        mock_ec2.create_snapshot.return_value = {"SnapshotId": "snap-abc"}
+        mock_ec2.delete_snapshot.return_value = {}
+
+        mock_s3_backend = AsyncMock()
+        mock_s3_backend.put.return_value = "s3://bucket/prefix/manifest.json"
+
+        with patch(
+            "app.connectors.executors.nexplane_agent.aws_utils._ec2_client",
+            return_value=mock_ec2,
+        ), patch(
+            "app.connectors.executors.nexplane_agent.backup_strategies.ebs_snapshot._get_storage_backend",
+            return_value=mock_s3_backend,
+        ):
+            result = asyncio.run(
+                ebs_snapshot.backup(
+                    {
+                        "aws_connector_id": "",
+                        "backup_storage_id": "",
+                        "instance_id": "i-123",
+                        "_storage_config": {"storage_type": "s3", "config": {"bucket": "b", "prefix": "p/"}},
+                    },
+                    ["asset-uuid"],
+                    None,
+                )
+            )
+        refs = result["artifact_refs"]
+        for field in ("capture_strategy", "restore_strategy", "backup_tier", "captured_at"):
+            assert field in refs, f"artifact_refs missing '{field}'"
+        assert refs["capture_strategy"] == "ebs_snapshot"
+        assert refs["restore_strategy"] == "launch_ami"
+        assert refs["backup_tier"] == "machine"
