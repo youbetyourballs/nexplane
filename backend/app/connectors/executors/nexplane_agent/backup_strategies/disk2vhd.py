@@ -188,7 +188,7 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         # WinRM sluggish for 60-90s per response even when the instance is still alive.
         import time as _time
         _poll_timeout = params.get("_winrm_poll_timeout_s", 120)
-        capture_timeout = params.get("_capture_timeout_s", 3600)
+        capture_timeout = params.get("_capture_timeout_s", 7200)
         poll_start = _time.monotonic()
         while True:
             _time.sleep(30)

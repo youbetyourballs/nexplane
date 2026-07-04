@@ -2214,11 +2214,13 @@ def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
                 # Write VHDx to D:\ (secondary EBS volume) — C:\ lacks sufficient
                 # free space to hold the output while also being the source drive.
                 "_vhdx_output_dir": r"D:\\",
+                "_capture_timeout_s": 7200,
+                "_upload_timeout_s": 7200,
                 "_storage_config": {"storage_type": "s3", "config": {
                     "bucket": SMOKE_BUCKET, "prefix": prefix,
                     "region": s3.meta.region_name or "us-east-1"}},
             },
-            timeout=4800,
+            timeout=7200,
         )
         assert cr["status"] == "completed", f"DISK2VHD backup failed: {cr}"
         refs = _extract_artifact_refs(cr)
