@@ -13,6 +13,19 @@ class BackupTargetCreate(BaseModel):
     expected_cadence_hours: int = 24
     recurring_job_id: uuid.UUID | None = None
     asset_id: uuid.UUID | None = None
+    backup_tier: str = "machine"
+    capture_strategy: str = "ebs_snapshot"
+    storage_id: uuid.UUID | None = None
+
+
+class BackupTargetUpdate(BaseModel):
+    target_description: str | None = None
+    expected_cadence_hours: int | None = None
+    asset_id: uuid.UUID | None = None
+    backup_tier: str | None = None
+    capture_strategy: str | None = None
+    storage_id: uuid.UUID | None = None
+    recurring_job_id: uuid.UUID | None = None
 
 
 class BackupTargetRead(BaseModel):
@@ -27,6 +40,9 @@ class BackupTargetRead(BaseModel):
     last_successful_backup_cr_id: uuid.UUID | None
     last_successful_at: datetime | None
     status: BackupTargetStatus
+    backup_tier: str
+    capture_strategy: str
+    storage_id: uuid.UUID | None
     created_at: datetime
 
 
@@ -54,6 +70,13 @@ class BackupContextRead(BaseModel):
     artifact: dict | None = None
     backup_cr_id: uuid.UUID | None = None
     overdue: bool = False
+
+
+class StrategyRecommendation(BaseModel):
+    capture_strategy: str
+    backup_tier: str
+    reason: str
+    alternatives: list[dict]
 
 
 # ---------------------------------------------------------------------------

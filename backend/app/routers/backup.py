@@ -25,8 +25,10 @@ from app.schemas.backup import (
     BackupStorageUpdate,
     BackupTargetCreate,
     BackupTargetRead,
+    BackupTargetUpdate,
     RecoveryTokenRead,
     RestoreCrCreate,
+    StrategyRecommendation,
 )
 from app.services.backup_target_service import compute_status
 from pydantic import BaseModel as PydanticBaseModel
@@ -69,10 +71,87 @@ async def create_backup_target(
         asset_id=body.asset_id,
         target_description=body.target_description,
         expected_cadence_hours=body.expected_cadence_hours,
+        backup_tier=body.backup_tier,
+        capture_strategy=body.capture_strategy,
+        storage_id=body.storage_id,
         status=BackupTargetStatus.unprotected,
     )
     bt.status = compute_status(bt)
     db.add(bt)
+    await db.commit()
+    await db.refresh(bt)
+    return bt
+
+
+# Backup-type → strategy mapping (mirrors frontend BACKUP_TYPES)
+_STRATEGY_MAP = {
+    "machine_image": {
+        "capture_strategy": "ebs_snapshot",
+        "backup_tier": "machine",
+        "reason": "Creates an EBS snapshot and AMI — full machine restore to a new EC2 instance.",
+        "alternatives": [
+            {"capture_strategy": "mgn_replication", "label": "MGN continuous replication (coming soon)"},
+            {"capture_strategy": "lvm_snapshot", "label": "LVM snapshot — Linux bare metal (coming soon)"},
+            {"capture_strategy": "disk2vhd", "label": "Disk2vhd — Windows bare metal (coming soon)"},
+        ],
+    },
+    "file_archive": {
+        "capture_strategy": "local_files",
+        "backup_tier": "data",
+        "reason": "Archives a directory path via SSH/tar — lightweight file-level backup.",
+        "alternatives": [
+            {"capture_strategy": "nfs_files", "label": "NFS path archive (coming soon)"},
+        ],
+    },
+    "database_dump": {
+        "capture_strategy": "database_dump",
+        "backup_tier": "data",
+        "reason": "Runs pg_dump / mysqldump / mongodump against a self-hosted database.",
+        "alternatives": [
+            {"capture_strategy": "managed_db_snapshot", "label": "Managed DB snapshot — RDS/Cloud SQL (coming soon)"},
+        ],
+    },
+    "storage_sync": {
+        "capture_strategy": "storage_sync",
+        "backup_tier": "data",
+        "reason": "Syncs objects between storage backends (S3→GCS, NFS→S3, etc.).",
+        "alternatives": [],
+    },
+}
+
+
+@router.get("/backup-targets/recommend-strategy", response_model=StrategyRecommendation)
+async def recommend_strategy(
+    backup_type: str = Query(..., description="machine_image | file_archive | database_dump | storage_sync"),
+    asset_id: uuid.UUID | None = Query(None),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    mapping = _STRATEGY_MAP.get(backup_type)
+    if not mapping:
+        raise HTTPException(status_code=422, detail=f"Unknown backup_type: {backup_type}")
+    return StrategyRecommendation(**mapping)
+
+
+@router.patch("/backup-targets/{target_id}", response_model=BackupTargetRead)
+async def patch_backup_target(
+    target_id: uuid.UUID,
+    body: BackupTargetUpdate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(BackupTarget).where(
+            BackupTarget.id == target_id,
+            BackupTarget.organization_id == user.organization_id,
+        )
+    )
+    bt = result.scalar_one_or_none()
+    if not bt:
+        raise HTTPException(status_code=404, detail="Backup target not found")
+    for field, value in body.model_dump(exclude_none=True).items():
+        setattr(bt, field, value)
+    bt.status = compute_status(bt)
     await db.commit()
     await db.refresh(bt)
     return bt
