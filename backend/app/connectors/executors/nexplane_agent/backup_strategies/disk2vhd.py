@@ -24,7 +24,9 @@ def _s3_client_from_creds(creds: dict):
 
 
 def _ps_check(sess, script: str, label: str):
-    r = sess.run_ps(script)
+    # Prepend progress suppression to avoid CLIXML noise on first WinRM connection
+    full_script = "$ProgressPreference = 'SilentlyContinue'; " + script
+    r = sess.run_ps(full_script)
     if r.status_code != 0:
         raise RuntimeError(f"disk2vhd: {label} failed: {r.std_err.decode(errors='replace')}")
     return r
