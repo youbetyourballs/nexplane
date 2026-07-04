@@ -208,6 +208,18 @@ def _execute_cr(client, cr_id: str) -> None:
     assert r.status_code in (200, 202), f"POST /execute failed {r.status_code}: {r.text}"
 
 
+def _rollback_cr(client, cr_id: str) -> None:
+    """Trigger rollback of a CR via REST."""
+    import requests as _req
+    auth_header = client.client.headers.get("Authorization", "")
+    base = (getattr(client, "base_url", None) or getattr(client, "base", "")).rstrip("/")
+    r = _req.post(
+        f"{base}/change-requests/{cr_id}/rollback",
+        headers={"Authorization": auth_header},
+    )
+    assert r.status_code in (200, 202), f"POST /rollback failed {r.status_code}: {r.text}"
+
+
 def _create_and_run_cr(client, title: str, change_type: str, asset_id: str, desired_outcome: dict) -> dict:
     """Create a CR, plan+approve+execute it, and wait for a terminal state."""
     cr = client.post("/change-requests", json={

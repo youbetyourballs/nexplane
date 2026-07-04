@@ -102,12 +102,8 @@ class TestBackupStrategyRegistry:
             get_strategy("does_not_exist_xyz")
 
     def test_stub_strategies_raise_not_implemented(self):
-        from app.connectors.executors.nexplane_agent.backup_strategies import get_strategy
-        for name in ("mgn_replication", "disk2vhd", "lvm_snapshot",
-                     "managed_db_snapshot", "storage_sync"):
-            mod = get_strategy(name)
-            with pytest.raises(NotImplementedError):
-                asyncio.run(mod.backup({}, [], None))
+        """No capture-strategy stubs remain — all 6 have been implemented."""
+        pass
 
     def test_ebs_snapshot_artifact_refs_contains_strategy_fields(self):
         """artifact_refs from ebs_snapshot must include the 4 required base fields."""
@@ -376,3 +372,416 @@ class TestFileRestoreToPathStrategy:
             file_restore_to_path.rollback({}, {"artifact_refs": {}}, None)
         )
         assert result["rolled_back"] is False
+
+
+class TestStorageSyncStrategy:
+    def test_storage_sync_backup_copies_and_reports_count(self):
+        import asyncio
+        from unittest.mock import MagicMock, patch
+        from app.connectors.executors.nexplane_agent.backup_strategies import storage_sync
+
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = [
+            {"Contents": [
+                {"Key": "src/a.txt", "Size": 10},
+                {"Key": "src/b.txt", "Size": 20},
+                {"Key": "src/c.txt", "Size": 30},
+            ]}
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+
+        with patch("boto3.client", return_value=mock_s3):
+            result = asyncio.run(
+                storage_sync.backup(
+                    {
+                        "source_prefix": "src/",
+                        "_source_config": {"storage_type": "s3", "config": {
+                            "bucket": "srcbucket", "region": "us-east-1"}},
+                        "_storage_config": {"storage_type": "s3", "config": {
+                            "bucket": "dstbucket", "prefix": "backups/", "region": "us-east-1"}},
+                    },
+                    ["asset-uuid"],
+                    None,
+                )
+            )
+        refs = result["artifact_refs"]
+        assert refs["capture_strategy"] == "storage_sync"
+        assert refs["restore_strategy"] == "storage_restore"
+        assert refs["backup_tier"] == "data"
+        assert refs["synced_count"] == 3
+        assert refs["synced_bytes"] == 60
+        assert refs["dest_bucket"] == "dstbucket"
+        assert mock_s3.copy_object.call_count == 3
+
+    def test_storage_sync_rollback_deletes_dest_prefix(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from app.connectors.executors.nexplane_agent.backup_strategies import storage_sync
+
+        mock_backend = AsyncMock()
+        mock_backend.delete_prefix.return_value = {"deleted_count": 3}
+        with patch("app.connectors.executors.nexplane_agent.storage_backends.get_backend",
+                   return_value=mock_backend):
+            result = asyncio.run(
+                storage_sync.rollback(
+                    {},
+                    {"artifact_refs": {
+                        "dest_storage_type": "s3",
+                        "dest_bucket": "dstbucket",
+                        "dest_prefix": "backups/asset/2026/",
+                        "dest_config": {"bucket": "dstbucket", "region": "us-east-1"},
+                    }},
+                    None,
+                )
+            )
+        assert result["rolled_back"] is True
+        assert result["deleted_prefix"] == "backups/asset/2026/"
+        mock_backend.delete_prefix.assert_called_once()
+
+
+def _mock_ssh_for_download(tar_or_dd_bytes=b"fake image data"):
+    """Build a MagicMock SSHClient whose exec_command + open_sftp behave for
+    the lvm/nfs backup flow. Returns (mock_ssh, mock_sftp)."""
+    from unittest.mock import MagicMock
+    mock_ssh = MagicMock()
+    mock_sftp = MagicMock()
+
+    def _fake_get(remote, local):
+        with open(local, "wb") as f:
+            f.write(tar_or_dd_bytes)
+    mock_sftp.get.side_effect = _fake_get
+    mock_ssh.open_sftp.return_value = mock_sftp
+
+    def _exec(cmd, *a, **k):
+        out = MagicMock()
+        if "wc -l" in cmd:
+            out.read.return_value = b"5"
+        elif "du -sb" in cmd:
+            out.read.return_value = b"2048"
+        elif "stat -c" in cmd or "stat --format" in cmd:
+            out.read.return_value = str(len(tar_or_dd_bytes)).encode()
+        else:
+            out.read.return_value = b""
+        out.channel.recv_exit_status.return_value = 0
+        return (MagicMock(), out, MagicMock())
+    mock_ssh.exec_command.side_effect = _exec
+    return mock_ssh, mock_sftp
+
+
+class TestLvmSnapshotStrategy:
+    def test_lvm_snapshot_backup_produces_artifact_refs(self):
+        import asyncio
+        from unittest.mock import patch, AsyncMock
+        from app.connectors.executors.nexplane_agent.backup_strategies import lvm_snapshot
+
+        mock_ssh, _ = _mock_ssh_for_download(b"lvm-image-bytes")
+        mock_backend = AsyncMock()
+        mock_backend.upload.return_value = "s3://bucket/prefix/lvm.img.gz"
+
+        with patch("paramiko.SSHClient", return_value=mock_ssh), \
+             patch("paramiko.Ed25519Key.from_private_key", return_value=object()), \
+             patch("app.connectors.executors.nexplane_agent.storage_backends.get_backend",
+                   return_value=mock_backend):
+            result = asyncio.run(
+                lvm_snapshot.backup(
+                    {
+                        "vg_name": "vg0",
+                        "lv_name": "data",
+                        "snapshot_size": "1G",
+                        "ssh_creds": {"host": "10.0.0.1", "username": "ec2-user",
+                                      "private_key": "fake"},
+                        "_storage_config": {"storage_type": "s3", "config": {
+                            "bucket": "b", "prefix": "p/", "region": "us-east-1"}},
+                    },
+                    ["asset-uuid"],
+                    None,
+                )
+            )
+        refs = result["artifact_refs"]
+        assert refs["capture_strategy"] == "lvm_snapshot"
+        assert refs["restore_strategy"] == "file_restore_to_path"
+        assert refs["backup_tier"] == "machine"
+        assert refs["artifact_uri"] == "s3://bucket/prefix/lvm.img.gz"
+        assert refs["vg_name"] == "vg0"
+        assert refs["lv_name"] == "data"
+
+    def test_lvm_snapshot_rollback_deletes_artifact(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from app.connectors.executors.nexplane_agent.backup_strategies import lvm_snapshot
+
+        mock_backend = AsyncMock()
+        with patch("app.connectors.executors.nexplane_agent.storage_backends.get_backend",
+                   return_value=mock_backend):
+            result = asyncio.run(
+                lvm_snapshot.rollback(
+                    {},
+                    {"artifact_refs": {
+                        "storage_type": "s3",
+                        "artifact_uri": "s3://bucket/key.img.gz",
+                        "config": {"bucket": "bucket"},
+                    }},
+                    None,
+                )
+            )
+        assert result["rolled_back"] is True
+        mock_backend.delete.assert_called_once_with("s3://bucket/key.img.gz", {"bucket": "bucket"})
+
+
+class TestNfsFilesStrategy:
+    def test_nfs_files_backup_produces_artifact_refs(self):
+        import asyncio
+        from unittest.mock import patch, AsyncMock
+        from app.connectors.executors.nexplane_agent.backup_strategies import nfs_files
+
+        mock_ssh, _ = _mock_ssh_for_download(b"tar-bytes")
+        mock_backend = AsyncMock()
+        mock_backend.upload.return_value = "s3://bucket/prefix/nfs.tar.gz"
+
+        with patch("paramiko.SSHClient", return_value=mock_ssh), \
+             patch("paramiko.Ed25519Key.from_private_key", return_value=object()), \
+             patch("app.connectors.executors.nexplane_agent.storage_backends.get_backend",
+                   return_value=mock_backend):
+            result = asyncio.run(
+                nfs_files.backup(
+                    {
+                        "nfs_export_path": "/srv/nfs-export",
+                        "ssh_creds": {"host": "10.0.0.1", "username": "ec2-user",
+                                      "private_key": "fake"},
+                        "_storage_config": {"storage_type": "s3", "config": {
+                            "bucket": "b", "prefix": "p/", "region": "us-east-1"}},
+                    },
+                    ["asset-uuid"],
+                    None,
+                )
+            )
+        refs = result["artifact_refs"]
+        assert refs["capture_strategy"] == "nfs_files"
+        assert refs["restore_strategy"] == "file_restore_to_path"
+        assert refs["backup_tier"] == "data"
+        assert refs["artifact_uri"] == "s3://bucket/prefix/nfs.tar.gz"
+        assert refs["nfs_export_path"] == "/srv/nfs-export"
+        assert refs["file_count"] == 5
+
+    def test_nfs_files_rollback_deletes_artifact(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from app.connectors.executors.nexplane_agent.backup_strategies import nfs_files
+
+        mock_backend = AsyncMock()
+        with patch("app.connectors.executors.nexplane_agent.storage_backends.get_backend",
+                   return_value=mock_backend):
+            result = asyncio.run(
+                nfs_files.rollback(
+                    {},
+                    {"artifact_refs": {
+                        "storage_type": "s3",
+                        "artifact_uri": "s3://bucket/key.tar.gz",
+                        "config": {"bucket": "bucket"},
+                    }},
+                    None,
+                )
+            )
+        assert result["rolled_back"] is True
+        mock_backend.delete.assert_called_once_with("s3://bucket/key.tar.gz", {"bucket": "bucket"})
+
+
+class TestManagedDbSnapshotStrategy:
+    def test_managed_db_snapshot_backup_creates_and_polls(self):
+        import asyncio
+        from unittest.mock import MagicMock, patch
+        from app.connectors.executors.nexplane_agent.backup_strategies import managed_db_snapshot
+
+        mock_rds = MagicMock()
+        mock_rds.create_db_snapshot.return_value = {"DBSnapshot": {
+            "DBSnapshotIdentifier": "nexplane-snap-x",
+            "DBSnapshotArn": "arn:aws:rds:us-east-1:1:snapshot:nexplane-snap-x",
+            "Engine": "mysql",
+            "AllocatedStorage": 20,
+            "Status": "creating",
+        }}
+        mock_rds.describe_db_snapshots.return_value = {"DBSnapshots": [{
+            "DBSnapshotIdentifier": "nexplane-snap-x",
+            "DBSnapshotArn": "arn:aws:rds:us-east-1:1:snapshot:nexplane-snap-x",
+            "Engine": "mysql",
+            "AllocatedStorage": 20,
+            "Status": "available",
+        }]}
+
+        with patch("boto3.client", return_value=mock_rds):
+            result = asyncio.run(
+                managed_db_snapshot.backup(
+                    {"aws_connector_id": "", "db_instance_identifier": "smokedb"},
+                    ["asset-uuid"],
+                    None,
+                )
+            )
+        refs = result["artifact_refs"]
+        assert refs["capture_strategy"] == "managed_db_snapshot"
+        assert refs["restore_strategy"] == "database_restore"
+        assert refs["backup_tier"] == "data"
+        assert refs["snapshot_id"].startswith("nexplane-snap-")
+        assert refs["engine"] == "mysql"
+        assert refs["allocated_storage_gb"] == 20
+        mock_rds.create_db_snapshot.assert_called_once()
+
+    def test_managed_db_snapshot_rollback_deletes_snapshot(self):
+        import asyncio
+        from unittest.mock import MagicMock, patch
+        from app.connectors.executors.nexplane_agent.backup_strategies import managed_db_snapshot
+
+        mock_rds = MagicMock()
+
+        class _NotFound(Exception):
+            pass
+        mock_rds.exceptions.DBSnapshotNotFoundFault = _NotFound
+        mock_rds.describe_db_snapshots.side_effect = _NotFound()
+
+        with patch("boto3.client", return_value=mock_rds):
+            result = asyncio.run(
+                managed_db_snapshot.rollback(
+                    {"aws_connector_id": ""},
+                    {"artifact_refs": {
+                        "snapshot_id": "nexplane-snap-x",
+                        "aws_connector_id": "",
+                    }},
+                    None,
+                )
+            )
+        assert result["rolled_back"] is True
+        assert result["deleted_snapshot_id"] == "nexplane-snap-x"
+        mock_rds.delete_db_snapshot.assert_called_once_with(DBSnapshotIdentifier="nexplane-snap-x")
+
+
+class TestDisk2VhdStrategy:
+    def test_disk2vhd_backup_produces_vhdx_artifact(self):
+        import asyncio
+        from unittest.mock import MagicMock, patch
+        from app.connectors.executors.nexplane_agent.backup_strategies import disk2vhd
+
+        mock_sess = MagicMock()
+
+        def _run_ps(script):
+            resp = MagicMock()
+            resp.status_code = 0
+            if "Get-Item" in script and "Length" in script:
+                resp.std_out = b"104857600"
+            else:
+                resp.std_out = b"ok"
+            resp.std_err = b""
+            return resp
+        mock_sess.run_ps.side_effect = _run_ps
+
+        mock_s3 = MagicMock()
+        mock_s3.generate_presigned_url.return_value = "https://s3.amazonaws.com/presigned-put"
+
+        with patch("winrm.Session", return_value=mock_sess), \
+             patch("boto3.client", return_value=mock_s3):
+            result = asyncio.run(
+                disk2vhd.backup(
+                    {
+                        "winrm_host": "10.0.0.9",
+                        "winrm_username": "Administrator",
+                        "winrm_password": "pw",
+                        "disk_list": ["C:"],
+                        "aws_connector_id": "",
+                        "_storage_config": {"storage_type": "s3", "config": {
+                            "bucket": "b", "prefix": "p/", "region": "us-east-1"}},
+                        "_disk2vhd_local_path": __file__,
+                    },
+                    ["asset-uuid"],
+                    None,
+                )
+            )
+        refs = result["artifact_refs"]
+        assert refs["capture_strategy"] == "disk2vhd"
+        assert refs["restore_strategy"] == "import_image"
+        assert refs["backup_tier"] == "machine"
+        assert refs["artifact_uri"].endswith(".vhdx")
+        assert refs["size_bytes"] == 104857600
+        assert refs["disk_list"] == ["C:"]
+
+    def test_disk2vhd_rollback_deletes_artifact(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from app.connectors.executors.nexplane_agent.backup_strategies import disk2vhd
+
+        mock_backend = AsyncMock()
+        with patch("app.connectors.executors.nexplane_agent.storage_backends.get_backend",
+                   return_value=mock_backend):
+            result = asyncio.run(
+                disk2vhd.rollback(
+                    {},
+                    {"artifact_refs": {
+                        "storage_type": "s3",
+                        "artifact_uri": "s3://bucket/key.vhdx",
+                        "config": {"bucket": "bucket"},
+                    }},
+                    None,
+                )
+            )
+        assert result["rolled_back"] is True
+        mock_backend.delete.assert_called_once_with("s3://bucket/key.vhdx", {"bucket": "bucket"})
+
+
+class TestMgnReplicationStrategy:
+    def test_mgn_replication_backup_launches_and_extracts_ami(self):
+        import asyncio
+        from unittest.mock import MagicMock, patch
+        from app.connectors.executors.nexplane_agent.backup_strategies import mgn_replication
+
+        mock_mgn = MagicMock()
+        mock_ec2 = MagicMock()
+
+        mock_mgn.describe_source_servers.return_value = {"items": [{
+            "sourceServerID": "s-abc",
+            "dataReplicationInfo": {"dataReplicationState": "CONTINUOUS"},
+            "lifeCycle": {"state": "READY_FOR_TEST"},
+        }]}
+        mock_mgn.launch_test_instances.return_value = {"job": {"jobID": "mgnjob-1"}}
+        mock_mgn.describe_jobs.return_value = {"items": [{
+            "jobID": "mgnjob-1",
+            "status": "COMPLETED",
+            "participatingServers": [{
+                "sourceServerID": "s-abc",
+                "launchedEc2InstanceID": "i-test123",
+            }],
+        }]}
+        mock_ec2.describe_instances.return_value = {"Reservations": [{"Instances": [{
+            "InstanceId": "i-test123",
+            "ImageId": "ami-test123",
+        }]}]}
+
+        def _client(service, **kwargs):
+            return mock_mgn if service == "mgn" else mock_ec2
+
+        with patch("boto3.client", side_effect=_client):
+            result = asyncio.run(
+                mgn_replication.backup(
+                    {"aws_connector_id": "", "mgn_source_server_id": "s-abc"},
+                    ["asset-uuid"],
+                    None,
+                )
+            )
+        refs = result["artifact_refs"]
+        assert refs["capture_strategy"] == "mgn_replication"
+        assert refs["restore_strategy"] == "launch_ami"
+        assert refs["backup_tier"] == "machine"
+        assert refs["test_instance_id"] == "i-test123"
+        assert refs["ami_id"] == "ami-test123"
+        assert refs["launch_job_id"] == "mgnjob-1"
+
+    def test_mgn_replication_rollback_is_noop(self):
+        import asyncio
+        from app.connectors.executors.nexplane_agent.backup_strategies import mgn_replication
+
+        result = asyncio.run(
+            mgn_replication.rollback(
+                {},
+                {"artifact_refs": {"mgn_source_server_id": "s-abc", "ami_id": "ami-x"}},
+                None,
+            )
+        )
+        assert result["rolled_back"] is True
+        assert result.get("noop") is True
