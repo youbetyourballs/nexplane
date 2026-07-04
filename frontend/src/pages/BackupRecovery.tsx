@@ -9,9 +9,10 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { formatDistanceToNow, parseISO } from "date-fns";
 import {
-  CheckCircle2, AlertTriangle, XCircle, RotateCcw, Clock, Database,
+  CheckCircle2, AlertTriangle, XCircle, RotateCcw, Clock, Database, Edit2, Plus,
 } from "lucide-react";
 import { backupApi, BackupTarget, BackupHistoryItem } from "../api/endpoints";
+import { BackupTargetForm } from "../components/BackupTargetForm";
 
 // ─── Coverage Cards ───────────────────────────────────────────────────────────
 
@@ -23,7 +24,15 @@ function statusConfig(status: BackupTarget["status"]) {
   }[status];
 }
 
-function CoverageCard({ target, onRestore }: { target: BackupTarget; onRestore: (t: BackupTarget) => void }) {
+function CoverageCard({
+  target,
+  onRestore,
+  onEdit,
+}: {
+  target: BackupTarget;
+  onRestore: (t: BackupTarget) => void;
+  onEdit: (t: BackupTarget) => void;
+}) {
   const cfg = statusConfig(target.status);
   const Icon = cfg.icon;
   return (
@@ -33,10 +42,19 @@ function CoverageCard({ target, onRestore }: { target: BackupTarget; onRestore: 
           <Database className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
           <span className="text-sm font-medium text-slate-900">{target.target_description}</span>
         </div>
-        <span className={`flex items-center gap-1 text-xs font-medium flex-shrink-0 ${cfg.cls}`}>
-          <Icon className="w-3.5 h-3.5" />
-          {cfg.label}
-        </span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => onEdit(target)}
+            className="text-slate-400 hover:text-slate-600"
+            title="Edit backup target"
+          >
+            <Edit2 className="w-3.5 h-3.5" />
+          </button>
+          <span className={`flex items-center gap-1 text-xs font-medium ${cfg.cls}`}>
+            <Icon className="w-3.5 h-3.5" />
+            {cfg.label}
+          </span>
+        </div>
       </div>
       {target.last_successful_at && (
         <p className="text-xs text-slate-500 mb-1">
@@ -246,8 +264,10 @@ function BackupHistoryTable({
 
 export function BackupRecovery() {
   const [restoreTarget, setRestoreTarget] = useState<BackupTarget | null>(null);
+  const [formTarget, setFormTarget] = useState<BackupTarget | null | undefined>(undefined);
+  // undefined = closed, null = create mode, BackupTarget = edit mode
 
-  const { data: targets = [], isLoading: targetsLoading } = useQuery({
+  const { data: targets = [], isLoading: targetsLoading, refetch: refetchTargets } = useQuery({
     queryKey: ["backup-targets"],
     queryFn: () => backupApi.listTargets(),
     refetchInterval: 60_000,
@@ -279,6 +299,9 @@ export function BackupRecovery() {
         last_successful_at: item.created_at,
         status: "healthy",
         created_at: item.created_at,
+        backup_tier: "machine",
+        capture_strategy: "ebs_snapshot",
+        storage_id: null,
       });
     }
   }
@@ -296,12 +319,21 @@ export function BackupRecovery() {
           onClose={() => setRestoreTarget(null)}
         />
       )}
-      <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
         <h1 className="text-xl font-semibold text-slate-900">Backup &amp; Recovery</h1>
         <p className="text-sm text-slate-500 mt-1">
           {targets.length} targets &middot; {healthy} healthy &middot; {overdue} overdue &middot;{" "}
           {unprotected} unprotected
         </p>
+        </div>
+        <button
+          onClick={() => setFormTarget(null)}
+          className="flex items-center gap-2 px-3 py-2 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700"
+        >
+          <Plus className="w-4 h-4" />
+          Add backup target
+        </button>
       </div>
       <section>
         <h2 className="text-sm font-semibold text-slate-700 mb-3">Coverage</h2>
@@ -315,7 +347,7 @@ export function BackupRecovery() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {targets.map((target) => (
-              <CoverageCard key={target.id} target={target} onRestore={setRestoreTarget} />
+              <CoverageCard key={target.id} target={target} onRestore={setRestoreTarget} onEdit={(t) => setFormTarget(t)} />
             ))}
           </div>
         )}
@@ -324,6 +356,13 @@ export function BackupRecovery() {
         <h2 className="text-sm font-semibold text-slate-700 mb-3">Backup History</h2>
         <BackupHistoryTable history={history} onRestore={handleHistoryRestore} />
       </section>
+      {formTarget !== undefined && (
+        <BackupTargetForm
+          target={formTarget}
+          onClose={() => setFormTarget(undefined)}
+          onSaved={() => refetchTargets()}
+        />
+      )}
     </div>
   );
 }

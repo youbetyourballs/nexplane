@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Edit, Save, X, Plus, Zap, Network, Clock } from "lucide-react";
+import { ArrowLeft, Edit, Save, X, Plus, Zap, Network, Clock, Database } from "lucide-react";
 import { assetsApi, agentTunnelsApi } from "../api/endpoints";
 import { changeRequestsApi } from "../api/endpoints";
 import { apiClient } from "../api/client";
@@ -16,6 +16,7 @@ import type { Asset, AssetType, Criticality } from "../types/api";
 import { IPMigrationWizard } from "../components/IPMigrationWizard";
 import { ContainerizationWizard } from "../components/ContainerizationWizard";
 import { MigrateDrawer } from "../components/MigrateDrawer";
+import { BackupTargetForm } from "../components/BackupTargetForm";
 
 // Maps asset type → eligible change types with label + title/description templates
 interface QuickAction {
@@ -657,6 +658,7 @@ export function AssetDetail() {
   const [activeTab, setActiveTab] = useState<"overview" | "activity" | "tunnel">("overview");
   const [showRollbackAllModal, setShowRollbackAllModal] = useState(false);
   const [rollbackAllLoading, setRollbackAllLoading] = useState(false);
+  const [showBackupForm, setShowBackupForm] = useState(false);
   const [rollbackAllResult, setRollbackAllResult] = useState<{ rolled_back: string[]; failed_at: string | null; errors: string[] } | null>(null);
 
   const { data: asset, isLoading } = useQuery({
@@ -1379,12 +1381,20 @@ export function AssetDetail() {
                 (!action.connectorType || action.connectorType === asset.connector_type) &&
                 (!action.condition || action.condition(asset))
             );
-            return actions.length > 0 && (
+            return (
             <div className="bg-white border border-slate-200 rounded-lg p-5">
               <h2 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-1.5">
                 <Zap className="w-4 h-4 text-brand-500" /> Quick Actions
               </h2>
               <div className="space-y-1.5">
+                {/* Enable Backup quick action */}
+                <button
+                  onClick={() => setShowBackupForm(true)}
+                  className="flex items-center gap-2 w-full text-left px-3 py-2 rounded-md text-sm text-slate-700 hover:bg-slate-50 border border-slate-200"
+                >
+                  <Database className="w-4 h-4 text-slate-400" />
+                  Enable Backup
+                </button>
                 {actions.map((action) => (
                   <button
                     key={action.changeType}
@@ -1754,6 +1764,16 @@ export function AssetDetail() {
           assetId={asset.id}
           assetName={asset.name}
           onClose={() => setShowMigrateDrawer(false)}
+        />
+      )}
+
+      {/* Backup target form */}
+      {showBackupForm && (
+        <BackupTargetForm
+          target={null}
+          initialAssetId={asset.id}
+          onClose={() => setShowBackupForm(false)}
+          onSaved={() => {}}
         />
       )}
     </div>
