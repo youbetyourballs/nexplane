@@ -2038,7 +2038,9 @@ def run_phase_managed_db_snapshot(client, aws_connector_id: str, asset_id: str,
 # ---------------------------------------------------------------------------
 
 _DISK2VHD_CACHE_KEY = "disk2vhd"
-_DISK2VHD_SETUP_HASH = "win2022-winrm-v1"
+# v2: switched from VHD-backed E: (disk2vhd can't capture VHD volumes) to
+# a real 2 GB EBS volume attached at /dev/sdg and formatted as E:.
+_DISK2VHD_SETUP_HASH = "win2022-winrm-v2"
 
 
 def _ensure_disk2vhd_tool(s3) -> bool:
@@ -2082,12 +2084,21 @@ New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985
         ImageId=image_id, InstanceType="t3.medium", MinCount=1, MaxCount=1,
         KeyName=key_name, SubnetId=subnet_id, SecurityGroupIds=[sg_id],
         IamInstanceProfile={"Name": SMOKE_IAM_PROFILE},
-        # Attach a 60 GB GP3 data volume so disk2vhd can write the VHDx to D:\
-        # instead of C:\ (which lacks sufficient free space to hold the output).
-        BlockDeviceMappings=[{
-            "DeviceName": "/dev/sdf",
-            "Ebs": {"VolumeSize": 60, "VolumeType": "gp3", "DeleteOnTermination": True},
-        }],
+        BlockDeviceMappings=[
+            # D:\ (60 GB) — output volume for the VHDX; C:\ lacks sufficient
+            # free space to hold the capture while also being the source drive.
+            {
+                "DeviceName": "/dev/sdf",
+                "Ebs": {"VolumeSize": 60, "VolumeType": "gp3", "DeleteOnTermination": True},
+            },
+            # E:\ (2 GB) — capture target volume; real EBS-backed disk so
+            # VSS and disk2vhd work correctly (disk2vhd cannot capture
+            # volumes backed by VHD files).
+            {
+                "DeviceName": "/dev/sdg",
+                "Ebs": {"VolumeSize": 2, "VolumeType": "gp3", "DeleteOnTermination": True},
+            },
+        ],
         TagSpecifications=[{"ResourceType": "instance",
                             "Tags": [{"Key": "Name", "Value": "nexplane-smoke-disk2vhd"}]}],
     )
@@ -2100,18 +2111,29 @@ New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985
     private_ip = desc["PrivateIpAddress"]
     _wait_ssm_ready_win(ssm, instance_id, timeout=600)
 
-    # Initialize the /dev/sdf (D:) data volume via diskpart so disk2vhd can write
-    # the VHDx there instead of on C: (which has insufficient free space).
-    diskpart_script = (
-        "Get-Disk | Where-Object {$_.PartitionStyle -eq 'RAW'} | "
-        "ForEach-Object { "
-        "  $_ | Initialize-Disk -PartitionStyle MBR -PassThru | "
-        "  New-Partition -DriveLetter D -UseMaximumSize | "
-        "  Format-Volume -FileSystem NTFS -NewFileSystemLabel 'Data' -Confirm:$false | "
-        "  Out-Null "
-        "}; "
-        "'DISK_INIT_DONE'"
-    )
+    # Initialize the EBS data volumes:
+    #   /dev/sdf (Disk 1, 60 GB) -> D:  VHDX output volume
+    #   /dev/sdg (Disk 2, 2 GB)  -> E:  capture target (real EBS-backed disk;
+    #       disk2vhd cannot capture VHD-file-backed volumes via VSS)
+    # Sort by size descending so the larger disk gets D: and the smaller E:.
+    diskpart_script = r"""
+$rawDisks = Get-Disk | Where-Object {$_.PartitionStyle -eq 'RAW'} | Sort-Object Size -Descending
+$diskD = $rawDisks | Select-Object -First 1
+$diskE = $rawDisks | Where-Object {$_.UniqueId -ne $diskD.UniqueId} | Select-Object -First 1
+if ($diskD) {
+    $diskD | Initialize-Disk -PartitionStyle MBR -PassThru |
+        New-Partition -DriveLetter D -UseMaximumSize |
+        Format-Volume -FileSystem NTFS -NewFileSystemLabel Data -Confirm:$false |
+        Out-Null
+}
+if ($diskE) {
+    $diskE | Initialize-Disk -PartitionStyle MBR -PassThru |
+        New-Partition -DriveLetter E -UseMaximumSize |
+        Format-Volume -FileSystem NTFS -NewFileSystemLabel Capture -Confirm:$false |
+        Out-Null
+}
+"DISK_INIT_DONE"
+"""
     disk_resp = ssm.send_command(
         InstanceIds=[instance_id],
         DocumentName='AWS-RunPowerShellScript',
@@ -2124,10 +2146,12 @@ New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985
         disk_out = ssm.get_command_invocation(CommandId=disk_cmd_id, InstanceId=instance_id)
         if disk_out['Status'] not in ('Pending', 'InProgress', 'Delayed'):
             if disk_out['Status'] != 'Success':
-                raise RuntimeError(f"D: init failed: {disk_out['StandardErrorContent']}")
+                raise RuntimeError(
+                    f"D:/E: init failed: {disk_out['StandardErrorContent']}"
+                )
             break
     else:
-        raise TimeoutError('D: disk init timed out')
+        raise TimeoutError('D:/E: disk init timed out')
 
     if cached_ami:
         # Reset Administrator password via SSM RunCommand so we use the fresh win_password
@@ -2160,43 +2184,6 @@ New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985
             Name=f"/nexplane/smoke-amis/{_DISK2VHD_CACHE_KEY}/{_DISK2VHD_SETUP_HASH}",
             Value=json.dumps({"ami_id": ami}), Type="String", Overwrite=True,
         )
-
-    # Create a small test VHD on D:\ and mount as E: so disk2vhd captures a
-    # 1 GB synthetic volume instead of the 30 GB OS disk.  Capturing C: with
-    # disk2vhd on a t3.medium triggers OOM or VSS driver crashes; a 1 GB VHD
-    # tests the same strategy mechanics without the resource pressure.
-    # diskpart is used instead of New-VHD to avoid a Hyper-V module dependency.
-    diskpart_vhd_script = r"""
-$dp = @"
-create vdisk file=D:\smoke_test_target.vhdx type=fixed maximum=1024
-select vdisk file=D:\smoke_test_target.vhdx
-attach vdisk
-create partition primary
-format fs=ntfs label="SmokeTest" quick
-assign letter=E
-exit
-"@
-$dp | diskpart
-"VHD_READY"
-"""
-    vhd_resp = ssm.send_command(
-        InstanceIds=[instance_id],
-        DocumentName='AWS-RunPowerShellScript',
-        Parameters={'commands': [diskpart_vhd_script]},
-        TimeoutSeconds=120,
-    )
-    vhd_cmd_id = vhd_resp['Command']['CommandId']
-    for _ in range(30):
-        _t.sleep(5)
-        vhd_out = ssm.get_command_invocation(CommandId=vhd_cmd_id, InstanceId=instance_id)
-        if vhd_out['Status'] not in ('Pending', 'InProgress', 'Delayed'):
-            if vhd_out['Status'] != 'Success':
-                raise RuntimeError(
-                    f"test VHD creation failed: {vhd_out['StandardErrorContent']}"
-                )
-            break
-    else:
-        raise TimeoutError('test VHD creation timed out')
 
     # Wait for WinRM port 5985 to be responsive after instance_running/reboot
     import socket as _sock
@@ -2251,10 +2238,10 @@ def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
                 "winrm_host": private_ip,
                 "winrm_username": "Administrator",
                 "winrm_password": win_password,
-                # Capture the 1 GB synthetic E: volume (not C:) to avoid OOM /
-                # VSS driver crashes on t3.medium from a full OS disk capture.
+                # Capture the 2 GB EBS E: volume (not C:) — much faster and
+                # avoids OOM on t3.medium from a full OS disk capture.
                 "disk_list": ["E:"],
-                "_vhdx_output_dir": r"D:\\",
+                "_vhdx_output_dir": "D:\\",
                 "_capture_timeout_s": 7200,
                 "_upload_timeout_s": 7200,
                 "_storage_config": {"storage_type": "s3", "config": {

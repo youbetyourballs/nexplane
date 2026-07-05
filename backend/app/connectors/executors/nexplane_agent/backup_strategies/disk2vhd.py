@@ -118,7 +118,7 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
     archive_key = f"{prefix}{asset_id}/{vhdx_name}"
     disk2vhd_s3_key = params.get("_disk2vhd_s3_key", "tools/disk2vhd.exe")
     remote_exe = r"C:\Windows\Temp\disk2vhd.exe"
-    _vhdx_dir = params.get("_vhdx_output_dir", r"C:\Windows\Temp")
+    _vhdx_dir = params.get("_vhdx_output_dir", r"C:\Windows\Temp").rstrip("\\")
     remote_vhdx = rf"{_vhdx_dir}\{vhdx_name}"
     local_exe = params.get("_disk2vhd_local_path")
 
