@@ -49,7 +49,6 @@ def _recreate_enum_without(conn, enum_name: str, table: str, column: str, remove
                 ("agent_jobs", "change_request_id"),
                 ("project_change_requests", "change_request_id"),
                 ("project_rollback_steps", "change_request_id"),
-                ("forensic_bundles", "change_request_id"),
                 ("vulnerability_findings", "change_request_id"),
                 ("finding_change_requests", "cr_id"),
                 ("security_policy_baselines", "cr_id"),
@@ -88,9 +87,11 @@ def _recreate_enum_without(conn, enum_name: str, table: str, column: str, remove
 def upgrade() -> None:
     conn = op.get_bind()
 
-    # Drop IR-specific tables
+    # Drop IR-specific tables (may already be absent from prior migrations)
     conn.execute(text("DROP TABLE IF EXISTS forensic_bundles CASCADE"))
     conn.execute(text("DROP TABLE IF EXISTS ir_playbook_templates CASCADE"))
+    # Remove forensic_bundles from the dep-delete list since it may not exist
+    # (handled by DROP IF EXISTS above)
 
     # Remove IR change types from changetype enum
     _recreate_enum_without(conn, "changetype", "change_requests", "change_type", _IR_CHANGE_TYPES)
