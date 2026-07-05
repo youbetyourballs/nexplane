@@ -72,7 +72,7 @@ def _recreate_enum_without(conn, enum_name: str, table: str, column: str, remove
         conn.execute(text(f"DELETE FROM {table} WHERE {column}::text IN ({placeholders})"))
 
     old_name = f"{enum_name}_old_ir001"
-    conn.execute(text(f"ALTER TYPE {enum_name} RENAME TO {old_name}"))
+    conn.execute(text(f'ALTER TYPE "{enum_name}" RENAME TO {old_name}'))
 
     values_sql = ", ".join(f"'{v}'" for v in kept)
     conn.execute(text(f"CREATE TYPE {enum_name} AS ENUM ({values_sql})"))
@@ -93,11 +93,11 @@ def upgrade() -> None:
     # Remove forensic_bundles from the dep-delete list since it may not exist
     # (handled by DROP IF EXISTS above)
 
-    # Remove IR change types from changetype enum
-    _recreate_enum_without(conn, "changetype", "change_requests", "change_type", _IR_CHANGE_TYPES)
+    # Remove IR change types from change_type enum (postgres type name uses underscore)
+    _recreate_enum_without(conn, "change_type", "change_requests", "change_type", _IR_CHANGE_TYPES)
 
-    # Remove ir_responder from userrole enum
-    _recreate_enum_without(conn, "userrole", "users", "role", {"ir_responder"})
+    # Remove ir_responder from user_role enum
+    _recreate_enum_without(conn, "user_role", "users", "role", {"ir_responder"})
 
 
 def downgrade() -> None:
