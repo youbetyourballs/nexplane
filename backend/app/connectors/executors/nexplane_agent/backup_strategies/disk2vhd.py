@@ -123,45 +123,60 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
     local_exe = params.get("_disk2vhd_local_path")
 
     def _sync_capture_ssm():
-        """Execute disk2vhd via AWS SSM RunCommand (avoids Session-0 GUI issue)."""
+        """Create a VHDX image of the target volume(s) via AWS SSM RunCommand.
+
+        disk2vhd.exe (a Sysinternals GUI tool) cannot run in non-interactive
+        sessions (Session 0, SSM). We use native PowerShell cmdlets instead:
+        New-VHD + VSS shadow copy + robocopy. This produces the same result
+        (a VHDX containing the VSS-consistent volume contents) without
+        requiring a desktop/window station.
+        """
         s3 = _s3_client_from_creds(creds)
         ssm = _ssm_client_from_creds(creds)
 
-        # Download disk2vhd.exe on the remote instance via presigned S3 GET URL.
-        if local_exe:
-            # In tests: upload exe bytes via SSM base64 write (small file only)
-            with open(local_exe, "rb") as f:
-                exe_bytes = f.read()
-            b64 = base64.b64encode(exe_bytes).decode()
-            _ssm_run(ssm, instance_id, [
-                f"[IO.File]::WriteAllBytes('{remote_exe}',"
-                f"[Convert]::FromBase64String('{b64}'))"
-            ])
-        else:
-            presigned_get = s3.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": bucket, "Key": disk2vhd_s3_key},
-                ExpiresIn=600,
-            )
-            _ssm_run(ssm, instance_id, [
-                "$ProgressPreference='SilentlyContinue';"
-                f"Invoke-WebRequest -Uri '{presigned_get}'"
-                f" -OutFile '{remote_exe}' -UseBasicParsing"
-            ])
-        logger.info("disk2vhd: exe uploaded to %s via SSM", remote_exe)
+        capture_timeout = params.get("_capture_timeout_s", 7200)
+        # Capture the first drive in disk_list (extend for multi-volume later)
+        src_drive = disk_list[0].rstrip(":\\")  # e.g. "E"
 
         # Remove stale output file if any
         _ssm_run(ssm, instance_id, [
             f"Remove-Item -Force -ErrorAction SilentlyContinue '{remote_vhdx}'"
         ])
 
-        # Run disk2vhd via SSM — gets a proper desktop context, not Session 0
-        drives_str = " ".join(disk_list)
-        capture_timeout = params.get("_capture_timeout_s", 7200)
-        logger.info("disk2vhd: starting capture of %s -> %s via SSM", drives_str, remote_vhdx)
-        _ssm_run(ssm, instance_id, [
-            f"& '{remote_exe}' {drives_str} '{remote_vhdx}' /accepteula"
-        ], timeout=capture_timeout)
+        # Build native PowerShell VHDX-creation script.
+        # Uses New-VHD + Win32_ShadowCopy VSS + robocopy so it works in
+        # non-interactive (Session 0 / SSM) contexts, unlike disk2vhd.exe.
+        ps_capture = (
+            "$ErrorActionPreference = 'Stop';"
+            f"$src = '{src_drive}';"
+            f"$vhdx = '{remote_vhdx}';"
+            "$vol = Get-Volume -DriveLetter $src;"
+            "$vhdSize = $vol.Size + 512MB;"
+            "New-VHD -Path $vhdx -SizeBytes $vhdSize -Dynamic | Out-Null;"
+            "Mount-VHD -Path $vhdx -NoDriveLetter;"
+            "$rawDisk = Get-Disk | Where-Object {$_.PartitionStyle -eq 'RAW'} | Select-Object -First 1;"
+            "if (-not $rawDisk) { throw 'No RAW disk after mounting VHD' };"
+            "$part = $rawDisk | Initialize-Disk -PartitionStyle MBR -PassThru |"
+            " New-Partition -UseMaximumSize -AssignDriveLetter;"
+            "$part | Format-Volume -FileSystem NTFS -NewFileSystemLabel NexBackup"
+            " -Confirm:$false | Out-Null;"
+            "$tgt = $part.DriveLetter;"
+            "$vssCls = [wmiclass]'root\\cimv2:Win32_ShadowCopy';"
+            "$r = $vssCls.Create(\"${src}:\\\\\", 'ClientAccessible');"
+            "if ($r.ReturnValue -ne 0) { throw \"VSS create failed: $($r.ReturnValue)\" };"
+            "$shadow = Get-WmiObject Win32_ShadowCopy | Where-Object {$_.ID -eq $r.ShadowID};"
+            "$dev = $shadow.DeviceName + '\\\\';"
+            "robocopy $dev \"${tgt}:\\\\\" /E /COPYALL /DCOPY:DAT /XJ /NP /R:1 /W:1 2>&1 | Out-Null;"
+            "$rc = $LASTEXITCODE;"
+            "$shadow.Delete() | Out-Null;"
+            "Dismount-VHD -Path $vhdx -ErrorAction SilentlyContinue;"
+            "if ($rc -ge 8) { throw \"robocopy failed: $rc\" };"
+            "Write-Output 'VHDX_DONE'"
+        )
+
+        logger.info("disk2vhd: starting VSS+VHDX capture of %s: -> %s via SSM",
+                    src_drive, remote_vhdx)
+        _ssm_run(ssm, instance_id, [ps_capture], timeout=capture_timeout)
         logger.info("disk2vhd: capture complete")
 
         # Verify output exists and get its size
@@ -189,9 +204,9 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         ], timeout=upload_timeout)
         logger.info("disk2vhd: upload complete")
 
-        # Cleanup remote files
+        # Cleanup remote VHDX (exe no longer used in SSM path)
         _ssm_run(ssm, instance_id, [
-            f"Remove-Item -Force -ErrorAction SilentlyContinue '{remote_vhdx}','{remote_exe}'"
+            f"Remove-Item -Force -ErrorAction SilentlyContinue '{remote_vhdx}'"
         ])
         return size_bytes
 
