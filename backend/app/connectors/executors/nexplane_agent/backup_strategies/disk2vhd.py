@@ -199,7 +199,12 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         size_bytes = int(size_out.strip())
         logger.info("disk2vhd: vhdx size=%d bytes", size_bytes)
 
-        # Upload to S3 via presigned PUT URL using Invoke-WebRequest on the instance
+        # Upload to S3 via presigned PUT URL.
+        # Use .NET WebClient.UploadFile() rather than Invoke-WebRequest -InFile;
+        # on Windows PowerShell 5.1 the latter can silently swallow HTTP errors
+        # when combined with | Out-Null.  WebClient.UploadFile() throws on any
+        # non-2xx response and properly streams large files without buffering
+        # the entire content in memory.
         presigned_put = s3.generate_presigned_url(
             "put_object",
             Params={"Bucket": bucket, "Key": archive_key},
@@ -208,12 +213,14 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         upload_timeout = params.get("_upload_timeout_s", 3600)
         logger.info("disk2vhd: uploading vhdx to s3://%s/%s", bucket, archive_key)
         _ssm_run(ssm, instance_id, [
-            "$ProgressPreference='SilentlyContinue';"
-            f"Invoke-WebRequest -Method PUT -Uri '{presigned_put}'"
-            f" -InFile '{remote_vhdx}'"
-            f" -ContentType 'application/octet-stream'"
-            f" -UseBasicParsing | Out-Null"
+            "$ErrorActionPreference='Stop';"
+            "$wc=New-Object System.Net.WebClient;"
+            "$wc.Headers['Content-Type']='application/octet-stream';"
+            f"$wc.UploadFile('{presigned_put}','PUT','{remote_vhdx}');"
+            "Write-Output 'UPLOAD_DONE'"
         ], timeout=upload_timeout)
+        # Python-side verification: confirm the object landed in S3
+        s3.head_object(Bucket=bucket, Key=archive_key)
         logger.info("disk2vhd: upload complete")
 
         # Cleanup remote VHDX (exe no longer used in SSM path)
