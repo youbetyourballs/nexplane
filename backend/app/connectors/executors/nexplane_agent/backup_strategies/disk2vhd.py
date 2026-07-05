@@ -21,12 +21,14 @@ logger = logging.getLogger(__name__)
 
 def _s3_client_from_creds(creds: dict):
     import boto3
+    from botocore.config import Config
     return boto3.client(
         "s3",
         region_name=creds.get("region", creds.get("aws_region", "us-east-1")),
         aws_access_key_id=creds.get("access_key_id", creds.get("aws_access_key_id")),
         aws_secret_access_key=creds.get("secret_access_key", creds.get("aws_secret_access_key")),
         aws_session_token=creds.get("session_token", creds.get("aws_session_token")),
+        config=Config(signature_version="s3v4"),
     )
 
 
