@@ -671,7 +671,7 @@ class TestDisk2VhdStrategy:
         def _get_invocation(**kwargs):
             # Return size on the 3rd SSM command (size check after run).
             call_index[0] += 1
-            stdout = "104857600" if call_index[0] == 3 else ""
+            stdout = "104857600" if call_index[0] == 4 else ""
             return {"Status": "Success", "StandardOutputContent": stdout, "StandardErrorContent": ""}
 
         mock_ssm.get_command_invocation.side_effect = _get_invocation
