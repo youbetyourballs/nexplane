@@ -756,7 +756,10 @@ class TestMgnReplicationStrategy:
         def _client(service, **kwargs):
             return mock_mgn if service == "mgn" else mock_ec2
 
-        with patch("boto3.client", side_effect=_client):
+        with patch("boto3.client", side_effect=_client), patch(
+            "app.connectors.executors.nexplane_agent.aws_utils._load_aws_creds",
+            return_value={},
+        ):
             result = asyncio.run(
                 mgn_replication.backup(
                     {"aws_connector_id": "", "mgn_source_server_id": "s-abc"},
