@@ -2762,6 +2762,26 @@ def main() -> None:
             _ec2_d2v = _get_aws_boto3_client("ec2")
             _ssm_d2v = _get_aws_boto3_client("ssm")
 
+            # Create a dedicated AWS connector for disk2vhd so the executor can
+            # generate valid presigned PUT URLs using credentials that have S3
+            # access.  cloud_account_id is an org UUID, not a connector UUID —
+            # passing it to _load_aws_creds falls back to the platform EC2 instance
+            # profile which lacks s3:PutObject on the smoke bucket.
+            _d2v_ts = str(int(time.time()))
+            _d2v_conn_resp = client.post("/connectors", json={
+                "connector_type": "aws",
+                "name": f"smoke-disk2vhd-{_d2v_ts}",
+            })
+            _d2v_conn_data = _d2v_conn_resp if isinstance(_d2v_conn_resp, dict) else _d2v_conn_resp.json()
+            _d2v_aws_connector_id = _d2v_conn_data.get("id") or _d2v_conn_data.get("connector_id")
+            _d2v_db_creds = get_connector_creds_from_db("aws")
+            client.put(f"/connectors/{_d2v_aws_connector_id}/credentials", json={"credentials": {
+                "access_key_id": _d2v_db_creds.get("access_key_id", ""),
+                "secret_access_key": _d2v_db_creds.get("secret_access_key", ""),
+                "session_token": _d2v_db_creds.get("session_token", ""),
+                "region": _d2v_db_creds.get("region", "us-east-1"),
+            }})
+
             # Resolve default VPC + subnet
             _vpcs_d2v = _ec2_d2v.describe_vpcs(
                 Filters=[{"Name": "isDefault", "Values": ["true"]}]
@@ -2830,7 +2850,7 @@ def main() -> None:
             try:
                 run_phase_disk2vhd(
                     client=client,
-                    aws_connector_id=cloud_account_id,
+                    aws_connector_id=_d2v_aws_connector_id,
                     asset_id=_d2v_asset_id,
                     key_name=_SMOKE_KEY_NAME_D2V,
                     subnet_id=_subnet_d2v,
