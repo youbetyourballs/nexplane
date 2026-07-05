@@ -274,10 +274,21 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
 
         rollback_result = await activity_execute_rollback(cr_id, data["generated_steps"], execution_result)
 
-        await update_change_request_status(cr_id, "rolled_back")
+        # Determine truthful terminal status from actual step outcomes.
+        from app.services.rollback_executor import _determine_rollback_status
+        _rollback_steps_raw = (rollback_result or {}).get("rollback_steps") or []
+        _step_results = (
+            [{"success": "error" not in s.get("result", {})} for s in _rollback_steps_raw]
+            if _rollback_steps_raw
+            else (rollback_result or {}).get("steps") or []
+        )
+        _rollback_ran = bool(_step_results) or (rollback_result or {}).get("rolled_back", True)
+        _truthful_status = _determine_rollback_status(_step_results, _rollback_ran).value
+
+        await update_change_request_status(cr_id, _truthful_status)
         if execution_run_id:
             await update_execution_run_status(
-                execution_run_id, "rolled_back",
+                execution_run_id, _truthful_status,
                 {"rollback": rollback_result, "reason": "verification_failed"},
             )
         await write_audit_event(
@@ -290,7 +301,7 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
         await write_audit_event(
             organization_id=org_id,
             event_type="workflow.completed",
-            event_payload={"outcome": "rolled_back"},
+            event_payload={"outcome": _truthful_status},
             actor_id=actor_id,
             change_request_id=cr_id,
         )

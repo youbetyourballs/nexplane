@@ -22,7 +22,7 @@ Nexplane models three rollback tiers — implicit inverse, explicit declared rol
 
 **Moat depth:** High. It took sustained engineering effort to build this correctly. The reconstitution pattern (save pre-state, re-provision equivalent access) is non-obvious and correct. Replicating it requires designing and testing it against every CR type — not a 3-month sprint.
 
-**Risk:** The moat erodes if rollback smoke coverage does not keep pace with new CR types. Currently ~15 of 200+ deployed CR types have live rollback verification. The rest are asserted only by code review. The gap must close.
+**Risk:** The moat erodes if rollback smoke coverage does not keep pace with new CR types. The smoke suite calls the platform rollback API for most change types via a rollback_stack teardown pattern, but does not verify that infrastructure state actually reverted after rollback — only that the CR status reached `rolled_back`. Two code-level gaps compound this: the automatic (verification-failure-triggered) rollback path hardcodes status `rolled_back` regardless of step outcomes, and the gating verification step is a mock that always passes. All three gaps are being addressed. Until post-rollback state assertions are added systematically across smoke phases, the rollback guarantee is enforced by code review, not live evidence.
 
 ---
 
