@@ -52,7 +52,7 @@ const STATUS_OPTIONS = [
   "draft", "pending_approval", "approved", "executing",
   "completed", "failed", "rolled_back", "batch_running", "batch_aborted",
 ];
-const ROLE_OPTIONS = ["admin", "security_operator", "approver", "auditor", "ir_responder"];
+const ROLE_OPTIONS = ["admin", "security_operator", "approver", "auditor"];
 
 // ── empty form ────────────────────────────────────────────────────────────────
 

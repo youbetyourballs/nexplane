@@ -215,7 +215,7 @@ async def test_plan_cr_sets_status_to_planned(db):
         requester_id=user.id,
         title="Test CR",
         description="Test",
-        change_type=ChangeType.isolate_host,
+        change_type=ChangeType.patch_package,
         target_asset_ids=[],
         desired_outcome={},
         risk_level=RiskLevel.low,
@@ -283,9 +283,9 @@ async def test_create_and_execute_runbook_cr_drives_cr_to_approved(db):
 
     step_def = {
         "step_number": 1,
-        "name": "Isolate Host",
+        "name": "Patch Package",
         "type": "change",
-        "change_type": "isolate_host",
+        "change_type": "patch_package",
         "parameters": {},
         "asset_selector": None,
         "on_failure": "abort",

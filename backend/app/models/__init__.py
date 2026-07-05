@@ -35,8 +35,6 @@ from app.models.agent import AgentJob, AgentRegistration  # noqa: F401
 from app.models.vulnerability import VulnerabilityFinding, RemediationPolicy, RemediationSLA  # noqa: F401
 from app.models.compliance import ComplianceBaseline, ChangeFreezeWindow  # noqa: F401
 from app.models.compliance_attestation import ComplianceAttestation  # noqa: F401
-from app.models.forensic_bundle import ForensicBundle  # noqa: F401
-from app.models.ir_playbook_template import IRPlaybookTemplate  # noqa: F401
 from app.models.maintenance_window import MaintenanceWindow  # noqa: F401
 from app.models.notification import Notification  # noqa: F401
 from app.models.org_settings import OrganizationSettings  # noqa: F401

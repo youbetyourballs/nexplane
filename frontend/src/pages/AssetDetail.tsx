@@ -85,12 +85,6 @@ const ASSET_ACTIONS: Record<AssetType, QuickAction[]> = {
       description: (a) => `Execute an approved command template on ${a.name}.`,
     },
     {
-      changeType: "isolate_host",
-      label: "Isolate Host",
-      title: (a) => `Isolate ${a.name}`,
-      description: (a) => `Flush outbound firewall rules to isolate ${a.name} from the network.`,
-    },
-    {
       changeType: "enforce_cis_benchmark",
       label: "Enforce CIS Benchmark",
       title: (a) => `CIS Benchmark on ${a.name}`,
@@ -257,12 +251,6 @@ const ASSET_ACTIONS: Record<AssetType, QuickAction[]> = {
       label: "Offboard User",
       title: (a) => `Offboard ${a.name}`,
       description: (a) => `Disable ${a.name} across all connected identity systems.`,
-    },
-    {
-      changeType: "lockdown_account",
-      label: "Lockdown Account",
-      title: (a) => `Lockdown ${a.name}`,
-      description: (a) => `Lock ${a.name} across all identity systems immediately.`,
     },
     { changeType: "iam_user_delete", label: "Delete IAM User", title: (a) => `Delete IAM user ${a.name}`, description: (a) => `Delete IAM user ${a.asset_metadata?.username ?? a.name} and all access keys.` },
     {
@@ -543,12 +531,6 @@ const ASSET_ACTIONS: Record<AssetType, QuickAction[]> = {
     },
   ],
   endpoint: [
-    {
-      changeType: "isolate_host",
-      label: "Isolate Host",
-      title: (a) => `Isolate ${a.name}`,
-      description: (a) => `Network-isolate endpoint ${a.name} (device_id: ${a.asset_metadata?.device_id ?? "unknown"}).`,
-    },
     {
       changeType: "patch_packages",
       label: "Patch Packages",

@@ -204,27 +204,6 @@ const CHANGE_TYPE_META: Partial<Record<ChangeType, { label: string; description:
     description: "Rotate a service account password in AD or Okta and update dependent services.",
     outcomeTemplate: JSON.stringify({ provider: "active_directory", account_name: "svc-app", service_names: [], rollback_strategy: "restore_previous_credentials" }, null, 2),
   },
-  // Incident response
-  isolate_host: {
-    label: "Isolate Host",
-    description: "Flush outbound firewall rules to isolate a host — allows only management CIDR + control plane.",
-    outcomeTemplate: JSON.stringify({ management_cidr: "10.0.0.0/8", rollback_strategy: "restore_firewall_rules" }, null, 2),
-  },
-  lockdown_account: {
-    label: "Lockdown Account",
-    description: "Lock a user account across all identity systems simultaneously (incident response).",
-    outcomeTemplate: JSON.stringify({ user_email: "suspect@example.com", rollback_strategy: "re_enable_account" }, null, 2),
-  },
-  phishing_response: {
-    label: "Phishing Response",
-    description: "Block sender domain, force password reset, revoke sessions, require MFA re-enrollment.",
-    outcomeTemplate: JSON.stringify({ sender_domain: "malicious.example.com", affected_user_emails: [], rollback_strategy: "rollback_unavailable" }, null, 2),
-  },
-  preserve_evidence: {
-    label: "Preserve Evidence",
-    description: "Collect forensic artifacts before remediation — logs, netstat, process state → S3.",
-    outcomeTemplate: JSON.stringify({ s3_upload_url: null, rollback_strategy: "rollback_unavailable" }, null, 2),
-  },
   // IaC
   terraform_local_apply: {
     label: "Terraform Apply (Local CLI)",
@@ -1300,10 +1279,6 @@ const CHANGE_TYPE_GROUPS: { label: string; types: ChangeType[] }[] = [
     types: ["rolling_restart", "canary_config_push", "distribute_file", "fleet_health_check"],
   },
   {
-    label: "Incident Response",
-    types: ["isolate_host", "lockdown_account", "phishing_response", "preserve_evidence"],
-  },
-  {
     label: "IaC",
     types: ["terraform_local_apply", "ansible_local_playbook", "terraform_apply", "ansible_playbook", "helm_upgrade"],
   },
@@ -1464,9 +1439,6 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   telemetry_agent_deploy: "server",
   remote_command: "server",
   scheduled_reboot: "server",
-  // Incident response on servers
-  isolate_host: "endpoint",
-  preserve_evidence: "server",
   // Compliance on servers
   enforce_cis_benchmark: "server",
   // Backup targets servers or cloud accounts
@@ -1482,8 +1454,6 @@ const CHANGE_TYPE_ASSET_FILTER: Partial<Record<ChangeType, AssetType | null>> = 
   // Identity targets identity assets
   offboard_user: "identity",
   onboard_user: "identity",
-  lockdown_account: "identity",
-  phishing_response: "identity",
   // AWS account-level actions
   terraform_local_apply: "cloud_account",
   ansible_local_playbook: "server",

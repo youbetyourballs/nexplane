@@ -13,9 +13,6 @@ import { PageHeader } from "../components/PageHeader";
 import { PageLoading } from "../components/LoadingSpinner";
 import { formatDistanceToNow } from "date-fns";
 import type { ChangeRequestStatus, RiskLevel, ChangeType } from "../types/api";
-import { irApi, ForensicBundle, StepResult } from "../api/ir";
-import { IRPlaybookLauncher } from "../components/IRPlaybookLauncher";
-import { IRStepStatusBadge } from "../components/IRStepStatusBadge";
 
 const STATUSES: ChangeRequestStatus[] = [
   "draft","planned","awaiting_approval","approved","executing","verifying","completed","failed","rolled_back","rejected",
@@ -26,54 +23,7 @@ const CHANGE_TYPES: ChangeType[] = [
   "telemetry_agent_deploy","remote_command","microsegmentation_policy",
 ];
 
-function IRBundlePanel() {
-  const { data: bundles = [] } = useQuery({
-    queryKey: ["ir-bundles"],
-    queryFn: () => irApi.getBundles({ limit: 50 }),
-  });
-
-  if (bundles.length === 0) {
-    return <p style={{ color: "#94a3b8" }}>No forensic bundles collected recently.</p>;
-  }
-
-  return (
-    <table style={{ width: "100%", borderCollapse: "collapse", color: "#f1f5f9", fontSize: 13 }}>
-      <thead>
-        <tr style={{ borderBottom: "1px solid #334155" }}>
-          <th style={{ textAlign: "left", padding: "6px 8px" }}>Asset ID</th>
-          <th style={{ textAlign: "left", padding: "6px 8px" }}>Collected</th>
-          <th style={{ textAlign: "right", padding: "6px 8px" }}>Size</th>
-          <th style={{ padding: "6px 8px" }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {bundles.map((b: ForensicBundle) => (
-          <tr key={b.id} style={{ borderBottom: "1px solid #1e293b" }}>
-            <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>{b.asset_id}</td>
-            <td style={{ padding: "6px 8px" }}>{new Date(b.collected_at).toLocaleString()}</td>
-            <td style={{ padding: "6px 8px", textAlign: "right" }}>
-              {b.size_bytes != null ? `${(b.size_bytes / 1024 / 1024).toFixed(1)} MB` : "—"}
-            </td>
-            <td style={{ padding: "6px 8px" }}>
-              <button
-                style={{ padding: "4px 10px", background: "#3b82f6", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
-                onClick={async () => {
-                  const { url } = await irApi.getBundleDownloadUrl(b.id);
-                  window.open(url, "_blank");
-                }}
-              >
-                Download
-              </button>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
 export function ChangeRequestList() {
-  const [activeTab, setActiveTab] = useState<"all" | "ir">("all");
   const [status, setStatus] = useState("");
   const [riskLevel, setRiskLevel] = useState("");
   const [changeType, setChangeType] = useState("");
@@ -97,61 +47,10 @@ export function ChangeRequestList() {
       }),
   });
 
-  // Fetch IR change requests (incident_response=true)
-  const { data: irChangeRequests = [] } = useQuery({
-    queryKey: ["change-requests-ir"],
-    queryFn: () => changeRequestsApi.list({ change_type: "isolate_host" }),
-    enabled: activeTab === "ir",
-  });
-
   return (
     <div className="p-8">
-      {/* Tab bar */}
-      <div style={{ display: "flex", gap: 0, marginBottom: 20, borderBottom: "1px solid #334155" }}>
-        {(["all", "ir"] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              padding: "8px 20px",
-              background: "none",
-              border: "none",
-              borderBottom: activeTab === tab ? "2px solid #3b82f6" : "2px solid transparent",
-              color: activeTab === tab ? "#f1f5f9" : "#94a3b8",
-              cursor: "pointer",
-              fontWeight: activeTab === tab ? 600 : 400,
-              marginBottom: -1,
-            }}
-          >
-            {tab === "all" ? "All Change Requests" : "Incident Response"}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === "ir" && (
-        <div>
-          <h2 style={{ color: "#f1f5f9", marginBottom: 16 }}>Launch IR Playbook</h2>
-          <IRPlaybookLauncher />
-
-          <h2 style={{ color: "#f1f5f9", margin: "32px 0 16px" }}>Active IR Change Requests</h2>
-          {(irChangeRequests as Array<{ id: string; title: string; status: string; step_results?: Record<string, StepResult> }>).map((cr) => (
-            <div key={cr.id} style={{ background: "#1e293b", padding: 12, borderRadius: 6, marginBottom: 8 }}>
-              <span style={{ color: "#f1f5f9", fontWeight: 600 }}>{cr.title}</span>
-              <span style={{ marginLeft: 12, color: "#94a3b8", fontSize: 12 }}>{cr.status}</span>
-              <div style={{ marginTop: 8 }}>
-                <IRStepStatusBadge stepResults={cr.step_results ?? {}} />
-              </div>
-            </div>
-          ))}
-
-          <h2 style={{ color: "#f1f5f9", margin: "32px 0 16px" }}>Recent Forensic Bundles</h2>
-          <IRBundlePanel />
-        </div>
-      )}
-
-      {activeTab === "all" && (
-        <>
-          <PageHeader
+      <>
+        <PageHeader
             title="Change Requests"
             subtitle="All governed infrastructure change requests"
             actions={
@@ -279,8 +178,7 @@ export function ChangeRequestList() {
               </table>
             </div>
           )}
-        </>
-      )}
+      </>
     </div>
   );
 }

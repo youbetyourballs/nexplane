@@ -21,7 +21,6 @@ from app.routers import compliance as compliance_router
 from app.routers import runbooks as runbooks_router
 from app.routers import review_campaigns as review_campaigns_router
 from app.routers import maintenance_windows as maintenance_windows_router
-from app.routers import ir as ir_router
 from app.routers import smoke_tests as smoke_tests_router
 from app.routers import access_reviews as access_reviews_router
 from app.routers import notifications as notifications_router
@@ -241,7 +240,6 @@ app.include_router(runbooks_router.router)
 app.include_router(runbooks_router.execution_router)
 app.include_router(review_campaigns_router.router)
 app.include_router(maintenance_windows_router.router)
-app.include_router(ir_router.router)
 app.include_router(smoke_tests_router.router)
 app.include_router(access_reviews_router.router)
 app.include_router(notifications_router.router)

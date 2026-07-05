@@ -46,41 +46,6 @@ SEED_TEMPLATES = [
         ],
     },
     {
-        "name": "Incident Response: Account Compromise",
-        "description": (
-            "Lock down a compromised account, preserve evidence, "
-            "reset credentials, and notify security."
-        ),
-        "tags": ["incident-response", "security"],
-        "steps": [
-            {"step_number": 1, "name": "Lockdown Account", "type": "change",
-             "change_type": "lockdown_account", "on_failure": "abort",
-             "parameters": {"user_identifier": ""}},
-            {"step_number": 2, "name": "Preserve Evidence", "type": "change",
-             "change_type": "preserve_cloudtrail_logs", "on_failure": "continue",
-             "parameters": {"bucket": "", "prefix": "", "region": "us-east-1"}},
-            {"step_number": 3, "name": "Force Password Reset", "type": "change",
-             "change_type": "force_password_reset", "on_failure": "abort",
-             "parameters": {"user_id": ""}},
-            {
-                "step_number": 4, "name": "Notify Security Team", "type": "human_checkpoint",
-                "prompt": (
-                    "Review the locked account and preserved logs. "
-                    "Confirm notification has been sent to the security team."
-                ),
-                "required_role": "security", "timeout_hours": 4, "on_timeout": "continue",
-                "on_failure": "abort",
-            },
-            {
-                "step_number": 5, "name": "Verify Lockdown", "type": "condition",
-                "condition_expr": "steps[1]['exit_code'] == 0",
-                "on_true_step": 6, "on_false_step": 99, "on_failure": "abort",
-            },
-            {"step_number": 6, "name": "Close Incident", "type": "change",
-             "change_type": "close_incident_ticket", "on_failure": "continue"},
-        ],
-    },
-    {
         "name": "Patch Campaign",
         "description": "Fleet health check, rolling patch, compliance verification.",
         "tags": ["patch", "compliance"],

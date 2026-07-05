@@ -16,7 +16,6 @@ class UserRole(str, enum.Enum):
     security_operator = "security_operator"
     approver = "approver"
     auditor = "auditor"
-    ir_responder = "ir_responder"
 
 
 class User(Base):

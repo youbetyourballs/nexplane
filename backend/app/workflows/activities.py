@@ -460,12 +460,10 @@ _CHANGE_TYPE_DISCOVERY: dict[str, list[tuple[str, str]]] = {
     # Identity (try okta then active_directory — whichever connector is attached)
     "offboard_user":    [("okta", "discover_users"), ("active_directory", "discover_identities")],
     "onboard_user":     [("okta", "discover_users"), ("active_directory", "discover_identities")],
-    "lockdown_account": [("okta", "discover_users"), ("active_directory", "discover_identities")],
     # DNS
     "dns_update":  [("cloudflare", "discover_dns_records")],
     "dr_failover": [("cloudflare", "discover_dns_records")],
-    # Endpoint
-    "isolate_host": [("crowdstrike", "discover_endpoints")],
+    # Endpoint (Crowdstrike isolate is a connector action, not IR playbook)
 }
 
 

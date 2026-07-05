@@ -87,11 +87,6 @@ class ChangeType(str, enum.Enum):
     rotate_ssh_keys = "rotate_ssh_keys"
     rotate_api_key = "rotate_api_key"
     rotate_service_account = "rotate_service_account"
-    # Incident response
-    isolate_host = "isolate_host"
-    lockdown_account = "lockdown_account"
-    phishing_response = "phishing_response"
-    preserve_evidence = "preserve_evidence"
     # IaC orchestration
     terraform_apply = "terraform_apply"
     ansible_playbook = "ansible_playbook"
