@@ -168,15 +168,11 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             '[System.IO.File]::WriteAllText($f1,$lines-join"`r`n",[System.Text.Encoding]::ASCII);'
             "diskpart /s $f1;"
             "Remove-Item $f1 -Force;"
-            # VSS shadow + robocopy
-            "$vssCls=[wmiclass]'root\\cimv2:Win32_ShadowCopy';"
-            f"$r=$vssCls.Create('{src_drive}:\\\\','ClientAccessible');"
-            "if($r.ReturnValue -ne 0){throw \"VSS create failed: $($r.ReturnValue)\"};"
-            "$shadow=Get-WmiObject Win32_ShadowCopy|Where-Object{$_.ID -eq $r.ShadowID};"
-            "$dev=$shadow.DeviceName+'\\\\';"
-            "robocopy $dev 'Z:\\' /E /COPYALL /DCOPY:DAT /XJ /NP /R:1 /W:1 2>&1|Out-Null;"
+            # Direct robocopy from source drive; VSS omitted because SSM Session 0
+            # runs as SYSTEM with no active writers — shadow copy DeviceName is
+            # inaccessible from that context and causes robocopy exit 16.
+            f"robocopy '{src_drive}:\\' 'Z:\\' /E /XJ /NP /R:1 /W:1 2>&1|Out-Null;"
             "$rc=$LASTEXITCODE;"
-            "$shadow.Delete()|Out-Null;"
             # Detach via diskpart
             "$f2='C:\\Windows\\Temp\\dp_detach.txt';"
             '$lines2=@('
@@ -190,7 +186,7 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             "Write-Output 'VHDX_DONE'"
         )
 
-        logger.info("disk2vhd: starting VSS+VHDX capture of %s: -> %s via SSM",
+        logger.info("disk2vhd: starting VHDX capture of %s: -> %s via SSM",
                     src_drive, remote_vhdx)
         _ssm_run(ssm, instance_id, [ps_capture], timeout=capture_timeout)
         logger.info("disk2vhd: capture complete")
