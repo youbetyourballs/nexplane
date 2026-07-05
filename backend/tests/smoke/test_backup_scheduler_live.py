@@ -2207,6 +2207,9 @@ def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
             desired_outcome={
                 "capture_strategy": "disk2vhd",
                 "aws_connector_id": aws_connector_id,
+                # SSM execution path: avoids Session-0 GUI restriction that
+                # causes disk2vhd to hang when launched via a Scheduled Task.
+                "instance_id": instance_id,
                 "winrm_host": private_ip,
                 "winrm_username": "Administrator",
                 "winrm_password": win_password,
