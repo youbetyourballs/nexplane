@@ -33,9 +33,19 @@ def _recreate_enum_without(conn, enum_name: str, table: str, column: str, remove
     ), {"name": enum_name}).fetchall()
     kept = [r[0] for r in rows if r[0] not in remove_values]
 
-    # Delete any rows using the removed values so the USING cast succeeds
+    # Delete any rows using the removed values so the USING cast succeeds.
+    # Use CASCADE via DELETE on parent so FK-referencing child rows are cleaned up first.
     if table and column:
         placeholders = ", ".join(f"'{v}'" for v in remove_values)
+        if table == "change_requests":
+            # change_requests has FKs from change_plans, execution_runs, audit_events, etc.
+            # Delete dependents first to avoid FK violations.
+            cr_ids_sql = f"SELECT id FROM change_requests WHERE change_type::text IN ({placeholders})"
+            for dep_table in ("change_plans", "execution_runs", "audit_events",
+                              "change_request_approvals", "runbook_step_executions"):
+                conn.execute(text(
+                    f"DELETE FROM {dep_table} WHERE change_request_id IN ({cr_ids_sql})"
+                ))
         conn.execute(text(f"DELETE FROM {table} WHERE {column}::text IN ({placeholders})"))
 
     old_name = f"{enum_name}_old_ir001"
