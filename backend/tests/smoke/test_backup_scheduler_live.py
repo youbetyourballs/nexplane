@@ -2160,6 +2160,44 @@ New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985
             Name=f"/nexplane/smoke-amis/{_DISK2VHD_CACHE_KEY}/{_DISK2VHD_SETUP_HASH}",
             Value=json.dumps({"ami_id": ami}), Type="String", Overwrite=True,
         )
+
+    # Create a small test VHD on D:\ and mount as E: so disk2vhd captures a
+    # 1 GB synthetic volume instead of the 30 GB OS disk.  Capturing C: with
+    # disk2vhd on a t3.medium triggers OOM or VSS driver crashes; a 1 GB VHD
+    # tests the same strategy mechanics without the resource pressure.
+    # diskpart is used instead of New-VHD to avoid a Hyper-V module dependency.
+    diskpart_vhd_script = r"""
+$dp = @"
+create vdisk file=D:\smoke_test_target.vhdx type=fixed maximum=1024
+select vdisk file=D:\smoke_test_target.vhdx
+attach vdisk
+create partition primary
+format fs=ntfs label="SmokeTest" quick
+assign letter=E
+exit
+"@
+$dp | diskpart
+"VHD_READY"
+"""
+    vhd_resp = ssm.send_command(
+        InstanceIds=[instance_id],
+        DocumentName='AWS-RunPowerShellScript',
+        Parameters={'commands': [diskpart_vhd_script]},
+        TimeoutSeconds=120,
+    )
+    vhd_cmd_id = vhd_resp['Command']['CommandId']
+    for _ in range(30):
+        _t.sleep(5)
+        vhd_out = ssm.get_command_invocation(CommandId=vhd_cmd_id, InstanceId=instance_id)
+        if vhd_out['Status'] not in ('Pending', 'InProgress', 'Delayed'):
+            if vhd_out['Status'] != 'Success':
+                raise RuntimeError(
+                    f"test VHD creation failed: {vhd_out['StandardErrorContent']}"
+                )
+            break
+    else:
+        raise TimeoutError('test VHD creation timed out')
+
     # Wait for WinRM port 5985 to be responsive after instance_running/reboot
     import socket as _sock
     winrm_deadline = _t.time() + 300
@@ -2178,8 +2216,8 @@ New-NetFirewallRule -DisplayName "WinRM-HTTP" -Direction Inbound -LocalPort 5985
 
 def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
                        key_name: str, subnet_id: str, sg_id: str) -> None:
-    """DISK2VHD: provision Windows EC2, capture C: as .vhdx, upload to S3,
-    verify, rollback, terminate EC2."""
+    """DISK2VHD: provision Windows EC2, capture 1 GB synthetic E: volume as
+    .vhdx via SSM, upload to S3, verify, rollback, terminate EC2."""
     import uuid as _uuid
     import secrets
     s3 = _get_aws_boto3_client("s3")
@@ -2213,9 +2251,9 @@ def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
                 "winrm_host": private_ip,
                 "winrm_username": "Administrator",
                 "winrm_password": win_password,
-                "disk_list": ["C:"],
-                # Write VHDx to D:\ (secondary EBS volume) — C:\ lacks sufficient
-                # free space to hold the output while also being the source drive.
+                # Capture the 1 GB synthetic E: volume (not C:) to avoid OOM /
+                # VSS driver crashes on t3.medium from a full OS disk capture.
+                "disk_list": ["E:"],
                 "_vhdx_output_dir": r"D:\\",
                 "_capture_timeout_s": 7200,
                 "_upload_timeout_s": 7200,
@@ -2269,7 +2307,7 @@ def main() -> None:
             "LVM_SNAPSHOT=LVM snapshot -> gzip image -> S3 + rollback verification. "
             "NFS_FILES=tar.gz of NFS export -> S3 + rollback; reuses LVM/NFS EC2 when combined with LVM_SNAPSHOT. "
             "MANAGED_DB_SNAPSHOT=RDS CreateDBSnapshot via CR + rollback + teardown. "
-            "DISK2VHD=Windows Server 2022 WinRM disk2vhd.exe .vhdx capture + S3 upload + rollback. "
+            "DISK2VHD=Windows Server 2022 disk2vhd.exe capture (1 GB synthetic E: volume) + S3 upload + rollback via SSM. "
             "Default: all three phases."
         ),
     )
