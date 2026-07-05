@@ -144,33 +144,49 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         ])
 
         # Build native PowerShell VHDX-creation script.
-        # Uses New-VHD + Win32_ShadowCopy VSS + robocopy so it works in
-        # non-interactive (Session 0 / SSM) contexts, unlike disk2vhd.exe.
+        # New-VHD/Mount-VHD require the Hyper-V PowerShell module which is
+        # not installed on standard Windows Server. Use diskpart /s instead —
+        # diskpart is available on all Windows Server editions without extras.
+        # Assigns drive letter Z: for the staging partition; Z is unlikely to
+        # conflict on a fresh smoke-test instance.
         ps_capture = (
-            "$ErrorActionPreference = 'Stop';"
-            f"$src = '{src_drive}';"
-            f"$vhdx = '{remote_vhdx}';"
-            "$vol = Get-Volume -DriveLetter $src;"
-            "$vhdSize = $vol.Size + 512MB;"
-            "New-VHD -Path $vhdx -SizeBytes $vhdSize -Dynamic | Out-Null;"
-            "Mount-VHD -Path $vhdx -NoDriveLetter;"
-            "$rawDisk = Get-Disk | Where-Object {$_.PartitionStyle -eq 'RAW'} | Select-Object -First 1;"
-            "if (-not $rawDisk) { throw 'No RAW disk after mounting VHD' };"
-            "$part = $rawDisk | Initialize-Disk -PartitionStyle MBR -PassThru |"
-            " New-Partition -UseMaximumSize -AssignDriveLetter;"
-            "$part | Format-Volume -FileSystem NTFS -NewFileSystemLabel NexBackup"
-            " -Confirm:$false | Out-Null;"
-            "$tgt = $part.DriveLetter;"
-            "$vssCls = [wmiclass]'root\\cimv2:Win32_ShadowCopy';"
-            "$r = $vssCls.Create(\"${src}:\\\\\", 'ClientAccessible');"
-            "if ($r.ReturnValue -ne 0) { throw \"VSS create failed: $($r.ReturnValue)\" };"
-            "$shadow = Get-WmiObject Win32_ShadowCopy | Where-Object {$_.ID -eq $r.ShadowID};"
-            "$dev = $shadow.DeviceName + '\\\\';"
-            "robocopy $dev \"${tgt}:\\\\\" /E /COPYALL /DCOPY:DAT /XJ /NP /R:1 /W:1 2>&1 | Out-Null;"
-            "$rc = $LASTEXITCODE;"
-            "$shadow.Delete() | Out-Null;"
-            "Dismount-VHD -Path $vhdx -ErrorAction SilentlyContinue;"
-            "if ($rc -ge 8) { throw \"robocopy failed: $rc\" };"
+            "$ErrorActionPreference='Stop';"
+            f"$src='{src_drive}';"
+            f"$vhdx='{remote_vhdx}';"
+            "$vol=Get-Volume -DriveLetter $src;"
+            "$mb=[math]::Ceiling($vol.Size/1MB)+512;"
+            "$f1='C:\\Windows\\Temp\\dp_create.txt';"
+            # Build diskpart script lines as an array, join with CRLF, write ASCII
+            '$lines=@('
+            '"create vdisk file=`"$vhdx`" maximum=$mb type=expandable",'
+            '"select vdisk file=`"$vhdx`"",'
+            '"attach vdisk",'
+            '"create partition primary",'
+            '"format fs=ntfs label=NexBackup quick",'
+            '"assign letter=Z",'
+            '"exit");'
+            '[System.IO.File]::WriteAllText($f1,$lines-join"`r`n",[System.Text.Encoding]::ASCII);'
+            "diskpart /s $f1;"
+            "Remove-Item $f1 -Force;"
+            # VSS shadow + robocopy
+            "$vssCls=[wmiclass]'root\\cimv2:Win32_ShadowCopy';"
+            f"$r=$vssCls.Create('{src_drive}:\\\\','ClientAccessible');"
+            "if($r.ReturnValue -ne 0){throw \"VSS create failed: $($r.ReturnValue)\"};"
+            "$shadow=Get-WmiObject Win32_ShadowCopy|Where-Object{$_.ID -eq $r.ShadowID};"
+            "$dev=$shadow.DeviceName+'\\\\';"
+            "robocopy $dev 'Z:\\' /E /COPYALL /DCOPY:DAT /XJ /NP /R:1 /W:1 2>&1|Out-Null;"
+            "$rc=$LASTEXITCODE;"
+            "$shadow.Delete()|Out-Null;"
+            # Detach via diskpart
+            "$f2='C:\\Windows\\Temp\\dp_detach.txt';"
+            '$lines2=@('
+            '"select vdisk file=`"$vhdx`"",'
+            '"detach vdisk",'
+            '"exit");'
+            '[System.IO.File]::WriteAllText($f2,$lines2-join"`r`n",[System.Text.Encoding]::ASCII);'
+            "diskpart /s $f2;"
+            "Remove-Item $f2 -Force;"
+            "if($rc -ge 8){throw \"robocopy failed: $rc\"};"
             "Write-Output 'VHDX_DONE'"
         )
 
