@@ -38,13 +38,37 @@ def _recreate_enum_without(conn, enum_name: str, table: str, column: str, remove
     if table and column:
         placeholders = ", ".join(f"'{v}'" for v in remove_values)
         if table == "change_requests":
-            # change_requests has FKs from change_plans, execution_runs, audit_events, etc.
-            # Delete dependents first to avoid FK violations.
+            # Null or delete FK references before deleting change_requests rows.
             cr_ids_sql = f"SELECT id FROM change_requests WHERE change_type::text IN ({placeholders})"
-            for dep_table in ("change_plans", "execution_runs", "audit_events",
-                              "change_request_approvals", "runbook_step_executions"):
+            # Hard-delete dependents that own their CR reference
+            for dep_table, col in (
+                ("change_plans", "change_request_id"),
+                ("execution_runs", "change_request_id"),
+                ("audit_events", "change_request_id"),
+                ("approvals", "change_request_id"),
+                ("agent_jobs", "change_request_id"),
+                ("project_change_requests", "change_request_id"),
+                ("project_rollback_steps", "change_request_id"),
+                ("forensic_bundles", "change_request_id"),
+                ("vulnerability_findings", "change_request_id"),
+                ("finding_change_requests", "cr_id"),
+                ("security_policy_baselines", "cr_id"),
+                ("security_policy_soak_sessions", "cr_id"),
+            ):
                 conn.execute(text(
-                    f"DELETE FROM {dep_table} WHERE change_request_id IN ({cr_ids_sql})"
+                    f"DELETE FROM {dep_table} WHERE {col} IN ({cr_ids_sql})"
+                ))
+            # Nullable FKs — set to NULL rather than deleting the parent row
+            for dep_table, col in (
+                ("backup_targets", "last_successful_backup_cr_id"),
+                ("recurring_jobs", "last_cr_id"),
+                ("project_rollbacks", "triggered_by_cr_id"),
+                ("project_rollback_steps", "backup_cr_id"),
+                ("recovery_tokens", "restore_cr_id"),
+                ("change_requests", "parent_change_request_id"),
+            ):
+                conn.execute(text(
+                    f"UPDATE {dep_table} SET {col} = NULL WHERE {col} IN ({cr_ids_sql})"
                 ))
         conn.execute(text(f"DELETE FROM {table} WHERE {column}::text IN ({placeholders})"))
 
