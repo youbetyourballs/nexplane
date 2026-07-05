@@ -2275,6 +2275,53 @@ def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
 
 
 # ---------------------------------------------------------------------------
+# Phase MGN_REPLICATION — AWS MGN launch_test_instances -> AMI capture
+# ---------------------------------------------------------------------------
+
+def run_phase_mgn_replication(client, aws_connector_id: str, asset_id: str) -> None:
+    """MGN_REPLICATION: fire backup CR using mgn_replication strategy, verify AMI
+    captured, rollback (no-op — source server retained), verify CR rolled back."""
+    import uuid as _uuid
+    ssm_boto = _get_aws_boto3_client("ssm")
+
+    # Read pre-warmed MGN source server ID from SSM
+    try:
+        source_server_id = ssm_boto.get_parameters(
+            Names=["/nexplane/smoke/mgn-source-server-id"],
+        )["Parameters"][0]["Value"]
+    except (IndexError, KeyError, Exception) as exc:
+        fail(f"MGN_REPLICATION: /nexplane/smoke/mgn-source-server-id not set — "
+             f"pre-warm a source server first: {exc}")
+
+    run_id = _uuid.uuid4().hex[:8]
+    cr = _create_and_run_cr(
+        client,
+        title=f"smoke mgn_replication {run_id}",
+        change_type="server_backup",
+        asset_id=asset_id,
+        desired_outcome={
+            "capture_strategy": "mgn_replication",
+            "aws_connector_id": aws_connector_id,
+            "mgn_source_server_id": source_server_id,
+        },
+        # MGN test launch + job poll (30s intervals, up to 30 min)
+        timeout=3600,
+    )
+    assert cr["status"] == "completed", f"MGN_REPLICATION backup failed: {cr}"
+    refs = _extract_artifact_refs(cr)
+    assert refs.get("capture_strategy") == "mgn_replication", f"Wrong strategy: {refs}"
+    assert refs.get("ami_id", "").startswith("ami-"), f"No AMI in refs: {refs}"
+    assert refs.get("test_instance_id", "").startswith("i-"), f"No test instance in refs: {refs}"
+    print(f"  MGN_REPLICATION backup PASSED: ami={refs['ami_id']} "
+          f"instance={refs['test_instance_id']}")
+
+    _rollback_cr(client, cr["id"])
+    rb = _wait_cr_complete(client, cr["id"], "mgn rollback", timeout=120)
+    assert rb["status"] in ("rolled_back", "rollback_partial"), f"rollback status={rb['status']}"
+    print("  MGN_REPLICATION rollback PASSED (noop — source retained)")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -2295,6 +2342,7 @@ def main() -> None:
             "NFS_FILES=tar.gz of NFS export -> S3 + rollback; reuses LVM/NFS EC2 when combined with LVM_SNAPSHOT. "
             "MANAGED_DB_SNAPSHOT=RDS CreateDBSnapshot via CR + rollback + teardown. "
             "DISK2VHD=Windows Server 2022 disk2vhd.exe capture (1 GB synthetic E: volume) + S3 upload + rollback via SSM. "
+            "MGN_REPLICATION=AWS MGN launch_test_instances -> AMI capture + rollback verification. "
             "Default: all three phases."
         ),
     )
@@ -2791,6 +2839,29 @@ def main() -> None:
             finally:
                 try:
                     client.delete(f"/assets/{_d2v_asset_id}")
+                except Exception:
+                    pass
+
+        if "MGN_REPLICATION" in phases:
+            print("\n=== PHASE: MGN_REPLICATION ===")
+            _mgn_asset_resp = client.post("/assets", json={
+                "asset_type": "server",
+                "environment": "staging",
+                "criticality": "low",
+                "name": f"smoke-mgn-{int(time.time())}",
+                "tags": ["nexplane-smoke"],
+            })
+            _mgn_asset_data = _mgn_asset_resp if isinstance(_mgn_asset_resp, dict) else _mgn_asset_resp.json()
+            _mgn_asset_id = _mgn_asset_data.get("id") or _mgn_asset_data.get("asset_id")
+            try:
+                run_phase_mgn_replication(
+                    client=client,
+                    aws_connector_id=cloud_account_id,
+                    asset_id=_mgn_asset_id,
+                )
+            finally:
+                try:
+                    client.delete(f"/assets/{_mgn_asset_id}")
                 except Exception:
                     pass
 
