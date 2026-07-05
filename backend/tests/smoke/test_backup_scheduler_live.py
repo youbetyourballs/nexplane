@@ -2762,11 +2762,11 @@ def main() -> None:
             _ec2_d2v = _get_aws_boto3_client("ec2")
             _ssm_d2v = _get_aws_boto3_client("ssm")
 
-            # Use the platform's main AWS connector — it holds nexplane_service_account
-            # credentials (AdministratorAccess) that can generate valid presigned PUT
-            # URLs.  cloud_account_id is an org UUID; _load_aws_creds would fall back
-            # to the platform EC2 instance profile which lacks s3:PutObject.
-            _d2v_aws_connector_id = "666e237d-bfcf-43a5-ae24-f1a0b4f2c5cc"
+            # cloud_account_id (org UUID) is not in the connectors table — _load_aws_creds
+            # returns empty creds and boto3 falls back to the platform EC2 instance
+            # profile (NexplaneEC2TestRole), which has NexplaneSmokeBackupSchedulerS3
+            # (s3:PutObject on nexplane-smoke-backup-scheduler/*).
+            _d2v_aws_connector_id = cloud_account_id
 
             # Resolve default VPC + subnet
             _vpcs_d2v = _ec2_d2v.describe_vpcs(
