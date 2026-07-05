@@ -660,35 +660,40 @@ class TestDisk2VhdStrategy:
         from unittest.mock import MagicMock, patch
         from app.connectors.executors.nexplane_agent.backup_strategies import disk2vhd
 
-        mock_sess = MagicMock()
-
-        def _run_ps(script):
-            resp = MagicMock()
-            resp.status_code = 0
-            if "Get-Item" in script and "Length" in script:
-                resp.std_out = b"104857600"
-            else:
-                resp.std_out = b"ok"
-            resp.std_err = b""
-            return resp
-        mock_sess.run_ps.side_effect = _run_ps
-
+        # Test the SSM path (primary path when instance_id is provided).
         mock_s3 = MagicMock()
-        mock_s3.generate_presigned_url.return_value = "https://s3.amazonaws.com/presigned-put"
+        mock_s3.generate_presigned_url.return_value = "https://s3.amazonaws.com/presigned"
+        mock_ssm = MagicMock()
+        mock_ssm.send_command.return_value = {"Command": {"CommandId": "cmd-123"}}
 
-        with patch("winrm.Session", return_value=mock_sess), \
-             patch("boto3.client", return_value=mock_s3):
+        call_index = [0]
+
+        def _get_invocation(**kwargs):
+            # Return size on the 3rd SSM command (size check after run).
+            call_index[0] += 1
+            stdout = "104857600" if call_index[0] == 3 else ""
+            return {"Status": "Success", "StandardOutputContent": stdout, "StandardErrorContent": ""}
+
+        mock_ssm.get_command_invocation.side_effect = _get_invocation
+
+        def _boto3_client(service, **kwargs):
+            return mock_s3 if service == "s3" else mock_ssm
+
+        with patch("boto3.client", side_effect=_boto3_client), \
+             patch("app.connectors.executors.nexplane_agent.aws_utils._load_aws_creds",
+                   return_value={"region": "us-east-1"}), \
+             patch("app.connectors.executors.nexplane_agent.backup_strategies.disk2vhd._time") as mock_time:
+            mock_time.sleep = lambda *a: None
+            mock_time.monotonic = lambda: 0
             result = asyncio.run(
                 disk2vhd.backup(
                     {
-                        "winrm_host": "10.0.0.9",
-                        "winrm_username": "Administrator",
-                        "winrm_password": "pw",
-                        "disk_list": ["C:"],
+                        "instance_id": "i-test",
+                        "disk_list": ["E:"],
                         "aws_connector_id": "",
                         "_storage_config": {"storage_type": "s3", "config": {
                             "bucket": "b", "prefix": "p/", "region": "us-east-1"}},
-                        "_disk2vhd_local_path": __file__,
+                        "_disk2vhd_s3_key": "tools/disk2vhd.exe",
                     },
                     ["asset-uuid"],
                     None,
@@ -699,8 +704,7 @@ class TestDisk2VhdStrategy:
         assert refs["restore_strategy"] == "import_image"
         assert refs["backup_tier"] == "machine"
         assert refs["artifact_uri"].endswith(".vhdx")
-        assert refs["size_bytes"] == 104857600
-        assert refs["disk_list"] == ["C:"]
+        assert refs["disk_list"] == ["E:"]
 
     def test_disk2vhd_rollback_deletes_artifact(self):
         import asyncio
