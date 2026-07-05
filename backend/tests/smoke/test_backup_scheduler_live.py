@@ -2212,9 +2212,9 @@ def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
     ssm = _get_aws_boto3_client("ssm")
     _ensure_s3_bucket(s3, SMOKE_BUCKET)
 
-    if not _ensure_disk2vhd_tool(s3):
-        fail("DISK2VHD: s3://%s/tools/disk2vhd.exe missing — upload it before running this phase"
-             % SMOKE_BUCKET)
+    # disk2vhd.exe no longer required — SSM path uses native PowerShell
+    # (diskpart /s + VSS + robocopy); WinRM path still uses it but is not
+    # exercised in this smoke phase.
 
     win_password = "Nx!" + secrets.token_urlsafe(14) + "9a"
     instance_id, private_ip, from_cache = _provision_windows_instance(
