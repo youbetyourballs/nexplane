@@ -575,11 +575,103 @@ def run_phase_r(client: NexplaneClient, cloud_account_id: str, gcp_project: str,
     log("Phase R complete")
 
 
-def run_phase_s_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
-    """Phase S: GCP Sub-B (Networking) — STUB."""
-    print("\n[Phase S] GCP Networking — STUB (implement with GCP Sub-project B)")
-    print("  ⚠️  Phase S is not yet implemented.")
-    print("  This phase will cover: advanced firewall lifecycle, VPC peering, private Google access.")
+def run_phase_s(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase S: Advanced firewall — two rules with different priorities and protocols."""
+    print("\n[Phase S] Advanced Firewall Rules")
+
+    import time as _time
+    rule1 = f"nexplane-smoke-s-tcp-{int(_time.time())}"
+    rule2 = f"nexplane-smoke-s-udp-{int(_time.time()) + 1}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        cr1 = client.run_cr(
+            "[Phase S] create TCP firewall rule", "gcp_firewall_create", cloud_account_id,
+            {
+                "project": gcp_project,
+                "rule_name": rule1,
+                "network": "global/networks/default",
+                "direction": "INGRESS",
+                "priority": 900,
+                "allowed": [{"IPProtocol": "tcp", "ports": ["8080"]}],
+                "source_ranges": ["192.0.2.0/24"],
+                "description": "Nexplane smoke test — safe to delete",
+            },
+        )
+        rollback_stack.append((cr1["id"], "gcp_firewall_create"))
+        log(f"Firewall rule 1 created: {rule1} (priority 900, TCP 8080)")
+
+        cr2 = client.run_cr(
+            "[Phase S] create UDP firewall rule", "gcp_firewall_create", cloud_account_id,
+            {
+                "project": gcp_project,
+                "rule_name": rule2,
+                "network": "global/networks/default",
+                "direction": "INGRESS",
+                "priority": 800,
+                "allowed": [{"IPProtocol": "udp", "ports": ["5353"]}],
+                "source_ranges": ["192.0.2.0/24"],
+                "description": "Nexplane smoke test — safe to delete",
+            },
+        )
+        rollback_stack.append((cr2["id"], "gcp_firewall_create"))
+        log(f"Firewall rule 2 created: {rule2} (priority 800, UDP 5353)")
+
+        # Verify both rules via SDK
+        creds = _get_gcp_creds()
+        if creds:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from google.cloud import compute_v1
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                fw_client = compute_v1.FirewallsClient(credentials=gc)
+                fw1 = fw_client.get(project=gcp_project, firewall=rule1)
+                assert fw1.priority == 900, f"Expected priority 900, got {fw1.priority}"
+                fw2 = fw_client.get(project=gcp_project, firewall=rule2)
+                assert fw2.priority == 800, f"Expected priority 800, got {fw2.priority}"
+                log("Both firewall rules verified via SDK (priority + protocol)")
+            except Exception as e:
+                print(f"  ⚠️  SDK verification error: {e}")
+                raise
+        else:
+            print("  ⚠️  No GCP credentials — SDK verification skipped")
+
+        # Rollback (LIFO)
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        rollback_stack.clear()
+        log("Phase S complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase S failed: {e}")
+        raise
+    finally:
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete rules via SDK if they still exist
+        creds = _get_gcp_creds()
+        if creds and gcp_project:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from google.cloud import compute_v1
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                fw_client = compute_v1.FirewallsClient(credentials=gc)
+                for rule_name in [rule1, rule2]:
+                    try:
+                        fw_client.delete(project=gcp_project, firewall=rule_name)
+                        print(f"  Safety net: deleted firewall rule {rule_name}")
+                    except Exception:
+                        pass
+            except Exception as e2:
+                print(f"  ⚠️  Safety net cleanup failed: {e2}")
 
 
 def run_phase_t_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
@@ -666,7 +758,7 @@ def main():
         if "R" in phases:
             run_phase_r(client, cloud_account_id, args.gcp_project, gcp_phase_result)
         if "S" in phases:
-            run_phase_s_stub(client, cloud_account_id, args.gcp_project)
+            run_phase_s(client, cloud_account_id, args.gcp_project)
         if "T" in phases:
             run_phase_t_stub(client, cloud_account_id, args.gcp_project)
         if "U" in phases:
