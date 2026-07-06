@@ -1,0 +1,9 @@
+{
+  "change_type": "gcp_cloudsql_instance_create",
+  "display_name": "Create Cloud SQL Instance",
+  "steps": [{"generic_action": "create_cloudsql_instance", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_cloudsql_instance",
+  "rollback_connector_type": "gcp"
+}

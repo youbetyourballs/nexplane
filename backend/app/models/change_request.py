@@ -70,6 +70,10 @@ class ChangeType(str, enum.Enum):
     gcp_dns_zone_delete = "gcp_dns_zone_delete"
     gcp_dns_record_create = "gcp_dns_record_create"
     gcp_dns_record_delete = "gcp_dns_record_delete"
+    # GCP Cloud SQL lifecycle
+    gcp_cloudsql_instance_create = "gcp_cloudsql_instance_create"
+    gcp_cloudsql_instance_delete = "gcp_cloudsql_instance_delete"
+    gcp_cloudsql_backup_create = "gcp_cloudsql_backup_create"
     # Azure VM lifecycle — Sub-project A
     azure_vm_create = "azure_vm_create"
     azure_vm_stop = "azure_vm_stop"

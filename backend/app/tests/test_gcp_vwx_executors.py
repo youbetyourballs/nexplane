@@ -50,3 +50,30 @@ def test_delete_dns_record_no_creds():
     ))
     assert result["action"] == "delete_dns_record"
     assert result["deleted"] is True
+
+
+# --- Cloud SQL ---
+
+def test_create_cloudsql_instance_no_creds():
+    from app.connectors.executors.gcp.create_cloudsql_instance import execute
+    result = _run(execute(
+        {"instance_name": "smoke-sql", "database_version": "POSTGRES_14",
+         "tier": "db-f1-micro", "region": "us-central1"},
+        [], _FakeConnector()
+    ))
+    assert result["action"] == "create_cloudsql_instance"
+    assert result["instance_name"] == "smoke-sql"
+
+
+def test_delete_cloudsql_instance_no_creds():
+    from app.connectors.executors.gcp.delete_cloudsql_instance import execute
+    result = _run(execute({"instance_name": "smoke-sql"}, [], _FakeConnector()))
+    assert result["action"] == "delete_cloudsql_instance"
+    assert result["deleted"] is True
+
+
+def test_create_cloudsql_backup_no_creds():
+    from app.connectors.executors.gcp.create_cloudsql_backup import execute
+    result = _run(execute({"instance_name": "smoke-sql"}, [], _FakeConnector()))
+    assert result["action"] == "create_cloudsql_backup"
+    assert result["instance_name"] == "smoke-sql"
