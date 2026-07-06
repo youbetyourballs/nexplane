@@ -11,7 +11,7 @@ Create Date: 2026-07-06
 from alembic import op
 
 revision = "gcp001"
-down_revision = "cwr001"
+down_revision = "merge001"
 branch_labels = None
 depends_on = None
 
