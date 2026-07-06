@@ -765,24 +765,40 @@ def run_phase_u(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
     import time as _time
     ts = int(_time.time()) % 100000
     account_id = f"nexplane-smoke-u-{ts}"
-    sa_email = f"{account_id}@{gcp_project}.iam.gserviceaccount.com"
     role = "roles/viewer"
-    member = f"serviceAccount:{sa_email}"
     rollback_stack: list[tuple[str, str]] = []
 
     try:
-        # 1. Create service account via CR
+        # 1. Create service account via CR — get actual email from CR result
         cr = client.run_cr(
             "[Phase U] create service account", "gcp_service_account_create", cloud_account_id,
             {"account_id": account_id, "display_name": "Nexplane smoke test"},
         )
         rollback_stack.append((cr["id"], "gcp_service_account_create"))
+        # Use the actual SA email from the executor result (project_id from connector credentials)
+        exec_runs = cr.get("execution_runs", [])
+        sa_email_actual = None
+        for run in exec_runs:
+            result = run.get("result", {})
+            steps = result.get("execution", {}).get("steps", []) if "execution" in result else []
+            for step in steps:
+                sa_email_actual = step.get("result", {}).get("email")
+                if sa_email_actual:
+                    break
+        # Fallback: construct from creds project_id
+        if not sa_email_actual:
+            creds_tmp = _get_gcp_creds()
+            actual_project = (creds_tmp or {}).get("project_id", gcp_project)
+            sa_email_actual = f"{account_id}@{actual_project}.iam.gserviceaccount.com"
+        sa_email = sa_email_actual
+        member = f"serviceAccount:{sa_email}"
         log(f"Service account created: {sa_email}")
 
         # 2. GCP SA eventual consistency — poll up to 30s
         creds = _get_gcp_creds()
         gc = None
         iam_svc = None
+        sa_project = sa_email.split("@")[1].split(".iam.")[0] if "@" in sa_email else gcp_project
         if creds:
             try:
                 import json as _json
@@ -795,11 +811,13 @@ def run_phase_u(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
                                       "https://www.googleapis.com/auth/iam"])
                 iam_svc = _build("iam", "v1", credentials=gc)
                 sa_ready = False
+                # sa_project already set above from sa_email (account@project.iam.gserviceaccount.com)
+                sa_ready = False
                 for _ in range(18):
                     _time.sleep(10)
                     try:
                         iam_svc.projects().serviceAccounts().get(
-                            name=f"projects/{gcp_project}/serviceAccounts/{sa_email}"
+                            name=f"projects/{sa_project}/serviceAccounts/{sa_email}"
                         ).execute()
                         sa_ready = True
                         break
@@ -824,7 +842,8 @@ def run_phase_u(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
             try:
                 from googleapiclient.discovery import build as _build2
                 crm = _build2("cloudresourcemanager", "v1", credentials=gc)
-                policy = crm.projects().getIamPolicy(resource=gcp_project, body={}).execute()
+                # Use the SA's project (from executor creds), not the CLI gcp_project arg
+                policy = crm.projects().getIamPolicy(resource=sa_project, body={}).execute()
                 binding_found = any(
                     b["role"] == role and member in b.get("members", [])
                     for b in policy.get("bindings", [])
@@ -848,7 +867,9 @@ def run_phase_u(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
             client.rollback_cr(cr_id, label)
         # Safety net: delete SA via SDK if it still exists
         creds = _get_gcp_creds()
-        if creds and gcp_project:
+        # Use the actual project from the SA email (may differ from --gcp-project CLI arg)
+        _sa_project = sa_email.split("@")[1].split(".iam.")[0] if "@" in sa_email else gcp_project
+        if creds and _sa_project:
             try:
                 import json as _json
                 from google.oauth2 import service_account as _sa_lib
@@ -861,7 +882,7 @@ def run_phase_u(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
                 iam_svc = _build("iam", "v1", credentials=gc)
                 try:
                     iam_svc.projects().serviceAccounts().delete(
-                        name=f"projects/{gcp_project}/serviceAccounts/{sa_email}"
+                        name=f"projects/{_sa_project}/serviceAccounts/{sa_email}"
                     ).execute()
                     print(f"  Safety net: deleted service account {sa_email}")
                 except Exception:
