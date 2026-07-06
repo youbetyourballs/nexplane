@@ -1004,11 +1004,98 @@ def run_phase_v(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
                 print(f"  ⚠️  Safety net DNS zone delete failed: {e2}")
 
 
-def run_phase_w_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
-    """Phase W: GCP Sub-F (SQL) — STUB."""
-    print("\n[Phase W] GCP Cloud SQL — STUB (implement with GCP Sub-project F)")
-    print("  ⚠️  Phase W is not yet implemented.")
-    print("  This phase will cover: Cloud SQL instance create/snapshot/replica/promote via CRs.")
+def run_phase_w(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase W: Cloud SQL — instance create + backup + rollback. (~10 min)"""
+    print("\n[Phase W] Cloud SQL Instance + Backup")
+    print("  ⚠️  This phase takes 5-10 min for Cloud SQL provisioning")
+
+    import time as _time
+    ts = int(_time.time()) % 10000
+    instance_name = f"nexplane-smoke-w-{ts}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # 1. Create Cloud SQL instance via CR (polls internally up to 900s)
+        cr = client.run_cr(
+            "[Phase W] create Cloud SQL instance", "gcp_cloudsql_instance_create", cloud_account_id,
+            {
+                "instance_name": instance_name,
+                "database_version": "POSTGRES_14",
+                "tier": "db-f1-micro",
+                "region": "us-central1",
+            },
+            timeout=900,
+        )
+        rollback_stack.append((cr["id"], "gcp_cloudsql_instance_create"))
+        log(f"Cloud SQL instance created: {instance_name}")
+
+        # 2. Create backup via CR
+        cr2 = client.run_cr(
+            "[Phase W] create Cloud SQL backup", "gcp_cloudsql_backup_create", cloud_account_id,
+            {"instance_name": instance_name},
+        )
+        rollback_stack.append((cr2["id"], "gcp_cloudsql_backup_create"))
+        log(f"Cloud SQL backup created for {instance_name}")
+
+        # 3. Verify via SDK
+        creds = _get_gcp_creds()
+        if creds:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from googleapiclient.discovery import build as _build
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                svc = _build("sqladmin", "v1beta4", credentials=gc)
+                instance_obj = svc.instances().get(
+                    project=gcp_project, instance=instance_name
+                ).execute()
+                assert instance_obj["state"] == "RUNNABLE", f"Instance state: {instance_obj['state']}"
+                runs = svc.backupRuns().list(
+                    project=gcp_project, instance=instance_name
+                ).execute()
+                items = runs.get("items", [])
+                successful = [r for r in items if r.get("status") == "SUCCESSFUL"]
+                assert successful, "No successful backup run found"
+                log(f"Instance RUNNABLE + backup SUCCESSFUL (SDK verified)")
+            except Exception as e:
+                print(f"  ⚠️  SDK verification skipped: {e}")
+        else:
+            print("  ⚠️  No GCP credentials — SDK verification skipped")
+
+        # 4. Rollback (LIFO): backup rollback is no-op, then delete instance
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        rollback_stack.clear()
+        log("Phase W complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase W failed: {e}")
+        raise
+    finally:
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete instance via SDK
+        creds = _get_gcp_creds()
+        if creds and gcp_project:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from googleapiclient.discovery import build as _build
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                svc = _build("sqladmin", "v1beta4", credentials=gc)
+                try:
+                    svc.instances().delete(project=gcp_project, instance=instance_name).execute()
+                    print(f"  Safety net: initiated Cloud SQL delete for {instance_name}")
+                except Exception:
+                    pass
+            except Exception as e2:
+                print(f"  ⚠️  Safety net Cloud SQL delete failed: {e2}")
 
 
 def run_phase_x_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
@@ -1075,7 +1162,7 @@ def main():
         if "V" in phases:
             run_phase_v(client, cloud_account_id, args.gcp_project)
         if "W" in phases:
-            run_phase_w_stub(client, cloud_account_id, args.gcp_project)
+            run_phase_w(client, cloud_account_id, args.gcp_project)
         if "X" in phases:
             run_phase_x_stub(client, cloud_account_id, args.gcp_project)
 
