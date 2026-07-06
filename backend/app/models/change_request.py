@@ -60,6 +60,11 @@ class ChangeType(str, enum.Enum):
     # GCP bucket lifecycle
     gcp_bucket_create = "gcp_bucket_create"
     gcp_bucket_delete = "gcp_bucket_delete"
+    # GCP service account + IAM lifecycle
+    gcp_service_account_create = "gcp_service_account_create"
+    gcp_service_account_delete = "gcp_service_account_delete"
+    gcp_iam_binding_add = "gcp_iam_binding_add"
+    gcp_iam_binding_remove = "gcp_iam_binding_remove"
     # Azure VM lifecycle — Sub-project A
     azure_vm_create = "azure_vm_create"
     azure_vm_stop = "azure_vm_stop"

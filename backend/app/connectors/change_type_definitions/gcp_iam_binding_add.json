@@ -1,0 +1,9 @@
+{
+  "change_type": "gcp_iam_binding_add",
+  "display_name": "Add GCP IAM Binding",
+  "steps": [{"generic_action": "add_iam_binding", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "remove_iam_binding",
+  "rollback_connector_type": "gcp"
+}
