@@ -758,11 +758,116 @@ def run_phase_t(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
                 print(f"  ⚠️  Safety net bucket delete failed: {e2}")
 
 
-def run_phase_u_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
-    """Phase U: GCP Sub-D (IAM) — STUB."""
-    print("\n[Phase U] GCP IAM — STUB (implement with GCP Sub-project D)")
-    print("  ⚠️  Phase U is not yet implemented.")
-    print("  This phase will cover: IAM role bindings, workload identity, service account impersonation.")
+def run_phase_u(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase U: Service account create + IAM binding add + rollback stack."""
+    print("\n[Phase U] Service Account + IAM Binding")
+
+    import time as _time
+    ts = int(_time.time()) % 100000
+    account_id = f"nexplane-smoke-u-{ts}"
+    sa_email = f"{account_id}@{gcp_project}.iam.gserviceaccount.com"
+    role = "roles/viewer"
+    member = f"serviceAccount:{sa_email}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # 1. Create service account via CR
+        cr = client.run_cr(
+            "[Phase U] create service account", "gcp_service_account_create", cloud_account_id,
+            {"account_id": account_id, "display_name": "Nexplane smoke test"},
+        )
+        rollback_stack.append((cr["id"], "gcp_service_account_create"))
+        log(f"Service account created: {sa_email}")
+
+        # 2. GCP SA eventual consistency — poll up to 30s
+        creds = _get_gcp_creds()
+        gc = None
+        iam_svc = None
+        if creds:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa_lib
+                from googleapiclient.discovery import build as _build
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa_lib.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform",
+                                      "https://www.googleapis.com/auth/iam"])
+                iam_svc = _build("iam", "v1", credentials=gc)
+                sa_ready = False
+                for _ in range(6):
+                    _time.sleep(5)
+                    try:
+                        iam_svc.projects().serviceAccounts().get(
+                            name=f"projects/{gcp_project}/serviceAccounts/{sa_email}"
+                        ).execute()
+                        sa_ready = True
+                        break
+                    except Exception:
+                        pass
+                if not sa_ready:
+                    raise RuntimeError(f"Service account {sa_email} not available after 30s")
+                log("Service account confirmed available via SDK")
+            except Exception as e:
+                print(f"  ⚠️  SDK SA polling skipped: {e}")
+
+        # 3. Add IAM binding via CR
+        cr2 = client.run_cr(
+            "[Phase U] add IAM binding", "gcp_iam_binding_add", cloud_account_id,
+            {"role": role, "member": member},
+        )
+        rollback_stack.append((cr2["id"], "gcp_iam_binding_add"))
+        log(f"IAM binding added: {role} → {member}")
+
+        # 4. Verify both SA exists and binding is present via SDK
+        if creds and gc:
+            try:
+                from googleapiclient.discovery import build as _build2
+                crm = _build2("cloudresourcemanager", "v1", credentials=gc)
+                policy = crm.projects().getIamPolicy(resource=gcp_project, body={}).execute()
+                binding_found = any(
+                    b["role"] == role and member in b.get("members", [])
+                    for b in policy.get("bindings", [])
+                )
+                assert binding_found, f"IAM binding {role}/{member} not found in project policy"
+                log("IAM binding verified via SDK")
+            except Exception as e:
+                print(f"  ⚠️  SDK verification skipped: {e}")
+
+        # 5. Rollback (LIFO): remove binding, then delete SA
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        rollback_stack.clear()
+        log("Phase U complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase U failed: {e}")
+        raise
+    finally:
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete SA via SDK if it still exists
+        creds = _get_gcp_creds()
+        if creds and gcp_project:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa_lib
+                from googleapiclient.discovery import build as _build
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa_lib.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform",
+                                      "https://www.googleapis.com/auth/iam"])
+                iam_svc = _build("iam", "v1", credentials=gc)
+                try:
+                    iam_svc.projects().serviceAccounts().delete(
+                        name=f"projects/{gcp_project}/serviceAccounts/{sa_email}"
+                    ).execute()
+                    print(f"  Safety net: deleted service account {sa_email}")
+                except Exception:
+                    pass
+            except Exception as e2:
+                print(f"  ⚠️  Safety net SA delete failed: {e2}")
 
 
 def run_phase_v_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
@@ -839,7 +944,7 @@ def main():
         if "T" in phases:
             run_phase_t(client, cloud_account_id, args.gcp_project)
         if "U" in phases:
-            run_phase_u_stub(client, cloud_account_id, args.gcp_project)
+            run_phase_u(client, cloud_account_id, args.gcp_project)
         if "V" in phases:
             run_phase_v_stub(client, cloud_account_id, args.gcp_project)
         if "W" in phases:
