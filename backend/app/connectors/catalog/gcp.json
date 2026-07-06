@@ -155,6 +155,8 @@
       "rollback_connector_type": "gcp",
       "estimated_duration_seconds": 15,
       "blast_radius_hint": "gcp_sa_key_permanently_deleted"
-    }
+    },
+    {"action_id": "create_bucket", "generic_action": "create_bucket", "action_type": "change", "execution_tier": 2, "display_name": "Create GCS Bucket", "description": "Create a new GCS bucket in the specified location. Rollback: delete.", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "bucket_name", "type": "string", "required": true}, {"name": "location", "type": "string", "required": false, "default": "US"}], "executor": "gcp.create_bucket", "rollback_action": "delete_bucket", "estimated_duration_seconds": 15},
+    {"action_id": "delete_bucket", "generic_action": "delete_bucket", "action_type": "change", "execution_tier": 2, "display_name": "Delete GCS Bucket", "description": "Delete a GCS bucket and all its contents (force=True).", "applicable_asset_types": ["cloud_account"], "parameters": [{"name": "bucket_name", "type": "string", "required": true}], "executor": "gcp.delete_bucket", "estimated_duration_seconds": 15, "blast_radius_hint": "destructive"}
   ]
 }

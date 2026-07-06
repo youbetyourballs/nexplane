@@ -1,0 +1,11 @@
+{
+  "change_type": "gcp_bucket_create",
+  "display_name": "Create GCS Bucket",
+  "steps": [
+    {"generic_action": "create_bucket", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_bucket",
+  "rollback_connector_type": "gcp"
+}

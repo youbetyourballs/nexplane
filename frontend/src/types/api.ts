@@ -342,6 +342,8 @@ export type ChangeType =
   | "gce_instance_reboot"
   | "gce_instance_delete"
   | "gce_disk_snapshot"
+  | "gcp_bucket_create"
+  | "gcp_bucket_delete"
   | "azure_vm_create"
   | "azure_vm_stop"
   | "azure_vm_start"

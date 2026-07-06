@@ -57,6 +57,9 @@ class ChangeType(str, enum.Enum):
     gce_instance_reboot = "gce_instance_reboot"
     gce_instance_delete = "gce_instance_delete"
     gce_disk_snapshot = "gce_disk_snapshot"
+    # GCP bucket lifecycle
+    gcp_bucket_create = "gcp_bucket_create"
+    gcp_bucket_delete = "gcp_bucket_delete"
     # Azure VM lifecycle — Sub-project A
     azure_vm_create = "azure_vm_create"
     azure_vm_stop = "azure_vm_stop"
