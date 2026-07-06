@@ -77,3 +77,45 @@ def test_create_cloudsql_backup_no_creds():
     result = _run(execute({"instance_name": "smoke-sql"}, [], _FakeConnector()))
     assert result["action"] == "create_cloudsql_backup"
     assert result["instance_name"] == "smoke-sql"
+
+
+# --- Cloud Monitoring ---
+
+def test_create_alert_policy_no_creds():
+    from app.connectors.executors.gcp.create_alert_policy import execute
+    result = _run(execute(
+        {"display_name": "smoke-alert", "condition_threshold": 0.9, "duration_seconds": 60},
+        [], _FakeConnector()
+    ))
+    assert result["action"] == "create_alert_policy"
+    assert result["display_name"] == "smoke-alert"
+
+
+def test_delete_alert_policy_no_creds():
+    from app.connectors.executors.gcp.delete_alert_policy import execute
+    result = _run(execute(
+        {"policy_name": "projects/p/alertPolicies/123"},
+        [], _FakeConnector()
+    ))
+    assert result["action"] == "delete_alert_policy"
+    assert result["deleted"] is True
+
+
+def test_create_uptime_check_no_creds():
+    from app.connectors.executors.gcp.create_uptime_check import execute
+    result = _run(execute(
+        {"display_name": "smoke-uptime", "host": "google.com", "path": "/", "period_seconds": 60},
+        [], _FakeConnector()
+    ))
+    assert result["action"] == "create_uptime_check"
+    assert result["display_name"] == "smoke-uptime"
+
+
+def test_delete_uptime_check_no_creds():
+    from app.connectors.executors.gcp.delete_uptime_check import execute
+    result = _run(execute(
+        {"check_id": "projects/p/uptimeCheckConfigs/abc"},
+        [], _FakeConnector()
+    ))
+    assert result["action"] == "delete_uptime_check"
+    assert result["deleted"] is True

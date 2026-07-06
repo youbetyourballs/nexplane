@@ -1,0 +1,9 @@
+{
+  "change_type": "gcp_alert_policy_create",
+  "display_name": "Create Cloud Monitoring Alert Policy",
+  "steps": [{"generic_action": "create_alert_policy", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_alert_policy",
+  "rollback_connector_type": "gcp"
+}

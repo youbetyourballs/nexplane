@@ -74,6 +74,11 @@ class ChangeType(str, enum.Enum):
     gcp_cloudsql_instance_create = "gcp_cloudsql_instance_create"
     gcp_cloudsql_instance_delete = "gcp_cloudsql_instance_delete"
     gcp_cloudsql_backup_create = "gcp_cloudsql_backup_create"
+    # GCP Cloud Monitoring lifecycle
+    gcp_alert_policy_create = "gcp_alert_policy_create"
+    gcp_alert_policy_delete = "gcp_alert_policy_delete"
+    gcp_uptime_check_create = "gcp_uptime_check_create"
+    gcp_uptime_check_delete = "gcp_uptime_check_delete"
     # Azure VM lifecycle — Sub-project A
     azure_vm_create = "azure_vm_create"
     azure_vm_stop = "azure_vm_stop"
