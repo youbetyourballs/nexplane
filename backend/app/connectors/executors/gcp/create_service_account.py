@@ -2,6 +2,7 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 import asyncio
+import time
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
@@ -30,7 +31,18 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                 "serviceAccount": {"displayName": display_name},
             },
         ).execute()
-        return sa["email"], sa["uniqueId"]
+        email = sa["email"]
+        # Poll for up to 30s — GCP SA creation is eventually consistent
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            try:
+                svc.projects().serviceAccounts().get(
+                    name=f"projects/{project}/serviceAccounts/{email}"
+                ).execute()
+                break
+            except Exception:
+                time.sleep(2)
+        return email, sa["uniqueId"]
 
     email, unique_id = await loop.run_in_executor(None, _create)
     return {"action": "create_service_account", "email": email, "unique_id": unique_id}
