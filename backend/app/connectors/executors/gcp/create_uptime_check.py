@@ -23,11 +23,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     def _create():
         from google.cloud import monitoring_v3
+        from google.api import monitored_resource_pb2
         from google.protobuf import duration_pb2
         client = monitoring_v3.UptimeCheckServiceClient(credentials=credentials)
         config = monitoring_v3.UptimeCheckConfig(
             display_name=display_name,
-            monitored_resource=monitoring_v3.MonitoredResource(
+            monitored_resource=monitored_resource_pb2.MonitoredResource(
                 type="uptime_url",
                 labels={"host": host},
             ),
