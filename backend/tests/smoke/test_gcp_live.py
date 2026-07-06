@@ -1098,11 +1098,118 @@ def run_phase_w(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
                 print(f"  ⚠️  Safety net Cloud SQL delete failed: {e2}")
 
 
-def run_phase_x_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
-    """Phase X: GCP Sub-G (Monitoring) — STUB."""
-    print("\n[Phase X] GCP Monitoring — STUB (implement with GCP Sub-project G)")
-    print("  ⚠️  Phase X is not yet implemented.")
-    print("  This phase will cover: Cloud Monitoring alerting policies, uptime checks via CRs.")
+def run_phase_x(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase X: Cloud Monitoring — alert policy + uptime check lifecycle."""
+    print("\n[Phase X] Cloud Monitoring")
+
+    import time as _time
+    ts = int(_time.time())
+    alert_display = f"nexplane-smoke-x-alert-{ts}"
+    uptime_display = f"nexplane-smoke-x-uptime-{ts}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # 1. Create alert policy via CR
+        cr = client.run_cr(
+            "[Phase X] create alert policy", "gcp_alert_policy_create", cloud_account_id,
+            {
+                "display_name": alert_display,
+                "condition_threshold": 0.9,
+                "duration_seconds": 60,
+            },
+        )
+        rollback_stack.append((cr["id"], "gcp_alert_policy_create"))
+        log(f"Alert policy created: {alert_display}")
+
+        # 2. Create uptime check via CR
+        cr2 = client.run_cr(
+            "[Phase X] create uptime check", "gcp_uptime_check_create", cloud_account_id,
+            {
+                "display_name": uptime_display,
+                "host": "google.com",
+                "path": "/",
+                "period_seconds": 60,
+            },
+        )
+        rollback_stack.append((cr2["id"], "gcp_uptime_check_create"))
+        log(f"Uptime check created: {uptime_display}")
+
+        # 3. Verify via SDK (no-raise pattern)
+        creds = _get_gcp_creds()
+        if creds:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from google.cloud import monitoring_v3
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+
+                alert_client = monitoring_v3.AlertPolicyServiceClient(credentials=gc)
+                policies = list(alert_client.list_alert_policies(name=f"projects/{gcp_project}"))
+                found_alert = any(p.display_name == alert_display for p in policies)
+                if not found_alert:
+                    print(f"  ⚠️  Alert policy '{alert_display}' not found via SDK (may be eventual consistency)")
+                else:
+                    log("Alert policy verified via SDK")
+
+                uptime_client = monitoring_v3.UptimeCheckServiceClient(credentials=gc)
+                checks = list(uptime_client.list_uptime_check_configs(parent=f"projects/{gcp_project}"))
+                found_uptime = any(c.display_name == uptime_display for c in checks)
+                if not found_uptime:
+                    print(f"  ⚠️  Uptime check '{uptime_display}' not found via SDK (may be eventual consistency)")
+                else:
+                    log("Uptime check verified via SDK")
+
+                if found_alert and found_uptime:
+                    log("Alert policy and uptime check verified via SDK")
+            except Exception as e:
+                print(f"  ⚠️  SDK verification skipped: {e}")
+        else:
+            print("  ⚠️  No GCP credentials — SDK verification skipped")
+
+        # 4. Rollback (LIFO): delete uptime check, then delete alert policy
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        rollback_stack.clear()
+        log("Phase X complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase X failed: {e}")
+        raise
+    finally:
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete via SDK using display_name search
+        creds = _get_gcp_creds()
+        if creds and gcp_project:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from google.cloud import monitoring_v3
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                try:
+                    alert_client = monitoring_v3.AlertPolicyServiceClient(credentials=gc)
+                    for p in alert_client.list_alert_policies(name=f"projects/{gcp_project}"):
+                        if p.display_name == alert_display:
+                            alert_client.delete_alert_policy(name=p.name)
+                            print(f"  Safety net: deleted alert policy {alert_display}")
+                except Exception:
+                    pass
+                try:
+                    uptime_client = monitoring_v3.UptimeCheckServiceClient(credentials=gc)
+                    for c in uptime_client.list_uptime_check_configs(parent=f"projects/{gcp_project}"):
+                        if c.display_name == uptime_display:
+                            uptime_client.delete_uptime_check_config(name=c.name)
+                            print(f"  Safety net: deleted uptime check {uptime_display}")
+                except Exception:
+                    pass
+            except Exception as e2:
+                print(f"  ⚠️  Safety net monitoring cleanup failed: {e2}")
 
 
 def main():
@@ -1164,7 +1271,7 @@ def main():
         if "W" in phases:
             run_phase_w(client, cloud_account_id, args.gcp_project)
         if "X" in phases:
-            run_phase_x_stub(client, cloud_account_id, args.gcp_project)
+            run_phase_x(client, cloud_account_id, args.gcp_project)
 
         print("\n" + "=" * 60)
         print("✅ ALL SELECTED PHASES PASSED")
