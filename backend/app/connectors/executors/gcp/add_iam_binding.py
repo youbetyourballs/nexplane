@@ -20,8 +20,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         from googleapiclient.discovery import build
         from googleapiclient.errors import HttpError
         crm = build("cloudresourcemanager", "v1", credentials=credentials)
-        # GCP SA eventual consistency: retry for up to 90s if SA not yet visible
-        deadline = time.time() + 90
+        # GCP SA eventual consistency: retry for up to 180s if SA not yet visible
+        deadline = time.time() + 180
         while True:
             try:
                 policy = crm.projects().getIamPolicy(resource=project, body={}).execute()

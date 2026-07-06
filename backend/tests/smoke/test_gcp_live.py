@@ -795,8 +795,8 @@ def run_phase_u(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
                                       "https://www.googleapis.com/auth/iam"])
                 iam_svc = _build("iam", "v1", credentials=gc)
                 sa_ready = False
-                for _ in range(6):
-                    _time.sleep(5)
+                for _ in range(18):
+                    _time.sleep(10)
                     try:
                         iam_svc.projects().serviceAccounts().get(
                             name=f"projects/{gcp_project}/serviceAccounts/{sa_email}"
@@ -806,7 +806,7 @@ def run_phase_u(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
                     except Exception:
                         pass
                 if not sa_ready:
-                    raise RuntimeError(f"Service account {sa_email} not available after 30s")
+                    raise RuntimeError(f"Service account {sa_email} not available after 180s")
                 log("Service account confirmed available via SDK")
             except Exception as e:
                 print(f"  ⚠️  SDK SA polling skipped: {e}")
