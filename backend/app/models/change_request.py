@@ -65,6 +65,11 @@ class ChangeType(str, enum.Enum):
     gcp_service_account_delete = "gcp_service_account_delete"
     gcp_iam_binding_add = "gcp_iam_binding_add"
     gcp_iam_binding_remove = "gcp_iam_binding_remove"
+    # GCP Cloud DNS lifecycle
+    gcp_dns_zone_create = "gcp_dns_zone_create"
+    gcp_dns_zone_delete = "gcp_dns_zone_delete"
+    gcp_dns_record_create = "gcp_dns_record_create"
+    gcp_dns_record_delete = "gcp_dns_record_delete"
     # Azure VM lifecycle — Sub-project A
     azure_vm_create = "azure_vm_create"
     azure_vm_stop = "azure_vm_stop"

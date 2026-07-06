@@ -1,0 +1,9 @@
+{
+  "change_type": "gcp_dns_zone_create",
+  "display_name": "Create Cloud DNS Zone",
+  "steps": [{"generic_action": "create_dns_zone", "purpose": "execute", "required": true}],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "delete_dns_zone",
+  "rollback_connector_type": "gcp"
+}
