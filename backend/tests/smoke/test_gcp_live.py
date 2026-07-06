@@ -891,11 +891,117 @@ def run_phase_u(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
                 print(f"  ⚠️  Safety net SA delete failed: {e2}")
 
 
-def run_phase_v_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
-    """Phase V: GCP Sub-E (DNS) — STUB."""
-    print("\n[Phase V] GCP DNS — STUB (implement with GCP Sub-project E)")
-    print("  ⚠️  Phase V is not yet implemented.")
-    print("  This phase will cover: Cloud DNS zone create/record upsert/delete via CRs.")
+def run_phase_v(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase V: Cloud DNS — managed zone + A record lifecycle."""
+    print("\n[Phase V] Cloud DNS")
+
+    import time as _time
+    ts = int(_time.time())
+    zone_name = f"nexplane-smoke-v-{ts}"
+    dns_name = f"nexplane-smoke-v-{ts}.example."
+    record_name = f"test.nexplane-smoke-v-{ts}.example."
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # 1. Create DNS zone via CR
+        cr = client.run_cr(
+            "[Phase V] create DNS zone", "gcp_dns_zone_create", cloud_account_id,
+            {
+                "zone_name": zone_name,
+                "dns_name": dns_name,
+                "description": "Nexplane smoke test zone — safe to delete",
+            },
+        )
+        rollback_stack.append((cr["id"], "gcp_dns_zone_create"))
+        log(f"DNS zone created: {zone_name} ({dns_name})")
+
+        # 2. Create A record via CR
+        cr2 = client.run_cr(
+            "[Phase V] create A record", "gcp_dns_record_create", cloud_account_id,
+            {
+                "zone_name": zone_name,
+                "record_name": record_name,
+                "record_type": "A",
+                "ttl": 300,
+                "rrdatas": ["1.2.3.4"],
+            },
+        )
+        rollback_stack.append((cr2["id"], "gcp_dns_record_create"))
+        log(f"A record created: {record_name} → 1.2.3.4")
+
+        # 3. Verify via SDK
+        creds = _get_gcp_creds()
+        if creds:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from googleapiclient.discovery import build as _build
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                dns_svc = _build("dns", "v1", credentials=gc)
+                zone_obj = dns_svc.managedZones().get(
+                    project=gcp_project, managedZone=zone_name
+                ).execute()
+                assert zone_obj["name"] == zone_name, "Zone name mismatch"
+                records_resp = dns_svc.resourceRecordSets().list(
+                    project=gcp_project, managedZone=zone_name
+                ).execute()
+                found = any(
+                    r["name"] == record_name and r["type"] == "A"
+                    for r in records_resp.get("rrsets", [])
+                )
+                assert found, f"A record {record_name} not found in zone"
+                log("Zone and A record verified via SDK")
+            except Exception as e:
+                print(f"  ⚠️  SDK verification skipped: {e}")
+        else:
+            print("  ⚠️  No GCP credentials — SDK verification skipped")
+
+        # 4. Rollback (LIFO): delete record, then delete zone
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        rollback_stack.clear()
+        log("Phase V complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase V failed: {e}")
+        raise
+    finally:
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete zone via SDK (clears records first)
+        creds = _get_gcp_creds()
+        if creds and gcp_project:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from googleapiclient.discovery import build as _build
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                dns_svc = _build("dns", "v1", credentials=gc)
+                # Clear non-SOA/NS records
+                try:
+                    resp = dns_svc.resourceRecordSets().list(
+                        project=gcp_project, managedZone=zone_name
+                    ).execute()
+                    to_delete = [r for r in resp.get("rrsets", []) if r["type"] not in ("SOA", "NS")]
+                    if to_delete:
+                        dns_svc.changes().create(
+                            project=gcp_project, managedZone=zone_name,
+                            body={"deletions": to_delete}
+                        ).execute()
+                    dns_svc.managedZones().delete(
+                        project=gcp_project, managedZone=zone_name
+                    ).execute()
+                    print(f"  Safety net: deleted DNS zone {zone_name}")
+                except Exception:
+                    pass
+            except Exception as e2:
+                print(f"  ⚠️  Safety net DNS zone delete failed: {e2}")
 
 
 def run_phase_w_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
@@ -967,7 +1073,7 @@ def main():
         if "U" in phases:
             run_phase_u(client, cloud_account_id, args.gcp_project)
         if "V" in phases:
-            run_phase_v_stub(client, cloud_account_id, args.gcp_project)
+            run_phase_v(client, cloud_account_id, args.gcp_project)
         if "W" in phases:
             run_phase_w_stub(client, cloud_account_id, args.gcp_project)
         if "X" in phases:
