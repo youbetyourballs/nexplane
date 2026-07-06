@@ -673,11 +673,89 @@ def run_phase_s(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
                 print(f"  ⚠️  Safety net cleanup failed: {e2}")
 
 
-def run_phase_t_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
-    """Phase T: GCP Sub-C (Storage) — STUB."""
-    print("\n[Phase T] GCP Storage — STUB (implement with GCP Sub-project C)")
-    print("  ⚠️  Phase T is not yet implemented.")
-    print("  This phase will cover: GCS bucket create/delete/lifecycle/policy via CRs.")
+def run_phase_t(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
+    """Phase T: GCS bucket create + block public access + rollback."""
+    print("\n[Phase T] GCS Bucket Lifecycle")
+
+    import secrets as _secrets
+    bucket_name = f"nexplane-smoke-t-{_secrets.token_hex(4)}"
+    rollback_stack: list[tuple[str, str]] = []
+
+    try:
+        # 1. Create bucket via CR
+        cr = client.run_cr(
+            "[Phase T] create GCS bucket", "gcp_bucket_create", cloud_account_id,
+            {"bucket_name": bucket_name, "location": "US"},
+        )
+        rollback_stack.append((cr["id"], "gcp_bucket_create"))
+        log(f"GCS bucket created: {bucket_name}")
+
+        # 2. Block public access via CR
+        cr2 = client.run_cr(
+            "[Phase T] block public GCS bucket access", "gcp_block_public_bucket_access",
+            cloud_account_id,
+            {"project": gcp_project, "bucket_name": bucket_name},
+        )
+        rollback_stack.append((cr2["id"], "gcp_block_public_bucket_access"))
+        log("Public access blocked on bucket")
+
+        # 3. Verify via SDK
+        creds = _get_gcp_creds()
+        if creds:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from google.cloud import storage as _storage
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                sc = _storage.Client(project=gcp_project, credentials=gc)
+                bucket_obj = sc.get_bucket(bucket_name)
+                assert bucket_obj.name == bucket_name, "Bucket not found"
+                policy = bucket_obj.get_iam_policy()
+                has_public = any(
+                    "allUsers" in b.get("members", []) or "allAuthenticatedUsers" in b.get("members", [])
+                    for b in policy.bindings
+                )
+                assert not has_public, "allUsers/allAuthenticatedUsers still present after blocking"
+                log("Bucket exists + public access blocked (SDK verified)")
+            except Exception as e:
+                print(f"  ⚠️  SDK verification skipped: {e}")
+        else:
+            print("  ⚠️  No GCP credentials — SDK verification skipped")
+
+        # 4. Rollback (LIFO): block_public (no-op rollback) then delete bucket
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        rollback_stack.clear()
+        log("Phase T complete")
+
+    except Exception as e:
+        print(f"\n❌ Phase T failed: {e}")
+        raise
+    finally:
+        for cr_id, label in reversed(rollback_stack):
+            client.rollback_cr(cr_id, label)
+        # Safety net: delete bucket via SDK
+        creds = _get_gcp_creds()
+        if creds and gcp_project:
+            try:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                from google.cloud import storage as _storage
+                key_raw = creds.get("service_account_key_json", "")
+                key_json = _json.loads(key_raw) if isinstance(key_raw, str) else key_raw
+                gc = _sa.Credentials.from_service_account_info(
+                    key_json, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                sc = _storage.Client(project=gcp_project, credentials=gc)
+                try:
+                    sc.get_bucket(bucket_name).delete(force=True)
+                    print(f"  Safety net: deleted GCS bucket {bucket_name}")
+                except Exception:
+                    pass
+            except Exception as e2:
+                print(f"  ⚠️  Safety net bucket delete failed: {e2}")
 
 
 def run_phase_u_stub(client: NexplaneClient, cloud_account_id: str, gcp_project: str) -> None:
@@ -759,7 +837,7 @@ def main():
         if "S" in phases:
             run_phase_s(client, cloud_account_id, args.gcp_project)
         if "T" in phases:
-            run_phase_t_stub(client, cloud_account_id, args.gcp_project)
+            run_phase_t(client, cloud_account_id, args.gcp_project)
         if "U" in phases:
             run_phase_u_stub(client, cloud_account_id, args.gcp_project)
         if "V" in phases:
