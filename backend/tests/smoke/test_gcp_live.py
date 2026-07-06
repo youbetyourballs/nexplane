@@ -715,7 +715,7 @@ def run_phase_t(client: NexplaneClient, cloud_account_id: str, gcp_project: str)
                 assert bucket_obj.name == bucket_name, "Bucket not found"
                 policy = bucket_obj.get_iam_policy()
                 has_public = any(
-                    "allUsers" in b.get("members", []) or "allAuthenticatedUsers" in b.get("members", [])
+                    "allUsers" in b.members or "allAuthenticatedUsers" in b.members
                     for b in policy.bindings
                 )
                 assert not has_public, "allUsers/allAuthenticatedUsers still present after blocking"
