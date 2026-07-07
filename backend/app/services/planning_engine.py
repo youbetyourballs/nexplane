@@ -162,9 +162,10 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
 
     # Allow callers to hint a specific connector via desired_outcome._locked_connector_type / _locked_connector_id.
     # This is used by smoke tests and programmatic CR creation to bypass asset-based inference.
-    if not locked_connector_id and desired.get("_locked_connector_id"):
+    # Explicit overrides take priority over asset-inferred connectors.
+    if desired.get("_locked_connector_id"):
         locked_connector_id = desired["_locked_connector_id"]
-    if not locked_connector_type and desired.get("_locked_connector_type"):
+    if desired.get("_locked_connector_type"):
         locked_connector_type = desired["_locked_connector_type"]
 
     options = catalog.get_options_for_action(generic_action, asset_types=asset_types)
