@@ -1,9 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
-import asyncio
-import os
-import tempfile
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -33,10 +30,6 @@ async def test_mysql_dump_uses_mysqldump():
     ssh.exec_command.return_value = (None, stdout, MagicMock())
 
     backend = MagicMock()
-    backend.upload = asyncio.coroutine(lambda *a, **kw: "s3://b/backups/db/mydb/x/ts.sql.gz") if False else None
-    backend.upload = MagicMock(return_value=asyncio.coroutine(lambda: "s3://b/key")())
-
-    import asyncio as _asyncio
 
     async def _fake_upload(local_path, key, cfg):
         return f"s3://b/{key}"
