@@ -753,7 +753,7 @@ def _get_or_create_backup_storage_by_type(client, storage_type, bucket, prefix):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = make_base_parser()
+    parser = make_base_parser("Backup strategies restore live smoke test")
     parser.add_argument(
         "--phases",
         default="GCS_BACKEND,STORAGE_RESTORE,DB_RESTORE",
