@@ -21,3 +21,7 @@ async def put_bytes(key: str, data: bytes, config: dict) -> str:
 
 async def delete_prefix(prefix: str, config: dict) -> dict:
     raise NotImplementedError(f"Storage backend '{_NAME}' is not yet implemented")
+
+
+async def list_prefix(prefix: str, config: dict) -> list:
+    raise NotImplementedError(f"Storage backend '{_NAME}' is not yet implemented")

@@ -92,3 +92,21 @@ async def delete_prefix(prefix: str, config: dict) -> dict:
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor() as pool:
         return await loop.run_in_executor(pool, _sync)
+
+
+async def list_prefix(prefix: str, config: dict) -> list:
+    """List all objects under prefix. Returns list of s3://bucket/key URIs."""
+    bucket = config["bucket"]
+
+    def _sync():
+        s3 = _client(config)
+        uris = []
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                uris.append(f"s3://{bucket}/{obj['Key']}")
+        return uris
+
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor() as pool:
+        return await loop.run_in_executor(pool, _sync)
