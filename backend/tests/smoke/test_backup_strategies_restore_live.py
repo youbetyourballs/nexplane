@@ -77,7 +77,7 @@ def _create_cr(client, change_type, params, connector_id=None, asset_ids=None):
         "target_asset_ids": asset_ids or [SMOKE_ASSET_ID],
     }
     if connector_id:
-        body["connector_id"] = connector_id
+        outcome["_locked_connector_id"] = connector_id
     cr = client.post("/change-requests", json=body)
     # plan
     client.post(f"/change-requests/{cr['id']}/plan")
