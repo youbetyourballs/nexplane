@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 _NAME = "database_dump"
 
-_SUPPORTED_DB_TYPES = ("postgres",)
+_SUPPORTED_DB_TYPES = ("postgres", "mysql", "mongodb")
 
 
 def _ssh_connect(creds: dict):
@@ -107,21 +107,41 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
     captured_at = datetime.now(timezone.utc).isoformat()
     asset_id = str(asset_ids[0]) if asset_ids else "unknown"
     ts = captured_at.replace(":", "-")
-    dump_key = f"{prefix}db/{db_name}/{asset_id}/{ts}.sql.gz"
+
+    # key suffix determined by db_type (used before sync for temp naming, suffix corrected after)
+    suffix = ".archive.gz" if db_type == "mongodb" else ".sql.gz"
+    dump_key = f"{prefix}db/{db_name}/{asset_id}/{ts}{suffix}"
 
     def _sync_dump_and_upload():
         ssh = _ssh_connect(creds)
         try:
-            with tempfile.NamedTemporaryFile(suffix=".sql.gz", delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
                 tmp_path = tmp.name
 
-            # Build pg_dump command; pipe through gzip
-            pg_cmd = (
-                f"PGPASSWORD={_shell_quote(db_password)} "
-                f"pg_dump -h {db_host} -p {db_port} -U {_shell_quote(db_user)} {_shell_quote(db_name)} "
-                f"| gzip"
-            )
-            _, stdout, stderr = ssh.exec_command(pg_cmd)
+            # Build dump command per db_type
+            if db_type == "postgres":
+                dump_cmd = (
+                    f"PGPASSWORD={_shell_quote(db_password)} "
+                    f"pg_dump -h {db_host} -p {db_port} -U {_shell_quote(db_user)} "
+                    f"{_shell_quote(db_name)} | gzip"
+                )
+                dump_format = "sql.gz"
+            elif db_type == "mysql":
+                dump_cmd = (
+                    f"mysqldump -h {db_host} -P {db_port} -u {_shell_quote(db_user)} "
+                    f"-p{_shell_quote(db_password)} {_shell_quote(db_name)} | gzip"
+                )
+                dump_format = "sql.gz"
+            else:  # mongodb
+                dump_cmd = (
+                    f"mongodump --host {db_host} --port {db_port} "
+                    f"-u {_shell_quote(db_user)} -p {_shell_quote(db_password)} "
+                    f"--authenticationDatabase admin --db {_shell_quote(db_name)} "
+                    f"--archive | gzip"
+                )
+                dump_format = "archive.gz"
+
+            _, stdout, stderr = ssh.exec_command(dump_cmd)
             with open(tmp_path, "wb") as f:
                 while True:
                     chunk = stdout.read(65536)
@@ -132,16 +152,16 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             if exit_code != 0:
                 err = stderr.read(2048).decode(errors="replace")
                 raise RuntimeError(
-                    f"database_dump: pg_dump failed (exit={exit_code}): {err}"
+                    f"database_dump: {db_type} dump failed (exit={exit_code}): {err}"
                 )
             size_bytes = os.path.getsize(tmp_path)
-            return tmp_path, size_bytes
+            return tmp_path, size_bytes, dump_format
         finally:
             ssh.close()
 
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor() as pool:
-        tmp_path, size_bytes = await loop.run_in_executor(pool, _sync_dump_and_upload)
+        tmp_path, size_bytes, dump_format = await loop.run_in_executor(pool, _sync_dump_and_upload)
 
     try:
         backend = get_backend(storage_type)
@@ -161,6 +181,7 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
         "config": cfg,
         "artifact_uri": artifact_uri,
         "db_type": db_type,
+        "dump_format": dump_format,
         "database_name": db_name,
         "size_bytes": size_bytes,
     }
