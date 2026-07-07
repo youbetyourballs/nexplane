@@ -269,7 +269,9 @@ def run_phase_storage_restore(client, aws_connector_id, instance_id, args):
     )
     cr1 = _execute_cr(client, cr1_id, timeout=120)
     if cr1["status"] != "completed":
-        fail(f"CR1 storage_sync failed: {cr1.get('status')}")
+        runs = cr1.get("execution_runs") or []
+        run_result = runs[0].get("result") if runs else {}
+        fail(f"CR1 storage_sync failed: {cr1.get('status')} | result: {run_result}")
     refs = _get_artifact_refs(cr1)
     assert refs.get("dest_prefix"), f"CR1 artifact_refs missing dest_prefix: {refs}"
     log(f"  CR1 storage_sync completed, dest_prefix={refs['dest_prefix']}")
@@ -504,7 +506,9 @@ def run_phase_db_restore_mysql(client, ssh_connector_id, args):
     cr3 = _execute_cr(client, cr3_id, timeout=180)
     if cr3["status"] != "completed":
         subprocess.run("docker rm -f smoke-mysql", shell=True)
-        fail(f"MySQL CR3 database_dump failed: {cr3.get('status')}")
+        runs = cr3.get("execution_runs") or []
+        run_result = runs[0].get("result") if runs else {}
+        fail(f"MySQL CR3 database_dump failed: {cr3.get('status')} | result: {run_result}")
     log("  CR3 database_dump (mysql) completed")
 
     cr4_id = _create_cr(
