@@ -2,7 +2,7 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 import asyncio
 import tempfile
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 import os
 
 import pytest
@@ -117,6 +117,7 @@ async def test_mysql_restore_runs_mysql():
     assert result["db_type"] == "mysql"
     calls = [c[0][0] for c in ssh.exec_command.call_args_list]
     assert any("mysql" in c and "SELECT 1" not in c for c in calls)
+    assert any("SELECT 1" in c for c in calls)
 
 
 @pytest.mark.asyncio

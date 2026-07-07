@@ -114,7 +114,8 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
 
     suffix = f".{dump_format}"
     run_id = str(_uuid.uuid4())[:8]
-    local_tmp = tempfile.mktemp(suffix=suffix)
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as _f:
+        local_tmp = _f.name
     remote_tmp = f"/tmp/nexplane-dbrestore-{run_id}{suffix}"
 
     backend = get_backend(storage_type)
@@ -165,7 +166,7 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                 )
                 verify_cmd = (
                     f"mongosh --host {target_db_host} --port {target_db_port} "
-                    f"-u {_shell_quote(target_db_user)} -p {_shell_quote(target_db_password)} "
+                    f"--username {_shell_quote(target_db_user)} --password {_shell_quote(target_db_password)} "
                     f'--eval "db.runCommand({{ping:1}})"'
                 )
 
@@ -231,20 +232,20 @@ async def rollback(params: dict, execution_result: dict, connector) -> dict:
                     f"PGPASSWORD={_shell_quote(target_db_password)} "
                     f"psql -h {target_db_host} -p {target_db_port} "
                     f"-U {_shell_quote(target_db_user)} "
-                    f'-c "DROP DATABASE IF EXISTS {target_db_name}"'
+                    f'-c "DROP DATABASE IF EXISTS \\"{target_db_name}\\""'
                 )
             elif db_type == "mysql":
                 drop_cmd = (
                     f"mysql -h {target_db_host} -P {target_db_port} "
                     f"-u {_shell_quote(target_db_user)} "
                     f"-p{_shell_quote(target_db_password)} "
-                    f'-e "DROP DATABASE IF EXISTS {target_db_name}"'
+                    f'-e "DROP DATABASE IF EXISTS `{target_db_name}`"'
                 )
             else:  # mongodb
                 drop_cmd = (
                     f"mongosh --host {target_db_host} --port {target_db_port} "
-                    f"-u {_shell_quote(target_db_user)} -p {_shell_quote(target_db_password)} "
-                    f"--eval \"db.getSiblingDB('{target_db_name}').dropDatabase()\""
+                    f"--username {_shell_quote(target_db_user)} --password {_shell_quote(target_db_password)} "
+                    f"--eval \"db.getSiblingDB(\\\"{target_db_name}\\\").dropDatabase()\""
                 )
             _, stdout, stderr = ssh.exec_command(drop_cmd)
             exit_code = stdout.channel.recv_exit_status()
