@@ -334,7 +334,7 @@ def run_phase_storage_restore(client, aws_connector_id, instance_id, args):
 
 def _get_or_create_backup_storage(client, connector_id, bucket, prefix):
     """Get or create a backup_storage record for the smoke bucket."""
-    storages = client.get("/backup-storages")
+    storages = client.get("/backup-storage")
     if isinstance(storages, dict):
         storages = storages.get("items", storages.get("data", []))
     if not isinstance(storages, list):
@@ -342,7 +342,7 @@ def _get_or_create_backup_storage(client, connector_id, bucket, prefix):
     for s in storages:
         if s.get("bucket") == bucket:
             return s["id"]
-    storage = client.post("/backup-storages", json={
+    storage = client.post("/backup-storage", json={
         "name": f"smoke-s3-{bucket[:20]}",
         "storage_type": "s3",
         "connector_id": connector_id,
@@ -757,7 +757,7 @@ def _query_count_via_api(client, ssh_connector_id, host, user, password, db, sql
 
 
 def _get_or_create_backup_storage_by_type(client, storage_type, bucket, prefix):
-    storages = client.get("/backup-storages")
+    storages = client.get("/backup-storage")
     if isinstance(storages, dict):
         storages = storages.get("items", storages.get("data", []))
     if not isinstance(storages, list):
@@ -766,7 +766,7 @@ def _get_or_create_backup_storage_by_type(client, storage_type, bucket, prefix):
         if s.get("bucket") == bucket and s.get("storage_type") == storage_type:
             return s["id"]
     aws_creds = get_connector_creds_from_db("aws")
-    storage = client.post("/backup-storages", json={
+    storage = client.post("/backup-storage", json={
         "name": f"smoke-{storage_type}-{bucket[:20]}",
         "storage_type": storage_type,
         "bucket": bucket,
