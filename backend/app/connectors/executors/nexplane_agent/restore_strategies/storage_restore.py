@@ -6,15 +6,15 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
+from app.connectors.executors.nexplane_agent.restore_strategies import _load_source_artifact_refs
+from app.connectors.executors.nexplane_agent.storage_backends import get_backend
+
 logger = logging.getLogger(__name__)
 
 _NAME = "storage_restore"
 
 
 async def restore(params: dict, asset_ids: list, connector) -> dict:
-    from app.connectors.executors.nexplane_agent.restore_strategies import _load_source_artifact_refs
-    from app.connectors.executors.nexplane_agent.storage_backends import get_backend
-
     source_backup_cr_id = params.get("source_backup_cr_id", "")
     if not source_backup_cr_id:
         raise RuntimeError("storage_restore: source_backup_cr_id is required")
@@ -70,8 +70,6 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(params: dict, execution_result: dict, connector) -> dict:
-    from app.connectors.executors.nexplane_agent.storage_backends import get_backend
-
     restored_uris = execution_result.get("restored_uris", [])
     if not restored_uris:
         return {"rolled_back": False, "reason": "no restored_uris in execution_result"}
