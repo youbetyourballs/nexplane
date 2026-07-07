@@ -2,12 +2,18 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 """Restore strategy: download dump from storage backend, restore to target DB via SSH. Data tier."""
 import asyncio
+import io
 import logging
 import os
 import tempfile
 import uuid as _uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+
+import paramiko
+
+from app.connectors.executors.nexplane_agent.restore_strategies import _load_source_artifact_refs
+from app.connectors.executors.nexplane_agent.storage_backends import get_backend
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +27,6 @@ def _shell_quote(s: str) -> str:
 
 
 def _ssh_connect(creds: dict):
-    import paramiko
-    import io
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     connect_kwargs = {
@@ -83,9 +87,6 @@ async def _get_ssh_creds(params: dict, connector, asset_ids: list) -> dict:
 
 
 async def restore(params: dict, asset_ids: list, connector) -> dict:
-    from app.connectors.executors.nexplane_agent.restore_strategies import _load_source_artifact_refs
-    from app.connectors.executors.nexplane_agent.storage_backends import get_backend
-
     source_backup_cr_id = params.get("source_backup_cr_id", "")
     if not source_backup_cr_id:
         raise RuntimeError("database_restore: source_backup_cr_id is required")
