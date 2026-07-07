@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
-import asyncio
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -35,8 +34,8 @@ async def test_restore_copies_objects():
 
     target_backend = MagicMock()
     target_backend.upload = AsyncMock(side_effect=[
-        "s3://target-bucket/restored/file1.tar",
-        "s3://target-bucket/restored/file2.tar",
+        "gcs://target-bucket/restored/file1.tar",
+        "gcs://target-bucket/restored/file2.tar",
     ])
 
     with patch(
@@ -49,7 +48,7 @@ async def test_restore_copies_objects():
         result = await mod.restore(
             {
                 "source_backup_cr_id": "abc",
-                "target_storage_type": "s3",
+                "target_storage_type": "gcs",
                 "target_bucket": "target-bucket",
                 "target_prefix": "restored/",
             },
