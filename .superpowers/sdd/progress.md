@@ -143,6 +143,7 @@ Base commit: d952244
 - Task 4: complete (commits 9414213..6b7bbd1, review clean — database_restore Postgres/MySQL/MongoDB, 5/5 tests on EC2. Fixes: SQL identifier quoting in DROP, tempfile.mktemp→NamedTemporaryFile, MySQL SELECT 1 verify assertion)
 - Task 5: complete (commits 6b7bbd1..9a32b84, ALL SELECTED PHASES PASSED on EC2 — STORAGE_RESTORE ✅, DB_RESTORE/mysql ✅, DB_RESTORE/mongodb ✅. GCS_BACKEND skipped (no GCP bucket connector). Fixes: authorized_keys perms, disk prune, mariadb105/mongodb tools installed, CREATE DATABASE IF NOT EXISTS before mysql restore, skip auth args for unauthenticated MongoDB, redirect mongodump stderr to prevent paramiko deadlock)
 ## BACKUP RESTORE STRATEGIES PLAN COMPLETE — Final review: Ready to merge
-- Deferred: I1 — MongoDB rollback doesn't skip auth args when target_db_user is empty (unauthenticated MongoDB only; fix next session)
-- Deferred: GCS_BACKEND live smoke — needs GCP connector with gcs_bucket creds registered in platform DB
-- Deferred: DB_RESTORE/postgres live smoke — needs SMOKE_RDS_HOST + SMOKE_RDS_PASSWORD env vars set on EC2
+- Deferred I1 RESOLVED: MongoDB rollback auth guard fixed (commit 7defbca)
+- Deferred GCS_BACKEND RESOLVED: bucket nexplane-smoke-backup-test created in GCP project nexplane; gcs_bucket field added to GCP connector creds; GCS_BACKEND ✅ PASSED on EC2 (commit 0d7093f)
+- Deferred DB_RESTORE/postgres RESOLVED: rewritten to use self-contained Docker postgres:15 on port 5433 (no RDS required); DB_RESTORE/postgres ✅ PASSED on EC2 (commit 0d7093f)
+## ALL DEFERRED ITEMS RESOLVED — GCS_BACKEND ✅, DB_RESTORE/postgres ✅, I1 ✅
