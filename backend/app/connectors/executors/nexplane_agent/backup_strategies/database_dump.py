@@ -88,12 +88,24 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             "database_dump: connector must have SSH credentials (hostname/host, username, private_key/password)"
         )
 
-    # Database connection details: prefer explicit params, fall back to connector creds
+    # Database connection details: prefer explicit params, fall back to connector creds.
+    # Use None-sentinel so that an explicit empty string in params means "no credential"
+    # rather than falling through to SSH connector's username/password fields.
     db_host = params.get("db_host") or creds.get("db_host", "localhost")
     db_port = params.get("db_port") or creds.get("db_port", 5432)
     db_name = params.get("database_name") or creds.get("dbname") or creds.get("database_name", "")
-    db_user = params.get("db_user") or creds.get("db_user") or creds.get("user") or creds.get("username", "")
-    db_password = params.get("db_password") or creds.get("db_password") or creds.get("password", "")
+    _db_user_param = params.get("db_user")
+    db_user = (
+        _db_user_param
+        if _db_user_param is not None
+        else (creds.get("db_user") or creds.get("user") or "")
+    )
+    _db_pass_param = params.get("db_password")
+    db_password = (
+        _db_pass_param
+        if _db_pass_param is not None
+        else (creds.get("db_password") or creds.get("password") or "")
+    )
 
     if not db_name:
         raise RuntimeError("database_dump: database_name is required")
