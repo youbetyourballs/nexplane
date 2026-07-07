@@ -158,10 +158,16 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                     f"mysql -h {target_db_host} -P {target_db_port} "
                     f"-u {_shell_quote(target_db_user)} "
                     f"-p{_shell_quote(target_db_password)} "
-                    f"-e \"CREATE DATABASE IF NOT EXISTS `{target_db_name}`\""
+                    f"-e 'CREATE DATABASE IF NOT EXISTS `{target_db_name}`'"
                 )
                 _, _co, _ce = ssh.exec_command(create_db_cmd)
-                _co.channel.recv_exit_status()  # wait, ignore failure
+                _create_exit = _co.channel.recv_exit_status()
+                if _create_exit != 0:
+                    _cerr = _ce.read(1024).decode(errors="replace").strip()
+                    raise RuntimeError(
+                        f"database_restore: failed to create target database "
+                        f"'{target_db_name}' (exit={_create_exit}): {_cerr}"
+                    )
 
                 restore_cmd = (
                     f"gunzip -c {remote_tmp} | "
@@ -176,17 +182,26 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                     f'-e "SELECT 1"'
                 )
             else:  # mongodb
+                _mongo_auth_restore = (
+                    f"--username {_shell_quote(target_db_user)} "
+                    f"--password {_shell_quote(target_db_password)} "
+                    f"--authenticationDatabase admin "
+                    if target_db_user else ""
+                )
                 restore_cmd = (
                     f"gunzip -c {remote_tmp} | "
                     f"mongorestore --host {target_db_host} --port {target_db_port} "
-                    f"--username {_shell_quote(target_db_user)} "
-                    f"--password {_shell_quote(target_db_password)} "
-                    f"--authenticationDatabase admin --archive "
+                    f"{_mongo_auth_restore}"
+                    f"--archive "
                     f"--db {_shell_quote(target_db_name)}"
+                )
+                _mongo_auth_verify = (
+                    f"--username {_shell_quote(target_db_user)} --password {_shell_quote(target_db_password)} "
+                    if target_db_user else ""
                 )
                 verify_cmd = (
                     f"mongosh --host {target_db_host} --port {target_db_port} "
-                    f"--username {_shell_quote(target_db_user)} --password {_shell_quote(target_db_password)} "
+                    f"{_mongo_auth_verify}"
                     f'--eval "db.runCommand({{ping:1}})"'
                 )
 
@@ -259,7 +274,7 @@ async def rollback(params: dict, execution_result: dict, connector) -> dict:
                     f"mysql -h {target_db_host} -P {target_db_port} "
                     f"-u {_shell_quote(target_db_user)} "
                     f"-p{_shell_quote(target_db_password)} "
-                    f'-e "DROP DATABASE IF EXISTS `{target_db_name}`"'
+                    f"-e 'DROP DATABASE IF EXISTS `{target_db_name}`'"
                 )
             else:  # mongodb
                 drop_cmd = (

@@ -133,10 +133,15 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
                 )
                 dump_format = "sql.gz"
             else:  # mongodb
+                _mongo_auth = (
+                    f"-u {_shell_quote(db_user)} -p {_shell_quote(db_password)} "
+                    f"--authenticationDatabase admin "
+                    if db_user else ""
+                )
                 dump_cmd = (
                     f"mongodump --host {db_host} --port {db_port} "
-                    f"-u {_shell_quote(db_user)} -p {_shell_quote(db_password)} "
-                    f"--authenticationDatabase admin --db {_shell_quote(db_name)} "
+                    f"{_mongo_auth}"
+                    f"--db {_shell_quote(db_name)} "
                     f"--archive | gzip"
                 )
                 dump_format = "archive.gz"
