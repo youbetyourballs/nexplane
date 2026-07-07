@@ -68,10 +68,12 @@ def _rollback_cr(client, cr_id, extra_params=None, timeout=300):
 
 
 def _create_cr(client, change_type, params, connector_id=None, asset_ids=None):
+    outcome = dict(params)
+    outcome.setdefault("rollback_strategy", "none")
     body = {
         "title": f"smoke-{change_type}-{uuid.uuid4().hex[:6]}",
         "change_type": change_type,
-        "desired_outcome": params,
+        "desired_outcome": outcome,
         "target_asset_ids": asset_ids or [SMOKE_ASSET_ID],
     }
     if connector_id:
