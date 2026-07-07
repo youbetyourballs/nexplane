@@ -130,6 +130,10 @@ async def _executor_fallback(
             rollback_result = await _mod.rollback(
                 cr.desired_outcome or {}, _step1, _connector
             )
+            # Executor ran and explicitly declared nothing to undo — tag so the
+            # status logic can distinguish this from "no executor found" or an exception.
+            if isinstance(rollback_result, dict) and rollback_result.get("rolled_back") is False:
+                rollback_result["_rollback_no_op"] = True
         else:
             rollback_result = {"rolled_back": False, "reason": "no_rollback_function_found"}
     except Exception as _exc:
@@ -204,7 +208,11 @@ async def execute_cr_rollback(
                     # No steps to roll back — treat as successful (nothing to undo).
                     step_results = [{"success": True}]
             if result.get("rolled_back") is False and not step_results:
-                rollback_ran = False
+                if result.get("_rollback_no_op"):
+                    # Executor ran and decided nothing to undo — count as success.
+                    step_results = [{"success": True}]
+                else:
+                    rollback_ran = False
         else:
             step_results = []
         cr.status = _determine_rollback_status(step_results, rollback_ran)
