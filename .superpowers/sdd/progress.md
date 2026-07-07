@@ -142,4 +142,7 @@ Base commit: d952244
 - Task 3: complete (commits 1a05f12..9414213, review clean — database_dump MySQL+MongoDB, 3/3 tests on EC2. Fixes: module-level imports, asyncio.coroutine removal)
 - Task 4: complete (commits 9414213..6b7bbd1, review clean — database_restore Postgres/MySQL/MongoDB, 5/5 tests on EC2. Fixes: SQL identifier quoting in DROP, tempfile.mktemp→NamedTemporaryFile, MySQL SELECT 1 verify assertion)
 - Task 5: complete (commits 6b7bbd1..9a32b84, ALL SELECTED PHASES PASSED on EC2 — STORAGE_RESTORE ✅, DB_RESTORE/mysql ✅, DB_RESTORE/mongodb ✅. GCS_BACKEND skipped (no GCP bucket connector). Fixes: authorized_keys perms, disk prune, mariadb105/mongodb tools installed, CREATE DATABASE IF NOT EXISTS before mysql restore, skip auth args for unauthenticated MongoDB, redirect mongodump stderr to prevent paramiko deadlock)
-## BACKUP RESTORE STRATEGIES PLAN COMPLETE
+## BACKUP RESTORE STRATEGIES PLAN COMPLETE — Final review: Ready to merge
+- Deferred: I1 — MongoDB rollback doesn't skip auth args when target_db_user is empty (unauthenticated MongoDB only; fix next session)
+- Deferred: GCS_BACKEND live smoke — needs GCP connector with gcs_bucket creds registered in platform DB
+- Deferred: DB_RESTORE/postgres live smoke — needs SMOKE_RDS_HOST + SMOKE_RDS_PASSWORD env vars set on EC2
