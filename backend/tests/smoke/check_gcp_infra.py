@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
-"""One-shot script: print GCP SA info + list GCS buckets, then check RDS."""
+"""One-shot script: print GCP SA info + list GCS buckets."""
 import asyncio
 import json
 import os
@@ -14,23 +14,27 @@ sys.path.insert(0, "/app")
 
 async def main():
     from app.database import AsyncSessionLocal
-    from sqlalchemy import text
+    from app.models.connector import Connector
+    from app.services.connector_service import _attach_credentials
+    from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
         r = await db.execute(
-            text("SELECT credentials FROM connectors WHERE connector_type='gcp' LIMIT 1")
+            select(Connector).where(Connector.connector_type == "gcp")
         )
-        row = r.fetchone()
+        conn = r.scalars().first()
+        if not conn:
+            print("NO GCP CONNECTOR FOUND")
+            return
+        await _attach_credentials(conn, db)
+        creds = getattr(conn, "credentials", {}) or {}
 
-    if not row:
-        print("NO GCP CONNECTOR FOUND")
-        return
+    print("GCP connector name:", conn.name)
+    print("GCP cred keys:", list(creds.keys()))
 
-    creds = row[0] if isinstance(row[0], dict) else json.loads(row[0])
     sa_raw = creds.get("service_account_key_json", "")
     if not sa_raw:
-        print("GCP connector has no service_account_key_json")
-        print("Keys present:", list(creds.keys()))
+        print("No service_account_key_json in creds")
         return
 
     sa = json.loads(sa_raw) if isinstance(sa_raw, str) else sa_raw
@@ -54,7 +58,7 @@ async def main():
         print("=== GCS buckets ===")
         print(r2.stdout[:1000] or "(none)")
         if r2.stderr:
-            print("stderr:", r2.stderr[:300])
+            print("stderr:", r2.stderr[:500])
     finally:
         os.unlink(key_path)
 
