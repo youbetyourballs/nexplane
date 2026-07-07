@@ -3,6 +3,7 @@
 import asyncio
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch, call
+import os
 
 import pytest
 
@@ -58,12 +59,18 @@ def _make_ssh(exit_code=0):
     return ssh, sftp
 
 
+async def _backend_download_to_file(artifact_uri, local_tmp, cfg):
+    """Mock backend that writes a dummy file."""
+    with open(local_tmp, "wb") as f:
+        f.write(b"test dump content")
+
+
 @pytest.mark.asyncio
 async def test_postgres_restore_runs_psql():
     mod = _mod()
     ssh, sftp = _make_ssh()
     backend = MagicMock()
-    backend.download = AsyncMock()
+    backend.download = AsyncMock(side_effect=_backend_download_to_file)
 
     with patch(
         "app.connectors.executors.nexplane_agent.restore_strategies.database_restore._load_source_artifact_refs",
@@ -91,7 +98,7 @@ async def test_mysql_restore_runs_mysql():
     mod = _mod()
     ssh, sftp = _make_ssh()
     backend = MagicMock()
-    backend.download = AsyncMock()
+    backend.download = AsyncMock(side_effect=_backend_download_to_file)
 
     with patch(
         "app.connectors.executors.nexplane_agent.restore_strategies.database_restore._load_source_artifact_refs",
@@ -117,7 +124,7 @@ async def test_mongodb_restore_runs_mongorestore():
     mod = _mod()
     ssh, sftp = _make_ssh()
     backend = MagicMock()
-    backend.download = AsyncMock()
+    backend.download = AsyncMock(side_effect=_backend_download_to_file)
 
     with patch(
         "app.connectors.executors.nexplane_agent.restore_strategies.database_restore._load_source_artifact_refs",
