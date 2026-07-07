@@ -226,8 +226,8 @@ def run_phase_storage_restore(client, aws_connector_id, instance_id, args):
     s3_client = boto3.client(
         "s3",
         region_name=SMOKE_REGION,
-        aws_access_key_id=aws_creds.get("aws_access_key_id"),
-        aws_secret_access_key=aws_creds.get("aws_secret_access_key"),
+        aws_access_key_id=aws_creds.get("access_key_id"),
+        aws_secret_access_key=aws_creds.get("secret_access_key"),
     )
 
     # Setup: ensure smoke bucket and source object exist
@@ -683,8 +683,8 @@ def _get_or_create_ssh_connector(client, instance_id, aws_connector_id):
     ec2 = boto3.client(
         "ec2",
         region_name=SMOKE_REGION,
-        aws_access_key_id=aws_creds.get("aws_access_key_id"),
-        aws_secret_access_key=aws_creds.get("aws_secret_access_key"),
+        aws_access_key_id=aws_creds.get("access_key_id"),
+        aws_secret_access_key=aws_creds.get("secret_access_key"),
     )
     desc = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
@@ -693,8 +693,8 @@ def _get_or_create_ssh_connector(client, instance_id, aws_connector_id):
     ssm = boto3.client(
         "ssm",
         region_name=SMOKE_REGION,
-        aws_access_key_id=aws_creds.get("aws_access_key_id"),
-        aws_secret_access_key=aws_creds.get("aws_secret_access_key"),
+        aws_access_key_id=aws_creds.get("access_key_id"),
+        aws_secret_access_key=aws_creds.get("secret_access_key"),
     )
     try:
         pk = ssm.get_parameter(Name="/nexplane/smoke/ssh-private-key", WithDecryption=True)["Parameter"]["Value"]
@@ -708,9 +708,11 @@ def _get_or_create_ssh_connector(client, instance_id, aws_connector_id):
     })
     conn_id = conn["id"]
     client.put(f"/connectors/{conn_id}/credentials", json={
-        "hostname": private_ip,
-        "username": "ec2-user",
-        "private_key": pk,
+        "credentials": {
+            "hostname": private_ip,
+            "username": "ec2-user",
+            "private_key": pk,
+        }
     })
     return conn_id
 
@@ -771,8 +773,8 @@ def _get_or_create_backup_storage_by_type(client, storage_type, bucket, prefix):
         "prefix": prefix,
         "config": {
             "bucket": bucket,
-            "aws_access_key_id": aws_creds.get("aws_access_key_id", ""),
-            "aws_secret_access_key": aws_creds.get("aws_secret_access_key", ""),
+            "aws_access_key_id": aws_creds.get("access_key_id", ""),
+            "aws_secret_access_key": aws_creds.get("secret_access_key", ""),
             "region": SMOKE_REGION,
         },
     })
