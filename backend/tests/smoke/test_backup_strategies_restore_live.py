@@ -47,7 +47,7 @@ SMOKE_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 def _wait_cr(client, cr_id, timeout=300, poll=5):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        cr = client.get(f"/change-requests/{cr_id}").json()
+        cr = client.get(f"/change-requests/{cr_id}")
         status = cr.get("status")
         if status in ("completed", "failed", "rollback_completed", "rollback_failed"):
             return cr
@@ -68,20 +68,20 @@ def _rollback_cr(client, cr_id, extra_params=None, timeout=300):
 
 def _create_cr(client, change_type, params, connector_id=None, asset_ids=None):
     body = {
+        "title": f"smoke-{change_type}-{uuid.uuid4().hex[:6]}",
         "change_type": change_type,
-        "parameters": params,
-        "description": f"smoke-{change_type}-{uuid.uuid4().hex[:6]}",
+        "desired_outcome": params,
     }
     if connector_id:
         body["connector_id"] = connector_id
     if asset_ids:
-        body["asset_ids"] = asset_ids
-    resp = client.post("/change-requests", json=body)
-    cr = resp.json()
+        body["target_asset_ids"] = asset_ids
+    cr = client.post("/change-requests", json=body)
     # plan
     client.post(f"/change-requests/{cr['id']}/plan")
     _wait_cr_planned(client, cr["id"])
-    # approve
+    # submit for approval then approve
+    client.post(f"/change-requests/{cr['id']}/submit-for-approval")
     client.post(f"/change-requests/{cr['id']}/approve", json={"decision": "approved"})
     return cr["id"]
 
@@ -89,7 +89,7 @@ def _create_cr(client, change_type, params, connector_id=None, asset_ids=None):
 def _wait_cr_planned(client, cr_id, timeout=60):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        cr = client.get(f"/change-requests/{cr_id}").json()
+        cr = client.get(f"/change-requests/{cr_id}")
         if cr.get("status") in ("planned", "awaiting_approval"):
             return
         if cr.get("status") in ("failed",):
@@ -128,9 +128,17 @@ def run_phase_gcs_backend(args):
     if not gcp_creds:
         fail("PHASE_GCS_BACKEND: no GCP connector creds found in DB — register a GCP connector first")
 
-    bucket = gcp_creds.get("bucket") or gcp_creds.get("gcs_bucket")
+    bucket = (
+        getattr(args, "gcs_bucket", None)
+        or gcp_creds.get("bucket")
+        or gcp_creds.get("gcs_bucket")
+    )
     if not bucket:
-        fail("PHASE_GCS_BACKEND: GCP connector creds missing 'bucket' or 'gcs_bucket' field")
+        fail(
+            "PHASE_GCS_BACKEND: GCP connector creds missing 'bucket'/'gcs_bucket' field and "
+            "--gcs-bucket not provided. Pass --gcs-bucket <name> or add 'gcs_bucket' to the "
+            "GCP connector credentials."
+        )
 
     key_json = (
         gcp_creds.get("service_account_key_json")
@@ -222,8 +230,24 @@ def run_phase_storage_restore(client, aws_connector_id, instance_id, args):
         aws_secret_access_key=aws_creds.get("aws_secret_access_key"),
     )
 
-    # Setup: ensure source object exists
+    # Setup: ensure smoke bucket and source object exist
     smoke_bucket = aws_creds.get("bucket") or aws_creds.get("s3_bucket") or "nexplane-smoke-backups"
+    # Create bucket if it doesn't exist
+    try:
+        s3_client.head_bucket(Bucket=smoke_bucket)
+        log(f"  bucket s3://{smoke_bucket} exists")
+    except Exception:
+        log(f"  creating bucket s3://{smoke_bucket}")
+        try:
+            if SMOKE_REGION == "us-east-1":
+                s3_client.create_bucket(Bucket=smoke_bucket)
+            else:
+                s3_client.create_bucket(
+                    Bucket=smoke_bucket,
+                    CreateBucketConfiguration={"LocationConstraint": SMOKE_REGION},
+                )
+        except Exception as e:
+            fail(f"PHASE_STORAGE_RESTORE: could not create bucket {smoke_bucket}: {e}")
     source_key = "smoke/storage_restore_source.txt"
     s3_client.put_object(Bucket=smoke_bucket, Key=source_key, Body=b"nexplane-storage-restore-smoke")
     log(f"  seeded s3://{smoke_bucket}/{source_key}")
@@ -310,19 +334,22 @@ def run_phase_storage_restore(client, aws_connector_id, instance_id, args):
 
 def _get_or_create_backup_storage(client, connector_id, bucket, prefix):
     """Get or create a backup_storage record for the smoke bucket."""
-    resp = client.get("/backup-storages")
-    storages = resp.json() if resp.status_code == 200 else []
-    for s in (storages if isinstance(storages, list) else storages.get("items", [])):
+    storages = client.get("/backup-storages")
+    if isinstance(storages, dict):
+        storages = storages.get("items", storages.get("data", []))
+    if not isinstance(storages, list):
+        storages = []
+    for s in storages:
         if s.get("bucket") == bucket:
             return s["id"]
-    resp = client.post("/backup-storages", json={
+    storage = client.post("/backup-storages", json={
         "name": f"smoke-s3-{bucket[:20]}",
         "storage_type": "s3",
         "connector_id": connector_id,
         "bucket": bucket,
         "prefix": prefix,
     })
-    return resp.json()["id"]
+    return storage["id"]
 
 
 # ── PHASE_DB_RESTORE ──────────────────────────────────────────────────────────
@@ -642,10 +669,11 @@ def run_phase_db_restore(client, aws_connector_id, instance_id, args):
 def _get_or_create_ssh_connector(client, instance_id, aws_connector_id):
     """Return or create a nexplane_agent SSH connector for the smoke EC2 instance."""
     # Check for existing connector named nexplane-smoke-ssh
-    resp = client.get("/connectors")
-    connectors = resp.json() if resp.status_code == 200 else []
+    connectors = client.get("/connectors")
     if isinstance(connectors, dict):
-        connectors = connectors.get("items", [])
+        connectors = connectors.get("items", connectors.get("data", []))
+    if not isinstance(connectors, list):
+        connectors = []
     for c in connectors:
         if c.get("name") == "nexplane-smoke-ssh" and c.get("connector_type") == "nexplane_agent":
             return c["id"]
@@ -673,12 +701,12 @@ def _get_or_create_ssh_connector(client, instance_id, aws_connector_id):
     except Exception:
         pk = ""
 
-    resp = client.post("/connectors", json={
+    conn = client.post("/connectors", json={
         "name": "nexplane-smoke-ssh",
         "connector_type": "nexplane_agent",
         "description": "smoke SSH connector for database_dump/restore tests",
     })
-    conn_id = resp.json()["id"]
+    conn_id = conn["id"]
     client.put(f"/connectors/{conn_id}/credentials", json={
         "hostname": private_ip,
         "username": "ec2-user",
@@ -727,15 +755,16 @@ def _query_count_via_api(client, ssh_connector_id, host, user, password, db, sql
 
 
 def _get_or_create_backup_storage_by_type(client, storage_type, bucket, prefix):
-    resp = client.get("/backup-storages")
-    storages = resp.json() if resp.status_code == 200 else []
+    storages = client.get("/backup-storages")
     if isinstance(storages, dict):
-        storages = storages.get("items", [])
+        storages = storages.get("items", storages.get("data", []))
+    if not isinstance(storages, list):
+        storages = []
     for s in storages:
         if s.get("bucket") == bucket and s.get("storage_type") == storage_type:
             return s["id"]
     aws_creds = get_connector_creds_from_db("aws")
-    resp = client.post("/backup-storages", json={
+    storage = client.post("/backup-storages", json={
         "name": f"smoke-{storage_type}-{bucket[:20]}",
         "storage_type": storage_type,
         "bucket": bucket,
@@ -747,7 +776,7 @@ def _get_or_create_backup_storage_by_type(client, storage_type, bucket, prefix):
             "region": SMOKE_REGION,
         },
     })
-    return resp.json()["id"]
+    return storage["id"]
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -759,8 +788,9 @@ def main():
         default="GCS_BACKEND,STORAGE_RESTORE,DB_RESTORE",
         help="Comma-separated phases to run",
     )
-    parser.add_argument("--aws-connector-id", default="666e237d")
+    parser.add_argument("--aws-connector-id", default="666e237d-bfcf-43a5-ae24-f1a0b4f2c5cc")
     parser.add_argument("--instance-id", default="i-050bab85006f0b73c")
+    parser.add_argument("--gcs-bucket", default="", help="GCS bucket for GCS_BACKEND phase (overrides connector creds)")
     args = parser.parse_args()
 
     phases = [p.strip().upper() for p in args.phases.split(",")]
