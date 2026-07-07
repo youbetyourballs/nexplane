@@ -138,11 +138,15 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
                     f"--authenticationDatabase admin "
                     if db_user else ""
                 )
+                # Redirect mongodump stderr to /dev/null to avoid a paramiko
+                # deadlock: mongodump writes progress to stderr; if the SSH
+                # channel's stderr buffer fills up the process blocks, which
+                # stalls gzip and makes the stdout read loop hang forever.
                 dump_cmd = (
                     f"mongodump --host {db_host} --port {db_port} "
                     f"{_mongo_auth}"
                     f"--db {_shell_quote(db_name)} "
-                    f"--archive | gzip"
+                    f"--archive 2>/dev/null | gzip"
                 )
                 dump_format = "archive.gz"
 
