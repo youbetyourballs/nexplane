@@ -130,6 +130,16 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                 sftp.close()
 
             if db_type == "postgres":
+                # Ensure the target database exists before restoring into it.
+                create_db_cmd = (
+                    f"PGPASSWORD={_shell_quote(target_db_password)} "
+                    f"psql -h {target_db_host} -p {target_db_port} "
+                    f"-U {_shell_quote(target_db_user)} postgres "
+                    f'-c "CREATE DATABASE {target_db_name}" 2>&1 || true'
+                )
+                _, _co, _ce = ssh.exec_command(create_db_cmd)
+                _co.channel.recv_exit_status()  # wait, ignore failure (already exists is fine)
+
                 restore_cmd = (
                     f"gunzip -c {remote_tmp} | "
                     f"PGPASSWORD={_shell_quote(target_db_password)} "
@@ -143,6 +153,16 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                     f'-c "SELECT 1"'
                 )
             elif db_type == "mysql":
+                # Ensure the target database exists before restoring into it.
+                create_db_cmd = (
+                    f"mysql -h {target_db_host} -P {target_db_port} "
+                    f"-u {_shell_quote(target_db_user)} "
+                    f"-p{_shell_quote(target_db_password)} "
+                    f"-e \"CREATE DATABASE IF NOT EXISTS `{target_db_name}`\""
+                )
+                _, _co, _ce = ssh.exec_command(create_db_cmd)
+                _co.channel.recv_exit_status()  # wait, ignore failure
+
                 restore_cmd = (
                     f"gunzip -c {remote_tmp} | "
                     f"mysql -h {target_db_host} -P {target_db_port} "
