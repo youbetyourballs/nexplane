@@ -295,7 +295,13 @@ def run_phase_storage_restore(client, aws_connector_id, instance_id, args):
     if cr2["status"] != "completed":
         fail(f"CR2 storage_restore failed: {cr2.get('status')}")
     cr2_result = _get_execution_result(cr2)
-    restored_uris = cr2_result.get("restored_uris", [])
+    # restored_uris may be at top level or nested in execution.steps[0].result
+    restored_uris = cr2_result.get("restored_uris") or []
+    if not restored_uris:
+        for step in (cr2_result.get("execution") or {}).get("steps", []):
+            restored_uris = (step.get("result") or {}).get("restored_uris") or []
+            if restored_uris:
+                break
     assert len(restored_uris) > 0, f"CR2 returned no restored_uris: {cr2_result}"
     log(f"  CR2 storage_restore completed, {len(restored_uris)} objects restored")
 
