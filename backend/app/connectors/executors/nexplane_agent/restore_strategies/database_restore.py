@@ -277,9 +277,13 @@ async def rollback(params: dict, execution_result: dict, connector) -> dict:
                     f"-e 'DROP DATABASE IF EXISTS `{target_db_name}`'"
                 )
             else:  # mongodb
+                _mongo_auth_drop = (
+                    f"--username {_shell_quote(target_db_user)} --password {_shell_quote(target_db_password)} "
+                    if target_db_user else ""
+                )
                 drop_cmd = (
                     f"mongosh --host {target_db_host} --port {target_db_port} "
-                    f"--username {_shell_quote(target_db_user)} --password {_shell_quote(target_db_password)} "
+                    f"{_mongo_auth_drop}"
                     f"--eval \"db.getSiblingDB(\\\"{target_db_name}\\\").dropDatabase()\""
                 )
             _, stdout, stderr = ssh.exec_command(drop_cmd)
