@@ -41,6 +41,7 @@ from smoke_helpers import (
 )
 
 SMOKE_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+SMOKE_ASSET_ID = os.getenv("SMOKE_ASSET_ID", "43b01bc2-281f-4403-ae00-e51d2b0a7f06")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -71,11 +72,10 @@ def _create_cr(client, change_type, params, connector_id=None, asset_ids=None):
         "title": f"smoke-{change_type}-{uuid.uuid4().hex[:6]}",
         "change_type": change_type,
         "desired_outcome": params,
+        "target_asset_ids": asset_ids or [SMOKE_ASSET_ID],
     }
     if connector_id:
         body["connector_id"] = connector_id
-    if asset_ids:
-        body["target_asset_ids"] = asset_ids
     cr = client.post("/change-requests", json=body)
     # plan
     client.post(f"/change-requests/{cr['id']}/plan")
