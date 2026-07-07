@@ -50,7 +50,7 @@ def _wait_cr(client, cr_id, timeout=300, poll=5):
     while time.time() < deadline:
         cr = client.get(f"/change-requests/{cr_id}")
         status = cr.get("status")
-        if status in ("completed", "failed", "rollback_completed", "rollback_failed"):
+        if status in ("completed", "failed", "rollback_completed", "rollback_failed", "rolled_back"):
             return cr
         time.sleep(poll)
     fail(f"CR {cr_id} did not complete within {timeout}s")
@@ -318,7 +318,7 @@ def run_phase_storage_restore(client, aws_connector_id, instance_id, args):
 
     # Rollback LIFO: CR2 first, then CR1
     rb2 = _rollback_cr(client, cr2_id)
-    if rb2["status"] not in ("rollback_completed",):
+    if rb2["status"] not in ("rollback_completed", "rolled_back"):
         fail(f"CR2 rollback failed: {rb2.get('status')}")
     # Verify objects gone
     for uri in restored_uris:
@@ -335,7 +335,7 @@ def run_phase_storage_restore(client, aws_connector_id, instance_id, args):
     log("  CR2 rollback completed, objects deleted")
 
     rb1 = _rollback_cr(client, cr1_id)
-    if rb1["status"] not in ("rollback_completed",):
+    if rb1["status"] not in ("rollback_completed", "rolled_back"):
         fail(f"CR1 rollback failed: {rb1.get('status')}")
     log("  CR1 rollback completed")
 
@@ -458,12 +458,12 @@ def run_phase_db_restore_postgres(client, ssh_connector_id, rds_host, rds_user, 
         "target_db_password": rds_password,
         "db_type": "postgres",
     })
-    if rb2["status"] not in ("rollback_completed",):
+    if rb2["status"] not in ("rollback_completed", "rolled_back"):
         fail(f"Postgres CR2 rollback failed: {rb2.get('status')}")
     log(f"  CR2 rollback completed — {copy_db} dropped")
 
     rb1 = _rollback_cr(client, cr1_id)
-    if rb1["status"] not in ("rollback_completed",):
+    if rb1["status"] not in ("rollback_completed", "rolled_back"):
         fail(f"Postgres CR1 rollback failed: {rb1.get('status')}")
     log("  CR1 rollback completed — artifact deleted")
     log("  DB_RESTORE/postgres: PASSED")
@@ -558,10 +558,10 @@ def run_phase_db_restore_mysql(client, ssh_connector_id, args):
         "target_db_password": "smokepass",
         "db_type": "mysql",
     })
-    if rb4["status"] not in ("rollback_completed",):
+    if rb4["status"] not in ("rollback_completed", "rolled_back"):
         fail(f"MySQL CR4 rollback failed: {rb4.get('status')}")
     rb3 = _rollback_cr(client, cr3_id)
-    if rb3["status"] not in ("rollback_completed",):
+    if rb3["status"] not in ("rollback_completed", "rolled_back"):
         fail(f"MySQL CR3 rollback failed: {rb3.get('status')}")
     subprocess.run("docker rm -f smoke-mysql", shell=True)
     log("  DB_RESTORE/mysql: PASSED")
@@ -649,10 +649,10 @@ def run_phase_db_restore_mongodb(client, ssh_connector_id, args):
         "target_db_password": "",
         "db_type": "mongodb",
     })
-    if rb6["status"] not in ("rollback_completed",):
+    if rb6["status"] not in ("rollback_completed", "rolled_back"):
         fail(f"MongoDB CR6 rollback failed: {rb6.get('status')}")
     rb5 = _rollback_cr(client, cr5_id)
-    if rb5["status"] not in ("rollback_completed",):
+    if rb5["status"] not in ("rollback_completed", "rolled_back"):
         fail(f"MongoDB CR5 rollback failed: {rb5.get('status')}")
     subprocess.run("docker rm -f smoke-mongo", shell=True)
     log("  DB_RESTORE/mongodb: PASSED")
