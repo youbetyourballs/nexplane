@@ -334,20 +334,27 @@ def run_phase_storage_restore(client, aws_connector_id, instance_id, args):
 
 def _get_or_create_backup_storage(client, connector_id, bucket, prefix):
     """Get or create a backup_storage record for the smoke bucket."""
+    storage_name = f"smoke-s3-{bucket[:20]}"
     storages = client.get("/backup-storage")
     if isinstance(storages, dict):
         storages = storages.get("items", storages.get("data", []))
     if not isinstance(storages, list):
         storages = []
     for s in storages:
-        if s.get("bucket") == bucket:
+        if s.get("name") == storage_name:
             return s["id"]
+    aws_creds = get_connector_creds_from_db("aws")
     storage = client.post("/backup-storage", json={
-        "name": f"smoke-s3-{bucket[:20]}",
+        "name": storage_name,
         "storage_type": "s3",
-        "connector_id": connector_id,
-        "bucket": bucket,
-        "prefix": prefix,
+        "config": {
+            "bucket": bucket,
+            "prefix": prefix,
+            "connector_id": connector_id,
+            "aws_access_key_id": aws_creds.get("access_key_id", ""),
+            "aws_secret_access_key": aws_creds.get("secret_access_key", ""),
+            "region": SMOKE_REGION,
+        },
     })
     return storage["id"]
 
@@ -757,22 +764,22 @@ def _query_count_via_api(client, ssh_connector_id, host, user, password, db, sql
 
 
 def _get_or_create_backup_storage_by_type(client, storage_type, bucket, prefix):
+    storage_name = f"smoke-{storage_type}-{bucket[:20]}"
     storages = client.get("/backup-storage")
     if isinstance(storages, dict):
         storages = storages.get("items", storages.get("data", []))
     if not isinstance(storages, list):
         storages = []
     for s in storages:
-        if s.get("bucket") == bucket and s.get("storage_type") == storage_type:
+        if s.get("name") == storage_name and s.get("storage_type") == storage_type:
             return s["id"]
     aws_creds = get_connector_creds_from_db("aws")
     storage = client.post("/backup-storage", json={
-        "name": f"smoke-{storage_type}-{bucket[:20]}",
+        "name": storage_name,
         "storage_type": storage_type,
-        "bucket": bucket,
-        "prefix": prefix,
         "config": {
             "bucket": bucket,
+            "prefix": prefix,
             "aws_access_key_id": aws_creds.get("access_key_id", ""),
             "aws_secret_access_key": aws_creds.get("secret_access_key", ""),
             "region": SMOKE_REGION,
