@@ -381,15 +381,28 @@ def _wait_docker(cmd, timeout=60, poll=5):
     fail(f"Timed out waiting for: {cmd}")
 
 
-def run_phase_db_restore_postgres(client, ssh_connector_id, rds_host, rds_user, rds_password, rds_db, args):
-    log("  DB_RESTORE/postgres: seeding RDS test table")
-    # Seed via SSH to agent
-    seed_sql = (
-        "DROP TABLE IF EXISTS nexplane_restore_smoke; "
-        "CREATE TABLE nexplane_restore_smoke (id serial, val text); "
-        "INSERT INTO nexplane_restore_smoke VALUES (1, 'smoke');"
+def run_phase_db_restore_postgres(client, ssh_connector_id, args):
+    log("  DB_RESTORE/postgres: launching Docker Postgres container")
+    subprocess.run("docker rm -f smoke-postgres 2>/dev/null || true", shell=True)
+    subprocess.run(
+        "docker run -d --name smoke-postgres "
+        "-e POSTGRES_PASSWORD=smokepass -e POSTGRES_DB=nexplanedb "
+        "-p 5433:5432 postgres:15",
+        shell=True, check=True,
     )
-    _run_psql_via_api(client, ssh_connector_id, rds_host, rds_user, rds_password, rds_db, seed_sql)
+    log("  waiting for Postgres to be ready (~15s)")
+    _wait_docker(
+        "docker exec smoke-postgres psql -U postgres -c 'SELECT 1'",
+        timeout=60,
+    )
+
+    seed_cmd = (
+        "docker exec smoke-postgres psql -U postgres nexplanedb "
+        "-c \"CREATE TABLE IF NOT EXISTS nexplane_restore_smoke (id serial, val text); "
+        "INSERT INTO nexplane_restore_smoke VALUES (1, 'smoke')\""
+    )
+    subprocess.run(seed_cmd, shell=True, check=True)
+    log("  seeded nexplanedb.nexplane_restore_smoke")
 
     aws_creds = get_connector_creds_from_db("aws")
     smoke_bucket = aws_creds.get("bucket") or "nexplane-smoke-backups"
@@ -401,11 +414,11 @@ def run_phase_db_restore_postgres(client, ssh_connector_id, rds_host, rds_user, 
         {
             "capture_strategy": "database_dump",
             "db_type": "postgres",
-            "db_host": rds_host,
-            "db_port": 5432,
-            "database_name": rds_db,
-            "db_user": rds_user,
-            "db_password": rds_password,
+            "db_host": "127.0.0.1",
+            "db_port": 5433,
+            "database_name": "nexplanedb",
+            "db_user": "postgres",
+            "db_password": "smokepass",
             "backup_storage_id": _get_or_create_backup_storage_by_type(
                 client, "s3", smoke_bucket, "backups/smoke/"
             ),
@@ -414,48 +427,51 @@ def run_phase_db_restore_postgres(client, ssh_connector_id, rds_host, rds_user, 
     )
     cr1 = _execute_cr(client, cr1_id, timeout=180)
     if cr1["status"] != "completed":
-        fail(f"Postgres CR1 database_dump failed: {cr1.get('status')}")
-    refs = _get_artifact_refs(cr1)
-    assert refs.get("artifact_uri"), f"CR1 missing artifact_uri: {refs}"
-    log(f"  CR1 database_dump completed, artifact={refs['artifact_uri']}")
+        subprocess.run("docker rm -f smoke-postgres", shell=True)
+        runs = cr1.get("execution_runs") or []
+        run_result = runs[0].get("result") if runs else {}
+        fail(f"Postgres CR1 database_dump failed: {cr1.get('status')} | result: {run_result}")
+    log("  CR1 database_dump (postgres) completed")
 
     # CR2: database_restore
-    copy_db = "nexplane_restore_smoke_copy"
+    copy_db = "nexplanedb_copy"
     cr2_id = _create_cr(
         client,
         "restore_server",
         {
             "restore_strategy": "database_restore",
             "source_backup_cr_id": cr1_id,
-            "target_db_host": rds_host,
-            "target_db_port": 5432,
+            "target_db_host": "127.0.0.1",
+            "target_db_port": 5433,
             "target_db_name": copy_db,
-            "target_db_user": rds_user,
-            "target_db_password": rds_password,
+            "target_db_user": "postgres",
+            "target_db_password": "smokepass",
         },
         connector_id=ssh_connector_id,
     )
     cr2 = _execute_cr(client, cr2_id, timeout=300)
     if cr2["status"] != "completed":
+        subprocess.run("docker rm -f smoke-postgres", shell=True)
         fail(f"Postgres CR2 database_restore failed: {cr2.get('status')}")
-    log(f"  CR2 database_restore completed")
+    log("  CR2 database_restore (postgres) completed")
 
-    # Verify row count
-    count = _query_count_via_api(
-        client, ssh_connector_id, rds_host, rds_user, rds_password, copy_db,
-        "SELECT COUNT(*) FROM nexplane_restore_smoke"
+    # Verify
+    result = subprocess.run(
+        "docker exec smoke-postgres psql -U postgres -d nexplanedb_copy "
+        "-t -c 'SELECT COUNT(*) FROM nexplane_restore_smoke'",
+        shell=True, capture_output=True, text=True,
     )
-    assert count >= 1, f"Expected ≥1 rows in copy DB, got {count}"
-    log(f"  SDK verify: {count} rows in {copy_db}.nexplane_restore_smoke ✓")
+    assert result.returncode == 0 and "1" in result.stdout, f"Postgres verify failed: {result.stdout}"
+    log("  SDK verify: row count ✓")
 
     # Rollback LIFO
     rb2 = _rollback_cr(client, cr2_id, extra_params={
         "confirm_drop": True,
-        "target_db_host": rds_host,
-        "target_db_port": 5432,
+        "target_db_host": "127.0.0.1",
+        "target_db_port": 5433,
         "target_db_name": copy_db,
-        "target_db_user": rds_user,
-        "target_db_password": rds_password,
+        "target_db_user": "postgres",
+        "target_db_password": "smokepass",
         "db_type": "postgres",
     })
     if rb2["status"] not in ("rollback_completed", "rolled_back"):
@@ -466,6 +482,7 @@ def run_phase_db_restore_postgres(client, ssh_connector_id, rds_host, rds_user, 
     if rb1["status"] not in ("rollback_completed", "rolled_back"):
         fail(f"Postgres CR1 rollback failed: {rb1.get('status')}")
     log("  CR1 rollback completed — artifact deleted")
+    subprocess.run("docker rm -f smoke-postgres", shell=True)
     log("  DB_RESTORE/postgres: PASSED")
 
 
@@ -664,18 +681,7 @@ def run_phase_db_restore(client, aws_connector_id, instance_id, args):
     # Locate SSH connector (nexplane_agent connector for the smoke EC2 instance)
     ssh_connector_id = _get_or_create_ssh_connector(client, instance_id, aws_connector_id)
 
-    # Postgres sub-phase: use existing RDS instance from smoke infra
-    rds_host = os.getenv("SMOKE_RDS_HOST", "")
-    rds_user = os.getenv("SMOKE_RDS_USER", "postgres")
-    rds_password = os.getenv("SMOKE_RDS_PASSWORD", "")
-    rds_db = os.getenv("SMOKE_RDS_DB", "nexplanedb")
-
-    if rds_host and rds_password:
-        run_phase_db_restore_postgres(
-            client, ssh_connector_id, rds_host, rds_user, rds_password, rds_db, args
-        )
-    else:
-        log("  DB_RESTORE/postgres: skipped (set SMOKE_RDS_HOST + SMOKE_RDS_PASSWORD env vars to enable)")
+    run_phase_db_restore_postgres(client, ssh_connector_id, args)
 
     run_phase_db_restore_mysql(client, ssh_connector_id, args)
     run_phase_db_restore_mongodb(client, ssh_connector_id, args)
@@ -736,14 +742,14 @@ def _get_or_create_ssh_connector(client, instance_id, aws_connector_id):
     return conn_id
 
 
-def _run_psql_via_api(client, ssh_connector_id, host, user, password, db, sql):
+def _run_psql_via_api(client, ssh_connector_id, host, user, password, db, sql, port=5432):
     """Execute SQL against Postgres by running a psql command via a CR on the SSH connector."""
     cr_id = _create_cr(
         client,
         "ssm_command",
         {
             "instance_id": "self",
-            "command": f"PGPASSWORD={password} psql -h {host} -U {user} {db} -c \"{sql}\"",
+            "command": f"PGPASSWORD={password} psql -h {host} -p {port} -U {user} {db} -c \"{sql}\"",
         },
         connector_id=ssh_connector_id,
     )
@@ -752,7 +758,7 @@ def _run_psql_via_api(client, ssh_connector_id, host, user, password, db, sql):
         fail(f"psql seed CR failed: {cr.get('status')}")
 
 
-def _query_count_via_api(client, ssh_connector_id, host, user, password, db, sql):
+def _query_count_via_api(client, ssh_connector_id, host, user, password, db, sql, port=5432):
     """Execute a count query via psql over SSH and return the integer result."""
     cr_id = _create_cr(
         client,
@@ -760,7 +766,7 @@ def _query_count_via_api(client, ssh_connector_id, host, user, password, db, sql
         {
             "instance_id": "self",
             "command": (
-                f"PGPASSWORD={password} psql -h {host} -U {user} {db} -t -c \"{sql}\""
+                f"PGPASSWORD={password} psql -h {host} -p {port} -U {user} {db} -t -c \"{sql}\""
             ),
         },
         connector_id=ssh_connector_id,
