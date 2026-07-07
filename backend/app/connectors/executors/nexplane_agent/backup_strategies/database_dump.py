@@ -8,6 +8,9 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+from app.connectors.executors.nexplane_agent.backup_strategies import _load_storage_config
+from app.connectors.executors.nexplane_agent.storage_backends import get_backend
+
 logger = logging.getLogger(__name__)
 
 _NAME = "database_dump"
@@ -46,9 +49,6 @@ def _ssh_connect(creds: dict):
 
 
 async def backup(params: dict, asset_ids: list, connector) -> dict:
-    from app.connectors.executors.nexplane_agent.backup_strategies import _load_storage_config
-    from app.connectors.executors.nexplane_agent.storage_backends import get_backend
-
     db_type = params.get("db_type", "postgres")
     if db_type not in _SUPPORTED_DB_TYPES:
         raise RuntimeError(
@@ -193,8 +193,6 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(params: dict, execution_result: dict, connector) -> dict:
-    from app.connectors.executors.nexplane_agent.storage_backends import get_backend
-
     artifact_refs = execution_result.get("artifact_refs", {})
     storage_type = artifact_refs.get("storage_type", "s3")
     artifact_uri = artifact_refs.get("artifact_uri", "")
