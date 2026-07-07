@@ -579,6 +579,37 @@ def get_connector_creds_from_db(connector_type_str: str) -> dict:
         except Exception:
             pass
 
+    # Not in container — try fetching credentials via docker exec
+    import subprocess as _subprocess_c, json as _json_c2
+    _not_in_container = not (_os_c.path.exists("/.dockerenv") or _os_c.path.exists("/app/app"))
+    if _not_in_container:
+        _ct_enum = connector_type_str.lower().replace("-", "_")
+        _script = (
+            "import asyncio,json,sys\n"
+            "async def _m():\n"
+            "    from app.database import AsyncSessionLocal\n"
+            "    from app.services.connector_service import _attach_credentials\n"
+            "    from app.models.connector import Connector\n"
+            "    from sqlalchemy import select\n"
+            "    async with AsyncSessionLocal() as db:\n"
+            "        r=await db.execute(select(Connector).where(Connector.connector_type=='" + _ct_enum + "'))\n"
+            "        conn=r.scalars().first()\n"
+            "        if not conn: sys.exit(1)\n"
+            "        await _attach_credentials(conn,db)\n"
+            "        print(json.dumps(getattr(conn,'credentials',{})))\n"
+            "asyncio.run(_m())\n"
+        )
+        try:
+            _out = _subprocess_c.check_output(
+                ["docker", "exec", "nexplane-backend-1", "python3", "-c", _script],
+                timeout=15, stderr=_subprocess_c.DEVNULL,
+            )
+            creds = _json_c2.loads(_out.strip())
+            _connector_creds_cache[connector_type_str] = creds
+            return creds
+        except Exception:
+            pass
+
     from app.config import settings
     from app.models.connector import Connector
     from app.services.connector_service import _attach_credentials
