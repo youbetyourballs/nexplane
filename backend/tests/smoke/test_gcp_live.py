@@ -37,7 +37,10 @@ from smoke_helpers import (
 def _get_gcp_creds() -> dict:
     """Return the GCP credentials dict from the connector, populating cache if needed."""
     import smoke_helpers as _sh
-    _get_gcp_compute_client()  # side effect: populates smoke_helpers._gcp_creds_cache
+    try:
+        _get_gcp_compute_client()  # side effect: populates smoke_helpers._gcp_creds_cache
+    except Exception:
+        pass
     return _sh._gcp_creds_cache
 
 
