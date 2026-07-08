@@ -431,8 +431,10 @@ def run_phase_import_image_restore(client, aws_connector_id, asset_id, ec2_clien
         fail(f"IMPORT_IMAGE restore failed: status={cr['status']}")
 
     runs = cr.get("execution_runs") or []
-    result = runs[0].get("result") or {} if runs else {}
-    ami_id = result.get("ami_id", "")
+    top_result = runs[0].get("result") or {} if runs else {}
+    # Result is nested: result.execution.steps[0].result
+    step_result = (top_result.get("execution", {}).get("steps") or [{}])[0].get("result", {})
+    ami_id = step_result.get("ami_id", "") or top_result.get("ami_id", "")
     if not ami_id:
         fail("IMPORT_IMAGE: no ami_id in execution result")
 
