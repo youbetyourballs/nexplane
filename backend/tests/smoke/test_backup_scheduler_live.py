@@ -2310,7 +2310,12 @@ _MGN_ROLE_POLICY = {
         },
         {
             "Effect": "Allow",
-            "Action": ["iam:PutRolePolicy", "iam:PutUserPolicy", "iam:GetUser"],
+            "Action": [
+                "iam:PutRolePolicy", "iam:PutUserPolicy", "iam:GetUser",
+                "iam:CreateServiceLinkedRole",
+                "iam:CreateInstanceProfile", "iam:AddRoleToInstanceProfile",
+                "iam:PassRole",
+            ],
             "Resource": "*",
         },
     ],
