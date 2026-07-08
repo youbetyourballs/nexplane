@@ -502,34 +502,38 @@ def _get_gcp_compute_client():
     import threading
     global _gcp_creds_cache
     if not _gcp_creds_cache:
-        from app.config import settings
-        from app.models.connector import Connector, ConnectorType
-        from app.services.connector_service import _attach_credentials
-        import asyncio, sqlalchemy as sa
-        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-        from sqlalchemy.orm import sessionmaker
-        result_holder: list = [None]
-        async def _get():
-            engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=False)
-            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            try:
-                async with async_session() as db:
-                    result = await db.execute(
-                        sa.select(Connector).where(Connector.connector_type == ConnectorType.gcp)
-                    )
-                    conn = result.scalars().first()
-                    if not conn:
-                        return None
-                    await _attach_credentials(conn, db)
-                    return getattr(conn, 'credentials', {})
-            finally:
-                await engine.dispose()
-        def _run_in_thread():
-            result_holder[0] = asyncio.run(_get())
-        t = threading.Thread(target=_run_in_thread)
-        t.start()
-        t.join()
-        _gcp_creds_cache = result_holder[0] or {}
+        try:
+            from app.config import settings
+            from app.models.connector import Connector, ConnectorType
+            from app.services.connector_service import _attach_credentials
+            import asyncio, sqlalchemy as sa
+            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+            from sqlalchemy.orm import sessionmaker
+            result_holder: list = [None]
+            async def _get():
+                engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=False)
+                async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+                try:
+                    async with async_session() as db:
+                        result = await db.execute(
+                            sa.select(Connector).where(Connector.connector_type == ConnectorType.gcp)
+                        )
+                        conn = result.scalars().first()
+                        if not conn:
+                            return None
+                        await _attach_credentials(conn, db)
+                        return getattr(conn, 'credentials', {})
+                finally:
+                    await engine.dispose()
+            def _run_in_thread():
+                result_holder[0] = asyncio.run(_get())
+            t = threading.Thread(target=_run_in_thread)
+            t.start()
+            t.join()
+            _gcp_creds_cache = result_holder[0] or {}
+        except ModuleNotFoundError:
+            # Running on runner EC2 without app/ on PYTHONPATH — fall back to env-var-injected creds.
+            _gcp_creds_cache = get_connector_creds_from_db("gcp")
     creds = _gcp_creds_cache
     if not creds:
         return None
