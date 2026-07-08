@@ -1754,7 +1754,7 @@ def phase_mcp_infra_provenance(client: NexplaneClient) -> None:
         else:
             log(f"approver user {approver_id} not found in DB — skipping cross-check", ok=False)
     else:
-        log("approver_id not in smoke_state — skipping cross-check", ok=False)
+        fail("approver_id not in smoke_state — cannot cross-check approver_name")
 
     print("[MCP_INFRA_PROVENANCE] PASSED", flush=True)
 
