@@ -2050,6 +2050,11 @@ def phase_mcp_infra_deletion_check(client: NexplaneClient) -> None:
                 f"isolated asset dependent_count should be 0, "
                 f"got {isolated_check.get('dependent_count')}"
             )
+        if isolated_check.get("safe") is not True:
+            fail(
+                f"isolated asset deletion-check safe should be True, "
+                f"got safe={isolated_check.get('safe')!r}"
+            )
         log(f"deletion-check (isolated): dependent_count=0")
     finally:
         # Clean up isolated asset
