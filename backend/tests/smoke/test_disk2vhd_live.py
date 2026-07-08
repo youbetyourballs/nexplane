@@ -396,18 +396,32 @@ def run_phase_disk2vhd_backup(client, aws_connector_id, asset_id, instance_id, p
     return cr_id, refs
 
 
-def run_phase_import_image_restore(client, aws_connector_id, asset_id, backup_cr_id, ec2_client):
-    """Create and execute a restore_server CR using import_image strategy."""
-    log(f"  Creating import_image restore CR (source={backup_cr_id})...")
+def run_phase_import_image_restore(client, aws_connector_id, asset_id, ec2_client,
+                                    backup_cr_id=None, artifact_uri=None, disk_format=None):
+    """Create and execute a restore_server CR using import_image strategy.
+
+    Either backup_cr_id (loads artifact_uri from that CR's result) or artifact_uri
+    (pre-staged bootable image in S3) must be provided.  artifact_uri is preferred
+    for smoke runs because the disk2vhd SSM-path VHDX is a file-copy (not bootable).
+    """
+    outcome = {
+        "restore_strategy": "import_image",
+        "aws_connector_id": aws_connector_id,
+        "license_type": "BYOL",
+    }
+    if artifact_uri:
+        outcome["artifact_uri"] = artifact_uri
+        if disk_format:
+            outcome["disk_format"] = disk_format
+        source_label = artifact_uri.rsplit("/", 1)[-1]
+    else:
+        outcome["source_backup_cr_id"] = backup_cr_id
+        source_label = backup_cr_id
+    log(f"  Creating import_image restore CR (source={source_label})...")
     cr_id = _create_and_approve_cr(
         client,
         change_type="restore_server",
-        desired_outcome={
-            "restore_strategy": "import_image",
-            "source_backup_cr_id": backup_cr_id,
-            "aws_connector_id": aws_connector_id,
-            "license_type": "BYOL",
-        },
+        desired_outcome=outcome,
         asset_id=asset_id,
     )
     log(f"  Executing restore CR {cr_id} (this takes 30-90 min for AWS VM Import)...")
@@ -526,6 +540,21 @@ def main():
     s3_client = _s3()
     _ensure_s3_bucket(s3_client, SMOKE_BUCKET)
 
+    # Load pre-staged bootable image from SSM cache for IMPORT_IMAGE phase.
+    # The disk2vhd SSM-path VHDX is a file-copy (non-bootable); AWS VM Import
+    # requires a real bootable image.  We pre-staged a minimal Linux RAW image.
+    _VHD_CACHE_KEY = "/nexplane/smoke-amis/disk2vhd/win2022-exported-vhd-v1"
+    prestaged_artifact_uri = None
+    prestaged_disk_format = None
+    try:
+        p = ssm_client.get_parameter(Name=_VHD_CACHE_KEY)
+        cached = json.loads(p["Parameter"]["Value"])
+        prestaged_artifact_uri = f"s3://{cached['s3_bucket']}/{cached['s3_key']}"
+        prestaged_disk_format = cached.get("disk_format", "RAW")
+        log(f"Pre-staged import image: {prestaged_artifact_uri} (format={prestaged_disk_format})")
+    except Exception as _e:
+        log(f"WARNING: no pre-staged image in SSM ({_e}); IMPORT_IMAGE will use backup CR artifact")
+
     run_id = uuid.uuid4().hex[:8]
     prefix = f"smoke-disk2vhd-{run_id}/"
     instance_id = None
@@ -534,7 +563,7 @@ def main():
     ami_id = None
 
     try:
-        if any(p in phases for p in ("DISK2VHD_BACKUP",)):
+        if "DISK2VHD_BACKUP" in phases:
             log("\n=== PHASE: DISK2VHD_BACKUP ===")
             instance_id, from_cache = _get_or_create_windows_instance(ec2_client, ssm_client)
             log(f"Windows instance: {instance_id} (cache={from_cache})")
@@ -544,10 +573,13 @@ def main():
 
         if "IMPORT_IMAGE" in phases:
             log("\n=== PHASE: IMPORT_IMAGE ===")
-            if not backup_cr_id:
-                fail("IMPORT_IMAGE requires DISK2VHD_BACKUP to have run first")
+            if not prestaged_artifact_uri and not backup_cr_id:
+                fail("IMPORT_IMAGE requires either a pre-staged image (SSM) or DISK2VHD_BACKUP")
             restore_cr_id, ami_id = run_phase_import_image_restore(
-                client, aws_connector_id, asset_id, backup_cr_id, ec2_client
+                client, aws_connector_id, asset_id, ec2_client,
+                backup_cr_id=backup_cr_id,
+                artifact_uri=prestaged_artifact_uri,
+                disk_format=prestaged_disk_format,
             )
 
         if "ROLLBACK" in phases:

@@ -59,23 +59,31 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
     from app.connectors.executors.nexplane_agent.aws_utils import _load_aws_creds
 
     source_backup_cr_id = params.get("source_backup_cr_id", "")
-    if not source_backup_cr_id:
-        raise RuntimeError("import_image: source_backup_cr_id is required")
-
     aws_connector_id = params.get("aws_connector_id", "")
     license_type = params.get("license_type", "BYOL")  # BYOL or AWS
-    description = params.get("description", f"nexplane import from {source_backup_cr_id[:8]}")
 
-    artifact_refs = await _load_source_artifact_refs(source_backup_cr_id)
-    artifact_uri = artifact_refs.get("artifact_uri", "")
+    # artifact_uri may be supplied directly (e.g. smoke test with pre-staged VHD)
+    # or loaded from the source backup CR's execution result.
+    artifact_uri = params.get("artifact_uri", "")
     if not artifact_uri:
-        raise RuntimeError(
-            f"import_image: no artifact_uri in source CR {source_backup_cr_id}"
-        )
+        if not source_backup_cr_id:
+            raise RuntimeError("import_image: source_backup_cr_id or artifact_uri is required")
+        artifact_refs = await _load_source_artifact_refs(source_backup_cr_id)
+        artifact_uri = artifact_refs.get("artifact_uri", "")
+        if not artifact_uri:
+            raise RuntimeError(
+                f"import_image: no artifact_uri in source CR {source_backup_cr_id}"
+            )
+
+    label = source_backup_cr_id[:8] if source_backup_cr_id else artifact_uri.rsplit("/", 1)[-1]
+    description = params.get("description", f"nexplane import from {label}")
 
     bucket, key = _parse_s3_uri(artifact_uri)
-    suffix = "." + key.rsplit(".", 1)[-1].lower() if "." in key else ""
-    disk_format = _FORMAT_MAP.get(suffix, "VHD")
+    # disk_format may be passed directly (e.g. "RAW" for pre-staged smoke images)
+    # or inferred from the file extension.
+    disk_format = params.get("disk_format") or (
+        _FORMAT_MAP.get("." + key.rsplit(".", 1)[-1].lower() if "." in key else "", "VHD")
+    )
 
     creds = await _load_aws_creds(aws_connector_id, connector)
     ec2 = _ec2_client_from_creds(creds)
