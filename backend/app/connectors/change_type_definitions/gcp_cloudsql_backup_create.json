@@ -4,5 +4,6 @@
   "steps": [{"generic_action": "create_cloudsql_backup", "purpose": "execute", "required": true}],
   "preflight_checks": ["connector_reachable"],
   "verification_methods": ["api_check"],
+  "rollback_action": "create_cloudsql_backup",
   "rollback_connector_type": "gcp"
 }
