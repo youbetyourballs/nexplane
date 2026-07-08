@@ -1664,6 +1664,101 @@ def phase_mcp_memory_accuracy(client: NexplaneClient) -> None:
     print("[MCP_MEMORY_ACCURACY] PASSED", flush=True)
 
 
+def phase_mcp_infra_provenance(client: NexplaneClient) -> None:
+    print("\n[MCP_INFRA_PROVENANCE] /memory/provenance + get_asset_history field accuracy", flush=True)
+
+    api_token = _smoke_state["api_token"]
+    asset_id = _smoke_state["asset_id"]
+    cr_id = _smoke_state["cr_id"]
+    approver_id = _smoke_state["approver_id"]
+
+    if not asset_id or not cr_id:
+        fail("asset_id or cr_id not set — run MCP_CR_ROUNDTRIP first")
+
+    # ── 1. REST GET /memory/provenance/{asset_id} ─────────────────────────────
+    prov = client.get(f"/memory/provenance/{asset_id}")
+    if not isinstance(prov, dict):
+        fail(f"GET /memory/provenance returned non-dict: {type(prov)}")
+    change_history = prov.get("change_history", [])
+    if not isinstance(change_history, list):
+        fail(f"change_history is not a list: {type(change_history)}")
+
+    matching_rest = [e for e in change_history if e.get("cr_id") == cr_id]
+    if not matching_rest:
+        fail(
+            f"CR {cr_id} not found in /memory/provenance change_history. "
+            f"Entries: {[e.get('cr_id') for e in change_history[:5]]}"
+        )
+    rest_entry = matching_rest[0]
+    approver_email_rest = rest_entry.get("approver_email", "")
+    if not approver_email_rest:
+        fail(f"approver_email empty in provenance entry: {rest_entry}")
+    log(f"provenance: CR found, approver_email={approver_email_rest}")
+
+    # ── 2. MCP get_asset_history — deep field accuracy ────────────────────────
+    history = _invoke_mcp_tool_inprocess("get_asset_history", {
+        "token": api_token,
+        "asset_id": asset_id,
+        "since_days": 1,
+    })
+    if not isinstance(history, list):
+        fail(f"get_asset_history returned non-list: {type(history)}")
+
+    mcp_entries = [e for e in history if e.get("cr_id") == cr_id]
+    if not mcp_entries:
+        fail(
+            f"CR {cr_id} not in get_asset_history (since_days=1). "
+            f"Entries: {[e.get('cr_id') for e in history[:5]]}"
+        )
+    mcp_entry = mcp_entries[0]
+
+    if mcp_entry.get("change_type") != "tag_resource":
+        fail(f"change_type mismatch: expected tag_resource, got {mcp_entry.get('change_type')!r}")
+    if mcp_entry.get("status") != "completed":
+        fail(f"status mismatch: expected completed, got {mcp_entry.get('status')!r}")
+    if mcp_entry.get("rolled_back") is not False:
+        fail(f"rolled_back should be False, got {mcp_entry.get('rolled_back')!r}")
+
+    approver_name_mcp = mcp_entry.get("approver_name", "")
+    if not approver_name_mcp:
+        fail("approver_name empty in get_asset_history entry")
+
+    applied_at = mcp_entry.get("applied_at", "")
+    if not applied_at:
+        fail("applied_at missing from get_asset_history entry")
+    try:
+        from datetime import datetime as _dt
+        _dt.fromisoformat(applied_at.replace("Z", "+00:00"))
+    except ValueError as e:
+        fail(f"applied_at not a valid ISO 8601 timestamp: {applied_at!r} — {e}")
+    log(f"get_asset_history: change_type=tag_resource, status=completed, approver_name={approver_name_mcp}")
+
+    # ── 3. Cross-check: approver_name from MCP matches DB user email ──────────
+    if approver_id:
+        import uuid as _uuid_prov
+        from app.models.user import User as _User
+
+        async def _get_approver_email(SessionLocal):
+            async with SessionLocal() as db:
+                user = await db.get(_User, _uuid_prov.UUID(approver_id))
+                return user.email if user else None
+
+        db_email = _run_db_check(_get_approver_email)
+        if db_email:
+            if approver_name_mcp != db_email:
+                fail(
+                    f"approver_name cross-check failed: "
+                    f"MCP={approver_name_mcp!r} DB={db_email!r}"
+                )
+            log(f"approver_name cross-check passed: {approver_name_mcp}")
+        else:
+            log(f"approver user {approver_id} not found in DB — skipping cross-check", ok=False)
+    else:
+        log("approver_id not in smoke_state — skipping cross-check", ok=False)
+
+    print("[MCP_INFRA_PROVENANCE] PASSED", flush=True)
+
+
 # ---------------------------------------------------------------------------
 # Phase registry + main
 # ---------------------------------------------------------------------------
@@ -1684,6 +1779,7 @@ ALL_PHASES = [
     "MCP_HOST_INTEL",
     "MCP_PLANNING_CTX",
     "MCP_MEMORY_ACCURACY",
+    "MCP_INFRA_PROVENANCE",
 ]
 
 
@@ -1721,7 +1817,8 @@ def main() -> None:
         "MCP_RUNBOOKS":         lambda: phase_mcp_runbooks(client),
         "MCP_HOST_INTEL":       lambda: phase_mcp_host_intel(client),
         "MCP_PLANNING_CTX":     lambda: phase_mcp_planning_ctx(client),
-        "MCP_MEMORY_ACCURACY":  lambda: phase_mcp_memory_accuracy(client),
+        "MCP_MEMORY_ACCURACY":      lambda: phase_mcp_memory_accuracy(client),
+        "MCP_INFRA_PROVENANCE":     lambda: phase_mcp_infra_provenance(client),
     }
 
     passed = []
