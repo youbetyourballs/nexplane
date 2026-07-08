@@ -888,6 +888,7 @@ def phase_mcp_who_approved(client: NexplaneClient) -> None:
 
     approved = [a for a in approvals if a.get("decision") in ("approved", "ApprovalDecision.approved")]
     assert approved, "No approved decision found in approvals list"
+    _smoke_state["approver_id"] = str(approved[0]["approver_id"])
     log(f"Approver id: {approved[0]['approver_id']}, decided_at: {approved[0]['decided_at']}")
 
     # Cross-check with REST — the same approver must appear
