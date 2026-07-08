@@ -2422,27 +2422,49 @@ def run_phase_mgn_replication(client, aws_connector_id: str, asset_id: str) -> N
 
     _ensure_mgn_iam_permissions(creds)
 
-    # Clean up any broken MGN instance profiles (empty profiles block initialize_service).
-    # Uses runner instance profile creds (NexplaneEC2TestRole) which now has DeleteInstanceProfile.
-    _MGN_BROKEN_PROFILES = [
+    # Pre-create MGN IAM roles and instance profiles so initialize_service() can succeed.
+    # initialize_service() fails if it can't attach AWSApplicationMigrationEC2AccessPolicy
+    # (not present in all accounts). Pre-creating the roles bypasses this — initialize_service
+    # then sees everything in place and either succeeds or raises ConflictException.
+    # Uses connector user creds (AdministratorAccess) for full IAM access.
+    _MGN_PREREQ_ROLES = [
         "AWSApplicationMigrationConversionServerRole",
         "AWSApplicationMigrationLaunchInstanceWithDrsRole",
         "AWSApplicationMigrationLaunchInstanceWithSsmRole",
         "AWSApplicationMigrationReplicationServerRole",
     ]
+    import json as _json_prereq
+    _EC2_TRUST = _json_prereq.dumps({
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}],
+    })
     try:
-        import boto3 as _boto3_mgn_cleanup
-        _iam_default = _boto3_mgn_cleanup.client("iam", region_name=region)
-        for _pname in _MGN_BROKEN_PROFILES:
+        import boto3 as _boto3_prereq
+        _iam_admin = _boto3_prereq.client(
+            "iam",
+            region_name=region,
+            aws_access_key_id=creds.get("access_key_id", creds.get("aws_access_key_id")),
+            aws_secret_access_key=creds.get("secret_access_key", creds.get("aws_secret_access_key")),
+        )
+        for _rname in _MGN_PREREQ_ROLES:
+            # Create role if missing
             try:
-                _prof = _iam_default.get_instance_profile(InstanceProfileName=_pname)
-                if not _prof["InstanceProfile"]["Roles"]:
-                    _iam_default.delete_instance_profile(InstanceProfileName=_pname)
-                    log(f"MGN_REPLICATION: deleted empty instance profile {_pname}")
-            except _iam_default.exceptions.NoSuchEntityException:
+                _iam_admin.create_role(RoleName=_rname, AssumeRolePolicyDocument=_EC2_TRUST)
+                log(f"MGN_REPLICATION: created IAM role {_rname}")
+            except _iam_admin.exceptions.EntityAlreadyExistsException:
                 pass
-    except Exception as _cleanup_err:
-        log(f"MGN_REPLICATION: profile cleanup warning: {_cleanup_err}")
+            # Create instance profile if missing
+            try:
+                _iam_admin.create_instance_profile(InstanceProfileName=_rname)
+            except _iam_admin.exceptions.EntityAlreadyExistsException:
+                pass
+            # Add role to profile if not already there
+            _prof = _iam_admin.get_instance_profile(InstanceProfileName=_rname)
+            if not _prof["InstanceProfile"]["Roles"]:
+                _iam_admin.add_role_to_instance_profile(InstanceProfileName=_rname, RoleName=_rname)
+                log(f"MGN_REPLICATION: attached role to instance profile {_rname}")
+    except Exception as _prereq_err:
+        log(f"MGN_REPLICATION: prereq setup warning: {_prereq_err}")
 
     # Initialize MGN service (idempotent)
     try:
