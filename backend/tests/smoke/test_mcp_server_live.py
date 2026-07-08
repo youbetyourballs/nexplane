@@ -1965,6 +1965,104 @@ def phase_mcp_infra_query(client: NexplaneClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase: MCP_INFRA_DELETION_CHECK
+# ---------------------------------------------------------------------------
+
+def phase_mcp_infra_deletion_check(client: NexplaneClient) -> None:
+    print("\n[MCP_INFRA_DELETION_CHECK] /memory/deletion-check + /memory/dependencies", flush=True)
+
+    asset_id = _smoke_state["asset_id"]
+    dependent_asset_id = _smoke_state.get("dependent_asset_id", "")
+
+    if not asset_id:
+        fail("asset_id not set — run MCP_CR_ROUNDTRIP first")
+    if not dependent_asset_id:
+        fail("dependent_asset_id not set — run MCP_DEPENDENCY first")
+
+    # ── Part A: asset with a known dependent ──────────────────────────────────
+    # asset_id is the PARENT (smoke-parent); dependent_asset_id is the CHILD
+    # MCP_DEPENDENCY creates: child --depends_on--> parent
+    # So parent has a downstream dependent → deletion should be unsafe
+
+    del_check = client.get(f"/memory/deletion-check/{asset_id}")
+    if not isinstance(del_check, dict):
+        fail(f"GET /memory/deletion-check returned non-dict: {type(del_check)}")
+
+    for key in ("safe", "dependent_count", "blocking_reasons"):
+        if key not in del_check:
+            fail(f"deletion-check response missing key {key!r}. Keys: {list(del_check.keys())}")
+
+    if del_check["safe"] is not False:
+        fail(
+            f"deletion-check safe should be False for asset with dependent. "
+            f"Got safe={del_check['safe']!r}, dependent_count={del_check.get('dependent_count')}"
+        )
+    if del_check["dependent_count"] < 1:
+        fail(
+            f"dependent_count should be >= 1, got {del_check['dependent_count']}. "
+            f"Dependency may not have been created by MCP_DEPENDENCY."
+        )
+    if not del_check["blocking_reasons"]:
+        fail(f"blocking_reasons should be non-empty for unsafe asset, got {del_check['blocking_reasons']!r}")
+
+    log(
+        f"deletion-check (parent with dependent): safe=False, "
+        f"dependent_count={del_check['dependent_count']}, "
+        f"blocking_reasons={del_check['blocking_reasons'][:2]}"
+    )
+
+    # ── Part B: /memory/dependencies/{asset_id} ───────────────────────────────
+    deps = client.get(f"/memory/dependencies/{asset_id}")
+    if not isinstance(deps, dict):
+        fail(f"GET /memory/dependencies returned non-dict: {type(deps)}")
+
+    dependents_list = deps.get("dependents", [])
+    if not isinstance(dependents_list, list):
+        fail(f"dependents should be list, got {type(dependents_list)}")
+
+    dep_ids = {
+        str(d.get("asset_id") or d.get("id") or "")
+        for d in dependents_list
+    }
+    if dependent_asset_id not in dep_ids:
+        fail(
+            f"dependent_asset_id {dependent_asset_id} not in /memory/dependencies dependents. "
+            f"Found: {list(dep_ids)[:5]}"
+        )
+    log(f"/memory/dependencies: {len(dependents_list)} dependent(s), child asset present")
+
+    # ── Part C: isolated asset (no dependents) ────────────────────────────────
+    isolated = client.post("/assets", json={
+        "name": f"smoke-isolated-{uuid.uuid4().hex[:8]}",
+        "asset_type": "server",
+        "environment": "dev",
+        "criticality": "low",
+    })
+    isolated_id = isolated["id"]
+    log(f"created isolated asset: {isolated_id}")
+
+    try:
+        isolated_check = client.get(f"/memory/deletion-check/{isolated_id}")
+        if not isinstance(isolated_check, dict):
+            fail(f"isolated deletion-check returned non-dict: {type(isolated_check)}")
+        if isolated_check.get("dependent_count", -1) != 0:
+            fail(
+                f"isolated asset dependent_count should be 0, "
+                f"got {isolated_check.get('dependent_count')}"
+            )
+        log(f"deletion-check (isolated): dependent_count=0")
+    finally:
+        # Clean up isolated asset
+        try:
+            client.delete(f"/assets/{isolated_id}")
+            log(f"cleaned up isolated asset {isolated_id}")
+        except Exception as e:
+            log(f"could not clean up isolated asset {isolated_id}: {e}", ok=False)
+
+    print("[MCP_INFRA_DELETION_CHECK] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
 # Phase registry + main
 # ---------------------------------------------------------------------------
 
@@ -1987,6 +2085,7 @@ ALL_PHASES = [
     "MCP_INFRA_PROVENANCE",
     "MCP_INFRA_TIMELINE",
     "MCP_INFRA_QUERY",
+    "MCP_INFRA_DELETION_CHECK",
 ]
 
 
@@ -2027,7 +2126,8 @@ def main() -> None:
         "MCP_MEMORY_ACCURACY":      lambda: phase_mcp_memory_accuracy(client),
         "MCP_INFRA_PROVENANCE":     lambda: phase_mcp_infra_provenance(client),
         "MCP_INFRA_TIMELINE":       lambda: phase_mcp_infra_timeline(client),
-        "MCP_INFRA_QUERY":          lambda: phase_mcp_infra_query(client),
+        "MCP_INFRA_QUERY":              lambda: phase_mcp_infra_query(client),
+        "MCP_INFRA_DELETION_CHECK":    lambda: phase_mcp_infra_deletion_check(client),
     }
 
     passed = []
