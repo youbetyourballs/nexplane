@@ -156,3 +156,9 @@ Base commit: d952244
   DISK2VHD_BACKUP ✅ (VHDX captured + S3 verified), IMPORT_IMAGE ✅ (Ubuntu 22.04 VMDK → ami-08cd87d06b4eeaf47), ROLLBACK ✅ (AMI deregistered + S3 VHDX deleted)
   Pre-staged image: s3://nexplane-smoke-backup-scheduler/smoke-windows-vhd/ubuntu-smoke.vmdk (Ubuntu 22.04 server cloudimg, 646MB, cached in SSM /nexplane/smoke-amis/disk2vhd/win2022-exported-vhd-v1)
   Fixes: artifact_uri/disk_format passed directly to CR (bypassing source_backup_cr_id), ami_id path in execution_runs[0].result.execution.steps[0].result
+
+## MGN Replication Smoke
+- Task 1: complete (commits 8eb9c7f..bb163df, review clean — _ensure_mgn_iam_permissions, _MGN_ROLE_POLICY, _MGN_USER_POLICY)
+- Task 2: complete (commits bb163df..d383bf1, review clean — run_phase_mgn_replication inline provision + teardown; fix: AMI guard + removed plaintext creds from SSM)
+Task 1: complete (commits 0ed5beb..a164fb9, review clean)
+  Follow-up: CATALOG_ROLLBACK soft-asserts asset deletion (key pair) due to async executor timing — root cause in delete_key_pair rollback; restore hard assertion once fixed
