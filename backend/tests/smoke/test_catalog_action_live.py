@@ -336,9 +336,13 @@ def phase_catalog_rollback(client: NexplaneClient) -> None:
         fail(f"CR did not reach rolled_back, got: {cr['status']}")
     log("Rollback: COMPLETED")
 
-    # 7. Verify asset deleted
+    # 7. Verify asset deleted (poll for async deletion)
     if auto_asset_id:
-        resp = client.client.get(f"{base}/assets/{auto_asset_id}")
+        for _ in range(30):
+            resp = client.client.get(f"{base}/assets/{auto_asset_id}")
+            if resp.status_code == 404:
+                break
+            time.sleep(1)
         if resp.status_code != 404:
             fail(f"Asset {auto_asset_id} still exists after rollback (expected 404, got {resp.status_code})")
         log(f"Auto-asset {auto_asset_id}: DELETED after rollback — VERIFIED")
