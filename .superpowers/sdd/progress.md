@@ -152,3 +152,7 @@ Base commit: d952244
 - gcp_cloudsql_backup_create rollback_failed fix: _rollback_no_op sentinel in rollback_executor.py (commit 3e04c6b); 4 unit tests; 4/4 passing
 - import_image restore strategy: full implementation (commit bdafa39); 4 unit tests; 38/38 test_backup_architecture.py passing on EC2
 - disk2vhd test fix: size check is SSM call #3 not #4 (commit bdafa39)
+- disk2vhd + import_image live smoke: ALL_PHASES_PASSED on EC2 (commit 3dc20b1)
+  DISK2VHD_BACKUP ✅ (VHDX captured + S3 verified), IMPORT_IMAGE ✅ (Ubuntu 22.04 VMDK → ami-08cd87d06b4eeaf47), ROLLBACK ✅ (AMI deregistered + S3 VHDX deleted)
+  Pre-staged image: s3://nexplane-smoke-backup-scheduler/smoke-windows-vhd/ubuntu-smoke.vmdk (Ubuntu 22.04 server cloudimg, 646MB, cached in SSM /nexplane/smoke-amis/disk2vhd/win2022-exported-vhd-v1)
+  Fixes: artifact_uri/disk_format passed directly to CR (bypassing source_backup_cr_id), ami_id path in execution_runs[0].result.execution.steps[0].result
