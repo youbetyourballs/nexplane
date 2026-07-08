@@ -974,11 +974,17 @@ Examples:
             "LOCAL_FILES_BACKUP", "DATABASE_DUMP_BACKUP", "STORAGE_SYNC",
             "LVM_SNAPSHOT", "NFS_FILES", "MANAGED_DB_SNAPSHOT", "DISK2VHD", "MGN_REPLICATION",
         }
+        CATALOG_ACTION_PHASES = {
+            "CATALOG_DISCOVERY", "CATALOG_CR_LIFECYCLE", "CATALOG_ACTION_ERRORS",
+            "CATALOG_ROLLBACK", "CATALOG_WORKFLOW", "CATALOG_WORKFLOW_PARTIAL_FAILURE",
+        }
         selected_phases = set(args.phases.split(","))
         if selected_phases & PLATFORM_PHASES:
             test_script = "test_platform_live.py"
         elif selected_phases & BACKUP_SCHEDULER_PHASES:
             test_script = "test_backup_scheduler_live.py"
+        elif selected_phases & CATALOG_ACTION_PHASES:
+            test_script = "test_catalog_action_live.py"
         else:
             test_script = "test_aws_live.py"
         test_cmd_parts = [
