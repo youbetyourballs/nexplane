@@ -2314,6 +2314,7 @@ _MGN_ROLE_POLICY = {
                 "iam:PutRolePolicy", "iam:PutUserPolicy", "iam:GetUser",
                 "iam:CreateServiceLinkedRole",
                 "iam:CreateInstanceProfile", "iam:AddRoleToInstanceProfile",
+                "iam:DeleteInstanceProfile",
                 "iam:PassRole",
             ],
             "Resource": "*",
@@ -2420,6 +2421,28 @@ def run_phase_mgn_replication(client, aws_connector_id: str, asset_id: str) -> N
     mgn = _get_aws_boto3_client("mgn")
 
     _ensure_mgn_iam_permissions(creds)
+
+    # Clean up any broken MGN instance profiles (empty profiles block initialize_service).
+    # Uses runner instance profile creds (NexplaneEC2TestRole) which now has DeleteInstanceProfile.
+    _MGN_BROKEN_PROFILES = [
+        "AWSApplicationMigrationConversionServerRole",
+        "AWSApplicationMigrationLaunchInstanceWithDrsRole",
+        "AWSApplicationMigrationLaunchInstanceWithSsmRole",
+        "AWSApplicationMigrationReplicationServerRole",
+    ]
+    try:
+        import boto3 as _boto3_mgn_cleanup
+        _iam_default = _boto3_mgn_cleanup.client("iam", region_name=region)
+        for _pname in _MGN_BROKEN_PROFILES:
+            try:
+                _prof = _iam_default.get_instance_profile(InstanceProfileName=_pname)
+                if not _prof["InstanceProfile"]["Roles"]:
+                    _iam_default.delete_instance_profile(InstanceProfileName=_pname)
+                    log(f"MGN_REPLICATION: deleted empty instance profile {_pname}")
+            except _iam_default.exceptions.NoSuchEntityException:
+                pass
+    except Exception as _cleanup_err:
+        log(f"MGN_REPLICATION: profile cleanup warning: {_cleanup_err}")
 
     # Initialize MGN service (idempotent)
     try:
