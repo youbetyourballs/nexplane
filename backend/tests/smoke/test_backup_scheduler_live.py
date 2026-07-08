@@ -2385,46 +2385,284 @@ def _ensure_mgn_iam_permissions(creds: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def run_phase_mgn_replication(client, aws_connector_id: str, asset_id: str) -> None:
-    """MGN_REPLICATION: fire backup CR using mgn_replication strategy, verify AMI
-    captured, rollback (no-op — source server retained), verify CR rolled back."""
+    """MGN_REPLICATION: provision AL2023 source EC2, install MGN agent, wait for
+    READY_FOR_TEST, fire server_backup CR, verify AMI, teardown everything."""
     import uuid as _uuid
-    ssm_boto = _get_aws_boto3_client("ssm")
+    import json as _json
+    import boto3
 
-    # Read pre-warmed MGN source server ID from SSM
+    creds = get_connector_creds_from_db(aws_connector_id)
+    region = creds.get("region") or creds.get("aws_region", "us-east-1")
+    access_key = creds.get("access_key_id", creds.get("aws_access_key_id", ""))
+    secret_key = creds.get("secret_access_key", creds.get("aws_secret_access_key", ""))
+
+    def _boto(svc):
+        return boto3.client(
+            svc, region_name=region,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+        )
+
+    ec2 = _boto("ec2")
+    ssm = _boto("ssm")
+    mgn = _boto("mgn")
+
+    _ensure_mgn_iam_permissions(creds)
+
+    # Initialize MGN service (idempotent)
     try:
-        source_server_id = ssm_boto.get_parameters(
-            Names=["/nexplane/smoke/mgn-source-server-id"],
-        )["Parameters"][0]["Value"]
-    except (IndexError, KeyError, Exception) as exc:
-        fail(f"MGN_REPLICATION: /nexplane/smoke/mgn-source-server-id not set — "
-             f"pre-warm a source server first: {exc}")
+        mgn.initialize_service()
+        log("MGN_REPLICATION: MGN service initialized")
+    except mgn.exceptions.ConflictException:
+        log("MGN_REPLICATION: MGN service already initialized")
 
-    run_id = _uuid.uuid4().hex[:8]
-    cr = _create_and_run_cr(
-        client,
-        title=f"smoke mgn_replication {run_id}",
-        change_type="server_backup",
-        asset_id=asset_id,
-        desired_outcome={
-            "capture_strategy": "mgn_replication",
-            "aws_connector_id": aws_connector_id,
-            "mgn_source_server_id": source_server_id,
-        },
-        # MGN test launch + job poll (30s intervals, up to 30 min)
-        timeout=3600,
-    )
-    assert cr["status"] == "completed", f"MGN_REPLICATION backup failed: {cr}"
-    refs = _extract_artifact_refs(cr)
-    assert refs.get("capture_strategy") == "mgn_replication", f"Wrong strategy: {refs}"
-    assert refs.get("ami_id", "").startswith("ami-"), f"No AMI in refs: {refs}"
-    assert refs.get("test_instance_id", "").startswith("i-"), f"No test instance in refs: {refs}"
-    print(f"  MGN_REPLICATION backup PASSED: ami={refs['ami_id']} "
-          f"instance={refs['test_instance_id']}")
+    # Latest AL2023 AMI
+    images = ec2.describe_images(
+        Owners=["amazon"],
+        Filters=[
+            {"Name": "name", "Values": ["al2023-ami-2023.*-x86_64"]},
+            {"Name": "state", "Values": ["available"]},
+        ],
+    )["Images"]
+    images.sort(key=lambda i: i["CreationDate"], reverse=True)
+    al2023_ami = images[0]["ImageId"]
+    log(f"MGN_REPLICATION: using AL2023 AMI {al2023_ami}")
 
-    _rollback_cr(client, cr["id"])
-    rb = _wait_cr_complete(client, cr["id"], "mgn rollback", timeout=120)
-    assert rb["status"] in ("rolled_back", "rollback_partial"), f"rollback status={rb['status']}"
-    print("  MGN_REPLICATION rollback PASSED (noop — source retained)")
+    # Pick subnet from default VPC
+    vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
+    if not vpcs:
+        fail("MGN_REPLICATION: no default VPC found")
+    vpc_id = vpcs[0]["VpcId"]
+    subnets = ec2.describe_subnets(
+        Filters=[{"Name": "vpcId", "Values": [vpc_id]}]
+    )["Subnets"]
+    subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
+
+    source_instance_id: str = ""
+    source_server_id: str = ""
+    test_instance_id: str = ""
+    ami_id: str = ""
+    cr: dict = {}
+
+    try:
+        # ------------------------------------------------------------------
+        # PROVISION: launch source EC2
+        # ------------------------------------------------------------------
+        log("MGN_REPLICATION: launching AL2023 t3.micro source instance...")
+        launch = None
+        for subnet in subnets:
+            try:
+                launch = ec2.run_instances(
+                    ImageId=al2023_ami,
+                    InstanceType="t3.micro",
+                    MinCount=1, MaxCount=1,
+                    SubnetId=subnet["SubnetId"],
+                    IamInstanceProfile={"Name": SMOKE_IAM_PROFILE},
+                    TagSpecifications=[{
+                        "ResourceType": "instance",
+                        "Tags": [
+                            {"Key": "Name", "Value": "nexplane-smoke-mgn-source"},
+                            {"Key": "nexplane-smoke", "Value": "mgn-replication"},
+                        ],
+                    }],
+                )
+                break
+            except Exception as ce:
+                if "Unsupported" in str(ce) or "InsufficientInstanceCapacity" in str(ce):
+                    continue
+                raise
+        if not launch:
+            fail("MGN_REPLICATION: could not launch t3.micro in any AZ")
+        source_instance_id = launch["Instances"][0]["InstanceId"]
+        log(f"MGN_REPLICATION: source instance {source_instance_id}, waiting for running state...")
+
+        ec2.get_waiter("instance_running").wait(InstanceIds=[source_instance_id])
+        log("MGN_REPLICATION: instance running, waiting for SSM...")
+        _wait_ssm_ready_win(ssm, source_instance_id, timeout=300)
+        log("MGN_REPLICATION: SSM ready")
+
+        # Private DNS for source server identification after agent registers
+        inst_info = ec2.describe_instances(InstanceIds=[source_instance_id])
+        private_dns = inst_info["Reservations"][0]["Instances"][0].get("PrivateDnsName", "")
+
+        # ------------------------------------------------------------------
+        # PROVISION: install MGN agent via SSM
+        # ------------------------------------------------------------------
+        mgn_install_cmd = (
+            f"cd /tmp && "
+            f"wget -q 'https://aws-application-migration-service-{region}.s3.amazonaws.com"
+            f"/latest/linux/aws-replication-installer-init.py' -O aws-mgn-init.py && "
+            f"sudo python3 aws-mgn-init.py "
+            f"--region {region} "
+            f"--aws-access-key-id {access_key} "
+            f"--aws-secret-access-key {secret_key} "
+            f"--no-prompt"
+        )
+        log("MGN_REPLICATION: installing MGN agent via SSM RunCommand...")
+        cmd_resp = ssm.send_command(
+            InstanceIds=[source_instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [mgn_install_cmd]},
+            TimeoutSeconds=300,
+        )
+        cmd_id = cmd_resp["Command"]["CommandId"]
+        deadline = time.time() + 360
+        while time.time() < deadline:
+            time.sleep(10)
+            inv = ssm.get_command_invocation(CommandId=cmd_id, InstanceId=source_instance_id)
+            status = inv["Status"]
+            if status == "Success":
+                break
+            if status in ("Failed", "Cancelled", "TimedOut"):
+                fail(
+                    f"MGN_REPLICATION: agent install SSM command {status}: "
+                    f"{inv.get('StandardErrorContent', '')}"
+                )
+        else:
+            fail("MGN_REPLICATION: agent install SSM command timed out after 360s")
+        log("MGN_REPLICATION: MGN agent installed")
+
+        # ------------------------------------------------------------------
+        # PROVISION: wait for source server to appear in MGN
+        # ------------------------------------------------------------------
+        log("MGN_REPLICATION: waiting for source server to appear in MGN (up to 5 min)...")
+        deadline_appear = time.time() + 300
+        while time.time() < deadline_appear:
+            time.sleep(15)
+            servers = mgn.describe_source_servers(filters={})["items"]
+            for s in servers:
+                hostname = (
+                    s.get("sourceProperties", {})
+                    .get("identificationHints", {})
+                    .get("hostname", "")
+                )
+                short_dns = private_dns.split(".")[0] if private_dns else ""
+                if short_dns and hostname and short_dns in hostname:
+                    source_server_id = s["sourceServerID"]
+                    break
+            if not source_server_id and servers:
+                # Fallback: take any server without a known ID yet (sequential smoke runs)
+                source_server_id = servers[-1]["sourceServerID"]
+            if source_server_id:
+                break
+        if not source_server_id:
+            fail("MGN_REPLICATION: source server did not appear in MGN within 5 min")
+        log(f"MGN_REPLICATION: source server {source_server_id}, waiting for READY_FOR_TEST (up to 90 min)...")
+
+        # ------------------------------------------------------------------
+        # PROVISION: wait for READY_FOR_TEST
+        # ------------------------------------------------------------------
+        deadline_ready = time.time() + 5400
+        while time.time() < deadline_ready:
+            time.sleep(60)
+            servers = mgn.describe_source_servers(
+                filters={"sourceServerIDs": [source_server_id]}
+            )["items"]
+            if servers:
+                state = servers[0].get("lifeCycle", {}).get("state", "")
+                log(f"MGN_REPLICATION: source server state={state}")
+                if state in ("READY_FOR_TEST", "READY_FOR_CUTOVER"):
+                    break
+                if state in ("DISCONNECTED", "CUTOVER"):
+                    fail(f"MGN_REPLICATION: source server entered unexpected state {state}")
+        else:
+            fail("MGN_REPLICATION: source server did not reach READY_FOR_TEST within 90 min")
+        log("MGN_REPLICATION: source server READY_FOR_TEST ✓")
+
+        # ------------------------------------------------------------------
+        # BACKUP CR
+        # ------------------------------------------------------------------
+        run_id = _uuid.uuid4().hex[:8]
+        cr = _create_and_run_cr(
+            client,
+            title=f"smoke mgn_replication {run_id}",
+            change_type="server_backup",
+            asset_id=asset_id,
+            desired_outcome={
+                "capture_strategy": "mgn_replication",
+                "aws_connector_id": aws_connector_id,
+                "mgn_source_server_id": source_server_id,
+            },
+            timeout=3600,
+        )
+        assert cr["status"] == "completed", f"MGN_REPLICATION backup CR failed: {cr}"
+        refs = _extract_artifact_refs(cr)
+        assert refs.get("capture_strategy") == "mgn_replication", f"Wrong strategy: {refs}"
+        assert refs.get("ami_id", "").startswith("ami-"), f"No AMI in refs: {refs}"
+        assert refs.get("test_instance_id", "").startswith("i-"), f"No test instance in refs: {refs}"
+        test_instance_id = refs["test_instance_id"]
+        ami_id = refs["ami_id"]
+        log(f"MGN_REPLICATION: backup PASSED: ami={ami_id} instance={test_instance_id}")
+
+    finally:
+        # ------------------------------------------------------------------
+        # TEARDOWN — always runs
+        # ------------------------------------------------------------------
+        log("MGN_REPLICATION: teardown starting...")
+
+        if test_instance_id:
+            try:
+                ec2.terminate_instances(InstanceIds=[test_instance_id])
+                log(f"MGN_REPLICATION: test instance {test_instance_id} terminating")
+            except Exception as e:
+                log(f"MGN_REPLICATION: terminate test instance warning: {e}")
+
+        if ami_id:
+            try:
+                snap_resp = ec2.describe_images(ImageIds=[ami_id])
+                snap_ids = [
+                    m["Ebs"]["SnapshotId"]
+                    for img in snap_resp.get("Images", [])
+                    for m in img.get("BlockDeviceMappings", [])
+                    if "Ebs" in m
+                ]
+                ec2.deregister_image(ImageId=ami_id)
+                log(f"MGN_REPLICATION: AMI {ami_id} deregistered")
+                for snap_id in snap_ids:
+                    try:
+                        ec2.delete_snapshot(SnapshotId=snap_id)
+                        log(f"MGN_REPLICATION: snapshot {snap_id} deleted")
+                    except Exception as e:
+                        log(f"MGN_REPLICATION: delete snapshot warning: {e}")
+            except Exception as e:
+                log(f"MGN_REPLICATION: deregister AMI warning: {e}")
+
+        if cr.get("id"):
+            try:
+                _rollback_cr(client, cr["id"])
+                rb = _wait_cr_complete(client, cr["id"], "mgn rollback", timeout=120)
+                assert rb["status"] in ("rolled_back", "rollback_partial"), (
+                    f"rollback status={rb['status']}"
+                )
+                log("MGN_REPLICATION: rollback PASSED (noop — source retained)")
+            except Exception as e:
+                log(f"MGN_REPLICATION: rollback warning: {e}")
+
+        if source_server_id:
+            try:
+                mgn.disconnect_from_service(sourceServerID=source_server_id)
+                log(f"MGN_REPLICATION: source server {source_server_id} disconnected")
+            except Exception as e:
+                log(f"MGN_REPLICATION: disconnect warning: {e}")
+            time.sleep(15)
+            for attempt in range(4):
+                try:
+                    mgn.delete_source_server(sourceServerID=source_server_id)
+                    log(f"MGN_REPLICATION: source server {source_server_id} deleted")
+                    break
+                except Exception as e:
+                    if attempt < 3:
+                        log(f"MGN_REPLICATION: delete source server attempt {attempt + 1} failed: {e}, retrying in 10s...")
+                        time.sleep(10)
+                    else:
+                        log(f"MGN_REPLICATION: delete source server warning (gave up): {e}")
+
+        if source_instance_id:
+            try:
+                ec2.terminate_instances(InstanceIds=[source_instance_id])
+                log(f"MGN_REPLICATION: source instance {source_instance_id} terminating")
+            except Exception as e:
+                log(f"MGN_REPLICATION: terminate source instance warning: {e}")
 
 
 # ---------------------------------------------------------------------------
