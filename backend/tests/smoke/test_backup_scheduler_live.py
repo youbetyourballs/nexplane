@@ -2388,7 +2388,6 @@ def run_phase_mgn_replication(client, aws_connector_id: str, asset_id: str) -> N
     """MGN_REPLICATION: provision AL2023 source EC2, install MGN agent, wait for
     READY_FOR_TEST, fire server_backup CR, verify AMI, teardown everything."""
     import uuid as _uuid
-    import json as _json
     import boto3
 
     creds = get_connector_creds_from_db(aws_connector_id)
@@ -2425,6 +2424,8 @@ def run_phase_mgn_replication(client, aws_connector_id: str, asset_id: str) -> N
         ],
     )["Images"]
     images.sort(key=lambda i: i["CreationDate"], reverse=True)
+    if not images:
+        fail("MGN_REPLICATION: no AL2023 AMI found in region")
     al2023_ami = images[0]["ImageId"]
     log(f"MGN_REPLICATION: using AL2023 AMI {al2023_ami}")
 
@@ -2494,8 +2495,6 @@ def run_phase_mgn_replication(client, aws_connector_id: str, asset_id: str) -> N
             f"/latest/linux/aws-replication-installer-init.py' -O aws-mgn-init.py && "
             f"sudo python3 aws-mgn-init.py "
             f"--region {region} "
-            f"--aws-access-key-id {access_key} "
-            f"--aws-secret-access-key {secret_key} "
             f"--no-prompt"
         )
         log("MGN_REPLICATION: installing MGN agent via SSM RunCommand...")
@@ -2642,9 +2641,9 @@ def run_phase_mgn_replication(client, aws_connector_id: str, asset_id: str) -> N
             try:
                 mgn.disconnect_from_service(sourceServerID=source_server_id)
                 log(f"MGN_REPLICATION: source server {source_server_id} disconnected")
+                time.sleep(15)
             except Exception as e:
                 log(f"MGN_REPLICATION: disconnect warning: {e}")
-            time.sleep(15)
             for attempt in range(4):
                 try:
                     mgn.delete_source_server(sourceServerID=source_server_id)
