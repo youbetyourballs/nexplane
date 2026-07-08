@@ -2327,9 +2327,20 @@ _MGN_USER_POLICY = {
         {
             "Effect": "Allow",
             "Action": [
+                "mgn:InitializeService",
                 "mgn:LaunchTestInstances",
                 "mgn:DescribeJobs",
                 "mgn:DescribeSourceServers",
+            ],
+            "Resource": "*",
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateServiceLinkedRole",
+                "iam:CreateInstanceProfile",
+                "iam:AddRoleToInstanceProfile",
+                "iam:PassRole",
             ],
             "Resource": "*",
         },
