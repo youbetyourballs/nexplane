@@ -2275,6 +2275,112 @@ def run_phase_disk2vhd(client, aws_connector_id: str, asset_id: str,
 
 
 # ---------------------------------------------------------------------------
+# IAM policies for MGN smoke phase
+# ---------------------------------------------------------------------------
+
+_MGN_ROLE_POLICY = {
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "mgn:InitializeService",
+                "mgn:DescribeSourceServers",
+                "mgn:DescribeJobs",
+                "mgn:DisconnectFromService",
+                "mgn:DeleteSourceServer",
+                "mgn:GetReplicationConfiguration",
+                "mgn:UpdateReplicationConfiguration",
+                "mgn:CreateReplicationConfigurationTemplate",
+                "mgn:DescribeReplicationConfigurationTemplates",
+            ],
+            "Resource": "*",
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeInstances",
+                "ec2:TerminateInstances",
+                "ec2:DeregisterImage",
+                "ec2:DeleteSnapshot",
+                "ec2:DescribeSnapshots",
+                "ec2:DescribeImages",
+            ],
+            "Resource": "*",
+        },
+        {
+            "Effect": "Allow",
+            "Action": ["iam:PutRolePolicy", "iam:PutUserPolicy", "iam:GetUser"],
+            "Resource": "*",
+        },
+    ],
+}
+
+_MGN_USER_POLICY = {
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "mgn:LaunchTestInstances",
+                "mgn:DescribeJobs",
+                "mgn:DescribeSourceServers",
+            ],
+            "Resource": "*",
+        },
+    ],
+}
+
+
+def _ensure_mgn_iam_permissions(creds: dict) -> None:
+    """Add MGN inline policies to the smoke runner role and platform connector
+    user. Both put_role_policy and put_user_policy are idempotent."""
+    import boto3
+    import json as _json
+
+    region = creds.get("region") or creds.get("aws_region", "us-east-1")
+    iam = boto3.client(
+        "iam",
+        region_name=region,
+        aws_access_key_id=creds.get("access_key_id", creds.get("aws_access_key_id")),
+        aws_secret_access_key=creds.get("secret_access_key", creds.get("aws_secret_access_key")),
+        aws_session_token=creds.get("session_token", creds.get("aws_session_token")),
+    )
+    errors = []
+
+    try:
+        iam.put_role_policy(
+            RoleName="NexplaneEC2TestRole",
+            PolicyName="NexplaneMGNSmokePolicy",
+            PolicyDocument=_json.dumps(_MGN_ROLE_POLICY),
+        )
+        log("MGN_REPLICATION: NexplaneMGNSmokePolicy attached to NexplaneEC2TestRole")
+    except Exception as exc:
+        errors.append(f"put_role_policy(NexplaneEC2TestRole): {exc}")
+
+    try:
+        user_name = iam.get_user()["User"]["UserName"]
+        iam.put_user_policy(
+            UserName=user_name,
+            PolicyName="NexplaneMGNExecutorPolicy",
+            PolicyDocument=_json.dumps(_MGN_USER_POLICY),
+        )
+        log(f"MGN_REPLICATION: NexplaneMGNExecutorPolicy attached to IAM user {user_name}")
+    except Exception as exc:
+        errors.append(f"put_user_policy(connector user): {exc}")
+
+    if len(errors) == 2:
+        raise RuntimeError(
+            "MGN_REPLICATION: could not add IAM permissions to either target.\n"
+            + "\n".join(errors)
+            + "\nAdd manually: NexplaneMGNSmokePolicy to NexplaneEC2TestRole, "
+            "NexplaneMGNExecutorPolicy to the platform connector IAM user."
+        )
+    if errors:
+        log(f"MGN_REPLICATION: IAM warning (one target failed, continuing): {errors[0]}")
+
+
+# ---------------------------------------------------------------------------
 # Phase MGN_REPLICATION — AWS MGN launch_test_instances -> AMI capture
 # ---------------------------------------------------------------------------
 
