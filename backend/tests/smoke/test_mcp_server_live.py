@@ -1878,6 +1878,93 @@ def phase_mcp_infra_timeline(client: NexplaneClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase: MCP_INFRA_QUERY
+# ---------------------------------------------------------------------------
+
+def phase_mcp_infra_query(client: NexplaneClient) -> None:
+    print("\n[MCP_INFRA_QUERY] POST /memory/query NL dispatcher routing + grounded responses", flush=True)
+
+    asset_id = _smoke_state["asset_id"]
+    if not asset_id:
+        fail("asset_id not set — run MCP_CR_ROUNDTRIP first")
+
+    # Fetch asset name for use in query strings
+    asset = client.get(f"/assets/{asset_id}")
+    asset_name = asset.get("name", asset_id)
+
+    # ── Query 1: provenance intent ────────────────────────────────────────────
+    q1 = f"why does asset {asset_name} exist?"
+    resp1 = client.post("/memory/query", json={"query": q1})
+
+    # Verify parse_query_intent in-process to confirm routing
+    from app.services.infrastructure_memory_service import parse_query_intent
+    intent1 = parse_query_intent(q1)
+    if intent1.get("intent") != "provenance":
+        fail(
+            f"Query {q1!r} should route to provenance intent, "
+            f"got {intent1.get('intent')!r}"
+        )
+
+    if not isinstance(resp1, dict):
+        fail(f"POST /memory/query (provenance) returned non-dict: {type(resp1)}")
+    if "error" in resp1 and resp1.get("status_code", 200) >= 500:
+        fail(f"POST /memory/query (provenance) returned server error: {resp1}")
+    # Response should contain asset_id or change_history (provenance dict)
+    if "asset_id" not in resp1 and "change_history" not in resp1:
+        fail(
+            f"POST /memory/query (provenance) response missing asset_id or change_history. "
+            f"Keys: {list(resp1.keys())}"
+        )
+    log(f"query 1 (provenance): intent=provenance, response keys={list(resp1.keys())[:5]}")
+
+    # ── Query 2: timeline intent ──────────────────────────────────────────────
+    q2 = "what changed in us-east-1?"
+    resp2 = client.post("/memory/query", json={"query": q2})
+
+    intent2 = parse_query_intent(q2)
+    if intent2.get("intent") != "timeline":
+        fail(
+            f"Query {q2!r} should route to timeline intent, "
+            f"got {intent2.get('intent')!r}"
+        )
+
+    if not isinstance(resp2, dict):
+        fail(f"POST /memory/query (timeline) returned non-dict: {type(resp2)}")
+    if "total" not in resp2:
+        fail(
+            f"POST /memory/query (timeline) response missing 'total' key. "
+            f"Keys: {list(resp2.keys())}"
+        )
+    if not isinstance(resp2["total"], int) or resp2["total"] < 0:
+        fail(f"POST /memory/query (timeline) total should be non-negative int, got {resp2['total']!r}")
+    log(f"query 2 (timeline): intent=timeline, total={resp2['total']}")
+
+    # ── Query 3: approval_search intent ───────────────────────────────────────
+    q3 = "who approved the tag_resource change?"
+    resp3 = client.post("/memory/query", json={"query": q3})
+
+    intent3 = parse_query_intent(q3)
+    if intent3.get("intent") != "approval_search":
+        fail(
+            f"Query {q3!r} should route to approval_search intent, "
+            f"got {intent3.get('intent')!r}"
+        )
+
+    # approval_search returns a list (may be empty)
+    if not isinstance(resp3, list):
+        fail(f"POST /memory/query (approval_search) returned non-list: {type(resp3)}")
+    if resp3:
+        first = resp3[0]
+        if not isinstance(first, dict):
+            fail(f"approval_search result entries should be dicts, got {type(first)}")
+        log(f"query 3 (approval_search): {len(resp3)} results, first keys={list(first.keys())[:5]}")
+    else:
+        log("query 3 (approval_search): 0 results (no matching CRs — acceptable)", ok=False)
+
+    print("[MCP_INFRA_QUERY] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
 # Phase registry + main
 # ---------------------------------------------------------------------------
 
@@ -1899,6 +1986,7 @@ ALL_PHASES = [
     "MCP_MEMORY_ACCURACY",
     "MCP_INFRA_PROVENANCE",
     "MCP_INFRA_TIMELINE",
+    "MCP_INFRA_QUERY",
 ]
 
 
@@ -1939,6 +2027,7 @@ def main() -> None:
         "MCP_MEMORY_ACCURACY":      lambda: phase_mcp_memory_accuracy(client),
         "MCP_INFRA_PROVENANCE":     lambda: phase_mcp_infra_provenance(client),
         "MCP_INFRA_TIMELINE":       lambda: phase_mcp_infra_timeline(client),
+        "MCP_INFRA_QUERY":          lambda: phase_mcp_infra_query(client),
     }
 
     passed = []
