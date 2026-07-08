@@ -2388,23 +2388,20 @@ def run_phase_mgn_replication(client, aws_connector_id: str, asset_id: str) -> N
     """MGN_REPLICATION: provision AL2023 source EC2, install MGN agent, wait for
     READY_FOR_TEST, fire server_backup CR, verify AMI, teardown everything."""
     import uuid as _uuid
-    import boto3
+    import os as _os
 
-    creds = get_connector_creds_from_db(aws_connector_id)
-    region = creds.get("region") or creds.get("aws_region", "us-east-1")
-    access_key = creds.get("access_key_id", creds.get("aws_access_key_id", ""))
-    secret_key = creds.get("secret_access_key", creds.get("aws_secret_access_key", ""))
+    # Build creds from env vars (set by run_on_ec2.py) — avoids app.config dependency
+    # on the runner which doesn't have the full backend installed.
+    region = _os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    creds = {
+        "access_key_id": _os.environ.get("AWS_ACCESS_KEY_ID", ""),
+        "secret_access_key": _os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
+        "region": region,
+    }
 
-    def _boto(svc):
-        return boto3.client(
-            svc, region_name=region,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-        )
-
-    ec2 = _boto("ec2")
-    ssm = _boto("ssm")
-    mgn = _boto("mgn")
+    ec2 = _get_aws_boto3_client("ec2")
+    ssm = _get_aws_boto3_client("ssm")
+    mgn = _get_aws_boto3_client("mgn")
 
     _ensure_mgn_iam_permissions(creds)
 
