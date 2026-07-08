@@ -1761,6 +1761,123 @@ def phase_mcp_infra_provenance(client: NexplaneClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase: MCP_INFRA_TIMELINE
+# ---------------------------------------------------------------------------
+
+def phase_mcp_infra_timeline(client: NexplaneClient) -> None:
+    print("\n[MCP_INFRA_TIMELINE] /memory/timeline time-bounded + get_migration_precedents accuracy", flush=True)
+
+    api_token = _smoke_state["api_token"]
+    asset_id = _smoke_state["asset_id"]
+    if not asset_id:
+        fail("asset_id not set — run MCP_CR_ROUNDTRIP first")
+
+    # ── 1. Create 2 purpose-built tag_resource CRs ────────────────────────────
+    from datetime import datetime, timezone
+    since_ts = datetime.now(timezone.utc).isoformat()
+
+    timeline_cr_ids = []
+    for i in range(2):
+        cr = client.post("/change-requests", json={
+            "cr_type": "tag_resource",
+            "title": f"smoke-timeline-{i}",
+            "desired_outcome": {"tag_key": f"smoke-tl-{i}", "tag_value": "true"},
+            "target_asset_ids": [asset_id],
+        })
+        cr_id = cr["id"]
+        client.post(f"/change-requests/{cr_id}/plan")
+        client.post(f"/change-requests/{cr_id}/approve")
+        client.post(f"/change-requests/{cr_id}/execute")
+
+        # Poll until completed (up to 30s)
+        status_resp = {}
+        for _ in range(30):
+            time.sleep(1)
+            status_resp = client.get(f"/change-requests/{cr_id}")
+            if status_resp.get("status") in ("completed", "failed", "rolled_back"):
+                break
+        if status_resp.get("status") != "completed":
+            fail(f"timeline CR {i} did not complete: {status_resp.get('status')}")
+        timeline_cr_ids.append(cr_id)
+        log(f"timeline CR {i} completed: {cr_id}")
+
+    # ── 2. REST GET /memory/timeline?since={since_ts} ─────────────────────────
+    timeline = client.get(f"/memory/timeline", params={"since": since_ts})
+    if not isinstance(timeline, dict):
+        fail(f"GET /memory/timeline returned non-dict: {type(timeline)}")
+
+    for key in ("total", "approved_count", "auto_remediation_count", "rollback_count", "changes"):
+        if key not in timeline:
+            fail(f"GET /memory/timeline missing key: {key!r}. Keys: {list(timeline.keys())}")
+
+    total = timeline["total"]
+    if not isinstance(total, int) or total < 0:
+        fail(f"total should be non-negative int, got {total!r}")
+    if total < 2:
+        fail(f"timeline total={total} after creating 2 CRs — expected >= 2")
+
+    approved_count = timeline["approved_count"]
+    if not isinstance(approved_count, int) or approved_count < 0:
+        fail(f"approved_count should be non-negative int, got {approved_count!r}")
+    if approved_count < 2:
+        fail(f"approved_count={approved_count} after approving 2 CRs — expected >= 2")
+
+    changes = timeline["changes"]
+    if not isinstance(changes, list):
+        fail(f"changes should be list, got {type(changes)}")
+
+    found_ids = {c.get("cr_id") or c.get("id") for c in changes}
+    for expected_id in timeline_cr_ids:
+        if expected_id not in found_ids:
+            fail(
+                f"timeline CR {expected_id} not in /memory/timeline changes. "
+                f"Found: {list(found_ids)[:10]}"
+            )
+    log(f"/memory/timeline?since={since_ts}: total={total}, approved={approved_count}, both CRs present")
+
+    # ── 3. REST GET /memory/timeline (no filter) ──────────────────────────────
+    timeline_all = client.get("/memory/timeline")
+    if not isinstance(timeline_all, dict):
+        fail(f"GET /memory/timeline (no filter) returned non-dict: {type(timeline_all)}")
+    for key in ("total", "approved_count", "rollback_count"):
+        val = timeline_all.get(key)
+        if not isinstance(val, int) or val < 0:
+            fail(f"timeline_all[{key!r}] should be non-negative int, got {val!r}")
+    log(f"/memory/timeline (all): total={timeline_all['total']}")
+
+    # ── 4. MCP get_migration_precedents — accuracy ────────────────────────────
+    prec = _invoke_mcp_tool_inprocess("get_migration_precedents", {
+        "token": api_token,
+        "change_type": "tag_resource",
+    })
+    if not isinstance(prec, dict):
+        fail(f"get_migration_precedents returned non-dict: {type(prec)}")
+
+    total_exec = prec.get("total_executions")
+    if not isinstance(total_exec, int) or total_exec <= 0:
+        fail(f"total_executions should be positive int, got {total_exec!r}")
+
+    success_rate = prec.get("success_rate")
+    if not isinstance(success_rate, (int, float)) or not (0.0 <= success_rate <= 1.0):
+        fail(f"success_rate should be float 0.0–1.0, got {success_rate!r}")
+
+    avg_dur = prec.get("avg_duration_minutes")
+    if not isinstance(avg_dur, (int, float)) or avg_dur < 0:
+        fail(f"avg_duration_minutes should be >= 0, got {avg_dur!r}")
+
+    sample_ids = prec.get("sample_cr_ids")
+    if not isinstance(sample_ids, list):
+        fail(f"sample_cr_ids should be list, got {type(sample_ids)}")
+
+    log(
+        f"get_migration_precedents tag_resource: "
+        f"total={total_exec}, success_rate={success_rate:.2f}, avg_dur={avg_dur:.1f}min"
+    )
+
+    print("[MCP_INFRA_TIMELINE] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
 # Phase registry + main
 # ---------------------------------------------------------------------------
 
@@ -1781,6 +1898,7 @@ ALL_PHASES = [
     "MCP_PLANNING_CTX",
     "MCP_MEMORY_ACCURACY",
     "MCP_INFRA_PROVENANCE",
+    "MCP_INFRA_TIMELINE",
 ]
 
 
@@ -1820,6 +1938,7 @@ def main() -> None:
         "MCP_PLANNING_CTX":     lambda: phase_mcp_planning_ctx(client),
         "MCP_MEMORY_ACCURACY":      lambda: phase_mcp_memory_accuracy(client),
         "MCP_INFRA_PROVENANCE":     lambda: phase_mcp_infra_provenance(client),
+        "MCP_INFRA_TIMELINE":       lambda: phase_mcp_infra_timeline(client),
     }
 
     passed = []
