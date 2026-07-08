@@ -43,6 +43,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 
 import httpx
 
@@ -1773,7 +1774,6 @@ def phase_mcp_infra_timeline(client: NexplaneClient) -> None:
         fail("asset_id not set — run MCP_CR_ROUNDTRIP first")
 
     # ── 1. Create 2 purpose-built tag_resource CRs ────────────────────────────
-    from datetime import datetime, timezone
     since_ts = datetime.now(timezone.utc).isoformat()
 
     timeline_cr_ids = []
@@ -1839,7 +1839,7 @@ def phase_mcp_infra_timeline(client: NexplaneClient) -> None:
     timeline_all = client.get("/memory/timeline")
     if not isinstance(timeline_all, dict):
         fail(f"GET /memory/timeline (no filter) returned non-dict: {type(timeline_all)}")
-    for key in ("total", "approved_count", "rollback_count"):
+    for key in ("total", "approved_count", "auto_remediation_count", "rollback_count"):
         val = timeline_all.get(key)
         if not isinstance(val, int) or val < 0:
             fail(f"timeline_all[{key!r}] should be non-negative int, got {val!r}")
