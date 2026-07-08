@@ -978,6 +978,15 @@ Examples:
             "CATALOG_DISCOVERY", "CATALOG_CR_LIFECYCLE", "CATALOG_ACTION_ERRORS",
             "CATALOG_ROLLBACK", "CATALOG_WORKFLOW", "CATALOG_WORKFLOW_PARTIAL_FAILURE",
         }
+        MCP_SERVER_PHASES = {
+            "MCP_TOOL_ENUM", "MCP_AGENT_TOKEN_AUTH", "MCP_CR_ROUNDTRIP",
+            "MCP_PROVENANCE", "MCP_WHO_APPROVED", "MCP_DEPENDENCY",
+            "MCP_SAFETY_QUERY", "MCP_TIMELINE", "MCP_FINDINGS",
+            "MCP_CONNECTORS", "MCP_IDENTITY", "MCP_RUNBOOKS",
+            "MCP_HOST_INTEL", "MCP_PLANNING_CTX", "MCP_MEMORY_ACCURACY",
+            "MCP_INFRA_PROVENANCE", "MCP_INFRA_TIMELINE", "MCP_INFRA_QUERY",
+            "MCP_INFRA_DELETION_CHECK",
+        }
         selected_phases = set(args.phases.split(","))
         if selected_phases & PLATFORM_PHASES:
             test_script = "test_platform_live.py"
@@ -985,6 +994,8 @@ Examples:
             test_script = "test_backup_scheduler_live.py"
         elif selected_phases & CATALOG_ACTION_PHASES:
             test_script = "test_catalog_action_live.py"
+        elif selected_phases & MCP_SERVER_PHASES:
+            test_script = "test_mcp_server_live.py"
         else:
             test_script = "test_aws_live.py"
         test_cmd_parts = [
