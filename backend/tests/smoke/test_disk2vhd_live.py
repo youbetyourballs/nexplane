@@ -47,10 +47,11 @@ from smoke_helpers import (
     make_base_parser,
     _get_aws_boto3_client,
     KEY_NAME,
-    SMOKE_BUCKET,
-    SMOKE_IAM_PROFILE,
     _wait_ssm_ready_win,
 )
+
+SMOKE_BUCKET = "nexplane-smoke-backup-scheduler"
+SMOKE_IAM_PROFILE = "NexplaneEC2TestProfile"
 
 
 def _ensure_s3_bucket(s3_boto, bucket: str) -> None:
