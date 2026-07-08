@@ -147,3 +147,8 @@ Base commit: d952244
 - Deferred GCS_BACKEND RESOLVED: bucket nexplane-smoke-backup-test created in GCP project nexplane; gcs_bucket field added to GCP connector creds; GCS_BACKEND ✅ PASSED on EC2 (commit 0d7093f)
 - Deferred DB_RESTORE/postgres RESOLVED: rewritten to use self-contained Docker postgres:15 on port 5433 (no RDS required); DB_RESTORE/postgres ✅ PASSED on EC2 (commit 0d7093f)
 ## ALL DEFERRED ITEMS RESOLVED — GCS_BACKEND ✅, DB_RESTORE/postgres ✅, I1 ✅
+
+## Post-completion fixes (2026-07-07)
+- gcp_cloudsql_backup_create rollback_failed fix: _rollback_no_op sentinel in rollback_executor.py (commit 3e04c6b); 4 unit tests; 4/4 passing
+- import_image restore strategy: full implementation (commit bdafa39); 4 unit tests; 38/38 test_backup_architecture.py passing on EC2
+- disk2vhd test fix: size check is SSM call #3 not #4 (commit bdafa39)
