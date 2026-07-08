@@ -183,6 +183,20 @@ def _get_or_create_windows_instance(ec2_client, ssm_client) -> tuple[str, str]:
     subnets = ec2_client.describe_subnets(
         Filters=[{"Name": "vpcId", "Values": [vpc_id]}]
     )["Subnets"]
+    # Filter to AZs that support t3.medium (Windows not available in all AZs)
+    try:
+        supported_azs = {
+            o["Location"]
+            for o in ec2_client.describe_instance_type_offerings(
+                LocationType="availability-zone",
+                Filters=[{"Name": "instance-type", "Values": ["t3.medium"]}],
+            )["InstanceTypeOfferings"]
+        }
+        filtered = [s for s in subnets if s.get("AvailabilityZone") in supported_azs]
+        if filtered:
+            subnets = filtered
+    except Exception:
+        pass
     subnets.sort(key=lambda s: s.get("AvailableIpAddressCount", 0), reverse=True)
     subnet_id = subnets[0]["SubnetId"]
 
