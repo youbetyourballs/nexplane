@@ -162,3 +162,7 @@ Base commit: d952244
 - Task 2: complete (commits bb163df..d383bf1, review clean — run_phase_mgn_replication inline provision + teardown; fix: AMI guard + removed plaintext creds from SSM)
 Task 1: complete (commits 0ed5beb..a164fb9, review clean)
   Follow-up: CATALOG_ROLLBACK soft-asserts asset deletion (key pair) due to async executor timing — root cause in delete_key_pair rollback; restore hard assertion once fixed
+Task 1 (MCP_INFRA_PROVENANCE): complete (commits 631422f..5ca84ba, review clean — phase_mcp_infra_provenance + approver_id population fix in MCP_WHO_APPROVED)
+Task 2 (MCP_INFRA_TIMELINE): complete (commits 5ca84ba..3a9f5a0, review clean — phase_mcp_infra_timeline, 2 purpose-built CRs, timeline since filter, get_migration_precedents)
+Task 3 (MCP_INFRA_QUERY): complete (commits 3a9f5a0..373f8fe, review clean — 3 NL queries, parse_query_intent in-process, REST response shape validation)
+Task 4 (MCP_INFRA_DELETION_CHECK): complete (commits 373f8fe..aeba74f, review clean — deletion-check/dependencies/isolated-asset; uuid import at line 45, client.delete exists)
