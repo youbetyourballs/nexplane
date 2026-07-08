@@ -21,22 +21,23 @@ class TestStorageBackendRegistry:
             get_backend("unknown_backend_xyz")
 
     def test_stub_backends_raise_not_implemented_upload(self):
+        # gcs is now implemented; remaining backends are still stubs
         from app.connectors.executors.nexplane_agent.storage_backends import get_backend
-        for name in ("gcs", "azure_blob", "oci_object_storage", "nfs", "local"):
+        for name in ("azure_blob", "oci_object_storage", "nfs", "local"):
             mod = get_backend(name)
             with pytest.raises(NotImplementedError):
                 asyncio.run(mod.upload("/tmp/file.tar.gz", "dest/key", {}))
 
     def test_stub_backends_raise_not_implemented_download(self):
         from app.connectors.executors.nexplane_agent.storage_backends import get_backend
-        for name in ("gcs", "azure_blob", "oci_object_storage", "nfs", "local"):
+        for name in ("azure_blob", "oci_object_storage", "nfs", "local"):
             mod = get_backend(name)
             with pytest.raises(NotImplementedError):
                 asyncio.run(mod.download("gcs://bucket/key", "/tmp/out", {}))
 
     def test_stub_backends_raise_not_implemented_delete(self):
         from app.connectors.executors.nexplane_agent.storage_backends import get_backend
-        for name in ("gcs", "azure_blob", "oci_object_storage", "nfs", "local"):
+        for name in ("azure_blob", "oci_object_storage", "nfs", "local"):
             mod = get_backend(name)
             with pytest.raises(NotImplementedError):
                 asyncio.run(mod.delete("gcs://bucket/key", {}))
@@ -163,10 +164,79 @@ class TestRestoreStrategyRegistry:
 
     def test_stub_restore_strategies_raise_not_implemented(self):
         from app.connectors.executors.nexplane_agent.restore_strategies import get_strategy
-        for name in ("import_image", "database_restore", "storage_restore"):
+        for name in ("database_restore", "storage_restore"):
             mod = get_strategy(name)
-            with pytest.raises(NotImplementedError):
+            with pytest.raises((NotImplementedError, RuntimeError)):
                 asyncio.run(mod.restore({}, [], None))
+
+    def test_import_image_restore_starts_task_and_returns_ami(self):
+        from unittest.mock import MagicMock, patch, AsyncMock
+        from app.connectors.executors.nexplane_agent.restore_strategies import import_image
+
+        mock_ec2 = MagicMock()
+        mock_ec2.import_image.return_value = {"ImportTaskId": "import-0abc"}
+        mock_ec2.describe_import_image_tasks.return_value = {
+            "ImportImageTasks": [{
+                "ImportTaskId": "import-0abc",
+                "Status": "completed",
+                "ImageId": "ami-imported",
+                "SnapshotDetails": [{"Ebs": {"SnapshotId": "snap-0001"}}],
+            }]
+        }
+
+        artifact_refs = {
+            "artifact_uri": "s3://smoke-bucket/disk2vhd/server.vhdx",
+            "capture_strategy": "disk2vhd",
+        }
+
+        with patch.object(import_image, "_ec2_client_from_creds", return_value=mock_ec2):
+            with patch.object(import_image, "_load_source_artifact_refs",
+                              new_callable=AsyncMock, return_value=artifact_refs):
+                with patch("app.connectors.executors.nexplane_agent.aws_utils._load_aws_creds",
+                           new_callable=AsyncMock, return_value={}):
+                    with patch.object(import_image, "_POLL_INTERVAL", 0):
+                        result = asyncio.run(import_image.restore(
+                            {"source_backup_cr_id": "cr-123"}, ["asset-1"], None
+                        ))
+        assert result["ami_id"] == "ami-imported"
+        assert result["snapshot_ids"] == ["snap-0001"]
+        assert result["import_task_id"] == "import-0abc"
+        mock_ec2.import_image.assert_called_once()
+        call_args = mock_ec2.import_image.call_args[1]
+        assert call_args["DiskContainers"][0]["Format"] == "VHD"
+        assert call_args["DiskContainers"][0]["UserBucket"]["S3Bucket"] == "smoke-bucket"
+        assert call_args["DiskContainers"][0]["UserBucket"]["S3Key"] == "disk2vhd/server.vhdx"
+
+    def test_import_image_rollback_deregisters_ami_and_deletes_snapshots(self):
+        from unittest.mock import MagicMock, patch, AsyncMock
+        from app.connectors.executors.nexplane_agent.restore_strategies import import_image
+
+        mock_ec2 = MagicMock()
+
+        with patch.object(import_image, "_ec2_client_from_creds", return_value=mock_ec2):
+            with patch("app.connectors.executors.nexplane_agent.aws_utils._load_aws_creds",
+                       new_callable=AsyncMock, return_value={}):
+                result = asyncio.run(import_image.rollback(
+                    {},
+                    {"ami_id": "ami-imported", "snapshot_ids": ["snap-0001"]},
+                    None,
+                ))
+        assert result["rolled_back"] is True
+        assert result["deregistered_ami"] == "ami-imported"
+        mock_ec2.deregister_image.assert_called_once_with(ImageId="ami-imported")
+        mock_ec2.delete_snapshot.assert_called_once_with(SnapshotId="snap-0001")
+
+    def test_import_image_rollback_no_ami_returns_false(self):
+        from app.connectors.executors.nexplane_agent.restore_strategies import import_image
+        result = asyncio.run(import_image.rollback({}, {}, None))
+        assert result["rolled_back"] is False
+        assert "ami_id" in result["reason"]
+
+    def test_import_image_parse_s3_uri(self):
+        from app.connectors.executors.nexplane_agent.restore_strategies.import_image import _parse_s3_uri
+        bucket, key = _parse_s3_uri("s3://my-bucket/path/to/file.vhdx")
+        assert bucket == "my-bucket"
+        assert key == "path/to/file.vhdx"
 
     def test_launch_ami_restore_calls_run_instances(self):
         from unittest.mock import MagicMock, patch
@@ -671,7 +741,7 @@ class TestDisk2VhdStrategy:
         def _get_invocation(**kwargs):
             # Return size on the 3rd SSM command (size check after run).
             call_index[0] += 1
-            stdout = "104857600" if call_index[0] == 4 else ""
+            stdout = "104857600" if call_index[0] == 3 else ""
             return {"Status": "Success", "StandardOutputContent": stdout, "StandardErrorContent": ""}
 
         mock_ssm.get_command_invocation.side_effect = _get_invocation
