@@ -8,6 +8,13 @@
 
 **Tech Stack:** HashiCorp Packer (HCL2 template), GitHub Actions, AWS EC2 / AMI APIs, Python smoke script, nginx (Docker container), systemd, docker-compose v2.
 
+**Future formats (out of scope for this plan, architecture must not preclude):**
+- **OVA** — on-premise VMware/VirtualBox deployments; same Packer template, different builder
+- **Azure VHD / GCP image** — other cloud providers; same provisioner scripts, different Packer builder + publish step
+- **Docker Compose bundle** — tarball with images + compose file for self-hosted Docker installs
+
+The `packer/` directory and provisioner scripts should be structured so adding a new builder is additive (new `.pkr.hcl` file + publish job) without modifying the existing AMI path.
+
 ---
 
 ## Global Constraints
@@ -145,9 +152,28 @@ This means the frontend and API are both accessible from the same public IP on p
 
 ---
 
+## Smoke Test Phases
+
+`packer/smoke_ami.py` runs 8 sequential phases against the live test instance. All phases must pass before the AMI is published.
+
+| Phase | What is verified |
+|-------|-----------------|
+| **1. Launch + network** | Instance launches from AMI; EC2 status checks pass; public IP assigned; port 80 responds HTTP 200 within boot timeout |
+| **2. Container health** | SSH `docker ps` confirms all expected containers (`db`, `backend`, `webserver`) are in `running` state |
+| **3. Authentication** | `POST /api/auth/login` with default creds returns JWT; `GET /api/auth/me` returns admin profile; token works for subsequent requests |
+| **4. Asset management** | Create 3 assets (web/app/db server); create `depends_on` chain; `GET /api/impact-simulation` returns correct upstream/downstream for each node; verify `downstream_risk.total >= 2` from root |
+| **5. Connector configuration** | `POST /api/connectors` creates AWS connector (fake creds — tests config API, not connectivity); `PUT /api/connectors/{id}/credentials` accepts credentials; `GET /api/connectors` lists it; create a second connector (agent_tunnel type) |
+| **6. Change request lifecycle** | Create CR targeting mid asset; `POST /plan` → poll until `planned`; verify `change_plan.blast_radius` populated with downstream count; `POST /submit-for-approval`; `POST /approve` with `decision=approved`; `POST /execute` → accept `executing`, `failed`, or `completed` as valid (fake creds will fail execution — that is expected and verified as graceful, not a crash) |
+| **7. Rollback** | `POST /change-requests/{id}/rollback` or `POST /project-rollbacks` → assert API returns 200/201 and rollback record created; verify rollback status is queryable |
+| **8. Feature surface spot-check** | `GET /api/vulnerabilities` → 200; `GET /api/compliance/baselines` → 200; `GET /api/runbooks` → 200; `GET /api/access-reviews` → 200; `GET /api/recurring-jobs` → 200; `GET /api/backup-targets` → 200; `GET /api/change-requests` → 200 and list non-empty (the CR created in phase 6) |
+
+Cleanup runs in a `finally` block regardless of outcome: DELETE created CRs, assets, connectors; terminate EC2 instance; delete ephemeral key pair and security group.
+
+---
+
 ## Success Criteria
 
 - `build-ami` PASSED: Packer completes, AMI ID captured, AMI is in `available` state
-- `smoke-ami` PASSED: all 5 HTTP/SSH assertions green, test instance terminated
+- `smoke-ami` PASSED: all 8 phases green, test instance terminated, ephemeral AWS resources deleted
 - `publish-manifest` PASSED: AMI is public, `latest.json` contains `ami_id` + `ami_launch_url`
-- Full pipeline: tag pushed → AMI live and launchable within ~20 minutes
+- Full pipeline: tag pushed → AMI live and launchable within ~25 minutes
