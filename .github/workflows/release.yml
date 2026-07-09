@@ -133,7 +133,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Packer
-        uses: hashicorp/setup-packer@main
+        uses: hashicorp/setup-packer@v3
         with:
           version: "1.11.0"
 
@@ -159,6 +159,7 @@ jobs:
             | cut -d, -f6 \
             | cut -d: -f2)
           echo "ami_id=${AMI_ID}" >> "$GITHUB_OUTPUT"
+          [[ -n "$AMI_ID" ]] || { echo "ERROR: AMI ID empty — Packer build may have failed"; exit 1; }
           echo "Built AMI: ${AMI_ID}"
 
   smoke-ami:
@@ -209,6 +210,8 @@ jobs:
 
       - name: Cleanup key pair and security group
         if: always()
+        # Instance termination is handled inside smoke_ami.py's finally block
+        # before this step runs, so the SG has no attached ENIs at this point
         run: |
           aws ec2 delete-key-pair --key-name "$KEY_NAME" || true
           aws ec2 delete-security-group \
@@ -218,6 +221,8 @@ jobs:
     needs: [build-and-release, build-ami, smoke-ami]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Make AMI public
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
