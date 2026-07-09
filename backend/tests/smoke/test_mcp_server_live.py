@@ -247,6 +247,9 @@ _smoke_state: dict = {
     "connector_id": "",        # connector used for MCP_CONNECTORS assertions
     "seeded_runbook_id": "",   # runbook created by MCP_RUNBOOKS if org had none
     "runbook_id": "",          # runbook used for MCP_RUNBOOKS assertions
+    "impact_root_id": "",      # root asset of 3-node chain (MCP_IMPACT_GRAPH)
+    "impact_mid_id": "",       # mid asset of 3-node chain (MCP_IMPACT_GRAPH)
+    "impact_leaf_id": "",      # leaf asset of 3-node chain (MCP_IMPACT_GRAPH)
 }
 
 
@@ -2081,6 +2084,173 @@ def phase_mcp_infra_deletion_check(client: NexplaneClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase: MCP_IMPACT_GRAPH
+# ---------------------------------------------------------------------------
+
+def phase_mcp_impact_graph(client: NexplaneClient, base_url: str) -> None:
+    print("\n[MCP_IMPACT_GRAPH] Asset dependency graph traversal + GET /impact-simulation", flush=True)
+
+    api_token = _smoke_state["api_token"]
+    assert api_token, "api_token not set — run MCP_TOOL_ENUM first"
+
+    # ── Setup: create 3-node chain root ← mid ← leaf ─────────────────────────
+    # "leaf depends on mid, mid depends on root"
+    # source_id depends on target_id (source → target = depends_on)
+    root = client.post("/assets", json={
+        "name": f"smoke-impact-root-{uuid.uuid4().hex[:6]}",
+        "asset_type": "server",
+        "environment": "staging",
+        "criticality": "high",
+    })
+    mid = client.post("/assets", json={
+        "name": f"smoke-impact-mid-{uuid.uuid4().hex[:6]}",
+        "asset_type": "server",
+        "environment": "staging",
+        "criticality": "medium",
+    })
+    leaf = client.post("/assets", json={
+        "name": f"smoke-impact-leaf-{uuid.uuid4().hex[:6]}",
+        "asset_type": "server",
+        "environment": "staging",
+        "criticality": "low",
+    })
+    root_id = root["id"]
+    mid_id  = mid["id"]
+    leaf_id = leaf["id"]
+
+    # mid depends on root
+    client.post(f"/assets/{mid_id}/relationships", json={
+        "target_asset_id": root_id,
+        "relationship_type": "depends_on",
+    })
+    # leaf depends on mid
+    client.post(f"/assets/{leaf_id}/relationships", json={
+        "target_asset_id": mid_id,
+        "relationship_type": "depends_on",
+    })
+
+    # Store for Task 2
+    _smoke_state["impact_root_id"] = root_id
+    _smoke_state["impact_mid_id"]  = mid_id
+    _smoke_state["impact_leaf_id"] = leaf_id
+    log(f"Chain created: root={root_id}, mid={mid_id}, leaf={leaf_id}")
+
+    # ── Part A: GET /impact-simulation from root ───────────────────────────────
+    # root has no upstream; mid and leaf are downstream (depth 1 and 2)
+    resp_root = client.get("/impact-simulation", params={"asset_id": root_id})
+    if not isinstance(resp_root, dict):
+        fail(f"GET /impact-simulation (root) returned non-dict: {type(resp_root)}")
+    for key in ("asset", "upstream", "downstream", "downstream_risk"):
+        if key not in resp_root:
+            fail(f"/impact-simulation (root) missing key {key!r}. Keys: {list(resp_root.keys())}")
+    if resp_root["upstream"]:
+        fail(f"root should have no upstream, got: {resp_root['upstream']}")
+    downstream_ids = {d["id"] for d in resp_root["downstream"]}
+    if mid_id not in downstream_ids:
+        fail(f"mid_id {mid_id} not in root downstream. Got: {list(downstream_ids)}")
+    if leaf_id not in downstream_ids:
+        fail(f"leaf_id {leaf_id} not in root downstream (transitive). Got: {list(downstream_ids)}")
+    if resp_root["downstream_risk"]["total"] < 2:
+        fail(f"downstream_risk.total should be >= 2 from root, got {resp_root['downstream_risk']['total']}")
+    log(f"Part A: root downstream={len(resp_root['downstream'])}, risk_total={resp_root['downstream_risk']['total']}")
+
+    # ── Part B: GET /impact-simulation from mid ────────────────────────────────
+    resp_mid = client.get("/impact-simulation", params={"asset_id": mid_id})
+    downstream_mid_ids = {d["id"] for d in resp_mid["downstream"]}
+    upstream_mid_ids   = {u["id"] for u in resp_mid["upstream"]}
+    if leaf_id not in downstream_mid_ids:
+        fail(f"leaf_id {leaf_id} not in mid downstream. Got: {list(downstream_mid_ids)}")
+    if root_id not in upstream_mid_ids:
+        fail(f"root_id {root_id} not in mid upstream. Got: {list(upstream_mid_ids)}")
+    log(f"Part B: mid upstream={len(resp_mid['upstream'])}, downstream={len(resp_mid['downstream'])}")
+
+    # ── Part C: GET /impact-simulation from leaf ───────────────────────────────
+    resp_leaf = client.get("/impact-simulation", params={"asset_id": leaf_id})
+    if resp_leaf["downstream"]:
+        fail(f"leaf should have no downstream, got: {resp_leaf['downstream']}")
+    upstream_leaf_ids = {u["id"] for u in resp_leaf["upstream"]}
+    if mid_id not in upstream_leaf_ids:
+        fail(f"mid_id {mid_id} not in leaf upstream. Got: {list(upstream_leaf_ids)}")
+    if root_id not in upstream_leaf_ids:
+        fail(f"root_id {root_id} not in leaf upstream (transitive depth=2). Got: {list(upstream_leaf_ids)}")
+    log(f"Part C: leaf upstream={len(resp_leaf['upstream'])}, downstream=0")
+
+    # ── Part D: 404 for non-existent asset ─────────────────────────────────────
+    try:
+        client.get("/impact-simulation", params={"asset_id": "00000000-0000-0000-0000-000000000000"})
+        fail("Expected 404 for non-existent asset, got success")
+    except Exception as exc:
+        if "404" not in str(exc):
+            fail(f"Expected 404 for non-existent asset, got: {exc}")
+    log("Part D: 404 for non-existent asset confirmed")
+
+    # ── Part E: isolated asset has empty upstream + downstream ─────────────────
+    iso = client.post("/assets", json={
+        "name": f"smoke-impact-iso-{uuid.uuid4().hex[:6]}",
+        "asset_type": "server",
+        "environment": "dev",
+        "criticality": "low",
+    })
+    iso_id = iso["id"]
+    try:
+        resp_iso = client.get("/impact-simulation", params={"asset_id": iso_id})
+        if resp_iso["upstream"]:
+            fail(f"isolated asset should have no upstream, got: {resp_iso['upstream']}")
+        if resp_iso["downstream"]:
+            fail(f"isolated asset should have no downstream, got: {resp_iso['downstream']}")
+        if resp_iso["downstream_risk"]["total"] != 0:
+            fail(f"isolated downstream_risk.total should be 0, got {resp_iso['downstream_risk']['total']}")
+        log("Part E: isolated asset shows empty upstream/downstream/risk")
+    finally:
+        client.delete(f"/assets/{iso_id}")
+
+    # ── Part F: MCP get_asset_neighbors on root ────────────────────────────────
+    neighbors = _invoke_mcp_tool_inprocess("get_asset_neighbors", {
+        "token": api_token,
+        "asset_id": root_id,
+    })
+    assert "error" not in neighbors, f"get_asset_neighbors error: {neighbors}"
+    downstream_nbr = neighbors.get("downstream", [])
+    nbr_ids = {e.get("id") or e.get("asset_id") for e in downstream_nbr}
+    if mid_id not in nbr_ids:
+        fail(f"get_asset_neighbors: mid_id {mid_id} not in root downstream. Got: {nbr_ids}")
+    upstream_nbr = neighbors.get("upstream", [])
+    if upstream_nbr:
+        fail(f"get_asset_neighbors: root should have no upstream, got: {upstream_nbr}")
+    log(f"Part F: get_asset_neighbors root downstream contains mid")
+
+    # ── Part G: MCP get_asset_upstream on leaf + DB cross-check ───────────────
+    upstream_chain = _invoke_mcp_tool_inprocess("get_asset_upstream", {
+        "token": api_token,
+        "asset_id": leaf_id,
+        "max_depth": 3,
+    })
+    assert isinstance(upstream_chain, list), f"get_asset_upstream returned non-list: {upstream_chain}"
+    chain_ids = {e.get("id") or e.get("asset_id") for e in upstream_chain}
+    if mid_id not in chain_ids:
+        fail(f"get_asset_upstream: mid_id {mid_id} not in leaf upstream chain. Got: {chain_ids}")
+    if root_id not in chain_ids:
+        fail(f"get_asset_upstream: root_id {root_id} not in leaf upstream chain (depth=2). Got: {chain_ids}")
+
+    # DB cross-check: leaf should have exactly 1 direct relationship row (leaf → mid)
+    async def _check_leaf_rels(SessionLocal):
+        from sqlalchemy import text
+        async with SessionLocal() as session:
+            result = await session.execute(
+                text("SELECT COUNT(*) FROM asset_relationships WHERE source_asset_id = :lid"),
+                {"lid": leaf_id},
+            )
+            return result.scalar()
+
+    db_rel_count = _run_db_check(_check_leaf_rels)
+    if db_rel_count != 1:
+        fail(f"Expected 1 direct relationship for leaf in DB, got {db_rel_count}")
+    log(f"Part G: get_asset_upstream leaf chain={list(chain_ids)}, DB rel_count={db_rel_count}")
+
+    print("[MCP_IMPACT_GRAPH] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
 # Phase registry + main
 # ---------------------------------------------------------------------------
 
@@ -2104,6 +2274,7 @@ ALL_PHASES = [
     "MCP_INFRA_TIMELINE",
     "MCP_INFRA_QUERY",
     "MCP_INFRA_DELETION_CHECK",
+    "MCP_IMPACT_GRAPH",
 ]
 
 
@@ -2146,6 +2317,7 @@ def main() -> None:
         "MCP_INFRA_TIMELINE":       lambda: phase_mcp_infra_timeline(client),
         "MCP_INFRA_QUERY":              lambda: phase_mcp_infra_query(client),
         "MCP_INFRA_DELETION_CHECK":    lambda: phase_mcp_infra_deletion_check(client),
+        "MCP_IMPACT_GRAPH":            lambda: phase_mcp_impact_graph(client, base_url),
     }
 
     passed = []
