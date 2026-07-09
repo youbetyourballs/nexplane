@@ -1,0 +1,15 @@
+[Unit]
+Description=Nexplane Platform
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/nexplane
+ExecStart=/usr/bin/docker compose -f /opt/nexplane/docker-compose.ami.yml up -d
+ExecStop=/usr/bin/docker compose -f /opt/nexplane/docker-compose.ami.yml down
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
