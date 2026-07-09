@@ -2251,6 +2251,169 @@ def phase_mcp_impact_graph(client: NexplaneClient, base_url: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase: MCP_IMPACT_PLANNING
+# ---------------------------------------------------------------------------
+
+def phase_mcp_impact_planning(client: NexplaneClient, base_url: str) -> None:
+    print("\n[MCP_IMPACT_PLANNING] Planning engine blast_radius population", flush=True)
+
+    api_token = _smoke_state["api_token"]
+    root_id = _smoke_state.get("impact_root_id", "")
+    mid_id  = _smoke_state.get("impact_mid_id", "")
+    leaf_id = _smoke_state.get("impact_leaf_id", "")
+
+    if not root_id or not mid_id or not leaf_id:
+        fail("impact chain IDs not set — run MCP_IMPACT_GRAPH first")
+
+    # ── Part A: CR targeting mid (has leaf as downstream dependent) ────────────
+    cr_mid = client.post("/change-requests", json={
+        "change_type": "tag_resource",
+        "title": "smoke-impact-planning-mid",
+        "desired_outcome": {"tag_key": "smoke-impact", "tag_value": "true"},
+        "target_asset_ids": [mid_id],
+    })
+    cr_mid_id = cr_mid["id"]
+
+    # Plan the CR and poll until it leaves planning state
+    client.post(f"/change-requests/{cr_mid_id}/plan")
+    cr_detail = {}
+    for _ in range(15):
+        time.sleep(1)
+        cr_detail = client.get(f"/change-requests/{cr_mid_id}")
+        if cr_detail.get("status") not in ("planning", "pending", "draft"):
+            break
+    post_plan_status = cr_detail.get("status")
+    log(f"Part A: CR targeting mid reached status: {post_plan_status}")
+
+    # Verify change_plan is present and blast_radius is populated
+    change_plan = cr_detail.get("change_plan")
+    if change_plan is None:
+        fail(f"change_plan is None after planning — status was {post_plan_status}")
+
+    blast_radius = change_plan.get("blast_radius")
+    if not blast_radius:
+        fail(f"blast_radius is empty after planning CR targeting mid. change_plan keys: {list(change_plan.keys())}")
+
+    # Verify blast_radius shape
+    for key in ("affected_assets", "affected_environments", "estimated_impact", "rollback_available"):
+        if key not in blast_radius:
+            fail(f"blast_radius missing key {key!r}. Keys: {list(blast_radius.keys())}")
+
+    affected = blast_radius["affected_assets"]
+    if not isinstance(affected, list) or len(affected) == 0:
+        fail(f"blast_radius.affected_assets should be non-empty list, got: {affected!r}")
+
+    affected_ids = {a["id"] for a in affected}
+    if mid_id not in affected_ids:
+        fail(f"blast_radius.affected_assets should contain mid_id {mid_id}. Got: {affected_ids}")
+
+    log(f"Part A: blast_radius populated, affected_assets={[a['id'] for a in affected]}")
+
+    # DB cross-check: blast_radius column in change_plans must be non-null
+    async def _check_blast_radius(SessionLocal):
+        from sqlalchemy import text
+        async with SessionLocal() as session:
+            result = await session.execute(
+                text("SELECT blast_radius FROM change_plans WHERE change_request_id = :crid"),
+                {"crid": cr_mid_id},
+            )
+            row = result.fetchone()
+            return row[0] if row else None
+
+    db_blast = _run_db_check(_check_blast_radius)
+    if db_blast is None:
+        fail(f"DB: change_plans.blast_radius is None for cr_mid_id {cr_mid_id}")
+    if not db_blast.get("affected_assets"):
+        fail(f"DB: blast_radius.affected_assets is empty. Got: {db_blast}")
+    log(f"Part A: DB blast_radius confirmed non-null, affected_assets count={len(db_blast.get('affected_assets', []))}")
+
+    # ── Part B: GET /impact-simulation cross-check ─────────────────────────────
+    # mid has leaf as downstream — planning + impact-simulation must agree on the asset
+    resp_mid = client.get("/impact-simulation", params={"asset_id": mid_id})
+    if resp_mid.get("downstream_risk", {}).get("total", 0) == 0:
+        fail(
+            f"GET /impact-simulation for mid should show downstream total > 0 "
+            f"(leaf is downstream). Got downstream_risk={resp_mid.get('downstream_risk')}"
+        )
+    # The planned blast_radius should reference mid; impact-simulation shows its downstream
+    # together they prove: planning captures the target, impact-sim shows the ripple effect
+    log(
+        f"Part B: impact-simulation cross-check — mid downstream_risk.total="
+        f"{resp_mid['downstream_risk']['total']}, blast_radius affected_assets={len(affected)}"
+    )
+
+    # MCP tool agrees with REST: get_asset_neighbors on mid returns leaf downstream
+    neighbors = _invoke_mcp_tool_inprocess("get_asset_neighbors", {
+        "token": api_token,
+        "asset_id": mid_id,
+    })
+    assert "error" not in neighbors, f"get_asset_neighbors error: {neighbors}"
+    nbr_downstream_ids = {e.get("id") or e.get("asset_id") for e in neighbors.get("downstream", [])}
+    if leaf_id not in nbr_downstream_ids:
+        fail(f"get_asset_neighbors mid: leaf_id {leaf_id} not in downstream. Got: {nbr_downstream_ids}")
+    log(f"Part B: MCP get_asset_neighbors agrees — leaf in mid downstream")
+
+    # ── Part C: isolated asset — blast_radius still populated, downstream empty ─
+    iso = client.post("/assets", json={
+        "name": f"smoke-impact-iso-{uuid.uuid4().hex[:6]}",
+        "asset_type": "server",
+        "environment": "dev",
+        "criticality": "low",
+    })
+    iso_id = iso["id"]
+
+    cr_iso = client.post("/change-requests", json={
+        "change_type": "tag_resource",
+        "title": "smoke-impact-planning-iso",
+        "desired_outcome": {"tag_key": "smoke-impact", "tag_value": "true"},
+        "target_asset_ids": [iso_id],
+    })
+    cr_iso_id = cr_iso["id"]
+    client.post(f"/change-requests/{cr_iso_id}/plan")
+    iso_detail = {}
+    for _ in range(15):
+        time.sleep(1)
+        iso_detail = client.get(f"/change-requests/{cr_iso_id}")
+        if iso_detail.get("status") not in ("planning", "pending", "draft"):
+            break
+
+    iso_plan = iso_detail.get("change_plan")
+    if iso_plan is None:
+        fail(f"change_plan is None for isolated asset CR after planning")
+    iso_blast = iso_plan.get("blast_radius", {})
+    if not iso_blast:
+        fail(f"blast_radius should be populated even for isolated asset CR (the target asset itself). Got: {iso_blast!r}")
+
+    # Impact simulation for isolated asset must show empty downstream
+    resp_iso = client.get("/impact-simulation", params={"asset_id": iso_id})
+    if resp_iso.get("downstream_risk", {}).get("total", -1) != 0:
+        fail(
+            f"isolated asset GET /impact-simulation downstream_risk.total should be 0. "
+            f"Got: {resp_iso.get('downstream_risk')}"
+        )
+    log(f"Part C: isolated asset blast_radius populated, impact-sim downstream=0")
+
+    # ── Cleanup ────────────────────────────────────────────────────────────────
+    for cr_id in (cr_mid_id, cr_iso_id):
+        try:
+            client.delete(f"/change-requests/{cr_id}")
+        except Exception as e:
+            log(f"Could not delete CR {cr_id}: {e}", ok=False)
+
+    client.delete(f"/assets/{iso_id}")
+
+    # Delete chain in dependency order: leaf first, then mid, then root
+    for aid in (leaf_id, mid_id, root_id):
+        try:
+            client.delete(f"/assets/{aid}")
+        except Exception as e:
+            log(f"Could not delete asset {aid}: {e}", ok=False)
+
+    log("Cleanup complete — chain and CRs deleted")
+    print("[MCP_IMPACT_PLANNING] PASSED", flush=True)
+
+
+# ---------------------------------------------------------------------------
 # Phase registry + main
 # ---------------------------------------------------------------------------
 
@@ -2275,6 +2438,7 @@ ALL_PHASES = [
     "MCP_INFRA_QUERY",
     "MCP_INFRA_DELETION_CHECK",
     "MCP_IMPACT_GRAPH",
+    "MCP_IMPACT_PLANNING",
 ]
 
 
@@ -2318,6 +2482,7 @@ def main() -> None:
         "MCP_INFRA_QUERY":              lambda: phase_mcp_infra_query(client),
         "MCP_INFRA_DELETION_CHECK":    lambda: phase_mcp_infra_deletion_check(client),
         "MCP_IMPACT_GRAPH":            lambda: phase_mcp_impact_graph(client, base_url),
+        "MCP_IMPACT_PLANNING":         lambda: phase_mcp_impact_planning(client, base_url),
     }
 
     passed = []

@@ -985,7 +985,7 @@ Examples:
             "MCP_CONNECTORS", "MCP_IDENTITY", "MCP_RUNBOOKS",
             "MCP_HOST_INTEL", "MCP_PLANNING_CTX", "MCP_MEMORY_ACCURACY",
             "MCP_INFRA_PROVENANCE", "MCP_INFRA_TIMELINE", "MCP_INFRA_QUERY",
-            "MCP_INFRA_DELETION_CHECK", "MCP_IMPACT_GRAPH",
+            "MCP_INFRA_DELETION_CHECK", "MCP_IMPACT_GRAPH", "MCP_IMPACT_PLANNING",
         }
         selected_phases = set(args.phases.split(","))
         if selected_phases & PLATFORM_PHASES:
