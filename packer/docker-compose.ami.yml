@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nexplane
+      POSTGRES_PASSWORD: nexplane_prod
+      POSTGRES_DB: nexplane
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexplane"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: ghcr.io/youbetyourballs/nexplane-backend:NEXPLANE_VERSION
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nexplane:nexplane_prod@db:5432/nexplane
+      SECRET_KEY: nexplane-default-secret-key-change-before-production
+      ENVIRONMENT: production
+      CORS_ORIGINS: "*"
+      DEMO_MODE: "true"
+      NEXPLANE_AGENT_DOWNLOAD_URL: "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com"
+    depends_on:
+      db:
+        condition: service_healthy
+    cap_add:
+      - NET_ADMIN
+    command: >
+      sh -c "alembic upgrade heads &&
+             python seed.py &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  webserver:
+    image: nexplane-webserver:NEXPLANE_VERSION
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
