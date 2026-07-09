@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AMI smoke test — 8-phase functional verification of a freshly launched Nexplane AMI.
+AMI smoke test — 9-phase functional verification of a freshly launched Nexplane AMI.
 Usage: python packer/smoke_ami.py --ami-id ami-xxx --key-name smoke-key --security-group-id sg-xxx
 """
 import argparse
@@ -16,7 +16,7 @@ BOOT_TIMEOUT   = 420   # seconds to wait for port 80 after EC2 status OK
 HTTP_POLL      = 15    # seconds between HTTP readiness polls
 PLAN_TIMEOUT   = 60    # seconds to wait for CR to reach "planned"
 EXEC_TIMEOUT   = 90    # seconds to wait for CR execution to reach terminal state
-EXEC_TERMINAL  = {"completed", "failed", "executed", "rollback_complete"}
+EXEC_TERMINAL  = {"completed", "failed", "executed", "executing", "rollback_complete"}
 PLAN_TERMINAL  = {"planned", "failed"}
 
 # Containers expected to be running on the AMI
@@ -474,9 +474,7 @@ def phase_mcp(base_url, token):
                 fail(f"Expected MCP tool '{tool}' not found in tool list")
         log(f"  All required MCP tool categories present ({len(tool_names)} total) ✓")
     else:
-        # MCP endpoint reachable but SSE parsing inconclusive — verify endpoint is up at minimum
-        log("  MCP tool list not parsed from SSE (streaming); verified endpoint reachable ✓")
-        # Require at least that the endpoint returned 200 — we already checked that above
+        fail("MCP tool list could not be verified via SSE or initialize — check /api/mcp endpoint")
 
     # Clean up agent token
     r = api("delete", base_url, f"/auth/agent-tokens/{agent_token_id}", token=token)
