@@ -44,7 +44,7 @@ source "amazon-ebs" "nexplane" {
   ssh_username = "ubuntu"
 
   ami_name        = local.ami_name
-  ami_description = "Nexplane platform ${var.version} — zero-config, runs on port 80"
+  ami_description = "Nexplane platform ${var.version} - zero-config, runs on port 80"
 
   # Start private; made public by publish-manifest job after smoke passes
   ami_groups = []
