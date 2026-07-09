@@ -17,6 +17,8 @@ env:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -121,3 +123,160 @@ jobs:
                   "notes": $notes
                 }
               }')"
+
+  build-ami:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    outputs:
+      ami_id: ${{ steps.packer.outputs.ami_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: "1.11.0"
+
+      - name: Packer init
+        run: packer init packer/nexplane-ami.pkr.hcl
+
+      - name: Build AMI
+        id: packer
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          PKR_VAR_version: ${{ needs.build-and-release.outputs.version }}
+          PKR_VAR_ghcr_token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          packer build \
+            -machine-readable \
+            packer/nexplane-ami.pkr.hcl \
+            | tee packer-output.txt
+
+          AMI_ID=$(grep 'artifact,0,id' packer-output.txt \
+            | tail -1 \
+            | cut -d, -f6 \
+            | cut -d: -f2)
+          echo "ami_id=${AMI_ID}" >> "$GITHUB_OUTPUT"
+          echo "Built AMI: ${AMI_ID}"
+
+  smoke-ami:
+    needs: [build-and-release, build-ami]
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      AMI_ID: ${{ needs.build-ami.outputs.ami_id }}
+      KEY_NAME: nexplane-smoke-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python deps
+        run: pip install boto3 requests
+
+      - name: Create ephemeral SSH key pair
+        run: |
+          aws ec2 create-key-pair \
+            --key-name "$KEY_NAME" \
+            --query 'KeyMaterial' \
+            --output text > "${KEY_NAME}.pem"
+          chmod 600 "${KEY_NAME}.pem"
+
+      - name: Create ephemeral security group
+        id: sg
+        run: |
+          RUNNER_IP=$(curl -s https://checkip.amazonaws.com)
+          SG_ID=$(aws ec2 create-security-group \
+            --group-name "nexplane-smoke-${GITHUB_RUN_ID}" \
+            --description "Nexplane AMI smoke test - run $GITHUB_RUN_ID" \
+            --query 'GroupId' --output text)
+          aws ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp --port 22 --cidr "${RUNNER_IP}/32"
+          aws ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp --port 80 --cidr "${RUNNER_IP}/32"
+          echo "sg_id=${SG_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Run smoke test
+        run: |
+          python packer/smoke_ami.py \
+            --ami-id "$AMI_ID" \
+            --key-name "$KEY_NAME" \
+            --security-group-id "${{ steps.sg.outputs.sg_id }}"
+
+      - name: Cleanup key pair and security group
+        if: always()
+        run: |
+          aws ec2 delete-key-pair --key-name "$KEY_NAME" || true
+          aws ec2 delete-security-group \
+            --group-id "${{ steps.sg.outputs.sg_id }}" || true
+
+  publish-manifest:
+    needs: [build-and-release, build-ami, smoke-ami]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Make AMI public
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          aws ec2 modify-image-attribute \
+            --image-id "${{ needs.build-ami.outputs.ami_id }}" \
+            --launch-permission "Add=[{Group=all}]"
+
+      - name: Update latest.json
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          VERSION: ${{ needs.build-and-release.outputs.version }}
+          AMI_ID: ${{ needs.build-ami.outputs.ami_id }}
+        run: |
+          aws s3 cp s3://nexplane-artifacts/releases/latest.json latest.json || \
+            echo '{}' > latest.json
+
+          LAUNCH_URL="https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#LaunchInstanceWizard:ami=${AMI_ID}"
+
+          jq \
+            --arg version "$VERSION" \
+            --arg ami_id "$AMI_ID" \
+            --arg ami_region "us-east-1" \
+            --arg ami_launch_url "$LAUNCH_URL" \
+            '. + {version: $version, ami_id: $ami_id, ami_region: $ami_region, ami_launch_url: $ami_launch_url}' \
+            latest.json > latest.json.new
+
+          aws s3 cp latest.json.new s3://nexplane-artifacts/releases/latest.json \
+            --content-type application/json \
+            --cache-control "no-cache"
+
+          echo "Published AMI ${AMI_ID} to latest.json"
+
+      - name: Render and upload launch artifacts
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          AMI_ID: ${{ needs.build-ami.outputs.ami_id }}
+        run: |
+          # Render templates — replace AMI_ID placeholder with real AMI ID
+          sed "s/AMI_ID/${AMI_ID}/g" packer/templates/quickstart.cfn.yml.tmpl \
+            > quickstart.cfn.yml
+          sed "s/AMI_ID/${AMI_ID}/g" packer/templates/LAUNCH.md.tmpl \
+            > LAUNCH.md
+
+          # Upload to S3 (served via releases.nexplane.ai CloudFront)
+          aws s3 cp quickstart.cfn.yml \
+            s3://nexplane-artifacts/releases/launch/quickstart.cfn.yml \
+            --content-type application/x-yaml \
+            --cache-control "no-cache"
+
+          aws s3 cp LAUNCH.md \
+            s3://nexplane-artifacts/releases/launch/LAUNCH.md \
+            --content-type text/markdown \
+            --cache-control "no-cache"
+
+          echo "Launch artifacts published to releases.nexplane.ai/launch/"
