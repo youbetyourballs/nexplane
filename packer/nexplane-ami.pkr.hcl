@@ -89,7 +89,7 @@ build {
       "NEXPLANE_GHCR_TOKEN=${var.ghcr_token}",
       "DEBIAN_FRONTEND=noninteractive",
     ]
-    execute_command = "sudo -E bash '{{ .Path }}'"
+    execute_command = "sudo sh -c '{{ .Vars }} bash {{ .Path }}'"
     script          = "packer/scripts/setup.sh"
   }
 
