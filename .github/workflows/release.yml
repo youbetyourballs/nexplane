@@ -149,6 +149,7 @@ jobs:
           PKR_VAR_version: ${{ needs.build-and-release.outputs.version }}
           PKR_VAR_ghcr_token: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -o pipefail
           packer build \
             -machine-readable \
             packer/nexplane-ami.pkr.hcl \
