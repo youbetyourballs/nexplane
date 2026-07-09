@@ -2400,7 +2400,10 @@ def phase_mcp_impact_planning(client: NexplaneClient, base_url: str) -> None:
         except Exception as e:
             log(f"Could not delete CR {cr_id}: {e}", ok=False)
 
-    client.delete(f"/assets/{iso_id}")
+    try:
+        client.delete(f"/assets/{iso_id}")
+    except Exception as e:
+        log(f"Could not delete isolated asset {iso_id}: {e}", ok=False)
 
     # Delete chain in dependency order: leaf first, then mid, then root
     for aid in (leaf_id, mid_id, root_id):
