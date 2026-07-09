@@ -32,7 +32,9 @@
 | `packer/scripts/setup.sh` | Create | Provisioner: installs Docker, pulls images, writes MOTD, enables systemd unit |
 | `packer/scripts/nexplane.service` | Create | systemd unit that starts docker-compose on boot |
 | `packer/docker-compose.ami.yml` | Create | Production compose: db + backend + webserver (no source mounts, no tailscale, no reload) |
-| `packer/smoke_ami.py` | Create | Post-build smoke: launch instance → verify HTTP + auth + docker ps → terminate |
+| `packer/smoke_ami.py` | Create | 9-phase post-build smoke test |
+| `packer/templates/quickstart.cfn.yml.tmpl` | Create | CloudFormation template (AMI_ID placeholder) — creates SG + instance, outputs URL + SSH cmd |
+| `packer/templates/LAUNCH.md.tmpl` | Create | Step-by-step launch instructions (AMI_ID placeholder) — rendered per release |
 | `.github/workflows/release.yml` | Modify | Add `build-ami`, `smoke-ami`, `publish-manifest` jobs |
 
 ---
@@ -1027,7 +1029,205 @@ git commit -m "feat: 8-phase AMI smoke test (launch, containers, auth, assets, c
 
 ---
 
-## Task 6: GitHub Actions integration
+## Task 6: Launch artifacts — CloudFormation quickstart + instructions
+
+**Files:**
+- Create: `packer/templates/quickstart.cfn.yml.tmpl`
+- Create: `packer/templates/LAUNCH.md.tmpl`
+
+**Interfaces:**
+- Both files use `AMI_ID` as a literal placeholder string; the `publish-manifest` CI job replaces it with `sed` before uploading to S3
+- Published to: `s3://nexplane-artifacts/releases/launch/quickstart.cfn.yml` and `.../launch/LAUNCH.md`
+- Served at: `releases.nexplane.ai/launch/quickstart.cfn.yml` and `.../launch/LAUNCH.md`
+- CloudFormation stack outputs: `PlatformURL` (`http://<PublicIp>/`) and `SSHCommand` (`ssh -i <key>.pem ubuntu@<PublicIp>`)
+
+- [ ] **Step 1: Write `packer/templates/quickstart.cfn.yml.tmpl`**
+
+```yaml
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Nexplane platform quickstart — launches a single EC2 instance from the
+  pre-built AMI with a security group allowing HTTP (80) and SSH (22).
+  Takes ~3 minutes. After launch, open the PlatformURL output in your browser.
+
+Parameters:
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: >
+      Your EC2 key pair for SSH access. Create one in EC2 → Key Pairs if you
+      don't have one. You will SSH as: ubuntu@<ip> -i <your-key>.pem
+
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues: [t3.medium, t3.large, t3.xlarge, m5.large, m5.xlarge]
+    Description: Instance size. t3.medium is sufficient for evaluation.
+
+Resources:
+  NexplaneSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Nexplane platform — HTTP and SSH access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Platform UI and API
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access (restrict to your IP in production)
+
+  NexplaneInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: AMI_ID
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      SecurityGroups:
+        - !Ref NexplaneSecurityGroup
+      Tags:
+        - Key: Name
+          Value: nexplane-quickstart
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          # Platform starts automatically via systemd on boot.
+          # This user-data is a no-op; it exists to confirm boot completed.
+          echo "Nexplane quickstart boot complete" >> /var/log/nexplane-boot.log
+
+Outputs:
+  PlatformURL:
+    Description: >
+      Open this URL in your browser after the instance finishes initialising
+      (~90 seconds after launch). Log in with admin@nexplane.local / changeme.
+    Value: !Sub "http://${NexplaneInstance.PublicIp}/"
+
+  SSHCommand:
+    Description: SSH into the instance (replace <your-key>.pem with your key file path)
+    Value: !Sub "ssh -i <your-key>.pem ubuntu@${NexplaneInstance.PublicIp}"
+
+  PublicIP:
+    Description: Instance public IP address
+    Value: !GetAtt NexplaneInstance.PublicIp
+```
+
+- [ ] **Step 2: Write `packer/templates/LAUNCH.md.tmpl`**
+
+```markdown
+# Launching Nexplane
+
+**AMI ID:** `AMI_ID` (us-east-1)
+
+---
+
+## Option A — One-click CloudFormation (recommended)
+
+This is the fastest path. CloudFormation creates everything for you.
+
+1. **[Click here to launch the CloudFormation stack](https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://nexplane-artifacts.s3.us-east-1.amazonaws.com/releases/launch/quickstart.cfn.yml&stackName=nexplane-quickstart)**
+
+2. On the "Quick create stack" page:
+   - **KeyPairName** — select your existing key pair, or [create one here](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#KeyPairs:) first
+   - **InstanceType** — leave as `t3.medium` for evaluation
+   - Check the acknowledgement box at the bottom
+   - Click **Create stack**
+
+3. Wait ~3 minutes for the stack to reach `CREATE_COMPLETE`
+
+4. Click the **Outputs** tab — copy the `PlatformURL` value and open it in your browser
+
+5. Log in with:
+   - **Email:** `admin@nexplane.local`
+   - **Password:** `changeme`
+
+> **First time?** Change your password immediately after login via Settings → Profile.
+
+---
+
+## Option B — AWS Console (manual)
+
+1. Open [EC2 → Launch Instance](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#LaunchInstances:)
+2. Under **Application and OS Images**, click **Browse more AMIs** → **Community AMIs** → search for `AMI_ID`
+3. Select instance type: `t3.medium` (minimum)
+4. Under **Key pair**: select or create a key pair
+5. Under **Network settings**: ensure **Auto-assign public IP** is enabled; allow inbound on ports **80** and **22**
+6. Click **Launch instance**
+7. Once running, find the **Public IPv4 address** on the instance detail page
+8. Open `http://<ip>/` in your browser
+9. Log in with `admin@nexplane.local` / `changeme`
+
+---
+
+## Option C — AWS CLI one-liner
+
+```bash
+# Replace sg-xxxxxxxx with your security group (must allow ports 80 + 22)
+# Replace my-key-pair with your key pair name
+aws ec2 run-instances \
+  --image-id AMI_ID \
+  --instance-type t3.medium \
+  --key-name my-key-pair \
+  --security-group-ids sg-xxxxxxxx \
+  --associate-public-ip-address \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=nexplane}]' \
+  --region us-east-1 \
+  --query 'Instances[0].PublicIpAddress' \
+  --output text
+```
+
+Wait ~90 seconds, then open `http://<output-ip>/` in your browser.
+
+---
+
+## SSH Access
+
+```bash
+ssh -i /path/to/your-key.pem ubuntu@<ip>
+```
+
+Check platform status:
+```bash
+sudo docker compose -f /opt/nexplane/docker-compose.ami.yml ps
+```
+
+View logs:
+```bash
+sudo docker compose -f /opt/nexplane/docker-compose.ami.yml logs -f backend
+```
+
+---
+
+## Default Credentials
+
+| Field    | Value                    |
+|----------|--------------------------|
+| Email    | `admin@nexplane.local`   |
+| Password | `changeme`               |
+
+**Change your password after first login.** Settings → Profile → Change Password.
+```
+
+- [ ] **Step 3: Verify the CloudFormation template is valid YAML**
+
+```bash
+python -c "import yaml; yaml.safe_load(open('packer/templates/quickstart.cfn.yml.tmpl'))" && echo "YAML OK"
+```
+
+Expected: `YAML OK` (the `AMI_ID` placeholder is fine — it's a valid string value)
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add packer/templates/quickstart.cfn.yml.tmpl packer/templates/LAUNCH.md.tmpl
+git commit -m "feat: CloudFormation quickstart template and hand-held launch instructions"
+```
+
+---
+
+## Task 7: GitHub Actions integration
 
 **Files:**
 - Modify: `.github/workflows/release.yml`
@@ -1194,6 +1394,32 @@ Add after the closing of the `build-and-release` job:
             --cache-control "no-cache"
 
           echo "Published AMI ${AMI_ID} to latest.json"
+
+      - name: Render and upload launch artifacts
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          AMI_ID: ${{ needs.build-ami.outputs.ami_id }}
+        run: |
+          # Render templates — replace AMI_ID placeholder with real AMI ID
+          sed "s/AMI_ID/${AMI_ID}/g" packer/templates/quickstart.cfn.yml.tmpl \
+            > quickstart.cfn.yml
+          sed "s/AMI_ID/${AMI_ID}/g" packer/templates/LAUNCH.md.tmpl \
+            > LAUNCH.md
+
+          # Upload to S3 (served via releases.nexplane.ai CloudFront)
+          aws s3 cp quickstart.cfn.yml \
+            s3://nexplane-artifacts/releases/launch/quickstart.cfn.yml \
+            --content-type application/x-yaml \
+            --cache-control "no-cache"
+
+          aws s3 cp LAUNCH.md \
+            s3://nexplane-artifacts/releases/launch/LAUNCH.md \
+            --content-type text/markdown \
+            --cache-control "no-cache"
+
+          echo "Launch artifacts published to releases.nexplane.ai/launch/"
 ```
 
 - [ ] **Step 5: Verify `build-and-release` job exposes `version` output**
@@ -1215,7 +1441,7 @@ git commit -m "feat: add build-ami, smoke-ami, publish-manifest to release pipel
 
 ---
 
-## Task 7: End-to-end validation
+## Task 8: End-to-end validation
 
 This task does NOT cut a real release tag. It validates the pipeline components are wired correctly before the first real tag.
 

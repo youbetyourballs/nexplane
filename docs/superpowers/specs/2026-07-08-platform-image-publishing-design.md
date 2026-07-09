@@ -101,13 +101,21 @@ Three new jobs added after `build-and-release`:
 - Merge new fields: `ami_id`, `ami_region: "us-east-1"`, `ami_launch_url`
 - Upload updated `latest.json` to S3 + invalidate CloudFront
 
+### `packer/templates/quickstart.cfn.yml.tmpl`
+CloudFormation template with `AMI_ID` literal placeholder. Creates a security group (ports 80 + 22), launches a `t3.medium` instance, and outputs `PlatformURL`, `SSHCommand`, and `PublicIP`. Rendered by `publish-manifest` CI job and uploaded to `releases.nexplane.ai/launch/quickstart.cfn.yml`. The CF stack console deep link in `LAUNCH.md` points directly to this file so users click once and the template is pre-loaded.
+
+### `packer/templates/LAUNCH.md.tmpl`
+Step-by-step launch instructions with `AMI_ID` placeholder. Three paths: (A) one-click CloudFormation (recommended), (B) AWS console manual, (C) CLI one-liner. Includes SSH access commands, docker compose status/logs commands, and a credentials table. Rendered and uploaded to `releases.nexplane.ai/launch/LAUNCH.md` on every release.
+
 ### `releases.nexplane.ai/latest.json` — new fields
 ```json
 {
   "version": "v1.2.3",
   "ami_id": "ami-0abc123def456789",
   "ami_region": "us-east-1",
-  "ami_launch_url": "https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#LaunchInstanceWizard:ami=ami-0abc123def456789"
+  "ami_launch_url": "https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#LaunchInstanceWizard:ami=ami-0abc123def456789",
+  "launch_instructions_url": "https://releases.nexplane.ai/launch/LAUNCH.md",
+  "cloudformation_quickstart_url": "https://releases.nexplane.ai/launch/quickstart.cfn.yml"
 }
 ```
 
