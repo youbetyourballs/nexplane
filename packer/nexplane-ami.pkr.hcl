@@ -66,10 +66,21 @@ source "amazon-ebs" "nexplane" {
 build {
   sources = ["source.amazon-ebs.nexplane"]
 
-  # Copy source tree so setup.sh can build the frontend
+  # Create destination directories before file provisioners run
+  provisioner "shell" {
+    inline = ["mkdir -p /tmp/nexplane-src/frontend /tmp/nexplane-src/packer"]
+  }
+
+  # Copy frontend source so setup.sh can build the production image
   provisioner "file" {
-    source      = "."
-    destination = "/tmp/nexplane-src"
+    source      = "frontend/"
+    destination = "/tmp/nexplane-src/frontend"
+  }
+
+  # Copy packer assets (compose file, systemd unit)
+  provisioner "file" {
+    source      = "packer/"
+    destination = "/tmp/nexplane-src/packer"
   }
 
   provisioner "shell" {
