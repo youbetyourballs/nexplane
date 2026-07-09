@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Nexplane platform quickstart — launches a single EC2 instance from the
+  pre-built AMI with a security group allowing HTTP (80) and SSH (22).
+  Takes ~3 minutes. After launch, open the PlatformURL output in your browser.
+
+Parameters:
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: >
+      Your EC2 key pair for SSH access. Create one in EC2 → Key Pairs if you
+      don't have one. You will SSH as: ubuntu@<ip> -i <your-key>.pem
+
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues: [t3.medium, t3.large, t3.xlarge, m5.large, m5.xlarge]
+    Description: Instance size. t3.medium is sufficient for evaluation.
+
+Resources:
+  NexplaneSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Nexplane platform — HTTP and SSH access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Platform UI and API
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access (restrict to your IP in production)
+
+  NexplaneInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: AMI_ID
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      SecurityGroups:
+        - !Ref NexplaneSecurityGroup
+      Tags:
+        - Key: Name
+          Value: nexplane-quickstart
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          # Platform starts automatically via systemd on boot.
+          # This user-data is a no-op; it exists to confirm boot completed.
+          echo "Nexplane quickstart boot complete" >> /var/log/nexplane-boot.log
+
+Outputs:
+  PlatformURL:
+    Description: >
+      Open this URL in your browser after the instance finishes initialising
+      (~90 seconds after launch). Log in with admin@nexplane.local / changeme.
+    Value: !Sub "http://${NexplaneInstance.PublicIp}/"
+
+  SSHCommand:
+    Description: SSH into the instance (replace <your-key>.pem with your key file path)
+    Value: !Sub "ssh -i <your-key>.pem ubuntu@${NexplaneInstance.PublicIp}"
+
+  PublicIP:
+    Description: Instance public IP address
+    Value: !GetAtt NexplaneInstance.PublicIp

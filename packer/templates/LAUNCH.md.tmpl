@@ -1,0 +1,91 @@
+# Launching Nexplane
+
+**AMI ID:** `AMI_ID` (us-east-1)
+
+---
+
+## Option A — One-click CloudFormation (recommended)
+
+This is the fastest path. CloudFormation creates everything for you.
+
+1. **[Click here to launch the CloudFormation stack](https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://nexplane-artifacts.s3.us-east-1.amazonaws.com/releases/launch/quickstart.cfn.yml&stackName=nexplane-quickstart)**
+
+2. On the "Quick create stack" page:
+   - **KeyPairName** — select your existing key pair, or [create one here](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#KeyPairs:) first
+   - **InstanceType** — leave as `t3.medium` for evaluation
+   - Check the acknowledgement box at the bottom
+   - Click **Create stack**
+
+3. Wait ~3 minutes for the stack to reach `CREATE_COMPLETE`
+
+4. Click the **Outputs** tab — copy the `PlatformURL` value and open it in your browser
+
+5. Log in with:
+   - **Email:** `admin@nexplane.local`
+   - **Password:** `changeme`
+
+> **First time?** Change your password immediately after login via Settings → Profile.
+
+---
+
+## Option B — AWS Console (manual)
+
+1. Open [EC2 → Launch Instance](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#LaunchInstances:)
+2. Under **Application and OS Images**, click **Browse more AMIs** → **Community AMIs** → search for `AMI_ID`
+3. Select instance type: `t3.medium` (minimum)
+4. Under **Key pair**: select or create a key pair
+5. Under **Network settings**: ensure **Auto-assign public IP** is enabled; allow inbound on ports **80** and **22**
+6. Click **Launch instance**
+7. Once running, find the **Public IPv4 address** on the instance detail page
+8. Open `http://<ip>/` in your browser
+9. Log in with `admin@nexplane.local` / `changeme`
+
+---
+
+## Option C — AWS CLI one-liner
+
+```bash
+# Replace sg-xxxxxxxx with your security group (must allow ports 80 + 22)
+# Replace my-key-pair with your key pair name
+aws ec2 run-instances \
+  --image-id AMI_ID \
+  --instance-type t3.medium \
+  --key-name my-key-pair \
+  --security-group-ids sg-xxxxxxxx \
+  --associate-public-ip-address \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=nexplane}]' \
+  --region us-east-1 \
+  --query 'Instances[0].PublicIpAddress' \
+  --output text
+```
+
+Wait ~90 seconds, then open `http://<output-ip>/` in your browser.
+
+---
+
+## SSH Access
+
+```bash
+ssh -i /path/to/your-key.pem ubuntu@<ip>
+```
+
+Check platform status:
+```bash
+sudo docker compose -f /opt/nexplane/docker-compose.ami.yml ps
+```
+
+View logs:
+```bash
+sudo docker compose -f /opt/nexplane/docker-compose.ami.yml logs -f backend
+```
+
+---
+
+## Default Credentials
+
+| Field    | Value                    |
+|----------|--------------------------|
+| Email    | `admin@nexplane.local`   |
+| Password | `changeme`               |
+
+**Change your password after first login.** Settings → Profile → Change Password.
