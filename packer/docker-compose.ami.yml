@@ -26,6 +26,9 @@ services:
       CORS_ORIGINS: "*"
       DEMO_MODE: "true"
       NEXPLANE_AGENT_DOWNLOAD_URL: "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com"
+      WEBHOOK_SECRET: nexplane-default-webhook-secret-change-before-production
+      ADMIN_EMAIL: admin@nexplane.local
+      ADMIN_PASSWORD: changeme
     depends_on:
       db:
         condition: service_healthy

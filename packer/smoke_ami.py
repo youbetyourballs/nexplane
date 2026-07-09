@@ -344,10 +344,10 @@ def phase_rollback(base_url, token, cr_id):
 def phase_feature_surface(base_url, token, cr_id):
     log("[PHASE 8: feature-surface]")
     endpoints = [
-        ("/vulnerabilities",         "vulnerabilities"),
+        ("/assets",                  "assets"),
         ("/compliance/baselines",    "compliance baselines"),
-        ("/runbooks",                "runbooks"),
-        ("/access-reviews",          "access reviews"),
+        ("/connectors",              "connectors"),
+        ("/change-requests",         "change requests"),
         ("/recurring-jobs",          "recurring jobs"),
         ("/backup-targets",          "backup targets"),
         ("/change-requests",         "change requests list"),

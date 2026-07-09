@@ -87,8 +87,10 @@ async def seed():
         db.add(org)
 
         users = [
-            User(id=USER_IDS["admin"], organization_id=ORG_ID, email="admin@acme.example",
-                 name="Alex Admin", role=UserRole.admin, hashed_password=hash_password("admin123")),
+            User(id=USER_IDS["admin"], organization_id=ORG_ID,
+                 email=os.environ.get("ADMIN_EMAIL", "admin@acme.example"),
+                 name="Alex Admin", role=UserRole.admin,
+                 hashed_password=hash_password(os.environ.get("ADMIN_PASSWORD", "admin123"))),
             User(id=USER_IDS["operator"], organization_id=ORG_ID, email="operator@acme.example",
                  name="Sam Operator", role=UserRole.security_operator, hashed_password=hash_password("operator123")),
             User(id=USER_IDS["approver"], organization_id=ORG_ID, email="approver@acme.example",
@@ -342,7 +344,7 @@ async def seed():
         await db.commit()
         print("Seed data created successfully.")
         print("\nDemo credentials:")
-        print("  admin@acme.example     / admin123")
+        print(f"  {os.environ.get('ADMIN_EMAIL', 'admin@acme.example')}     / {os.environ.get('ADMIN_PASSWORD', 'admin123')}")
         print("  operator@acme.example  / operator123")
         print("  approver@acme.example  / approver123")
         print("  auditor@acme.example   / auditor123")
