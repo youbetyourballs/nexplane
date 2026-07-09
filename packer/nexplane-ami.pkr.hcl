@@ -27,8 +27,9 @@ locals {
 }
 
 source "amazon-ebs" "nexplane" {
-  region        = var.aws_region
-  instance_type = "t3.medium"
+  region           = var.aws_region
+  instance_type    = "t3.medium"
+  force_deregister = true
 
   # Latest Ubuntu 22.04 LTS x86_64
   source_ami_filter {
