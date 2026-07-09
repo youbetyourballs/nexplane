@@ -2214,6 +2214,8 @@ def phase_mcp_impact_graph(client: NexplaneClient, base_url: str) -> None:
     nbr_ids = {e.get("id") or e.get("asset_id") for e in downstream_nbr}
     if mid_id not in nbr_ids:
         fail(f"get_asset_neighbors: mid_id {mid_id} not in root downstream. Got: {nbr_ids}")
+    # leaf_id is depth=2 from root — get_asset_neighbors returns direct neighbors only;
+    # transitive traversal is verified by get_asset_upstream (Part G) and REST Part A.
     upstream_nbr = neighbors.get("upstream", [])
     if upstream_nbr:
         fail(f"get_asset_neighbors: root should have no upstream, got: {upstream_nbr}")
@@ -2284,6 +2286,8 @@ def phase_mcp_impact_planning(client: NexplaneClient, base_url: str) -> None:
             break
     post_plan_status = cr_detail.get("status")
     log(f"Part A: CR targeting mid reached status: {post_plan_status}")
+    if post_plan_status in ("failed", "error"):
+        fail(f"Part A: CR planning failed — status={post_plan_status}. check_plan may have errored.")
 
     # Verify change_plan is present and blast_radius is populated
     change_plan = cr_detail.get("change_plan")
@@ -2306,6 +2310,8 @@ def phase_mcp_impact_planning(client: NexplaneClient, base_url: str) -> None:
     affected_ids = {a["id"] for a in affected}
     if mid_id not in affected_ids:
         fail(f"blast_radius.affected_assets should contain mid_id {mid_id}. Got: {affected_ids}")
+    # blast_radius.affected_assets = CR target assets only (not transitive downstream);
+    # transitive downstream impact is verified via GET /impact-simulation in Part B.
 
     log(f"Part A: blast_radius populated, affected_assets={[a['id'] for a in affected]}")
 
@@ -2377,6 +2383,8 @@ def phase_mcp_impact_planning(client: NexplaneClient, base_url: str) -> None:
         if iso_detail.get("status") not in ("planning", "pending", "draft"):
             break
 
+    if iso_detail.get("status") in ("failed", "error"):
+        fail(f"Part C: isolated asset CR planning failed — status={iso_detail.get('status')}")
     iso_plan = iso_detail.get("change_plan")
     if iso_plan is None:
         fail(f"change_plan is None for isolated asset CR after planning")
