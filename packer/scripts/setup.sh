@@ -19,6 +19,7 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 # Enable Docker
 systemctl enable docker
 systemctl start docker
+usermod -aG docker ubuntu
 
 # Log in to GHCR
 echo "${GHCR_TOKEN}" | docker login ghcr.io -u youbetyourballs --password-stdin
