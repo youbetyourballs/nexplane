@@ -131,10 +131,16 @@ def phase_container_health(public_ip, args):
 
 def phase_auth(base_url):
     log("[PHASE 3: authentication]")
-    r = api("post", base_url, "/auth/login",
-            json={"email": "admin@nexplane.local", "password": "changeme"})
-    if r.status_code != 200:
-        fail(f"Login failed: {r.status_code} {r.text[:300]}")
+    deadline = time.time() + 120
+    while True:
+        r = api("post", base_url, "/auth/login",
+                json={"email": "admin@nexplane.local", "password": "changeme"})
+        if r.status_code == 200:
+            break
+        if time.time() >= deadline:
+            fail(f"Login failed: {r.status_code} {r.text[:300]}")
+        log(f"  Backend not ready yet ({r.status_code}), retrying...")
+        time.sleep(10)
     token = r.json().get("access_token")
     if not token:
         fail(f"No access_token in login response: {r.text[:300]}")
