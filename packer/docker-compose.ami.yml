@@ -36,7 +36,7 @@ services:
       - NET_ADMIN
     command: >
       sh -c "alembic upgrade heads &&
-             python seed.py &&
+             python seed.py &
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   webserver:
