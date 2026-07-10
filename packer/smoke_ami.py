@@ -104,20 +104,26 @@ def phase_launch(ec2, args):
 
 def phase_container_health(public_ip, args):
     log("[PHASE 2: container-health]")
-    ssh = [
-        "ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
-        "-i", f"{args.key_name}.pem",
-        f"ubuntu@{public_ip}",
-        "docker ps --format '{{.Names}}' --filter status=running",
-    ]
-    result = subprocess.run(ssh, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        fail(f"SSH docker ps failed: {result.stderr.strip()}")
-    running = result.stdout.strip().splitlines()
-    log(f"  Running containers: {running}")
-    for expected in EXPECTED_CONTAINERS:
-        if not any(expected in name for name in running):
-            fail(f"Expected container '{expected}' not running. Got: {running}")
+    deadline = time.time() + 120
+    while True:
+        ssh = [
+            "ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
+            "-i", f"{args.key_name}.pem",
+            f"ubuntu@{public_ip}",
+            "docker ps --format '{{.Names}}' --filter status=running",
+        ]
+        result = subprocess.run(ssh, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            fail(f"SSH docker ps failed: {result.stderr.strip()}")
+        running = result.stdout.strip().splitlines()
+        missing = [e for e in EXPECTED_CONTAINERS if not any(e in n for n in running)]
+        if not missing:
+            log(f"  Running containers: {running}")
+            break
+        if time.time() >= deadline:
+            fail(f"Expected containers {missing} not running after 120s. Got: {running}")
+        log(f"  Waiting for containers {missing} (got {running})")
+        time.sleep(10)
     log("[PHASE 2: container-health] PASSED")
 
 
