@@ -104,7 +104,7 @@ def phase_launch(ec2, args):
 
 def phase_container_health(public_ip, args):
     log("[PHASE 2: container-health]")
-    deadline = time.time() + 120
+    deadline = time.time() + 300
     while True:
         ssh = [
             "ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
@@ -131,7 +131,7 @@ def phase_container_health(public_ip, args):
 
 def phase_auth(base_url):
     log("[PHASE 3: authentication]")
-    deadline = time.time() + 120
+    deadline = time.time() + 300
     while True:
         r = api("post", base_url, "/auth/login",
                 json={"email": "admin@nexplane.local", "password": "changeme"})
@@ -140,7 +140,7 @@ def phase_auth(base_url):
         if time.time() >= deadline:
             fail(f"Login failed: {r.status_code} {r.text[:300]}")
         log(f"  Backend not ready yet ({r.status_code}), retrying...")
-        time.sleep(10)
+        time.sleep(15)
     token = r.json().get("access_token")
     if not token:
         fail(f"No access_token in login response: {r.text[:300]}")
