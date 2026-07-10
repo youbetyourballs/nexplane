@@ -129,17 +129,28 @@ def phase_container_health(public_ip, args):
 
 # ── Phase 3: Authentication ───────────────────────────────────────────────────
 
-def phase_auth(base_url):
+def phase_auth(base_url, public_ip=None, args=None):
     log("[PHASE 3: authentication]")
     deadline = time.time() + 300
     while True:
-        r = api("post", base_url, "/auth/login",
-                json={"email": "admin@nexplane.local", "password": "changeme"})
-        if r.status_code == 200:
-            break
+        try:
+            r = api("post", base_url, "/auth/login",
+                    json={"email": "admin@nexplane.local", "password": "changeme"})
+            if r.status_code == 200:
+                break
+            status = r.status_code
+        except requests.exceptions.RequestException as exc:
+            status = repr(exc)
         if time.time() >= deadline:
-            fail(f"Login failed: {r.status_code} {r.text[:300]}")
-        log(f"  Backend not ready yet ({r.status_code}), retrying...")
+            if public_ip and args:
+                ssh_logs = subprocess.run(
+                    ["ssh", "-o", "StrictHostKeyChecking=no", "-i", f"{args.key_name}.pem",
+                     f"ubuntu@{public_ip}",
+                     "docker logs --tail 50 nexplane-backend-1 2>&1 || true"],
+                    capture_output=True, text=True, timeout=30)
+                log(f"  Backend logs:\n{ssh_logs.stdout[-2000:]}")
+            fail(f"Login failed after 300s: {status}")
+        log(f"  Backend not ready yet ({status}), retrying in 15s...")
         time.sleep(15)
     token = r.json().get("access_token")
     if not token:
@@ -532,7 +543,7 @@ def main():
     try:
         instance_id, public_ip, base_url = phase_launch(ec2, args)
         phase_container_health(public_ip, args)
-        token = phase_auth(base_url)
+        token = phase_auth(base_url, public_ip=public_ip, args=args)
         web_id, app_id, db_id, asset_ids = phase_assets(base_url, token)
         aws_conn_id, connector_ids = phase_connectors(base_url, token)
         cr_id, cr_ids = phase_cr_lifecycle(base_url, token, app_id, aws_conn_id)
