@@ -239,8 +239,10 @@ def phase_connectors(base_url, token):
     log(f"  Created AWS connector → {aws_conn_id}")
 
     r = api("put", base_url, f"/connectors/{aws_conn_id}/credentials", token=token, json={
-        "access_key_id": "AKIAIOSFODNN7SMOKE00",
-        "secret_access_key": "smoke-test-secret-not-real",
+        "credentials": {
+            "access_key_id": "AKIAIOSFODNN7SMOKE00",
+            "secret_access_key": "smoke-test-secret-not-real",
+        },
     })
     if r.status_code not in (200, 201, 204):
         fail(f"PUT /connectors/{aws_conn_id}/credentials failed: {r.status_code} {r.text[:200]}")
