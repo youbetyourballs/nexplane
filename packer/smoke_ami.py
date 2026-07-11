@@ -257,18 +257,18 @@ def phase_connectors(base_url, token):
         fail(f"Created connector {aws_conn_id} not in GET /connectors list")
     log(f"  GET /connectors lists {len(ids_in_list)} connector(s) ✓")
 
-    # Second connector (agent_tunnel type)
+    # Second connector (github type)
     r = api("post", base_url, "/connectors", token=token, json={
-        "name": "smoke-tunnel",
-        "connector_type": "agent_tunnel",
-        "description": "AMI smoke test tunnel connector",
+        "name": "smoke-github",
+        "connector_type": "github",
+        "description": "AMI smoke test github connector",
         "config": {},
     })
     if r.status_code not in (200, 201):
-        fail(f"POST /connectors (agent_tunnel) failed: {r.status_code} {r.text[:200]}")
+        fail(f"POST /connectors (github) failed: {r.status_code} {r.text[:200]}")
     tunnel_conn_id = r.json()["id"]
     created_connector_ids.append(tunnel_conn_id)
-    log(f"  Created agent_tunnel connector → {tunnel_conn_id}")
+    log(f"  Created github connector → {tunnel_conn_id}")
 
     log("[PHASE 5: connector-configuration] PASSED")
     return aws_conn_id, created_connector_ids
