@@ -176,7 +176,7 @@ def phase_assets(base_url, token):
 
     def make_asset(name, asset_type):
         r = api("post", base_url, "/assets", token=token,
-                json={"name": name, "asset_type": asset_type, "environment": "staging"})
+                json={"name": name, "asset_type": asset_type, "environment": "staging", "criticality": "medium"})
         if r.status_code not in (200, 201):
             fail(f"POST /assets ({name}) failed: {r.status_code} {r.text[:200]}")
         aid = r.json()["id"]
