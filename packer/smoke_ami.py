@@ -419,8 +419,8 @@ def phase_mcp(base_url, token):
         fail(f"Agent token {agent_token_id} not in list")
     log("  Agent token listed ✓")
 
-    # Verify MCP SSE endpoint responds — GET /mcp returns 200 text/event-stream
-    mcp_url = f"{base_url}/api/mcp"
+    # Verify MCP SSE endpoint responds — GET /mcp/sse returns 200 text/event-stream
+    mcp_url = f"{base_url}/api/mcp/sse"
     log(f"  Connecting to MCP SSE endpoint: {mcp_url}")
     try:
         with requests.get(
@@ -430,10 +430,10 @@ def phase_mcp(base_url, token):
             timeout=10,
         ) as resp:
             if resp.status_code != 200:
-                fail(f"GET /api/mcp SSE returned {resp.status_code} (expected 200)")
+                fail(f"GET /api/mcp/sse returned {resp.status_code} (expected 200)")
             ct = resp.headers.get("content-type", "")
             if "text/event-stream" not in ct:
-                fail(f"GET /api/mcp content-type is '{ct}' (expected text/event-stream)")
+                fail(f"GET /api/mcp/sse content-type is '{ct}' (expected text/event-stream)")
             log("  MCP SSE endpoint → 200 text/event-stream ✓")
     except requests.exceptions.Timeout:
         # SSE streams don't close; a timeout after connecting means the endpoint is up
