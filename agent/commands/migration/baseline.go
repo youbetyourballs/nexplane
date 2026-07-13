@@ -7,12 +7,21 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"time"
 )
 
 // CaptureBehavioralBaselineExecute observes the host for observation_window_seconds,
-// probing endpoints, services, and dependencies. If an endpoint was initially down
-// but comes up during the window, the observation extends by 600s (adaptive extension).
+// probing endpoints, services, and dependencies. Adaptive extension triggers when:
+//   - An HTTP endpoint was never seen up during the initial window, OR
+//   - A config_only dependency never responded to a TCP probe during the initial window
+//
+// In both cases the window extends by 600s (up to max_window_seconds) and stops
+// early once all previously-down items come up.
+//
+// If params["expected_profile"] is provided (a stored profile from Phase 1), its
+// endpoints and dependencies are used for adaptive tracking so that ports that were
+// up at profile time but are currently down still trigger extension.
 func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, error) {
 	windowSecs := 1200
 	if v, ok := params["observation_window_seconds"]; ok {
@@ -33,36 +42,100 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 		}
 	}
 
-	// Run discovery to know what to probe
+	// Run discovery for actual measurement (current live state of the host)
 	discoveryResult, err := DiscoverApplicationProfileExecute(params)
 	if err != nil {
 		return nil, fmt.Errorf("capture_behavioral_baseline: discovery failed: %w", err)
 	}
 	profile, _ := discoveryResult["profile"].(map[string]any)
 
-	// Initial probe of endpoints (record which ones are down at start)
 	startTime := time.Now()
-	rawEndpoints, _ := profile["endpoints"].([]map[string]any)
-	// Track whether each port was seen up at least once during observation
+
+	// For adaptive extension tracking: prefer stored profile (expected_profile param) so
+	// that ports which were up at profile time but are currently stopped still trigger
+	// extension. Falls back to freshly discovered endpoints if no stored profile is given.
+	rawEndpoints := extractStoredEndpoints(params)
+	storedEndpointsLen := len(rawEndpoints)
+	if len(rawEndpoints) == 0 {
+		rawEndpoints, _ = profile["endpoints"].([]map[string]any)
+	}
+	freshEndpointsLen := 0
+	if storedEndpointsLen == 0 {
+		freshEndpointsLen = len(rawEndpoints)
+	}
+	fmt.Fprintf(os.Stderr, "[baseline-debug] storedEndpointsLen=%d freshEndpointsLen=%d rawEndpointsLen=%d\n",
+		storedEndpointsLen, freshEndpointsLen, len(rawEndpoints))
+
+	// IMPORTANT: initialize ALL expected ports to false (not seen up yet).
+	// Only ports explicitly set to true during probing are considered observed.
 	endpointSeenUp := make(map[int]bool) // port → seen up at least once
 	for _, ep := range rawEndpoints {
-		port, _ := ep["port"].(int)
+		port := extractPortFromMap(ep)
 		if port == 0 {
 			continue
 		}
+		endpointSeenUp[port] = false
 		status, _, _ := probeHTTP(fmt.Sprintf("http://localhost:%d/health", port))
 		if status > 0 {
 			endpointSeenUp[port] = true
 		}
 	}
 
-	// Observe for the initial window, polling every 15s
+	// Track config_only dependencies via TCP probe. Using TCP (not ss-established)
+	// means a dep is "observed" as soon as it accepts connections, not only when an
+	// application actively holds an established connection to it.
+	rawDeps := extractStoredDeps(params)
+	if len(rawDeps) == 0 {
+		rawDeps, _ = profile["dependencies"].([]map[string]any)
+	}
+
+	configOnlyPorts := make(map[int]bool)
+	for _, dep := range rawDeps {
+		conf, _ := dep["confidence"].(string)
+		port := extractPortFromMap(dep)
+		if conf == "config_only" && port > 0 {
+			configOnlyPorts[port] = false
+		}
+	}
+
+	checkConfigOnlyObserved := func() {
+		for port := range configOnlyPorts {
+			if configOnlyPorts[port] {
+				continue
+			}
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", port), 2*time.Second)
+			if err == nil {
+				conn.Close()
+				configOnlyPorts[port] = true
+			}
+		}
+	}
+
+	// Run initial check of config_only deps
+	checkConfigOnlyObserved()
+
+	needsExtension := func() bool {
+		for _, seen := range endpointSeenUp {
+			if !seen {
+				return true
+			}
+		}
+		for _, observed := range configOnlyPorts {
+			if !observed {
+				return true
+			}
+		}
+		return false
+	}
+
+	allObserved := func() bool { return !needsExtension() }
+
+	// Observe for the initial window, polling every 10s
 	initialDeadline := startTime.Add(time.Duration(windowSecs) * time.Second)
 	maxDeadline := startTime.Add(time.Duration(maxWindowSecs) * time.Second)
 	extensionSecs := 600
-	extended := false
 
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for time.Now().Before(initialDeadline) {
@@ -76,45 +149,38 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 					}
 				}
 			}
+			checkConfigOnlyObserved()
 		}
 	}
 
-	// Adaptive extension: if any endpoint was never seen up during the window, extend once
-	anyDown := false
-	for _, seenUp := range endpointSeenUp {
-		if !seenUp {
-			anyDown = true
-			break
-		}
-	}
-	if anyDown {
+	// Debug: dump endpointSeenUp and configOnlyPorts state
+	fmt.Fprintf(os.Stderr, "[baseline-debug] endpointSeenUp=%v configOnlyPorts=%v\n", endpointSeenUp, configOnlyPorts)
+
+	// Adaptive extension: if any endpoint or config_only dep was never observed, extend once
+	if needsExtension() {
 		extDeadline := time.Now().Add(time.Duration(extensionSecs) * time.Second)
 		if extDeadline.After(maxDeadline) {
 			extDeadline = maxDeadline
 		}
-		extended = true
-		ticker2 := time.NewTicker(15 * time.Second)
+		ticker2 := time.NewTicker(10 * time.Second)
 		defer ticker2.Stop()
 		for time.Now().Before(extDeadline) {
 			<-ticker2.C
-			allUp := true
 			for port := range endpointSeenUp {
 				if !endpointSeenUp[port] {
 					status, _, _ := probeHTTP(fmt.Sprintf("http://localhost:%d/health", port))
 					if status > 0 {
 						endpointSeenUp[port] = true
-					} else {
-						allUp = false
 					}
 				}
 			}
-			if allUp {
-				break // all endpoints came up — stop early
+			checkConfigOnlyObserved()
+			if allObserved() {
+				break // everything came up — stop extension early
 			}
 		}
 	}
 
-	_ = extended
 	actualDuration := int(time.Since(startTime).Seconds())
 
 	endpoints := probeEndpoints(profile)
@@ -150,12 +216,77 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 		"library_versions":             libraryVersions,
 	}
 
+	debugEndpoints := map[string]bool{}
+	for k, v := range endpointSeenUp {
+		debugEndpoints[fmt.Sprintf("%d", k)] = v
+	}
+	debugDeps := map[string]bool{}
+	for k, v := range configOnlyPorts {
+		debugDeps[fmt.Sprintf("%d", k)] = v
+	}
+
 	return map[string]any{
 		"action":                       "capture_behavioral_baseline",
 		"baseline":                     baseline,
 		"observation_duration_seconds": actualDuration,
 		"unverified_dependencies":      unverified,
+		"_debug_endpoint_seen_up":      debugEndpoints,
+		"_debug_config_only_ports":     debugDeps,
+		"_debug_stored_endpoints_len":  storedEndpointsLen,
+		"_debug_fresh_endpoints_len":   freshEndpointsLen,
 	}, nil
+}
+
+// extractPortFromMap reads a port value that may be int (from Go-constructed maps) or
+// float64 (from JSON-deserialized maps). Returns 0 if the key is missing or wrong type.
+func extractPortFromMap(m map[string]any) int {
+	switch v := m["port"].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	}
+	return 0
+}
+
+// extractStoredEndpoints reads endpoints from params["expected_profile"] if present.
+// The stored profile is passed from the Python executor via JSON, so arrays arrive as
+// []interface{} with map[string]any elements rather than []map[string]any.
+func extractStoredEndpoints(params map[string]any) []map[string]any {
+	expectedProfile, ok := params["expected_profile"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := expectedProfile["endpoints"].([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, e := range raw {
+		if m, ok := e.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// extractStoredDeps reads dependencies from params["expected_profile"] if present.
+func extractStoredDeps(params map[string]any) []map[string]any {
+	expectedProfile, ok := params["expected_profile"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := expectedProfile["dependencies"].([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, e := range raw {
+		if m, ok := e.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func probeEndpoints(profile map[string]any) []map[string]any {

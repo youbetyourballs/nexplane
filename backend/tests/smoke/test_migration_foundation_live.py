@@ -221,7 +221,8 @@ def _setup_legacy_app_host(client: NexplaneClient, cloud_account_id: str,
         {"instance_id": instance_id, "auth_key": auth_key, "hostname": _AGENT_HOSTNAME},
     )
 
-    # Deploy Nexplane agent
+    # Deploy Nexplane agent — use the backend's own downloads endpoint so the
+    # dev build (with current code changes) is installed rather than the S3 release.
     nexplane_url = f"http://{backend_ip}:8000"
     client.run_cr(
         "smoke-migration: deploy nexplane agent", "deploy_nexplane_agent", instance_asset["id"],
@@ -230,6 +231,7 @@ def _setup_legacy_app_host(client: NexplaneClient, cloud_account_id: str,
             "nexplane_url": nexplane_url,
             "nexplane_secret": agent_secret,
             "hostname": _AGENT_HOSTNAME,
+            "download_url": nexplane_url,
         },
     )
 
@@ -649,7 +651,8 @@ def phase_behavioral_baseline(client: NexplaneClient, profile_asset_id: str) -> 
 # ---------------------------------------------------------------------------
 
 def phase_baseline_adaptive(client: NexplaneClient, instance_asset_id: str,
-                             instance_id: str, agent_asset_id: str) -> None:
+                             instance_id: str, agent_asset_id: str,
+                             profile_asset_id: str = None) -> None:
     """
     Fresh capture with Flask stopped initially. Start Flask mid-window.
     Assert observation_duration_seconds extends beyond the initial window.
@@ -677,7 +680,9 @@ def phase_baseline_adaptive(client: NexplaneClient, instance_asset_id: str,
             "rollback_strategy": "snapshot_restore",
             "_smoke_test": True,
         },
-        "target_asset_ids": [agent_asset_id],
+        # Use profile_asset_id if available so the executor can fetch the stored
+        # profile (captured when Flask was UP) for adaptive extension tracking.
+        "target_asset_ids": [profile_asset_id or agent_asset_id],
     })
     if resp.status_code not in (200, 201):
         fail(f"Phase 3: POST /change-requests returned {resp.status_code}: {resp.text}")
@@ -690,9 +695,11 @@ def phase_baseline_adaptive(client: NexplaneClient, instance_asset_id: str,
                        json={"decision": "approved", "comment": "smoke test"})
     client.client.post(f"{base}/change-requests/{cr_id}/execute")
 
-    # Wait for initial window to elapse, then start Flask to trigger adaptive extension
-    log(f"Phase 3: Waiting {short_window + 10}s, then starting Flask mid-window...")
-    time.sleep(short_window + 10)
+    # Wait for initial window to elapse, then start Flask to trigger adaptive extension.
+    # The agent polls every 30s, so it may start the window up to 30s after CR execute.
+    # Adding 60s buffer ensures Flask always starts after the agent's initial window closes.
+    log(f"Phase 3: Waiting {short_window + 60}s, then starting Flask mid-window...")
+    time.sleep(short_window + 60)
 
     log("Phase 3: Starting smoke-app (Flask) to trigger adaptive extension")
     _run_ssm(client, instance_asset_id, instance_id,
@@ -715,8 +722,15 @@ def phase_baseline_adaptive(client: NexplaneClient, instance_asset_id: str,
     if cr.get("status") != "completed":
         fail(f"Phase 3: adaptive baseline CR did not complete — status={cr.get('status')}")
 
+    log(f"Phase 3: cr keys={list(cr.keys())}")
+    log(f"Phase 3: execution_result keys={list((cr.get('execution_result') or {}).keys())}")
     result = _extract_execution_result(cr)
     obs_duration = result.get("observation_duration_seconds", 0)
+    log(f"Phase 3: result keys={list(result.keys())}")
+    log(f"Phase 3: _debug_endpoint_seen_up={result.get('_debug_endpoint_seen_up')}")
+    log(f"Phase 3: _debug_config_only_ports={result.get('_debug_config_only_ports')}")
+    log(f"Phase 3: _debug_stored_endpoints_len={result.get('_debug_stored_endpoints_len')}")
+    log(f"Phase 3: _debug_fresh_endpoints_len={result.get('_debug_fresh_endpoints_len')}")
 
     if obs_duration <= short_window:
         fail(f"Phase 3: observation_duration_seconds ({obs_duration}) not extended beyond "
@@ -892,7 +906,8 @@ def run(client: NexplaneClient, tailscale_auth_key: str = "") -> None:
         phase_behavioral_baseline(client, profile_asset_id)
 
         # Phase 3: adaptive baseline (uses same host; stops/starts Flask)
-        phase_baseline_adaptive(client, instance_asset_id, instance_id, agent_asset_id)
+        phase_baseline_adaptive(client, instance_asset_id, instance_id, agent_asset_id,
+                                profile_asset_id=profile_asset_id)
 
         # Ensure Flask is running before Phase 4 (Phase 3 restores it, but double-check)
         time.sleep(5)

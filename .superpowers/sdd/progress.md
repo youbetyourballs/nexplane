@@ -202,3 +202,7 @@ Base commit: 25c82f2
 - Task 6: TODO
 - Task 7: TODO
 - Task 2: complete (commits 0a594c3..98d9405, review clean)
+- Task 3: complete (commits 98d9405..45f9319, review clean after name format fix)
+- Task 4: complete (commits 45f9319..087c162, review clean)
+- Task 5: complete (commits 087c162..2d0f899, review clean)
+- Task 6: complete (commits 2d0f899..7180ec2, review clean — mig001 migration ran on EC2, backend clean restart)
