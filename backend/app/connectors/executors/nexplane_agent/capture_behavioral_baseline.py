@@ -91,6 +91,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         _eps[0] if _eps else {},
     )
 
+    adaptive_extension_enabled = bool(parameters.get("adaptive_extension_enabled", False))
+
     result = await _dispatch.dispatch_agent_job(
         command="capture_behavioral_baseline",
         parameters={
@@ -98,6 +100,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "observation_window_seconds": observation_window,
             "max_window_seconds": _MAX_WINDOW_SECONDS,
             "expected_profile": stored_profile,
+            "adaptive_extension_enabled": adaptive_extension_enabled,
         },
         asset_ids=[agent_asset_id],
         timeout_seconds=_MAX_WINDOW_SECONDS + 300,

@@ -676,7 +676,7 @@ def phase_baseline_adaptive(client: NexplaneClient, instance_asset_id: str,
         "desired_outcome": {
             "connector_type": "nexplane_agent",
             "action_id": "capture_behavioral_baseline",
-            "params": {"observation_window_seconds": short_window},
+            "params": {"observation_window_seconds": short_window, "adaptive_extension_enabled": True},
             "rollback_strategy": "snapshot_restore",
             "_smoke_test": True,
         },

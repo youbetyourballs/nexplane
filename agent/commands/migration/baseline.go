@@ -156,8 +156,11 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 	// Debug: dump endpointSeenUp and configOnlyPorts state
 	fmt.Fprintf(os.Stderr, "[baseline-debug] endpointSeenUp=%v configOnlyPorts=%v\n", endpointSeenUp, configOnlyPorts)
 
-	// Adaptive extension: if any endpoint or config_only dep was never observed, extend once
-	if needsExtension() {
+	// Adaptive extension: only when explicitly enabled. Phase 2 (normal baseline) must not
+	// extend — it would chase ephemeral ports from the stored profile indefinitely.
+	adaptiveEnabled, _ := params["adaptive_extension_enabled"].(bool)
+
+	if adaptiveEnabled && needsExtension() {
 		extDeadline := time.Now().Add(time.Duration(extensionSecs) * time.Second)
 		if extDeadline.After(maxDeadline) {
 			extDeadline = maxDeadline
