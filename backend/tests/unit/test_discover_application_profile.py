@@ -37,7 +37,7 @@ async def test_execute_returns_auto_asset():
     assert result["action"] == "discover_application_profile"
     assert "_auto_asset" in result
     assert result["_auto_asset"]["asset_type"] == "application_profile"
-    assert "application_profile" in result["_auto_asset"]["name"].lower()
+    assert result["_auto_asset"]["name"] == f"Application Profile — smoke-host"
     assert result["profile"]["endpoints"][0]["port"] == 80
 
 

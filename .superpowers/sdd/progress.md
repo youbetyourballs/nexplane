@@ -166,3 +166,39 @@ Task 1 (MCP_INFRA_PROVENANCE): complete (commits 631422f..5ca84ba, review clean 
 Task 2 (MCP_INFRA_TIMELINE): complete (commits 5ca84ba..3a9f5a0, review clean — phase_mcp_infra_timeline, 2 purpose-built CRs, timeline since filter, get_migration_precedents)
 Task 3 (MCP_INFRA_QUERY): complete (commits 3a9f5a0..373f8fe, review clean — 3 NL queries, parse_query_intent in-process, REST response shape validation)
 Task 4 (MCP_INFRA_DELETION_CHECK): complete (commits 373f8fe..aeba74f, review clean — deletion-check/dependencies/isolated-asset; uuid import at line 45, client.delete exists)
+Task 1 (MCP_IMPACT_GRAPH): complete (commit fdb6caa..fb59ffe, review clean — phase_mcp_impact_graph 7 parts, 3-node chain, DB cross-check, live PASSED)
+Task 2 (MCP_IMPACT_PLANNING): complete (commits fb59ffe..fed2435, review clean — blast_radius nested access, DB cross-check, MCP cross-tool, 21/21 PASSED on EC2; Minor fix: iso_id wrapped in try/except)
+Final review fixes: complete (commit 3f3f957 — clarify neighbor depth comment, planning-failed guard, blast_radius target-only comment)
+## IMPACT SIMULATION SMOKE COMPLETE — 21/21 phases passing on EC2
+
+## Platform Image Publishing (2026-07-09-platform-image-publishing.md)
+Base commit: b64229c
+- Task 1: TODO
+- Task 2: TODO
+- Task 3: TODO
+- Task 4: TODO
+- Task 5: TODO
+- Task 6: TODO
+- Task 7: TODO
+- Task 8: TODO
+- Task 1: complete (commits b64229c..b00037b, review clean — Minor: VITE_AGENT_DOWNLOAD_URL ARG dropped from old stub, not in spec)
+- Task 2: complete (commits b00037b..3d4860c, review clean)
+- Task 3: complete (commits 3d4860c..fbea505, review clean after executable bit fix)
+- Task 4: complete (commits fbea505..40cd4da, review clean — Minor: packer validate deferred to CI; file provisioner may be slow on large repos)
+- Task 5: complete (commits 40cd4da..aa7e761, review clean after MCP fail() fix + EXEC_TERMINAL + docstring)
+
+- Task 6: complete (commits aa7e761..36f4845, review clean)
+- Task 7: complete (commits 36f4845..0df59d6, review clean after fix: checkout in publish-manifest, AMI_ID guard, setup-packer@v3 pin, SG cleanup comment)
+- Task 8: complete (commits 0df59d6..3a67bb7, review clean after C1/C2/C3 fixes: WEBHOOK_SECRET, env-driven seed creds, Phase 8 reachable endpoints)
+
+## Migration Workflows Foundation (2026-07-13-migration-workflows-foundation.md)
+- Task 1: complete (commits 25c82f2..0a594c3, review clean)
+Base commit: 25c82f2
+- Task 1: TODO
+- Task 2: TODO
+- Task 3: TODO
+- Task 4: TODO
+- Task 5: TODO
+- Task 6: TODO
+- Task 7: TODO
+- Task 2: complete (commits 0a594c3..98d9405, review clean)

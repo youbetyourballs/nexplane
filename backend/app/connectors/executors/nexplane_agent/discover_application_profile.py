@@ -20,7 +20,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     return {
         "action": "discover_application_profile",
         "_auto_asset": {
-            "name": f"application_profile_{hostname}",
+            "name": f"Application Profile — {hostname}",
             "asset_type": "application_profile",
             "environment": "prod",
             "criticality": "medium",
