@@ -30,6 +30,11 @@ class AssetType(str, enum.Enum):
     kubernetes_cluster = "kubernetes_cluster"
     container_image = "container_image"
     kubernetes_workload = "kubernetes_workload"
+    # Migration workflows — Plan 1
+    application_profile = "application_profile"
+    service_endpoint = "service_endpoint"
+    database_instance = "database_instance"
+    network_port = "network_port"
 
 
 class Environment(str, enum.Enum):
