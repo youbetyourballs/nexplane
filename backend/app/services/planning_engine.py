@@ -111,6 +111,8 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
             "instance_id": desired.get("instance_id", ""),
             "nexplane_url": desired.get("nexplane_url", ""),
             "nexplane_secret": desired.get("nexplane_secret", ""),
+            "hostname": desired.get("hostname", ""),
+            "download_url": desired.get("download_url", ""),
         },
         "remove_nexplane_agent":  {"instance_id": desired.get("instance_id", "")},
         "terraform_plan_local":    {
