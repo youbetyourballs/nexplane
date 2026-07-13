@@ -47,6 +47,8 @@ The `verify_against_baseline` CR enforces all four layers. Failure in Applicatio
 
 When automated execution reaches the boundary of what deterministic rules can handle, the CR escalates to `ai_assisted` mode. The platform parks execution, hands structured context to the LLM, receives a proposed resolution, requires operator approval, then re-enters the workflow. This is not a failure state — it is a first-class escalation path. The operator still speaks in intent; the LLM reasons; the platform enforces approval and rollback.
 
+**Non-negotiable:** No AI-proposed action executes without explicit operator approval. "AI-assisted" means AI proposes, human approves — always. This applies to every CR type that involves LLM-generated actions, present and future.
+
 ---
 
 ## New CR Types
@@ -255,9 +257,12 @@ If iteration limit reached with unresolved dependencies: escalate to **`ai_assis
 - Parks workflow at current FILO position
 - Passes structured context to LLM via MCP: failure report, asset state, available options
 - LLM returns proposed next action as a structured CR step
-- Platform presents proposed action to operator for approval (with full detail available, subdued by default)
-- On approval: proposed action executes within current FILO position
-- On rejection: operator can modify proposed action or abort
+- CR enters `awaiting_approval` — **the proposed action cannot execute without explicit operator approval**
+- Approval view shows the proposed action with **full detail visible** (not subdued — this is a novel, LLM-generated action; the operator must be able to evaluate it completely)
+- On approval: proposed action executes within current FILO position, with rollback declared
+- On rejection: operator can request an alternative proposal from the LLM, modify the proposed action manually, or abort the workflow entirely
+
+**Hard requirement:** No AI-proposed action ever executes without passing through `awaiting_approval`. This applies to `ai_assisted_cr` and any future CR type that involves LLM-generated actions. An AI-proposed action that executes without operator approval is a critical platform defect.
 
 This is not a failure state. It is the platform's mechanism for handling cases where rules-based execution is insufficient. The rollback guarantee is preserved — any action taken through `ai_assisted_cr` is itself a CR step with rollback declared.
 
