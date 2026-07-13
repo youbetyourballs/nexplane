@@ -106,7 +106,7 @@ _AGENT_HOSTNAME = "nexplane-smoke-migration"
 _KEY_NAME = "nexplane-smoke-migration-key"
 
 # Short observation window for smoke (avoids 20-minute real baseline)
-_SMOKE_OBSERVATION_SECONDS = 180  # 3 minutes
+_SMOKE_OBSERVATION_SECONDS = 60  # 1 minute (smoke only needs to verify mechanism)
 
 
 # ---------------------------------------------------------------------------
