@@ -68,7 +68,10 @@ func discoverEndpoints() []map[string]any {
 
 	var endpoints []map[string]any
 	seen := map[string]bool{}
-	re := regexp.MustCompile(`(?:tcp|udp)\s+\S+\s+\S+\s+[*\d.:]+:(\d+)\s+`)
+	// ss -tulpn format: Netid State Recv-Q Send-Q Local:Port Peer:Port [Process]
+	// We skip 3 whitespace-separated fields after the Netid (State, Recv-Q, Send-Q)
+	// then match the local address:port (handles IPv4 0.0.0.0:PORT and IPv6 [::]:PORT / :::PORT).
+	re := regexp.MustCompile(`(?i)(?:tcp|udp)\s+\S+\s+\S+\s+\S+\s+\S+:(\d+)\s+`)
 
 	for _, line := range strings.Split(string(out), "\n") {
 		m := re.FindStringSubmatch(line)
@@ -76,7 +79,7 @@ func discoverEndpoints() []map[string]any {
 			continue
 		}
 		port := m[1]
-		if port == "22" || seen[port] {
+		if port == "22" || port == "0" || seen[port] {
 			continue
 		}
 		seen[port] = true
