@@ -37,6 +37,46 @@ from smoke_helpers import (
     setup_backend_tailscale,
 )
 
+def _get_tailscale_auth_key_direct() -> str:
+    """Get Tailscale auth key from DB, handling multiple connector rows."""
+    import asyncio
+    import threading
+
+    result_holder: list = [None]
+
+    async def _fetch() -> str:
+        from sqlalchemy import select
+        from app.database import AsyncSessionLocal
+        from app.models.connector import Connector
+        from app.models.connector_credential import ConnectorCredential
+        from app.services.secrets_service import SecretsService
+        from app.config import settings as _cfg
+
+        async with AsyncSessionLocal() as db:
+            row = await db.execute(
+                select(Connector).where(Connector.connector_type == "tailscale")
+            )
+            conn = row.scalars().first()  # use .first() not .scalar_one_or_none()
+            if not conn:
+                return ""
+            cred_row = await db.execute(
+                select(ConnectorCredential).where(ConnectorCredential.connector_id == conn.id)
+            )
+            cred = cred_row.scalars().first()
+            if not cred:
+                return ""
+            svc = SecretsService(_cfg.SECRET_KEY)
+            return svc.decrypt_json(cred.credentials_encrypted).get("auth_key", "")
+
+    def _run():
+        result_holder[0] = asyncio.run(_fetch())
+
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join()
+    return result_holder[0] or ""
+
+
 def _get_backend_tailscale_ip() -> str:
     """Return the backend container's current Tailscale IP if already connected, else empty string."""
     import subprocess
@@ -84,10 +124,14 @@ def _setup_legacy_app_host(client: NexplaneClient, cloud_account_id: str,
     # Check if backend is already on Tailscale (common for EC2 runners)
     backend_ip = _get_backend_tailscale_ip()
     if not backend_ip:
-        auth_key = tailscale_auth_key or client.get_tailscale_auth_key("")
+        auth_key = tailscale_auth_key or _get_tailscale_auth_key_direct()
         backend_ip = setup_backend_tailscale(auth_key)
     else:
         log(f"Backend already on Tailscale: {backend_ip}")
+    # Get Tailscale auth key for the target instance to join
+    auth_key = tailscale_auth_key or _get_tailscale_auth_key_direct()
+    if not auth_key:
+        fail("Tailscale auth key not found — store credentials in the Tailscale connector")
 
     agent_secret = client.get_agent_secret()
 
