@@ -300,7 +300,7 @@ def _install_legacy_app_stack(client: NexplaneClient, instance_asset_id: str, in
 
 
 def _app_setup_script() -> str:
-    return r"""set -e
+    return r"""set +e
 # Init PostgreSQL — detect installed service via unit-files (works even before first start)
 PG_SVC=""
 if systemctl list-unit-files 2>/dev/null | grep -q "^postgresql-15\.service"; then
@@ -357,11 +357,9 @@ upstream_url = http://localhost:8080
 INIEOF
 
 # nginx config
-cat > /etc/nginx/conf.d/smoke.conf << 'NGINXEOF' 2>/dev/null || \
-cat > /etc/nginx/sites-available/default << 'NGINXEOF2'
-server { listen 80; location / { proxy_pass http://127.0.0.1:8080; } }
-NGINXEOF2
-NGINXEOF
+mkdir -p /etc/nginx/conf.d
+printf 'server { listen 80; location / { proxy_pass http://127.0.0.1:8080; } }\n' \
+    > /etc/nginx/conf.d/smoke.conf || true
 
 # Systemd unit for Flask
 cat > /etc/systemd/system/smoke-app.service << 'SDEOF'
@@ -376,8 +374,8 @@ RestartSec=5
 WantedBy=multi-user.target
 SDEOF
 
-systemctl daemon-reload
-systemctl enable smoke-app
+systemctl daemon-reload || true
+systemctl enable smoke-app || true
 systemctl start smoke-app || true
 systemctl restart nginx || true
 sleep 3

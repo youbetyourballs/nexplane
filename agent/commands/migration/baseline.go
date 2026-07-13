@@ -10,8 +10,9 @@ import (
 	"time"
 )
 
-// CaptureBehavioralBaselineExecute probes endpoints, services, and dependencies
-// and returns a behavioral baseline for later verification.
+// CaptureBehavioralBaselineExecute observes the host for observation_window_seconds,
+// probing endpoints, services, and dependencies. If an endpoint was initially down
+// but comes up during the window, the observation extends by 600s (adaptive extension).
 func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, error) {
 	windowSecs := 1200
 	if v, ok := params["observation_window_seconds"]; ok {
@@ -22,6 +23,15 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 			windowSecs = n
 		}
 	}
+	maxWindowSecs := 7200
+	if v, ok := params["max_window_seconds"]; ok {
+		switch n := v.(type) {
+		case float64:
+			maxWindowSecs = int(n)
+		case int:
+			maxWindowSecs = n
+		}
+	}
 
 	// Run discovery to know what to probe
 	discoveryResult, err := DiscoverApplicationProfileExecute(params)
@@ -29,6 +39,83 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 		return nil, fmt.Errorf("capture_behavioral_baseline: discovery failed: %w", err)
 	}
 	profile, _ := discoveryResult["profile"].(map[string]any)
+
+	// Initial probe of endpoints (record which ones are down at start)
+	startTime := time.Now()
+	rawEndpoints, _ := profile["endpoints"].([]map[string]any)
+	// Track whether each port was seen up at least once during observation
+	endpointSeenUp := make(map[int]bool) // port → seen up at least once
+	for _, ep := range rawEndpoints {
+		port, _ := ep["port"].(int)
+		if port == 0 {
+			continue
+		}
+		status, _, _ := probeHTTP(fmt.Sprintf("http://localhost:%d/health", port))
+		if status > 0 {
+			endpointSeenUp[port] = true
+		}
+	}
+
+	// Observe for the initial window, polling every 15s
+	initialDeadline := startTime.Add(time.Duration(windowSecs) * time.Second)
+	maxDeadline := startTime.Add(time.Duration(maxWindowSecs) * time.Second)
+	extensionSecs := 600
+	extended := false
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for time.Now().Before(initialDeadline) {
+		select {
+		case <-ticker.C:
+			for port := range endpointSeenUp {
+				if !endpointSeenUp[port] {
+					status, _, _ := probeHTTP(fmt.Sprintf("http://localhost:%d/health", port))
+					if status > 0 {
+						endpointSeenUp[port] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Adaptive extension: if any endpoint was never seen up during the window, extend once
+	anyDown := false
+	for _, seenUp := range endpointSeenUp {
+		if !seenUp {
+			anyDown = true
+			break
+		}
+	}
+	if anyDown {
+		extDeadline := time.Now().Add(time.Duration(extensionSecs) * time.Second)
+		if extDeadline.After(maxDeadline) {
+			extDeadline = maxDeadline
+		}
+		extended = true
+		ticker2 := time.NewTicker(15 * time.Second)
+		defer ticker2.Stop()
+		for time.Now().Before(extDeadline) {
+			<-ticker2.C
+			allUp := true
+			for port := range endpointSeenUp {
+				if !endpointSeenUp[port] {
+					status, _, _ := probeHTTP(fmt.Sprintf("http://localhost:%d/health", port))
+					if status > 0 {
+						endpointSeenUp[port] = true
+					} else {
+						allUp = false
+					}
+				}
+			}
+			if allUp {
+				break // all endpoints came up — stop early
+			}
+		}
+	}
+
+	_ = extended
+	actualDuration := int(time.Since(startTime).Seconds())
 
 	endpoints := probeEndpoints(profile)
 	if endpoints == nil {
@@ -56,7 +143,7 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 
 	baseline := map[string]any{
 		"captured_at":                  time.Now().UTC().Format(time.RFC3339),
-		"observation_duration_seconds": windowSecs,
+		"observation_duration_seconds": actualDuration,
 		"endpoints":                    endpoints,
 		"services":                     services,
 		"dependencies":                 dependencies,
@@ -64,9 +151,10 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 	}
 
 	return map[string]any{
-		"action":                  "capture_behavioral_baseline",
-		"baseline":                baseline,
-		"unverified_dependencies": unverified,
+		"action":                       "capture_behavioral_baseline",
+		"baseline":                     baseline,
+		"observation_duration_seconds": actualDuration,
+		"unverified_dependencies":      unverified,
 	}, nil
 }
 
@@ -164,6 +252,7 @@ func probeDependencies(profile map[string]any, windowSecs int) (deps []map[strin
 			"query_sample_result": queryResult,
 			"row_count_sample":    rowCountSample,
 			"confidence":          confidence,
+			"port":                port,
 		}
 
 		if probeOk || confidence == "both" || confidence == "runtime_only" {
@@ -175,14 +264,12 @@ func probeDependencies(profile map[string]any, windowSecs int) (deps []map[strin
 		}
 	}
 
-	// Adaptive extension: for config_only deps with no traffic, the Python executor
-	// handles the timing. The agent just probes and returns current state.
 	_ = windowSecs
 
 	return deps, unverified
 }
 
-// probeHTTP is a helper for verify
+// probeHTTP is a helper for verify and adaptive extension
 func probeHTTP(url string) (statusCode int, latencyMs int64, contentSig string) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	start := time.Now()
