@@ -1,0 +1,68 @@
+{
+  "connector_type": "nexplane_agent",
+  "display_name": "Nexplane Agent — Migration",
+  "credential_fields": [],
+  "actions": [
+    {
+      "action_id": "discover_application_profile",
+      "display_name": "Discover Application Profile",
+      "description": "Map what is running on a host and what it depends on, without requiring operator knowledge of the application.",
+      "action_type": "discovery",
+      "executor": "nexplane_agent.discover_application_profile",
+      "generic_action": "discover_application_profile",
+      "applicable_asset_types": ["server"],
+      "execution_tier": 2,
+      "estimated_duration_seconds": 120,
+      "parameters": [
+        {
+          "name": "asset_id",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "action_id": "capture_behavioral_baseline",
+      "display_name": "Capture Behavioral Baseline",
+      "description": "Record how the application behaves now — the success benchmark for post-migration verification.",
+      "action_type": "discovery",
+      "executor": "nexplane_agent.capture_behavioral_baseline",
+      "generic_action": "capture_behavioral_baseline",
+      "applicable_asset_types": ["application_profile"],
+      "execution_tier": 2,
+      "estimated_duration_seconds": 1800,
+      "parameters": [
+        {
+          "name": "observation_window_seconds",
+          "type": "integer",
+          "required": false,
+          "default": 1200
+        }
+      ]
+    },
+    {
+      "action_id": "verify_against_baseline",
+      "display_name": "Verify Against Baseline",
+      "description": "Confirm the migrated system matches the pre-migration behavioral benchmark across all four production quality layers.",
+      "action_type": "verification",
+      "executor": "nexplane_agent.verify_against_baseline",
+      "generic_action": "verify_against_baseline",
+      "applicable_asset_types": ["application_profile", "server"],
+      "execution_tier": 2,
+      "estimated_duration_seconds": 60,
+      "parameters": [
+        {
+          "name": "target_host",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "target_port_offset",
+          "type": "integer",
+          "required": false,
+          "default": 0
+        }
+      ]
+    }
+  ]
+}
