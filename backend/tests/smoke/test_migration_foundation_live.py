@@ -594,7 +594,7 @@ def phase_behavioral_baseline(client: NexplaneClient, profile_asset_id: str) -> 
         action_id="capture_behavioral_baseline",
         asset_id=profile_asset_id,
         params={"observation_window_seconds": _SMOKE_OBSERVATION_SECONDS},
-        timeout=_SMOKE_OBSERVATION_SECONDS + 120,
+        timeout=_SMOKE_OBSERVATION_SECONDS + 180,
     )
 
     if cr.get("status") != "completed":
