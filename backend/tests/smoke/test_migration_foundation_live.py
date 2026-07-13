@@ -113,12 +113,30 @@ _SMOKE_OBSERVATION_SECONDS = 180  # 3 minutes
 # Infrastructure setup
 # ---------------------------------------------------------------------------
 
+def _pre_run_cleanup(client: NexplaneClient) -> None:
+    """Delete any stale assets from previous smoke runs before starting."""
+    try:
+        for q in (_INSTANCE_NAME, _AGENT_HOSTNAME):
+            assets = client.get("/assets", params={"q": q})
+            for asset in assets:
+                name = asset.get("name", "")
+                if _INSTANCE_NAME in name or _AGENT_HOSTNAME in name or "smoke-migration" in name:
+                    try:
+                        client.client.delete(f"{client.base}/assets/{asset['id']}")
+                        log(f"Pre-run cleanup: deleted stale asset '{name}' ({asset['id']})")
+                    except Exception as e:
+                        log(f"Pre-run cleanup: could not delete asset '{name}': {e}")
+    except Exception as e:
+        log(f"Pre-run cleanup skipped: {e}")
+
+
 def _setup_legacy_app_host(client: NexplaneClient, cloud_account_id: str,
                             tailscale_auth_key: str) -> dict:
     """
     Launch EC2 instance, install legacy app stack, deploy Nexplane agent.
     Returns dict with instance_asset, instance_id, endpoint_asset_id (agent-registered server asset).
     """
+    _pre_run_cleanup(client)
     log("Setup: launching EC2 instance for migration smoke test")
 
     # Check if backend is already on Tailscale (common for EC2 runners)
