@@ -162,8 +162,8 @@ def _setup_legacy_app_host(client: NexplaneClient, cloud_account_id: str,
     except SystemExit:
         log("Key pair may already exist — continuing")
 
-    # Launch EC2 instance (Ubuntu 20.04 equivalent via amazon_linux for smoke)
-    client.run_cr(
+    # Launch EC2 instance (Amazon Linux 2023)
+    launch_cr = client.run_cr(
         "smoke-migration: launch EC2 instance", "ec2_launch", cloud_account_id,
         {
             "mode": "quick",
@@ -176,7 +176,21 @@ def _setup_legacy_app_host(client: NexplaneClient, cloud_account_id: str,
     )
     time.sleep(10)
 
-    instance_asset = client.get_asset_by_name(_INSTANCE_NAME)
+    # Extract asset ID from launch CR result (step 2 = launch_instance)
+    # This avoids get_asset_by_name() which fails with duplicate-name stale assets
+    launch_step = NexplaneClient.get_cr_step_result(launch_cr, step_number=2)
+    instance_asset_id_from_cr = launch_step.get("_auto_asset_id")
+
+    if instance_asset_id_from_cr:
+        instance_asset = client.get(f"/assets/{instance_asset_id_from_cr}")
+        log(f"Got instance asset from launch CR: {instance_asset_id_from_cr}")
+    else:
+        # Fallback: search by name, prefer running instances
+        candidates = client.get("/assets", params={"q": _INSTANCE_NAME, "asset_type": "server"})
+        running = [a for a in candidates if
+                   (a.get("asset_metadata") or {}).get("state") == "running"]
+        instance_asset = running[0] if running else (candidates[0] if candidates else None)
+
     if not instance_asset:
         fail(f"Instance '{_INSTANCE_NAME}' not found in inventory after ec2_launch")
     instance_id = instance_asset.get("asset_metadata", {}).get("instance_id")
