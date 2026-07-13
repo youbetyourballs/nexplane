@@ -20,11 +20,29 @@ func DiscoverApplicationProfileExecute(params map[string]any) (map[string]any, e
 	hostname, _ := os.Hostname()
 
 	endpoints := discoverEndpoints()
+	if endpoints == nil {
+		endpoints = []map[string]any{}
+	}
 	dependencies := discoverDependencies()
+	if dependencies == nil {
+		dependencies = []map[string]any{}
+	}
 	configFiles := discoverConfigFiles()
+	if configFiles == nil {
+		configFiles = []map[string]any{}
+	}
 	services := discoverRunningServices()
+	if services == nil {
+		services = []map[string]any{}
+	}
 	libraryVersions := discoverLibraryVersions()
+	if libraryVersions == nil {
+		libraryVersions = []map[string]any{}
+	}
 	processes := discoverProcesses()
+	if processes == nil {
+		processes = []map[string]any{}
+	}
 
 	profile := map[string]any{
 		"processes":        processes,

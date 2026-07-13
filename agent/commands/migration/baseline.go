@@ -31,12 +31,27 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 	profile, _ := discoveryResult["profile"].(map[string]any)
 
 	endpoints := probeEndpoints(profile)
+	if endpoints == nil {
+		endpoints = []map[string]any{}
+	}
 	services := probeServices(profile)
+	if services == nil {
+		services = []map[string]any{}
+	}
 	dependencies, unverified := probeDependencies(profile, windowSecs)
+	if dependencies == nil {
+		dependencies = []map[string]any{}
+	}
+	if unverified == nil {
+		unverified = []map[string]any{}
+	}
 
 	var libraryVersions []map[string]any
 	if lv, ok := profile["library_versions"].([]map[string]any); ok {
 		libraryVersions = lv
+	}
+	if libraryVersions == nil {
+		libraryVersions = []map[string]any{}
 	}
 
 	baseline := map[string]any{
