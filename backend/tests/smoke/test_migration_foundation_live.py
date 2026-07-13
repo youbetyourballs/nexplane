@@ -37,6 +37,22 @@ from smoke_helpers import (
     setup_backend_tailscale,
 )
 
+def _get_backend_tailscale_ip() -> str:
+    """Return the backend container's current Tailscale IP if already connected, else empty string."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["tailscale", "ip", "-4"],
+            capture_output=True, text=True, timeout=10,
+        )
+        ip = result.stdout.strip()
+        if ip and ip.startswith("100."):
+            return ip
+    except Exception:
+        pass
+    return ""
+
+
 ALL_PHASES = [
     "DISCOVERY_PROFILE",
     "BEHAVIORAL_BASELINE",
@@ -65,8 +81,14 @@ def _setup_legacy_app_host(client: NexplaneClient, cloud_account_id: str,
     """
     log("Setup: launching EC2 instance for migration smoke test")
 
-    auth_key = tailscale_auth_key or client.get_tailscale_auth_key("")
-    backend_ip = setup_backend_tailscale(auth_key)
+    # Check if backend is already on Tailscale (common for EC2 runners)
+    backend_ip = _get_backend_tailscale_ip()
+    if not backend_ip:
+        auth_key = tailscale_auth_key or client.get_tailscale_auth_key("")
+        backend_ip = setup_backend_tailscale(auth_key)
+    else:
+        log(f"Backend already on Tailscale: {backend_ip}")
+
     agent_secret = client.get_agent_secret()
 
     # Create key pair for the instance
