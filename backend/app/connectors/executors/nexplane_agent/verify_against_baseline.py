@@ -11,6 +11,41 @@ from app.connectors.executors.nexplane_agent import _dispatch
 # Failure in Infrastructure or Service layers is surfaced as warning only.
 
 
+async def _resolve_agent_asset_id(profile_asset_id: str, org_id) -> str:
+    """
+    Resolve the server asset ID that has an agent registered,
+    given a profile asset ID. Falls back to finding any agent in the org.
+    """
+    try:
+        from sqlalchemy import select
+        from app.database import AsyncSessionLocal
+        from app.models.agent import AgentRegistration
+
+        async with AsyncSessionLocal() as db:
+            # First try: is there an agent registered directly for this asset?
+            reg = await db.execute(
+                select(AgentRegistration).where(
+                    AgentRegistration.asset_id == profile_asset_id,
+                    AgentRegistration.organization_id == org_id,
+                ).limit(1)
+            )
+            if reg.scalar_one_or_none():
+                return profile_asset_id
+
+            # Fallback: find any server asset with a registered agent in this org
+            reg2 = await db.execute(
+                select(AgentRegistration).where(
+                    AgentRegistration.organization_id == org_id,
+                ).order_by(AgentRegistration.last_seen.desc()).limit(1)
+            )
+            r = reg2.scalar_one_or_none()
+            if r:
+                return str(r.asset_id)
+    except Exception:
+        pass
+    return profile_asset_id
+
+
 async def _load_profile_baseline(asset_id: str) -> dict:
     """Load application_profile asset metadata and build a baseline dict for verify."""
     try:
@@ -56,22 +91,40 @@ async def _load_profile_baseline(asset_id: str) -> dict:
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
-    asset_id = asset_ids[0] if asset_ids else None
+    import uuid
+    from sqlalchemy import select
+    from app.database import AsyncSessionLocal
+    from app.models.asset import Asset
+
+    profile_asset_id = asset_ids[0] if asset_ids else None
+
+    # Resolve the org_id from the profile asset so we can find the agent
+    org_id = None
+    try:
+        async with AsyncSessionLocal() as db:
+            asset = await db.get(Asset, uuid.UUID(str(profile_asset_id)))
+            if asset:
+                org_id = asset.organization_id
+    except Exception:
+        pass
+
+    # Find the server asset that has a registered agent
+    agent_asset_id = await _resolve_agent_asset_id(profile_asset_id, org_id) if org_id else profile_asset_id
 
     # Load the stored profile to build baseline for comparison
-    baseline = await _load_profile_baseline(asset_id) if asset_id else {}
+    baseline = await _load_profile_baseline(profile_asset_id) if profile_asset_id else {}
 
     result = await _dispatch.dispatch_agent_job(
         command="verify_against_baseline",
         parameters={
-            "asset_id": asset_id,
+            "asset_id": agent_asset_id,
             "baseline": baseline,
             "target_host": parameters.get("target_host"),
             "target_port_offset": int(parameters.get("target_port_offset", 0)),
             "latency_threshold_pct": 150,
             "row_count_tolerance_pct": 5,
         },
-        asset_ids=list(asset_ids),
+        asset_ids=[agent_asset_id],
         timeout_seconds=120,
     )
 
