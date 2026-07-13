@@ -29,6 +29,7 @@ import (
 	"nexplane-agent/commands/macos"
 	"nexplane-agent/commands/forensics"
 	"nexplane-agent/commands/compliance"
+	"nexplane-agent/commands/migration"
 )
 
 // Result is the outcome of a command execution.
@@ -179,6 +180,10 @@ var commands = map[string]CommandFunc{
 	"santa_event_export":     macos.SantaEventExportExecute,
 	"santa_binary_check":     macos.SantaBinaryCheckExecute,
 	"santa_install":          macos.SantaInstallExecute,
+	// Migration (Spec: migration foundation)
+	"discover_application_profile": migration.DiscoverApplicationProfileExecute,
+	"capture_behavioral_baseline":  migration.CaptureBehavioralBaselineExecute,
+	"verify_against_baseline":      migration.VerifyAgainstBaselineExecute,
 	// Credential rotation
 	"rotate_ssh_keys":        credrotation.SSHKeyExecute,
 	"rotate_db_creds":        credrotation.DBRotateExecute,
