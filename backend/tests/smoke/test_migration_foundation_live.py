@@ -184,7 +184,7 @@ def _install_legacy_app_stack(client: NexplaneClient, instance_asset_id: str, in
     """Install nginx + Flask + PostgreSQL 14 on the instance via SSM commands."""
     log("Installing legacy app stack (nginx, Flask, PostgreSQL)...")
 
-    # Install packages
+    # Install packages — handle Amazon Linux 2023 (dnf), AL2 (yum), and Ubuntu (apt)
     client.run_cr(
         "smoke-migration: install packages", "ssm_command", instance_asset_id,
         {
@@ -192,9 +192,16 @@ def _install_legacy_app_stack(client: NexplaneClient, instance_asset_id: str, in
             "document_name": "AWS-RunShellScript",
             "command": (
                 "set -e; "
-                "yum install -y nginx python3 python3-pip postgresql postgresql-server || "
-                "apt-get install -y nginx python3 python3-pip postgresql postgresql-contrib 2>/dev/null; "
-                "pip3 install flask psycopg2-binary --quiet 2>/dev/null || true"
+                "if command -v dnf &>/dev/null; then "
+                "  dnf install -y nginx python3 python3-pip postgresql15-server postgresql15 2>&1 || "
+                "  dnf install -y nginx python3 python3-pip postgresql postgresql-server 2>&1; "
+                "elif command -v yum &>/dev/null; then "
+                "  yum install -y nginx python3 python3-pip postgresql postgresql-server; "
+                "else "
+                "  apt-get install -y nginx python3 python3-pip postgresql postgresql-contrib; "
+                "fi; "
+                "pip3 install flask psycopg2-binary --quiet 2>&1 || "
+                "pip3 install flask psycopg2-binary 2>&1 || true"
             ),
             "rollback_strategy": "rollback_unavailable",
         },
@@ -218,15 +225,27 @@ def _install_legacy_app_stack(client: NexplaneClient, instance_asset_id: str, in
 
 def _app_setup_script() -> str:
     return r"""set -e
-# Init PostgreSQL if needed
-if command -v postgresql-setup &>/dev/null; then
-    postgresql-setup --initdb 2>/dev/null || true
-    systemctl start postgresql || true
-    systemctl enable postgresql || true
+# Init PostgreSQL — detect installed service via unit-files (works even before first start)
+PG_SVC=""
+if systemctl list-unit-files 2>/dev/null | grep -q "^postgresql-15\.service"; then
+    PG_SVC="postgresql-15"
+elif systemctl list-unit-files 2>/dev/null | grep -q "^postgresql-14\.service"; then
+    PG_SVC="postgresql-14"
+elif systemctl list-unit-files 2>/dev/null | grep -q "^postgresql\.service"; then
+    PG_SVC="postgresql"
 fi
-if command -v pg_createcluster &>/dev/null; then
-    pg_createcluster 14 main 2>/dev/null || true
-    systemctl start postgresql || true
+echo "Detected PG service: $PG_SVC"
+
+if [ -n "$PG_SVC" ]; then
+    if command -v postgresql-setup &>/dev/null; then
+        postgresql-setup --initdb 2>/dev/null || true
+    fi
+    if command -v pg_createcluster &>/dev/null; then
+        pg_createcluster 14 main 2>/dev/null || true
+    fi
+    systemctl start "$PG_SVC" 2>/dev/null || true
+    systemctl enable "$PG_SVC" 2>/dev/null || true
+    sleep 3
 fi
 # Create DB and tables
 sleep 3
