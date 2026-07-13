@@ -598,6 +598,235 @@ Approvers interact with intent. They expand to modify parameters if needed. The 
 
 ---
 
+## Smoke Tests
+
+Live infrastructure smoke tests are required for every new CR type before that CR type ships. Unit test green is not done. These phases must pass end-to-end on EC2, run via the Nexplane CR lifecycle (dogfooding), and include rollback verification for every mutating CR.
+
+### Smoke Infrastructure
+
+**Legacy application AMI (cached)** — pre-baked Ubuntu 20.04 image containing:
+- nginx serving a simple Python Flask application on port 80 and 8080
+- Flask app connects to a local PostgreSQL 14 instance with a `smoke_app` database containing 3 tables and ~5,000 rows
+- A systemd unit (`smoke-app.service`) managing the Flask process
+- A cron job running every 5 minutes (to test adaptive baseline extension)
+- `/etc/app/config.ini` with database DSN and upstream URL (for config file discovery smoke)
+- Nexplane agent pre-installed
+
+Cache key in SSM: `/nexplane/smoke-amis/legacy-app/{hash}`. Use `get_or_create_smoke_ami()` helper. Boot time is ~90s — AMI cache is mandatory.
+
+**PostgreSQL 14 source AMI (cached)** — Ubuntu 22.04 with PostgreSQL 14, `smoke_migration` database, 10,000 rows across 3 tables with FK relationships, alembic migration history table present at version `001_initial`. Cache key: `/nexplane/smoke-amis/pg14-source/{hash}`.
+
+**Clean Ubuntu 22.04 AMI** — standard AWS Ubuntu 22.04 (no pre-baking needed, use Canonical AMI filter). Used as the new-host migration target and PostgreSQL 16 target host.
+
+All smoke instances use the existing smoke security group and SSH key. All are terminated at end of their respective phase. Rollback verification explicitly checks that terminated instances are gone and restored state is valid.
+
+---
+
+### Phase 1: DISCOVERY_PROFILE
+
+**Infrastructure:** Legacy application AMI launched as `t3.small`.
+
+**Steps:**
+1. Create `discover_application_profile` CR targeting the smoke host asset
+2. Approve and execute
+3. Assert ApplicationProfile asset created and linked to host:
+   - `endpoints` contains port 80 (nginx) and port 8080 (Flask)
+   - `dependencies` contains PostgreSQL on localhost:5432 with `confidence: both`
+   - `config_files` contains `/etc/app/config.ini`
+   - `services` contains `nginx`, `smoke-app`, `postgresql`
+   - `library_versions` non-empty
+
+**Rollback:** Non-mutating — verify host is unchanged after CR completes.
+
+---
+
+### Phase 2: BEHAVIORAL_BASELINE
+
+**Infrastructure:** Continuing from Phase 1 (same host, ApplicationProfile exists).
+
+**Steps:**
+1. Generate some HTTP traffic against port 80 and 8080 (5 requests each) to ensure endpoints are observed
+2. Create `capture_behavioral_baseline` CR targeting the ApplicationProfile
+3. Approve and execute (initial window: 5 minutes for smoke — configurable)
+4. Assert Behavioral Baseline stored on asset:
+   - Port 80 endpoint: `status_code: 200`, `response_ms_p50` recorded, `confidence: both`
+   - Port 8080 endpoint: `status_code: 200`, `confidence: both`
+   - PostgreSQL dependency: `confidence: both`, `row_count_sample` recorded
+   - `smoke-app` service: `state: active`, `confidence: both`
+
+---
+
+### Phase 3: BASELINE_ADAPTIVE
+
+**Infrastructure:** Fresh legacy application AMI with cron job disabled and Flask app not yet started (simulates an idle scheduled-job dependency).
+
+**Steps:**
+1. Run `discover_application_profile` — discovers Flask DSN in `/etc/app/config.ini` but Flask is not running
+2. Run `capture_behavioral_baseline` with 2-minute initial window
+3. Assert at end of initial window: PostgreSQL dependency marked `pending` (config_only confidence, no traffic seen)
+4. Assert baseline extends observation window automatically
+5. Start Flask app mid-extension (simulates delayed service start)
+6. Assert PostgreSQL dependency transitions to `observed` after Flask starts making queries
+7. Assert final baseline has `confidence: both` for DB dependency, `observation_duration_seconds > initial_window`
+
+---
+
+### Phase 4: VERIFY_BASELINE
+
+**Infrastructure:** Continuing from Phase 2 (host + baseline exist).
+
+**Steps:**
+1. Make a minor harmless change to the host (restart nginx) to simulate post-operation state
+2. Create `verify_against_baseline` CR targeting same host
+3. Approve and execute
+4. Assert Verification Report: all four layers pass
+5. **Failure path:** Stop Flask app (`systemctl stop smoke-app`), run `verify_against_baseline` again
+6. Assert: Application layer fails, CR returns `{failed: true}`, FILO rollback triggers
+7. Assert: CR reaches `rolled_back` state (no-op rollback since verification is non-mutating, but rollback machinery fires correctly)
+
+---
+
+### Phase 5: OS_UPGRADE_INPLACE (Path A)
+
+**Infrastructure:** Fresh legacy application AMI (Ubuntu 20.04) with Behavioral Baseline pre-captured.
+
+**Steps:**
+1. Run `discover_application_profile` + `capture_behavioral_baseline` (abbreviated — 3 minutes)
+2. Run `backup_capture` (lvm_snapshot) — assert snapshot ID stored in CR result
+3. Run `run_os_upgrade` targeting Ubuntu 22.04
+4. Assert: services restarted post-upgrade, packages upgraded count > 0
+5. Run `verify_against_baseline` on upgraded host
+6. Assert: all four layers pass, library versions ≥ baseline
+7. **Rollback verification:** Create a second run where `run_os_upgrade` is forced to fail (inject a held package conflict). Assert: FILO triggers, lvm_snapshot is restored, host returns to Ubuntu 20.04, services running, `verify_against_baseline` passes on restored host
+
+---
+
+### Phase 6: OS_UPGRADE_NEWHOST (Path B)
+
+**Infrastructure:** Legacy application AMI (source) + clean Ubuntu 22.04 (target, provisioned during test).
+
+**Steps:**
+1. `discover_application_profile` + `capture_behavioral_baseline` on source host
+2. `backup_capture` on source host
+3. `provision_host` — clean Ubuntu 22.04 launched, host asset created
+4. `migrate_host_config` — assert nginx config present on new host, sysctl values match
+5. `migrate_identity` — assert smoke user exists on new host with same SSH key
+6. `rsync_application` — assert Flask app files present at same path on new host
+7. `resolve_dependencies` — assert Flask dependencies installed, smoke-app.service starts successfully
+8. `verify_against_baseline` on new host — assert all layers pass
+9. `shift_traffic_weight` to 10% (DNS weighted record) — assert Route53 weight updated
+10. `shift_traffic_weight` to 100% — assert traffic fully on new host
+11. `decommission_legacy_host` — assert source instance terminated
+12. **Rollback verification:** Re-run from step 9, force `shift_traffic_weight` 100% to fail, assert FILO unwinds to 10% canary state, then assert full rollback to legacy host returns traffic and source instance is still running
+
+---
+
+### Phase 7: CONTAINERIZE
+
+**Infrastructure:** Legacy application AMI with Behavioral Baseline pre-captured. Docker-capable host or k8s namespace available.
+
+**Steps:**
+1. `discover_application_profile` + `capture_behavioral_baseline` on legacy host
+2. `containerize_application` — assert ContainerImage asset created, image built and pushed to registry, container starts successfully during build validation
+3. `deploy_container_alongside` — assert container running, not receiving traffic
+4. `verify_against_baseline` against running container (port-mapped endpoints) — assert all layers pass
+5. `shift_traffic_weight` 10% → 100% (two CRs)
+6. `decommission_legacy_process` — assert smoke-app.service stopped and disabled on legacy host
+7. **Rollback verification:** Force `verify_against_baseline` failure at step 4 (inject a bad container entrypoint). Assert FILO removes container, legacy process remains running and serving traffic, `verify_against_baseline` against legacy host passes
+
+---
+
+### Phase 8: PG_MIGRATE
+
+**Infrastructure:** PostgreSQL 14 source AMI + clean Ubuntu 22.04 target. Flask app from legacy AMI connected to PG14 source.
+
+**Steps:**
+1. `discover_application_profile` on Flask app host — assert DatabaseInstance asset created for PG14 source
+2. `capture_behavioral_baseline` — assert row_count_sample recorded for all 3 tables
+3. `managed_db_snapshot` on PG14 source — assert snapshot ID stored
+4. `provision_database_instance` — PostgreSQL 16 on Ubuntu 22.04, DatabaseInstance asset created
+5. `migrate_postgres_instance` (dump/restore strategy) — assert schema present on PG16, row counts match
+6. `verify_data_integrity` — assert:
+   - Row counts within 5% of baseline
+   - FK constraints valid
+   - alembic schema version matches source (`001_initial`)
+   - Index validity check passes
+7. `update_connection_strings` — assert Flask app's `/etc/app/config.ini` DSN updated to PG16, smoke-app.service restarted
+8. `verify_against_baseline` on Flask app — assert all layers pass against new DB
+9. `decommission_database_instance` — assert PG14 instance terminated
+10. **Rollback verification:** Force `verify_data_integrity` failure (inject row count mismatch). Assert FILO unwinds: PG16 schema dropped, connection strings reverted to PG14 DSN, `verify_against_baseline` passes with Flask app talking to PG14
+
+---
+
+### Phase 9: SCHEMA_MIGRATION
+
+**Infrastructure:** Continuing from Phase 8 or fresh PG16 instance with alembic at `001_initial`.
+
+**Steps:**
+1. `run_schema_migration` targeting PG16, migration tool: alembic, target version: `002_add_audit_columns`
+   (Smoke migration: adds two nullable columns to one table — reversible)
+2. Assert: schema version updated to `002_add_audit_columns`, columns present in table
+3. Assert `rollback_data` in CR result contains down-migration command
+4. **Rollback verification:** Trigger rollback of the schema migration CR. Assert: schema version reverts to `001_initial`, columns removed
+
+---
+
+### Phase 10: AI_ASSISTED_CR
+
+**Infrastructure:** Legacy application AMI with an intentionally obscure dependency — a Python package installed from source (not via pip/apt) that `resolve_dependencies` cannot automatically map to a new-distro equivalent.
+
+**Steps:**
+1. Run `resolve_dependencies` — assert it exhausts iteration limit (5 attempts) without resolving the source-installed package
+2. Assert CR escalates to `ai_assisted_cr`, status transitions to `awaiting_approval`
+3. Assert: proposed action from LLM is present in CR result, but **CR has not executed the proposed action**
+4. Assert: attempting to advance the CR to `executing` without approval returns 403
+5. Approve the proposed action
+6. Assert: proposed action executes, dependency resolved, smoke-app.service starts
+7. **Approval gate verification (critical):** Use the API directly to attempt to set CR status to `executing` while in `awaiting_approval`. Assert 403 is returned. This is the non-negotiable gate check.
+
+---
+
+### Phase 11: DECOMMISSION_GATE
+
+**Infrastructure:** Any host or DB instance with a preceding `verify_against_baseline` CR in `planned` state (not yet completed).
+
+**Steps:**
+1. Create decommission CR (targeting any instance)
+2. Attempt to advance decommission CR to `awaiting_approval` while the preceding `verify_against_baseline` is still `planned`
+3. Assert: platform returns error — decommission cannot enter approval while verification is incomplete
+4. Complete the `verify_against_baseline` CR (mark completed)
+5. Assert: decommission CR can now enter `awaiting_approval`
+6. Assert: approval view contains irreversibility callout (verified by checking CR metadata field `irreversibility_threshold: true`)
+
+---
+
+### Phase 12: FULL_WORKFLOW_ROLLBACK
+
+**Infrastructure:** Legacy application AMI + PG14 source (full PostgreSQL migration scenario).
+
+**Steps:**
+1. Execute Workflow C (PostgreSQL version migration) steps 1–9
+2. At step 9 (`verify_against_baseline`), inject a failure — Flask app returns 500 against PG16
+3. Assert FILO unwinds in reverse order:
+   - `verify_against_baseline` → no-op (non-mutating)
+   - `update_connection_strings` → reverted, Flask reconnects to PG14
+   - `run_schema_migration` → down-migration executed (if present)
+   - `migrate_postgres_instance` → PG16 schema dropped
+   - `provision_database_instance` → PG16 instance terminated
+   - `managed_db_snapshot` → no-op (non-mutating)
+4. Assert final state: Flask app serving traffic from PG14, PG14 instance running, PG16 instance terminated, connection strings pointing to PG14
+5. Assert `verify_against_baseline` against Flask app (using PG14) passes — confirms complete restoration to pre-migration state
+
+---
+
+### Smoke Pass Criteria
+
+All 12 phases must pass in a single combined run on EC2. Individual phase passes are not sufficient. The combined run must complete without manual intervention except:
+- Phase 10 Step 5: operator approval of AI-assisted action (this is intentional — the test verifies the gate, then approves through it)
+- Phase 11 Step 5: operator approval of decommission after verification completes
+
+---
+
 ## Open Items / Future Expansion
 
 - **`shift_traffic_weight` stability window:** The canary step should support an automatic stability window — hold at N% for M minutes, monitor error rate from the Behavioral Baseline's endpoint probes, auto-advance or auto-halt based on threshold. Requires metrics integration.
