@@ -87,16 +87,28 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     node_pool_id = execution_result.get("node_pool_id", "")
 
     if not creds:
-        return {"action": "rollback_create_oke_cluster", "rolled_back": True, "mock": True}
+        return {
+            "action": "rollback_create_oke_cluster",
+            "rolled_back": True,
+            "mock": True,
+            "cluster_id": cluster_id,
+            "node_pool_id": node_pool_id,
+        }
 
     client = get_container_engine_client(creds)
 
     loop = asyncio.get_running_loop()
     if node_pool_id:
-        await loop.run_in_executor(None, lambda: client.delete_node_pool(node_pool_id))
+        np_resp = await loop.run_in_executor(None, lambda: client.delete_node_pool(node_pool_id))
+        np_wr_id = np_resp.headers.get("opc-work-request-id")
+        if np_wr_id:
+            await poll_work_request(client, np_wr_id, "nodepool", timeout=900)
 
     if cluster_id:
-        await loop.run_in_executor(None, lambda: client.delete_cluster(cluster_id))
+        cl_resp = await loop.run_in_executor(None, lambda: client.delete_cluster(cluster_id))
+        cl_wr_id = cl_resp.headers.get("opc-work-request-id")
+        if cl_wr_id:
+            await poll_work_request(client, cl_wr_id, "cluster", timeout=1200)
 
     return {
         "action": "rollback_create_oke_cluster",

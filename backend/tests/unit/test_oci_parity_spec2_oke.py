@@ -80,6 +80,8 @@ class TestCreateOkeCluster:
         result = asyncio.run(rollback({}, {"cluster_id": "ocid1.cluster.x", "node_pool_id": "ocid1.nodepool.x"}, _empty_connector()))
         assert result["mock"] is True
         assert result["rolled_back"] is True
+        assert result["cluster_id"] == "ocid1.cluster.x"
+        assert result["node_pool_id"] == "ocid1.nodepool.x"
 
     def test_execute_creates_cluster_and_node_pool(self):
         from app.connectors.executors.oci.oci_create_oke_cluster import execute
@@ -141,7 +143,8 @@ class TestCreateOkeCluster:
         fake_client.delete_node_pool.side_effect = lambda np_id: (delete_order.append("nodepool"), MagicMock(headers={"opc-work-request-id": "wr1"}))[1]
         fake_client.delete_cluster.side_effect = lambda cl_id: (delete_order.append("cluster"), MagicMock(headers={"opc-work-request-id": "wr2"}))[1]
 
-        with patch("app.connectors.executors.oci.oci_create_oke_cluster.get_container_engine_client", return_value=fake_client):
+        with patch("app.connectors.executors.oci.oci_create_oke_cluster.get_container_engine_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.oci_create_oke_cluster.poll_work_request", new_callable=AsyncMock) as mock_poll:
             result = asyncio.run(rollback(
                 {},
                 {"cluster_id": "ocid1.cluster.real", "node_pool_id": "ocid1.nodepool.real"},
@@ -149,3 +152,11 @@ class TestCreateOkeCluster:
             ))
         assert result["rolled_back"] is True
         assert delete_order.index("nodepool") < delete_order.index("cluster")
+        # Verify poll_work_request was called for both nodepool and cluster
+        assert mock_poll.call_count == 2
+        calls = mock_poll.call_args_list
+        # First call for nodepool, second for cluster
+        assert calls[0][0][1] == "wr1"  # nodepool work request
+        assert calls[0][0][2] == "nodepool"
+        assert calls[1][0][1] == "wr2"  # cluster work request
+        assert calls[1][0][2] == "cluster"
