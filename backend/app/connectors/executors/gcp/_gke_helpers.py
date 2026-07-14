@@ -7,8 +7,7 @@ import time
 
 async def poll_gke_operation(client, op_name: str, timeout: int) -> None:
     """Poll a GKE operation by full resource-path name until DONE. Raises on failure or timeout."""
-    import sys
-    container_v1 = sys.modules["google.cloud.container_v1"]
+    from google.cloud import container_v1
     loop = asyncio.get_event_loop()
     deadline = time.time() + timeout
     while True:

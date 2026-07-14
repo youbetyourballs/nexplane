@@ -274,3 +274,14 @@ Base commit: 3662e90
 - Task 5: complete (commits e133269..d6a23f3, review clean — oci_scale_oke_node_pool + oci_update_oke_node_pool, 9/9 tests)
 Task 6: complete (commits d6a23f3..cf8142d, review clean — oci_get_oke_kubeconfig executor, 7 OKE catalog entries, 37/37 tests)
 - Task 7: complete (commit b0e4e79, smoke xfail LimitExceeded on free-tier tenancy — executor code correct, matches OCIR xfail pattern from Spec 1)
+
+## GCP GKE Plan (2026-07-14-gcp-gke.md)
+Base commit: 1ab4825
+- Task 1: complete (commit ae39a62, review clean — get_container_client + poll_gke_operation, 4/4 tests)
+- Task 2: complete (commits bf9d683..567afb8, review clean after AsyncMock + patch-target fixes, 8/8 tests on EC2)
+- Task 3: complete (commits 95212ae..108fbfd, review clean after adjudication — C1 false positive (usage-site patch correct for module-level imports), I2 plan-mandated (get_event_loop), 10/10 tests on EC2)
+- Task 4: complete (commits ec0d2fa..2addf35, review clean after fix — dead import removed, display_name drop (GKE names immutable), labels-only update, 8/8 tests on EC2)
+- Task 5: complete (commits 8e03e41..6ee1af0, review clean — kubeconfig executor, 7 catalog entries, 34/34 tests on EC2)
+- Task 6: complete (no new commits — 34/34 unit tests pass on EC2)
+- Task 7: complete (commits be3eb45..a23ccce, review clean — smoke test + _get_gcp_container_client; Minor: dead `threading` import in helper, dead `create_cr_id` var in smoke test)
+## GCP GKE PLAN ALL 7 TASKS COMPLETE — unit tests 34/34 on EC2; smoke ready to run manually
