@@ -243,7 +243,22 @@ async def create_change_request(
     """
     Create a draft Change Request for an infrastructure change against a target asset.
     The CR is created in draft state — it must be reviewed, approved, and executed separately.
-    This tool NEVER executes a change directly. Use list_change_types to discover available types.
+    This tool NEVER executes a change directly.
+
+    Discovery: use list_change_types to see available change_type values. For native types
+    (ec2_stop, key_rotation, etc.) pass parameters matching that type's schema.
+
+    For catalog_action CRs (connector-backed actions such as AWS/GCP/Okta/Kubernetes ops),
+    use this shape for parameters:
+        {
+            "connector_type": "aws",          # connector type string (e.g. aws, gcp, okta, kubernetes)
+            "action_id": "stop_instance",     # action from list_catalog_actions(connector_type)
+            "params": { ... },                # action-specific parameters
+            "rollback_strategy": "snapshot_restore"  # optional
+        }
+    Use list_catalog_actions(connector_type) to see all available action_id values and their
+    parameter schemas for a given connector type.
+
     Returns the draft CR and asset context bundle so you can validate the plan before approving.
     """
     from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType

@@ -2,7 +2,7 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 """
-Nexplane MCP tools — Connectors domain (5 tools).
+Nexplane MCP tools — Connectors domain (6 tools).
 """
 import uuid as _uuid
 from typing import Any, Optional
@@ -162,8 +162,8 @@ async def get_connector_status(token: str, connector_id: str) -> dict[str, Any]:
 @mcp.tool()
 async def list_connector_change_types(token: str, connector_id: str) -> list[dict[str, Any]]:
     """
-    List change types available for a specific connector.
-    Use this to discover what CRs can be created against assets managed by this connector.
+    List catalog actions available for a connector identified by its UUID.
+    Use list_catalog_actions(connector_type) instead when you already know the connector type string.
     """
     from sqlalchemy import select
     from app.models.connector import Connector
@@ -181,19 +181,60 @@ async def list_connector_change_types(token: str, connector_id: str) -> list[dic
         if c is None:
             return [{"error": "Connector not found"}]
 
-        try:
-            svc = get_catalog_service()
-            connector_type_str = c.connector_type.value if hasattr(c.connector_type, "value") else str(c.connector_type)
-            actions = svc._catalog.get(connector_type_str, [])
-            return [
-                {
-                    "change_type": a.get("action_id", ""),
-                    "display_name": a.get("display_name", ""),
-                    "description": a.get("description", ""),
-                }
-                for a in actions
-            ]
-        except Exception:
-            return []
+        connector_type_str = c.connector_type.value if hasattr(c.connector_type, "value") else str(c.connector_type)
+        svc = get_catalog_service()
+        actions = svc._catalog.get(connector_type_str, [])
+        return [
+            {
+                "action_id": a.get("action_id", ""),
+                "display_name": a.get("display_name", ""),
+                "description": a.get("description", ""),
+            }
+            for a in actions
+        ]
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def list_catalog_actions(
+    token: str,
+    connector_type: str,
+) -> list[dict[str, Any]]:
+    """
+    List all catalog actions available for a connector type (e.g. "aws", "gcp", "okta",
+    "kubernetes", "nexplane_agent", "nexplane_agent_migration").
+
+    Use this to discover valid action_id values before creating a catalog_action CR.
+    Returns action_id, display name, description, and parameter schema for each action.
+
+    Example flow:
+        list_catalog_actions("aws")           → see all AWS actions
+        list_catalog_actions("kubernetes")    → see all Kubernetes actions
+        create_change_request(change_type="catalog_action", parameters={
+            "connector_type": "aws",
+            "action_id": "stop_instance",
+            "params": {"instance_id": "i-abc123"},
+        })
+    """
+    from app.connectors.catalog_service import get_catalog_service
+
+    user, db, db_cm = await _auth(token)
+    try:
+        svc = get_catalog_service()
+        actions = svc._catalog.get(connector_type, [])
+        if not actions:
+            known = sorted(svc._catalog.keys())
+            return [{"error": f"No catalog found for connector_type '{connector_type}'",
+                     "known_connector_types": known}]
+        return [
+            {
+                "action_id": a.get("action_id", ""),
+                "display_name": a.get("display_name", ""),
+                "description": a.get("description", ""),
+                "parameters": a.get("parameters", {}),
+            }
+            for a in actions
+        ]
     finally:
         await db_cm.__aexit__(None, None, None)
