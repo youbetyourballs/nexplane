@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "Instance termination is permanent; boot volume and instance data are destroyed unless explicitly preserved"
+
 import asyncio
 from datetime import datetime, timezone
 

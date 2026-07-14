@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "IAM policy deletion is destructive; policy statements are not preserved for rollback"
+
 import asyncio
 from datetime import datetime, timezone
 from ._client import get_identity_client

@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "Compartment deletion is destructive; compartment and its configuration cannot be restored"
+
 import asyncio
 from datetime import datetime, timezone
 from ._client import get_identity_client

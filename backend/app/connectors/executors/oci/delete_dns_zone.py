@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "DNS zone deletion is destructive; zone records cannot be recovered after deletion"
+
 import asyncio
 from datetime import datetime, timezone
 

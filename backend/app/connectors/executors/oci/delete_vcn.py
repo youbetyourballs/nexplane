@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "VCN deletion is destructive; network configuration, subnets, and routing tables cannot be restored"
+
 import asyncio
 from datetime import datetime, timezone
 

@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "IAM user deletion is destructive; user credentials and API keys cannot be restored after deletion"
+
 import asyncio
 from datetime import datetime, timezone
 from ._client import get_identity_client

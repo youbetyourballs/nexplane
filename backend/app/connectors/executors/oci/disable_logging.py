@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "Logging disable deletes the log group and logs permanently; historical log data cannot be restored"
+
 import asyncio
 from datetime import datetime, timezone
 

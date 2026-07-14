@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "Reboot cannot be undone; the instance is already back to running state after a reboot"
+
 import asyncio
 from datetime import datetime, timezone
 
