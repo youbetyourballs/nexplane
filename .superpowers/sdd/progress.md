@@ -225,3 +225,38 @@ Base commit: c496d6c
 - Task 1: complete (commits c496d6c..4550bbb, review clean after __new__ fix + migration nullable fix)
 - Task 2: complete (commits 4550bbb..aefd06f, review clean after tier3 counter fix + tier2/3 tests)
 - Task 3: complete (commits aefd06f..a14f4e9, review clean)
+- Task 4: complete (commits a14f4e9..c4a778e, review clean after _matches None guard + RDS scanned unit + SSM assertion)
+Task 5: complete (commits 85a46ab..4d63a76, review clean after secret_description rename + ECS rollback honest + SecureString guard + blocklist fix)
+- Task 6: complete (commits 4d63a76..81b461e, review clean after PropertyMock secrets data guard fix)
+- Task 7: complete (commits 81b461e..9f129a4, review clean after update_ingress_host missing + status string + consistency fix)
+- Task 8: complete (commits 9f129a4..c14a1b8, review clean — reviewer C1/C2 were false alarms: brief explicitly uses scan_summary nesting for agent output, not flat scanned)
+- Task 9: complete (commits c14a1b8..04fb4d0, review clean)
+- Task 10: complete (commits 04fb4d0..e8d885f, review clean — return field names differ from spec intro but match brief test scaffold; confident_updates contains the list)
+- Task 11: complete (commits e8d885f..dfe5b65, review clean after separate endpoints + resolve-with-cr creates draft CR fix; I1 get_settings false alarm — sync factory functions)
+- Task 12: complete (commits dfe5b65..b4b6cdb, review clean after auth pattern + type hints + return type annotation fix)
+- Task 13: complete (commits b4b6cdb..c8fe9b0, ALL_PHASES_PASSED on live EC2 — REF_SCAN_AWS ✅, REF_SCAN_K8S ✅, others gracefully skipped pending test infra; 5 production bugs fixed: router import, enum migration, config import, cr.desired_outcome field, smoke params shape)
+## REFERENCE SCAN AND UPDATE COMPLETE — All 13 tasks done, smoke passing on EC2
+- REF_SCAN_AWS ✅, REF_SCAN_K8S ✅ on live EC2
+- 5 production bugs fixed during smoke: router import, enum migration, config import, cr.desired_outcome field, smoke params shape
+- Final whole-branch review: Ready to merge (no blocking issues)
+## CR Execution Remediation (2026-07-14-cr-execution-remediation.md)
+Base commit: b2e73a2
+- Task 1: complete (commit b2e73a2..29e6729, review clean — merge migration presst001, two deviations: merge head + table name correction both legitimate)
+- Task 2: complete (commits 29e6729..2444b7e, review clean after fix — expires_at filter added to retrieve(), no-op flush removed from purge_expired, 6/6 tests)
+- Task 3: complete (commits 2444b7e..59f1ea1, review clean — _validate_rollback_capability added, regex block replaced, ExecutorProtocol documented, 5/5 tests; minor: unused imports cleaned)
+- Task 4: complete (commits 59f1ea1..f9bb387, review clean — settings API, min-7 validation, nightly purge, frontend amber warning; minor: max_instances=1 added)
+- Task 5: complete (commit f9bb387..70d26ea, review clean — 25/25 Bucket 3 files declared; promote_db_replica→promote_rds_replica name corrected)
+- Task 6: complete (commit 70d26ea..5564579, review clean — 8/8 Bucket 2 files; add_to_group/remove_from_group logic preserved; 6 paired-action rollbacks updated)
+- Task 7: complete (commits 5564579..f67660f, review clean after C1 fix — terminate_instance capture-before-destroy order corrected; 4/5 AWS executors reconstitution rollback; delete_rds_instance irreversible)
+- Task 8: complete (commits f67660f..9cf4543, review clean after 2 critical fixes — delete/update_dns_record capture-before-destroy ordering + rollback reads PreStateStore; delete_user SSM-only rollback acceptable)
+- Task 9: complete (commits 9cf4543..6aec684, ALL_PHASES_PASSED on EC2 — ROLLBACK_CAPABILITY_GATE ✅ PRESTATE_CAPTURE ✅ PRESTATE_ROLLBACK ✅ IRREVERSIBLE_WARNING ✅ RETENTION_PURGE ✅; 4 production bugs fixed: rollback_action in aws.json, cr_id/step_id/org_id injection in activities.py, run_ssm_command capability declaration)
+- Final review fix: complete (commit 89f60ff — removed from __future__ import annotations from planning_engine.py)
+## CR EXECUTION REMEDIATION COMPLETE — All 9 tasks done, 5/5 smoke phases passing on live EC2
+
+## OCI Parity Spec 1 (2026-07-14-oci-parity-spec1.md)
+Base commit: 52b8291
+- Task 1: TODO
+- Task 2: TODO
+- Task 3: TODO
+- Task 4: TODO
+- Task 5: TODO

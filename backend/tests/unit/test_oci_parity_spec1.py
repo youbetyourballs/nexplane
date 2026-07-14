@@ -94,7 +94,9 @@ class TestDeleteOcirRepository:
         with patch("app.connectors.executors.oci.delete_ocir_repository.get_artifacts_client", return_value=fake_client), \
              patch("app.connectors.executors.oci.delete_ocir_repository.PreStateStore") as mock_store, \
              patch("app.connectors.executors.oci.delete_ocir_repository.AsyncSessionLocal") as mock_session:
-            mock_session.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+            mock_db = AsyncMock()
+            mock_db.commit = AsyncMock(side_effect=lambda: call_order.append("commit"))
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_store.capture = AsyncMock(side_effect=lambda *a, **kw: call_order.append("capture"))
             fake_client.delete_container_repository.side_effect = lambda **kw: call_order.append("delete")
@@ -103,7 +105,7 @@ class TestDeleteOcirRepository:
                  "step_id": "step_0", "org_id": "00000000-0000-0000-0000-000000000002"},
                 [], _connector()
             ))
-        assert call_order.index("capture") < call_order.index("delete")
+        assert call_order.index("capture") < call_order.index("commit") < call_order.index("delete")
 
 
 class TestDeleteOcirImage:

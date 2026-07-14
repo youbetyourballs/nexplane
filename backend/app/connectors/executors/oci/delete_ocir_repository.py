@@ -40,6 +40,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
                 "freeform_tags": repo.freeform_tags or {},
             },
         )
+        await db.commit()
 
     await loop.run_in_executor(
         None, lambda: client.delete_container_repository(repository_id=repository_id)
