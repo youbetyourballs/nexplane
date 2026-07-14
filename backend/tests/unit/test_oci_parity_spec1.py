@@ -2,7 +2,7 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 import asyncio
-import pytest
+import sys
 from unittest.mock import MagicMock, patch, AsyncMock
 
 
@@ -47,7 +47,9 @@ class TestCreateOcirRepository:
         fake_repo.id = "ocid1.containerrepo.x"
         fake_client = MagicMock()
         fake_client.create_container_repository.return_value = MagicMock(data=fake_repo)
-        with patch("app.connectors.executors.oci.create_ocir_repository.get_artifacts_client", return_value=fake_client):
+        fake_oci = MagicMock()
+        with patch("app.connectors.executors.oci.create_ocir_repository.get_artifacts_client", return_value=fake_client), \
+             patch.dict(sys.modules, {"oci": fake_oci}):
             result = asyncio.run(execute(
                 {"compartment_id": "ocid1.compartment.x", "display_name": "test-repo", "is_public": False},
                 [], _connector()

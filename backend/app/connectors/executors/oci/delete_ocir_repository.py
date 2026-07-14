@@ -35,7 +35,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             {
                 "display_name": repo.display_name,
                 "compartment_id": repo.compartment_id,
-                "is_immutable": repo.is_immutable,
+                "is_public": bool(repo.is_public) if repo.is_public is not None else False,
                 "defined_tags": repo.defined_tags or {},
                 "freeform_tags": repo.freeform_tags or {},
             },
@@ -53,11 +53,11 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    import oci
     creds = getattr(connector, "credentials", {})
     if not creds:
         return {"action": "rollback_delete_ocir_repository", "mock": True}
 
-    import oci
     client = get_artifacts_client(creds)
     loop = asyncio.get_running_loop()
 
@@ -76,7 +76,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         details = oci.artifacts.models.CreateContainerRepositoryDetails(
             compartment_id=state["compartment_id"],
             display_name=state["display_name"],
-            is_public=not state.get("is_immutable", False),
+            is_public=state.get("is_public", False),
         )
         return client.create_container_repository(
             create_container_repository_details=details

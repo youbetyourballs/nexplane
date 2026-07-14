@@ -23,24 +23,16 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "mock": True,
         }
 
+    import oci
     client = get_artifacts_client(creds)
     loop = asyncio.get_running_loop()
 
     def _create():
-        try:
-            import oci as _oci
-            details = _oci.artifacts.models.CreateContainerRepositoryDetails(
-                compartment_id=compartment_id,
-                display_name=display_name,
-                is_public=is_public,
-            )
-        except ModuleNotFoundError:
-            from types import SimpleNamespace
-            details = SimpleNamespace(
-                compartment_id=compartment_id,
-                display_name=display_name,
-                is_public=is_public,
-            )
+        details = oci.artifacts.models.CreateContainerRepositoryDetails(
+            compartment_id=compartment_id,
+            display_name=display_name,
+            is_public=is_public,
+        )
         return client.create_container_repository(
             create_container_repository_details=details
         ).data

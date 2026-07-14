@@ -16,3 +16,5 @@ validate_impl.py
 docs/superpowers/
 # Marketing and GTM content (live in nexplane-site repo)
 content/
+# Test databases
+backend/test.db
