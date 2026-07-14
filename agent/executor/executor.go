@@ -30,6 +30,7 @@ import (
 	"nexplane-agent/commands/forensics"
 	"nexplane-agent/commands/compliance"
 	"nexplane-agent/commands/migration"
+	"nexplane-agent/commands/reference"
 )
 
 // Result is the outcome of a command execution.
@@ -184,6 +185,8 @@ var commands = map[string]CommandFunc{
 	"discover_application_profile": migration.DiscoverApplicationProfileExecute,
 	"capture_behavioral_baseline":  migration.CaptureBehavioralBaselineExecute,
 	"verify_against_baseline":      migration.VerifyAgainstBaselineExecute,
+	// Reference scan (host file scanning for migrating resource references)
+	"reference-scan": reference.Execute,
 	// Credential rotation
 	"rotate_ssh_keys":        credrotation.SSHKeyExecute,
 	"rotate_db_creds":        credrotation.DBRotateExecute,

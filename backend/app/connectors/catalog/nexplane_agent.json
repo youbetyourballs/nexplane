@@ -2485,6 +2485,23 @@
                         "executor": "nexplane_agent.restore_server",
                         "generic_action": "restore_server",
                         "action_id": "restore_server"
+                    },
+                    {
+                        "display_name": "Scan Host for References",
+                        "description": "Search files on an agent-monitored host for references to a migrating resource (env files, config files, systemd units, docker-compose files).",
+                        "parameters": [
+                            {"required": true, "type": "array", "name": "search_terms"},
+                            {"required": false, "type": "array", "name": "paths"},
+                            {"required": false, "type": "array", "name": "extensions"}
+                        ],
+                        "execution_tier": 2,
+                        "rollback_strategy": "no_op",
+                        "estimated_duration_seconds": 30,
+                        "applicable_asset_types": ["server", "workstation"],
+                        "action_type": "read",
+                        "executor": "nexplane_agent.scan_host_references",
+                        "generic_action": "scan_host_references",
+                        "action_id": "scan_host_references"
                     }
                 ]
 }
