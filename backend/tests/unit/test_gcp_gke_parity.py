@@ -516,7 +516,7 @@ class TestUpdateGkeNodePool:
                 result = asyncio.get_event_loop().run_until_complete(
                     execute(self._params(), [], connector)
                 )
-        assert "pre_state" in result
+        assert result.get("pre_state", {}).get("labels") == {"env": "prod"}
         assert result["updated"] is True
 
     def test_rollback_restores_config(self):
@@ -532,7 +532,7 @@ class TestUpdateGkeNodePool:
             "location": "us-central1-a",
             "node_pool_name": "default-pool",
             "project_id": "test-project",
-            "pre_state": {"display_name": "old-name", "labels": {}},
+            "pre_state": {"labels": {"env": "prod"}},
         }
         with patch("app.connectors.executors.gcp.gcp_update_gke_node_pool.get_container_client", return_value=client_mock):
             with patch("app.connectors.executors.gcp.gcp_update_gke_node_pool.poll_gke_operation", new_callable=AsyncMock):

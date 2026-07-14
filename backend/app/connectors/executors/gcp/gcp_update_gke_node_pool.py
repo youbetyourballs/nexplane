@@ -2,7 +2,6 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 import asyncio
-
 from ._client import get_container_client, get_project_id
 from ._gke_helpers import poll_gke_operation
 
@@ -14,19 +13,16 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     cluster_name = parameters["cluster_name"]
     location = parameters["location"]
     node_pool_name = parameters["node_pool_name"]
-    new_display_name = parameters.get("display_name")
     new_labels = parameters.get("labels")
 
     if not creds:
         return {
             "updated": True,
-            "pre_state": {"display_name": node_pool_name, "labels": {}},
+            "pre_state": {"labels": {}},
             "cluster_name": cluster_name,
             "node_pool_name": node_pool_name,
             "mock": True,
         }
-
-    from google.cloud import container_v1
 
     project_id = get_project_id(creds)
     client = get_container_client(creds)
@@ -36,23 +32,17 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Capture pre-state before updating
     pool = await loop.run_in_executor(None, lambda: client.get_node_pool({"name": pool_ref}))
     prior_labels = dict(pool.config.labels) if (pool.config and pool.config.labels) else {}
-    prior_display_name = pool.name
 
-    request_dict = {"name": pool_ref}
-    if new_display_name:
-        request_dict["node_pool_id"] = node_pool_name
     if new_labels is not None:
-        request_dict["labels"] = new_labels
-
-    op = await loop.run_in_executor(
-        None,
-        lambda: client.update_node_pool(request_dict)
-    )
-    await poll_gke_operation(client, op.name, timeout=600)
+        op = await loop.run_in_executor(
+            None,
+            lambda: client.update_node_pool({"name": pool_ref, "labels": new_labels})
+        )
+        await poll_gke_operation(client, op.name, timeout=600)
 
     return {
         "updated": True,
-        "pre_state": {"display_name": prior_display_name, "labels": prior_labels},
+        "pre_state": {"labels": prior_labels},
         "cluster_name": cluster_name,
         "location": location,
         "node_pool_name": node_pool_name,
@@ -78,8 +68,10 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     loop = asyncio.get_event_loop()
     pool_ref = f"projects/{project_id}/locations/{location}/clusters/{cluster_name}/nodePools/{node_pool_name}"
 
-    request_dict = {"name": pool_ref, "labels": prior_labels}
-    op = await loop.run_in_executor(None, lambda: client.update_node_pool(request_dict))
+    op = await loop.run_in_executor(
+        None,
+        lambda: client.update_node_pool({"name": pool_ref, "labels": prior_labels})
+    )
     await poll_gke_operation(client, op.name, timeout=600)
 
     return {"rolled_back": True, "node_pool_name": node_pool_name}
