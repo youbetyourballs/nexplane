@@ -5,6 +5,9 @@ import asyncio
 import time
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "SSM command output is terminal — side effects on the target instance cannot be automatically undone."
+
 
 async def _real_execute(creds: dict, parameters: dict) -> dict:
     from ._client import get_boto3_client
