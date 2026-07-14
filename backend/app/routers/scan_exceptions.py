@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.routers import current_user as get_current_user
 from app.services.scan_exception_service import (
     list_exceptions,
     get_exception,
