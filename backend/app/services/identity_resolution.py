@@ -9,7 +9,8 @@ tenant to find matching user accounts. Each connector type stores the email
 in a different JSONB metadata key; this module encodes that mapping.
 """
 import uuid
-from sqlalchemy import select, or_, text
+from dataclasses import dataclass
+from sqlalchemy import select, or_, cast, String, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset
@@ -94,3 +95,101 @@ async def resolve_user_across_connectors(
             })
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# 4-tier consumer identity resolution (Task 2: Reference Scan)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class IdentityResolutionResult:
+    asset_id: uuid.UUID | None
+    tier: int
+    confidence: float
+    new_asset_data: dict | None = None
+
+
+async def resolve_consumer_identity(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    consumer_identity: dict,
+) -> IdentityResolutionResult:
+    """
+    4-tier identity resolution for scan hit consumers.
+
+    Tier 1: stable cloud ID (ARN, resource ID) matches asset_metadata JSON.
+    Tier 2: hostname or DNS name matches asset name or asset_metadata.
+    Tier 3: composite fingerprint — match on >=2 signals from surface_metadata.
+    Tier 4: no match — return new_asset_data for auto-registration.
+    """
+    stable_id = consumer_identity.get("stable_id")
+    hostname = consumer_identity.get("hostname")
+    surface_meta = consumer_identity.get("surface_metadata") or {}
+
+    base_q = select(Asset).where(Asset.organization_id == organization_id)
+
+    # Tier 1: stable cloud ID in asset_metadata (arn, resource_id, instance_id, etc.)
+    if stable_id:
+        for field in ("arn", "resource_id", "instance_id", "function_name", "cluster_id"):
+            q = base_q.where(
+                cast(Asset.asset_metadata[field], String) == f'"{stable_id}"'
+            )
+            r = await db.execute(q)
+            asset = r.scalar_one_or_none()
+            if asset:
+                return IdentityResolutionResult(asset_id=asset.id, tier=1, confidence=0.99)
+
+    # Tier 2: hostname / DNS name match on asset.name
+    if hostname:
+        q = base_q.where(
+            or_(
+                Asset.name == hostname,
+                Asset.name == hostname.split(".")[0],
+            )
+        )
+        r = await db.execute(q)
+        assets = r.scalars().all()
+        if len(assets) == 1:
+            return IdentityResolutionResult(asset_id=assets[0].id, tier=2, confidence=0.85)
+        if len(assets) > 1:
+            # Ambiguous — pick closest and flag lower confidence
+            return IdentityResolutionResult(asset_id=assets[0].id, tier=2, confidence=0.50)
+
+    # Tier 3: composite fingerprint — >=2 signals from surface_metadata
+    mac = surface_meta.get("mac_address")
+    os_type = surface_meta.get("os_type")
+    iface = surface_meta.get("primary_interface_ip")
+    signals_matched = 0
+    candidate = None
+    for signal_field, signal_val in [
+        ("mac_address", mac),
+        ("os_type", os_type),
+        ("primary_interface_ip", iface),
+    ]:
+        if not signal_val:
+            continue
+        q = base_q.where(
+            cast(Asset.asset_metadata[signal_field], String) == f'"{signal_val}"'
+        )
+        r = await db.execute(q)
+        a = r.scalar_one_or_none()
+        if a:
+            signals_matched += 1
+            candidate = a
+    if signals_matched >= 2 and candidate:
+        return IdentityResolutionResult(asset_id=candidate.id, tier=3, confidence=0.70)
+
+    # Tier 4: no match — build new asset data for auto-registration
+    name = hostname or stable_id or surface_meta.get("label") or "unknown-consumer"
+    new_asset_data = {
+        "name": name,
+        "asset_type": "application",
+        "environment": "unknown",
+        "asset_metadata": {
+            "discovered_via": "reference_scan",
+            "stable_id": stable_id,
+            "hostname": hostname,
+            **surface_meta,
+        },
+    }
+    return IdentityResolutionResult(asset_id=None, tier=4, confidence=0.0, new_asset_data=new_asset_data)
