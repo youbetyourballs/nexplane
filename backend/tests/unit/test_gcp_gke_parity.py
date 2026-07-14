@@ -80,9 +80,141 @@ class TestGkeClientFactory:
         pending_op = MagicMock()
         pending_op.status = MagicMock()  # not DONE
         client.get_operation.return_value = pending_op
-        # Force status != DONE by making the comparison always False
-        _container_v1_mock.Operation.Status.DONE = object()
         with pytest.raises(TimeoutError):
             asyncio.get_event_loop().run_until_complete(
                 poll_gke_operation(client, "projects/p/locations/l/operations/op1", 0)
             )
+
+
+class TestCreateGkeCluster:
+    def _params(self):
+        return {
+            "cluster_name": "test-cluster",
+            "location": "us-central1-a",
+            "node_count": 1,
+            "machine_type": "e2-medium",
+            "disk_size_gb": 100,
+            "network": "default",
+        }
+
+    def _connector(self, with_creds=False):
+        c = MagicMock()
+        c.credentials = _make_creds() if with_creds else {}
+        return c
+
+    def test_mock_path_returns_expected_keys(self):
+        from app.connectors.executors.gcp.gcp_create_gke_cluster import execute
+        result = asyncio.get_event_loop().run_until_complete(
+            execute(self._params(), [], self._connector())
+        )
+        assert result.get("mock") is True
+        assert "cluster_name" in result
+        assert "node_pool_name" in result
+
+    def test_rollback_capability_full(self):
+        from app.connectors.executors.gcp import gcp_create_gke_cluster
+        assert gcp_create_gke_cluster.ROLLBACK_CAPABILITY == "full"
+
+    def test_execute_calls_create_cluster_and_node_pool(self):
+        from app.connectors.executors.gcp.gcp_create_gke_cluster import execute
+        from unittest.mock import AsyncMock
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op123"
+        op_mock.status = _container_v1_mock.Operation.Status.DONE
+        op_mock.status_message = ""
+        client_mock.create_cluster.return_value = op_mock
+        client_mock.create_node_pool.return_value = op_mock
+        done_op = MagicMock()
+        done_op.status = _container_v1_mock.Operation.Status.DONE
+        done_op.status_message = ""
+        client_mock.get_operation.return_value = done_op
+        with patch("app.connectors.executors.gcp.gcp_create_gke_cluster.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_create_gke_cluster.poll_gke_operation") as mock_poll:
+                mock_poll.return_value = AsyncMock(return_value=None)()
+                result = asyncio.get_event_loop().run_until_complete(
+                    execute(self._params(), [], connector)
+                )
+        client_mock.create_cluster.assert_called_once()
+        client_mock.create_node_pool.assert_called_once()
+
+    def test_rollback_deletes_cluster(self):
+        from app.connectors.executors.gcp.gcp_create_gke_cluster import rollback
+        from unittest.mock import AsyncMock
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        op_mock.status = _container_v1_mock.Operation.Status.DONE
+        op_mock.status_message = ""
+        client_mock.delete_cluster.return_value = op_mock
+        done_op = MagicMock()
+        done_op.status = _container_v1_mock.Operation.Status.DONE
+        done_op.status_message = ""
+        client_mock.get_operation.return_value = done_op
+        execution_result = {
+            "cluster_name": "test-cluster",
+            "location": "us-central1-a",
+            "node_pool_name": "default-pool",
+            "project_id": "test-project",
+        }
+        with patch("app.connectors.executors.gcp.gcp_create_gke_cluster.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_create_gke_cluster.poll_gke_operation") as mock_poll:
+                mock_poll.return_value = AsyncMock(return_value=None)()
+                result = asyncio.get_event_loop().run_until_complete(
+                    rollback(self._params(), execution_result, connector)
+                )
+        assert result.get("rolled_back") is True
+        client_mock.delete_cluster.assert_called_once()
+
+
+class TestDeleteGkeCluster:
+    def _params(self):
+        return {"cluster_name": "test-cluster", "location": "us-central1-a"}
+
+    def _connector(self, with_creds=False):
+        c = MagicMock()
+        c.credentials = _make_creds() if with_creds else {}
+        return c
+
+    def test_mock_path(self):
+        from app.connectors.executors.gcp.gcp_delete_gke_cluster import execute
+        result = asyncio.get_event_loop().run_until_complete(
+            execute(self._params(), [], self._connector())
+        )
+        assert result.get("mock") is True
+
+    def test_rollback_capability_irreversible(self):
+        from app.connectors.executors.gcp import gcp_delete_gke_cluster
+        assert gcp_delete_gke_cluster.ROLLBACK_CAPABILITY == "irreversible"
+
+    def test_rollback_returns_rolled_back_false(self):
+        from app.connectors.executors.gcp.gcp_delete_gke_cluster import rollback
+        result = asyncio.get_event_loop().run_until_complete(
+            rollback(self._params(), {}, self._connector())
+        )
+        assert result.get("rolled_back") is False
+
+    def test_execute_calls_delete_cluster(self):
+        from app.connectors.executors.gcp.gcp_delete_gke_cluster import execute
+        from unittest.mock import AsyncMock
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        op_mock.status = _container_v1_mock.Operation.Status.DONE
+        op_mock.status_message = ""
+        client_mock.delete_cluster.return_value = op_mock
+        done_op = MagicMock()
+        done_op.status = _container_v1_mock.Operation.Status.DONE
+        done_op.status_message = ""
+        client_mock.get_operation.return_value = done_op
+        with patch("app.connectors.executors.gcp.gcp_delete_gke_cluster.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_delete_gke_cluster.poll_gke_operation") as mock_poll:
+                mock_poll.return_value = AsyncMock(return_value=None)()
+                result = asyncio.get_event_loop().run_until_complete(
+                    execute(self._params(), [], connector)
+                )
+        assert result.get("deleted") is True
+        client_mock.delete_cluster.assert_called_once()
