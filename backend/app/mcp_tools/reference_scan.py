@@ -31,17 +31,11 @@ async def _auth(token: str):
         raise
 
 
-def _org_id(user, agent_token):
-    if user is not None:
-        return user.organization_id
-    return agent_token.organization_id
-
-
 @mcp.tool()
 async def scan_for_references(
     token: str,
-    search_terms: list,
-    connector_ids: list,
+    search_terms: list[str],
+    connector_ids: list[str],
     migration_context: str,
     asset_id: Optional[str] = None,
 ) -> dict:
@@ -62,7 +56,7 @@ async def scan_for_references(
 
     user, db, db_cm = await _auth(token)
     try:
-        org_id = _org_id(user, None)
+        org_id = user.organization_id
         cr_id = _uuid.uuid4()
         parameters = {
             "search_terms": search_terms,
@@ -112,7 +106,7 @@ async def get_scan_results(token: str, scan_cr_id: str) -> dict:
 
     user, db, db_cm = await _auth(token)
     try:
-        org_id = _org_id(user, None)
+        org_id = user.organization_id
         cr_result = await db.execute(
             select(ChangeRequest).where(
                 ChangeRequest.id == _uuid.UUID(scan_cr_id),
@@ -149,7 +143,7 @@ async def get_scan_results(token: str, scan_cr_id: str) -> dict:
 
 
 @mcp.tool()
-async def list_reference_exceptions(token: str, scan_cr_id: str) -> list:
+async def list_reference_exceptions(token: str, scan_cr_id: str) -> list[dict]:
     """
     List all scan exceptions for a completed scan_for_references CR.
 
@@ -164,7 +158,7 @@ async def list_reference_exceptions(token: str, scan_cr_id: str) -> list:
 
     user, db, db_cm = await _auth(token)
     try:
-        org_id = _org_id(user, None)
+        org_id = user.organization_id
         exceptions = await list_exceptions(db, org_id, scan_cr_id=_uuid.UUID(scan_cr_id))
         return [
             {
@@ -182,7 +176,7 @@ async def list_reference_exceptions(token: str, scan_cr_id: str) -> list:
             for e in exceptions
         ]
     except ValueError as e:
-        return [{"error": str(e)}]
+        return {"error": str(e)}
     finally:
         await db_cm.__aexit__(None, None, None)
 
@@ -207,7 +201,7 @@ async def resolve_reference_exception(
 
     user, db, db_cm = await _auth(token)
     try:
-        org_id = _org_id(user, None)
+        org_id = user.organization_id
         return await resolve_with_update_cr(
             _uuid.UUID(exception_id), update_cr_params, db, org_id
         )
@@ -242,7 +236,7 @@ async def reattempt_reference_triage(
 
     user, db, db_cm = await _auth(token)
     try:
-        org_id = _org_id(user, None)
+        org_id = user.organization_id
         settings_result = await db.execute(
             select(OrganizationSettings).where(
                 OrganizationSettings.organization_id == org_id
@@ -283,7 +277,7 @@ async def dismiss_reference_exception(
 
     user, db, db_cm = await _auth(token)
     try:
-        org_id = _org_id(user, None)
+        org_id = user.organization_id
         return await dismiss_exception(_uuid.UUID(exception_id), reason, db, org_id)
     except ValueError as e:
         return {"error": str(e)}
