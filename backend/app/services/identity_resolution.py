@@ -155,12 +155,15 @@ async def resolve_consumer_identity(
             # Ambiguous — pick closest and flag lower confidence
             return IdentityResolutionResult(asset_id=assets[0].id, tier=2, confidence=0.50)
 
-    # Tier 3: composite fingerprint — >=2 signals from surface_metadata
+    # Tier 3: composite fingerprint — >=2 signals from surface_metadata must match
+    # the *same* asset. Collect per-asset match counts, then pick the best.
+    from collections import Counter
+    import uuid as _uuid_mod
     mac = surface_meta.get("mac_address")
     os_type = surface_meta.get("os_type")
     iface = surface_meta.get("primary_interface_ip")
-    signals_matched = 0
-    candidate = None
+    signal_matches: Counter = Counter()
+    candidates: dict = {}
     for signal_field, signal_val in [
         ("mac_address", mac),
         ("os_type", os_type),
@@ -174,13 +177,14 @@ async def resolve_consumer_identity(
         r = await db.execute(q)
         a = r.scalar_one_or_none()
         if a:
-            signals_matched += 1
-            candidate = a
-    if signals_matched >= 2 and candidate:
-        return IdentityResolutionResult(asset_id=candidate.id, tier=3, confidence=0.70)
+            signal_matches[str(a.id)] += 1
+            candidates[str(a.id)] = a
+    best_id = signal_matches.most_common(1)[0][0] if signal_matches else None
+    if best_id and signal_matches[best_id] >= 2:
+        return IdentityResolutionResult(asset_id=candidates[best_id].id, tier=3, confidence=0.70)
 
     # Tier 4: no match — build new asset data for auto-registration
-    name = hostname or stable_id or surface_meta.get("label") or "unknown-consumer"
+    name = hostname or stable_id or surface_meta.get("label") or f"unknown-consumer-{str(_uuid_mod.uuid4())[:8]}"
     new_asset_data = {
         "name": name,
         "asset_type": "application",
