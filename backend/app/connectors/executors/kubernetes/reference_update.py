@@ -106,7 +106,7 @@ async def update_deployment_image(cr, connector, db) -> dict:
     apps_api.patch_namespaced_deployment(name=deployment_name, namespace=ns, body=obj)
 
     return {
-        "status": "success",
+        "status": "updated",
         "rollback_data": {
             "namespace": ns,
             "deployment_name": deployment_name,

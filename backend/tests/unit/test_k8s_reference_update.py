@@ -134,7 +134,7 @@ async def test_update_deployment_image_success():
     with patch("app.connectors.executors.kubernetes.reference_update.get_k8s_client", return_value=mock_clients):
         result = await update_deployment_image(cr, connector, AsyncMock())
 
-    assert result["status"] == "success"
+    assert result["status"] == "updated"
     assert result["rollback_data"]["old_image"] == "registry.internal/myapp:v1.0"
     assert mock_container.image == "registry.internal/myapp:v2.0"
     apps_api.patch_namespaced_deployment.assert_called_once()
