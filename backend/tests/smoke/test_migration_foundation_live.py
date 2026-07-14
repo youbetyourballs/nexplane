@@ -34,60 +34,36 @@ from smoke_helpers import (
     log,
     fail,
     make_base_parser,
-    setup_backend_tailscale,
 )
 
-def _get_tailscale_auth_key_direct() -> str:
-    """Get Tailscale auth key from DB, handling multiple connector rows."""
-    import asyncio
-    import threading
+def _get_backend_vpc_ip() -> str:
+    """Return the platform EC2's VPC-internal private IP for agent→backend communication.
 
-    result_holder: list = [None]
-
-    async def _fetch() -> str:
-        from sqlalchemy import select
-        from app.database import AsyncSessionLocal
-        from app.models.connector import Connector
-        from app.models.connector_credential import ConnectorCredential
-        from app.services.secrets_service import SecretsService
-        from app.config import settings as _cfg
-
-        async with AsyncSessionLocal() as db:
-            row = await db.execute(
-                select(Connector).where(Connector.connector_type == "tailscale")
-            )
-            conn = row.scalars().first()  # use .first() not .scalar_one_or_none()
-            if not conn:
-                return ""
-            cred_row = await db.execute(
-                select(ConnectorCredential).where(ConnectorCredential.connector_id == conn.id)
-            )
-            cred = cred_row.scalars().first()
-            if not cred:
-                return ""
-            svc = SecretsService(_cfg.SECRET_KEY)
-            return svc.decrypt_json(cred.credentials_encrypted).get("auth_key", "")
-
-    def _run():
-        result_holder[0] = asyncio.run(_fetch())
-
-    t = threading.Thread(target=_run)
-    t.start()
-    t.join()
-    return result_holder[0] or ""
-
-
-def _get_backend_tailscale_ip() -> str:
-    """Return the backend container's current Tailscale IP if already connected, else empty string."""
+    Smoke tests run inside the same VPC so no Tailscale is needed.  Port 8000
+    is open to the VPC CIDR in the platform security group.
+    """
     import subprocess
     try:
+        # ec2-metadata is available on Amazon Linux; fall back to ip addr
         result = subprocess.run(
-            ["tailscale", "ip", "-4"],
-            capture_output=True, text=True, timeout=10,
+            ["ec2-metadata", "--local-ipv4"],
+            capture_output=True, text=True, timeout=5,
         )
-        ip = result.stdout.strip()
-        if ip and ip.startswith("100."):
-            return ip
+        line = result.stdout.strip()
+        if line:
+            ip = line.split(":")[-1].strip()
+            if ip and ip.startswith("172."):
+                return ip
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["hostname", "-I"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for token in result.stdout.split():
+            if token.startswith("172."):
+                return token
     except Exception:
         pass
     return ""
@@ -131,7 +107,7 @@ def _pre_run_cleanup(client: NexplaneClient) -> None:
 
 
 def _setup_legacy_app_host(client: NexplaneClient, cloud_account_id: str,
-                            tailscale_auth_key: str) -> dict:
+                            tailscale_auth_key: str = "") -> dict:
     """
     Launch EC2 instance, install legacy app stack, deploy Nexplane agent.
     Returns dict with instance_asset, instance_id, endpoint_asset_id (agent-registered server asset).
@@ -139,17 +115,13 @@ def _setup_legacy_app_host(client: NexplaneClient, cloud_account_id: str,
     _pre_run_cleanup(client)
     log("Setup: launching EC2 instance for migration smoke test")
 
-    # Check if backend is already on Tailscale (common for EC2 runners)
-    backend_ip = _get_backend_tailscale_ip()
+    # Use VPC-private IP — smoke EC2 instances are in the same VPC as the platform.
+    # Port 8000 is open to the VPC CIDR in the nexplane-platform security group.
+    # No Tailscale required for intra-VPC smoke tests.
+    backend_ip = _get_backend_vpc_ip()
     if not backend_ip:
-        auth_key = tailscale_auth_key or _get_tailscale_auth_key_direct()
-        backend_ip = setup_backend_tailscale(auth_key)
-    else:
-        log(f"Backend already on Tailscale: {backend_ip}")
-    # Get Tailscale auth key for the target instance to join
-    auth_key = tailscale_auth_key or _get_tailscale_auth_key_direct()
-    if not auth_key:
-        fail("Tailscale auth key not found — store credentials in the Tailscale connector")
+        fail("Could not determine platform EC2 VPC private IP for agent→backend connectivity")
+    log(f"Backend VPC private IP: {backend_ip}")
 
     agent_secret = client.get_agent_secret()
 
@@ -214,12 +186,6 @@ def _setup_legacy_app_host(client: NexplaneClient, cloud_account_id: str,
 
     # Install legacy app stack via SSM
     _install_legacy_app_stack(client, instance_asset["id"], instance_id)
-
-    # Join Tailscale so agent can reach the control plane
-    client.run_cr(
-        "smoke-migration: tailscale join", "tailscale_join", instance_asset["id"],
-        {"instance_id": instance_id, "auth_key": auth_key, "hostname": _AGENT_HOSTNAME},
-    )
 
     # Deploy Nexplane agent — use the backend's own downloads endpoint so the
     # dev build (with current code changes) is installed rather than the S3 release.
@@ -887,13 +853,13 @@ def _teardown(client: NexplaneClient) -> None:
 # Combined run entry point
 # ---------------------------------------------------------------------------
 
-def run(client: NexplaneClient, tailscale_auth_key: str = "") -> None:
+def run(client: NexplaneClient) -> None:
     log("=== Migration Foundation Smoke — Phases 1–4 ===")
 
     cloud_account_id = client.get_cloud_account_asset_id()
     log(f"Using cloud account asset: {cloud_account_id}")
 
-    setup = _setup_legacy_app_host(client, cloud_account_id, tailscale_auth_key)
+    setup = _setup_legacy_app_host(client, cloud_account_id)
     agent_asset_id = setup["agent_asset_id"]
     instance_asset_id = setup["instance_asset"]["id"]
     instance_id = setup["instance_id"]
@@ -927,10 +893,6 @@ def main() -> None:
         default=",".join(ALL_PHASES),
         help=f"Comma-separated phases to run (default: all). Options: {','.join(ALL_PHASES)}",
     )
-    parser.add_argument(
-        "--tailscale-auth-key", default="",
-        help="Tailscale auth key (optional — will be fetched from connector if not provided)",
-    )
     args = parser.parse_args()
 
     phases = [p.strip().upper() for p in args.phases.split(",") if p.strip()]
@@ -943,11 +905,11 @@ def main() -> None:
 
     if phases == ALL_PHASES:
         # Full combined run
-        run(client, tailscale_auth_key=args.tailscale_auth_key)
+        run(client)
     else:
         # If running individual phases, still need setup
         cloud_account_id = client.get_cloud_account_asset_id()
-        setup = _setup_legacy_app_host(client, cloud_account_id, args.tailscale_auth_key)
+        setup = _setup_legacy_app_host(client, cloud_account_id)
         agent_asset_id = setup["agent_asset_id"]
         instance_asset_id = setup["instance_asset"]["id"]
         instance_id = setup["instance_id"]

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
-import pytest
 from app.models.scan_exception import ScanException
 
 def test_scan_exception_has_required_fields():
@@ -16,6 +15,7 @@ def test_scan_exception_has_required_fields():
         assert field in mapper_columns, f"Missing column: {field}"
 
 def test_scan_exception_status_values():
-    se = ScanException.__new__(ScanException)
-    se.status = "pending"
-    assert se.status == "pending"
+    # Just verify the status column exists and has correct properties
+    assert hasattr(ScanException, 'status')
+    status_col = ScanException.__mapper__.columns['status']
+    assert status_col.nullable is False
