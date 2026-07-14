@@ -258,14 +258,14 @@ class TestAddGkeNodePool:
 
     def test_execute_calls_create_node_pool(self):
         from app.connectors.executors.gcp.gcp_add_gke_node_pool import execute
+        from unittest.mock import AsyncMock
         connector = self._connector(with_creds=True)
         client_mock = MagicMock()
         op_mock = MagicMock()
         op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
         client_mock.create_node_pool.return_value = op_mock
         with patch("app.connectors.executors.gcp.gcp_add_gke_node_pool.get_container_client", return_value=client_mock):
-            with patch("app.connectors.executors.gcp.gcp_add_gke_node_pool.poll_gke_operation") as mock_poll:
-                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+            with patch("app.connectors.executors.gcp.gcp_add_gke_node_pool.poll_gke_operation", new_callable=AsyncMock):
                 result = asyncio.get_event_loop().run_until_complete(
                     execute(self._params(), [], connector)
                 )
@@ -274,6 +274,7 @@ class TestAddGkeNodePool:
 
     def test_rollback_deletes_pool(self):
         from app.connectors.executors.gcp.gcp_add_gke_node_pool import rollback
+        from unittest.mock import AsyncMock
         connector = self._connector(with_creds=True)
         client_mock = MagicMock()
         op_mock = MagicMock()
@@ -286,8 +287,7 @@ class TestAddGkeNodePool:
             "project_id": "test-project",
         }
         with patch("app.connectors.executors.gcp.gcp_add_gke_node_pool.get_container_client", return_value=client_mock):
-            with patch("app.connectors.executors.gcp.gcp_add_gke_node_pool.poll_gke_operation") as mock_poll:
-                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+            with patch("app.connectors.executors.gcp.gcp_add_gke_node_pool.poll_gke_operation", new_callable=AsyncMock):
                 result = asyncio.get_event_loop().run_until_complete(
                     rollback(self._params(), execution_result, connector)
                 )
@@ -321,6 +321,7 @@ class TestDeleteGkeNodePool:
 
     def test_drain_recommended_true_when_instance_groups_present(self):
         from app.connectors.executors.gcp.gcp_delete_gke_node_pool import execute
+        from unittest.mock import AsyncMock
         connector = self._connector(with_creds=True)
         client_mock = MagicMock()
         pool_mock = MagicMock()
@@ -330,8 +331,7 @@ class TestDeleteGkeNodePool:
         op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
         client_mock.delete_node_pool.return_value = op_mock
         with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.get_container_client", return_value=client_mock):
-            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation") as mock_poll:
-                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation", new_callable=AsyncMock):
                 result = asyncio.get_event_loop().run_until_complete(
                     execute(self._params(), [], connector)
                 )
@@ -340,6 +340,7 @@ class TestDeleteGkeNodePool:
 
     def test_drain_recommended_false_when_no_instance_groups(self):
         from app.connectors.executors.gcp.gcp_delete_gke_node_pool import execute
+        from unittest.mock import AsyncMock
         connector = self._connector(with_creds=True)
         client_mock = MagicMock()
         pool_mock = MagicMock()
@@ -349,8 +350,7 @@ class TestDeleteGkeNodePool:
         op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
         client_mock.delete_node_pool.return_value = op_mock
         with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.get_container_client", return_value=client_mock):
-            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation") as mock_poll:
-                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation", new_callable=AsyncMock):
                 result = asyncio.get_event_loop().run_until_complete(
                     execute(self._params(), [], connector)
                 )
@@ -358,6 +358,7 @@ class TestDeleteGkeNodePool:
 
     def test_prestatestore_captured_before_delete(self):
         from app.connectors.executors.gcp.gcp_delete_gke_node_pool import execute
+        from unittest.mock import AsyncMock
         connector = self._connector(with_creds=True)
         client_mock = MagicMock()
         pool_mock = MagicMock()
@@ -369,8 +370,7 @@ class TestDeleteGkeNodePool:
         op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
         client_mock.delete_node_pool.side_effect = lambda *a, **kw: (call_order.append("delete"), op_mock)[1]
         with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.get_container_client", return_value=client_mock):
-            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation") as mock_poll:
-                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation", new_callable=AsyncMock):
                 asyncio.get_event_loop().run_until_complete(
                     execute(self._params(), [], connector)
                 )
@@ -378,6 +378,7 @@ class TestDeleteGkeNodePool:
 
     def test_rollback_recreates_pool(self):
         from app.connectors.executors.gcp.gcp_delete_gke_node_pool import rollback
+        from unittest.mock import AsyncMock
         connector = self._connector(with_creds=True)
         client_mock = MagicMock()
         op_mock = MagicMock()
@@ -394,8 +395,7 @@ class TestDeleteGkeNodePool:
             },
         }
         with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.get_container_client", return_value=client_mock):
-            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation") as mock_poll:
-                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation", new_callable=AsyncMock):
                 result = asyncio.get_event_loop().run_until_complete(
                     rollback(self._params(), execution_result, connector)
                 )
