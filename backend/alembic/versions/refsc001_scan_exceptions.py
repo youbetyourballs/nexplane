@@ -19,7 +19,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add new change_type enum values for reference scan/update
+    # Add new change_type enum values for reference scan/update.
+    # ALTER TYPE ... ADD VALUE cannot run inside a transaction block in PostgreSQL < 12.
+    # We use op.execute() here; alembic runs DDL in transaction by default but PostgreSQL
+    # silently commits ADD VALUE before the transaction end, so this works for PG 10+.
     op.execute("ALTER TYPE change_type ADD VALUE IF NOT EXISTS 'scan_for_references'")
     op.execute("ALTER TYPE change_type ADD VALUE IF NOT EXISTS 'update_reference'")
 
