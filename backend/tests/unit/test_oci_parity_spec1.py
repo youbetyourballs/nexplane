@@ -286,7 +286,7 @@ def _tag_test(module_path, executor_fn_name, id_param, id_value, get_fn_name, up
         mock_db = AsyncMock()
         mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
         mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
-        mock_store.capture = MagicMock(side_effect=lambda *a, **kw: call_order.append("capture"))
+        mock_store.capture = AsyncMock(side_effect=lambda *a, **kw: call_order.append("capture"))
         getattr(fake_client, update_fn_name).side_effect = lambda *a, **kw: call_order.append("update") or MagicMock(data=fake_resource)
 
         result = asyncio.run(execute(
@@ -334,7 +334,7 @@ class TestTagComputeInstance:
                 {"instance_id": "ocid1.instance.x",
                  "cr_id": "00000000-0000-0000-0000-000000000001",
                  "step_id": "step_0", "org_id": "00000000-0000-0000-0000-000000000002"},
-                [], _connector(), {}
+                {}, _connector()
             ))
         fake_client.update_instance.assert_called_once()
         assert result["rolled_back"] is True
@@ -357,6 +357,29 @@ class TestTagBlockVolume:
             "get_volume", "update_volume", "blockstorage"
         )
 
+    def test_rollback_restores_tags(self):
+        from app.connectors.executors.oci.tag_block_volume import rollback
+        fake_client = MagicMock()
+        fake_resource = MagicMock()
+        fake_client.update_volume.return_value = MagicMock(data=fake_resource)
+        _fake_oci = MagicMock()
+        with patch.dict(sys.modules, {"oci": _fake_oci, "oci.core": _fake_oci.core,
+                                       "oci.core.models": _fake_oci.core.models}), \
+             patch("app.connectors.executors.oci.tag_block_volume.get_blockstorage_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.tag_block_volume.PreStateStore") as mock_store, \
+             patch("app.connectors.executors.oci.tag_block_volume.AsyncSessionLocal") as mock_session:
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_store.retrieve = AsyncMock(return_value={"freeform_tags": {"old": "tag"}, "defined_tags": {}})
+            result = asyncio.run(rollback(
+                {"volume_id": "ocid1.volume.x",
+                 "cr_id": "00000000-0000-0000-0000-000000000001",
+                 "step_id": "step_0", "org_id": "00000000-0000-0000-0000-000000000002"},
+                {}, _connector()
+            ))
+        fake_client.update_volume.assert_called_once()
+        assert result["rolled_back"] is True
+
 
 class TestTagVcn:
     def test_rollback_capability_full(self):
@@ -375,6 +398,29 @@ class TestTagVcn:
             "get_vcn", "update_vcn", "network"
         )
 
+    def test_rollback_restores_tags(self):
+        from app.connectors.executors.oci.tag_vcn import rollback
+        fake_client = MagicMock()
+        fake_resource = MagicMock()
+        fake_client.update_vcn.return_value = MagicMock(data=fake_resource)
+        _fake_oci = MagicMock()
+        with patch.dict(sys.modules, {"oci": _fake_oci, "oci.core": _fake_oci.core,
+                                       "oci.core.models": _fake_oci.core.models}), \
+             patch("app.connectors.executors.oci.tag_vcn.get_network_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.tag_vcn.PreStateStore") as mock_store, \
+             patch("app.connectors.executors.oci.tag_vcn.AsyncSessionLocal") as mock_session:
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_store.retrieve = AsyncMock(return_value={"freeform_tags": {"old": "tag"}, "defined_tags": {}})
+            result = asyncio.run(rollback(
+                {"vcn_id": "ocid1.vcn.x",
+                 "cr_id": "00000000-0000-0000-0000-000000000001",
+                 "step_id": "step_0", "org_id": "00000000-0000-0000-0000-000000000002"},
+                {}, _connector()
+            ))
+        fake_client.update_vcn.assert_called_once()
+        assert result["rolled_back"] is True
+
 
 class TestTagAdb:
     def test_rollback_capability_full(self):
@@ -392,3 +438,26 @@ class TestTagAdb:
             "autonomous_database_id", "ocid1.adb.x",
             "get_autonomous_database", "update_autonomous_database", "database"
         )
+
+    def test_rollback_restores_tags(self):
+        from app.connectors.executors.oci.tag_adb import rollback
+        fake_client = MagicMock()
+        fake_resource = MagicMock()
+        fake_client.update_autonomous_database.return_value = MagicMock(data=fake_resource)
+        _fake_oci = MagicMock()
+        with patch.dict(sys.modules, {"oci": _fake_oci, "oci.database": _fake_oci.database,
+                                       "oci.database.models": _fake_oci.database.models}), \
+             patch("app.connectors.executors.oci.tag_adb.get_database_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.tag_adb.PreStateStore") as mock_store, \
+             patch("app.connectors.executors.oci.tag_adb.AsyncSessionLocal") as mock_session:
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_store.retrieve = AsyncMock(return_value={"freeform_tags": {"old": "tag"}, "defined_tags": {}})
+            result = asyncio.run(rollback(
+                {"autonomous_database_id": "ocid1.adb.x",
+                 "cr_id": "00000000-0000-0000-0000-000000000001",
+                 "step_id": "step_0", "org_id": "00000000-0000-0000-0000-000000000002"},
+                {}, _connector()
+            ))
+        fake_client.update_autonomous_database.assert_called_once()
+        assert result["rolled_back"] is True

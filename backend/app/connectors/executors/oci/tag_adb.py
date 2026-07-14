@@ -32,7 +32,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     prior_defined = adb.defined_tags or {}
 
     async with AsyncSessionLocal() as db:
-        PreStateStore.capture(
+        await PreStateStore.capture(
             db,
             parameters.get("cr_id"),
             parameters.get("step_id"),
@@ -62,7 +62,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     }
 
 
-async def rollback(parameters: dict, asset_ids: list, connector, execution_result: dict) -> dict:
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     creds = getattr(connector, "credentials", {})
     autonomous_database_id = parameters.get("autonomous_database_id", "")
 
