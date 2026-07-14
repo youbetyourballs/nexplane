@@ -388,3 +388,128 @@ class TestDeleteOkeCluster:
             ))
         assert result["deleted"] is True
         assert delete_order.index("nodepool") < delete_order.index("cluster")
+
+
+class TestScaleOkeNodePool:
+    def test_rollback_capability(self):
+        import app.connectors.executors.oci.oci_scale_oke_node_pool as m
+        assert m.ROLLBACK_CAPABILITY == "full"
+
+    def test_mock_mode_execute(self):
+        from app.connectors.executors.oci.oci_scale_oke_node_pool import execute
+        result = asyncio.run(execute(
+            {"node_pool_id": "ocid1.nodepool.x", "node_count": 3}, [], _empty_connector()
+        ))
+        assert result["mock"] is True
+        assert result["scaled"] is True
+
+    def test_mock_mode_rollback(self):
+        from app.connectors.executors.oci.oci_scale_oke_node_pool import rollback
+        result = asyncio.run(rollback({"node_pool_id": "ocid1.nodepool.x"}, {}, _empty_connector()))
+        assert result["mock"] is True
+        assert result["rolled_back"] is True
+
+    def test_execute_captures_prior_count_and_scales(self):
+        from app.connectors.executors.oci.oci_scale_oke_node_pool import execute
+        fake_pool = MagicMock()
+        fake_pool.node_config_details.size = 2
+        fake_client = MagicMock()
+        fake_client.get_node_pool.return_value = MagicMock(data=fake_pool)
+        fake_wr = MagicMock()
+        fake_wr.status = "SUCCEEDED"
+        fake_wr.resources = []
+        fake_client.update_node_pool.return_value = MagicMock(headers={"opc-work-request-id": "wr-1"})
+        fake_client.get_work_request.return_value = MagicMock(data=fake_wr)
+        fake_oci = MagicMock()
+        with patch("app.connectors.executors.oci.oci_scale_oke_node_pool.get_container_engine_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.oci_scale_oke_node_pool.PreStateStore") as mock_store, \
+             patch("app.connectors.executors.oci.oci_scale_oke_node_pool.AsyncSessionLocal") as mock_session, \
+             patch.dict(sys.modules, {"oci": fake_oci, "oci.container_engine": fake_oci.container_engine, "oci.container_engine.models": fake_oci.container_engine.models}):
+            mock_db = AsyncMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_store.capture = AsyncMock()
+            result = asyncio.run(execute(
+                {"node_pool_id": "ocid1.nodepool.x", "node_count": 4,
+                 "cr_id": "cr-1", "step_id": "s-1", "org_id": "org-1"},
+                [], _connector()
+            ))
+        assert result["previous_count"] == 2
+        assert result["new_count"] == 4
+        assert result["scaled"] is True
+        fake_client.update_node_pool.assert_called_once()
+
+    def test_rollback_restores_prior_count(self):
+        from app.connectors.executors.oci.oci_scale_oke_node_pool import rollback
+        fake_client = MagicMock()
+        fake_wr = MagicMock()
+        fake_wr.status = "SUCCEEDED"
+        fake_wr.resources = []
+        fake_client.update_node_pool.return_value = MagicMock(headers={"opc-work-request-id": "wr-1"})
+        fake_client.get_work_request.return_value = MagicMock(data=fake_wr)
+        fake_oci = MagicMock()
+        with patch("app.connectors.executors.oci.oci_scale_oke_node_pool.get_container_engine_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.oci_scale_oke_node_pool.PreStateStore") as mock_store, \
+             patch("app.connectors.executors.oci.oci_scale_oke_node_pool.AsyncSessionLocal") as mock_session, \
+             patch.dict(sys.modules, {"oci": fake_oci, "oci.container_engine": fake_oci.container_engine, "oci.container_engine.models": fake_oci.container_engine.models}):
+            mock_db = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_store.retrieve = AsyncMock(return_value={"node_count": 2})
+            result = asyncio.run(rollback(
+                {"node_pool_id": "ocid1.nodepool.x", "cr_id": "cr-1", "step_id": "s-1", "org_id": "org-1"},
+                {}, _connector()
+            ))
+        assert result["rolled_back"] is True
+        assert result["restored_count"] == 2
+
+
+class TestUpdateOkeNodePool:
+    def test_rollback_capability(self):
+        import app.connectors.executors.oci.oci_update_oke_node_pool as m
+        assert m.ROLLBACK_CAPABILITY == "full"
+
+    def test_mock_mode_execute(self):
+        from app.connectors.executors.oci.oci_update_oke_node_pool import execute
+        result = asyncio.run(execute(
+            {"node_pool_id": "ocid1.nodepool.x", "name": "new-name"}, [], _empty_connector()
+        ))
+        assert result["mock"] is True
+        assert result["updated"] is True
+
+    def test_mock_mode_rollback(self):
+        from app.connectors.executors.oci.oci_update_oke_node_pool import rollback
+        result = asyncio.run(rollback({"node_pool_id": "ocid1.nodepool.x"}, {}, _empty_connector()))
+        assert result["mock"] is True
+        assert result["rolled_back"] is True
+
+    def test_execute_captures_prior_name_and_updates(self):
+        from app.connectors.executors.oci.oci_update_oke_node_pool import execute
+        fake_pool = MagicMock()
+        fake_pool.name = "old-name"
+        fake_pool.initial_node_labels = []
+        fake_client = MagicMock()
+        fake_client.get_node_pool.return_value = MagicMock(data=fake_pool)
+        fake_wr = MagicMock()
+        fake_wr.status = "SUCCEEDED"
+        fake_wr.resources = []
+        fake_client.update_node_pool.return_value = MagicMock(headers={"opc-work-request-id": "wr-1"})
+        fake_client.get_work_request.return_value = MagicMock(data=fake_wr)
+        fake_oci = MagicMock()
+        with patch("app.connectors.executors.oci.oci_update_oke_node_pool.get_container_engine_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.oci_update_oke_node_pool.PreStateStore") as mock_store, \
+             patch("app.connectors.executors.oci.oci_update_oke_node_pool.AsyncSessionLocal") as mock_session, \
+             patch.dict(sys.modules, {"oci": fake_oci, "oci.container_engine": fake_oci.container_engine, "oci.container_engine.models": fake_oci.container_engine.models}):
+            mock_db = AsyncMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_store.capture = AsyncMock()
+            result = asyncio.run(execute(
+                {"node_pool_id": "ocid1.nodepool.x", "name": "new-name",
+                 "cr_id": "cr-1", "step_id": "s-1", "org_id": "org-1"},
+                [], _connector()
+            ))
+        assert result["updated"] is True
+        fake_client.update_node_pool.assert_called_once()
