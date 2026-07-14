@@ -3,7 +3,6 @@
 
 import types
 import pytest
-from unittest.mock import MagicMock, patch
 
 
 def _make_module(capability=None, reason=None, has_execute=True, has_rollback=True):
