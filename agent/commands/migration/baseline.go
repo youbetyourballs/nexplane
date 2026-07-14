@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"time"
 )
 
@@ -55,17 +54,9 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 	// that ports which were up at profile time but are currently stopped still trigger
 	// extension. Falls back to freshly discovered endpoints if no stored profile is given.
 	rawEndpoints := extractStoredEndpoints(params)
-	storedEndpointsLen := len(rawEndpoints)
 	if len(rawEndpoints) == 0 {
 		rawEndpoints, _ = profile["endpoints"].([]map[string]any)
 	}
-	freshEndpointsLen := 0
-	if storedEndpointsLen == 0 {
-		freshEndpointsLen = len(rawEndpoints)
-	}
-	fmt.Fprintf(os.Stderr, "[baseline-debug] storedEndpointsLen=%d freshEndpointsLen=%d rawEndpointsLen=%d\n",
-		storedEndpointsLen, freshEndpointsLen, len(rawEndpoints))
-
 	// IMPORTANT: initialize ALL expected ports to false (not seen up yet).
 	// Only ports explicitly set to true during probing are considered observed.
 	endpointSeenUp := make(map[int]bool) // port → seen up at least once
@@ -153,9 +144,6 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 		}
 	}
 
-	// Debug: dump endpointSeenUp and configOnlyPorts state
-	fmt.Fprintf(os.Stderr, "[baseline-debug] endpointSeenUp=%v configOnlyPorts=%v\n", endpointSeenUp, configOnlyPorts)
-
 	// Adaptive extension: only when explicitly enabled. Phase 2 (normal baseline) must not
 	// extend — it would chase ephemeral ports from the stored profile indefinitely.
 	adaptiveEnabled, _ := params["adaptive_extension_enabled"].(bool)
@@ -219,24 +207,11 @@ func CaptureBehavioralBaselineExecute(params map[string]any) (map[string]any, er
 		"library_versions":             libraryVersions,
 	}
 
-	debugEndpoints := map[string]bool{}
-	for k, v := range endpointSeenUp {
-		debugEndpoints[fmt.Sprintf("%d", k)] = v
-	}
-	debugDeps := map[string]bool{}
-	for k, v := range configOnlyPorts {
-		debugDeps[fmt.Sprintf("%d", k)] = v
-	}
-
 	return map[string]any{
 		"action":                       "capture_behavioral_baseline",
 		"baseline":                     baseline,
 		"observation_duration_seconds": actualDuration,
 		"unverified_dependencies":      unverified,
-		"_debug_endpoint_seen_up":      debugEndpoints,
-		"_debug_config_only_ports":     debugDeps,
-		"_debug_stored_endpoints_len":  storedEndpointsLen,
-		"_debug_fresh_endpoints_len":   freshEndpointsLen,
 	}, nil
 }
 

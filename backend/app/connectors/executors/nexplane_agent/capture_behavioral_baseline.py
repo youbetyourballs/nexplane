@@ -79,18 +79,6 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     except Exception:
         pass
 
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
-    _ep_count = len((stored_profile or {}).get("endpoints", []))
-    _dep_count = len((stored_profile or {}).get("dependencies", []))
-    _eps = (stored_profile or {}).get("endpoints", [])
-    _ep_ports = [ep.get("port") for ep in _eps] if _eps else []
-    _log.warning(
-        "capture_behavioral_baseline: profile_asset_id=%s ep_count=%d dep_count=%d ep_ports=%s ep_sample=%s",
-        profile_asset_id, _ep_count, _dep_count, _ep_ports,
-        _eps[0] if _eps else {},
-    )
-
     adaptive_extension_enabled = bool(parameters.get("adaptive_extension_enabled", False))
 
     result = await _dispatch.dispatch_agent_job(
@@ -111,16 +99,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     obs_duration = result.get("observation_duration_seconds",
                               baseline.get("observation_duration_seconds", observation_window))
 
-    out = {
+    return {
         "action": "capture_behavioral_baseline",
         "baseline": baseline,
         "observation_duration_seconds": obs_duration,
         "unverified_dependencies": unverified,
     }
-    for k, v in result.items():
-        if k.startswith("_debug"):
-            out[k] = v
-    return out
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
