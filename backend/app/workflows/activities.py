@@ -174,6 +174,14 @@ async def activity_execute_change(
                 db=_fan_db,
             )
             return _result
+        elif _cr and _cr.change_type.value == "scan_for_references":
+            from app.connectors.executors.reference.scan_orchestrator import orchestrate_scan
+            from app.services.secrets_service import SecretsService
+            import app.core.config as _app_config
+            _settings = _app_config.settings
+            _secrets_svc = SecretsService(_settings.SECRET_KEY)
+            _result = await orchestrate_scan(_cr, _fan_db, _secrets_svc, _settings)
+            return _result
 
     step_results = []
     # Carries resolved values forward from steps like resolve_launch_config
@@ -317,6 +325,8 @@ async def activity_execute_rollback(
                 execution_result=execution_result,
                 connector=None,
             )
+        elif _cr and _cr.change_type.value == "scan_for_references":
+            return {"status": "no_op", "note": "scan_for_references has no rollback action"}
 
     rollback_results = []
 
