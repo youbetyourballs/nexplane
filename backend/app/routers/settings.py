@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models.org_settings import OrganizationSettings
 from app.models.user import User, UserRole
 from app.routers import current_user, require_roles
+from pydantic import BaseModel
 from app.schemas.org_settings import OrgSettingsRead, AIKeyUpdate
 from app.schemas.credential import AIProvidersRead, AIProviderInfo, AIProviderWrite, AIDefaultWrite
 from app.services.secrets_service import SecretsService
@@ -59,6 +60,7 @@ async def get_settings(
         ai_configured=ai_configured,
         agent_configured=org_settings.agent_secret_encrypted is not None,
         updated_at=org_settings.updated_at,
+        pre_state_retention_days=org_settings.pre_state_retention_days if org_settings else 30,
     )
 
 
@@ -196,4 +198,32 @@ async def generate_agent_secret(
         agent_configured=True,
         updated_at=org_settings.updated_at,
         agent_secret_plaintext=new_secret,
+    )
+
+
+class PreStateRetentionUpdate(BaseModel):
+    pre_state_retention_days: int
+
+
+@router.put("/pre-state-retention", response_model=OrgSettingsRead)
+async def update_pre_state_retention(
+    body: PreStateRetentionUpdate,
+    user: User = Depends(require_roles(UserRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    if body.pre_state_retention_days < 7:
+        raise HTTPException(status_code=422, detail="pre_state_retention_days minimum is 7")
+    org_settings = await _get_or_create_org_settings(user.organization_id, db)
+    org_settings.pre_state_retention_days = body.pre_state_retention_days
+    await db.commit()
+    await db.refresh(org_settings)
+    ai_configured = (
+        org_settings.anthropic_api_key_encrypted is not None
+        or org_settings.ai_providers_encrypted is not None
+    )
+    return OrgSettingsRead(
+        ai_configured=ai_configured,
+        agent_configured=org_settings.agent_secret_encrypted is not None,
+        updated_at=org_settings.updated_at,
+        pre_state_retention_days=org_settings.pre_state_retention_days,
     )

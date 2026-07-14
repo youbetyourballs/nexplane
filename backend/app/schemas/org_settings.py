@@ -10,6 +10,7 @@ class OrgSettingsRead(BaseModel):
     agent_configured: bool = False
     updated_at: datetime | None = None
     agent_secret_plaintext: str | None = None
+    pre_state_retention_days: int = 30
 
 
 class AIKeyUpdate(BaseModel):

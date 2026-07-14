@@ -502,6 +502,11 @@ export function ChangeRequestDetail() {
 
             <Section title="Execution Steps" icon={Layers}>
               <div className="space-y-2">
+                {cr.change_plan.generated_steps.some((s: any) => s.rollback_warning) && (
+                  <div className="mb-3 p-3 rounded bg-amber-50 border border-amber-200 text-sm text-amber-800">
+                    ⚠ This change request contains {cr.change_plan.generated_steps.filter((s: any) => s.rollback_warning).length} step(s) that cannot be automatically rolled back. Review warnings below before approving.
+                  </div>
+                )}
                 {cr.change_plan.generated_steps.map((step) => (
                   <div key={step.step_number} className="flex gap-3 p-3 bg-slate-50 rounded border border-slate-100">
                     <div className="w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -514,6 +519,9 @@ export function ChangeRequestDetail() {
                       </div>
                       {step.rollback_action && (
                         <div className="text-xs text-orange-600 mt-0.5">↩ Rollback: {step.rollback_action}</div>
+                      )}
+                      {step.rollback_warning && (
+                        <div className="text-xs text-amber-600 mt-1 font-medium">⚠ {step.rollback_warning}</div>
                       )}
                     </div>
                   </div>

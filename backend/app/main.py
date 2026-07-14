@@ -65,6 +65,7 @@ from app.routers.logs import router as logs_router
 from app.routers.metrics import router as metrics_router
 from app.routers.tunnel_metrics import router as tunnel_metrics_router
 from app.routers.scan_exceptions import router as scan_exceptions_router
+from app.services.pre_state_store import PreStateStore
 
 _escalation_scheduler: AsyncIOScheduler | None = None
 _socks_server = None  # app.tunnel.socks.SocksServer, started when TUNNEL_SOCKS_ENABLED
@@ -118,6 +119,13 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
         max_instances=1,
     )
+    async def _purge_pre_state():
+        async with AsyncSessionLocal() as db:
+            count = await PreStateStore.purge_expired(db)
+            await db.commit()
+            log.info("Purged %d expired pre_state_snapshots", count)
+
+    _escalation_scheduler.add_job(_purge_pre_state, "cron", hour=3, minute=0, id="purge_pre_state", replace_existing=True)
     _escalation_scheduler.start()
     # Scrub orphaned CRs — any CR still in-flight when the backend
     # restarted will never complete; mark them failed now so the
