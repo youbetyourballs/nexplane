@@ -37,6 +37,67 @@
     {"action_id": "scan_configmaps", "display_name": "Scan ConfigMap Data", "description": "Scans ConfigMap data values across all namespaces for matching terms.", "rollback_strategy": "no_op", "action_type": "ingest", "execution_tier": 1, "executor": "kubernetes.reference_scan.scan_configmaps", "parameters": {"search_terms": {"type": "array", "items": {"type": "string"}, "description": "Terms to search for"}}},
     {"action_id": "scan_secrets_metadata", "display_name": "Scan Secret Names and Labels", "description": "Scans Secret names and labels (metadata only, never values) across all namespaces for matching terms.", "rollback_strategy": "no_op", "action_type": "ingest", "execution_tier": 1, "executor": "kubernetes.reference_scan.scan_secrets_metadata", "parameters": {"search_terms": {"type": "array", "items": {"type": "string"}, "description": "Terms to search for"}}},
     {"action_id": "scan_deployment_env", "display_name": "Scan Deployment Environment Variables", "description": "Scans Deployment and StatefulSet container environment variables across all namespaces for matching terms.", "rollback_strategy": "no_op", "action_type": "ingest", "execution_tier": 1, "executor": "kubernetes.reference_scan.scan_deployment_env", "parameters": {"search_terms": {"type": "array", "items": {"type": "string"}, "description": "Terms to search for"}}},
-    {"action_id": "scan_ingress_rules", "display_name": "Scan Ingress Rules", "description": "Scans Ingress rules including host and backend service references across all namespaces for matching terms.", "rollback_strategy": "no_op", "action_type": "ingest", "execution_tier": 1, "executor": "kubernetes.reference_scan.scan_ingress_rules", "parameters": {"search_terms": {"type": "array", "items": {"type": "string"}, "description": "Terms to search for"}}}
+    {"action_id": "scan_ingress_rules", "display_name": "Scan Ingress Rules", "description": "Scans Ingress rules including host and backend service references across all namespaces for matching terms.", "rollback_strategy": "no_op", "action_type": "ingest", "execution_tier": 1, "executor": "kubernetes.reference_scan.scan_ingress_rules", "parameters": {"search_terms": {"type": "array", "items": {"type": "string"}, "description": "Terms to search for"}}},
+    {
+      "action_id": "update_configmap_value",
+      "display_name": "Update ConfigMap Value",
+      "description": "Update a single key in a Kubernetes ConfigMap. Saves old value for rollback.",
+      "rollback_strategy": "reconstitution",
+      "action_type": "change",
+      "execution_tier": 2,
+      "executor": "kubernetes.reference_update.update_configmap_value",
+      "parameters": {
+        "type": "object",
+        "required": ["namespace", "configmap_name", "key", "old_value", "new_value"],
+        "properties": {
+          "namespace": {"type": "string"},
+          "configmap_name": {"type": "string"},
+          "key": {"type": "string"},
+          "old_value": {"type": "string"},
+          "new_value": {"type": "string"}
+        }
+      }
+    },
+    {
+      "action_id": "update_deployment_image",
+      "display_name": "Update Deployment Container Image",
+      "description": "Update a container image in a Kubernetes Deployment. Saves old image for rollback.",
+      "rollback_strategy": "reconstitution",
+      "action_type": "change",
+      "execution_tier": 2,
+      "executor": "kubernetes.reference_update.update_deployment_image",
+      "parameters": {
+        "type": "object",
+        "required": ["namespace", "deployment_name", "container_name", "old_image", "new_image"],
+        "properties": {
+          "namespace": {"type": "string"},
+          "deployment_name": {"type": "string"},
+          "container_name": {"type": "string"},
+          "old_image": {"type": "string"},
+          "new_image": {"type": "string"}
+        }
+      }
+    },
+    {
+      "action_id": "update_deployment_env_var",
+      "display_name": "Update Deployment Environment Variable",
+      "description": "Update a container environment variable in a Kubernetes Deployment. Saves old value for rollback.",
+      "rollback_strategy": "reconstitution",
+      "action_type": "change",
+      "execution_tier": 2,
+      "executor": "kubernetes.reference_update.update_deployment_env_var",
+      "parameters": {
+        "type": "object",
+        "required": ["namespace", "deployment_name", "container_name", "env_var_name", "old_value", "new_value"],
+        "properties": {
+          "namespace": {"type": "string"},
+          "deployment_name": {"type": "string"},
+          "container_name": {"type": "string"},
+          "env_var_name": {"type": "string"},
+          "old_value": {"type": "string"},
+          "new_value": {"type": "string"}
+        }
+      }
+    }
   ]
 }
