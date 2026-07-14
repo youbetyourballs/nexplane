@@ -314,6 +314,8 @@ async def test_scan_ssm_parameters_metadata_no_values_scanned():
     # Should NOT match because we only scan name/description, not Value
     assert result["hits"] == []
     assert result["scan_summary"]["matched"] == 0
+    mock_ssm.get_parameter.assert_not_called()
+    mock_ssm.get_parameters.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,8 @@ def _boto_client(service: str, connector, region: str | None = None) -> Any:
 
 
 def _matches(value: str, search_terms: list[str]) -> list[str]:
+    if not value:
+        return []
     return [t for t in search_terms if t.lower() in value.lower()]
 
 
@@ -118,13 +120,13 @@ async def scan_rds_parameter_groups(cr, connector, db) -> dict:
     pg_paginator = client.get_paginator("describe_db_parameter_groups")
     for page in pg_paginator.paginate():
         for pg in page.get("DBParameterGroups", []):
+            scanned += 1
             pg_name = pg["DBParameterGroupName"]
             pg_arn = pg["DBParameterGroupArn"]
             pp = client.get_paginator("describe_db_parameters")
             for ppage in pp.paginate(DBParameterGroupName=pg_name):
                 for param in ppage.get("Parameters", []):
                     val = param.get("ParameterValue", "")
-                    scanned += 1
                     for term in _matches(val, search_terms):
                         hits.append(_hit(
                             surface="aws_rds_parameter_group",

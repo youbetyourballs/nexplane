@@ -222,3 +222,6 @@ Base commit: c496d6c
 - Task 11: TODO
 - Task 12: TODO
 - Task 13: TODO
+- Task 1: complete (commits c496d6c..4550bbb, review clean after __new__ fix + migration nullable fix)
+- Task 2: complete (commits 4550bbb..aefd06f, review clean after tier3 counter fix + tier2/3 tests)
+- Task 3: complete (commits aefd06f..a14f4e9, review clean)
