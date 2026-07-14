@@ -4,6 +4,9 @@
 from datetime import datetime, timezone
 from ._runner import run_playbook
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "Ansible playbook has already executed — write an undo playbook for controlled reversal"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     instance_id = parameters.get('instance_id', '')

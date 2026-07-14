@@ -12,6 +12,8 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only list — no state was changed"
 
 # ---------------------------------------------------------------------------
 # WinRM helpers (same pattern as dc_integrity_check)

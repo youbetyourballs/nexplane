@@ -4,6 +4,9 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "old password was not stored before reset — cannot restore previous credential"
+
 
 async def _real_execute(parameters: dict, creds: dict) -> dict:
     from ._client import get_connection

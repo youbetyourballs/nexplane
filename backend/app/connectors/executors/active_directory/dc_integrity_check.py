@@ -21,6 +21,8 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only integrity check — no state was changed"
 
 # ---------------------------------------------------------------------------
 # WinRM helpers

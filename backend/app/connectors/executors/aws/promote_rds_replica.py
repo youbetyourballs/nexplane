@@ -4,6 +4,9 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "RDS promotion is irreversible — the replica is now a standalone primary; create a new replica from the pre-promotion snapshot if needed"
+
 
 def _mock_response(params: dict) -> dict:
     return {
