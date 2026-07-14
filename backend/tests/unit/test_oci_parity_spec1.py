@@ -125,3 +125,131 @@ class TestDeleteOcirImage:
         from app.connectors.executors.oci.delete_ocir_image import rollback
         result = asyncio.run(rollback({}, {}, _connector()))
         assert result["rolled_back"] is False
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Backup Restore
+# ---------------------------------------------------------------------------
+
+class TestRestoreAdb:
+    def test_rollback_capability_irreversible(self):
+        import app.connectors.executors.oci.restore_adb as m
+        assert m.ROLLBACK_CAPABILITY == "irreversible"
+        assert m.ROLLBACK_REASON
+
+    def test_mock_mode(self):
+        from app.connectors.executors.oci.restore_adb import execute
+        result = asyncio.run(execute(
+            {"autonomous_database_id": "ocid1.adb.x", "timestamp": "2026-01-01T00:00:00Z"},
+            [], _empty_connector()
+        ))
+        assert result["mock"] is True
+
+    def test_rollback_returns_false(self):
+        from app.connectors.executors.oci.restore_adb import rollback
+        result = asyncio.run(rollback({}, {}, _connector()))
+        assert result["rolled_back"] is False
+
+    def test_execute_calls_restore(self):
+        from app.connectors.executors.oci.restore_adb import execute
+        fake_adb = MagicMock()
+        fake_adb.lifecycle_state = "AVAILABLE"
+        fake_client = MagicMock()
+        fake_client.restore_autonomous_database.return_value = MagicMock(data=MagicMock())
+        fake_client.get_autonomous_database.return_value = MagicMock(data=fake_adb)
+        with patch("app.connectors.executors.oci.restore_adb.get_database_client", return_value=fake_client), \
+             patch.dict(sys.modules, {"oci": MagicMock()}):
+            result = asyncio.run(execute(
+                {"autonomous_database_id": "ocid1.adb.x", "timestamp": "2026-01-01T00:00:00Z"},
+                [], _connector()
+            ))
+        fake_client.restore_autonomous_database.assert_called_once()
+        assert result["autonomous_database_id"] == "ocid1.adb.x"
+
+
+class TestRestoreBlockVolumeBackup:
+    def test_rollback_capability_full(self):
+        import app.connectors.executors.oci.restore_block_volume_backup as m
+        assert m.ROLLBACK_CAPABILITY == "full"
+
+    def test_mock_mode(self):
+        from app.connectors.executors.oci.restore_block_volume_backup import execute
+        result = asyncio.run(execute(
+            {"volume_backup_id": "ocid1.volumebackup.x", "display_name": "test",
+             "compartment_id": "ocid1.compartment.x", "availability_domain": "AD-1"},
+            [], _empty_connector()
+        ))
+        assert result["mock"] is True
+
+    def test_execute_returns_volume_id(self):
+        from app.connectors.executors.oci.restore_block_volume_backup import execute
+        fake_vol = MagicMock()
+        fake_vol.id = "ocid1.volume.x"
+        fake_vol.lifecycle_state = "AVAILABLE"
+        fake_client = MagicMock()
+        fake_client.create_volume.return_value = MagicMock(data=fake_vol)
+        fake_client.get_volume.return_value = MagicMock(data=fake_vol)
+        with patch("app.connectors.executors.oci.restore_block_volume_backup.get_blockstorage_client", return_value=fake_client), \
+             patch.dict(sys.modules, {"oci": MagicMock(), "oci.core": MagicMock(), "oci.core.models": MagicMock()}):
+            result = asyncio.run(execute(
+                {"volume_backup_id": "ocid1.volumebackup.x", "display_name": "test",
+                 "compartment_id": "ocid1.compartment.x", "availability_domain": "AD-1"},
+                [], _connector()
+            ))
+        assert result["volume_id"] == "ocid1.volume.x"
+
+    def test_rollback_deletes_volume(self):
+        from app.connectors.executors.oci.restore_block_volume_backup import rollback
+        fake_client = MagicMock()
+        fake_vol = MagicMock()
+        fake_vol.lifecycle_state = "TERMINATED"
+        fake_client.delete_volume.return_value = None
+        fake_client.get_volume.return_value = MagicMock(data=fake_vol)
+        with patch("app.connectors.executors.oci.restore_block_volume_backup.get_blockstorage_client", return_value=fake_client):
+            result = asyncio.run(rollback({}, {"volume_id": "ocid1.volume.x"}, _connector()))
+        fake_client.delete_volume.assert_called_once_with(volume_id="ocid1.volume.x")
+        assert result["rolled_back"] is True
+
+
+class TestRestoreBootVolumeBackup:
+    def test_rollback_capability_full(self):
+        import app.connectors.executors.oci.restore_boot_volume_backup as m
+        assert m.ROLLBACK_CAPABILITY == "full"
+
+    def test_mock_mode(self):
+        from app.connectors.executors.oci.restore_boot_volume_backup import execute
+        result = asyncio.run(execute(
+            {"boot_volume_backup_id": "ocid1.bootvolumebackup.x", "display_name": "test",
+             "compartment_id": "ocid1.compartment.x", "availability_domain": "AD-1"},
+            [], _empty_connector()
+        ))
+        assert result["mock"] is True
+
+    def test_execute_returns_boot_volume_id(self):
+        from app.connectors.executors.oci.restore_boot_volume_backup import execute
+        fake_vol = MagicMock()
+        fake_vol.id = "ocid1.bootvolume.x"
+        fake_vol.lifecycle_state = "AVAILABLE"
+        fake_client = MagicMock()
+        fake_client.create_boot_volume.return_value = MagicMock(data=fake_vol)
+        fake_client.get_boot_volume.return_value = MagicMock(data=fake_vol)
+        with patch("app.connectors.executors.oci.restore_boot_volume_backup.get_blockstorage_client", return_value=fake_client), \
+             patch.dict(sys.modules, {"oci": MagicMock(), "oci.core": MagicMock(), "oci.core.models": MagicMock()}):
+            result = asyncio.run(execute(
+                {"boot_volume_backup_id": "ocid1.bootvolumebackup.x", "display_name": "test",
+                 "compartment_id": "ocid1.compartment.x", "availability_domain": "AD-1"},
+                [], _connector()
+            ))
+        assert result["boot_volume_id"] == "ocid1.bootvolume.x"
+
+    def test_rollback_deletes_boot_volume(self):
+        from app.connectors.executors.oci.restore_boot_volume_backup import rollback
+        fake_client = MagicMock()
+        fake_vol = MagicMock()
+        fake_vol.lifecycle_state = "TERMINATED"
+        fake_client.delete_boot_volume.return_value = None
+        fake_client.get_boot_volume.return_value = MagicMock(data=fake_vol)
+        with patch("app.connectors.executors.oci.restore_boot_volume_backup.get_blockstorage_client", return_value=fake_client):
+            result = asyncio.run(rollback({}, {"boot_volume_id": "ocid1.bootvolume.x"}, _connector()))
+        fake_client.delete_boot_volume.assert_called_once_with(boot_volume_id="ocid1.bootvolume.x")
+        assert result["rolled_back"] is True
