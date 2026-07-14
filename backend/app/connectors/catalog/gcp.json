@@ -274,7 +274,7 @@
       "action_type": "change",
       "execution_tier": 2,
       "display_name": "Update GKE Node Pool",
-      "description": "Change node pool display name or labels. Rollback: restore prior config.",
+      "description": "Change node pool labels. Rollback: restore prior labels.",
       "applicable_asset_types": ["cloud_account"],
       "parameters": [
         {"name": "cluster_name", "type": "string", "required": true},

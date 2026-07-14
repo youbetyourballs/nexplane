@@ -173,7 +173,6 @@ class TestGkeLifecycle:
         create_result = _step_result(create_cr)
         assert create_result.get("cluster_name"), f"cluster_name missing: {create_result}"
         assert create_result.get("node_pool_name"), f"node_pool_name missing: {create_result}"
-        create_cr_id = create_cr["id"]
         log(f"[GKE] Cluster created: {cluster_name}")
 
         try:

@@ -556,7 +556,6 @@ _gcp_container_creds_cache: dict = {}
 
 
 def _get_gcp_container_client():
-    import threading
     global _gcp_container_creds_cache
     if not _gcp_container_creds_cache:
         creds = get_connector_creds_from_db("gcp")
