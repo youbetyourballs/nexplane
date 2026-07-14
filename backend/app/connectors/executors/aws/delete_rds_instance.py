@@ -4,6 +4,9 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "RDS instance was deleted without a final snapshot — data cannot be recovered; enable final_snapshot in parameters before deletion"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, 'credentials', {})
@@ -38,4 +41,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": False, "reason": "delete_rds_instance is terminal — instance cannot be recreated automatically"}
+    return {
+        "rolled_back": False,
+        "reason": ROLLBACK_REASON,
+    }
