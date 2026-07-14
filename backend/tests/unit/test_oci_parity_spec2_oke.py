@@ -160,3 +160,49 @@ class TestCreateOkeCluster:
         assert calls[0][0][2] == "nodepool"
         assert calls[1][0][1] == "wr2"  # cluster work request
         assert calls[1][0][2] == "cluster"
+
+
+class TestDeleteOkeCluster:
+    def test_rollback_capability_irreversible(self):
+        import app.connectors.executors.oci.oci_delete_oke_cluster as m
+        assert m.ROLLBACK_CAPABILITY == "irreversible"
+        assert m.ROLLBACK_REASON
+
+    def test_mock_mode_execute(self):
+        from app.connectors.executors.oci.oci_delete_oke_cluster import execute
+        result = asyncio.run(execute(
+            {"cluster_id": "ocid1.cluster.x", "compartment_id": "ocid1.compartment.x"},
+            [], _empty_connector()
+        ))
+        assert result["mock"] is True
+        assert result["deleted"] is True
+
+    def test_rollback_returns_false(self):
+        from app.connectors.executors.oci.oci_delete_oke_cluster import rollback
+        result = asyncio.run(rollback({}, {}, _connector()))
+        assert result["rolled_back"] is False
+        assert "reason" in result
+
+    def test_execute_deletes_node_pools_before_cluster(self):
+        from app.connectors.executors.oci.oci_delete_oke_cluster import execute
+        fake_pool = MagicMock()
+        fake_pool.id = "ocid1.nodepool.x"
+        fake_pool.lifecycle_state = "ACTIVE"
+        fake_client = MagicMock()
+        fake_client.list_node_pools.return_value = MagicMock(data=[fake_pool])
+        fake_wr = MagicMock()
+        fake_wr.status = "SUCCEEDED"
+        fake_wr.resources = []
+        fake_client.get_work_request.return_value = MagicMock(data=fake_wr)
+        delete_order = []
+        fake_client.delete_node_pool.side_effect = lambda np_id: (delete_order.append("nodepool"), MagicMock(headers={"opc-work-request-id": "wr1"}))[1]
+        fake_client.delete_cluster.side_effect = lambda cl_id: (delete_order.append("cluster"), MagicMock(headers={"opc-work-request-id": "wr2"}))[1]
+
+        with patch("app.connectors.executors.oci.oci_delete_oke_cluster.get_container_engine_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.oci_delete_oke_cluster.poll_work_request", new_callable=AsyncMock):
+            result = asyncio.run(execute(
+                {"cluster_id": "ocid1.cluster.x", "compartment_id": "ocid1.compartment.x"},
+                [], _connector()
+            ))
+        assert result["deleted"] is True
+        assert delete_order.index("nodepool") < delete_order.index("cluster")
