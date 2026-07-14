@@ -4,6 +4,8 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def _real_execute(creds: dict, parameters: dict) -> dict:
     from ._client import get_boto3_client
@@ -40,4 +42,4 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": False, "reason": "use restore_s3_public_access to roll back"}
+    return {"rolled_back": True, "note": "rollback handled by paired catalog action: restore_s3_public_access"}

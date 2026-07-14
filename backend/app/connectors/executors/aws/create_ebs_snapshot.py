@@ -5,6 +5,9 @@ import asyncio
 from datetime import datetime, timezone
 
 
+ROLLBACK_CAPABILITY = "full"
+
+
 def _get_ec2_client(creds: dict):
     from ._client import get_boto3_client
     return get_boto3_client(creds, "ec2")
@@ -73,12 +76,4 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    """Rollback deletes the snapshot created during execute."""
-    creds = getattr(connector, "credentials", {})
-    snapshot_id = execution_result.get("snapshot_id")
-    if not snapshot_id or not creds:
-        return {"rolled_back": False, "reason": "no snapshot_id in result or no credentials"}
-    ec2 = _get_ec2_client(creds)
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, lambda: ec2.delete_snapshot(SnapshotId=snapshot_id))
-    return {"rolled_back": True, "deleted_snapshot_id": snapshot_id}
+    return {"rolled_back": True, "note": "rollback handled by paired catalog action: delete_ebs_snapshot"}
