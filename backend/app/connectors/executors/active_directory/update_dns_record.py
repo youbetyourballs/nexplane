@@ -63,6 +63,32 @@ _PS_CREATE_TXT = (
 )
 
 
+def _get_record(
+    creds: dict,
+    zone_name: str,
+    record_name: str,
+    record_type: str,
+    dc_hostname: str | None,
+) -> str | None:
+    """Read the current record value. No side effects."""
+    rtype = record_type.upper()
+    read_script = (
+        f"Get-DnsServerResourceRecord -ZoneName '{zone_name}' "
+        f"-Name '{record_name}' -RRType '{rtype}' "
+        f"-ErrorAction SilentlyContinue | ConvertTo-Json -Depth 5"
+    )
+    read_out, _, _ = _run_ps(creds, read_script, dc_hostname)
+    if not read_out:
+        return None
+    try:
+        data = json.loads(read_out)
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        return _extract_record_value(data)
+    except (json.JSONDecodeError, IndexError):
+        return None
+
+
 def _update_record(
     creds: dict,
     zone_name: str,
@@ -71,26 +97,9 @@ def _update_record(
     new_value: str,
     ttl: int,
     dc_hostname: str | None,
-) -> str | None:
-    """Delete the existing record and recreate it with new_value. Returns old value."""
+) -> None:
+    """Delete the existing record and recreate it with new_value. Pre-state must be captured before calling this."""
     rtype = record_type.upper()
-
-    # Read existing value for rollback
-    read_script = (
-        f"Get-DnsServerResourceRecord -ZoneName '{zone_name}' "
-        f"-Name '{record_name}' -RRType '{rtype}' "
-        f"-ErrorAction SilentlyContinue | ConvertTo-Json -Depth 5"
-    )
-    read_out, _, _ = _run_ps(creds, read_script, dc_hostname)
-    old_value: str | None = None
-    if read_out:
-        try:
-            data = json.loads(read_out)
-            if isinstance(data, list):
-                data = data[0] if data else {}
-            old_value = _extract_record_value(data)
-        except (json.JSONDecodeError, IndexError):
-            old_value = None
 
     # Delete existing
     del_script = (
@@ -119,8 +128,6 @@ def _update_record(
             f"Recreate step of update failed (rc={create_rc}): {create_err}. "
             f"WARNING: record '{record_name}' may have been deleted but not recreated."
         )
-
-    return old_value
 
 
 # ---------------------------------------------------------------------------
@@ -151,11 +158,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         }
 
     loop = asyncio.get_event_loop()
+
+    # 1. Read pre-state (no side effects)
     old_value = await loop.run_in_executor(
         None,
-        lambda: _update_record(creds, zone_name, record_name, record_type, new_value, ttl, dc_hostname),
+        lambda: _get_record(creds, zone_name, record_name, record_type, dc_hostname),
     )
 
+    # 2. Persist pre-state to DB before destructive action
     from app.services.pre_state_store import PreStateStore
     from app.database import AsyncSessionLocal
     import uuid as _uuid
@@ -175,6 +185,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         )
         await db.commit()
 
+    # 3. Perform the destructive action
+    await loop.run_in_executor(
+        None,
+        lambda: _update_record(creds, zone_name, record_name, record_type, new_value, ttl, dc_hostname),
+    )
+
     return {
         "zone_name": zone_name,
         "record_name": record_name,
@@ -191,7 +207,35 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     if execution_result.get("mock"):
         return {"rolled_back": True, "reason": "mock — no real update to reverse"}
 
-    old_value = execution_result.get("old_value")
+    # Prefer PreStateStore as authoritative source; fall back to execution_result
+    from app.services.pre_state_store import PreStateStore
+    from app.database import AsyncSessionLocal
+    import uuid as _uuid
+    pre_state = None
+    try:
+        async with AsyncSessionLocal() as db:
+            pre_state = await PreStateStore.retrieve(
+                db,
+                _uuid.UUID(str(parameters["cr_id"])),
+                str(parameters.get("step_id", "step_0")),
+                _uuid.UUID(str(parameters["org_id"])),
+            )
+    except Exception:
+        pass
+
+    if pre_state:
+        old_value = pre_state.get("old_value")
+        zone_name = pre_state.get("zone_name", execution_result.get("zone_name"))
+        record_name = pre_state.get("record_name", execution_result.get("record_name"))
+        record_type = pre_state.get("record_type", execution_result.get("record_type"))
+        ttl = pre_state.get("ttl", execution_result.get("ttl", 300))
+    else:
+        old_value = execution_result.get("old_value")
+        zone_name = execution_result.get("zone_name")
+        record_name = execution_result.get("record_name")
+        record_type = execution_result.get("record_type")
+        ttl = execution_result.get("ttl", 300)
+
     if not old_value:
         return {
             "rolled_back": False,
@@ -199,12 +243,15 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         }
 
     rollback_params = {
-        "zone_name": execution_result["zone_name"],
-        "record_name": execution_result["record_name"],
-        "record_type": execution_result["record_type"],
+        "zone_name": zone_name,
+        "record_name": record_name,
+        "record_type": record_type,
         "new_value": old_value,
-        "ttl": execution_result.get("ttl", 300),
+        "ttl": ttl,
         "dc_hostname": parameters.get("dc_hostname"),
+        "cr_id": parameters["cr_id"],
+        "step_id": parameters.get("step_id", "step_0"),
+        "org_id": parameters["org_id"],
     }
     result = await execute(rollback_params, [], connector)
     return {"rolled_back": True, "update_result": result}

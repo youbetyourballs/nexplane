@@ -63,15 +63,14 @@ def _read_existing_value(creds: dict, zone_name: str, record_name: str, record_t
         return None
 
 
-def _delete_record(
+def _delete_record_only(
     creds: dict,
     zone_name: str,
     record_name: str,
     record_type: str,
     dc_hostname: str | None,
-) -> str | None:
-    previous_value = _read_existing_value(creds, zone_name, record_name, record_type.upper(), dc_hostname)
-
+) -> None:
+    """Delete the DNS record. Raises RuntimeError on failure."""
     script = (
         f"Remove-DnsServerResourceRecord "
         f"-ZoneName '{zone_name}' "
@@ -83,8 +82,6 @@ def _delete_record(
     stdout, stderr, rc = _run_ps(creds, script, dc_hostname)
     if rc != 0:
         raise RuntimeError(f"Remove-DnsServerResourceRecord failed (rc={rc}): {stderr or stdout}")
-
-    return previous_value
 
 
 # ---------------------------------------------------------------------------
@@ -111,11 +108,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         }
 
     loop = asyncio.get_event_loop()
+
+    # 1. Read pre-state (no side effects)
     previous_value = await loop.run_in_executor(
         None,
-        lambda: _delete_record(creds, zone_name, record_name, record_type, dc_hostname),
+        lambda: _read_existing_value(creds, zone_name, record_name, record_type, dc_hostname),
     )
 
+    # 2. Persist pre-state to DB before destructive action
     from app.services.pre_state_store import PreStateStore
     from app.database import AsyncSessionLocal
     import uuid as _uuid
@@ -135,6 +135,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         )
         await db.commit()
 
+    # 3. Perform the destructive action
+    await loop.run_in_executor(
+        None,
+        lambda: _delete_record_only(creds, zone_name, record_name, record_type, dc_hostname),
+    )
+
     return {
         "zone_name": zone_name,
         "record_name": record_name,
@@ -149,7 +155,33 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     if execution_result.get("mock"):
         return {"rolled_back": True, "reason": "mock — no real deletion to reverse"}
 
-    previous_value = execution_result.get("previous_value")
+    # Prefer PreStateStore as authoritative source; fall back to execution_result
+    from app.services.pre_state_store import PreStateStore
+    from app.database import AsyncSessionLocal
+    import uuid as _uuid
+    pre_state = None
+    try:
+        async with AsyncSessionLocal() as db:
+            pre_state = await PreStateStore.retrieve(
+                db,
+                _uuid.UUID(str(parameters["cr_id"])),
+                str(parameters.get("step_id", "step_0")),
+                _uuid.UUID(str(parameters["org_id"])),
+            )
+    except Exception:
+        pass
+
+    if pre_state:
+        previous_value = pre_state.get("value")
+        zone_name = pre_state.get("zone_name", execution_result.get("zone_name"))
+        record_name = pre_state.get("record_name", execution_result.get("record_name"))
+        record_type = pre_state.get("record_type", execution_result.get("record_type"))
+    else:
+        previous_value = execution_result.get("previous_value")
+        zone_name = execution_result.get("zone_name")
+        record_name = execution_result.get("record_name")
+        record_type = execution_result.get("record_type")
+
     if not previous_value:
         return {
             "rolled_back": False,
@@ -159,9 +191,9 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     from . import create_dns_record as _create
 
     rollback_params = {
-        "zone_name": execution_result["zone_name"],
-        "record_name": execution_result["record_name"],
-        "record_type": execution_result["record_type"],
+        "zone_name": zone_name,
+        "record_name": record_name,
+        "record_type": record_type,
         "value": previous_value,
         "ttl": 300,
         "dc_hostname": parameters.get("dc_hostname"),
