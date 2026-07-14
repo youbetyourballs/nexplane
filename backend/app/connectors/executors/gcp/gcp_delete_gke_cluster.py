@@ -2,6 +2,8 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 import asyncio
+from ._client import get_container_client
+from ._gke_helpers import poll_gke_operation
 
 ROLLBACK_CAPABILITY = "irreversible"
 ROLLBACK_REASON = "Deleted GKE cluster cannot be reconstituted; VPC, subnets, and workloads must be reprovisioned."
@@ -15,8 +17,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds:
         return {"deleted": True, "cluster_name": cluster_name, "location": location, "mock": True}
 
-    from ._client import get_container_client, get_project_id
-    from ._gke_helpers import poll_gke_operation
+    from ._client import get_project_id
 
     project_id = get_project_id(creds)
     client = get_container_client(creds)

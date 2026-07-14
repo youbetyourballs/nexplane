@@ -2,6 +2,8 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 import asyncio
+from ._client import get_container_client
+from ._gke_helpers import poll_gke_operation
 
 ROLLBACK_CAPABILITY = "full"
 
@@ -26,8 +28,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "mock": True,
         }
 
-    from ._client import get_container_client, get_project_id
-    from ._gke_helpers import poll_gke_operation
+    from ._client import get_project_id
     from google.cloud import container_v1
 
     project_id = get_project_id(creds)
@@ -77,8 +78,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     if not creds:
         return {"rolled_back": True, "mock": True}
 
-    from ._client import get_container_client, get_project_id
-    from ._gke_helpers import poll_gke_operation
+    from ._client import get_project_id
 
     if not project_id:
         project_id = get_project_id(creds)

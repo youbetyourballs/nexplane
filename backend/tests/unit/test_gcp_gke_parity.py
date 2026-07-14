@@ -130,8 +130,12 @@ class TestCreateGkeCluster:
         done_op.status = _container_v1_mock.Operation.Status.DONE
         done_op.status_message = ""
         client_mock.get_operation.return_value = done_op
+
+        async def mock_poll(*args, **kwargs):
+            pass
+
         with patch("app.connectors.executors.gcp.gcp_create_gke_cluster.get_container_client", return_value=client_mock):
-            with patch("app.connectors.executors.gcp.gcp_create_gke_cluster.poll_gke_operation", new_callable=AsyncMock) as mock_poll:
+            with patch("app.connectors.executors.gcp.gcp_create_gke_cluster.poll_gke_operation", side_effect=mock_poll):
                 result = asyncio.get_event_loop().run_until_complete(
                     execute(self._params(), [], connector)
                 )
@@ -158,8 +162,12 @@ class TestCreateGkeCluster:
             "node_pool_name": "default-pool",
             "project_id": "test-project",
         }
+
+        async def mock_poll(*args, **kwargs):
+            pass
+
         with patch("app.connectors.executors.gcp.gcp_create_gke_cluster.get_container_client", return_value=client_mock):
-            with patch("app.connectors.executors.gcp.gcp_create_gke_cluster.poll_gke_operation", new_callable=AsyncMock) as mock_poll:
+            with patch("app.connectors.executors.gcp.gcp_create_gke_cluster.poll_gke_operation", side_effect=mock_poll):
                 result = asyncio.get_event_loop().run_until_complete(
                     rollback(self._params(), execution_result, connector)
                 )
@@ -208,8 +216,12 @@ class TestDeleteGkeCluster:
         done_op.status = _container_v1_mock.Operation.Status.DONE
         done_op.status_message = ""
         client_mock.get_operation.return_value = done_op
+
+        async def mock_poll(*args, **kwargs):
+            pass
+
         with patch("app.connectors.executors.gcp.gcp_delete_gke_cluster.get_container_client", return_value=client_mock):
-            with patch("app.connectors.executors.gcp.gcp_delete_gke_cluster.poll_gke_operation", new_callable=AsyncMock) as mock_poll:
+            with patch("app.connectors.executors.gcp.gcp_delete_gke_cluster.poll_gke_operation", side_effect=mock_poll):
                 result = asyncio.get_event_loop().run_until_complete(
                     execute(self._params(), [], connector)
                 )
