@@ -162,6 +162,188 @@ class TestCreateOkeCluster:
         assert calls[1][0][2] == "cluster"
 
 
+class TestAddOkeNodePool:
+    def test_rollback_capability(self):
+        import app.connectors.executors.oci.oci_add_oke_node_pool as m
+        assert m.ROLLBACK_CAPABILITY == "full"
+
+    def test_mock_mode_execute(self):
+        from app.connectors.executors.oci.oci_add_oke_node_pool import execute
+        result = asyncio.run(execute(
+            {"cluster_id": "ocid1.cluster.x", "compartment_id": "ocid1.compartment.x",
+             "name": "pool-2", "kubernetes_version": "v1.29.1",
+             "node_shape": "VM.Standard.E3.Flex", "node_count": 1, "subnet_id": "ocid1.subnet.x"},
+            [], _empty_connector()
+        ))
+        assert result["mock"] is True
+        assert "node_pool_id" in result
+
+    def test_mock_mode_rollback(self):
+        from app.connectors.executors.oci.oci_add_oke_node_pool import rollback
+        result = asyncio.run(rollback({}, {"node_pool_id": "ocid1.nodepool.x"}, _empty_connector()))
+        assert result["mock"] is True
+        assert result["rolled_back"] is True
+
+    def test_execute_returns_node_pool_id(self):
+        from app.connectors.executors.oci.oci_add_oke_node_pool import execute
+        fake_client = MagicMock()
+        fake_wr = MagicMock()
+        fake_wr.status = "SUCCEEDED"
+        np_resource = MagicMock()
+        np_resource.entity_type = "nodepool"
+        np_resource.identifier = "ocid1.nodepool.real"
+        fake_wr.resources = [np_resource]
+        fake_client.create_node_pool.return_value = MagicMock(headers={"opc-work-request-id": "wr-1"})
+        fake_client.get_work_request.return_value = MagicMock(data=fake_wr)
+        fake_oci = MagicMock()
+        with patch("app.connectors.executors.oci.oci_add_oke_node_pool.get_container_engine_client", return_value=fake_client), \
+             patch.dict(sys.modules, {"oci": fake_oci, "oci.container_engine": fake_oci.container_engine, "oci.container_engine.models": fake_oci.container_engine.models}):
+            result = asyncio.run(execute(
+                {"cluster_id": "ocid1.cluster.x", "compartment_id": "ocid1.compartment.x",
+                 "name": "pool-2", "kubernetes_version": "v1.29.1",
+                 "node_shape": "VM.Standard.E3.Flex", "node_count": 1, "subnet_id": "ocid1.subnet.x"},
+                [], _connector()
+            ))
+        assert result["node_pool_id"] == "ocid1.nodepool.real"
+
+    def test_rollback_deletes_node_pool(self):
+        from app.connectors.executors.oci.oci_add_oke_node_pool import rollback
+        fake_client = MagicMock()
+        fake_wr = MagicMock()
+        fake_wr.status = "SUCCEEDED"
+        fake_wr.resources = []
+        fake_client.delete_node_pool.return_value = MagicMock(headers={"opc-work-request-id": "wr-1"})
+        fake_client.get_work_request.return_value = MagicMock(data=fake_wr)
+        with patch("app.connectors.executors.oci.oci_add_oke_node_pool.get_container_engine_client", return_value=fake_client):
+            result = asyncio.run(rollback({}, {"node_pool_id": "ocid1.nodepool.x"}, _connector()))
+        fake_client.delete_node_pool.assert_called_once_with("ocid1.nodepool.x")
+        assert result["rolled_back"] is True
+
+
+class TestDeleteOkeNodePool:
+    def test_rollback_capability(self):
+        import app.connectors.executors.oci.oci_delete_oke_node_pool as m
+        assert m.ROLLBACK_CAPABILITY == "full"
+
+    def test_mock_mode_execute(self):
+        from app.connectors.executors.oci.oci_delete_oke_node_pool import execute
+        result = asyncio.run(execute({"node_pool_id": "ocid1.nodepool.x"}, [], _empty_connector()))
+        assert result["mock"] is True
+        assert "drain_recommended" in result
+
+    def test_mock_mode_rollback(self):
+        from app.connectors.executors.oci.oci_delete_oke_node_pool import rollback
+        result = asyncio.run(rollback({}, {}, _empty_connector()))
+        assert result["mock"] is True
+        assert result["rolled_back"] is True
+
+    def test_drain_recommended_true_when_active_nodes(self):
+        from app.connectors.executors.oci.oci_delete_oke_node_pool import execute
+        active_node = MagicMock()
+        active_node.lifecycle_state = "ACTIVE"
+        fake_pool = MagicMock()
+        fake_pool.nodes = [active_node]
+        fake_pool.compartment_id = "ocid1.compartment.x"
+        fake_pool.cluster_id = "ocid1.cluster.x"
+        fake_pool.name = "pool-1"
+        fake_pool.kubernetes_version = "v1.29.1"
+        fake_pool.node_shape = "VM.Standard.E3.Flex"
+        fake_pool.node_config_details.size = 1
+        fake_pool.node_config_details.placement_configs = []
+        fake_client = MagicMock()
+        fake_client.get_node_pool.return_value = MagicMock(data=fake_pool)
+        fake_wr = MagicMock()
+        fake_wr.status = "SUCCEEDED"
+        fake_wr.resources = []
+        fake_client.delete_node_pool.return_value = MagicMock(headers={"opc-work-request-id": "wr-1"})
+        fake_client.get_work_request.return_value = MagicMock(data=fake_wr)
+        with patch("app.connectors.executors.oci.oci_delete_oke_node_pool.get_container_engine_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.oci_delete_oke_node_pool.PreStateStore") as mock_store, \
+             patch("app.connectors.executors.oci.oci_delete_oke_node_pool.AsyncSessionLocal") as mock_session:
+            mock_db = AsyncMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_store.capture = AsyncMock()
+            result = asyncio.run(execute(
+                {"node_pool_id": "ocid1.nodepool.x", "cr_id": "cr-1", "step_id": "s-1", "org_id": "org-1"},
+                [], _connector()
+            ))
+        assert result["drain_recommended"] is True
+        assert result["active_node_count"] == 1
+
+    def test_drain_recommended_false_when_no_active_nodes(self):
+        from app.connectors.executors.oci.oci_delete_oke_node_pool import execute
+        fake_pool = MagicMock()
+        fake_pool.nodes = []
+        fake_pool.compartment_id = "ocid1.compartment.x"
+        fake_pool.cluster_id = "ocid1.cluster.x"
+        fake_pool.name = "pool-1"
+        fake_pool.kubernetes_version = "v1.29.1"
+        fake_pool.node_shape = "VM.Standard.E3.Flex"
+        fake_pool.node_config_details.size = 0
+        fake_pool.node_config_details.placement_configs = []
+        fake_client = MagicMock()
+        fake_client.get_node_pool.return_value = MagicMock(data=fake_pool)
+        fake_wr = MagicMock()
+        fake_wr.status = "SUCCEEDED"
+        fake_wr.resources = []
+        fake_client.delete_node_pool.return_value = MagicMock(headers={"opc-work-request-id": "wr-1"})
+        fake_client.get_work_request.return_value = MagicMock(data=fake_wr)
+        with patch("app.connectors.executors.oci.oci_delete_oke_node_pool.get_container_engine_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.oci_delete_oke_node_pool.PreStateStore") as mock_store, \
+             patch("app.connectors.executors.oci.oci_delete_oke_node_pool.AsyncSessionLocal") as mock_session:
+            mock_db = AsyncMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_store.capture = AsyncMock()
+            result = asyncio.run(execute(
+                {"node_pool_id": "ocid1.nodepool.x", "cr_id": "cr-1", "step_id": "s-1", "org_id": "org-1"},
+                [], _connector()
+            ))
+        assert result["drain_recommended"] is False
+
+    def test_rollback_recreates_pool_from_pre_state(self):
+        from app.connectors.executors.oci.oci_delete_oke_node_pool import rollback
+        captured_state = {
+            "compartment_id": "ocid1.compartment.x",
+            "cluster_id": "ocid1.cluster.x",
+            "name": "pool-1",
+            "kubernetes_version": "v1.29.1",
+            "node_shape": "VM.Standard.E3.Flex",
+            "node_config_details": {
+                "size": 1,
+                "placement_configs": [{"availability_domain": "AD-1", "subnet_id": "ocid1.subnet.x"}],
+            },
+        }
+        fake_client = MagicMock()
+        fake_wr = MagicMock()
+        fake_wr.status = "SUCCEEDED"
+        np_resource = MagicMock()
+        np_resource.entity_type = "nodepool"
+        np_resource.identifier = "ocid1.nodepool.new"
+        fake_wr.resources = [np_resource]
+        fake_client.create_node_pool.return_value = MagicMock(headers={"opc-work-request-id": "wr-1"})
+        fake_client.get_work_request.return_value = MagicMock(data=fake_wr)
+        fake_oci = MagicMock()
+        with patch("app.connectors.executors.oci.oci_delete_oke_node_pool.get_container_engine_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.oci_delete_oke_node_pool.PreStateStore") as mock_store, \
+             patch("app.connectors.executors.oci.oci_delete_oke_node_pool.AsyncSessionLocal") as mock_session, \
+             patch.dict(sys.modules, {"oci": fake_oci, "oci.container_engine": fake_oci.container_engine, "oci.container_engine.models": fake_oci.container_engine.models}):
+            mock_db = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_store.retrieve = AsyncMock(return_value=captured_state)
+            result = asyncio.run(rollback(
+                {"node_pool_id": "ocid1.nodepool.old", "cr_id": "cr-1", "step_id": "s-1", "org_id": "org-1"},
+                {}, _connector()
+            ))
+        assert result["rolled_back"] is True
+        assert result["new_node_pool_id"] == "ocid1.nodepool.new"
+        fake_client.create_node_pool.assert_called_once()
+
+
 class TestDeleteOkeCluster:
     def test_rollback_capability_irreversible(self):
         import app.connectors.executors.oci.oci_delete_oke_cluster as m
