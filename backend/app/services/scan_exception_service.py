@@ -58,22 +58,24 @@ async def dismiss_exception(exception_id: uuid.UUID, reason: str, db: AsyncSessi
 
 async def resolve_with_update_cr(exception_id: uuid.UUID, update_cr_params: dict, db: AsyncSession, org_id: uuid.UUID) -> dict:
     exc = await _get_exception(exception_id, org_id, db)
+    cr_id = uuid.uuid4()
+    asset_ids = [str(exc.consumer_asset_id)] if exc.consumer_asset_id else []
     cr = ChangeRequest(
-        id=uuid.uuid4(),
+        id=cr_id,
         organization_id=org_id,
         change_type=ChangeType.update_reference,
-        asset_id=exc.consumer_asset_id,
+        target_asset_ids=asset_ids,
         title=f"Update reference at {exc.location}",
-        parameters=update_cr_params,
+        desired_outcome=update_cr_params,
         status=ChangeRequestStatus.draft,
         created_at=datetime.now(timezone.utc),
     )
     db.add(cr)
     exc.status = "resolved"
-    exc.resolved_by_cr_id = cr.id
+    exc.resolved_by_cr_id = cr_id
     exc.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    return {"status": "resolved", "exception_id": str(exception_id), "cr_id": str(cr.id)}
+    return {"status": "resolved", "exception_id": str(exception_id), "cr_id": str(cr_id)}
 
 
 async def resolve_exception(db: AsyncSession, organization_id: uuid.UUID, exception_id: uuid.UUID, resolution: dict) -> dict:

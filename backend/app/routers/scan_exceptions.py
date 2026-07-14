@@ -10,7 +10,6 @@ from app.dependencies import get_current_user
 from app.services.scan_exception_service import (
     list_exceptions,
     get_exception,
-    resolve_exception,
     dismiss_exception,
     resolve_with_update_cr,
     reattempt_triage,
@@ -63,11 +62,15 @@ async def get_scan_exception(
 
 
 class ResolveRequest(BaseModel):
-    path: str
-    cr_id: Optional[str] = None
-    reason: Optional[str] = None
-    operator_context: Optional[str] = None
-    update_cr_params: Optional[dict] = None
+    update_cr_params: dict
+
+
+class ReattemptRequest(BaseModel):
+    operator_context: str
+
+
+class DismissRequest(BaseModel):
+    reason: str
 
 
 @router.post("/{exception_id}/resolve")
@@ -77,10 +80,36 @@ async def resolve_scan_exception(
     db=Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    resolution = body.model_dump(exclude_none=True)
     try:
-        return await resolve_exception(db, current_user.organization_id, exception_id, resolution)
+        return await resolve_with_update_cr(exception_id, body.update_cr_params, db, current_user.organization_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{exception_id}/reattempt")
+async def reattempt_scan_exception(
+    exception_id: uuid.UUID,
+    body: ReattemptRequest,
+    db=Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.dependencies import get_settings, get_secrets_service
+    try:
+        return await reattempt_triage(exception_id, body.operator_context, db, current_user.organization_id, get_settings(), get_secrets_service())
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{exception_id}/dismiss")
+async def dismiss_scan_exception(
+    exception_id: uuid.UUID,
+    body: DismissRequest,
+    db=Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        return await dismiss_exception(exception_id, body.reason, db, current_user.organization_id)
     except ValueError as e:
         msg = str(e)
-        status_code = 400 if "required" in msg or "Unknown" in msg or "reason" in msg else 404
+        status_code = 400 if "reason" in msg else 404
         raise HTTPException(status_code=status_code, detail=msg)

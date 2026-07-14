@@ -3,7 +3,7 @@
 
 import uuid
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest.mark.asyncio
@@ -39,8 +39,6 @@ async def test_list_exceptions_filters_by_status():
     org_id = uuid.uuid4()
     pending_exc = MagicMock()
     pending_exc.status = "pending"
-    dismissed_exc = MagicMock()
-    dismissed_exc.status = "dismissed"
 
     mock_scalars = MagicMock()
     mock_scalars.all.return_value = [pending_exc]
@@ -53,31 +51,49 @@ async def test_list_exceptions_filters_by_status():
 
     assert len(results) == 1
     assert results[0].status == "pending"
-    # Verify a query was executed (filtering happened at DB level via sqlalchemy)
     mock_db.execute.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_resolve_exception_resolve_with_cr():
-    from app.services.scan_exception_service import resolve_exception
+async def test_resolve_with_update_cr_creates_draft_cr():
+    from app.services.scan_exception_service import resolve_with_update_cr
 
     org_id = uuid.uuid4()
     exception_id = uuid.uuid4()
-    cr_id = str(uuid.uuid4())
 
     mock_exception = MagicMock()
     mock_exception.organization_id = org_id
+    mock_exception.consumer_asset_id = uuid.uuid4()
+    mock_exception.location = "Dockerfile"
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = mock_exception
     mock_db = AsyncMock()
     mock_db.execute.return_value = mock_result
 
-    result = await resolve_exception(mock_db, org_id, exception_id, {"path": "resolve-with-cr", "cr_id": cr_id})
+    update_cr_params = {"new_image": "nginx:1.25"}
+    result = await resolve_with_update_cr(exception_id, update_cr_params, mock_db, org_id)
 
+    # A new CR must have been added (not just linked)
+    mock_db.add.assert_called_once()
+    added_cr = mock_db.add.call_args[0][0]
+    from app.models.change_request import ChangeType, ChangeRequestStatus
+    assert added_cr.change_type == ChangeType.update_reference
+    assert added_cr.status == ChangeRequestStatus.draft
+    assert added_cr.desired_outcome == update_cr_params
     assert mock_exception.status == "resolved"
-    assert str(mock_exception.resolved_by_cr_id) == cr_id
     assert result["status"] == "resolved"
-    assert result["cr_id"] == cr_id
+    assert "cr_id" in result
+
+
+@pytest.mark.asyncio
+async def test_resolve_exception_unknown_path_raises():
+    from app.services.scan_exception_service import resolve_exception
+
+    org_id = uuid.uuid4()
+    mock_db = AsyncMock()
+
+    with pytest.raises(ValueError, match="Unknown resolution path"):
+        await resolve_exception(mock_db, org_id, uuid.uuid4(), {"path": "invalid-path"})
 
 
 @pytest.mark.asyncio
@@ -99,25 +115,3 @@ async def test_resolve_exception_dismiss_with_reason():
     assert mock_exception.status == "dismissed"
     assert "Not applicable" in mock_exception.resolution_notes
     assert result["status"] == "dismissed"
-
-
-@pytest.mark.asyncio
-async def test_resolve_exception_unknown_path_raises():
-    from app.services.scan_exception_service import resolve_exception
-
-    org_id = uuid.uuid4()
-    mock_db = AsyncMock()
-
-    with pytest.raises(ValueError, match="Unknown resolution path"):
-        await resolve_exception(mock_db, org_id, uuid.uuid4(), {"path": "invalid-path"})
-
-
-@pytest.mark.asyncio
-async def test_resolve_with_cr_requires_cr_id():
-    from app.services.scan_exception_service import resolve_exception
-
-    org_id = uuid.uuid4()
-    mock_db = AsyncMock()
-
-    with pytest.raises(ValueError, match="cr_id"):
-        await resolve_exception(mock_db, org_id, uuid.uuid4(), {"path": "resolve-with-cr"})
