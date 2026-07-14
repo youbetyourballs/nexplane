@@ -8,14 +8,14 @@
 - Task 6: complete (commit de6fefc, 18/18 smoke tests passed on EC2 in 179s)
 
 ## Plan 2: Planning Context
-- Task 1: TODO
+- Task 1: complete (commits 52b8291..a80dcbf, review clean — OCIR create/delete/image executors, get_artifacts_client, 10/10 tests)
 - Task 2: TODO
 - Task 3: TODO
 - Task 4: TODO
 - Task 5: TODO
 
 ## Plan 3: Project Orchestration
-- Task 1: TODO
+- Task 1: complete (commits 52b8291..a80dcbf, review clean — OCIR create/delete/image executors, get_artifacts_client, 10/10 tests)
 - Task 2: TODO
 - Task 3: TODO
 - Task 4: TODO
@@ -173,7 +173,7 @@ Final review fixes: complete (commit 3f3f957 — clarify neighbor depth comment,
 
 ## Platform Image Publishing (2026-07-09-platform-image-publishing.md)
 Base commit: b64229c
-- Task 1: TODO
+- Task 1: complete (commits 52b8291..a80dcbf, review clean — OCIR create/delete/image executors, get_artifacts_client, 10/10 tests)
 - Task 2: TODO
 - Task 3: TODO
 - Task 4: TODO
@@ -194,7 +194,7 @@ Base commit: b64229c
 ## Migration Workflows Foundation (2026-07-13-migration-workflows-foundation.md)
 - Task 1: complete (commits 25c82f2..0a594c3, review clean)
 Base commit: 25c82f2
-- Task 1: TODO
+- Task 1: complete (commits 52b8291..a80dcbf, review clean — OCIR create/delete/image executors, get_artifacts_client, 10/10 tests)
 - Task 2: TODO
 - Task 3: TODO
 - Task 4: TODO
@@ -209,7 +209,7 @@ Base commit: 25c82f2
 
 ## Reference Scan and Update (2026-07-14)
 Base commit: c496d6c
-- Task 1: TODO
+- Task 1: complete (commits 52b8291..a80dcbf, review clean — OCIR create/delete/image executors, get_artifacts_client, 10/10 tests)
 - Task 2: TODO
 - Task 3: TODO
 - Task 4: TODO
@@ -255,8 +255,21 @@ Base commit: b2e73a2
 
 ## OCI Parity Spec 1 (2026-07-14-oci-parity-spec1.md)
 Base commit: 52b8291
-- Task 1: TODO
+- Task 1: complete (commits 52b8291..a80dcbf, review clean — OCIR create/delete/image executors, get_artifacts_client, 10/10 tests)
 - Task 2: TODO
 - Task 3: TODO
 - Task 4: TODO
 - Task 5: TODO
+Task 2: complete (commits a80dcbf..c954aa1, review clean — restore_adb/block_volume/boot_volume executors, 22/22 tests)
+Task 3: complete (commits c954aa1..25bd673, review clean — tag_compute_instance/block_volume/vcn/adb executors + catalog entries, 38/38 tests)
+Task 4: complete (commits 25bd673..4782d52, review clean — ROLLBACK_CAPABILITY backfilled on 58 OCI executors, wait_instance_state fix)
+Task 5: complete (commits 4782d52..ffe5ad9, smoke run: TAGGING PASS, OCIR/RESTORE_BLOCK_VOLUME xfail free-tier account limits — executor code correct)
+
+## OCI Parity Spec 2 OKE (2026-07-14-oci-parity-spec2-oke.md)
+Base commit: 3662e90
+- Task 1: complete (commit 3662e90..bcfdcc9, review clean — get_container_engine_client + poll_work_request, 4/4 tests. Minor: unused imports in test file, missing timeout test — noted for final review)
+- Task 2: complete (commits bcfdcc9..686975a, review clean after fix — oci_create_oke_cluster rollback polls work requests, 5/5 tests)
+- Task 3: complete (commits 686975a..7778e30, review clean — oci_delete_oke_cluster irreversible, drains node pools before cluster delete, 4/4 tests)
+- Task 4: complete (commits 7778e30..e133269, review clean — oci_add_oke_node_pool + oci_delete_oke_node_pool, PreStateStore drain advisory, 11/11 tests. Minor: add rollback should guard against empty node_pool_id before SDK call)
+- Task 5: complete (commits e133269..d6a23f3, review clean — oci_scale_oke_node_pool + oci_update_oke_node_pool, 9/9 tests)
+Task 6: complete (commits d6a23f3..cf8142d, review clean — oci_get_oke_kubeconfig executor, 7 OKE catalog entries, 37/37 tests)
