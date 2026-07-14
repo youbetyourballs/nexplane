@@ -26,6 +26,7 @@ class OrganizationSettings(Base):
     sla_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     escalation_chain: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     escalation_timeout_minutes: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    pre_state_retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
