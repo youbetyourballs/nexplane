@@ -61,10 +61,20 @@ async def _load_profile_baseline(asset_id: str) -> dict:
             meta = asset.asset_metadata or {}
             # Build a minimal baseline from the discovery profile
             endpoints = meta.get("endpoints", [])
+            # Only build HTTP checks for ports with a web-server process or known HTTP ports.
+            # Non-HTTP system ports (DHCP 68, NTP 323, DHCPv6 546, Tailscale 41641, etc.)
+            # are checked at the TCP layer by the service layer, not the application layer.
+            _HTTP_PROCESSES = {"nginx", "gunicorn", "uvicorn", "python", "python3", "node",
+                               "ruby", "java", "caddy", "apache", "httpd", "flask", "fastapi"}
+            _HTTP_PORTS = {80, 443, 8000, 8080, 8443, 3000, 4000, 4443, 5000, 9000, 9090}
             baseline_endpoints = []
             for ep in endpoints:
                 port = ep.get("port", 0)
-                if port and port not in (22,):
+                if not port or port in (22,):
+                    continue
+                proc = (ep.get("process") or "").lower()
+                is_web = port in _HTTP_PORTS or any(p in proc for p in _HTTP_PROCESSES)
+                if is_web:
                     baseline_endpoints.append({
                         "url": f"http://localhost:{port}/health",
                         "port": port,
