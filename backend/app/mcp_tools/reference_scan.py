@@ -143,7 +143,7 @@ async def get_scan_results(token: str, scan_cr_id: str) -> dict:
 
 
 @mcp.tool()
-async def list_reference_exceptions(token: str, scan_cr_id: str) -> list[dict]:
+async def list_reference_exceptions(token: str, scan_cr_id: str) -> list[dict] | dict:
     """
     List all scan exceptions for a completed scan_for_references CR.
 
