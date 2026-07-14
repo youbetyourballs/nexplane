@@ -513,3 +513,34 @@ class TestUpdateOkeNodePool:
             ))
         assert result["updated"] is True
         fake_client.update_node_pool.assert_called_once()
+
+
+class TestGetOkeKubeconfig:
+    def test_rollback_capability(self):
+        import app.connectors.executors.oci.oci_get_oke_kubeconfig as m
+        assert m.ROLLBACK_CAPABILITY == "full"
+
+    def test_mock_mode_execute(self):
+        from app.connectors.executors.oci.oci_get_oke_kubeconfig import execute
+        result = asyncio.run(execute({"cluster_id": "ocid1.cluster.x"}, [], _empty_connector()))
+        assert result["mock"] is True
+        assert "kubeconfig" in result
+        assert result["kubeconfig"]
+
+    def test_rollback_returns_read_only(self):
+        from app.connectors.executors.oci.oci_get_oke_kubeconfig import rollback
+        result = asyncio.run(rollback({}, {}, _connector()))
+        assert result["rolled_back"] is False
+        assert result["reason"] == "read-only"
+
+    def test_execute_returns_kubeconfig_yaml(self):
+        from app.connectors.executors.oci.oci_get_oke_kubeconfig import execute
+        fake_content = b"apiVersion: v1\nkind: Config\n"
+        fake_response = MagicMock()
+        fake_response.data.content = fake_content
+        fake_client = MagicMock()
+        fake_client.create_kubeconfig.return_value = fake_response
+        with patch("app.connectors.executors.oci.oci_get_oke_kubeconfig.get_container_engine_client", return_value=fake_client):
+            result = asyncio.run(execute({"cluster_id": "ocid1.cluster.x"}, [], _connector()))
+        assert "apiVersion" in result["kubeconfig"]
+        fake_client.create_kubeconfig.assert_called_once_with("ocid1.cluster.x")
