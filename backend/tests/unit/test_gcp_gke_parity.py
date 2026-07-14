@@ -227,3 +227,177 @@ class TestDeleteGkeCluster:
                 )
         assert result.get("deleted") is True
         client_mock.delete_cluster.assert_called_once()
+
+
+class TestAddGkeNodePool:
+    def _params(self):
+        return {
+            "cluster_name": "test-cluster",
+            "location": "us-central1-a",
+            "node_pool_name": "pool-2",
+            "node_count": 1,
+            "machine_type": "e2-medium",
+        }
+
+    def _connector(self, with_creds=False):
+        c = MagicMock()
+        c.credentials = _make_creds() if with_creds else {}
+        return c
+
+    def test_mock_path(self):
+        from app.connectors.executors.gcp.gcp_add_gke_node_pool import execute
+        result = asyncio.get_event_loop().run_until_complete(
+            execute(self._params(), [], self._connector())
+        )
+        assert result.get("mock") is True
+        assert "node_pool_name" in result
+
+    def test_rollback_capability_full(self):
+        from app.connectors.executors.gcp import gcp_add_gke_node_pool
+        assert gcp_add_gke_node_pool.ROLLBACK_CAPABILITY == "full"
+
+    def test_execute_calls_create_node_pool(self):
+        from app.connectors.executors.gcp.gcp_add_gke_node_pool import execute
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        client_mock.create_node_pool.return_value = op_mock
+        with patch("app.connectors.executors.gcp.gcp_add_gke_node_pool.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_add_gke_node_pool.poll_gke_operation") as mock_poll:
+                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+                result = asyncio.get_event_loop().run_until_complete(
+                    execute(self._params(), [], connector)
+                )
+        client_mock.create_node_pool.assert_called_once()
+        assert result["node_pool_name"] == "pool-2"
+
+    def test_rollback_deletes_pool(self):
+        from app.connectors.executors.gcp.gcp_add_gke_node_pool import rollback
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        client_mock.delete_node_pool.return_value = op_mock
+        execution_result = {
+            "node_pool_name": "pool-2",
+            "cluster_name": "test-cluster",
+            "location": "us-central1-a",
+            "project_id": "test-project",
+        }
+        with patch("app.connectors.executors.gcp.gcp_add_gke_node_pool.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_add_gke_node_pool.poll_gke_operation") as mock_poll:
+                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+                result = asyncio.get_event_loop().run_until_complete(
+                    rollback(self._params(), execution_result, connector)
+                )
+        assert result.get("rolled_back") is True
+        client_mock.delete_node_pool.assert_called_once()
+
+
+class TestDeleteGkeNodePool:
+    def _params(self):
+        return {
+            "cluster_name": "test-cluster",
+            "location": "us-central1-a",
+            "node_pool_name": "pool-2",
+        }
+
+    def _connector(self, with_creds=False):
+        c = MagicMock()
+        c.credentials = _make_creds() if with_creds else {}
+        return c
+
+    def test_mock_path(self):
+        from app.connectors.executors.gcp.gcp_delete_gke_node_pool import execute
+        result = asyncio.get_event_loop().run_until_complete(
+            execute(self._params(), [], self._connector())
+        )
+        assert result.get("mock") is True
+
+    def test_rollback_capability_full(self):
+        from app.connectors.executors.gcp import gcp_delete_gke_node_pool
+        assert gcp_delete_gke_node_pool.ROLLBACK_CAPABILITY == "full"
+
+    def test_drain_recommended_true_when_instance_groups_present(self):
+        from app.connectors.executors.gcp.gcp_delete_gke_node_pool import execute
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        pool_mock = MagicMock()
+        pool_mock.instance_group_urls = ["https://group1", "https://group2"]
+        client_mock.get_node_pool.return_value = pool_mock
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        client_mock.delete_node_pool.return_value = op_mock
+        with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation") as mock_poll:
+                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+                result = asyncio.get_event_loop().run_until_complete(
+                    execute(self._params(), [], connector)
+                )
+        assert result.get("drain_recommended") is True
+        assert result.get("active_node_count") == 2
+
+    def test_drain_recommended_false_when_no_instance_groups(self):
+        from app.connectors.executors.gcp.gcp_delete_gke_node_pool import execute
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        pool_mock = MagicMock()
+        pool_mock.instance_group_urls = []
+        client_mock.get_node_pool.return_value = pool_mock
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        client_mock.delete_node_pool.return_value = op_mock
+        with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation") as mock_poll:
+                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+                result = asyncio.get_event_loop().run_until_complete(
+                    execute(self._params(), [], connector)
+                )
+        assert result.get("drain_recommended") is False
+
+    def test_prestatestore_captured_before_delete(self):
+        from app.connectors.executors.gcp.gcp_delete_gke_node_pool import execute
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        pool_mock = MagicMock()
+        pool_mock.instance_group_urls = []
+        pool_mock.name = "pool-2"
+        call_order = []
+        client_mock.get_node_pool.side_effect = lambda *a, **kw: (call_order.append("get"), pool_mock)[1]
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        client_mock.delete_node_pool.side_effect = lambda *a, **kw: (call_order.append("delete"), op_mock)[1]
+        with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation") as mock_poll:
+                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+                asyncio.get_event_loop().run_until_complete(
+                    execute(self._params(), [], connector)
+                )
+        assert call_order.index("get") < call_order.index("delete")
+
+    def test_rollback_recreates_pool(self):
+        from app.connectors.executors.gcp.gcp_delete_gke_node_pool import rollback
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        client_mock.create_node_pool.return_value = op_mock
+        execution_result = {
+            "cluster_name": "test-cluster",
+            "location": "us-central1-a",
+            "project_id": "test-project",
+            "pre_state": {
+                "node_pool_name": "pool-2",
+                "node_count": 1,
+                "machine_type": "e2-medium",
+            },
+        }
+        with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_delete_gke_node_pool.poll_gke_operation") as mock_poll:
+                mock_poll.return_value = asyncio.coroutine(lambda *a, **kw: None)()
+                result = asyncio.get_event_loop().run_until_complete(
+                    rollback(self._params(), execution_result, connector)
+                )
+        assert result.get("rolled_back") is True
+        client_mock.create_node_pool.assert_called_once()
