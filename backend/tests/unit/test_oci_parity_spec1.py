@@ -253,3 +253,142 @@ class TestRestoreBootVolumeBackup:
             result = asyncio.run(rollback({}, {"boot_volume_id": "ocid1.bootvolume.x"}, _connector()))
         fake_client.delete_boot_volume.assert_called_once_with(boot_volume_id="ocid1.bootvolume.x")
         assert result["rolled_back"] is True
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Resource Tagging
+# ---------------------------------------------------------------------------
+
+def _tag_test(module_path, executor_fn_name, id_param, id_value, get_fn_name, update_fn_name, resource_attr):
+    """Shared test logic for all tag_* executors."""
+    mod = __import__(module_path, fromlist=[executor_fn_name])
+    execute = getattr(mod, executor_fn_name)
+    assert mod.ROLLBACK_CAPABILITY == "full"
+
+    fake_resource = MagicMock()
+    fake_resource.freeform_tags = {"existing": "tag"}
+    fake_resource.defined_tags = {}
+    fake_client = MagicMock()
+    getattr(fake_client, get_fn_name).return_value = MagicMock(data=fake_resource)
+    getattr(fake_client, update_fn_name).return_value = MagicMock(data=fake_resource)
+
+    client_patch = f"{module_path}.get_{resource_attr}_client"
+    call_order = []
+    _fake_oci = MagicMock()
+
+    with patch.dict(sys.modules, {"oci": _fake_oci, "oci.core": _fake_oci.core,
+                                   "oci.core.models": _fake_oci.core.models,
+                                   "oci.database": _fake_oci.database,
+                                   "oci.database.models": _fake_oci.database.models}), \
+         patch(client_patch, return_value=fake_client), \
+         patch(f"{module_path}.PreStateStore") as mock_store, \
+         patch(f"{module_path}.AsyncSessionLocal") as mock_session:
+        mock_db = AsyncMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_store.capture = MagicMock(side_effect=lambda *a, **kw: call_order.append("capture"))
+        getattr(fake_client, update_fn_name).side_effect = lambda *a, **kw: call_order.append("update") or MagicMock(data=fake_resource)
+
+        result = asyncio.run(execute(
+            {id_param: id_value, "freeform_tags": {"env": "prod"},
+             "cr_id": "00000000-0000-0000-0000-000000000001",
+             "step_id": "step_0", "org_id": "00000000-0000-0000-0000-000000000002"},
+            [], _connector()
+        ))
+    assert call_order.index("capture") < call_order.index("update")
+    return result
+
+
+class TestTagComputeInstance:
+    def test_rollback_capability_full(self):
+        import app.connectors.executors.oci.tag_compute_instance as m
+        assert m.ROLLBACK_CAPABILITY == "full"
+
+    def test_mock_mode(self):
+        from app.connectors.executors.oci.tag_compute_instance import execute
+        result = asyncio.run(execute({"instance_id": "ocid1.instance.x"}, [], _empty_connector()))
+        assert result["mock"] is True
+
+    def test_capture_before_update(self):
+        _tag_test(
+            "app.connectors.executors.oci.tag_compute_instance", "execute",
+            "instance_id", "ocid1.instance.x",
+            "get_instance", "update_instance", "compute"
+        )
+
+    def test_rollback_restores_tags(self):
+        from app.connectors.executors.oci.tag_compute_instance import rollback
+        fake_client = MagicMock()
+        fake_resource = MagicMock()
+        fake_client.update_instance.return_value = MagicMock(data=fake_resource)
+        _fake_oci = MagicMock()
+        with patch.dict(sys.modules, {"oci": _fake_oci, "oci.core": _fake_oci.core,
+                                       "oci.core.models": _fake_oci.core.models}), \
+             patch("app.connectors.executors.oci.tag_compute_instance.get_compute_client", return_value=fake_client), \
+             patch("app.connectors.executors.oci.tag_compute_instance.PreStateStore") as mock_store, \
+             patch("app.connectors.executors.oci.tag_compute_instance.AsyncSessionLocal") as mock_session:
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_store.retrieve = AsyncMock(return_value={"freeform_tags": {"old": "tag"}, "defined_tags": {}})
+            result = asyncio.run(rollback(
+                {"instance_id": "ocid1.instance.x",
+                 "cr_id": "00000000-0000-0000-0000-000000000001",
+                 "step_id": "step_0", "org_id": "00000000-0000-0000-0000-000000000002"},
+                [], _connector(), {}
+            ))
+        fake_client.update_instance.assert_called_once()
+        assert result["rolled_back"] is True
+
+
+class TestTagBlockVolume:
+    def test_rollback_capability_full(self):
+        import app.connectors.executors.oci.tag_block_volume as m
+        assert m.ROLLBACK_CAPABILITY == "full"
+
+    def test_mock_mode(self):
+        from app.connectors.executors.oci.tag_block_volume import execute
+        result = asyncio.run(execute({"volume_id": "ocid1.volume.x"}, [], _empty_connector()))
+        assert result["mock"] is True
+
+    def test_capture_before_update(self):
+        _tag_test(
+            "app.connectors.executors.oci.tag_block_volume", "execute",
+            "volume_id", "ocid1.volume.x",
+            "get_volume", "update_volume", "blockstorage"
+        )
+
+
+class TestTagVcn:
+    def test_rollback_capability_full(self):
+        import app.connectors.executors.oci.tag_vcn as m
+        assert m.ROLLBACK_CAPABILITY == "full"
+
+    def test_mock_mode(self):
+        from app.connectors.executors.oci.tag_vcn import execute
+        result = asyncio.run(execute({"vcn_id": "ocid1.vcn.x"}, [], _empty_connector()))
+        assert result["mock"] is True
+
+    def test_capture_before_update(self):
+        _tag_test(
+            "app.connectors.executors.oci.tag_vcn", "execute",
+            "vcn_id", "ocid1.vcn.x",
+            "get_vcn", "update_vcn", "network"
+        )
+
+
+class TestTagAdb:
+    def test_rollback_capability_full(self):
+        import app.connectors.executors.oci.tag_adb as m
+        assert m.ROLLBACK_CAPABILITY == "full"
+
+    def test_mock_mode(self):
+        from app.connectors.executors.oci.tag_adb import execute
+        result = asyncio.run(execute({"autonomous_database_id": "ocid1.adb.x"}, [], _empty_connector()))
+        assert result["mock"] is True
+
+    def test_capture_before_update(self):
+        _tag_test(
+            "app.connectors.executors.oci.tag_adb", "execute",
+            "autonomous_database_id", "ocid1.adb.x",
+            "get_autonomous_database", "update_autonomous_database", "database"
+        )
