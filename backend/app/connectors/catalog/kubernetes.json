@@ -98,6 +98,25 @@
           "new_value": {"type": "string"}
         }
       }
+    },
+    {
+      "action_id": "update_ingress_host",
+      "display_name": "Update Ingress Host",
+      "description": "Update a backend host or service reference in a Kubernetes Ingress rule. Rollback patches the old rule back.",
+      "rollback_strategy": "reconstitution",
+      "action_type": "change",
+      "execution_tier": 2,
+      "executor": "kubernetes.reference_update.update_ingress_host",
+      "parameters": {
+        "type": "object",
+        "required": ["namespace", "ingress_name", "old_host", "new_host"],
+        "properties": {
+          "namespace": {"type": "string"},
+          "ingress_name": {"type": "string"},
+          "old_host": {"type": "string"},
+          "new_host": {"type": "string"}
+        }
+      }
     }
   ]
 }

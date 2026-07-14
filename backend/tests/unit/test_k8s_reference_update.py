@@ -69,7 +69,7 @@ async def test_update_configmap_value_success():
     with patch("app.connectors.executors.kubernetes.reference_update.get_k8s_client", return_value=mock_clients):
         result = await update_configmap_value(cr, connector, AsyncMock())
 
-    assert result["status"] == "success"
+    assert result["status"] == "updated"
     assert result["rollback_data"]["old_value"] == "postgres://old-db.internal/app"
     assert result["rollback_data"]["key"] == "DATABASE_URL"
     core_api.patch_namespaced_config_map.assert_called_once()
@@ -203,7 +203,7 @@ async def test_update_deployment_env_var_success():
     with patch("app.connectors.executors.kubernetes.reference_update.get_k8s_client", return_value=mock_clients):
         result = await update_deployment_env_var(cr, connector, AsyncMock())
 
-    assert result["status"] == "success"
+    assert result["status"] == "updated"
     assert result["rollback_data"]["old_value"] == "old-db.internal"
     assert result["rollback_data"]["env_var_name"] == "DB_HOST"
     assert mock_env.value == "new-db.internal"
@@ -312,3 +312,65 @@ async def test_rollback_deployment_env_var():
     assert result["status"] == "success"
     assert mock_env.value == "old-db.internal"
     apps_api.patch_namespaced_deployment.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# update_ingress_host
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_update_ingress_host_success():
+    from app.connectors.executors.kubernetes.reference_update import update_ingress_host
+
+    cr = _make_cr({
+        "namespace": "production",
+        "ingress_name": "api-ingress",
+        "old_host": "old-api.internal",
+        "new_host": "new-api.internal",
+    })
+    connector = _make_connector()
+
+    mock_rule = MagicMock()
+    mock_rule.host = "old-api.internal"
+    mock_ingress = MagicMock()
+    mock_ingress.spec.rules = [mock_rule]
+    networking_api = MagicMock()
+    networking_api.read_namespaced_ingress.return_value = mock_ingress
+    mock_clients = _make_mock_clients(networking=networking_api)
+
+    with patch("app.connectors.executors.kubernetes.reference_update.get_k8s_client", return_value=mock_clients):
+        result = await update_ingress_host(cr, connector, AsyncMock())
+
+    assert result["status"] == "updated"
+    assert result["rollback_data"]["old_host"] == "old-api.internal"
+    assert result["rollback_data"]["ingress_name"] == "api-ingress"
+    assert mock_rule.host == "new-api.internal"
+    networking_api.patch_namespaced_ingress.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_ingress_host_old_value_mismatch():
+    from app.connectors.executors.kubernetes.reference_update import update_ingress_host
+
+    cr = _make_cr({
+        "namespace": "production",
+        "ingress_name": "api-ingress",
+        "old_host": "expected-old.internal",
+        "new_host": "new-api.internal",
+    })
+    connector = _make_connector()
+
+    mock_rule = MagicMock()
+    mock_rule.host = "actual-current.internal"
+    mock_ingress = MagicMock()
+    mock_ingress.spec.rules = [mock_rule]
+    networking_api = MagicMock()
+    networking_api.read_namespaced_ingress.return_value = mock_ingress
+    mock_clients = _make_mock_clients(networking=networking_api)
+
+    with patch("app.connectors.executors.kubernetes.reference_update.get_k8s_client", return_value=mock_clients):
+        result = await update_ingress_host(cr, connector, AsyncMock())
+
+    assert result["status"] == "skipped"
+    assert "not found" in result["reason"]
+    networking_api.patch_namespaced_ingress.assert_not_called()

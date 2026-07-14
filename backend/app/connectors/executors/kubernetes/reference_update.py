@@ -40,7 +40,7 @@ async def update_configmap_value(cr, connector, db) -> dict:
     core_api.patch_namespaced_config_map(name=cm_name, namespace=ns, body=cm)
 
     return {
-        "status": "success",
+        "status": "updated",
         "rollback_data": {
             "namespace": ns,
             "configmap_name": cm_name,
@@ -178,7 +178,7 @@ async def update_deployment_env_var(cr, connector, db) -> dict:
     apps_api.patch_namespaced_deployment(name=deployment_name, namespace=ns, body=obj)
 
     return {
-        "status": "success",
+        "status": "updated",
         "rollback_data": {
             "namespace": ns,
             "deployment_name": deployment_name,
@@ -187,6 +187,55 @@ async def update_deployment_env_var(cr, connector, db) -> dict:
             "old_value": old_val,
         },
     }
+
+
+async def update_ingress_host(cr, connector, db) -> dict:
+    params = cr.parameters or {}
+    ns = params["namespace"]
+    ingress_name = params["ingress_name"]
+    old_host = params["old_host"]
+    new_host = params["new_host"]
+
+    clients = get_k8s_client(connector, params)
+    if clients is None:
+        return {"status": "error", "reason": "No kubeconfig available"}
+
+    networking_api = clients["networking"]
+    ingress = networking_api.read_namespaced_ingress(name=ingress_name, namespace=ns)
+    updated = False
+    for rule in (ingress.spec.rules or []):
+        if rule.host == old_host:
+            rule.host = new_host
+            updated = True
+
+    if not updated:
+        return {"status": "skipped", "reason": f"host {old_host} not found in ingress rules"}
+
+    networking_api.patch_namespaced_ingress(name=ingress_name, namespace=ns, body=ingress)
+    return {
+        "status": "updated",
+        "rollback_data": {
+            "namespace": ns,
+            "ingress_name": ingress_name,
+            "old_host": old_host,
+            "new_host": new_host,
+        },
+    }
+
+
+async def rollback_ingress_host(cr, connector, db) -> dict:
+    rb = (cr.execution_result or {}).get("rollback_data", {})
+    clients = get_k8s_client(connector)
+    if clients is None:
+        return {"status": "error", "reason": "No kubeconfig available"}
+
+    networking_api = clients["networking"]
+    ingress = networking_api.read_namespaced_ingress(name=rb["ingress_name"], namespace=rb["namespace"])
+    for rule in (ingress.spec.rules or []):
+        if rule.host == rb["new_host"]:
+            rule.host = rb["old_host"]
+    networking_api.patch_namespaced_ingress(name=rb["ingress_name"], namespace=rb["namespace"], body=ingress)
+    return {"status": "rolled_back"}
 
 
 async def rollback_deployment_env_var(cr, connector, db) -> dict:
