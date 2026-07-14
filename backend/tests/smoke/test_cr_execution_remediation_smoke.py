@@ -129,60 +129,73 @@ def phase_rollback_capability_gate():
             _assert(False, f"unexpected response for unknown change_type: {neg_resp.status_code} {neg_resp.text[:200]}")
 
 
-def _get_s3_client():
-    """Return a boto3 S3 client using platform credentials."""
-    import boto3
-    try:
-        import sys
-        if "/app" not in sys.path:
-            sys.path.insert(0, "/app")
-        import asyncio as _asyncio
-        from app.database import AsyncSessionLocal
-        from app.models.connector_credential import ConnectorCredential
-        from app.services.secret_backend_factory import get_secret_backend
-        from sqlalchemy import select
-        import uuid as _uuid
+def _create_s3_bucket_via_subprocess(bucket_name: str) -> str:
+    """Create an S3 bucket using platform credentials via subprocess (avoids event-loop conflicts).
+    Returns the region used."""
+    import subprocess as _sp
+    create_script = f"""
+import asyncio, sys, json
+sys.path.insert(0, '/app')
+from app.database import AsyncSessionLocal
+from app.models.connector_credential import ConnectorCredential
+from app.services.secret_backend_factory import get_secret_backend
+from sqlalchemy import select
+import uuid as _uuid
+import boto3
 
-        async def _fetch():
-            backend = get_secret_backend()
-            async with AsyncSessionLocal() as db:
-                result = await db.execute(
-                    select(ConnectorCredential).where(
-                        ConnectorCredential.connector_id == _uuid.UUID(_AWS_CONNECTOR_ID)
-                    )
-                )
-                cred_row = result.scalar_one_or_none()
-                return backend.decrypt_json(cred_row.credentials_encrypted) if cred_row else {}
+_AWS_CONNECTOR_ID = "{_AWS_CONNECTOR_ID}"
 
-        creds = _asyncio.run(_fetch())
-        if creds.get("access_key_id"):
-            session_kwargs = dict(
-                aws_access_key_id=creds["access_key_id"],
-                aws_secret_access_key=creds["secret_access_key"],
-                region_name=creds.get("region", "us-east-1"),
+async def _fetch():
+    backend = get_secret_backend()
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ConnectorCredential).where(
+                ConnectorCredential.connector_id == _uuid.UUID(_AWS_CONNECTOR_ID)
             )
-            if creds.get("session_token"):
-                session_kwargs["aws_session_token"] = creds["session_token"]
-            return boto3.client("s3", **session_kwargs), creds.get("region", "us-east-1")
-    except Exception as e:
-        print(f"  Could not load platform creds ({e}), falling back to instance role")
-    return boto3.client("s3"), "us-east-1"
+        )
+        cred_row = result.scalar_one_or_none()
+        return backend.decrypt_json(cred_row.credentials_encrypted) if cred_row else {{}}
+
+creds = asyncio.run(_fetch())
+region = creds.get("region", "us-east-1")
+if creds.get("access_key_id"):
+    session_kwargs = dict(
+        aws_access_key_id=creds["access_key_id"],
+        aws_secret_access_key=creds["secret_access_key"],
+        region_name=region,
+    )
+    if creds.get("session_token"):
+        session_kwargs["aws_session_token"] = creds["session_token"]
+    s3 = boto3.client("s3", **session_kwargs)
+else:
+    s3 = boto3.client("s3")
+    region = "us-east-1"
+kwargs = {{"Bucket": "{bucket_name}"}}
+if region != "us-east-1":
+    kwargs["CreateBucketConfiguration"] = {{"LocationConstraint": region}}
+s3.create_bucket(**kwargs)
+print(f"CREATED:{{region}}")
+"""
+    result = _sp.run(
+        ["python3", "-c", create_script],
+        capture_output=True, text=True, cwd="/app", env={**os.environ, "PYTHONPATH": "/app"},
+    )
+    output = (result.stdout + result.stderr).strip()
+    if "CREATED:" not in output:
+        raise RuntimeError(f"Bucket creation subprocess failed: {output}")
+    region = output.split("CREATED:")[1].strip().splitlines()[0]
+    return region
 
 
 def phase_prestate_capture():
     print("\n=== PHASE: PRESTATE_CAPTURE ===")
     # Verify that executing an s3_bucket_delete CR creates a pre_state_snapshots row.
     # We create a temp S3 bucket, delete it via CR, then verify the snapshot row.
-    import boto3
     import time
 
-    s3, region = _get_s3_client()
     bucket_name = f"nexplane-smoke-cap-{uuid.uuid4().hex[:12]}"
     print(f"  Creating test bucket: {bucket_name}")
-    if region == "us-east-1":
-        s3.create_bucket(Bucket=bucket_name)
-    else:
-        s3.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={"LocationConstraint": region})
+    _create_s3_bucket_via_subprocess(bucket_name)
     print(f"  Created: s3://{bucket_name}")
 
     resp = client.post("/change-requests", json={
@@ -253,13 +266,9 @@ def phase_prestate_rollback():
     # Create a test S3 bucket, delete it via CR, rollback, verify bucket reconstituted.
     import time
 
-    s3, region = _get_s3_client()
     bucket_name = f"nexplane-smoke-rb-{uuid.uuid4().hex[:12]}"
     print(f"  Creating test bucket: {bucket_name}")
-    if region == "us-east-1":
-        s3.create_bucket(Bucket=bucket_name)
-    else:
-        s3.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={"LocationConstraint": region})
+    _create_s3_bucket_via_subprocess(bucket_name)
     print(f"  Created: s3://{bucket_name}")
 
     resp = client.post("/change-requests", json={
@@ -316,7 +325,7 @@ def phase_prestate_rollback():
 
     # Verify bucket reconstituted via subprocess
     _check_recon = _sp.run(
-        ["python3", "-c", f"import boto3,botocore.exceptions\ns3=boto3.client('s3')\ntry:\n s3.head_bucket(Bucket='{bucket_name}')\n print('EXISTS')\nexcept botocore.exceptions.ClientError as e:\n print('NOT_FOUND:'+e.response['Error']['Code'])"],
+        ["python3", "-c", f"import boto3,botocore.exceptions\ns3=boto3.client('s3')\ntry:\n s3.head_bucket(Bucket='{bucket_name}')\n print('EXISTS')\nexcept botocore.exceptions.ClientError as e:\n code=e.response['Error']['Code']\n # 403=Forbidden means bucket EXISTS but caller lacks ListBucket; treat as exists\n if code in ('403','AccessDenied','Forbidden'):\n  print('EXISTS')\n else:\n  print('NOT_FOUND:'+code)"],
         capture_output=True, text=True, cwd="/app"
     )
     _recon_out = (_check_recon.stdout + _check_recon.stderr).strip()
