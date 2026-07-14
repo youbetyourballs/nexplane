@@ -401,3 +401,143 @@ class TestDeleteGkeNodePool:
                 )
         assert result.get("rolled_back") is True
         client_mock.create_node_pool.assert_called_once()
+
+
+class TestScaleGkeNodePool:
+    def _params(self):
+        return {
+            "cluster_name": "test-cluster",
+            "location": "us-central1-a",
+            "node_pool_name": "default-pool",
+            "node_count": 2,
+        }
+
+    def _connector(self, with_creds=False):
+        c = MagicMock()
+        c.credentials = _make_creds() if with_creds else {}
+        return c
+
+    def test_mock_path(self):
+        from app.connectors.executors.gcp.gcp_scale_gke_node_pool import execute
+        result = asyncio.get_event_loop().run_until_complete(
+            execute(self._params(), [], self._connector())
+        )
+        assert result.get("mock") is True
+        assert result.get("scaled") is True
+
+    def test_rollback_capability_full(self):
+        from app.connectors.executors.gcp import gcp_scale_gke_node_pool
+        assert gcp_scale_gke_node_pool.ROLLBACK_CAPABILITY == "full"
+
+    def test_execute_captures_prior_count(self):
+        from app.connectors.executors.gcp.gcp_scale_gke_node_pool import execute
+        from unittest.mock import AsyncMock
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        pool_mock = MagicMock()
+        pool_mock.initial_node_count = 1
+        client_mock.get_node_pool.return_value = pool_mock
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        client_mock.set_node_pool_size.return_value = op_mock
+        with patch("app.connectors.executors.gcp.gcp_scale_gke_node_pool.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_scale_gke_node_pool.poll_gke_operation", new_callable=AsyncMock):
+                result = asyncio.get_event_loop().run_until_complete(
+                    execute(self._params(), [], connector)
+                )
+        assert result["pre_state"]["node_count"] == 1
+        assert result["new_count"] == 2
+
+    def test_rollback_restores_count(self):
+        from app.connectors.executors.gcp.gcp_scale_gke_node_pool import rollback
+        from unittest.mock import AsyncMock
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        client_mock.set_node_pool_size.return_value = op_mock
+        execution_result = {
+            "cluster_name": "test-cluster",
+            "location": "us-central1-a",
+            "node_pool_name": "default-pool",
+            "project_id": "test-project",
+            "pre_state": {"node_count": 1},
+            "new_count": 2,
+        }
+        with patch("app.connectors.executors.gcp.gcp_scale_gke_node_pool.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_scale_gke_node_pool.poll_gke_operation", new_callable=AsyncMock):
+                result = asyncio.get_event_loop().run_until_complete(
+                    rollback(self._params(), execution_result, connector)
+                )
+        assert result.get("rolled_back") is True
+        client_mock.set_node_pool_size.assert_called_once()
+
+
+class TestUpdateGkeNodePool:
+    def _params(self):
+        return {
+            "cluster_name": "test-cluster",
+            "location": "us-central1-a",
+            "node_pool_name": "default-pool",
+            "display_name": "renamed-pool",
+        }
+
+    def _connector(self, with_creds=False):
+        c = MagicMock()
+        c.credentials = _make_creds() if with_creds else {}
+        return c
+
+    def test_mock_path(self):
+        from app.connectors.executors.gcp.gcp_update_gke_node_pool import execute
+        result = asyncio.get_event_loop().run_until_complete(
+            execute(self._params(), [], self._connector())
+        )
+        assert result.get("mock") is True
+        assert result.get("updated") is True
+
+    def test_rollback_capability_full(self):
+        from app.connectors.executors.gcp import gcp_update_gke_node_pool
+        assert gcp_update_gke_node_pool.ROLLBACK_CAPABILITY == "full"
+
+    def test_execute_captures_prior_config(self):
+        from app.connectors.executors.gcp.gcp_update_gke_node_pool import execute
+        from unittest.mock import AsyncMock
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        pool_mock = MagicMock()
+        pool_mock.name = "default-pool"
+        pool_mock.config.labels = {"env": "prod"}
+        client_mock.get_node_pool.return_value = pool_mock
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        client_mock.update_node_pool.return_value = op_mock
+        with patch("app.connectors.executors.gcp.gcp_update_gke_node_pool.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_update_gke_node_pool.poll_gke_operation", new_callable=AsyncMock):
+                result = asyncio.get_event_loop().run_until_complete(
+                    execute(self._params(), [], connector)
+                )
+        assert "pre_state" in result
+        assert result["updated"] is True
+
+    def test_rollback_restores_config(self):
+        from app.connectors.executors.gcp.gcp_update_gke_node_pool import rollback
+        from unittest.mock import AsyncMock
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        op_mock = MagicMock()
+        op_mock.name = "projects/test-project/locations/us-central1-a/operations/op1"
+        client_mock.update_node_pool.return_value = op_mock
+        execution_result = {
+            "cluster_name": "test-cluster",
+            "location": "us-central1-a",
+            "node_pool_name": "default-pool",
+            "project_id": "test-project",
+            "pre_state": {"display_name": "old-name", "labels": {}},
+        }
+        with patch("app.connectors.executors.gcp.gcp_update_gke_node_pool.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_update_gke_node_pool.poll_gke_operation", new_callable=AsyncMock):
+                result = asyncio.get_event_loop().run_until_complete(
+                    rollback(self._params(), execution_result, connector)
+                )
+        assert result.get("rolled_back") is True
+        client_mock.update_node_pool.assert_called_once()
