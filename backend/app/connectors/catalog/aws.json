@@ -2122,6 +2122,103 @@
       "rollback_connector_type": "aws",
       "estimated_duration_seconds": 15,
       "blast_radius_hint": "iam_key_permanently_deleted"
+    },
+    {
+      "action_id": "scan_lambda_env_vars",
+      "generic_action": "scan_lambda_env_vars",
+      "action_type": "read",
+      "execution_tier": 1,
+      "display_name": "Scan Lambda Environment Variables",
+      "description": "Search Lambda function environment variables for references to a migrating resource.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "search_terms", "type": "array", "items": {"type": "string"}, "required": true, "description": "Strings to search for (hostname, IP, ARN, DSN fragment, etc.)"},
+        {"name": "region", "type": "string", "required": false, "description": "AWS region (default: connector default region)"}
+      ],
+      "executor": "aws.scan_lambda_env_vars",
+      "rollback_strategy": "no_op",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "scan_ecs_task_defs",
+      "generic_action": "scan_ecs_task_defs",
+      "action_type": "read",
+      "execution_tier": 1,
+      "display_name": "Scan ECS Task Definitions",
+      "description": "Search ECS task definition environment variables and secrets references for a migrating resource.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "search_terms", "type": "array", "items": {"type": "string"}, "required": true},
+        {"name": "region", "type": "string", "required": false}
+      ],
+      "executor": "aws.scan_ecs_task_defs",
+      "rollback_strategy": "no_op",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "scan_rds_parameter_groups",
+      "generic_action": "scan_rds_parameter_groups",
+      "action_type": "read",
+      "execution_tier": 1,
+      "display_name": "Scan RDS Parameter Groups",
+      "description": "Search RDS parameter group values for references to a migrating resource.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "search_terms", "type": "array", "items": {"type": "string"}, "required": true},
+        {"name": "region", "type": "string", "required": false}
+      ],
+      "executor": "aws.scan_rds_parameter_groups",
+      "rollback_strategy": "no_op",
+      "estimated_duration_seconds": 60
+    },
+    {
+      "action_id": "scan_secrets_manager_metadata",
+      "generic_action": "scan_secrets_manager_metadata",
+      "action_type": "read",
+      "execution_tier": 1,
+      "display_name": "Scan Secrets Manager Metadata",
+      "description": "Search Secrets Manager secret names, descriptions, and tags (NOT values) for references to a migrating resource.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "search_terms", "type": "array", "items": {"type": "string"}, "required": true},
+        {"name": "region", "type": "string", "required": false}
+      ],
+      "executor": "aws.scan_secrets_manager_metadata",
+      "rollback_strategy": "no_op",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "scan_ssm_parameters_metadata",
+      "generic_action": "scan_ssm_parameters_metadata",
+      "action_type": "read",
+      "execution_tier": 1,
+      "display_name": "Scan SSM Parameter Metadata",
+      "description": "Search SSM Parameter Store parameter names and descriptions (NOT values) for references to a migrating resource.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "search_terms", "type": "array", "items": {"type": "string"}, "required": true},
+        {"name": "region", "type": "string", "required": false}
+      ],
+      "executor": "aws.scan_ssm_parameters_metadata",
+      "rollback_strategy": "no_op",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "scan_ec2_user_data",
+      "generic_action": "scan_ec2_user_data",
+      "action_type": "read",
+      "execution_tier": 1,
+      "display_name": "Scan EC2 User Data",
+      "description": "Search EC2 instance user data scripts for references to a migrating resource.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "search_terms", "type": "array", "items": {"type": "string"}, "required": true},
+        {"name": "instance_ids", "type": "array", "items": {"type": "string"}, "required": false, "description": "Specific instance IDs to scan; if omitted, scans all running instances"},
+        {"name": "region", "type": "string", "required": false}
+      ],
+      "executor": "aws.scan_ec2_user_data",
+      "rollback_strategy": "no_op",
+      "estimated_duration_seconds": 120
     }
   ]
 }
