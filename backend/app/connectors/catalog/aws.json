@@ -2278,20 +2278,20 @@
       "estimated_duration_seconds": 10
     },
     {
-      "action_id": "update_secrets_manager_secret_name",
-      "generic_action": "update_secrets_manager_secret_name",
+      "action_id": "update_secrets_manager_secret_description",
+      "generic_action": "update_secrets_manager_secret_description",
       "action_type": "change",
       "execution_tier": 1,
-      "display_name": "Update Secrets Manager Secret Name",
-      "description": "Update the description of a Secrets Manager secret to record the intended new name (not its value). AWS does not support renaming secrets directly. Saves old name for rollback.",
+      "display_name": "Update Secrets Manager Secret Description",
+      "description": "Update the description field of a Secrets Manager secret. Saves old description for rollback. Note: AWS does not support secret renaming — use this to track hostname references in secret descriptions.",
       "applicable_asset_types": ["cloud_account"],
       "parameters": [
         {"name": "secret_arn", "type": "string", "required": true},
-        {"name": "old_name", "type": "string", "required": true},
-        {"name": "new_name", "type": "string", "required": true},
+        {"name": "old_description", "type": "string", "required": true},
+        {"name": "new_description", "type": "string", "required": true},
         {"name": "region", "type": "string", "required": false}
       ],
-      "executor": "aws.update_secrets_manager_secret_name",
+      "executor": "aws.update_secrets_manager_secret_description",
       "rollback_strategy": "reconstitution",
       "estimated_duration_seconds": 10
     }

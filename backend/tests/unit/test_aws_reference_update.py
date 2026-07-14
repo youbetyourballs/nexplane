@@ -198,25 +198,77 @@ async def test_update_ssm_parameter_value_skips_if_mismatch():
 
 
 @pytest.mark.asyncio
-async def test_update_secrets_manager_secret_name_saves_rollback_data():
-    from app.connectors.executors.aws.reference_update import update_secrets_manager_secret_name
+async def test_update_ssm_parameter_value_rejects_securestring():
+    from app.connectors.executors.aws.reference_update import update_ssm_parameter_value
+
+    mock_cr = MagicMock()
+    mock_cr.parameters = {
+        "parameter_name": "/myapp/secret",
+        "old_value": "old-secret",
+        "new_value": "new-secret",
+    }
+    mock_connector = MagicMock()
+    mock_connector.credentials = {"access_key_id": "AK", "secret_access_key": "SK"}
+    mock_db = AsyncMock()
+
+    mock_ssm = MagicMock()
+    mock_ssm.get_parameter.return_value = {
+        "Parameter": {"Name": "/myapp/secret", "Value": "old-secret", "Type": "SecureString"}
+    }
+
+    with patch("boto3.client", return_value=mock_ssm):
+        result = await update_ssm_parameter_value(mock_cr, mock_connector, mock_db)
+
+    assert result["status"] == "error"
+    assert "SecureString" in result["reason"]
+    mock_ssm.put_parameter.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_secrets_manager_secret_description_saves_rollback_data():
+    from app.connectors.executors.aws.reference_update import update_secrets_manager_secret_description
 
     mock_cr = MagicMock()
     mock_cr.parameters = {
         "secret_arn": "arn:aws:secretsmanager:us-east-1:123:secret:old-db-creds-abc123",
-        "old_name": "old-db-creds",
-        "new_name": "new-db-creds",
+        "old_description": "Points to old-db.internal",
+        "new_description": "Points to new-db.internal",
     }
     mock_connector = MagicMock()
     mock_connector.credentials = {"access_key_id": "AK", "secret_access_key": "SK"}
     mock_db = AsyncMock()
 
     mock_sm = MagicMock()
+    mock_sm.describe_secret.return_value = {"Description": "Points to old-db.internal"}
     mock_sm.update_secret.return_value = {}
 
     with patch("boto3.client", return_value=mock_sm):
-        result = await update_secrets_manager_secret_name(mock_cr, mock_connector, mock_db)
+        result = await update_secrets_manager_secret_description(mock_cr, mock_connector, mock_db)
 
     assert result["status"] == "updated"
-    assert result["rollback_data"]["old_name"] == "old-db-creds"
+    assert result["rollback_data"]["old_description"] == "Points to old-db.internal"
     mock_sm.update_secret.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_secrets_manager_secret_description_skips_if_mismatch():
+    from app.connectors.executors.aws.reference_update import update_secrets_manager_secret_description
+
+    mock_cr = MagicMock()
+    mock_cr.parameters = {
+        "secret_arn": "arn:aws:secretsmanager:us-east-1:123:secret:old-db-creds-abc123",
+        "old_description": "expected old description",
+        "new_description": "new description",
+    }
+    mock_connector = MagicMock()
+    mock_connector.credentials = {"access_key_id": "AK", "secret_access_key": "SK"}
+    mock_db = AsyncMock()
+
+    mock_sm = MagicMock()
+    mock_sm.describe_secret.return_value = {"Description": "actual current description"}
+
+    with patch("boto3.client", return_value=mock_sm):
+        result = await update_secrets_manager_secret_description(mock_cr, mock_connector, mock_db)
+
+    assert result["status"] == "skipped"
+    mock_sm.update_secret.assert_not_called()

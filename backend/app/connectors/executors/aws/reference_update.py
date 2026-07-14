@@ -4,14 +4,13 @@
 """AWS reference update executors — reconstitution rollback pattern.
 
 AWS does not support renaming Secrets Manager secrets directly. The
-update_secrets_manager_secret_name action updates the secret Description
-to record the intended new name. To truly rename a secret you must create
+update_secrets_manager_secret_description action updates the secret Description
+field to track hostname references. To truly rename a secret you must create
 a new secret with the desired name, copy the value, and delete the old one
 — that workflow is out of scope for this action.
 """
 
 import logging
-import boto3
 from app.connectors.executors.aws.reference_scan import _boto_client
 
 logger = logging.getLogger(__name__)
@@ -90,14 +89,9 @@ async def update_ecs_task_def_env(cr, connector, db) -> dict:
             "reason": f"env var {key}={old_val} not found in container {container_name}",
         }
 
-    register_kwargs = {
-        "family": td["family"],
-        "containerDefinitions": containers,
-    }
-    for k in ("networkMode", "volumes", "requiresCompatibilities", "cpu", "memory", "executionRoleArn", "taskRoleArn"):
-        if k in td:
-            register_kwargs[k] = td[k]
-
+    AWS_MANAGED_FIELDS = {"taskDefinitionArn", "revision", "status", "registeredAt", "registeredBy", "deregisteredAt", "compatibilities", "requiresAttributes"}
+    register_kwargs = {k: v for k, v in td.items() if k not in AWS_MANAGED_FIELDS and k != "containerDefinitions"}
+    register_kwargs["containerDefinitions"] = containers
     new_td = client.register_task_definition(**register_kwargs)["taskDefinition"]
 
     return {
@@ -109,11 +103,11 @@ async def update_ecs_task_def_env(cr, connector, db) -> dict:
 
 async def rollback_ecs_task_def_env(cr, connector, db) -> dict:
     """ECS rollback: the old task definition revision still exists in AWS.
-    Update services to point back to old_task_def_arn from rollback_data."""
+    Operators must manually update services to point back to old_task_def_arn."""
     rb = (cr.execution_result or {}).get("rollback_data", {})
     return {
-        "status": "rolled_back",
-        "note": "Update ECS services to use old_task_def_arn from rollback_data",
+        "status": "manual_action_required",
+        "reason": "ECS task definition rollback requires updating all services that reference the new task def ARN to point back to the old one. See rollback_data for old_task_def_arn.",
         "rollback_data": rb,
     }
 
@@ -127,8 +121,12 @@ async def update_ssm_parameter_value(cr, connector, db) -> dict:
 
     client = _boto_client("ssm", connector, region)
     current = client.get_parameter(Name=param_name, WithDecryption=False)["Parameter"]
+
+    if current.get("Type") == "SecureString":
+        return {"status": "error", "reason": "SecureString parameters are not supported — use Secrets Manager for encrypted values"}
+
     if current["Value"] != old_val:
-        return {"status": "skipped", "reason": "current value != expected old_value"}
+        return {"status": "skipped", "reason": f"current value '{current['Value']}' != expected old_value '{old_val}'"}
 
     client.put_parameter(Name=param_name, Value=new_val, Overwrite=True)
     return {
@@ -145,26 +143,33 @@ async def rollback_ssm_parameter_value(cr, connector, db) -> dict:
     return {"status": "rolled_back"}
 
 
-async def update_secrets_manager_secret_name(cr, connector, db) -> dict:
-    """AWS does not support renaming secrets directly. This action updates the
-    secret Description to record the intended new name. To physically rename,
-    create a new secret, copy the value, then delete the old one."""
+async def update_secrets_manager_secret_description(cr, connector, db) -> dict:
+    """Update the description field of a Secrets Manager secret.
+    Saves old description for rollback. AWS does not support secret renaming."""
     params = cr.parameters or {}
     secret_arn = params["secret_arn"]
-    new_name = params["new_name"]
+    old_desc = params["old_description"]
+    new_desc = params["new_description"]
     region = params.get("region")
 
     client = _boto_client("secretsmanager", connector, region)
-    client.update_secret(SecretId=secret_arn, Description=f"Renamed to: {new_name}")
+    current_desc = client.describe_secret(SecretId=secret_arn).get("Description", "")
+    if current_desc != old_desc:
+        return {
+            "status": "skipped",
+            "reason": f"current description '{current_desc}' != expected old_description '{old_desc}'",
+        }
+
+    client.update_secret(SecretId=secret_arn, Description=new_desc)
     return {
         "status": "updated",
         "secret_arn": secret_arn,
-        "rollback_data": {"secret_arn": secret_arn, "old_name": params["old_name"], "region": region},
+        "rollback_data": {"secret_arn": secret_arn, "old_description": old_desc, "region": region},
     }
 
 
-async def rollback_secrets_manager_secret_name(cr, connector, db) -> dict:
+async def rollback_secrets_manager_secret_description(cr, connector, db) -> dict:
     rb = (cr.execution_result or {}).get("rollback_data", {})
     client = _boto_client("secretsmanager", connector, region=rb.get("region"))
-    client.update_secret(SecretId=rb["secret_arn"], Description=f"Rolled back name to: {rb['old_name']}")
+    client.update_secret(SecretId=rb["secret_arn"], Description=rb["old_description"])
     return {"status": "rolled_back"}
