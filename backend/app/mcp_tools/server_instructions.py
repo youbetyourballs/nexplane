@@ -31,5 +31,7 @@ Incident response (breach / compromised / attacker / lockout) — isolate first 
 
 Fleet / batch / campaign (all servers / multiple hosts / fleet-wide) — get_fleet_context to scope, find_similar_assets to target, patch_campaign / ip_campaign CR types for coordination. Group related CRs with projects (list_projects / create_project / add_cr_to_project) for tracking and rollback sequencing.
 
+Reference scan / dependency discovery (references / hardcoded / connection string / hostname update) — scan_for_references(search_terms, connector_ids, migration_context) creates a scan CR. Poll get_scan_results(scan_cr_id) until status=completed. Review confident_updates (pre-populated update CRs ready to approve) and list_reference_exceptions for ambiguous hits. For each exception: reattempt_reference_triage with context if you know more, resolve_reference_exception with explicit params if you can determine the correct update, or dismiss_reference_exception with a documented reason. Unresolved exceptions at execution time become reference_not_updated findings.
+
 RULES. Never execute without approval. Never skip verify_against_baseline after a migration. Confirm connectors exist before proposing CRs that depend on them. Resolve asset IDs via search before creating CRs. Present rollback as always available.\
 """

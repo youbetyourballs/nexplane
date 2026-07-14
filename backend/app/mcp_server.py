@@ -101,5 +101,6 @@ def create_mcp_app():
     import app.mcp_tools.planning_context  # noqa: F401
     import app.mcp_tools.projects  # noqa: F401
     import app.mcp_tools.migration  # noqa: F401
+    import app.mcp_tools.reference_scan  # noqa: F401
 
     return mcp.sse_app()
