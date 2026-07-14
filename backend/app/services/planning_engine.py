@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 import importlib.util
-import inspect
 import json
 import logging
 import pathlib
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -147,6 +145,35 @@ def _resolve_parameters(generic_action: str, desired: dict, assets: list[Asset])
     )
 
 
+def _validate_rollback_capability(executor_module, connector_type: str, action_id: str) -> str | None:
+    """
+    Read ROLLBACK_CAPABILITY from an executor module.
+
+    Returns:
+        None if capability is "full"
+        A rollback_warning string if capability is "irreversible"
+
+    Raises:
+        ValueError if the constant is missing, invalid, or "irreversible" without ROLLBACK_REASON.
+    """
+    capability = getattr(executor_module, "ROLLBACK_CAPABILITY", None)
+    if capability not in ("full", "irreversible"):
+        raise ValueError(
+            f"Executor {connector_type}.{action_id} does not declare ROLLBACK_CAPABILITY "
+            f"(got {capability!r}). Valid values: 'full' or 'irreversible'. "
+            "This is a code defect — fix the executor before this CR can be planned."
+        )
+    if capability == "irreversible":
+        reason = getattr(executor_module, "ROLLBACK_REASON", None)
+        if not reason:
+            raise ValueError(
+                f"Executor {connector_type}.{action_id} declares ROLLBACK_CAPABILITY = 'irreversible' "
+                "but does not declare ROLLBACK_REASON. Both are required."
+            )
+        return f"This step cannot be rolled back: {reason}"
+    return None
+
+
 def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[Asset], catalog) -> dict:
     generic_action = step_def["generic_action"]
     asset_types = [a.asset_type.value for a in assets]
@@ -213,22 +240,11 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
                 f"required 'execute' and 'rollback' attributes — ExecutorProtocol contract violated"
             )
 
-        # Warn when the step has a rollback_action but the executor's rollback is a known no-op.
-        # Detect no-op rollbacks by inspecting the module source for the pattern.
-        if rollback_action:
-            try:
-                source_file = inspect.getfile(executor_module)
-                source_text = pathlib.Path(source_file).read_text(encoding="utf-8")
-                if re.search(r"rolled_back.*?False", source_text):
-                    rollback_warning = (
-                        f"Executor {best.connector_type}.{best.action_id} declares a rollback_action "
-                        f"('{rollback_action}') but its rollback() implementation returns rolled_back=False. "
-                        f"Reconstitution rollback may be incomplete — review before approving."
-                    )
-                    log.warning("Planning: %s", rollback_warning)
-            except (TypeError, OSError):
-                # Built-in or bytecode-only module — skip source inspection
-                pass
+        rollback_warning = _validate_rollback_capability(
+            executor_module, best.connector_type, best.action_id
+        )
+        if rollback_warning:
+            log.info("Planning: irreversible step %s.%s: %s", best.connector_type, best.action_id, rollback_warning)
     except ImportError as exc:
         # Executor module not yet implemented — surface as planning warning, not hard failure,
         # since some actions are catalog-declared before implementation ships.
