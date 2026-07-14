@@ -587,7 +587,7 @@ class TestGetGkeKubeconfig:
                 creds_obj = MagicMock()
                 creds_obj.token = "fake-token"
                 mock_creds.return_value = creds_obj
-                with patch("app.connectors.executors.gcp.gcp_get_gke_kubeconfig.Request") as mock_request:
+                with patch("google.auth.transport.requests.Request") as mock_request:
                     result = asyncio.get_event_loop().run_until_complete(
                         execute(self._params(), [], connector)
                     )
