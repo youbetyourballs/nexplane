@@ -17,10 +17,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     ec2 = get_ec2_client(creds)
     loop = asyncio.get_event_loop()
 
-    def _capture_and_terminate():
+    def _capture():
         desc = ec2.describe_instances(InstanceIds=[instance_id])
         instance = desc["Reservations"][0]["Instances"][0]
-        pre_state = {
+        return {
             "instance_id": instance_id,
             "image_id": instance["ImageId"],
             "instance_type": instance["InstanceType"],
@@ -32,14 +32,18 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "user_data": ec2.get_attribute(InstanceId=instance_id, Attribute="userData")
                 .get("UserData", {}).get("Value"),
         }
+
+    def _terminate():
         resp = ec2.terminate_instances(InstanceIds=[instance_id])
         change = resp['TerminatingInstances'][0]
         waiter = ec2.get_waiter('instance_terminated')
         waiter.wait(InstanceIds=[instance_id], WaiterConfig={'Delay': 5, 'MaxAttempts': 60})
-        return pre_state, change
+        return change
 
-    pre_state, change = await loop.run_in_executor(None, _capture_and_terminate)
+    # Step 1: capture pre-state (read-only, safe)
+    pre_state = await loop.run_in_executor(None, _capture)
 
+    # Step 2: persist pre-state to DB (must succeed before destruction)
     from app.services.pre_state_store import PreStateStore
     from app.database import AsyncSessionLocal
     import uuid as _uuid
@@ -47,12 +51,15 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     async with AsyncSessionLocal() as db:
         await PreStateStore.capture(
             db,
-            _uuid.UUID(parameters["cr_id"]),
-            parameters.get("step_id", "step_0"),
-            _uuid.UUID(parameters["org_id"]),
+            _uuid.UUID(str(parameters["cr_id"])),
+            str(parameters.get("step_id", "step_0")),
+            _uuid.UUID(str(parameters["org_id"])),
             pre_state,
         )
         await db.commit()
+
+    # Step 3: only after DB write succeeds, terminate
+    change = await loop.run_in_executor(None, _terminate)
 
     return {
         "action": "terminate_instance",
