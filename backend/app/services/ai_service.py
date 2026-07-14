@@ -4,6 +4,7 @@
 import json
 import re
 from app.services.secrets_service import SecretsService
+from app.mcp_tools.server_instructions import NEXPLANE_SERVER_INSTRUCTIONS
 
 
 _PROVIDER_DEFAULTS = {
@@ -45,9 +46,13 @@ def _build_change_types_text() -> str:
     return _CHANGE_TYPES_TEXT_CACHE
 
 
-_SYSTEM_PROMPT_TEMPLATE = """You are a planning assistant for Nexplane, a secure infrastructure change management platform.
+_SYSTEM_PROMPT_TEMPLATE = (
+    NEXPLANE_SERVER_INSTRUCTIONS
+    + """
 
-The operator is planning a project with this goal: {goal}
+---
+
+You are the Nexplane AI planning assistant. The operator is planning a project with this goal: {goal}
 
 ## Available Assets ({asset_count} total)
 
@@ -106,6 +111,7 @@ Rules:
 - seq is a 1-based integer. depends_on lists seq values this CR must follow.
 - Only emit <nexplane-proposal> once, when the full plan is ready.
 - Do not include <nexplane-proposal> in clarifying question responses."""
+)
 
 
 def _build_asset_context_text(assets: list[dict]) -> str:
