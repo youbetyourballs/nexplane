@@ -94,6 +94,24 @@ async def test_purge_expired_deletes_expired_rows():
 
 
 @pytest.mark.asyncio
+async def test_retrieve_returns_none_when_expired():
+    db = _mock_db()
+    cr_id = uuid.uuid4()
+    org_id = uuid.uuid4()
+
+    snapshot = MagicMock()
+    snapshot.state_json = {"some": "data"}
+    snapshot.expires_at = datetime.now(timezone.utc) - timedelta(days=1)  # expired
+
+    result_mock = MagicMock()
+    result_mock.scalar_one_or_none.return_value = None  # expires_at filter excludes it
+    db.execute.return_value = result_mock
+
+    result = await PreStateStore.retrieve(db, cr_id, "step_0", org_id)
+    assert result is None
+
+
+@pytest.mark.asyncio
 async def test_capture_uses_default_30_days_when_org_settings_missing():
     db = _mock_db()
     result_mock = MagicMock()

@@ -55,6 +55,7 @@ class PreStateStore:
                 PreStateSnapshot.cr_id == cr_id,
                 PreStateSnapshot.step_id == step_id,
                 PreStateSnapshot.organization_id == org_id,
+                PreStateSnapshot.expires_at > datetime.now(timezone.utc),
             )
         )
         snapshot = result.scalar_one_or_none()
@@ -68,5 +69,4 @@ class PreStateStore:
         result = await db.execute(
             delete(PreStateSnapshot).where(PreStateSnapshot.expires_at < now)
         )
-        await db.flush()
         return result.rowcount
