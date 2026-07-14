@@ -15,7 +15,7 @@ sys.modules.setdefault("kubernetes.config", _k8s_stub.config)
 sys.modules.setdefault("yaml", sys.modules.get("yaml", MagicMock()))
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, PropertyMock
 
 
 def _make_connector():
@@ -163,15 +163,14 @@ async def test_scan_secrets_metadata_never_reads_data():
     from app.connectors.executors.kubernetes.reference_scan import scan_secrets_metadata
 
     secret = _make_secret(name="unrelated-secret")
-    # If data were accessed, it would return a MagicMock which would not be iterable as expected
-    secret.data = MagicMock()  # Should NEVER be called
+    # Make .data raise an AssertionError if accessed, ensuring scan_secrets_metadata never reads it
+    type(secret).data = PropertyMock(side_effect=AssertionError("scan_secrets_metadata must not access .data"))
     mock_clients = {"core": _make_core_api_with_secrets([secret]), "apps": MagicMock(), "networking": MagicMock()}
 
     with patch("app.connectors.executors.kubernetes.reference_scan.get_k8s_client", return_value=mock_clients):
         result = await scan_secrets_metadata(_make_cr(["unrelated"]), _make_connector(), _make_db())
 
-    # Verify data attribute was never accessed
-    secret.data.assert_not_called()
+    # If we reach this point without an AssertionError, .data was never accessed
     assert result["scanned"] == 1
 
 
