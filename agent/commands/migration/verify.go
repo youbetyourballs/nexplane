@@ -11,6 +11,28 @@ import (
 	"time"
 )
 
+// toSliceOfMaps converts []interface{} (from JSON unmarshal) to []map[string]any.
+// Direct type assertion .([]map[string]any) always fails for JSON-decoded values.
+func toSliceOfMaps(v any) []map[string]any {
+	if v == nil {
+		return nil
+	}
+	if typed, ok := v.([]map[string]any); ok {
+		return typed
+	}
+	iface, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(iface))
+	for _, item := range iface {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // VerifyAgainstBaselineExecute compares the current system state to the stored
 // behavioral baseline across four production quality layers.
 func VerifyAgainstBaselineExecute(params map[string]any) (map[string]any, error) {
@@ -84,9 +106,9 @@ func verifyServiceLayer(baseline map[string]any, targetHost string) map[string]a
 		return map[string]any{"passed": true, "checks": checks}
 	}
 
-	baselineEndpoints, _ := baseline["endpoints"].([]map[string]any)
+	baselineEndpoints := toSliceOfMaps(baseline["endpoints"])
 	for _, ep := range baselineEndpoints {
-		port, _ := ep["port"].(int)
+		port := extractPortFromMap(ep)
 		if port == 0 {
 			continue
 		}
@@ -118,7 +140,7 @@ func verifyApplicationLayer(baseline map[string]any, targetHost string, latencyT
 		return map[string]any{"passed": true, "checks": checks}
 	}
 
-	baselineEndpoints, _ := baseline["endpoints"].([]map[string]any)
+	baselineEndpoints := toSliceOfMaps(baseline["endpoints"])
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	for _, ep := range baselineEndpoints {
@@ -173,7 +195,7 @@ func verifyDataLayer(baseline map[string]any, targetHost string, rowCountToleran
 		return map[string]any{"passed": true, "checks": checks}
 	}
 
-	baselineDeps, _ := baseline["dependencies"].([]map[string]any)
+	baselineDeps := toSliceOfMaps(baseline["dependencies"])
 	for _, dep := range baselineDeps {
 		depType, _ := dep["type"].(string)
 		if depType != "db" {
