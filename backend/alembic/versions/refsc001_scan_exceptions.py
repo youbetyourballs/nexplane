@@ -19,6 +19,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Add new change_type enum values for reference scan/update
+    op.execute("ALTER TYPE change_type ADD VALUE IF NOT EXISTS 'scan_for_references'")
+    op.execute("ALTER TYPE change_type ADD VALUE IF NOT EXISTS 'update_reference'")
+
     op.create_table(
         "scan_exceptions",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
