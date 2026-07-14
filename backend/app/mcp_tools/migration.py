@@ -108,6 +108,140 @@ async def get_application_profile(
 
 
 @mcp.tool()
+async def discover_application_profile(
+    token: str,
+    asset_id: str,
+    title: str = "Discover application profile",
+) -> dict[str, Any]:
+    """
+    Create a draft CR that maps what is running on a host and what it depends on —
+    endpoints, services, library versions, config files, and dependencies — without
+    requiring operator knowledge of the application.
+
+    Produces an application_profile asset that is the starting point for
+    capture_behavioral_baseline and verify_against_baseline.
+
+    The CR is created in draft state. Submit for approval then execute separately.
+    """
+    from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType
+
+    user, db, db_cm = await _auth(token)
+    try:
+        cr = ChangeRequest(
+            organization_id=user.organization_id,
+            requester_id=user.id,
+            change_type=ChangeType.catalog_action,
+            target_asset_ids=[asset_id],
+            title=title,
+            status=ChangeRequestStatus.draft,
+            desired_outcome={
+                "connector_type": "nexplane_agent",
+                "action_id": "discover_application_profile",
+                "params": {"asset_id": asset_id},
+                "rollback_strategy": "snapshot_restore",
+            },
+        )
+        db.add(cr)
+        await db.flush()
+        await db.commit()
+        await db.refresh(cr)
+        return {"cr_id": str(cr.id), "status": str(cr.status), "title": cr.title}
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def capture_behavioral_baseline(
+    token: str,
+    profile_asset_id: str,
+    observation_window_seconds: int = 1200,
+    title: str = "Capture behavioral baseline",
+) -> dict[str, Any]:
+    """
+    Create a draft CR that records how the application behaves right now —
+    HTTP endpoint latency/status, service states, dependency row counts —
+    as the success benchmark for post-migration verification.
+
+    Run this against the application_profile asset produced by discover_application_profile.
+    Default observation window is 20 minutes; reduce for testing (minimum meaningful: 60s).
+
+    The CR is created in draft state. Submit for approval then execute separately.
+    """
+    from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType
+
+    user, db, db_cm = await _auth(token)
+    try:
+        cr = ChangeRequest(
+            organization_id=user.organization_id,
+            requester_id=user.id,
+            change_type=ChangeType.catalog_action,
+            target_asset_ids=[profile_asset_id],
+            title=title,
+            status=ChangeRequestStatus.draft,
+            desired_outcome={
+                "connector_type": "nexplane_agent",
+                "action_id": "capture_behavioral_baseline",
+                "params": {"observation_window_seconds": observation_window_seconds},
+                "rollback_strategy": "snapshot_restore",
+            },
+        )
+        db.add(cr)
+        await db.flush()
+        await db.commit()
+        await db.refresh(cr)
+        return {"cr_id": str(cr.id), "status": str(cr.status), "title": cr.title}
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
+async def verify_against_baseline(
+    token: str,
+    profile_asset_id: str,
+    title: str = "Verify against behavioral baseline",
+) -> dict[str, Any]:
+    """
+    Create a draft CR that confirms the (migrated) system matches its pre-migration
+    behavioral benchmark across four production quality layers:
+      - Infrastructure: host reachability
+      - Service: expected ports open
+      - Application: HTTP endpoints returning correct status within latency threshold
+      - Data: database dependencies reachable
+
+    Failure in Application or Data layers triggers FILO rollback by the workflow.
+    Infrastructure and Service failures are surfaced as warnings only.
+
+    Run against the same application_profile asset used for capture_behavioral_baseline.
+    The CR is created in draft state. Submit for approval then execute separately.
+    """
+    from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType
+
+    user, db, db_cm = await _auth(token)
+    try:
+        cr = ChangeRequest(
+            organization_id=user.organization_id,
+            requester_id=user.id,
+            change_type=ChangeType.catalog_action,
+            target_asset_ids=[profile_asset_id],
+            title=title,
+            status=ChangeRequestStatus.draft,
+            desired_outcome={
+                "connector_type": "nexplane_agent",
+                "action_id": "verify_against_baseline",
+                "params": {},
+                "rollback_strategy": "snapshot_restore",
+            },
+        )
+        db.add(cr)
+        await db.flush()
+        await db.commit()
+        await db.refresh(cr)
+        return {"cr_id": str(cr.id), "status": str(cr.status), "title": cr.title}
+    finally:
+        await db_cm.__aexit__(None, None, None)
+
+
+@mcp.tool()
 async def list_database_instances(
     token: str,
     environment: str = None,
