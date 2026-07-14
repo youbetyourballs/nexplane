@@ -125,7 +125,7 @@ async def lifespan(app: FastAPI):
             await db.commit()
             log.info("Purged %d expired pre_state_snapshots", count)
 
-    _escalation_scheduler.add_job(_purge_pre_state, "cron", hour=3, minute=0, id="purge_pre_state", replace_existing=True)
+    _escalation_scheduler.add_job(_purge_pre_state, "cron", hour=3, minute=0, id="purge_pre_state", replace_existing=True, max_instances=1)
     _escalation_scheduler.start()
     # Scrub orphaned CRs — any CR still in-flight when the backend
     # restarted will never complete; mark them failed now so the
