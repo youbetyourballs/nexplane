@@ -541,3 +541,57 @@ class TestUpdateGkeNodePool:
                 )
         assert result.get("rolled_back") is True
         client_mock.update_node_pool.assert_called_once()
+
+
+class TestGetGkeKubeconfig:
+    def _params(self):
+        return {"cluster_name": "test-cluster", "location": "us-central1-a"}
+
+    def _connector(self, with_creds=False):
+        c = MagicMock()
+        c.credentials = _make_creds() if with_creds else {}
+        return c
+
+    def test_mock_path_returns_kubeconfig_string(self):
+        from app.connectors.executors.gcp.gcp_get_gke_kubeconfig import execute
+        result = asyncio.get_event_loop().run_until_complete(
+            execute(self._params(), [], self._connector())
+        )
+        assert result.get("mock") is True
+        assert "kubeconfig" in result
+        assert "apiVersion" in result["kubeconfig"]
+
+    def test_rollback_capability_full(self):
+        from app.connectors.executors.gcp import gcp_get_gke_kubeconfig
+        assert gcp_get_gke_kubeconfig.ROLLBACK_CAPABILITY == "full"
+
+    def test_rollback_returns_read_only(self):
+        from app.connectors.executors.gcp.gcp_get_gke_kubeconfig import rollback
+        result = asyncio.get_event_loop().run_until_complete(
+            rollback(self._params(), {}, self._connector())
+        )
+        assert result.get("rolled_back") is False
+        assert result.get("reason") == "read-only"
+
+    def test_execute_builds_valid_yaml(self):
+        from app.connectors.executors.gcp.gcp_get_gke_kubeconfig import execute
+        import base64
+        connector = self._connector(with_creds=True)
+        client_mock = MagicMock()
+        cluster_mock = MagicMock()
+        cluster_mock.endpoint = "1.2.3.4"
+        cluster_mock.master_auth.cluster_ca_certificate = base64.b64encode(b"fake-ca").decode()
+        client_mock.get_cluster.return_value = cluster_mock
+        with patch("app.connectors.executors.gcp.gcp_get_gke_kubeconfig.get_container_client", return_value=client_mock):
+            with patch("app.connectors.executors.gcp.gcp_get_gke_kubeconfig.get_credentials") as mock_creds:
+                creds_obj = MagicMock()
+                creds_obj.token = "fake-token"
+                mock_creds.return_value = creds_obj
+                with patch("app.connectors.executors.gcp.gcp_get_gke_kubeconfig.Request") as mock_request:
+                    result = asyncio.get_event_loop().run_until_complete(
+                        execute(self._params(), [], connector)
+                    )
+        kubeconfig = result.get("kubeconfig", "")
+        assert "apiVersion: v1" in kubeconfig
+        assert "test-cluster" in kubeconfig
+        assert "1.2.3.4" in kubeconfig
