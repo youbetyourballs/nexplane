@@ -16,3 +16,9 @@ def get_credentials(creds: dict):
 
 def get_project_id(creds: dict) -> str:
     return creds["project_id"]
+
+
+def get_container_client(creds: dict):
+    from google.cloud import container_v1
+    credentials = get_credentials(creds)
+    return container_v1.ClusterManagerClient(credentials=credentials)
