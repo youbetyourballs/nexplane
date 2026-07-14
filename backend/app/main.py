@@ -59,6 +59,7 @@ from app.routers.version import router as version_router
 from app.services.upgrade_verify import run_startup_verify as _run_upgrade_verify
 from app.routers import catalog as catalog_router
 from app.routers import capabilities as capabilities_router
+from app.models.scan_exception import ScanException  # noqa: F401
 from app.routers.notification_routing import router as notification_routing_router
 from app.routers.logs import router as logs_router
 from app.routers.metrics import router as metrics_router

@@ -1,0 +1,11 @@
+{
+  "change_type": "scan_for_references",
+  "display_name": "Scan for References",
+  "description": "Scan infrastructure, configuration, and code surfaces to find all references to a target asset, credential, or identifier.",
+  "steps": [
+    {"generic_action": "scan_for_references", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": ""
+}

@@ -560,6 +560,9 @@ class ChangeType(str, enum.Enum):
     # Generic catalog action
     catalog_action = "catalog_action"
     catalog_workflow = "catalog_workflow"
+    # Reference scan and update
+    scan_for_references = "scan_for_references"
+    update_reference = "update_reference"
 
 
 class RiskLevel(str, enum.Enum):
