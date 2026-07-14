@@ -2,6 +2,7 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 import asyncio
+from ._client import get_container_client, get_credentials, get_project_id
 
 ROLLBACK_CAPABILITY = "full"
 
@@ -34,8 +35,6 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     if not creds:
         return {"kubeconfig": _MOCK_KUBECONFIG, "cluster_name": cluster_name, "mock": True}
-
-    from ._client import get_container_client, get_credentials, get_project_id
 
     project_id = get_project_id(creds)
     client = get_container_client(creds)
