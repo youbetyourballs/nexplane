@@ -963,6 +963,22 @@ def _get_oci_lb_client():
     return oci.load_balancer.LoadBalancerClient(config)
 
 
+def _get_oci_container_engine_client():
+    """Return an OCI ContainerEngineClient using cached credentials."""
+    creds = _get_oci_creds()
+    if not creds:
+        return None
+    import oci
+    config = {
+        "user": creds["user"],
+        "key_content": creds["private_key"],
+        "fingerprint": creds["fingerprint"],
+        "tenancy": creds["tenancy"],
+        "region": creds.get("region", "us-ashburn-1"),
+    }
+    return oci.container_engine.ContainerEngineClient(config)
+
+
 # ---------------------------------------------------------------------------
 # AWS-specific cleanup (called by test_aws_live.py cleanup())
 # ---------------------------------------------------------------------------
