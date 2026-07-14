@@ -120,3 +120,10 @@ def get_artifacts_client(creds: dict):
     import oci
     config = get_oci_config(creds)
     return oci.artifacts.ArtifactsClient(config)
+
+
+def get_container_engine_client(creds: dict):
+    """Return oci.container_engine.ContainerEngineClient authenticated with stored credentials."""
+    import oci
+    config = get_oci_config(creds)
+    return oci.container_engine.ContainerEngineClient(config)
