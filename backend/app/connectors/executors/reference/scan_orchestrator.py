@@ -88,7 +88,8 @@ async def _run_agent_scans(cr, connector, asset_ids, db) -> list:
 async def orchestrate_scan(cr, db: AsyncSession, secrets_svc, settings) -> dict:
     """Fan out reference scans across all configured connectors, resolve identities,
     triage with AI, persist exceptions, and return a summary dict."""
-    params = cr.parameters or {}
+    # Parameters may be stored as `parameters` (proxy CRs) or `desired_outcome` (real CRs)
+    params = getattr(cr, "parameters", None) or getattr(cr, "desired_outcome", None) or {}
     org_id = cr.organization_id
     migration_context = params.get("migration_context", {})
     connector_configs = params.get("connectors", [])

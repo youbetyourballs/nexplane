@@ -62,7 +62,11 @@ def _get_connector(client: NexplaneClient, connector_type: str):
 def _run_scan_cr(client: NexplaneClient, title: str, connector_type: str, connector_id: str,
                  extra_params: dict | None = None) -> dict:
     """Create, approve, execute a scan_for_references CR and wait for completion."""
-    params: dict = {
+    # The ChangeRequest model uses desired_outcome as the single parameters store.
+    # Scan parameters (search_terms, connectors, migration_context) go inside it.
+    desired: dict = {
+        "rollback_strategy": "snapshot_restore",
+        "_smoke_test": True,
         "search_terms": [SEARCH_TERM],
         "migration_context": {
             "source_term": SEARCH_TERM,
@@ -72,14 +76,13 @@ def _run_scan_cr(client: NexplaneClient, title: str, connector_type: str, connec
         "connectors": [{"connector_type": connector_type, "connector_id": connector_id}],
     }
     if extra_params:
-        params.update(extra_params)
+        desired.update(extra_params)
 
     cr = client.post("/change-requests", json={
         "title": title,
         "description": f"Smoke test: {title}",
         "change_type": "scan_for_references",
-        "desired_outcome": {"rollback_strategy": "snapshot_restore", "_smoke_test": True},
-        "parameters": params,
+        "desired_outcome": desired,
     })
     cr_id = cr["id"]
     client.post(f"/change-requests/{cr_id}/plan")
