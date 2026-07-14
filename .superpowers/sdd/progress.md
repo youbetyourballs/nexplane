@@ -273,3 +273,4 @@ Base commit: 3662e90
 - Task 4: complete (commits 7778e30..e133269, review clean — oci_add_oke_node_pool + oci_delete_oke_node_pool, PreStateStore drain advisory, 11/11 tests. Minor: add rollback should guard against empty node_pool_id before SDK call)
 - Task 5: complete (commits e133269..d6a23f3, review clean — oci_scale_oke_node_pool + oci_update_oke_node_pool, 9/9 tests)
 Task 6: complete (commits d6a23f3..cf8142d, review clean — oci_get_oke_kubeconfig executor, 7 OKE catalog entries, 37/37 tests)
+- Task 7: complete (commit b0e4e79, smoke xfail LimitExceeded on free-tier tenancy — executor code correct, matches OCIR xfail pattern from Spec 1)
