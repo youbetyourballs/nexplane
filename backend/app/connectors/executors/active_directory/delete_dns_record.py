@@ -12,6 +12,8 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 # ---------------------------------------------------------------------------
 # WinRM helpers (same pattern as dc_integrity_check)
@@ -113,6 +115,25 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         None,
         lambda: _delete_record(creds, zone_name, record_name, record_type, dc_hostname),
     )
+
+    from app.services.pre_state_store import PreStateStore
+    from app.database import AsyncSessionLocal
+    import uuid as _uuid
+    async with AsyncSessionLocal() as db:
+        await PreStateStore.capture(
+            db,
+            _uuid.UUID(str(parameters["cr_id"])),
+            str(parameters.get("step_id", "step_0")),
+            _uuid.UUID(str(parameters["org_id"])),
+            {
+                "record_name": record_name,
+                "record_type": record_type,
+                "zone_name": zone_name,
+                "value": previous_value,
+                "ttl": parameters.get("ttl", 300),
+            },
+        )
+        await db.commit()
 
     return {
         "zone_name": zone_name,
