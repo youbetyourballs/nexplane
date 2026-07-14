@@ -198,6 +198,21 @@ async def activity_execute_change(
                 **plan_params,
                 **{k: v for k, v in carried_context.items() if not plan_params.get(k)},
             }
+            # Inject cr_id, org_id, and step_id so executors that use PreStateStore.capture()
+            # can persist pre-state without receiving these through plan parameters.
+            parameters.setdefault("cr_id", change_request_id)
+            parameters.setdefault("step_id", f"step_{step.get('step_number', 0)}")
+            # Resolve org_id from the CR row if not already in parameters
+            if "org_id" not in parameters:
+                try:
+                    _cr_row = (await db.execute(
+                        select(ChangeRequest).where(ChangeRequest.id == uuid.UUID(change_request_id))
+                    )).scalar_one_or_none()
+                    if _cr_row:
+                        parameters["org_id"] = str(_cr_row.organization_id)
+                except Exception:
+                    pass  # org_id injection is best-effort; executor will fail if it truly needs it
+
             step_connector_id = step.get("connector_id")
 
             # Look up the specific connector instance if we have its ID
@@ -390,7 +405,19 @@ async def activity_execute_rollback(
             rollback_params = {
                 **prior_result,
                 "confirm_terminate": True,  # rollback implies confirmation
+                "cr_id": change_request_id,
+                "step_id": f"step_{step.get('step_number', 0)}",
             }
+            # Inject org_id for PreStateStore.retrieve()
+            if "org_id" not in rollback_params:
+                try:
+                    _rb_cr_row = (await db.execute(
+                        select(ChangeRequest).where(ChangeRequest.id == uuid.UUID(change_request_id))
+                    )).scalar_one_or_none()
+                    if _rb_cr_row:
+                        rollback_params["org_id"] = str(_rb_cr_row.organization_id)
+                except Exception:
+                    pass
 
             # Recover asset_ids from the stored execution result (_asset_ids is set by
             # agent-based executors like apply_sysctl_hardening during forward execution).

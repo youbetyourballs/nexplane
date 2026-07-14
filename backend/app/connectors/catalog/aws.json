@@ -1023,14 +1023,15 @@
           "name": "bucket_name"
         }
       ], 
-      "execution_tier": 1, 
-      "rollback_action": null, 
+      "execution_tier": 1,
+      "rollback_action": "delete_s3_bucket",
+      "rollback_connector_type": "aws",
       "applicable_asset_types": [
         "storage_bucket"
-      ], 
-      "action_type": "change", 
-      "executor": "aws.delete_s3_bucket", 
-      "generic_action": "delete_s3_bucket", 
+      ],
+      "action_type": "change",
+      "executor": "aws.delete_s3_bucket",
+      "generic_action": "delete_s3_bucket",
       "action_id": "delete_s3_bucket", 
       "estimated_duration_seconds": 30
     }, 
