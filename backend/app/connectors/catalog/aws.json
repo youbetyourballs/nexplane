@@ -2219,6 +2219,81 @@
       "executor": "aws.scan_ec2_user_data",
       "rollback_strategy": "no_op",
       "estimated_duration_seconds": 120
+    },
+    {
+      "action_id": "update_lambda_env_var",
+      "generic_action": "update_lambda_env_var",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Update Lambda Environment Variable",
+      "description": "Update a single Lambda function environment variable. Saves old value for rollback.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "function_arn", "type": "string", "required": true},
+        {"name": "env_var_key", "type": "string", "required": true},
+        {"name": "old_value", "type": "string", "required": true},
+        {"name": "new_value", "type": "string", "required": true},
+        {"name": "region", "type": "string", "required": false}
+      ],
+      "executor": "aws.update_lambda_env_var",
+      "rollback_strategy": "reconstitution",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "update_ecs_task_def_env",
+      "generic_action": "update_ecs_task_def_env",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Update ECS Task Definition Environment Variable",
+      "description": "Register a new ECS task definition revision with updated environment variable. Rollback re-registers the old revision as active.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "task_def_arn", "type": "string", "required": true},
+        {"name": "container_name", "type": "string", "required": true},
+        {"name": "env_var_key", "type": "string", "required": true},
+        {"name": "old_value", "type": "string", "required": true},
+        {"name": "new_value", "type": "string", "required": true},
+        {"name": "region", "type": "string", "required": false}
+      ],
+      "executor": "aws.update_ecs_task_def_env",
+      "rollback_strategy": "reconstitution",
+      "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "update_ssm_parameter_value",
+      "generic_action": "update_ssm_parameter_value",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Update SSM Parameter Value",
+      "description": "Overwrite an SSM parameter value. Saves old value for rollback. Does NOT update SecureString values — use Secrets Manager action for secrets.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "parameter_name", "type": "string", "required": true},
+        {"name": "old_value", "type": "string", "required": true},
+        {"name": "new_value", "type": "string", "required": true},
+        {"name": "region", "type": "string", "required": false}
+      ],
+      "executor": "aws.update_ssm_parameter_value",
+      "rollback_strategy": "reconstitution",
+      "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "update_secrets_manager_secret_name",
+      "generic_action": "update_secrets_manager_secret_name",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Update Secrets Manager Secret Name",
+      "description": "Update the description of a Secrets Manager secret to record the intended new name (not its value). AWS does not support renaming secrets directly. Saves old name for rollback.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "secret_arn", "type": "string", "required": true},
+        {"name": "old_name", "type": "string", "required": true},
+        {"name": "new_name", "type": "string", "required": true},
+        {"name": "region", "type": "string", "required": false}
+      ],
+      "executor": "aws.update_secrets_manager_secret_name",
+      "rollback_strategy": "reconstitution",
+      "estimated_duration_seconds": 10
     }
   ]
 }
