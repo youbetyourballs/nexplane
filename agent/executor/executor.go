@@ -186,7 +186,9 @@ var commands = map[string]CommandFunc{
 	"capture_behavioral_baseline":  migration.CaptureBehavioralBaselineExecute,
 	"verify_against_baseline":      migration.VerifyAgainstBaselineExecute,
 	// Reference scan (host file scanning for migrating resource references)
-	"reference-scan": reference.Execute,
+	"reference-scan":    reference.Execute,
+	"reference-update":  reference.UpdateExecute,
+	"reference-restore": reference.RestoreExecute,
 	// Credential rotation
 	"rotate_ssh_keys":        credrotation.SSHKeyExecute,
 	"rotate_db_creds":        credrotation.DBRotateExecute,

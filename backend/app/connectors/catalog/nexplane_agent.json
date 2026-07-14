@@ -2502,6 +2502,24 @@
                         "executor": "nexplane_agent.scan_host_references",
                         "generic_action": "scan_host_references",
                         "action_id": "scan_host_references"
+                    },
+                    {
+                        "display_name": "Update Config File Reference",
+                        "description": "Replace all occurrences of a string in a config file on an agent-monitored host. Backs up the file first for rollback.",
+                        "parameters": [
+                            {"required": true, "type": "string", "name": "file_path"},
+                            {"required": true, "type": "string", "name": "old_value"},
+                            {"required": true, "type": "string", "name": "new_value"},
+                            {"required": false, "type": "string", "name": "backup_dir", "description": "Backup directory (default: /tmp/nexplane-backups)"}
+                        ],
+                        "execution_tier": 3,
+                        "rollback_strategy": "reconstitution",
+                        "estimated_duration_seconds": 30,
+                        "applicable_asset_types": ["server", "workstation"],
+                        "action_type": "change",
+                        "executor": "nexplane_agent.update_config_file_reference",
+                        "generic_action": "update_config_file_reference",
+                        "action_id": "update_config_file_reference"
                     }
                 ]
 }
