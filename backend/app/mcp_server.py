@@ -21,12 +21,13 @@ from sqlalchemy import select
 from app.database import AsyncSessionLocal
 from app.models.api_token import ApiToken
 from app.models.user import User
+from app.mcp_tools.server_instructions import NEXPLANE_SERVER_INSTRUCTIONS
 
 logger = logging.getLogger(__name__)
 
 # ── MCP server singleton ─────────────────────────────────────────────────────
 
-mcp = FastMCP("nexplane")
+mcp = FastMCP("nexplane", instructions=NEXPLANE_SERVER_INSTRUCTIONS)
 
 
 # ── Token auth ───────────────────────────────────────────────────────────────
