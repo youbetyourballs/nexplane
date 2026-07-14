@@ -551,6 +551,33 @@ def _get_gcp_compute_client():
     )
     return compute_v1.InstancesClient(credentials=credentials)
 
+
+_gcp_container_creds_cache: dict = {}
+
+
+def _get_gcp_container_client():
+    import threading
+    global _gcp_container_creds_cache
+    if not _gcp_container_creds_cache:
+        creds = get_connector_creds_from_db("gcp")
+        _gcp_container_creds_cache = creds or {}
+    creds = _gcp_container_creds_cache
+    if not creds:
+        return None
+    import json as _json
+    from google.oauth2 import service_account
+    from google.cloud import container_v1
+    key_json_raw = creds.get("service_account_key_json", "")
+    if isinstance(key_json_raw, str):
+        key_json = _json.loads(key_json_raw)
+    else:
+        key_json = key_json_raw
+    credentials = service_account.Credentials.from_service_account_info(
+        key_json,
+        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+    )
+    return container_v1.ClusterManagerClient(credentials=credentials)
+
 # ---------------------------------------------------------------------------
 # Generic connector credentials helper (reads from platform DB directly)
 # ---------------------------------------------------------------------------
