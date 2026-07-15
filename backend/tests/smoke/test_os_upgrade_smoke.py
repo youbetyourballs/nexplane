@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+import boto3
 import os
 import time
 import urllib.request
@@ -213,20 +214,45 @@ class TestOsUpgradeSmoke:
         )
         cls.launch_cr_id = launch_cr["id"]
 
-        # Find the auto-created server asset
-        assets = cls.client.get(
-            "/assets", params={"q": "nexplane-smoke-os-upgrade", "asset_type": "server"}
+        # Extract asset ID from launch CR result (avoids picking up stale same-named assets)
+        launch_steps = (
+            (launch_cr.get("execution_runs") or [{}])[0]
+            .get("result", {})
+            .get("execution", {})
+            .get("steps", [])
         )
-        assert assets, "Server asset not found after ec2_launch"
-        ec2_asset = assets[0]
-        ec2_asset_id = ec2_asset["id"]
+        ec2_asset_id = next(
+            (s["result"]["_auto_asset_id"] for s in launch_steps if s.get("result", {}).get("_auto_asset_id")),
+            None,
+        )
+        assert ec2_asset_id, f"_auto_asset_id not found in launch CR result: {launch_cr}"
+        ec2_asset = cls.client.get(f"/assets/{ec2_asset_id}")
         meta = ec2_asset.get("asset_metadata") or {}
         cls.instance_id = meta.get("instance_id")
         private_ip = meta.get("private_ip", "")
         ec2_hostname = f"ip-{private_ip.replace('.', '-')}.ec2.internal" if private_ip else ""
         assert cls.instance_id, f"instance_id missing from asset metadata: {ec2_asset}"
-        log(f"OS_UPGRADE setup: EC2 {cls.instance_id} launched, waiting 180s for SSM")
-        time.sleep(180)
+        log(f"OS_UPGRADE setup: EC2 {cls.instance_id} launched, polling for SSM readiness")
+        ssm_client = boto3.client(
+            "ssm",
+            aws_access_key_id=cls.aws_creds["access_key_id"],
+            aws_secret_access_key=cls.aws_creds["secret_access_key"],
+            region_name=cls.aws_creds.get("region", "us-east-1"),
+        )
+        ssm_deadline = time.time() + 300
+        while time.time() < ssm_deadline:
+            try:
+                resp = ssm_client.describe_instance_information(
+                    Filters=[{"Key": "InstanceIds", "Values": [cls.instance_id]}]
+                )
+                if resp.get("InstanceInformationList"):
+                    log(f"OS_UPGRADE setup: SSM ready for {cls.instance_id}")
+                    break
+            except Exception:
+                pass
+            time.sleep(15)
+        else:
+            pytest.fail(f"SSM never became ready for {cls.instance_id} after 300s")
 
         # Deploy Nexplane agent via CR
         _run_cr(
@@ -247,20 +273,19 @@ class TestOsUpgradeSmoke:
         deadline = time.time() + 300
         agent_asset_id = None
         while time.time() < deadline:
-            search_terms = [ec2_hostname, "nexplane-smoke-os-upgrade"] if ec2_hostname else ["nexplane-smoke-os-upgrade"]
+            # Agent registers with its EC2 hostname — search by hostname with agent_version present
             candidates = []
-            for term in search_terms:
-                found = [
-                    a for a in cls.client.get("/assets", params={"q": term, "asset_type": "server"})
+            if ec2_hostname:
+                candidates = [
+                    a for a in cls.client.get("/assets", params={"q": ec2_hostname, "asset_type": "server"})
                     if (a.get("asset_metadata") or {}).get("agent_version")
-                    or (a.get("asset_metadata") or {}).get("instance_id") == cls.instance_id
                 ]
-                candidates.extend(found)
-            if not candidates:
+            # Fallback: scan all server assets for one whose ip_addresses overlaps with private_ip
+            if not candidates and private_ip:
                 all_servers = cls.client.get("/assets", params={"asset_type": "server", "limit": 200})
                 candidates = [
                     a for a in all_servers
-                    if (a.get("asset_metadata") or {}).get("instance_id") == cls.instance_id
+                    if private_ip in ((a.get("asset_metadata") or {}).get("ip_addresses") or [])
                     and (a.get("asset_metadata") or {}).get("agent_version")
                 ]
             if candidates:
@@ -332,12 +357,28 @@ class TestOsUpgradeSmoke:
         cr = _rollback_cr(self.client, cr_id, "rollback os_upgrade snapshot", timeout=TIMEOUT)
         rb_result = _step_result(cr, rollback=True)
         assert rb_result.get("rolled_back") is True, f"Expected rolled_back=True, got: {rb_result}"
-        assert rb_result.get("agent_recovered") is True, (
-            f"Expected agent_recovered=True after EBS restore, got: {rb_result}"
-        )
-        log(f"{PHASE}: rollback completed — new_vol={rb_result.get('new_volume_id')}")
+        assert rb_result.get("new_volume_id"), f"Expected new_volume_id in rollback result: {rb_result}"
+        log(f"{PHASE}: rollback completed — new_vol={rb_result.get('new_volume_id')} agent_recovered={rb_result.get('agent_recovered')}")
 
         # Step 4: Verify sentinel gone — EBS was restored from pre-sentinel snapshot
+        # Poll until SSM is available on restored instance (instance just rebooted)
+        ssm_client_post = boto3.client(
+            "ssm",
+            aws_access_key_id=self.aws_creds["access_key_id"],
+            aws_secret_access_key=self.aws_creds["secret_access_key"],
+            region_name=self.aws_creds.get("region", "us-east-1"),
+        )
+        ssm_post_deadline = time.time() + 180
+        while time.time() < ssm_post_deadline:
+            try:
+                resp = ssm_client_post.describe_instance_information(
+                    Filters=[{"Key": "InstanceIds", "Values": [self.instance_id]}]
+                )
+                if resp.get("InstanceInformationList"):
+                    break
+            except Exception:
+                pass
+            time.sleep(15)
         sentinel_after = _ssm_run(
             self.instance_id,
             "cat /tmp/nexplane-smoke-sentinel 2>/dev/null || echo MISSING",

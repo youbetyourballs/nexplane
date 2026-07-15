@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+import boto3
 import os
 import time
 import urllib.request
@@ -165,6 +166,7 @@ class TestContainerizeSmoke:
     instance_id = None
     launch_cr_id = None
     aws_creds = None
+    ssh_connector_id = None
 
     @classmethod
     def setup_class(cls):
@@ -213,20 +215,45 @@ class TestContainerizeSmoke:
         )
         cls.launch_cr_id = launch_cr["id"]
 
-        # Find the auto-created server asset
-        assets = cls.client.get(
-            "/assets", params={"q": "nexplane-smoke-containerize", "asset_type": "server"}
+        # Extract asset ID from launch CR result (avoids picking up stale same-named assets)
+        launch_steps = (
+            (launch_cr.get("execution_runs") or [{}])[0]
+            .get("result", {})
+            .get("execution", {})
+            .get("steps", [])
         )
-        assert assets, "Server asset not found after ec2_launch"
-        ec2_asset = assets[0]
-        ec2_asset_id = ec2_asset["id"]
+        ec2_asset_id = next(
+            (s["result"]["_auto_asset_id"] for s in launch_steps if s.get("result", {}).get("_auto_asset_id")),
+            None,
+        )
+        assert ec2_asset_id, f"_auto_asset_id not found in launch CR result: {launch_cr}"
+        ec2_asset = cls.client.get(f"/assets/{ec2_asset_id}")
         meta = ec2_asset.get("asset_metadata") or {}
         cls.instance_id = meta.get("instance_id")
         private_ip = meta.get("private_ip", "")
         ec2_hostname = f"ip-{private_ip.replace('.', '-')}.ec2.internal" if private_ip else ""
         assert cls.instance_id, f"instance_id missing from asset metadata: {ec2_asset}"
-        log(f"CONTAINERIZE setup: EC2 {cls.instance_id} launched, waiting 180s for SSM")
-        time.sleep(180)
+        log(f"CONTAINERIZE setup: EC2 {cls.instance_id} launched, polling for SSM readiness")
+        ssm_client = boto3.client(
+            "ssm",
+            aws_access_key_id=cls.aws_creds["access_key_id"],
+            aws_secret_access_key=cls.aws_creds["secret_access_key"],
+            region_name=cls.aws_creds.get("region", "us-east-1"),
+        )
+        ssm_deadline = time.time() + 300
+        while time.time() < ssm_deadline:
+            try:
+                resp = ssm_client.describe_instance_information(
+                    Filters=[{"Key": "InstanceIds", "Values": [cls.instance_id]}]
+                )
+                if resp.get("InstanceInformationList"):
+                    log(f"CONTAINERIZE setup: SSM ready for {cls.instance_id}")
+                    break
+            except Exception:
+                pass
+            time.sleep(15)
+        else:
+            pytest.fail(f"SSM never became ready for {cls.instance_id} after 300s")
 
         # Deploy Nexplane agent via CR
         _run_cr(
@@ -247,22 +274,19 @@ class TestContainerizeSmoke:
         deadline = time.time() + 300
         agent_asset_id = None
         while time.time() < deadline:
-            # Search by hostname first, fall back to instance_id in metadata
-            search_terms = [ec2_hostname, "nexplane-smoke-containerize"] if ec2_hostname else ["nexplane-smoke-containerize"]
+            # Agent registers with its EC2 hostname — search by hostname with agent_version present
             candidates = []
-            for term in search_terms:
-                found = [
-                    a for a in cls.client.get("/assets", params={"q": term, "asset_type": "server"})
+            if ec2_hostname:
+                candidates = [
+                    a for a in cls.client.get("/assets", params={"q": ec2_hostname, "asset_type": "server"})
                     if (a.get("asset_metadata") or {}).get("agent_version")
-                    or (a.get("asset_metadata") or {}).get("instance_id") == cls.instance_id
                 ]
-                candidates.extend(found)
-            # Also try a direct instance_id match across all server assets
-            if not candidates:
+            # Fallback: scan all server assets for one whose ip_addresses overlaps with private_ip
+            if not candidates and private_ip:
                 all_servers = cls.client.get("/assets", params={"asset_type": "server", "limit": 200})
                 candidates = [
                     a for a in all_servers
-                    if (a.get("asset_metadata") or {}).get("instance_id") == cls.instance_id
+                    if private_ip in ((a.get("asset_metadata") or {}).get("ip_addresses") or [])
                     and (a.get("asset_metadata") or {}).get("agent_version")
                 ]
             if candidates:
@@ -290,6 +314,50 @@ class TestContainerizeSmoke:
             timeout=60,
         )
         log(f"CONTAINERIZE setup: dummy service {DUMMY_SERVICE} installed")
+
+        # Set up SSH connector for the SSH-inplace test phase
+        # Generate RSA keypair, inject public key via SSM, register SSH connector in platform
+        try:
+            import paramiko
+            import io as _io
+
+            ssh_key = paramiko.RSAKey.generate(2048)
+            priv_buf = _io.StringIO()
+            ssh_key.write_private_key(priv_buf)
+            private_key_pem = priv_buf.getvalue()
+            public_key_line = f"ssh-rsa {ssh_key.get_base64()} nexplane-smoke"
+
+            _ssm_run(
+                cls.instance_id,
+                f'mkdir -p /home/ec2-user/.ssh && echo "{public_key_line}" >> /home/ec2-user/.ssh/authorized_keys && chmod 600 /home/ec2-user/.ssh/authorized_keys',
+                cls.aws_creds,
+                timeout=30,
+            )
+
+            resp = cls.client.client.post(
+                f"{cls.client.base}/connectors",
+                json={"name": "smoke-ec2-ssh", "connector_type": "ssh"},
+            )
+            if resp.status_code in (200, 201):
+                conn_id = resp.json().get("id")
+                cred_resp = cls.client.client.put(
+                    f"{cls.client.base}/connectors/{conn_id}/credentials",
+                    json={
+                        "hostname": private_ip,
+                        "port": 22,
+                        "username": "ec2-user",
+                        "private_key": private_key_pem,
+                    },
+                )
+                if cred_resp.status_code in (200, 201, 204):
+                    cls.ssh_connector_id = conn_id
+                    log(f"CONTAINERIZE setup: SSH connector {cls.ssh_connector_id} created for {private_ip}")
+                else:
+                    log(f"CONTAINERIZE setup: SSH cred PUT failed {cred_resp.status_code} — ssh_inplace test will skip")
+            else:
+                log(f"CONTAINERIZE setup: SSH connector creation failed {resp.status_code} — ssh_inplace test will skip")
+        except Exception as e:
+            log(f"CONTAINERIZE setup: SSH connector setup failed: {e} — ssh_inplace test will skip")
 
     @classmethod
     def teardown_class(cls):
@@ -380,11 +448,17 @@ class TestContainerizeSmoke:
 
     def test_containerize_ssh_inplace(self):
         """CONTAINERIZE_SSH_INPLACE — adaptive SSH executor on provisioned host."""
+        if not self.ssh_connector_id:
+            pytest.skip("SSH connector not set up in setup_class — skipping ssh_inplace phase")
         cr = _run_cr(
             self.client,
             "[smoke] ssh containerize_workload inplace",
             "ssh_containerize_workload",
-            {"service_name": DUMMY_SERVICE, "registry": "nexplane-local"},
+            {
+                "service_name": DUMMY_SERVICE,
+                "registry": "nexplane-local",
+                "_locked_connector_id": self.ssh_connector_id,
+            },
             asset_ids=[self.agent_asset_id],
         )
         cr_id = cr["id"]

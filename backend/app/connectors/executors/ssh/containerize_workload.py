@@ -37,8 +37,23 @@ except ImportError:
 
 async def _run(connector, cmd: str) -> tuple:
     """Run cmd via SSH connector (non-blocking). Returns (stdout, stderr, exit_code)."""
+    from app.connectors.executors.ssh._client import get_ssh_client, prepare_ssh_target
+
+    creds = getattr(connector, "credentials", {}) or {}
+    creds = await prepare_ssh_target(connector, creds)
+
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: connector.run_command(cmd))
+
+    def _exec():
+        client = get_ssh_client(creds)
+        try:
+            _, stdout_f, stderr_f = client.exec_command(cmd, timeout=60)
+            exit_code = stdout_f.channel.recv_exit_status()
+            return stdout_f.read().decode(), stderr_f.read().decode(), exit_code
+        finally:
+            client.close()
+
+    return await loop.run_in_executor(None, _exec)
 
 
 async def _capture_pre_state(connector, service_name: str) -> dict:

@@ -181,6 +181,34 @@ async def delete_ai_provider(
     await db.commit()
 
 
+@router.get("/agent-secret", response_model=OrgSettingsRead)
+async def get_agent_secret(
+    user: User = Depends(require_roles(UserRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns the current agent secret in plaintext (if one exists), or generates a new one."""
+    svc = _get_secrets()
+    org_settings = await _get_or_create_org_settings(user.organization_id, db)
+    if org_settings.agent_secret_encrypted:
+        existing = svc.decrypt(org_settings.agent_secret_encrypted)
+        return OrgSettingsRead(
+            ai_configured=org_settings.anthropic_api_key_encrypted is not None,
+            agent_configured=True,
+            updated_at=org_settings.updated_at,
+            agent_secret_plaintext=existing,
+        )
+    new_secret = "sk-agent-" + secrets_mod.token_hex(24)
+    org_settings.agent_secret_encrypted = svc.encrypt(new_secret)
+    await db.commit()
+    await db.refresh(org_settings)
+    return OrgSettingsRead(
+        ai_configured=org_settings.anthropic_api_key_encrypted is not None,
+        agent_configured=True,
+        updated_at=org_settings.updated_at,
+        agent_secret_plaintext=new_secret,
+    )
+
+
 @router.post("/agent-secret", response_model=OrgSettingsRead)
 async def generate_agent_secret(
     user: User = Depends(require_roles(UserRole.admin)),

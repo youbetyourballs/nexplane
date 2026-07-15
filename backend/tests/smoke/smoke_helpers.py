@@ -166,7 +166,7 @@ class NexplaneClient:
         return sorted(matches, key=lambda a: a.get("updated_at", ""), reverse=True)[0]
 
     def get_agent_secret(self) -> str:
-        data = self.post("/settings/agent-secret")
+        data = self.get("/settings/agent-secret")
         return data["agent_secret_plaintext"]
 
     def get_tailscale_auth_key(self, provided_key: str = "") -> str:

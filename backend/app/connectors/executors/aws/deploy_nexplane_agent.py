@@ -61,7 +61,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 set -eux
 VERSION=$(curl -fsSL --max-time 15 --retry 3 --retry-delay 5 '{version_url}' | tr -d '[:space:]')
 echo "Version: $VERSION"
-curl -fsSL --max-time 180 --retry 3 --retry-delay 5 "{binary_url_tpl.format(base=download_url, ver='$VERSION')}" -o /usr/local/bin/nexplane-agent
+mkdir -p /usr/local/bin
+systemctl stop nexplane-agent 2>/dev/null || true
+curl -fsSL --max-time 180 --retry 3 --retry-delay 5 "{binary_url_tpl.format(base=download_url, ver='$VERSION')}" -o /tmp/nexplane-agent-new
+mv -f /tmp/nexplane-agent-new /usr/local/bin/nexplane-agent
 chmod +x /usr/local/bin/nexplane-agent
 cat > /etc/systemd/system/nexplane-agent.service << 'SYSTEMD_EOF'
 [Unit]

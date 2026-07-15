@@ -30,7 +30,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    """Rollback: restart the legacy service."""
+    """Rollback: re-enable and start the legacy service via the agent's built-in rollback."""
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 
     systemd_unit = parameters.get("systemd_unit") or execution_result.get("systemd_unit", "")
@@ -42,10 +42,14 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     if not rollback_asset_ids:
         return {"rolled_back": False, "note": "No asset_ids available for rollback dispatch"}
 
-    return await dispatch_agent_job(
+    result = await dispatch_agent_job(
         command="containerize_retire",
-        parameters={"systemd_unit": systemd_unit, "dry_run": False},
+        parameters={"systemd_unit": systemd_unit, "rollback": True},
         asset_ids=rollback_asset_ids,
         timeout_seconds=60,
-        rollback=True,
     )
+    if not isinstance(result, dict):
+        result = {}
+    result["rolled_back"] = result.get("rolled_back", True)
+    result["systemd_unit"] = systemd_unit
+    return result

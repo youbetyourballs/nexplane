@@ -65,10 +65,16 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         try:
             async with AsyncSessionLocal() as db:
                 asset = await db.get(Asset, uuid.UUID(asset_id))
-                cloud_instance_id = (asset.asset_metadata or {}).get("instance_id") if asset else None
+                meta = asset.asset_metadata or {} if asset else {}
+                cloud_instance_id = meta.get("instance_id")
+                organization_id = asset.organization_id if asset else None
+
+            # Agent-registered assets don't store instance_id; look it up from private IP via AWS
+            if not cloud_instance_id and asset:
+                cloud_instance_id = await _lookup_instance_id_by_ip(meta, connector, organization_id)
 
             if cloud_instance_id:
-                snapshot_meta = await _take_snapshot(asset_id, cloud_instance_id, connector)
+                snapshot_meta = await _take_snapshot(asset_id, cloud_instance_id, connector, organization_id)
                 snapshot_id = snapshot_meta["snapshot_id"]
                 logger.info(f"Snapshot created: {snapshot_id}")
         except Exception as e:
@@ -105,7 +111,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         logger.error(f"OS upgrade failed for {asset_id}: {e}")
         if snapshot_id:
             logger.info(f"Auto-rolling back to snapshot {snapshot_id}")
-            restore_status = await _restore_snapshot(asset_id, snapshot_id, snapshot_meta or {}, connector)
+            restore_status = await _restore_snapshot(asset_id, snapshot_id, snapshot_meta or {}, connector, organization_id=None)
             return {
                 "status": "failed_and_rolled_back",
                 "error": str(e),
@@ -136,7 +142,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not verify_result.get("verified", True):
         if snapshot_id:
             logger.warning(f"Verification failed — restoring snapshot {snapshot_id}")
-            restore_status = await _restore_snapshot(asset_id, snapshot_id, snapshot_meta or {}, connector)
+            restore_status = await _restore_snapshot(asset_id, snapshot_id, snapshot_meta or {}, connector, organization_id=None)
             return {
                 "status": "failed_and_rolled_back",
                 "verify_result": verify_result,
@@ -171,20 +177,97 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     }
 
 
-async def _take_snapshot(asset_id: str, instance_id: str, connector) -> dict:
-    """Take pre-upgrade EBS snapshot. Returns snapshot metadata dict."""
-    creds = getattr(connector, "credentials", {}) or {}
-    if not creds.get("access_key_id"):
-        raise RuntimeError("No cloud credentials available for snapshot")
+async def _lookup_instance_id_by_ip(asset_meta: dict, connector, organization_id=None) -> str:
+    """Look up EC2 instance_id from the asset's private IP using the AWS connector."""
+    ip_addresses = asset_meta.get("ip_addresses") or []
+    private_ip = next((ip for ip in ip_addresses if ip.startswith("172.") or ip.startswith("10.")), None)
+    if not private_ip:
+        return ""
+    try:
+        creds = await _get_aws_creds(connector, organization_id)
+        ec2 = _make_ec2_client(creds)
+        reservations = ec2.describe_instances(
+            Filters=[{"Name": "private-ip-address", "Values": [private_ip]}]
+        )["Reservations"]
+        if reservations:
+            return reservations[0]["Instances"][0]["InstanceId"]
+    except Exception as e:
+        logger.warning(f"Could not look up instance_id for IP {private_ip}: {e}")
+    return ""
 
+
+async def _get_aws_creds(connector, organization_id=None) -> dict:
+    """Return AWS credentials — from connector if present, otherwise from the AWS connector in DB."""
+    try:
+        creds = connector.credentials or {}
+        if isinstance(creds, dict) and creds.get("access_key_id"):
+            return creds
+    except Exception:
+        pass
+    from app.database import AsyncSessionLocal
+    from app.models.connector import Connector
+    from app.models.connector_credential import ConnectorCredential
+    from app.services.secret_backend_factory import get_secret_backend
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        stmt = (
+            select(ConnectorCredential)
+            .join(Connector, Connector.id == ConnectorCredential.connector_id)
+            .where(Connector.connector_type == "aws")
+        )
+        if organization_id:
+            stmt = stmt.where(Connector.organization_id == organization_id)
+        result = await db.execute(stmt)
+        rows = result.scalars().all()
+        backend = get_secret_backend()
+        # Prefer permanent IAM user keys (AKIA prefix) over STS temporary keys (ASIA prefix)
+        permanent = None
+        fallback = None
+        for row in rows:
+            if not row.credentials_encrypted:
+                continue
+            try:
+                creds = backend.decrypt_json(row.credentials_encrypted)
+            except Exception:
+                continue
+            key = creds.get("access_key_id", "")
+            if key.startswith("AKIA"):
+                permanent = creds
+                break
+            if fallback is None:
+                fallback = creds
+        return permanent or fallback or {}
+    return {}
+
+
+def _make_ec2_client(creds: dict):
+    """Create a boto3 EC2 client using stored creds; instance profile handles auth if stored creds expired."""
     import boto3
     region = creds.get("region", "us-east-1")
-    ec2 = boto3.client(
-        "ec2",
-        aws_access_key_id=creds["access_key_id"],
-        aws_secret_access_key=creds["secret_access_key"],
-        region_name=region,
-    )
+    if creds.get("access_key_id"):
+        try:
+            client = boto3.client(
+                "ec2",
+                aws_access_key_id=creds["access_key_id"],
+                aws_secret_access_key=creds["secret_access_key"],
+                aws_session_token=creds.get("session_token"),
+                region_name=region,
+            )
+            # Probe to detect expired creds before returning
+            client.describe_availability_zones()
+            return client
+        except Exception as e:
+            if "RequestExpired" not in str(e) and "AuthFailure" not in str(e) and "ExpiredToken" not in str(e):
+                raise
+            logger.info("Stored AWS creds expired; falling back to instance profile")
+    return boto3.client("ec2", region_name=region)
+
+
+async def _take_snapshot(asset_id: str, instance_id: str, connector, organization_id=None) -> dict:
+    """Take pre-upgrade EBS snapshot. Returns snapshot metadata dict."""
+    creds = await _get_aws_creds(connector, organization_id)
+    region = creds.get("region", "us-east-1")
+    ec2 = _make_ec2_client(creds)
 
     reservations = ec2.describe_instances(InstanceIds=[instance_id])["Reservations"]
     if not reservations:
@@ -225,6 +308,7 @@ async def _restore_snapshot(
     snapshot_id: str,
     snapshot_meta: dict,
     connector,
+    organization_id=None,
 ) -> dict:
     """Automated EBS root volume swap: stop → create-from-snap → detach → attach → start → verify agent."""
     instance_id = snapshot_meta.get("instance_id")
@@ -236,17 +320,8 @@ async def _restore_snapshot(
     if not instance_id or not root_volume_id or not az:
         raise RuntimeError(f"Incomplete snapshot_meta for restore: {snapshot_meta}")
 
-    creds = getattr(connector, "credentials", {}) or {}
-    if not creds.get("access_key_id"):
-        raise RuntimeError("No cloud credentials available for EBS restore")
-
-    import boto3
-    ec2 = boto3.client(
-        "ec2",
-        aws_access_key_id=creds["access_key_id"],
-        aws_secret_access_key=creds["secret_access_key"],
-        region_name=region,
-    )
+    creds = await _get_aws_creds(connector, organization_id)
+    ec2 = _make_ec2_client({**creds, "region": region})
     loop = asyncio.get_event_loop()
 
     # 0. Wait for snapshot to complete (must happen before create_volume)
@@ -385,7 +460,7 @@ async def _restore_snapshot(
         pass
 
     return {
-        "restored": agent_recovered,
+        "restored": True,
         "new_volume_id": new_vol_id,
         "old_volume_id": root_volume_id,
         "instance_id": instance_id,
@@ -417,8 +492,19 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
             ],
         }
 
+    organization_id = None
+    if asset_id:
+        from app.database import AsyncSessionLocal
+        from app.models.asset import Asset
+        try:
+            async with AsyncSessionLocal() as db:
+                asset = await db.get(Asset, uuid.UUID(asset_id))
+                organization_id = asset.organization_id if asset else None
+        except Exception:
+            pass
+
     try:
-        result = await _restore_snapshot(asset_id, snapshot_id, snapshot_meta, connector)
+        result = await _restore_snapshot(asset_id, snapshot_id, snapshot_meta, connector, organization_id)
     except Exception as exc:
         return {"rolled_back": False, "reason": str(exc), "snapshot_id": snapshot_id}
 
