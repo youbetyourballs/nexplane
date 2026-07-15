@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone, timedelta
 
+ROLLBACK_CAPABILITY = "full"
 
 def _graph_client(connector, execution_result=None):
     """Get Azure AD Graph API credentials."""

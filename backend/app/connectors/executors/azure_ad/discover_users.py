@@ -3,6 +3,8 @@
 
 from .azure_ad_client import get_azure_ad_client
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     client = get_azure_ad_client(connector)

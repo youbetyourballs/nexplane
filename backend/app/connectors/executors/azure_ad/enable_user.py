@@ -3,6 +3,7 @@
 
 from .azure_ad_client import get_azure_ad_client
 
+ROLLBACK_CAPABILITY = "full"
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     user = parameters.get("user_identifier") or parameters.get("user", "")

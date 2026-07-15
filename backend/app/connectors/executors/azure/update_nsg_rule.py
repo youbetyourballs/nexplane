@@ -4,6 +4,7 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
 
 def _mock_response(parameters, asset_ids):
     return {"action": "update_nsg_rule", "rule_name": parameters.get("rule_name"), "nsg_action": parameters.get("action"), "priority": parameters.get("priority", 100), "assets": asset_ids, "applied": True, "applied_at": datetime.now(timezone.utc).isoformat()}

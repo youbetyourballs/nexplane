@@ -4,6 +4,7 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
 
 async def _real_execute(parameters: dict, asset_ids: list, creds: dict) -> dict:
     from ._client import get_storage_client

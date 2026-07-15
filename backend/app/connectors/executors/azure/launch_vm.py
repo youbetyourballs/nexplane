@@ -5,6 +5,7 @@ import asyncio
 import base64
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
 
 _AGENT_STARTUP_SCRIPT = """#!/bin/bash
 set -e

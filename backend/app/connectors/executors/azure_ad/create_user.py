@@ -6,6 +6,7 @@ import string
 from datetime import datetime, timezone
 from .azure_ad_client import get_azure_ad_client
 
+ROLLBACK_CAPABILITY = "full"
 
 def _random_password(length: int = 16) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%"

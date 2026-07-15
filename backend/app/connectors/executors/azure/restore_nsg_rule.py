@@ -4,6 +4,7 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
 
 async def _real_execute(parameters: dict, creds: dict) -> dict:
     from ._client import get_network_client

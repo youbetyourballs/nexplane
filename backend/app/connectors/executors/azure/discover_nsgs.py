@@ -4,6 +4,9 @@
 ﻿import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 _NSGS = [
     ("payments-subnet-nsg", ["payments"], 12, False),
     ("web-tier-nsg", ["web", "dmz"], 8, True),

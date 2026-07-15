@@ -6,6 +6,7 @@ import random
 import string
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
 
 def _new_key_fp():
     k = "".join(random.choices(string.ascii_letters + string.digits, k=64))

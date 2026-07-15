@@ -4,6 +4,8 @@
 ﻿import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
 
 async def _real_execute(creds: dict) -> list:
     from ._client import get_compute_client

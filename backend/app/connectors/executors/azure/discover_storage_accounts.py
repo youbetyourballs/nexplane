@@ -4,6 +4,9 @@
 ﻿import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 _STORAGE = [
     ("acmeprodbackups", False, "GRS"),
     ("acmepublicassets", True, "LRS"),
