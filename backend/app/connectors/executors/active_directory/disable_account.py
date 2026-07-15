@@ -4,6 +4,12 @@
 import asyncio
 from datetime import datetime, timezone
 
+try:
+    from ._client import get_connection, prepare_ad_target
+except ImportError:
+    get_connection = None
+    prepare_ad_target = None
+
 ROLLBACK_CAPABILITY = "full"
 
 
@@ -70,4 +76,23 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    return {"rolled_back": True, "action": "enable_account", "username": parameters.get("username")}
+    from ldap3 import MODIFY_REPLACE
+    creds = getattr(connector, "credentials", {})
+    username = execution_result.get("username") or parameters.get("username")
+    user_dn = execution_result.get("user_dn") or parameters.get("user_dn")
+    if not creds:
+        return {"rolled_back": True, "username": username, "mock": True}
+    try:
+        resolved = await prepare_ad_target(connector, creds)
+
+        def _enable():
+            conn = get_connection(resolved)
+            conn.modify(user_dn, {"userAccountControl": [(MODIFY_REPLACE, [512])]})
+            result = conn.result
+            conn.unbind()
+            return result
+
+        result = await asyncio.get_event_loop().run_in_executor(None, _enable)
+        return {"rolled_back": True, "username": username, "user_dn": user_dn, "ldap_result": str(result)}
+    except Exception as e:
+        return {"rolled_back": False, "error": str(e)}
