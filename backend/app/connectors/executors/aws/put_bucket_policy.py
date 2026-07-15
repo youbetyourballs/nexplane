@@ -10,13 +10,13 @@ from ._client import get_boto3_client
 
 async def execute(parameters, asset_ids, connector):
     creds = getattr(connector, "credentials", {})
-    bucket = parameters["bucket"]
+    bucket = parameters["bucket_name"]
     policy = parameters["policy"]
 
     if not creds:
         return {
             "applied": True,
-            "bucket": bucket,
+            "bucket_name": bucket,
             "mock": True,
             "pre_state": {},
         }
@@ -44,7 +44,7 @@ async def execute(parameters, asset_ids, connector):
     await loop.run_in_executor(None, _put)
     return {
         "applied": True,
-        "bucket": bucket,
+        "bucket_name": bucket,
         "pre_state": pre_state,
     }
 
@@ -52,7 +52,7 @@ async def execute(parameters, asset_ids, connector):
 async def rollback(parameters, execution_result, connector):
     creds = getattr(connector, "credentials", {})
     pre_state = execution_result.get("pre_state", {})
-    bucket = execution_result.get("bucket") or parameters.get("bucket")
+    bucket = execution_result.get("bucket_name") or parameters.get("bucket_name")
 
     if not pre_state:
         return {"rolled_back": False, "reason": "no pre_state captured"}
