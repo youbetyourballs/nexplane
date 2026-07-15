@@ -156,10 +156,17 @@ def _validate_rollback_capability(executor_module, connector_type: str, action_i
         ValueError if the constant is missing, invalid, or "irreversible" without ROLLBACK_REASON.
     """
     capability = getattr(executor_module, "ROLLBACK_CAPABILITY", None)
+    if capability is None:
+        log.warning(
+            "Executor %s.%s does not declare ROLLBACK_CAPABILITY — degrading gracefully",
+            connector_type, action_id,
+        )
+        return None
     if capability not in ("full", "irreversible"):
         raise ValueError(
-            f"Executor {connector_type}.{action_id} does not declare ROLLBACK_CAPABILITY "
-            f"(got {capability!r}). Valid values: 'full' or 'irreversible'. "
+            f"Executor {connector_type}.{action_id} declares ROLLBACK_CAPABILITY = "
+            f"{capability!r} which is not a valid value. "
+            "Valid values: 'full' or 'irreversible'. "
             "This is a code defect — fix the executor before this CR can be planned."
         )
     if capability == "irreversible":

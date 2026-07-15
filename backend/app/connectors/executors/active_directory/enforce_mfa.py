@@ -3,7 +3,8 @@
 
 from datetime import datetime, timezone
 
-ROLLBACK_CAPABILITY = "full"
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "MFA enforcement policy cannot be atomically reverted — requires manual review of per-user MFA state"
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     return {"action": "enforce_mfa", "username": parameters.get("username"), "mfa_required": True, "enforced_at": datetime.now(timezone.utc).isoformat()}

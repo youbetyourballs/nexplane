@@ -4,6 +4,7 @@
 ROLLBACK_CAPABILITY = "full"
 
 import asyncio
+import json
 from botocore.exceptions import ClientError
 from ._client import get_boto3_client
 
@@ -38,6 +39,8 @@ async def execute(parameters, asset_ids, connector):
     pre_state = {"policy": prior_policy}
 
     # 2. Apply new policy
+    if isinstance(policy, dict):
+        policy = json.dumps(policy)
     def _put():
         s3.put_bucket_policy(Bucket=bucket, Policy=policy)
 

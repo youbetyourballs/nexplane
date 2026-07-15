@@ -35,11 +35,11 @@ def _make_catalog(executor_module, action_def=None):
 
 
 class TestValidateExecutorContract:
-    def test_missing_rollback_capability_raises_plan_blocked(self):
-        from app.services.change_plan_service import PlanBlockedError
+    def test_missing_rollback_capability_returns_none(self):
+        # Missing ROLLBACK_CAPABILITY degrades gracefully — returns None, no error
         catalog = _make_catalog(_make_executor(capability=None))
-        with pytest.raises(PlanBlockedError):
-            _validate_executor_contract("gcp", "gcp_create_gke_cluster", catalog)
+        result = _validate_executor_contract("gcp", "gcp_create_gke_cluster", catalog)
+        assert result is None
 
     def test_full_capability_returns_none(self):
         catalog = _make_catalog(_make_executor(capability="full"))
