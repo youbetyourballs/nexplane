@@ -4,6 +4,8 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 def _capture_alb_pre_state(elbv2, lb_arn: str) -> dict:
     """Capture full ALB configuration required to reconstitute it on rollback."""

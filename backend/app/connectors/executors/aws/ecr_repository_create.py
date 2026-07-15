@@ -4,6 +4,8 @@
 """Executor: ecr_create_repository — create ECR repository via boto3."""
 from __future__ import annotations
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Create an ECR repository.

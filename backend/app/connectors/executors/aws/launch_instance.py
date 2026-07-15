@@ -5,6 +5,8 @@ import asyncio
 import random
 import string
 
+ROLLBACK_CAPABILITY = "full"
+
 
 def _mock_instance_id():
     return "i-" + "".join(random.choices(string.hexdigits[:16], k=17))

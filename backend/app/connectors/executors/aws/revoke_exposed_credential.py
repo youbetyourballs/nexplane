@@ -10,6 +10,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def _reconstitute(rp: dict, connector: Any) -> dict:
     """Called during rollback — create a new key for the same user."""

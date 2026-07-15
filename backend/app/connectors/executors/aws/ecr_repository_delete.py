@@ -4,6 +4,8 @@
 """Executor: ecr_delete_repository — delete ECR repository."""
 from __future__ import annotations
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     import boto3

@@ -8,6 +8,8 @@ import secrets
 import string
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 def _sm_client(connector, execution_result=None):
     creds = (connector.credentials if connector else None) or {}

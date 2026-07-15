@@ -9,6 +9,7 @@ import json
 import os
 import tempfile
 
+ROLLBACK_CAPABILITY = "full"
 
 TERRAFORM_EKS_MODULE = '''
 terraform {

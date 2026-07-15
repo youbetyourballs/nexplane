@@ -4,6 +4,9 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 
 async def _real_execute(creds: dict, asset_ids: list) -> dict:
     from ._client import get_ec2_client

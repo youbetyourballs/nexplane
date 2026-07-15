@@ -7,6 +7,8 @@ import asyncio
 import base64
 import json
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Create an EKS cluster and managed node group via boto3.

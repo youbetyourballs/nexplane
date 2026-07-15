@@ -5,6 +5,8 @@ import asyncio
 import time
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 def _get_rds_client(creds: dict):
     from ._client import get_boto3_client

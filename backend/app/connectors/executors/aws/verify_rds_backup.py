@@ -5,6 +5,9 @@ import asyncio
 import time
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 
 def _get_rds_client(creds: dict):
     from ._client import get_boto3_client

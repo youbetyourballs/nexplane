@@ -5,6 +5,8 @@ import os
 import boto3
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 def _iam_client(connector, execution_result: dict | None = None):
     """Build IAM client, falling back through multiple credential sources."""

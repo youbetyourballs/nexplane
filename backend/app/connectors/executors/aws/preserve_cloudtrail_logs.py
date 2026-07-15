@@ -5,6 +5,9 @@ import asyncio
 from datetime import datetime, timezone
 from ._client import get_boto3_client
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})

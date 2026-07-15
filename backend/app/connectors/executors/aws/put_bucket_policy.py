@@ -5,6 +5,8 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def _real_execute(creds: dict, parameters: dict) -> dict:
     from ._client import get_boto3_client

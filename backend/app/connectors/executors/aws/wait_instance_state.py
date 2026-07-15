@@ -4,6 +4,9 @@
 import asyncio
 import time
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only wait — no state was changed"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, 'credentials', {})

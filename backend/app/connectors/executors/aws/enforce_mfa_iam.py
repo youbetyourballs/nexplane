@@ -4,6 +4,8 @@
 import boto3
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     user = parameters.get("user_name") or parameters.get("user_identifier", "")

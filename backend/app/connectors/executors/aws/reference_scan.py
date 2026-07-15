@@ -8,6 +8,9 @@ import logging
 import boto3
 from typing import Any
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 logger = logging.getLogger(__name__)
 
 

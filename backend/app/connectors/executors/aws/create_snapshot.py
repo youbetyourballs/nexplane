@@ -6,6 +6,8 @@ import random
 import string
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 def _fake_id(prefix=""): return prefix + "".join(random.choices(string.ascii_lowercase + string.digits, k=12))
 

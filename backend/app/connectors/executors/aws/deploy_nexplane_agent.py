@@ -13,6 +13,8 @@ _DEFAULT_DOWNLOAD_URL = os.environ.get(
     "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com",
 )
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, 'credentials', {})

@@ -6,6 +6,8 @@ import json
 import os
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 def _iam_client(connector, execution_result: dict | None = None):
     creds = (connector.credentials if connector else None) or {}

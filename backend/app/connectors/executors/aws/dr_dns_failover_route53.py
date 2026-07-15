@@ -4,6 +4,8 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 def _get_r53_client(creds: dict):
     from ._client import get_boto3_client

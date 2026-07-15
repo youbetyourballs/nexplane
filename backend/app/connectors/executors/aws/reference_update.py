@@ -15,6 +15,8 @@ from app.connectors.executors.aws.reference_scan import _boto_client
 
 logger = logging.getLogger(__name__)
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def update_lambda_env_var(cr, connector, db) -> dict:
     params = cr.parameters or {}
