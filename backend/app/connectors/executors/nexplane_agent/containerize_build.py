@@ -42,12 +42,18 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not asset_id:
         raise ValueError("No asset_id provided")
 
-    app_profile = await _load_app_profile(str(asset_id), app_name)
-    if app_profile is None:
-        raise ValueError(
-            f"Application '{app_name}' not found in asset_metadata.applications[]. "
-            "Run agent_appdiscovery first."
-        )
+    dry_run = bool(parameters.get("dry_run", False))
+
+    if dry_run:
+        # Dry-run: skip DB app_profile lookup — agent will inspect the host itself
+        app_profile = {"name": app_name}
+    else:
+        app_profile = await _load_app_profile(str(asset_id), app_name)
+        if app_profile is None:
+            raise ValueError(
+                f"Application '{app_name}' not found in asset_metadata.applications[]. "
+                "Run agent_appdiscovery first."
+            )
 
     agent_params = {
         "app_profile": app_profile,
@@ -55,7 +61,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "namespace": parameters.get("namespace", "default"),
         "cpu_request": parameters.get("cpu_request", "100m"),
         "mem_request": parameters.get("mem_request", "128Mi"),
-        "dry_run": bool(parameters.get("dry_run", False)),
+        "dry_run": dry_run,
     }
 
     return await dispatch_agent_job(

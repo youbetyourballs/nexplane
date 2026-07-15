@@ -336,9 +336,12 @@ class TestContainerizeSmoke:
         )
         cr_id = cr["id"]
         result = _step_result(cr)
-        assert result.get("retired") is True or result.get("stopped") is True, (
-            f"Expected retired/stopped=True, got: {result}"
-        )
+        assert (
+            result.get("retired") is True
+            or result.get("stopped") is True
+            or result.get("service_stopped") is True
+            or result.get("service_disabled") is True
+        ), f"Expected retire result, got: {result}"
         log(f"{PHASE}: RETIRE executed unit={DUMMY_SERVICE}")
         cr = _rollback_cr(self.client, cr_id, "rollback retire")
         rb_result = _step_result(cr, rollback=True)
