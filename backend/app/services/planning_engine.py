@@ -173,6 +173,30 @@ def _validate_rollback_capability(executor_module, connector_type: str, action_i
     return None
 
 
+def _validate_executor_contract(connector_type: str, action_id: str, catalog) -> str | None:
+    """
+    Validate that an executor module satisfies the ExecutorProtocol contract.
+    Returns rollback_warning (None or str). Raises PlanBlockedError on violation.
+    Called at planning time for catalog_action and catalog_workflow CRs.
+    """
+    from app.services.change_plan_service import PlanBlockedError
+    try:
+        executor_module = catalog.get_executor(connector_type, action_id)
+    except ImportError as exc:
+        raise PlanBlockedError([
+            f"Executor module not found for {connector_type}.{action_id}: {exc}"
+        ])
+    if not (hasattr(executor_module, "execute") and hasattr(executor_module, "rollback")):
+        raise PlanBlockedError([
+            f"Executor {connector_type}.{action_id} is missing required 'execute' and/or 'rollback' "
+            "attributes — ExecutorProtocol contract violated"
+        ])
+    try:
+        return _validate_rollback_capability(executor_module, connector_type, action_id)
+    except ValueError as exc:
+        raise PlanBlockedError([str(exc)])
+
+
 def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[Asset], catalog) -> dict:
     generic_action = step_def["generic_action"]
     asset_types = [a.asset_type.value for a in assets]
@@ -306,6 +330,8 @@ def generate_plan(
         except KeyError:
             raise PlanBlockedError([f"Unknown catalog action: {connector_type}.{action_id}"])
 
+        rollback_warning = _validate_executor_contract(connector_type, action_id, catalog)
+
         rollback_action = action_def.get("rollback_action")
         rollback_ct = action_def.get("rollback_connector_type")
 
@@ -319,10 +345,14 @@ def generate_plan(
             "rollback_connector_type": rollback_ct,
             "rollback_action_id": rollback_action,
         }
+        if rollback_warning:
+            step["rollback_warning"] = rollback_warning
+
+        generated_steps = [step]
         return ChangePlanData(
-            generated_steps=[step],
+            generated_steps=generated_steps,
             preflight_checks=[],
-            blast_radius=_calculate_blast_radius(change_request, assets, safety_result),
+            blast_radius=_calculate_blast_radius(change_request, assets, safety_result, steps=generated_steps),
             rollback_plan={},
             verification_plan={},
         )
@@ -351,10 +381,17 @@ def generate_plan(
                 "rollback_connector_type": action_def.get("rollback_connector_type"),
                 "rollback_action_id": action_def.get("rollback_action"),
             })
+        for step in generated_steps:
+            step_ct = step.get("connector_type", "")
+            step_action = step.get("action_id", "")
+            if step_ct and step_action:
+                rw = _validate_executor_contract(step_ct, step_action, catalog)
+                if rw:
+                    step["rollback_warning"] = rw
         return ChangePlanData(
             generated_steps=generated_steps,
             preflight_checks=[],
-            blast_radius=_calculate_blast_radius(change_request, assets, safety_result),
+            blast_radius=_calculate_blast_radius(change_request, assets, safety_result, steps=generated_steps),
             rollback_plan={},
             verification_plan={},
         )
@@ -367,7 +404,7 @@ def generate_plan(
     return ChangePlanData(
         generated_steps=steps,
         preflight_checks=_generate_preflight_checks(change_def),
-        blast_radius=_calculate_blast_radius(change_request, assets, safety_result),
+        blast_radius=_calculate_blast_radius(change_request, assets, safety_result, steps=steps),
         rollback_plan=_generate_rollback_plan(ct, desired),
         verification_plan=_generate_verification_plan(change_def),
     )
@@ -380,15 +417,17 @@ def _generate_preflight_checks(change_def: dict) -> list[dict]:
     ]
 
 
-def _calculate_blast_radius(cr: ChangeRequest, assets: list[Asset], safety: SafetyReviewResult) -> dict:
+def _calculate_blast_radius(cr: ChangeRequest, assets: list[Asset], safety: SafetyReviewResult, steps: list[dict] | None = None) -> dict:
     envs = list({a.environment.value for a in assets})
+    has_irreversible = any(s.get("rollback_warning") for s in (steps or []))
+    rollback_available = not has_irreversible and safety.risk_level.value not in ["critical"]
     return {
         "affected_assets": [{"id": str(a.id), "name": a.name, "type": a.asset_type.value, "env": a.environment.value, "criticality": a.criticality.value} for a in assets],
         "affected_environments": envs,
         "estimated_impact": f"Risk level: {safety.risk_level.value}. Score: {safety.risk_score}.",
         "affected_services": [],
         "recovery_time_estimate": "5-30 minutes",
-        "rollback_available": safety.risk_level.value not in ["critical"],
+        "rollback_available": rollback_available,
     }
 
 
