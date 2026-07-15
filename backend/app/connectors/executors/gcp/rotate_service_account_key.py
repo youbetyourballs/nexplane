@@ -2,7 +2,6 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 """Rotate a GCP service account key — deactivates old, creates new."""
-from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
