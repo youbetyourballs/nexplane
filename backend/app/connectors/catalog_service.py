@@ -69,7 +69,10 @@ class ActionCatalogService:
                     continue
                 actions.append(action_def)
 
-            self._catalog[connector_type] = actions
+            # Merge actions — multiple JSON files may contribute to the same connector_type.
+            # Example: nexplane_agent.json + nexplane_agent_migration.json both declare
+            # connector_type="nexplane_agent"; the second file would otherwise erase the first.
+            self._catalog[connector_type] = self._catalog.get(connector_type, []) + actions
             self._raw[connector_type] = data
             for action_def in actions:
                 generic = action_def.get("generic_action")
