@@ -5,6 +5,9 @@ import asyncio
 import random
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 _OUS = ["OU=Servers,DC=acme,DC=example", "OU=Workstations,DC=acme,DC=example", "OU=DMZ,DC=acme,DC=example"]
 _HOSTS = ["dc-01", "dc-02", "web-01", "web-02", "app-01", "app-02", "db-01", "payments-api-01", "bastion-01"]
 

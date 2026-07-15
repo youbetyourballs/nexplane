@@ -14,13 +14,13 @@ S3 layout:
 
 Rollback: deletes the S3 objects written during the snapshot.
 """
-from __future__ import annotations
 import asyncio
 import io
 import json
 import zipfile
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
 
 # ---------------------------------------------------------------------------
 # PowerShell scripts

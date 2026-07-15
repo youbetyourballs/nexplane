@@ -4,6 +4,8 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def _verify_enabled(username: str, user_dn: str, creds: dict, retries: int = 3, delay: float = 2.0) -> bool:
     from ._client import get_connection

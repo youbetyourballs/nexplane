@@ -26,11 +26,12 @@ S3 layout:
   {s3_prefix}/{dc_name}/IFM.zip
   {s3_prefix}/{dc_name}/GPO-backup.zip
 """
-from __future__ import annotations
 import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+
+ROLLBACK_CAPABILITY = "full"
 
 logger = logging.getLogger(__name__)
 

@@ -13,6 +13,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
 
 # ---------------------------------------------------------------------------
 # WinRM helpers (same pattern as dc_integrity_check)

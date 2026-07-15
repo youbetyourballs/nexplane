@@ -18,12 +18,13 @@ Sequence:
 
 Rollback: Uninstall-ADDSDomainController on target if promotion completed.
 """
-from __future__ import annotations
 import asyncio
 import json
 import logging
 import time
 from datetime import datetime, timezone
+
+ROLLBACK_CAPABILITY = "full"
 
 logger = logging.getLogger(__name__)
 

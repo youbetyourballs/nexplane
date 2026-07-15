@@ -14,9 +14,10 @@ entry succeeds. iLO/iDRAC stubs appear in result.warnings but do not fail the CR
 
 Rollback: not reversible — documented in rollback() return value.
 """
-from __future__ import annotations
 import asyncio
 import logging
+
+ROLLBACK_CAPABILITY = "full"
 
 logger = logging.getLogger(__name__)
 

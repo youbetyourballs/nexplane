@@ -18,6 +18,9 @@ snapshot_id is the timestamp folder name, e.g. "20240315T143022Z".
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 
 def _do_discover(s3_bucket: str, s3_prefix: str) -> list[dict]:
     import boto3
