@@ -21,6 +21,14 @@ for pkg in [
         if name not in sys.modules:
             sys.modules[name] = types.ModuleType(name)
 
+# Add attribute stubs needed by _client.py modules at import time
+_sentinel = type("_Stub", (), {"__init__": lambda self, *a, **kw: None})
+sys.modules["paramiko"].SSHClient = _sentinel
+sys.modules["paramiko"].AutoAddPolicy = _sentinel
+sys.modules["httpx"].AsyncClient = _sentinel
+sys.modules["httpx"].AsyncHTTPTransport = _sentinel
+sys.modules["requests"].Session = _sentinel
+
 FAMILIES = [
     ("sccm", "app.connectors.executors.sccm"),
     ("ansible", "app.connectors.executors.ansible"),
