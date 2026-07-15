@@ -184,7 +184,7 @@ class TestPutBucketPolicyRollback(unittest.TestCase):
             from app.connectors.executors.aws import put_bucket_policy
             result = run(
                 put_bucket_policy.execute(
-                    {"bucket": "my-bucket", "policy": '{"Statement": [{"Effect": "Allow"}]}'}, [], FakeConnector()
+                    {"bucket_name": "my-bucket", "policy": '{"Statement": [{"Effect": "Allow"}]}'}, [], FakeConnector()
                 )
             )
         self.assertEqual(result["pre_state"]["policy"], prior)
@@ -202,7 +202,7 @@ class TestPutBucketPolicyRollback(unittest.TestCase):
             from app.connectors.executors.aws import put_bucket_policy
             result = run(
                 put_bucket_policy.execute(
-                    {"bucket": "my-bucket", "policy": "{}"}, [], FakeConnector()
+                    {"bucket_name": "my-bucket", "policy": "{}"}, [], FakeConnector()
                 )
             )
         self.assertIsNone(result["pre_state"]["policy"])
@@ -217,8 +217,8 @@ class TestPutBucketPolicyRollback(unittest.TestCase):
             from app.connectors.executors.aws import put_bucket_policy
             result = run(
                 put_bucket_policy.rollback(
-                    {"bucket": "my-bucket"},
-                    {"bucket": "my-bucket", "pre_state": {"policy": prior}},
+                    {"bucket_name": "my-bucket"},
+                    {"bucket_name": "my-bucket", "pre_state": {"policy": prior}},
                     FakeConnector(),
                 )
             )
@@ -234,8 +234,8 @@ class TestPutBucketPolicyRollback(unittest.TestCase):
             from app.connectors.executors.aws import put_bucket_policy
             result = run(
                 put_bucket_policy.rollback(
-                    {"bucket": "my-bucket"},
-                    {"bucket": "my-bucket", "pre_state": {"policy": None}},
+                    {"bucket_name": "my-bucket"},
+                    {"bucket_name": "my-bucket", "pre_state": {"policy": None}},
                     FakeConnector(),
                 )
             )
