@@ -249,9 +249,20 @@ async def _restore_snapshot(
     )
     loop = asyncio.get_event_loop()
 
+    # 0. Wait for snapshot to complete (must happen before create_volume)
+    logger.info(f"Waiting for snapshot {snapshot_id} to complete")
+    await loop.run_in_executor(
+        None,
+        lambda: ec2.get_waiter("snapshot_completed").wait(
+            SnapshotIds=[snapshot_id],
+            WaiterConfig={"Delay": 15, "MaxAttempts": 60},
+        ),
+    )
+    logger.info(f"Snapshot {snapshot_id} ready")
+
     # 1. Stop instance
     logger.info(f"Stopping instance {instance_id} for EBS restore")
-    ec2.stop_instances(InstanceIds=[instance_id])
+    await loop.run_in_executor(None, lambda: ec2.stop_instances(InstanceIds=[instance_id]))
     await loop.run_in_executor(
         None,
         lambda: ec2.get_waiter("instance_stopped").wait(
@@ -263,14 +274,17 @@ async def _restore_snapshot(
 
     # 2. Create new volume from snapshot in same AZ
     logger.info(f"Creating volume from snapshot {snapshot_id} in {az}")
-    new_vol = ec2.create_volume(
-        SnapshotId=snapshot_id,
-        AvailabilityZone=az,
-        VolumeType="gp3",
-        TagSpecifications=[{"ResourceType": "volume", "Tags": [
-            {"Key": "nexplane-purpose", "Value": "os-upgrade-restore"},
-            {"Key": "nexplane-asset-id", "Value": asset_id},
-        ]}],
+    new_vol = await loop.run_in_executor(
+        None,
+        lambda: ec2.create_volume(
+            SnapshotId=snapshot_id,
+            AvailabilityZone=az,
+            VolumeType="gp3",
+            TagSpecifications=[{"ResourceType": "volume", "Tags": [
+                {"Key": "nexplane-purpose", "Value": "os-upgrade-restore"},
+                {"Key": "nexplane-asset-id", "Value": asset_id},
+            ]}],
+        ),
     )
     new_vol_id = new_vol["VolumeId"]
     await loop.run_in_executor(
@@ -285,7 +299,10 @@ async def _restore_snapshot(
     # 3. Detach current root volume
     logger.info(f"Detaching current root volume {root_volume_id}")
     try:
-        ec2.detach_volume(VolumeId=root_volume_id, InstanceId=instance_id, Force=False)
+        await loop.run_in_executor(
+            None,
+            lambda: ec2.detach_volume(VolumeId=root_volume_id, InstanceId=instance_id, Force=False),
+        )
         await loop.run_in_executor(
             None,
             lambda: ec2.get_waiter("volume_available").wait(
@@ -298,19 +315,25 @@ async def _restore_snapshot(
 
     # Tag old volume for operator cleanup — do NOT delete
     try:
-        ec2.create_tags(
-            Resources=[root_volume_id],
-            Tags=[
-                {"Key": "nexplane-rollback-orphan", "Value": "true"},
-                {"Key": "nexplane-asset-id", "Value": asset_id},
-            ],
+        await loop.run_in_executor(
+            None,
+            lambda: ec2.create_tags(
+                Resources=[root_volume_id],
+                Tags=[
+                    {"Key": "nexplane-rollback-orphan", "Value": "true"},
+                    {"Key": "nexplane-asset-id", "Value": asset_id},
+                ],
+            ),
         )
     except Exception:
         pass
 
     # 4. Attach new volume as root
     logger.info(f"Attaching {new_vol_id} as {root_device_name} on {instance_id}")
-    ec2.attach_volume(VolumeId=new_vol_id, InstanceId=instance_id, Device=root_device_name)
+    await loop.run_in_executor(
+        None,
+        lambda: ec2.attach_volume(VolumeId=new_vol_id, InstanceId=instance_id, Device=root_device_name),
+    )
     await loop.run_in_executor(
         None,
         lambda: ec2.get_waiter("volume_in_use").wait(
@@ -321,7 +344,7 @@ async def _restore_snapshot(
 
     # 5. Start instance
     logger.info(f"Starting instance {instance_id}")
-    ec2.start_instances(InstanceIds=[instance_id])
+    await loop.run_in_executor(None, lambda: ec2.start_instances(InstanceIds=[instance_id]))
     await loop.run_in_executor(
         None,
         lambda: ec2.get_waiter("instance_running").wait(
@@ -351,9 +374,12 @@ async def _restore_snapshot(
 
     # Tag snapshot as used
     try:
-        ec2.create_tags(
-            Resources=[snapshot_id],
-            Tags=[{"Key": "nexplane-rollback-used", "Value": "true"}],
+        await loop.run_in_executor(
+            None,
+            lambda: ec2.create_tags(
+                Resources=[snapshot_id],
+                Tags=[{"Key": "nexplane-rollback-used", "Value": "true"}],
+            ),
         )
     except Exception:
         pass
