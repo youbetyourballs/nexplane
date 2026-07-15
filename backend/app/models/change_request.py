@@ -295,6 +295,7 @@ class ChangeType(str, enum.Enum):
     k8s_workload_deploy = "k8s_workload_deploy"
     agent_containerize_retire = "agent_containerize_retire"
     agent_containerize_auto = "agent_containerize_auto"
+    ssh_containerize_workload = "ssh_containerize_workload"
     # IP address migration
     change_ip = "change_ip"
     migrate_ip = "migrate_ip"

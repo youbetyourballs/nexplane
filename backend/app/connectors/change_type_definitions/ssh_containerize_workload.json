@@ -1,0 +1,15 @@
+{
+  "change_type": "ssh_containerize_workload",
+  "display_name": "SSH: Containerize Workload",
+  "description": "Containerize a legacy workload in-place via SSH — generates Dockerfile and k8s manifests, builds image, pushes to registry, and restores on rollback.",
+  "steps": [
+    {"generic_action": "containerize_workload", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "asset_exists"],
+  "verification_methods": ["api_check"],
+  "parameters": {
+    "service_name": {"type": "string", "required": true, "description": "Systemd service name to containerize"},
+    "registry":     {"type": "string", "required": true, "description": "Image registry prefix"},
+    "dry_run":      {"type": "boolean", "required": false, "default": false}
+  }
+}

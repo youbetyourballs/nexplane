@@ -277,7 +277,7 @@ class TestOsUpgradeSmoke:
         cr = _run_cr(
             self.client,
             "[smoke] os_upgrade dry_run",
-            "execute_os_upgrade",
+            "agent_os_upgrade",
             {"dry_run": True, "target_version": ""},
             asset_ids=[self.agent_asset_id],
         )
@@ -294,7 +294,7 @@ class TestOsUpgradeSmoke:
         cr = _run_cr(
             self.client,
             "[smoke] os_upgrade snapshot_only",
-            "execute_os_upgrade",
+            "agent_os_upgrade",
             {"snapshot_only": True},
             asset_ids=[self.agent_asset_id],
         )
