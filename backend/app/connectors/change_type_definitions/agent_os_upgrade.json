@@ -3,10 +3,7 @@
   "display_name": "Agent: OS Major Version Upgrade",
   "description": "Safely upgrades a Linux host to the next major OS release. Takes a VM snapshot before upgrading and auto-restores on failure. Ubuntu uses do-release-upgrade, RHEL/CentOS uses leapp. This operation causes downtime.",
   "steps": [
-    {"generic_action": "preflight_os_upgrade",   "purpose": "preflight_validate", "required": true},
-    {"generic_action": "snapshot_before_upgrade", "purpose": "preflight_validate", "required": true},
-    {"generic_action": "execute_os_upgrade",      "purpose": "execute",            "required": true},
-    {"generic_action": "verify_os_upgrade",       "purpose": "verify",             "required": true}
+    {"generic_action": "agent_os_upgrade", "purpose": "execute", "required": true}
   ],
   "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
   "verification_methods": ["output_check"],
@@ -14,6 +11,7 @@
     "target_version":     {"type": "string",  "required": false, "description": "Target OS version e.g. 22.04, 9"},
     "dry_run":            {"type": "boolean", "default": false},
     "skip_snapshot":      {"type": "boolean", "default": false, "description": "Skip pre-upgrade snapshot (not recommended for prod)"},
+    "snapshot_only":      {"type": "boolean", "default": false, "description": "Take snapshot only, no upgrade"},
     "maintenance_window": {"type": "boolean", "default": true,  "description": "Confirm this is scheduled as downtime"},
     "defer_reboot":       {"type": "boolean", "default": false}
   }

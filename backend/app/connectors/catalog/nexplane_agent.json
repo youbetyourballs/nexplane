@@ -1744,6 +1744,25 @@
                         "estimated_duration_seconds": 120
                     },
                     {
+                        "action_id": "agent_os_upgrade",
+                        "generic_action": "agent_os_upgrade",
+                        "action_type": "change",
+                        "execution_tier": 3,
+                        "display_name": "OS Major Version Upgrade",
+                        "description": "Safely upgrades a Linux host to the next major OS release. Runs preflight, takes EBS snapshot, executes upgrade, verifies. Auto-restores on failure.",
+                        "applicable_asset_types": ["server"],
+                        "parameters": [
+                            {"name": "target_version",     "type": "string",  "required": false},
+                            {"name": "dry_run",            "type": "boolean", "required": false, "default": false},
+                            {"name": "skip_snapshot",      "type": "boolean", "required": false, "default": false},
+                            {"name": "snapshot_only",      "type": "boolean", "required": false, "default": false},
+                            {"name": "maintenance_window", "type": "boolean", "required": false, "default": true},
+                            {"name": "defer_reboot",       "type": "boolean", "required": false, "default": false}
+                        ],
+                        "executor": "nexplane_agent.os_upgrade",
+                        "estimated_duration_seconds": 3600
+                    },
+                    {
                         "action_id": "ip_campaign",
                         "generic_action": "ip_campaign",
                         "action_type": "change",

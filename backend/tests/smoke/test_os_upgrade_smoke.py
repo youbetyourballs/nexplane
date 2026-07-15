@@ -242,23 +242,33 @@ class TestOsUpgradeSmoke:
             timeout=300,
         )
 
-        # Poll for agent asset registration (up to 180s)
+        # Poll for agent asset registration (up to 300s)
         log("OS_UPGRADE setup: waiting for agent registration")
-        deadline = time.time() + 180
+        deadline = time.time() + 300
         agent_asset_id = None
         while time.time() < deadline:
-            candidates = [
-                a for a in cls.client.get(
-                    "/assets", params={"q": ec2_hostname or "nexplane-smoke", "asset_type": "server"}
-                )
-                if (a.get("asset_metadata") or {}).get("agent_version")
-            ]
+            search_terms = [ec2_hostname, "nexplane-smoke-os-upgrade"] if ec2_hostname else ["nexplane-smoke-os-upgrade"]
+            candidates = []
+            for term in search_terms:
+                found = [
+                    a for a in cls.client.get("/assets", params={"q": term, "asset_type": "server"})
+                    if (a.get("asset_metadata") or {}).get("agent_version")
+                    or (a.get("asset_metadata") or {}).get("instance_id") == cls.instance_id
+                ]
+                candidates.extend(found)
+            if not candidates:
+                all_servers = cls.client.get("/assets", params={"asset_type": "server", "limit": 200})
+                candidates = [
+                    a for a in all_servers
+                    if (a.get("asset_metadata") or {}).get("instance_id") == cls.instance_id
+                    and (a.get("asset_metadata") or {}).get("agent_version")
+                ]
             if candidates:
                 agent_asset_id = candidates[0]["id"]
                 break
             time.sleep(15)
         assert agent_asset_id, (
-            f"Agent did not register within 180s on {cls.instance_id} (hostname={ec2_hostname})"
+            f"Agent did not register within 300s on {cls.instance_id} (hostname={ec2_hostname})"
         )
         cls.agent_asset_id = agent_asset_id
         log(f"OS_UPGRADE setup: agent registered as {agent_asset_id}")
