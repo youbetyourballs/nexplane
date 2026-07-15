@@ -68,6 +68,16 @@ async def _executor_fallback(
             (s.get("connector_type") for s in _exec_steps_for_ct if s.get("connector_type")),
             None,
         )
+        # For catalog_action CRs, _ct is "catalog_action" which doesn't map to any
+        # executor module. Use the action_id from the execution steps instead so the
+        # executor's native rollback() is found correctly.
+        if _ct == "catalog_action":
+            _action_id_from_step = next(
+                (s.get("action_id") for s in _exec_steps_for_ct if s.get("action_id")),
+                None,
+            )
+            if _action_id_from_step:
+                _ct = _action_id_from_step
         _connector = None
         # Resolve connector object for credentials if a connector_id is in the step
         _step_connector_id = next(
@@ -207,7 +217,10 @@ async def execute_cr_rollback(
                 else:
                     # No steps to roll back — treat as successful (nothing to undo).
                     step_results = [{"success": True}]
-            if result.get("rolled_back") is False and not step_results:
+            if result.get("rolled_back") is True and not step_results:
+                # _executor_fallback returned direct {"rolled_back": True} — count as success.
+                step_results = [{"success": True}]
+            elif result.get("rolled_back") is False and not step_results:
                 if result.get("_rollback_no_op"):
                     # Executor ran and decided nothing to undo — count as success.
                     step_results = [{"success": True}]

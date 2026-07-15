@@ -1192,13 +1192,13 @@
           "name": "ttl"
         }
       ], 
-      "execution_tier": 1, 
-      "rollback_action": "upsert_route53_record", 
+      "execution_tier": 1,
+      "rollback_action": null,
       "applicable_asset_types": [
         "dns_zone"
-      ], 
-      "rollback_connector_type": "aws", 
-      "action_type": "change", 
+      ],
+      "rollback_connector_type": "aws",
+      "action_type": "change",
       "executor": "aws.delete_route53_record", 
       "generic_action": "delete_route53_record", 
       "action_id": "delete_route53_record", 

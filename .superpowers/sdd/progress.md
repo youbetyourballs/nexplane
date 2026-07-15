@@ -288,3 +288,13 @@ Base commit: 1ab4825
 Task 5: complete (commits 70215c9..9e42b67, review clean after BOM fix + future-import fix — 47 Azure/Azure AD executors; 47/47 on EC2)
 Task 6: complete (commits 9e42b67..a1aa97d, review clean after dc_integrity_check duplicate fix — 22 AD executors; 22/22 on EC2; report was copy-paste error but code was correct)
 Task 7: complete (commits a1aa97d..298e5c2, review clean — 29 K8s executors; 29/29 on EC2; stub rollback() bodies noted, deferred to Task 13)
+Task 8: complete (commits 298e5c2..ef82f6a, review clean after future-import cleanup — 207 remaining executors; 207/207 on EC2; ansible/cancel_job pre-existing irreversible accepted as more accurate)
+Task 9: complete (commits ef82f6a..dfe27d2, review clean after bucket_name fix — 5 AWS executor reconstitutions + test file; 17/17 on EC2; Minor: Route53 empty-values path, CW OKActions edge case, IAM key re-activation no-op)
+Task 10: SKIPPED — plan marked as already done (all OCI reconstitution executors already had PreStateStore rollback from OCI Parity work)
+Task 11: complete (commits dfe27d2..386ceb1, review clean — delete_instance.py pre-state capture + reconstitution; 3/3 on EC2)
+Task 12: complete (commits 386ceb1..0591912, review clean — disable_account + enable_account real LDAP rollback; 6/6 on EC2)
+Task 12: complete (commits 386ceb1..0591912, review clean — disable_account + enable_account real LDAP rollback; 6/6 on EC2)
+Task 13: complete (commits 0591912..291f943, review clean after EC2 verification — patch_deployment + uncordon_node pre-state + reconstitution; 7/7 on EC2; report narrative was stale but code correct)
+Task 14: SKIPPED — already done (Ansible update_host_variables already had PreStateStore rollback)
+## ALL RECONSTITUTION TASKS COMPLETE — 33/33 tests on EC2
+Task 15: complete (commits 291f943..17c5ce9, review clean)
