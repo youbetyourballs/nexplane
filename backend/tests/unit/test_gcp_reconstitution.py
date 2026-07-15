@@ -43,16 +43,16 @@ class TestDeleteInstanceRollback(unittest.TestCase):
         mock_client.delete.return_value = mock_op
 
         with patch(
-            "backend.app.connectors.executors.gcp.delete_instance.get_credentials",
+            "app.connectors.executors.gcp.delete_instance.get_credentials",
             return_value=MagicMock(),
         ), patch(
-            "backend.app.connectors.executors.gcp.delete_instance.get_project_id",
+            "app.connectors.executors.gcp.delete_instance.get_project_id",
             return_value="my-project",
         ), patch(
             "google.cloud.compute_v1.InstancesClient",
             return_value=mock_client,
         ):
-            from backend.app.connectors.executors.gcp import delete_instance
+            from app.connectors.executors.gcp import delete_instance
             result = run(
                 delete_instance.execute(
                     {"instance_name": "my-vm", "zone": "us-central1-a"},
@@ -87,10 +87,10 @@ class TestDeleteInstanceRollback(unittest.TestCase):
         }
 
         with patch(
-            "backend.app.connectors.executors.gcp.delete_instance.get_credentials",
+            "app.connectors.executors.gcp.delete_instance.get_credentials",
             return_value=MagicMock(),
         ), patch(
-            "backend.app.connectors.executors.gcp.delete_instance.get_project_id",
+            "app.connectors.executors.gcp.delete_instance.get_project_id",
             return_value="my-project",
         ), patch(
             "google.cloud.compute_v1.InstancesClient",
@@ -110,7 +110,7 @@ class TestDeleteInstanceRollback(unittest.TestCase):
         ), patch(
             "google.cloud.compute_v1.Items",
         ):
-            from backend.app.connectors.executors.gcp import delete_instance
+            from app.connectors.executors.gcp import delete_instance
             result = run(
                 delete_instance.rollback(
                     {"instance_name": "my-vm", "zone": "us-central1-a"},
@@ -125,13 +125,13 @@ class TestDeleteInstanceRollback(unittest.TestCase):
 
     def test_rollback_no_pre_state_returns_false(self):
         with patch(
-            "backend.app.connectors.executors.gcp.delete_instance.get_credentials",
+            "app.connectors.executors.gcp.delete_instance.get_credentials",
             return_value=MagicMock(),
         ), patch(
-            "backend.app.connectors.executors.gcp.delete_instance.get_project_id",
+            "app.connectors.executors.gcp.delete_instance.get_project_id",
             return_value="my-project",
         ), patch("google.cloud.compute_v1.InstancesClient", return_value=MagicMock()):
-            from backend.app.connectors.executors.gcp import delete_instance
+            from app.connectors.executors.gcp import delete_instance
             result = run(
                 delete_instance.rollback(
                     {}, {"pre_state": {}}, FakeConnector()
