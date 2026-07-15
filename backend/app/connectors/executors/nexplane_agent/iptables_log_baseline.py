@@ -3,6 +3,9 @@
 
 from app.connectors.executors.nexplane_agent import _dispatch
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only baseline capture — no state was changed"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     result = await _dispatch.dispatch_agent_job(

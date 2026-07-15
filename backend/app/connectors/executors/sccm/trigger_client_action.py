@@ -6,6 +6,9 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "SCCM client action side effects cannot be automatically undone"
+
 VALID_ACTIONS = frozenset(
     ["MachinePolicyRetrieve", "SoftwareInventory", "HardwareInventory", "UpdateDeploymentReEval"]
 )

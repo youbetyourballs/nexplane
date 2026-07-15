@@ -3,6 +3,8 @@
 
 """Executor for agent_containerize_retire change type."""
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Dispatch containerize_retire to the registered Nexplane agent."""

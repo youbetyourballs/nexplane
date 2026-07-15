@@ -6,6 +6,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Deploy an application to an SCCM collection.

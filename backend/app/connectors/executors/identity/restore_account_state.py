@@ -10,6 +10,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+ROLLBACK_CAPABILITY = "full"
+
 RESTORABLE_CONNECTOR_TYPES = frozenset({
     "active_directory", "okta", "entra_id", "github", "gitlab",
     "ldap", "freeipa", "keycloak", "gitea", "teleport", "kubernetes",

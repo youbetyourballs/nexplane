@@ -16,6 +16,8 @@ from typing import Any
 
 from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 
+ROLLBACK_CAPABILITY = "full"
+
 
 # -------------------------------------------------------------------------
 # Stage 1: preflight_discovery

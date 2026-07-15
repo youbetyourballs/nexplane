@@ -4,6 +4,9 @@
 from datetime import datetime, timezone
 from app.services.safety_engine import APPROVED_COMMAND_TEMPLATES
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     template_id = parameters.get("template_id")
     if not template_id or template_id not in APPROVED_COMMAND_TEMPLATES:

@@ -4,6 +4,8 @@
 """Executor: remove a package that has no available patch and poses unacceptable risk."""
 from typing import Any
 
+ROLLBACK_CAPABILITY = "full"
+
 _VERSION_CMD = (
     "rpm -q '{pkg}' 2>/dev/null || "
     "dpkg -s '{pkg}' 2>/dev/null | grep '^Version' | awk '{{print $2}}' || "

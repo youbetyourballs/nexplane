@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 
 from app.connectors.executors.nexplane_agent.server_backup import _ec2_client, _load_aws_creds
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def _do_snapshot(creds: dict, instance_id: str, no_reboot: bool = True) -> dict:
     import asyncio

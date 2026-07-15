@@ -10,6 +10,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not asset_ids:

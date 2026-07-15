@@ -3,6 +3,9 @@
 
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     return {
         "action": "upload_image",

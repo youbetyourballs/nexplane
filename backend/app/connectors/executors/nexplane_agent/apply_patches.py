@@ -5,6 +5,8 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job

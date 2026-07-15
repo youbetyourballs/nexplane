@@ -4,6 +4,8 @@
 from datetime import datetime, timezone
 from ._client import okta_headers, okta_base, get_client
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})

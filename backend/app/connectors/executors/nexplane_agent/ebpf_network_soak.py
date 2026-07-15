@@ -6,6 +6,9 @@ import logging
 
 from app.connectors.executors.nexplane_agent import _dispatch
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only soak/observe operation — no state was changed"
+
 logger = logging.getLogger(__name__)
 
 _MAX_WARMUP_ATTEMPTS = 10

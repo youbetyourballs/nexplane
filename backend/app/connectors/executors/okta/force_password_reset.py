@@ -4,6 +4,9 @@
 from datetime import datetime, timezone
 from ._client import okta_headers, okta_base, get_client
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "old password hash not stored — cannot restore previous credential"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})

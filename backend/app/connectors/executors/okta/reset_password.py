@@ -3,6 +3,9 @@
 
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "old password hash not stored — cannot restore previous credential"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, 'credentials', {})

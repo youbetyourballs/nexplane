@@ -5,6 +5,8 @@ import asyncio
 from datetime import datetime, timezone
 from ._client import get_ssh_client, prepare_ssh_target
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     service_name = parameters.get("service_name", "nexplane-agent")

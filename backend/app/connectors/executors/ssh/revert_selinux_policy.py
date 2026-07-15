@@ -4,6 +4,8 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Remove a named SELinux policy module, reverting the system to the state before it was applied."""

@@ -4,6 +4,8 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 def _okta_client_from_params(parameters: dict):
     """Extract Okta credentials from parameters for emergency lockout."""

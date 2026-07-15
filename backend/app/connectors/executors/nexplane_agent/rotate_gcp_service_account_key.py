@@ -3,6 +3,8 @@
 
 from app.connectors.executors.nexplane_agent import _dispatch
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     from app.connectors.executors.gcp.rotate_service_account_key import execute as gcp_rotate

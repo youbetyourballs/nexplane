@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def _discover_users(connector, action: str, params: dict) -> dict:
     from app.services.connector_service import execute_action

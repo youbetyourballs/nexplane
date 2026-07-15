@@ -4,6 +4,9 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "file copy side effects cannot be automatically undone without knowing prior file state"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {}) or {}

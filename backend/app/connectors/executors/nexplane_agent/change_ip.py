@@ -15,6 +15,7 @@ New parameters (v2, all optional and backward-compatible):
 from __future__ import annotations
 from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 
+ROLLBACK_CAPABILITY = "full"
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:

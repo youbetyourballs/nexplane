@@ -3,6 +3,9 @@
 
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     action = parameters.get("action", "install")
     cert_name = parameters.get("cert_name", "unknown")

@@ -6,6 +6,9 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "SCCM script side effects on target cannot be automatically undone"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Run a pre-approved SCCM script against a collection.

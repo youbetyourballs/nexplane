@@ -3,6 +3,9 @@
 
 from app.connectors.executors.nexplane_agent import _dispatch
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 # Default and max observation window for adaptive extension
 _DEFAULT_WINDOW_SECONDS = 1200   # 20 minutes
 _MAX_WINDOW_SECONDS = 7200       # 2 hours

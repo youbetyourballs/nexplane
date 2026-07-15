@@ -6,6 +6,8 @@ import random
 import string
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Upload and install a SELinux policy module (.te file content or .pp path) via semodule."""

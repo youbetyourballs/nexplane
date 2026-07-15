@@ -3,6 +3,8 @@
 
 from app.connectors.executors.nexplane_agent import _dispatch
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Rotate SSH authorized_keys on target hosts via the agent.

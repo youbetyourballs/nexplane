@@ -7,6 +7,9 @@ Called before any fan-out child CR executes its action.
 """
 from __future__ import annotations
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 # Fields captured per connector type. Keys must be stable — used by restore.
 _STATE_FIELDS: dict[str, list[str]] = {
     "active_directory": ["enabled", "locked", "group_memberships", "mfa_enforced"],

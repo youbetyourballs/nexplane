@@ -17,6 +17,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def _lookup_profile(profile_id: uuid.UUID, organization_id=None, db=None):
     from app.database import db_factory

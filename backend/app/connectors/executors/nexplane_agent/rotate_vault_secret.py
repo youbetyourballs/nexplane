@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+ROLLBACK_CAPABILITY = "full"
+
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     from app.connectors.executors.vault.rotate_secret import execute as vault_rotate
     result = await vault_rotate(parameters, asset_ids, connector)

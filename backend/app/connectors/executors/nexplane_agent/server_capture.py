@@ -12,6 +12,9 @@ from app.connectors.executors.nexplane_agent.aws_utils import _load_aws_creds, _
 from app.connectors.executors.nexplane_agent.backup_strategies import _load_storage_config
 from app.connectors.executors.nexplane_agent.server_snapshot import _do_snapshot, _deregister_ami
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 
 async def _delete_s3_prefix(creds: dict, bucket: str, prefix: str) -> None:
     """Delete all objects under prefix from S3 (best-effort)."""

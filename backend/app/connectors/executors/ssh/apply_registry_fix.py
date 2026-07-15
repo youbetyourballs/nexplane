@@ -4,6 +4,8 @@
 """Executor: set a Windows registry value via PowerShell (delivered through SSH/WinRM connector)."""
 from typing import Any
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list[str], connector: Any) -> dict:
     key_path = parameters["key_path"]

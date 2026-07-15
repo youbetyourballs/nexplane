@@ -3,6 +3,9 @@
 
 from app.connectors.executors.nexplane_agent import _dispatch
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 # Pass thresholds (spec-mandated):
 # - HTTP latency: ≤ 150% of baseline p95
 # - DB row count: within 5% of baseline sample

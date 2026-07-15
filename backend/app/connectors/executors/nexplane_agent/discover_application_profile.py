@@ -3,6 +3,9 @@
 
 from app.connectors.executors.nexplane_agent import _dispatch
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     asset_id = parameters.get("asset_id") or (asset_ids[0] if asset_ids else None)

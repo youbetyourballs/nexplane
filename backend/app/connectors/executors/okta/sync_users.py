@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """List all Okta users for discovery. Returns count + user list."""

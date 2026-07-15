@@ -5,6 +5,8 @@ import json
 
 from app.connectors.executors.nexplane_agent import _dispatch
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Unpack synthesized profile from soak service: {session_id, service_name, profile: <json str>}

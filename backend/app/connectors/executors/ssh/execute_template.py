@@ -7,6 +7,9 @@ import time
 from datetime import datetime, timezone
 from app.services.safety_engine import APPROVED_COMMAND_TEMPLATES
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "SSH command side effects on target cannot be automatically undone"
+
 
 async def _real_execute(parameters: dict, asset_ids: list, creds: dict) -> dict:
     from ._client import get_ssh_client, is_allowed

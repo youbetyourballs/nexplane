@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only registry lookup — no state was changed"
+
 FAN_OUT_ACTIONS: dict[str, dict[str, str]] = {
     "emergency_user_lockout": {
         "active_directory": "disable_account",

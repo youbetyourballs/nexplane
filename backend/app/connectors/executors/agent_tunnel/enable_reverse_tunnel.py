@@ -11,6 +11,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 # Default allowlist used when the operator does not supply one.
 _RFC1918_ALLOWLIST = ["10.0.0.0/8:*", "172.16.0.0/12:*", "192.168.0.0/16:*"]

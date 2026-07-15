@@ -7,6 +7,8 @@ from app.connectors.executors.nexplane_agent import _dispatch
 
 logger = logging.getLogger(__name__)
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(cr, connector, db) -> dict:
     params = cr.parameters or {}

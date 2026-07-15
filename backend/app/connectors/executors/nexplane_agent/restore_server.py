@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 from app.connectors.executors.nexplane_agent.aws_utils import _load_aws_creds, _ec2_client  # noqa: F401
 from app.connectors.executors.nexplane_agent.restore_strategies import IrreversibleOperationError  # noqa: F401
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     from app.connectors.executors.nexplane_agent.restore_strategies import get_strategy

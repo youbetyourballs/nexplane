@@ -7,6 +7,9 @@ import asyncio
 import re
 from ._client import get_ssh_client, prepare_ssh_target
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 _DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 
 

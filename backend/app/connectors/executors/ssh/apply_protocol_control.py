@@ -4,6 +4,8 @@
 """Executor: disable a vulnerable network protocol on Linux via OpenSSL/sysctl config."""
 from typing import Any
 
+ROLLBACK_CAPABILITY = "full"
+
 _CONFIG_FILE = "/etc/ssl/openssl.cnf"
 
 _PROTOCOL_MIN_VERSION = {

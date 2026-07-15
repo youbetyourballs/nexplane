@@ -19,6 +19,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+ROLLBACK_CAPABILITY = "full"
+
 STRUCTURAL_FIELDS = {"enabled", "locked", "group_memberships", "role_assignments",
                      "mfa_state", "status", "accountEnabled", "rolebindings"}
 MAX_BATCH_DEFAULT = 100

@@ -7,6 +7,8 @@ import uuid
 from app.database import AsyncSessionLocal
 from app.models.asset import Asset
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def _load_app_profile(asset_id: str, app_name: str) -> dict | None:
     """Load the app profile from asset_metadata.applications[]."""

@@ -7,6 +7,9 @@ from app.connectors.executors.nexplane_agent import _dispatch
 
 logger = logging.getLogger(__name__)
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 _DEFAULT_PATHS = ["/etc", "/opt", "/var/www", "/home"]
 _DEFAULT_EXTENSIONS = [".conf", ".env", ".yaml", ".yml", ".json", ".toml", ".ini", ".properties", ".sh"]
 

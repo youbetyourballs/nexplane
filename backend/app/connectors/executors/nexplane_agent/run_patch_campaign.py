@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     cve_id = parameters.get("cve_id")

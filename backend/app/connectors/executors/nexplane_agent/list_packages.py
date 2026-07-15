@@ -3,6 +3,9 @@
 
 """Executor: list_installed_packages — CIS Control 2 software inventory via Nexplane agent."""
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Dispatch list_installed_packages to the Nexplane agent on the target host.

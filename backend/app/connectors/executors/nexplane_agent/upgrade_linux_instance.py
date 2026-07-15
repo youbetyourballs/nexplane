@@ -2,6 +2,10 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 from datetime import datetime, timezone
+
+ROLLBACK_CAPABILITY = "full"
+
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     path = parameters.get("path", "inplace")
     if path == "containerize":

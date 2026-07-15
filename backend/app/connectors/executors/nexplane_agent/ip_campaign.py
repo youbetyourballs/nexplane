@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from typing import Any
 from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """

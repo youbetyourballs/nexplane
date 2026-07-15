@@ -4,6 +4,8 @@
 """Executor: blacklist and unload a vulnerable Linux kernel module."""
 from typing import Any
 
+ROLLBACK_CAPABILITY = "full"
+
 _BLACKLIST_FILE = "/etc/modprobe.d/nexplane-disable.conf"
 
 

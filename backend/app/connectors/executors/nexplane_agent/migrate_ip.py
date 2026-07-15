@@ -26,6 +26,8 @@ from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 from app.services.dns_discovery_service import discover_dns_records_for_asset
 from app.database import AsyncSessionLocal
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """

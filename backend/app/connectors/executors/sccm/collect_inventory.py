@@ -6,6 +6,9 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only inventory collection — no state was changed"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Pull hardware/software inventory for a device from SCCM.

@@ -7,6 +7,8 @@ from app.connectors.executors.nexplane_agent import _dispatch
 
 logger = logging.getLogger(__name__)
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # --- Kernel/capability preflight diagnostics ---

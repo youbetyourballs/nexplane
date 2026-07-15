@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 # Re-export for modules that still import these from server_backup (e.g. restore_server)
 from app.connectors.executors.nexplane_agent.aws_utils import _load_aws_creds, _ec2_client  # noqa: F401
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not asset_ids:

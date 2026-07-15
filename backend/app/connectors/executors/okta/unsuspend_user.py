@@ -4,6 +4,8 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def _wait_for_status(user_id: str, target_status: str, connector, max_wait: int = 30, interval: int = 3) -> None:
     from ._client import okta_headers, okta_base, get_client
