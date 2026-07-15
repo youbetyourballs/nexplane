@@ -298,3 +298,17 @@ Task 13: complete (commits 0591912..291f943, review clean after EC2 verification
 Task 14: SKIPPED — already done (Ansible update_host_variables already had PreStateStore rollback)
 ## ALL RECONSTITUTION TASKS COMPLETE — 33/33 tests on EC2
 Task 15: complete (commits 291f943..17c5ce9, review clean)
+Task 16: complete (commits 17c5ce9..da9af54, review approved — 3 production rollback bugs fixed)
+Task 17: complete (commits da9af54..d9757ad, review approved — 1 skipped expected, OCI cred field names corrected vs brief)
+Task 18: complete (commits d9757ad..19898d0, review approved — 1 skipped expected, GCP dns_zone not configured)
+Task 19: complete (commits 19898d0..f668d11, review approved — 1 skipped expected; Minor: credential defaults)
+Task 20: complete (commits f668d11..54730c1, review clean — 1 skipped expected, no K8s creds)
+ALL 20 TASKS COMPLETE
+Final review fixes: complete (commit dd67b9d — C1/I2/I3/M5 resolved; branch ready to merge)
+
+## Containerize + OS Upgrade Completion
+Base commit: 1f1c025
+- Containerize Task 1: complete (commit 2ddcc37, 3/3 tests, review clean)
+- Containerize Task 2: complete (commits 5f3a282..6b06c2d, review clean after run_in_executor + rollback command fixes, 6/6 tests)
+- Containerize Task 3: complete (commit 2311b69, 5 skips (no nexplane_agent creds), review clean)
+## Containerize plan COMPLETE

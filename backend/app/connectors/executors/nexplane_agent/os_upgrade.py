@@ -29,31 +29,33 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     from app.database import AsyncSessionLocal
     from app.models.asset import Asset
 
-    # Step 1: Pre-flight check
-    logger.info(f"OS upgrade preflight for asset {asset_id}")
-    preflight = await dispatch_agent_job(
-        command="preflight_os_upgrade",
-        parameters={"target_version": target_version, "dry_run": dry_run},
-        asset_ids=[asset_id],
-        timeout_seconds=120,
-    )
+    # Step 1: Pre-flight check (skip if snapshot_only)
+    preflight = None
+    if not snapshot_only:
+        logger.info(f"OS upgrade preflight for asset {asset_id}")
+        preflight = await dispatch_agent_job(
+            command="preflight_os_upgrade",
+            parameters={"target_version": target_version, "dry_run": dry_run},
+            asset_ids=[asset_id],
+            timeout_seconds=120,
+        )
 
-    if preflight.get("status") == "blocked":
-        return {
-            "status": "blocked",
-            "reason": preflight.get("reason", "Pre-flight checks failed"),
-            "preflight": preflight,
-        }
+        if preflight.get("status") == "blocked":
+            return {
+                "status": "blocked",
+                "reason": preflight.get("reason", "Pre-flight checks failed"),
+                "preflight": preflight,
+            }
 
-    if dry_run:
-        return {
-            "status": "dry_run",
-            "current_os": preflight.get("current_os"),
-            "target_os": preflight.get("target_os"),
-            "packages_to_migrate": preflight.get("packages_to_migrate", []),
-            "estimated_duration_minutes": preflight.get("estimated_duration_minutes", 60),
-            "warnings": preflight.get("warnings", []),
-        }
+        if dry_run:
+            return {
+                "status": "dry_run",
+                "current_os": preflight.get("current_os"),
+                "target_os": preflight.get("target_os"),
+                "packages_to_migrate": preflight.get("packages_to_migrate", []),
+                "estimated_duration_minutes": preflight.get("estimated_duration_minutes", 60),
+                "warnings": preflight.get("warnings", []),
+            }
 
     # Step 2: Take snapshot before upgrade
     snapshot_meta = None
@@ -122,7 +124,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             command="verify_os_upgrade",
             parameters={
                 "target_version": target_version,
-                "pre_upgrade_services": preflight.get("running_services", []),
+                "pre_upgrade_services": (preflight or {}).get("running_services", []),
             },
             asset_ids=[asset_id],
             timeout_seconds=300,
@@ -159,7 +161,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     return {
         "status": "completed",
-        "previous_os": preflight.get("current_os"),
+        "previous_os": (preflight or {}).get("current_os"),
         "new_os": verify_result.get("new_os_version"),
         "snapshot_id": snapshot_id,
         "snapshot_meta": snapshot_meta,
