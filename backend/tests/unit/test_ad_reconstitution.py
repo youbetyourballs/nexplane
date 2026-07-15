@@ -12,7 +12,10 @@ def run(coro):
 
 class FakeConnector:
     def __init__(self, creds=None):
-        self.credentials = creds or {"server": "dc.example.com", "username": "admin", "password": "pass"}
+        if creds is None:
+            self.credentials = {"server": "dc.example.com", "username": "admin", "password": "pass"}
+        else:
+            self.credentials = creds
 
 
 def _make_mock_conn(modify_result=None):
