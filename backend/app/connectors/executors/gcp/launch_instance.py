@@ -4,6 +4,7 @@
 import asyncio
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
 
 _AGENT_STARTUP_TEMPLATE = """#!/bin/bash
 set -e

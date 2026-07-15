@@ -3,6 +3,7 @@
 
 import asyncio
 
+ROLLBACK_CAPABILITY = "full"
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {})

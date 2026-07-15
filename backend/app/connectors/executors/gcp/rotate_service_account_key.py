@@ -7,6 +7,7 @@ import json
 import os
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
 
 def _gcp_iam_client(connector, execution_result: dict | None = None):
     """Build Google IAM client, falling back through credential sources."""
