@@ -11,8 +11,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 from smoke_helpers import NexplaneClient, log, get_connector_creds_from_db
 
 BASE_URL = os.environ.get("NEXPLANE_BASE_URL", "http://localhost:8000")
-EMAIL = os.environ.get("NEXPLANE_EMAIL", "admin@nexplane.local")
-PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin")
+EMAIL = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
+PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 
 PHASE = "AWS_ROLLBACK"
 TIMEOUT = 120
@@ -86,6 +86,9 @@ def _step_result(cr, rollback=False):
             steps = result.get("rollback_steps", [])
             if steps:
                 return steps[0].get("result") or {}
+            # _executor_fallback stores result directly (no rollback_steps wrapper)
+            if "rolled_back" in result:
+                return result
         else:
             steps = result.get("execution", {}).get("steps", [])
             if steps:
@@ -110,8 +113,8 @@ class TestAwsRollbackSmoke:
         import boto3
         self.r53 = boto3.client(
             "route53",
-            aws_access_key_id=self.creds["aws_access_key_id"],
-            aws_secret_access_key=self.creds["aws_secret_access_key"],
+            aws_access_key_id=self.creds["access_key_id"],
+            aws_secret_access_key=self.creds["secret_access_key"],
             region_name=self.creds.get("region", "us-east-1"),
         )
         self.test_record = None
