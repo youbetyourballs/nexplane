@@ -2,7 +2,6 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 import os
-import time
 import pytest
 import sys
 
@@ -35,10 +34,6 @@ def _plan_cr(client, cr_id):
     r = client.client.post(f"{base}/change-requests/{cr_id}/plan")
     return r
 
-
-def _get_cr(client, cr_id):
-    base = client.base
-    return client.client.get(f"{base}/change-requests/{cr_id}").json()
 
 
 class TestCrContractSmoke:
