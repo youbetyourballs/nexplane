@@ -2,7 +2,6 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 """Executor for agent_containerize_build change type."""
-from __future__ import annotations
 import uuid
 from app.database import AsyncSessionLocal
 from app.models.asset import Asset
@@ -68,14 +67,26 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    """Rollback: note the image that should be deleted."""
     image_name = execution_result.get("image_name", "")
     image_digest = execution_result.get("image_digest", "")
     if not image_name or not image_digest:
-        return {"rolled_back": False, "note": "No image digest to delete"}
+        return {"rolled_back": False, "reason": "no_image_coordinates"}
+
+    from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
+
+    asset_ids = execution_result.get("asset_ids") or []
+    if not asset_ids and parameters.get("asset_ids"):
+        asset_ids = parameters["asset_ids"]
+
+    result = await dispatch_agent_job(
+        command="containerize_build_rollback",
+        parameters={"image_name": image_name, "image_digest": image_digest},
+        asset_ids=[str(a) for a in asset_ids],
+        timeout_seconds=60,
+    )
     return {
-        "rolled_back": True,
-        "note": f"Image {image_name}@{image_digest} should be deleted from registry manually",
+        "rolled_back": result.get("deleted", False) or result.get("rolled_back", False),
         "image_name": image_name,
         "image_digest": image_digest,
+        "agent_result": result,
     }
