@@ -4,7 +4,8 @@
 """Executor: ecr_delete_repository — delete ECR repository."""
 from __future__ import annotations
 
-ROLLBACK_CAPABILITY = "full"
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "ECR repository and all contained images are permanently deleted — no recovery path"
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
