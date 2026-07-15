@@ -4,6 +4,8 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
+MODULE = "app.connectors.executors.ssh.containerize_workload"
+
 
 def _make_connector(responses: dict) -> MagicMock:
     """Mock SSH connector: run_command returns tuple from responses keyed by substring."""
@@ -31,7 +33,9 @@ async def test_inplace_path_when_docker_available():
         "ldd": ("", "", 0),
         "ss -tlnp": ("", "", 0),
     })
-    result = await execute({"service_name": "myapp.service", "registry": "test.io"}, [], conn)
+    mock_dispatch = AsyncMock(return_value={"deployed": True})
+    with patch(f"{MODULE}.dispatch_agent_job", mock_dispatch):
+        result = await execute({"service_name": "myapp.service", "registry": "test.io"}, [], conn)
     assert result["path"] == "inplace"
     assert result["containerized"] is True
     assert result["container_id"] == "ctr-123"
@@ -52,10 +56,7 @@ async def test_remote_path_when_deployment_target_k8s():
         "ss -tlnp": ("", "", 0),
     })
     mock_dispatch = AsyncMock(return_value={"deployed": True})
-    with patch(
-        "app.connectors.executors.ssh.containerize_workload.dispatch_agent_job",
-        mock_dispatch,
-    ):
+    with patch(f"{MODULE}.dispatch_agent_job", mock_dispatch):
         result = await execute(
             {"service_name": "myapp.service", "registry": "test.io", "deployment_target": "k8s"},
             [],
@@ -79,7 +80,9 @@ async def test_rollback_inplace_stops_container_and_restarts_service():
             "path": "inplace",
         },
     }
-    result = await rollback({}, execution_result, conn)
+    mock_dispatch = AsyncMock(return_value={})
+    with patch(f"{MODULE}.dispatch_agent_job", mock_dispatch):
+        result = await rollback({}, execution_result, conn)
     assert result["rolled_back"] is True
     assert result["path"] == "inplace"
     calls = [str(c) for c in conn.run_command.call_args_list]
@@ -91,11 +94,13 @@ async def test_rollback_inplace_stops_container_and_restarts_service():
 async def test_rollback_remote_does_not_touch_source():
     from app.connectors.executors.ssh.containerize_workload import rollback
     conn = MagicMock()
-    result = await rollback(
-        {},
-        {"path": "remote", "pre_state": {"systemd_unit": "myapp.service", "path": "remote"}, "deploy_result": {}},
-        conn,
-    )
+    mock_dispatch = AsyncMock(return_value={})
+    with patch(f"{MODULE}.dispatch_agent_job", mock_dispatch):
+        result = await rollback(
+            {},
+            {"path": "remote", "pre_state": {"systemd_unit": "myapp.service", "path": "remote"}, "deploy_result": {}},
+            conn,
+        )
     assert result["rolled_back"] is True
     assert result["path"] == "remote"
     conn.run_command.assert_not_called()
@@ -104,5 +109,29 @@ async def test_rollback_remote_does_not_touch_source():
 @pytest.mark.asyncio
 async def test_missing_service_name_raises():
     from app.connectors.executors.ssh.containerize_workload import execute
-    with pytest.raises(ValueError, match="service_name"):
-        await execute({}, [], MagicMock())
+    mock_dispatch = AsyncMock(return_value={})
+    with patch(f"{MODULE}.dispatch_agent_job", mock_dispatch):
+        with pytest.raises(ValueError, match="service_name"):
+            await execute({}, [], MagicMock())
+
+
+@pytest.mark.asyncio
+async def test_rollback_dispatches_agent_job():
+    """Rollback for k8s/remote path must dispatch containerize_workload_rollback."""
+    from app.connectors.executors.ssh.containerize_workload import rollback
+    conn = MagicMock()
+    mock_dispatch = AsyncMock(return_value={})
+    execution_result = {
+        "path": "remote",
+        "pre_state": {"systemd_unit": "myapp.service", "path": "remote"},
+        "deploy_result": {"namespace": "prod"},
+    }
+    with patch(f"{MODULE}.dispatch_agent_job", mock_dispatch):
+        result = await rollback({}, execution_result, conn)
+    assert result["rolled_back"] is True
+    mock_dispatch.assert_called_once()
+    call_kwargs = mock_dispatch.call_args
+    assert call_kwargs.kwargs.get("command") == "containerize_workload_rollback" or \
+           call_kwargs.args[0] == "containerize_workload_rollback" if call_kwargs.args else \
+           call_kwargs.kwargs["command"] == "containerize_workload_rollback"
+    conn.run_command.assert_not_called()
