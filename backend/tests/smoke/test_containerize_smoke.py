@@ -20,7 +20,15 @@ DUMMY_SERVICE = "nexplane-smoke-dummy"
 
 
 def _get_backend_private_ip() -> str:
-    """Fetch this EC2 instance's private IP from IMDSv2."""
+    """Fetch this EC2 instance's private IP.
+
+    Checks NEXPLANE_BACKEND_IP env var first (needed when running inside Docker
+    where the default IMDSv2 hop limit of 1 blocks container access to IMDS).
+    Falls back to IMDSv2 when running directly on the EC2 host.
+    """
+    env_ip = os.environ.get("NEXPLANE_BACKEND_IP", "").strip()
+    if env_ip:
+        return env_ip
     token_req = urllib.request.Request(
         "http://169.254.169.254/latest/api/token",
         headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"},
