@@ -40,10 +40,10 @@ class TestDeleteRoute53RecordRollback(unittest.TestCase):
     def test_execute_captures_pre_state(self):
         mock_r53 = self._make_mock_r53()
         with patch(
-            "backend.app.connectors.executors.aws.delete_route53_record.get_boto3_client",
+            "app.connectors.executors.aws.delete_route53_record.get_boto3_client",
             return_value=mock_r53,
         ):
-            from backend.app.connectors.executors.aws import delete_route53_record
+            from app.connectors.executors.aws import delete_route53_record
             result = run(
                 delete_route53_record.execute(
                     {"hosted_zone_id": "Z123", "name": "test.example.com", "record_type": "A"},
@@ -57,10 +57,10 @@ class TestDeleteRoute53RecordRollback(unittest.TestCase):
     def test_rollback_restores_record(self):
         mock_r53 = self._make_mock_r53()
         with patch(
-            "backend.app.connectors.executors.aws.delete_route53_record.get_boto3_client",
+            "app.connectors.executors.aws.delete_route53_record.get_boto3_client",
             return_value=mock_r53,
         ):
-            from backend.app.connectors.executors.aws import delete_route53_record
+            from app.connectors.executors.aws import delete_route53_record
             execution_result = {
                 "zone_id": "Z123",
                 "name": "test.example.com",
@@ -89,10 +89,10 @@ class TestDeleteRoute53RecordRollback(unittest.TestCase):
 
     def test_rollback_no_pre_state_returns_false(self):
         with patch(
-            "backend.app.connectors.executors.aws.delete_route53_record.get_boto3_client",
+            "app.connectors.executors.aws.delete_route53_record.get_boto3_client",
             return_value=MagicMock(),
         ):
-            from backend.app.connectors.executors.aws import delete_route53_record
+            from app.connectors.executors.aws import delete_route53_record
             result = run(
                 delete_route53_record.rollback({}, {"pre_state": {}}, FakeConnector())
             )
@@ -124,10 +124,10 @@ class TestDeleteCloudwatchAlarmRollback(unittest.TestCase):
         mock_cw = MagicMock()
         mock_cw.describe_alarms.return_value = {"MetricAlarms": [self._alarm_data()]}
         with patch(
-            "backend.app.connectors.executors.aws.delete_cloudwatch_alarm.get_boto3_client",
+            "app.connectors.executors.aws.delete_cloudwatch_alarm.get_boto3_client",
             return_value=mock_cw,
         ):
-            from backend.app.connectors.executors.aws import delete_cloudwatch_alarm
+            from app.connectors.executors.aws import delete_cloudwatch_alarm
             result = run(
                 delete_cloudwatch_alarm.execute(
                     {"alarm_name": "my-alarm"}, [], FakeConnector()
@@ -140,10 +140,10 @@ class TestDeleteCloudwatchAlarmRollback(unittest.TestCase):
         mock_cw = MagicMock()
         alarm = self._alarm_data()
         with patch(
-            "backend.app.connectors.executors.aws.delete_cloudwatch_alarm.get_boto3_client",
+            "app.connectors.executors.aws.delete_cloudwatch_alarm.get_boto3_client",
             return_value=mock_cw,
         ):
-            from backend.app.connectors.executors.aws import delete_cloudwatch_alarm
+            from app.connectors.executors.aws import delete_cloudwatch_alarm
             result = run(
                 delete_cloudwatch_alarm.rollback(
                     {},
@@ -159,10 +159,10 @@ class TestDeleteCloudwatchAlarmRollback(unittest.TestCase):
 
     def test_rollback_no_pre_state_returns_false(self):
         with patch(
-            "backend.app.connectors.executors.aws.delete_cloudwatch_alarm.get_boto3_client",
+            "app.connectors.executors.aws.delete_cloudwatch_alarm.get_boto3_client",
             return_value=MagicMock(),
         ):
-            from backend.app.connectors.executors.aws import delete_cloudwatch_alarm
+            from app.connectors.executors.aws import delete_cloudwatch_alarm
             result = run(
                 delete_cloudwatch_alarm.rollback({}, {"pre_state": {}}, FakeConnector())
             )
@@ -178,10 +178,10 @@ class TestPutBucketPolicyRollback(unittest.TestCase):
         mock_s3 = MagicMock()
         mock_s3.get_bucket_policy.return_value = {"Policy": prior}
         with patch(
-            "backend.app.connectors.executors.aws.put_bucket_policy.get_boto3_client",
+            "app.connectors.executors.aws.put_bucket_policy.get_boto3_client",
             return_value=mock_s3,
         ):
-            from backend.app.connectors.executors.aws import put_bucket_policy
+            from app.connectors.executors.aws import put_bucket_policy
             result = run(
                 put_bucket_policy.execute(
                     {"bucket": "my-bucket", "policy": '{"Statement": [{"Effect": "Allow"}]}'}, [], FakeConnector()
@@ -196,10 +196,10 @@ class TestPutBucketPolicyRollback(unittest.TestCase):
             {"Error": {"Code": "NoSuchBucketPolicy", "Message": ""}}, "GetBucketPolicy"
         )
         with patch(
-            "backend.app.connectors.executors.aws.put_bucket_policy.get_boto3_client",
+            "app.connectors.executors.aws.put_bucket_policy.get_boto3_client",
             return_value=mock_s3,
         ):
-            from backend.app.connectors.executors.aws import put_bucket_policy
+            from app.connectors.executors.aws import put_bucket_policy
             result = run(
                 put_bucket_policy.execute(
                     {"bucket": "my-bucket", "policy": "{}"}, [], FakeConnector()
@@ -211,10 +211,10 @@ class TestPutBucketPolicyRollback(unittest.TestCase):
         prior = json.dumps({"Version": "2012-10-17", "Statement": []})
         mock_s3 = MagicMock()
         with patch(
-            "backend.app.connectors.executors.aws.put_bucket_policy.get_boto3_client",
+            "app.connectors.executors.aws.put_bucket_policy.get_boto3_client",
             return_value=mock_s3,
         ):
-            from backend.app.connectors.executors.aws import put_bucket_policy
+            from app.connectors.executors.aws import put_bucket_policy
             result = run(
                 put_bucket_policy.rollback(
                     {"bucket": "my-bucket"},
@@ -228,10 +228,10 @@ class TestPutBucketPolicyRollback(unittest.TestCase):
     def test_rollback_deletes_policy_when_prior_was_none(self):
         mock_s3 = MagicMock()
         with patch(
-            "backend.app.connectors.executors.aws.put_bucket_policy.get_boto3_client",
+            "app.connectors.executors.aws.put_bucket_policy.get_boto3_client",
             return_value=mock_s3,
         ):
-            from backend.app.connectors.executors.aws import put_bucket_policy
+            from app.connectors.executors.aws import put_bucket_policy
             result = run(
                 put_bucket_policy.rollback(
                     {"bucket": "my-bucket"},
@@ -244,10 +244,10 @@ class TestPutBucketPolicyRollback(unittest.TestCase):
 
     def test_rollback_no_pre_state_returns_false(self):
         with patch(
-            "backend.app.connectors.executors.aws.put_bucket_policy.get_boto3_client",
+            "app.connectors.executors.aws.put_bucket_policy.get_boto3_client",
             return_value=MagicMock(),
         ):
-            from backend.app.connectors.executors.aws import put_bucket_policy
+            from app.connectors.executors.aws import put_bucket_policy
             result = run(
                 put_bucket_policy.rollback({}, {"pre_state": {}}, FakeConnector())
             )
@@ -272,10 +272,10 @@ class TestModifyListenerRollback(unittest.TestCase):
         mock_elb = MagicMock()
         mock_elb.describe_listeners.return_value = {"Listeners": [self._listener_data()]}
         with patch(
-            "backend.app.connectors.executors.aws.modify_listener.get_boto3_client",
+            "app.connectors.executors.aws.modify_listener.get_boto3_client",
             return_value=mock_elb,
         ):
-            from backend.app.connectors.executors.aws import modify_listener
+            from app.connectors.executors.aws import modify_listener
             result = run(
                 modify_listener.execute(
                     {
@@ -292,10 +292,10 @@ class TestModifyListenerRollback(unittest.TestCase):
         mock_elb = MagicMock()
         listener = self._listener_data()
         with patch(
-            "backend.app.connectors.executors.aws.modify_listener.get_boto3_client",
+            "app.connectors.executors.aws.modify_listener.get_boto3_client",
             return_value=mock_elb,
         ):
-            from backend.app.connectors.executors.aws import modify_listener
+            from app.connectors.executors.aws import modify_listener
             result = run(
                 modify_listener.rollback(
                     {},
@@ -314,10 +314,10 @@ class TestModifyListenerRollback(unittest.TestCase):
 
     def test_rollback_no_pre_state_returns_false(self):
         with patch(
-            "backend.app.connectors.executors.aws.modify_listener.get_boto3_client",
+            "app.connectors.executors.aws.modify_listener.get_boto3_client",
             return_value=MagicMock(),
         ):
-            from backend.app.connectors.executors.aws import modify_listener
+            from app.connectors.executors.aws import modify_listener
             result = run(
                 modify_listener.rollback({}, {"pre_state": {}}, FakeConnector())
             )
@@ -337,10 +337,10 @@ class TestLockIamUserRollback(unittest.TestCase):
             ]
         }
         with patch(
-            "backend.app.connectors.executors.aws.lock_iam_user.get_boto3_client",
+            "app.connectors.executors.aws.lock_iam_user.get_boto3_client",
             return_value=mock_iam,
         ):
-            from backend.app.connectors.executors.aws import lock_iam_user
+            from app.connectors.executors.aws import lock_iam_user
             result = run(
                 lock_iam_user.execute({"username": "bob"}, [], FakeConnector())
             )
@@ -350,10 +350,10 @@ class TestLockIamUserRollback(unittest.TestCase):
     def test_rollback_removes_policy_and_restores_active_keys(self):
         mock_iam = MagicMock()
         with patch(
-            "backend.app.connectors.executors.aws.lock_iam_user.get_boto3_client",
+            "app.connectors.executors.aws.lock_iam_user.get_boto3_client",
             return_value=mock_iam,
         ):
-            from backend.app.connectors.executors.aws import lock_iam_user
+            from app.connectors.executors.aws import lock_iam_user
             result = run(
                 lock_iam_user.rollback(
                     {"username": "bob"},
@@ -379,10 +379,10 @@ class TestLockIamUserRollback(unittest.TestCase):
 
     def test_rollback_no_pre_state_returns_false(self):
         with patch(
-            "backend.app.connectors.executors.aws.lock_iam_user.get_boto3_client",
+            "app.connectors.executors.aws.lock_iam_user.get_boto3_client",
             return_value=MagicMock(),
         ):
-            from backend.app.connectors.executors.aws import lock_iam_user
+            from app.connectors.executors.aws import lock_iam_user
             result = run(
                 lock_iam_user.rollback({}, {"pre_state": {}}, FakeConnector())
             )
