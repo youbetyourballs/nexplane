@@ -40,7 +40,7 @@ EXCLUDED = {
 
 def _all_executor_params():
     params = []
-    base = pathlib.Path("backend/app/connectors/executors")
+    base = pathlib.Path(__file__).parent.parent.parent / "app" / "connectors" / "executors"
     for family, module_prefix in FAMILIES:
         family_dir = base / family
         for f in sorted(family_dir.glob("*.py")):
