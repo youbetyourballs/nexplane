@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
-from __future__ import annotations
-
 import urllib.parse
+from typing import Any
 
 import httpx
 
@@ -99,13 +98,13 @@ class SCCMClient:
     # Public API
     # ------------------------------------------------------------------
 
-    def get_collections(self) -> list[dict]:
+    def get_collections(self) -> list[Any]:
         """Return all device/user collections visible to the service account."""
         url = self._wmi_url("SMS_Collection")
         data = self._get(url)
         return data.get("value", [])
 
-    def get_collection_members(self, collection_id: str) -> list[dict]:
+    def get_collection_members(self, collection_id: str) -> list[Any]:
         """Return members of a specific collection."""
         # SMS_FullCollectionMembership keyed by CollectionID
         encoded = urllib.parse.quote(f"CollectionID='{collection_id}'")
@@ -163,7 +162,7 @@ class SCCMClient:
             raise ValueError(f"Device '{device_name}' not found in SCCM")
         return items[0]
 
-    def get_software_inventory(self, device_name: str) -> list[dict]:
+    def get_software_inventory(self, device_name: str) -> list[Any]:
         """Return installed software for a device (SMS_G_System_ADD_REMOVE_PROGRAMS)."""
         device = self.get_device(device_name)
         resource_id = device.get("ResourceID") or device.get("resourceId", "")

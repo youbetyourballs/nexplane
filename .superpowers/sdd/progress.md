@@ -285,3 +285,6 @@ Base commit: 1ab4825
 - Task 6: complete (no new commits — 34/34 unit tests pass on EC2)
 - Task 7: complete (commits be3eb45..a23ccce, review clean — smoke test + _get_gcp_container_client; Minor: dead `threading` import in helper, dead `create_cr_id` var in smoke test)
 ## GCP GKE PLAN ALL 7 TASKS COMPLETE — unit tests 34/34 on EC2; smoke ready to run manually
+Task 5: complete (commits 70215c9..9e42b67, review clean after BOM fix + future-import fix — 47 Azure/Azure AD executors; 47/47 on EC2)
+Task 6: complete (commits 9e42b67..a1aa97d, review clean after dc_integrity_check duplicate fix — 22 AD executors; 22/22 on EC2; report was copy-paste error but code was correct)
+Task 7: complete (commits a1aa97d..298e5c2, review clean — 29 K8s executors; 29/29 on EC2; stub rollback() bodies noted, deferred to Task 13)

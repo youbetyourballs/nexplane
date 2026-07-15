@@ -6,8 +6,6 @@ This is a platform-tier operation (execution_tier=1) — no agent job is
 dispatched. We update the AgentRegistration row directly, exactly as the
 admin API does, and store enough previous state for rollback.
 """
-from __future__ import annotations
-
 import uuid
 from datetime import datetime, timezone
 

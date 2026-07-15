@@ -5,8 +5,6 @@
 Platform-tier operation (execution_tier=1). Updates AgentRegistration
 directly and stores previous state so rollback can re-enable.
 """
-from __future__ import annotations
-
 import uuid
 from datetime import datetime, timezone
 
