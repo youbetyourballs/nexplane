@@ -43,20 +43,16 @@ def _get_backend_private_ip() -> str:
         return r.read().decode().strip()
 
 
-def _run_cr(client, label, action_id, params, connector_type="nexplane_agent",
-            asset_ids=None, timeout=TIMEOUT):
+def _run_cr(client, label, change_type, params, asset_ids=None, timeout=TIMEOUT):
+    """Create, plan, approve, execute a CR and wait for completion."""
     base = client.base
     body = {
         "title": label,
-        "change_type": "catalog_action",
-        "desired_outcome": {
-            "connector_type": connector_type,
-            "action_id": action_id,
-            "params": params,
-        },
+        "change_type": change_type,
+        "desired_outcome": {"_smoke_test": True, **params},
     }
     if asset_ids:
-        body["asset_ids"] = asset_ids
+        body["target_asset_ids"] = asset_ids
     resp = client.client.post(f"{base}/change-requests", json=body)
     if resp.status_code not in (200, 201):
         raise AssertionError(f"[{label}] CR create failed {resp.status_code}: {resp.text}")
@@ -186,7 +182,7 @@ class TestOsUpgradeSmoke:
         if not cls.aws_creds:
             pytest.skip("No AWS connector in platform DB — cannot provision EC2")
 
-        # Cloud account asset
+        # Cloud account asset (ec2_launch targets this)
         try:
             cloud_account_id = cls.client.get_cloud_account_asset_id()
         except Exception as e:
@@ -212,7 +208,7 @@ class TestOsUpgradeSmoke:
                 "iam_instance_profile": "NexplaneEC2TestProfile",
                 "rollback_strategy": "terminate_instance",
             },
-            connector_type="aws",
+            asset_ids=[cloud_account_id],
             timeout=300,
         )
         cls.launch_cr_id = launch_cr["id"]
@@ -242,7 +238,6 @@ class TestOsUpgradeSmoke:
                 "nexplane_url": nexplane_url,
                 "nexplane_secret": agent_secret,
             },
-            connector_type="nexplane_agent",
             asset_ids=[ec2_asset_id],
             timeout=300,
         )
