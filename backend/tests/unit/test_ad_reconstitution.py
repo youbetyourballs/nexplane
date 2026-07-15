@@ -27,13 +27,13 @@ class TestDisableAccountRollback(unittest.TestCase):
     def test_rollback_calls_modify_with_uac_512(self):
         mock_conn = _make_mock_conn()
         with patch(
-            "backend.app.connectors.executors.active_directory.disable_account.get_connection",
+            "app.connectors.executors.active_directory.disable_account.get_connection",
             return_value=mock_conn,
         ), patch(
-            "backend.app.connectors.executors.active_directory.disable_account.prepare_ad_target",
+            "app.connectors.executors.active_directory.disable_account.prepare_ad_target",
             new=AsyncMock(return_value={"server": "dc.example.com"}),
         ):
-            from backend.app.connectors.executors.active_directory import disable_account
+            from app.connectors.executors.active_directory import disable_account
             result = run(
                 disable_account.rollback(
                     {"username": "bob"},
@@ -52,13 +52,13 @@ class TestDisableAccountRollback(unittest.TestCase):
         mock_conn = _make_mock_conn()
         mock_conn.modify.side_effect = Exception("LDAP connection refused")
         with patch(
-            "backend.app.connectors.executors.active_directory.disable_account.get_connection",
+            "app.connectors.executors.active_directory.disable_account.get_connection",
             return_value=mock_conn,
         ), patch(
-            "backend.app.connectors.executors.active_directory.disable_account.prepare_ad_target",
+            "app.connectors.executors.active_directory.disable_account.prepare_ad_target",
             new=AsyncMock(return_value={"server": "dc.example.com"}),
         ):
-            from backend.app.connectors.executors.active_directory import disable_account
+            from app.connectors.executors.active_directory import disable_account
             result = run(
                 disable_account.rollback(
                     {"username": "bob"},
@@ -70,7 +70,7 @@ class TestDisableAccountRollback(unittest.TestCase):
         self.assertIn("error", result)
 
     def test_rollback_mock_when_no_creds(self):
-        from backend.app.connectors.executors.active_directory import disable_account
+        from app.connectors.executors.active_directory import disable_account
         connector = FakeConnector(creds={})
         result = run(
             disable_account.rollback(
@@ -89,13 +89,13 @@ class TestEnableAccountRollback(unittest.TestCase):
     def test_rollback_calls_modify_with_uac_514(self):
         mock_conn = _make_mock_conn()
         with patch(
-            "backend.app.connectors.executors.active_directory.enable_account.get_connection",
+            "app.connectors.executors.active_directory.enable_account.get_connection",
             return_value=mock_conn,
         ), patch(
-            "backend.app.connectors.executors.active_directory.enable_account.prepare_ad_target",
+            "app.connectors.executors.active_directory.enable_account.prepare_ad_target",
             new=AsyncMock(return_value={"server": "dc.example.com"}),
         ):
-            from backend.app.connectors.executors.active_directory import enable_account
+            from app.connectors.executors.active_directory import enable_account
             result = run(
                 enable_account.rollback(
                     {"username": "alice"},
@@ -114,13 +114,13 @@ class TestEnableAccountRollback(unittest.TestCase):
         mock_conn = _make_mock_conn()
         mock_conn.modify.side_effect = Exception("Timeout")
         with patch(
-            "backend.app.connectors.executors.active_directory.enable_account.get_connection",
+            "app.connectors.executors.active_directory.enable_account.get_connection",
             return_value=mock_conn,
         ), patch(
-            "backend.app.connectors.executors.active_directory.enable_account.prepare_ad_target",
+            "app.connectors.executors.active_directory.enable_account.prepare_ad_target",
             new=AsyncMock(return_value={"server": "dc.example.com"}),
         ):
-            from backend.app.connectors.executors.active_directory import enable_account
+            from app.connectors.executors.active_directory import enable_account
             result = run(
                 enable_account.rollback(
                     {"username": "alice"},
@@ -132,7 +132,7 @@ class TestEnableAccountRollback(unittest.TestCase):
         self.assertIn("error", result)
 
     def test_rollback_mock_when_no_creds(self):
-        from backend.app.connectors.executors.active_directory import enable_account
+        from app.connectors.executors.active_directory import enable_account
         connector = FakeConnector(creds={})
         result = run(
             enable_account.rollback(
