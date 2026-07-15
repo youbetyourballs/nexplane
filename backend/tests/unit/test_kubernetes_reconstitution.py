@@ -37,10 +37,10 @@ class TestPatchDeploymentRollback(unittest.TestCase):
     def test_execute_captures_prior_spec(self):
         mock_api = self._make_mock_api()
         with patch(
-            "backend.app.connectors.executors.kubernetes.patch_deployment.get_k8s_clients",
+            "app.connectors.executors.kubernetes.patch_deployment.get_k8s_clients",
             return_value=_make_apps_clients(mock_api),
         ):
-            from backend.app.connectors.executors.kubernetes import patch_deployment
+            from app.connectors.executors.kubernetes import patch_deployment
             result = run(
                 patch_deployment.execute(
                     {
@@ -59,10 +59,10 @@ class TestPatchDeploymentRollback(unittest.TestCase):
     def test_rollback_patches_back_to_prior_spec(self):
         mock_api = self._make_mock_api()
         with patch(
-            "backend.app.connectors.executors.kubernetes.patch_deployment.get_k8s_clients",
+            "app.connectors.executors.kubernetes.patch_deployment.get_k8s_clients",
             return_value=_make_apps_clients(mock_api),
         ):
-            from backend.app.connectors.executors.kubernetes import patch_deployment
+            from app.connectors.executors.kubernetes import patch_deployment
             prior = {"metadata": {"name": "my-dep"}, "spec": {"replicas": 3}}
             result = run(
                 patch_deployment.rollback(
@@ -83,10 +83,10 @@ class TestPatchDeploymentRollback(unittest.TestCase):
 
     def test_rollback_no_pre_state_returns_false(self):
         with patch(
-            "backend.app.connectors.executors.kubernetes.patch_deployment.get_k8s_clients",
+            "app.connectors.executors.kubernetes.patch_deployment.get_k8s_clients",
             return_value=_make_apps_clients(MagicMock()),
         ):
-            from backend.app.connectors.executors.kubernetes import patch_deployment
+            from app.connectors.executors.kubernetes import patch_deployment
             result = run(
                 patch_deployment.rollback({}, {"pre_state": {}}, FakeConnector())
             )
@@ -100,10 +100,10 @@ class TestUncordonNodeRollback(unittest.TestCase):
         mock_node.spec.unschedulable = True
         mock_api.read_node.return_value = mock_node
         with patch(
-            "backend.app.connectors.executors.kubernetes.uncordon_node.get_k8s_clients",
+            "app.connectors.executors.kubernetes.uncordon_node.get_k8s_clients",
             return_value=_make_core_clients(mock_api),
         ):
-            from backend.app.connectors.executors.kubernetes import uncordon_node
+            from app.connectors.executors.kubernetes import uncordon_node
             result = run(
                 uncordon_node.execute({"node_name": "node-1"}, [], FakeConnector())
             )
@@ -113,10 +113,10 @@ class TestUncordonNodeRollback(unittest.TestCase):
     def test_rollback_recordons_when_was_unschedulable(self):
         mock_api = MagicMock()
         with patch(
-            "backend.app.connectors.executors.kubernetes.uncordon_node.get_k8s_clients",
+            "app.connectors.executors.kubernetes.uncordon_node.get_k8s_clients",
             return_value=_make_core_clients(mock_api),
         ):
-            from backend.app.connectors.executors.kubernetes import uncordon_node
+            from app.connectors.executors.kubernetes import uncordon_node
             result = run(
                 uncordon_node.rollback(
                     {"node_name": "node-1"},
@@ -131,10 +131,10 @@ class TestUncordonNodeRollback(unittest.TestCase):
     def test_rollback_noop_when_was_already_uncordoned(self):
         mock_api = MagicMock()
         with patch(
-            "backend.app.connectors.executors.kubernetes.uncordon_node.get_k8s_clients",
+            "app.connectors.executors.kubernetes.uncordon_node.get_k8s_clients",
             return_value=_make_core_clients(mock_api),
         ):
-            from backend.app.connectors.executors.kubernetes import uncordon_node
+            from app.connectors.executors.kubernetes import uncordon_node
             result = run(
                 uncordon_node.rollback(
                     {"node_name": "node-1"},
@@ -148,10 +148,10 @@ class TestUncordonNodeRollback(unittest.TestCase):
 
     def test_rollback_no_pre_state_returns_false(self):
         with patch(
-            "backend.app.connectors.executors.kubernetes.uncordon_node.get_k8s_clients",
+            "app.connectors.executors.kubernetes.uncordon_node.get_k8s_clients",
             return_value=_make_core_clients(MagicMock()),
         ):
-            from backend.app.connectors.executors.kubernetes import uncordon_node
+            from app.connectors.executors.kubernetes import uncordon_node
             result = run(
                 uncordon_node.rollback({}, {"pre_state": {}}, FakeConnector())
             )
