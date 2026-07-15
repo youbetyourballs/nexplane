@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 import asyncio
 from ._client import get_k8s_client
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Rotate a Kubernetes ServiceAccount token by deleting the old secret."""

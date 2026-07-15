@@ -6,6 +6,9 @@
 import logging
 from app.connectors.executors.kubernetes._client import get_k8s_client
 
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "read-only operation — no state was changed"
+
 logger = logging.getLogger(__name__)
 
 

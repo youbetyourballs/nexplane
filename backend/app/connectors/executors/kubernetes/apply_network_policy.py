@@ -6,6 +6,8 @@ import json
 import yaml
 from datetime import datetime, timezone
 
+ROLLBACK_CAPABILITY = "full"
+
 
 def _parse_manifest(manifest_str: str) -> dict:
     try:

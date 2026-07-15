@@ -6,6 +6,8 @@
 import logging
 from app.connectors.executors.kubernetes._client import get_k8s_client
 
+ROLLBACK_CAPABILITY = "full"
+
 logger = logging.getLogger(__name__)
 
 

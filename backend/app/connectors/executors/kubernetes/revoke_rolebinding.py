@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from ._client import get_k8s_client
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Remove a RoleBinding or ClusterRoleBinding to revoke access."""

@@ -11,6 +11,8 @@ import uuid
 import yaml
 from datetime import datetime
 
+ROLLBACK_CAPABILITY = "full"
+
 
 async def _load_build_result(asset_id: str, app_name: str) -> dict | None:
     """Load build artifacts from asset_metadata.build_results[app_name]."""
