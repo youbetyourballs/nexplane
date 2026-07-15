@@ -18,9 +18,6 @@ LDAP checks (always run if base_dn + bind_dn available):
 
 import asyncio
 import hashlib
-
-ROLLBACK_CAPABILITY = "irreversible"
-ROLLBACK_REASON = "read-only operation — no state was changed"
 import json
 from datetime import datetime, timezone
 
