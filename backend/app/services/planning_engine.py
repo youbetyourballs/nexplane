@@ -486,7 +486,7 @@ async def _find_connector_for_type(connector_type: str, org_id: str):
     import uuid as _uuid
     from app.models.connector import Connector, ConnectorType
     from sqlalchemy import select
-    from app.db.session import AsyncSessionLocal
+    from app.database import AsyncSessionLocal
     async with AsyncSessionLocal() as db:
         res = await db.execute(
             select(Connector).where(

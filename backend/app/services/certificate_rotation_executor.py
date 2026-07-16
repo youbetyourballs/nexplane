@@ -509,6 +509,22 @@ def _build_result(dependents: list, rotation_result: Optional[dict], phase: str,
     }
 
 
+def _update_succeeded(result: dict) -> bool:
+    """Normalise success check across executors that return different key names.
+
+    manage_tls_certificates returns {"applied": bool, ...} while most other
+    executors return {"success": bool, ...}.  Check both so update failure
+    detection is not silently masked by a missing key.
+    """
+    if result is None:
+        return False
+    if "success" in result:
+        return bool(result["success"])
+    if "applied" in result:
+        return bool(result["applied"])
+    return True  # unknown format — assume ok
+
+
 def _merge_by_index(existing: list, new_items: list) -> list:
     """Merge two lists of dependents by index, new_items overriding existing."""
     merged = {d["index"]: d for d in existing}
@@ -583,7 +599,7 @@ async def execute_certificate_rotation(cr_id: uuid.UUID) -> dict:
 
         # Check for update failures — unconditionally, before entering phase 5
         if any(
-            d.get("update_result") and not d["update_result"].get("success", True)
+            d.get("update_result") and not _update_succeeded(d["update_result"])
             for d in dependents
         ):
             return _build_result(dependents, rotation_result, phase="update", paused=True)
@@ -668,20 +684,40 @@ async def execute_certificate_rollback(cr_id: uuid.UUID, execution_result: dict)
                 if global_strategy == "restore" and dep.get("snapshot"):
                     # Strategy B: restore snapshot
                     if dep["type"] == "host":
-                        from app.connectors.catalog_service import get_catalog_service
-                        catalog = get_catalog_service()
-                        mod = catalog.get_executor("nexplane_agent", "manage_tls_certificates")
-                        result = await mod.execute(
-                            {
-                                "cert_pem": dep["snapshot"],
-                                "key_pem": dep.get("snapshot_key", dep["snapshot"]),
-                                "reload_command": dep.get("reload_command", "nginx -s reload"),
-                            },
-                            [dep.get("asset_id", "")],
-                            connector,
-                        )
-                        step["rollback_result"] = result
-                        step["rolled_back"] = True
+                        if dep.get("snapshot_key"):
+                            # Full restore — both cert and key were captured
+                            from app.connectors.catalog_service import get_catalog_service
+                            catalog = get_catalog_service()
+                            mod = catalog.get_executor("nexplane_agent", "manage_tls_certificates")
+                            result = await mod.execute(
+                                {
+                                    "cert_pem": dep["snapshot"],
+                                    "key_pem": dep["snapshot_key"],
+                                    "reload_command": dep.get("reload_command", "nginx -s reload"),
+                                },
+                                [dep.get("asset_id", "")],
+                                connector,
+                            )
+                            step["rollback_result"] = result
+                            step["rolled_back"] = True
+                        else:
+                            # No private key snapshot available — re-issue a fresh cert instead.
+                            # TLS probes can only capture the public cert, never the private key,
+                            # so snapshot_key is always absent for host dependents discovered via
+                            # _snapshot_dependents.  Fall back to strategy A (re-issue) for this
+                            # specific dependent rather than supplying cert PEM as key PEM.
+                            step["strategy"] = "reissue"
+                            step_ca_connector = await _load_step_ca_connector(cr.organization_id, db)
+                            new_rotation = await _rotate_certificate(desired, step_ca_connector)
+                            fresh_dependents = await _update_dependents([dep], new_rotation, db)
+                            fresh_dep = fresh_dependents[0]
+                            update_ok = _update_succeeded(fresh_dep.get("update_result") or {})
+                            step["rollback_result"] = fresh_dep.get("update_result")
+                            step["rolled_back"] = update_ok
+                            if not update_ok:
+                                step["error"] = (fresh_dep.get("update_result") or {}).get(
+                                    "error", "Re-issue fallback failed (no snapshot_key)"
+                                )
                     elif dep["type"] == "k8s_secret":
                         from app.connectors.catalog_service import get_catalog_service
                         catalog = get_catalog_service()

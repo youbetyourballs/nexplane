@@ -198,7 +198,7 @@ class TestCertificateRotation:
                 "san": [SMOKE_SUBJECT],
                 "not_after": "720h",
                 "trigger_reason": "scheduled",
-                "scan_scope": [],  # empty scope — no dependents, just issue
+                "scan_scope": ["nexplane_agent"],  # zero-dependent run — asset not registered yet, but non-empty scope passes validation
                 "verify_timeout_seconds": 1,
             },
         })
@@ -411,7 +411,7 @@ class TestCertificateRotation:
                 "san": [EXPIRING_SUBJECT],
                 "not_after": "2h",
                 "trigger_reason": "scheduled",
-                "scan_scope": [],
+                "scan_scope": ["nexplane_agent"],
                 "verify_timeout_seconds": 1,
             },
         })
