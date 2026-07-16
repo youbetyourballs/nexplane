@@ -38,28 +38,23 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     cluster_body = container_v1.Cluster(
         name=cluster_name,
-        initial_node_count=0,
         network=network,
         subnetwork=subnetwork if subnetwork else "",
-        node_pools=[],
+        node_pools=[
+            container_v1.NodePool(
+                name=node_pool_name,
+                initial_node_count=node_count,
+                config=container_v1.NodeConfig(
+                    machine_type=machine_type,
+                    disk_size_gb=disk_size_gb,
+                    oauth_scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                ),
+            )
+        ],
     )
     create_request = container_v1.CreateClusterRequest(parent=parent, cluster=cluster_body)
     op = await loop.run_in_executor(None, lambda: client.create_cluster(create_request))
-    await poll_gke_operation(client, op.name, timeout=1200)
-
-    node_pool_body = container_v1.NodePool(
-        name=node_pool_name,
-        initial_node_count=node_count,
-        config=container_v1.NodeConfig(
-            machine_type=machine_type,
-            disk_size_gb=disk_size_gb,
-            oauth_scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        ),
-    )
-    cluster_ref = f"{parent}/clusters/{cluster_name}"
-    np_request = container_v1.CreateNodePoolRequest(parent=cluster_ref, node_pool=node_pool_body)
-    op2 = await loop.run_in_executor(None, lambda: client.create_node_pool(np_request))
-    await poll_gke_operation(client, op2.name, timeout=900)
+    await poll_gke_operation(client, op.name, timeout=2700, project_id=project_id, location=location)
 
     return {
         "cluster_name": cluster_name,
@@ -87,6 +82,6 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     cluster_ref = f"projects/{project_id}/locations/{location}/clusters/{cluster_name}"
 
     op = await loop.run_in_executor(None, lambda: client.delete_cluster({"name": cluster_ref}))
-    await poll_gke_operation(client, op.name, timeout=1200)
+    await poll_gke_operation(client, op.name, timeout=1200, project_id=project_id, location=location)
 
     return {"rolled_back": True, "cluster_name": cluster_name, "location": location}

@@ -38,7 +38,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             None,
             lambda: client.update_node_pool({"name": pool_ref, "labels": new_labels})
         )
-        await poll_gke_operation(client, op.name, timeout=600)
+        await poll_gke_operation(client, op.name, timeout=600, project_id=project_id, location=location)
 
     return {
         "updated": True,
@@ -72,6 +72,6 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         None,
         lambda: client.update_node_pool({"name": pool_ref, "labels": prior_labels})
     )
-    await poll_gke_operation(client, op.name, timeout=600)
+    await poll_gke_operation(client, op.name, timeout=600, project_id=project_id, location=location)
 
     return {"rolled_back": True, "node_pool_name": node_pool_name}

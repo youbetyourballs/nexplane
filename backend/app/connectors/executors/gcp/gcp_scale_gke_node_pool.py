@@ -42,7 +42,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "node_count": node_count,
         })
     )
-    await poll_gke_operation(client, op.name, timeout=600)
+    await poll_gke_operation(client, op.name, timeout=600, project_id=project_id, location=location)
 
     return {
         "scaled": True,
@@ -76,6 +76,6 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         None,
         lambda: client.set_node_pool_size({"name": pool_ref, "node_count": prior_count})
     )
-    await poll_gke_operation(client, op.name, timeout=600)
+    await poll_gke_operation(client, op.name, timeout=600, project_id=project_id, location=location)
 
     return {"rolled_back": True, "restored_count": prior_count, "node_pool_name": node_pool_name}

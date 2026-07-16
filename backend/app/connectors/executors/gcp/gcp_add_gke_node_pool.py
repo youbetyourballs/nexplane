@@ -42,7 +42,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     )
     request = container_v1.CreateNodePoolRequest(parent=cluster_ref, node_pool=node_pool_body)
     op = await loop.run_in_executor(None, lambda: client.create_node_pool(request))
-    await poll_gke_operation(client, op.name, timeout=900)
+    await poll_gke_operation(client, op.name, timeout=900, project_id=project_id, location=location)
 
     return {
         "node_pool_name": node_pool_name,
@@ -69,6 +69,6 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     pool_ref = f"projects/{project_id}/locations/{location}/clusters/{cluster_name}/nodePools/{node_pool_name}"
 
     op = await loop.run_in_executor(None, lambda: client.delete_node_pool({"name": pool_ref}))
-    await poll_gke_operation(client, op.name, timeout=600)
+    await poll_gke_operation(client, op.name, timeout=600, project_id=project_id, location=location)
 
     return {"rolled_back": True, "node_pool_name": node_pool_name}

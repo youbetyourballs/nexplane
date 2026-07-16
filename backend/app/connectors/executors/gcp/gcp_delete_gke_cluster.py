@@ -25,7 +25,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     cluster_ref = f"projects/{project_id}/locations/{location}/clusters/{cluster_name}"
 
     op = await loop.run_in_executor(None, lambda: client.delete_cluster({"name": cluster_ref}))
-    await poll_gke_operation(client, op.name, timeout=1200)
+    await poll_gke_operation(client, op.name, timeout=1200, project_id=project_id, location=location)
 
     return {"deleted": True, "cluster_name": cluster_name, "location": location, "project_id": project_id}
 

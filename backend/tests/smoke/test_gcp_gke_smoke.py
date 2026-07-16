@@ -37,7 +37,7 @@ BASE_URL = os.environ.get("PLATFORM_URL", "http://localhost:8000")
 EMAIL = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
 PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 
-CREATE_TIMEOUT = 2400   # 40 min: cluster + node pool provisioning
+CREATE_TIMEOUT = 3600   # 60 min: cluster + node pool provisioning (GKE can be slow)
 DAY2_TIMEOUT = 900      # 15 min: scale / update / add pool
 DELETE_TIMEOUT = 1800   # 30 min: delete cluster
 
@@ -149,7 +149,7 @@ class TestGkeLifecycle:
         if not project_id:
             pytest.skip("Cannot determine GCP project_id from credentials")
 
-        location = os.environ.get("GCP_GKE_LOCATION", creds.get("gke_location", "us-central1"))
+        location = os.environ.get("GCP_GKE_LOCATION", creds.get("gke_location", "us-east1"))
         cluster_name = f"nexplane-smoke-{uuid.uuid4().hex[:8]}"
         node_pool_name = "default-pool"
         log(f"[GKE] Project={project_id} location={location} cluster={cluster_name}")
