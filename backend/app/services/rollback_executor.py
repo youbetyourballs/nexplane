@@ -33,11 +33,23 @@ async def _load_cr_and_run(
     )
     latest_run = run_res.scalar_one_or_none()
     if not latest_run:
+        # Exclude rollback runs so a paused CR's forward run is preferred over a
+        # previously-attempted rollback run that has no `dependents`.
+        from sqlalchemy import not_
         fallback_res = await db.execute(
-            select(ExecutionRun).where(ExecutionRun.change_request_id == cr.id)
-            .order_by(ExecutionRun.started_at.desc()).limit(1)
+            select(ExecutionRun).where(
+                ExecutionRun.change_request_id == cr.id,
+                not_(ExecutionRun.workflow_id.contains("rollback")),
+            ).order_by(ExecutionRun.started_at.desc()).limit(1)
         )
         latest_run = fallback_res.scalar_one_or_none()
+        if not latest_run:
+            # Last resort: any run
+            fallback_res2 = await db.execute(
+                select(ExecutionRun).where(ExecutionRun.change_request_id == cr.id)
+                .order_by(ExecutionRun.started_at.desc()).limit(1)
+            )
+            latest_run = fallback_res2.scalar_one_or_none()
 
     plan_res = await db.execute(select(ChangePlan).where(ChangePlan.change_request_id == cr.id))
     plan = plan_res.scalar_one_or_none()
@@ -201,7 +213,10 @@ async def execute_cr_rollback(
         # certificate_rotation: FILO rollback with strategy C
         if cr.change_type.value == "certificate_rotation":
             from app.services.certificate_rotation_executor import execute_certificate_rollback
-            result = await execute_certificate_rollback(cr.id, execution_result)
+            # Workflow stores cert rotation result as {"execution": {cert_rotation_result}}
+            # Unwrap the execution key so rollback receives the raw cert rotation result.
+            cert_exec_result = execution_result.get("execution", execution_result)
+            result = await execute_certificate_rollback(cr.id, cert_exec_result)
             if result.get("has_warnings"):
                 cr.status = ChangeRequestStatus.rolled_back_with_warnings
             else:
