@@ -186,6 +186,20 @@ async def execute_cr_rollback(
         if extra_execution_result:
             execution_result = {**execution_result, **extra_execution_result}
 
+        # credential_rotation: FILO rollback of completed steps
+        if cr.change_type.value == "credential_rotation":
+            from app.services.credential_rotation_executor import execute_filo_rollback
+            result = await execute_filo_rollback(cr.id, execution_result)
+            rb_steps = result.get("rollback_steps", [])
+            step_outcomes = [
+                {"success": r["rollback_result"].get("rolled_back", False)}
+                for r in rb_steps
+            ]
+            cr.status = _determine_rollback_status(step_outcomes, rollback_ran=bool(rb_steps) or not rb_steps)
+            cr.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            return result
+
         steps = (plan.generated_steps if plan else []) or []
         has_rollback_steps = any(s.get("rollback_action") or s.get("rollback_action_id") for s in steps)
 
