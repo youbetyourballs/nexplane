@@ -187,6 +187,7 @@ class TestCredentialRotation:
         log(f"[PHASE1] Rollback status: {rb_cr['status']}")
 
         # Verify FILO: last completed step should appear first in rollback_steps
+        filo_verified = False
         for run in rb_cr.get("execution_runs", []):
             result = run.get("result") or {}
             rb_steps = result.get("rollback_steps", [])
@@ -194,7 +195,9 @@ class TestCredentialRotation:
                 assert rb_steps[0]["index"] == 1, \
                     f"Expected step index 1 first in rollback (FILO), got {rb_steps[0]['index']}"
                 log(f"[PHASE1] FILO order confirmed: rollback_steps={[s['index'] for s in rb_steps]}")
+                filo_verified = True
                 break
+        assert filo_verified, f"No rollback_steps found in execution_runs — FILO order not verified: {rb_cr.get('execution_runs', [])}"
 
         log("[PHASE1] PASS")
 
@@ -260,6 +263,7 @@ class TestCredentialRotation:
         assert rb_cr["status"] in ("rolled_back", "rollback_partial", "rollback_failed"), \
             f"Unexpected rollback status: {rb_cr['status']}"
 
+        rb_verified = False
         for run in rb_cr.get("execution_runs", []):
             result = run.get("result") or {}
             rb_steps = result.get("rollback_steps", [])
@@ -268,6 +272,8 @@ class TestCredentialRotation:
                 assert 1 not in indices, f"Skipped step 1 should not appear in rollback: {indices}"
                 assert 0 in indices, f"Step 0 should appear in rollback: {indices}"
                 log(f"[PHASE2] Rollback correctly excludes skipped step: {indices}")
+                rb_verified = True
                 break
+        assert rb_verified, f"No rollback_steps found in execution_runs — selective rollback not verified: {rb_cr.get('execution_runs', [])}"
 
         log("[PHASE2] PASS")
