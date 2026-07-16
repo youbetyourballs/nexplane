@@ -181,6 +181,10 @@ async def activity_execute_change(
             _secrets_svc = SecretsService(_settings.SECRET_KEY)
             _result = await orchestrate_scan(_cr, _fan_db, _secrets_svc, _settings)
             return _result
+        elif _cr and _cr.change_type.value == "credential_rotation":
+            from app.services.credential_rotation_executor import execute_steps
+            _result = await execute_steps(_cr.id)
+            return _result
 
     step_results = []
     # Carries resolved values forward from steps like resolve_launch_config
