@@ -514,8 +514,15 @@ async def manual_rollback(
 ):
     cr = await _get_cr(db, cr_id, user.organization_id)
 
-    if cr.status not in (ChangeRequestStatus.completed, ChangeRequestStatus.failed):
-        raise HTTPException(status_code=400, detail="Can only manually roll back completed or failed change requests")
+    if cr.status not in (
+        ChangeRequestStatus.completed,
+        ChangeRequestStatus.failed,
+        ChangeRequestStatus.paused,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Can only manually roll back completed, failed, or paused change requests",
+        )
 
     if user.role not in (UserRole.admin, UserRole.approver):
         raise HTTPException(status_code=403, detail="Only admins and approvers can initiate manual rollback")
@@ -624,6 +631,113 @@ async def manual_rollback(
 
     result = await db.execute(select(ExecutionRun).where(ExecutionRun.id == rollback_run_id))
     return result.scalar_one()
+
+
+@router.post("/{cr_id}/retry-step", response_model=ChangeRequestRead)
+async def retry_step(
+    cr_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reset the failed step to pending and resume execution."""
+    from app.models.change_request import ChangeType
+    cr = await _get_cr(db, cr_id, user.organization_id)
+
+    if cr.change_type != ChangeType.credential_rotation:
+        raise HTTPException(status_code=400, detail="retry-step is only valid for credential_rotation CRs")
+    if cr.status != ChangeRequestStatus.paused:
+        raise HTTPException(status_code=400, detail="CR must be paused to retry a step")
+
+    run_res = await db.execute(
+        select(ExecutionRun)
+        .where(ExecutionRun.change_request_id == cr_id)
+        .order_by(ExecutionRun.started_at.desc())
+        .limit(1)
+    )
+    run = run_res.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No execution run found")
+
+    steps = (run.result or {}).get("steps", [])
+    reset = False
+    for step in steps:
+        if step.get("status") == "failed":
+            step["status"] = "pending"
+            step["error"] = None
+            reset = True
+            break
+    if not reset:
+        raise HTTPException(status_code=409, detail="No failed step found to retry")
+
+    run.result = {"steps": steps}
+    cr.status = ChangeRequestStatus.executing
+    cr.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    import asyncio
+    from app.services.credential_rotation_executor import execute_steps
+    asyncio.ensure_future(execute_steps(cr_id))
+
+    await db.refresh(cr)
+    return cr
+
+
+@router.post("/{cr_id}/skip-step", response_model=ChangeRequestRead)
+async def skip_step(
+    cr_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark the failed step as skipped and resume execution (or complete if last step)."""
+    from app.models.change_request import ChangeType
+    cr = await _get_cr(db, cr_id, user.organization_id)
+
+    if cr.change_type != ChangeType.credential_rotation:
+        raise HTTPException(status_code=400, detail="skip-step is only valid for credential_rotation CRs")
+    if cr.status != ChangeRequestStatus.paused:
+        raise HTTPException(status_code=400, detail="CR must be paused to skip a step")
+
+    run_res = await db.execute(
+        select(ExecutionRun)
+        .where(ExecutionRun.change_request_id == cr_id)
+        .order_by(ExecutionRun.started_at.desc())
+        .limit(1)
+    )
+    run = run_res.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No execution run found")
+
+    steps = (run.result or {}).get("steps", [])
+    skipped = False
+    for step in steps:
+        if step.get("status") == "failed":
+            step["status"] = "skipped"
+            step["error"] = None
+            skipped = True
+            break
+    if not skipped:
+        raise HTTPException(status_code=409, detail="No failed step found to skip")
+
+    run.result = {"steps": steps}
+
+    has_more = any(s.get("status") in ("pending", "executing") for s in steps)
+    if not has_more:
+        cr.status = ChangeRequestStatus.completed
+        cr.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(cr)
+        return cr
+
+    cr.status = ChangeRequestStatus.executing
+    cr.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    import asyncio
+    from app.services.credential_rotation_executor import execute_steps
+    asyncio.ensure_future(execute_steps(cr_id))
+
+    await db.refresh(cr)
+    return cr
 
 
 @router.post("/{cr_id}/confirm-stateful", status_code=200)
