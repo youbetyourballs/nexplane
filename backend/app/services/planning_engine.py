@@ -428,7 +428,15 @@ def generate_plan(
         _validate_certificate_rotation_fields(desired)
         return ChangePlanData(
             generated_steps=[],
-            preflight_checks=[],
+            preflight_checks=[
+                {
+                    "name": "step_ca_connector_required",
+                    "description": "A step_ca connector must be configured for this organization",
+                    "check_type": "connector_exists",
+                    "connector_type": "step_ca",
+                    "expected_result": "pass",
+                }
+            ],
             blast_radius=_calculate_blast_radius(change_request, assets, safety_result, steps=[]),
             rollback_plan={},
             verification_plan={},
@@ -466,20 +474,10 @@ def _validate_certificate_rotation_fields(desired: dict) -> None:
 
 async def _validate_certificate_rotation(desired: dict, org_id: str) -> None:
     """Async validation for certificate_rotation (used in async contexts and tests)."""
-    from app.services.change_plan_service import PlanBlockedError
-    errors = []
-    if not desired.get("subject"):
-        errors.append("certificate_rotation requires 'subject'")
-    tr = desired.get("trigger_reason", "")
-    if tr not in ("scheduled", "compromise"):
-        errors.append("trigger_reason must be 'scheduled' or 'compromise'")
-    scope = desired.get("scan_scope") or []
-    if not scope:
-        errors.append("scan_scope must be a non-empty list")
-    if errors:
-        raise PlanBlockedError(errors)
+    _validate_certificate_rotation_fields(desired)
     connector = await _find_connector_for_type("step_ca", org_id)
     if not connector:
+        from app.services.change_plan_service import PlanBlockedError
         raise PlanBlockedError(["No step_ca connector configured for this organization"])
 
 
