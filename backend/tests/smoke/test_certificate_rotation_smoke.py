@@ -282,7 +282,6 @@ class TestCertificateRotation:
 
         log("[PHASE2] Starting K8s secret rotation")
         # Pre-create K8s secret with placeholder PEM
-        import kubernetes as k8s_client
         # Use the platform's kubernetes connector to create the secret
         base = self.client.base
         # Create a simple k8s secret via executor action
