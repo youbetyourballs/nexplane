@@ -185,6 +185,10 @@ async def activity_execute_change(
             from app.services.credential_rotation_executor import execute_steps
             _result = await execute_steps(_cr.id)
             return _result
+        elif _cr and _cr.change_type.value == "certificate_rotation":
+            from app.services.certificate_rotation_executor import execute_certificate_rotation
+            _result = await execute_certificate_rotation(_cr.id)
+            return _result
 
     step_results = []
     # Carries resolved values forward from steps like resolve_launch_config

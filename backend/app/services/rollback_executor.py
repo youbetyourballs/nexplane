@@ -198,6 +198,18 @@ async def execute_cr_rollback(
             await db.commit()
             return result
 
+        # certificate_rotation: FILO rollback with strategy C
+        if cr.change_type.value == "certificate_rotation":
+            from app.services.certificate_rotation_executor import execute_certificate_rollback
+            result = await execute_certificate_rollback(cr.id, execution_result)
+            if result.get("has_warnings"):
+                cr.status = ChangeRequestStatus.rolled_back_with_warnings
+            else:
+                cr.status = ChangeRequestStatus.rolled_back
+            cr.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            return result
+
         steps = (plan.generated_steps if plan else []) or []
         has_rollback_steps = any(s.get("rollback_action") or s.get("rollback_action_id") for s in steps)
 
