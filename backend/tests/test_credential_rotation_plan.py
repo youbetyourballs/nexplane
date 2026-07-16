@@ -2,7 +2,7 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 import pytest
 from unittest.mock import MagicMock, patch
-from app.models.change_request import ChangeType, ChangeRequestStatus, ChangeRequest
+from app.models.change_request import ChangeType, ChangeRequest
 from app.services.planning_engine import generate_plan
 
 
