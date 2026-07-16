@@ -32,7 +32,7 @@ export function Customers() {
   // Onboard wizard state
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [onboardStep, setOnboardStep] = useState(0);
-  const [onboardCRs, setOnboardCRs] = useState<Array<{ action_id: string; cr_id: string }>>([]);
+  const [collectedParams, setCollectedParams] = useState<Record<string, unknown>[]>([]);
 
   // Destructive typed-confirm state
   const [destructiveAction, setDestructiveAction] = useState<{ action: CatalogAction; customer: Customer } | null>(null);
@@ -63,13 +63,14 @@ export function Customers() {
     },
   });
 
-  const onboardCRMutation = useMutation({
+  const onboardWorkflowMutation = useMutation({
     mutationFn: (data: Parameters<typeof changeRequestsApi.create>[0]) =>
       changeRequestsApi.create(data),
-    onSuccess: (data: { id?: string }, variables: Parameters<typeof changeRequestsApi.create>[0]) => {
-      const stepActionId = (variables?.desired_outcome as { action_id?: string })?.action_id ?? "";
-      setOnboardCRs((prev) => [...prev, { action_id: String(stepActionId), cr_id: data?.id ?? "" }]);
-      setOnboardStep((s) => (s < onboardStepActions.length - 1 ? s + 1 : s));
+    onSuccess: (data: { id?: string }) => {
+      setOnboardOpen(false);
+      setCollectedParams([]);
+      setOnboardStep(0);
+      if (data?.id) navigate(`/change-requests/${data.id}`);
     },
   });
 
@@ -106,13 +107,25 @@ export function Customers() {
     }
   }
 
-  function handleOnboardSubmit(action: CatalogAction, params: Record<string, unknown>) {
-    onboardCRMutation.mutate({
-      title: `${action.display_name} — Onboard`,
-      change_type: "catalog_action",
-      target_asset_ids: [],
-      desired_outcome: { connector_type: action.connector_type, action_id: action.action_id, params },
-    });
+  function handleOnboardSubmit(_action: CatalogAction, params: Record<string, unknown>) {
+    const nextParams = [...collectedParams, params];
+    if (nextParams.length < onboardStepActions.length) {
+      setCollectedParams(nextParams);
+      setOnboardStep(nextParams.length);
+    } else {
+      const steps = onboardStepActions.map((a, i) => ({
+        connector_type: a.connector_type,
+        action_id: a.action_id,
+        params: nextParams[i] ?? {},
+      }));
+      const title = `Onboard Customer — ${String(nextParams[0]?.display_name ?? nextParams[0]?.client_id ?? "")}`;
+      onboardWorkflowMutation.mutate({
+        title,
+        change_type: "catalog_workflow",
+        target_asset_ids: [],
+        desired_outcome: { steps },
+      });
+    }
   }
 
   function handleDestructiveConfirm() {
@@ -136,7 +149,7 @@ export function Customers() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-white">Customers</h1>
         <button
-          onClick={() => { setOnboardOpen(true); setOnboardStep(0); setOnboardCRs([]); }}
+          onClick={() => { setOnboardOpen(true); setOnboardStep(0); setCollectedParams([]); }}
           className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded hover:bg-brand-700 transition-colors"
         >
           Onboard Customer
@@ -243,11 +256,11 @@ export function Customers() {
             </div>
 
             {/* Completed steps */}
-            {onboardCRs.length > 0 && (
+            {collectedParams.length > 0 && (
               <div className="space-y-1">
-                {onboardCRs.map((cr) => (
-                  <p key={cr.action_id} className="text-xs text-green-400">
-                    ✓ {cr.action_id} — CR: {cr.cr_id}
+                {onboardStepActions.slice(0, collectedParams.length).map((a) => (
+                  <p key={a.action_id} className="text-xs text-green-400">
+                    ✓ {a.display_name}
                   </p>
                 ))}
               </div>
@@ -258,23 +271,10 @@ export function Customers() {
                 action={currentOnboardAction}
                 initial={{}}
                 onSubmit={(params) => handleOnboardSubmit(currentOnboardAction, params)}
-                submitting={onboardCRMutation.isPending}
+                submitting={onboardWorkflowMutation.isPending}
               />
             ) : (
-              <p className="text-slate-400 text-sm">
-                {onboardCRs.length === ONBOARD_STEPS.length
-                  ? "Onboarding complete!"
-                  : "Loading wizard steps…"}
-              </p>
-            )}
-
-            {onboardCRs.length === onboardStepActions.length && onboardStepActions.length > 0 && (
-              <button
-                onClick={() => setOnboardOpen(false)}
-                className="w-full px-4 py-2 bg-green-700 text-white text-sm rounded hover:bg-green-600"
-              >
-                Done
-              </button>
+              <p className="text-slate-400 text-sm">Loading wizard steps…</p>
             )}
           </div>
         </div>
