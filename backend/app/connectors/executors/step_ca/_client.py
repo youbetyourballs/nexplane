@@ -52,12 +52,17 @@ class StepCAClient:
             "--install",
         ])
 
-    def issue_certificate(self, subject: str, san: str, output_cert: str,
+    def issue_certificate(self, subject: str, san: "str | list[str]", output_cert: str,
                           output_key: str, not_after: str = "24h") -> dict:
         """Issue a certificate using ACME or JWK provisioner via step CLI.
 
+        ``san`` may be a single string or a list of SANs; each entry is passed
+        as a separate ``--san`` flag so the step CLI expands them all into the
+        certificate's Subject Alternative Names extension.
+
         Returns dict with cert_path and key_path.
         """
+        san_list = [san] if isinstance(san, str) else list(san)
         args = [
             "ca", "certificate",
             subject,
@@ -65,10 +70,11 @@ class StepCAClient:
             output_key,
             "--ca-url", self.ca_url,
             "--root", "/etc/step/certs/root_ca.crt",
-            "--san", san,
             "--not-after", not_after,
             "--provisioner", self.provisioner,
         ]
+        for s in san_list:
+            args += ["--san", s]
         if self.provisioner_password:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
                 f.write(self.provisioner_password)

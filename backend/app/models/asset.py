@@ -35,6 +35,9 @@ class AssetType(str, enum.Enum):
     service_endpoint = "service_endpoint"
     database_instance = "database_instance"
     network_port = "network_port"
+    # Certificate rotation — cert-bearing secret assets
+    k8s_secret = "k8s_secret"
+    aws_secret = "aws_secret"
 
 
 class Environment(str, enum.Enum):

@@ -16,8 +16,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
-from app.models.change_request import ChangeRequest, ChangeRequestStatus
-from app.models.execution_run import ExecutionRun, ExecutionStatus
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +67,13 @@ async def _scan_dependents(desired: dict, organization_id: uuid.UUID, db: AsyncS
                 })
                 idx += 1
 
-    # Type-B: Kubernetes workload assets (k8s_secret not in AssetType enum;
-    # kubernetes_workload is the closest available type for cert-bearing K8s resources)
+    # Type-B: Kubernetes secret assets (cert-bearing K8s Secrets registered with
+    # AssetType.k8s_secret; kubernetes_workload assets are NOT searched here).
     if "kubernetes" in scope or not scope:
         res = await db.execute(
             select(Asset).where(
                 Asset.organization_id == organization_id,
-                Asset.asset_type == AssetType.kubernetes_workload,
+                Asset.asset_type == AssetType.k8s_secret,
             )
         )
         k8s_secrets = res.scalars().all()
@@ -101,13 +99,13 @@ async def _scan_dependents(desired: dict, organization_id: uuid.UUID, db: AsyncS
                 })
                 idx += 1
 
-    # Type-B: AWS secrets (aws_secret not in AssetType enum; using storage_bucket as
-    # placeholder — in practice, cert-bearing AWS secrets should be tagged via asset_metadata)
+    # Type-B: AWS Secrets Manager entries holding cert material, registered as
+    # AssetType.aws_secret (distinct from storage_bucket / S3).
     if "aws" in scope or not scope:
         res = await db.execute(
             select(Asset).where(
                 Asset.organization_id == organization_id,
-                Asset.asset_type == AssetType.storage_bucket,
+                Asset.asset_type == AssetType.aws_secret,
             )
         )
         aws_secrets = res.scalars().all()
@@ -168,7 +166,11 @@ def _pem_fingerprint(pem: str) -> str:
         return hashlib.sha256(pem.encode()).hexdigest()
 
 
-async def _snapshot_dependents(dependents: list, db: AsyncSession) -> list:
+async def _snapshot_dependents(
+    dependents: list,
+    db: AsyncSession,
+    organization_id: Optional[uuid.UUID] = None,
+) -> list:
     """Populate snapshot + snapshot_fingerprint for each dependent."""
     updated = []
     for dep in dependents:
@@ -184,7 +186,9 @@ async def _snapshot_dependents(dependents: list, db: AsyncSession) -> list:
                     dep["snapshot"] = None
 
             elif dep["type"] == "k8s_secret":
-                connector = await _load_connector(dep["connector_type"], dep.get("connector_id"), db)
+                connector = await _load_connector(
+                    dep["connector_type"], dep.get("connector_id"), db, organization_id
+                )
                 if connector:
                     from app.connectors.catalog_service import get_catalog_service
                     catalog = get_catalog_service()
@@ -199,7 +203,9 @@ async def _snapshot_dependents(dependents: list, db: AsyncSession) -> list:
                     dep["snapshot"] = None
 
             elif dep["type"] == "aws_secret":
-                connector = await _load_connector(dep["connector_type"], dep.get("connector_id"), db)
+                connector = await _load_connector(
+                    dep["connector_type"], dep.get("connector_id"), db, organization_id
+                )
                 if connector:
                     from app.connectors.catalog_service import get_catalog_service
                     catalog = get_catalog_service()
@@ -238,10 +244,12 @@ async def _rotate_certificate(desired: dict, connector) -> dict:
         cert_path = f"{tmpdir}/cert.pem"
         key_path = f"{tmpdir}/key.pem"
 
-        # issue_certificate writes to files; we read them back
+        # issue_certificate writes to files; we read them back.
+        # san is always passed as a list; StepCAClient expands each entry into
+        # a separate --san flag so all SANs appear in the issued certificate.
         client.issue_certificate(
             subject=subject,
-            san=san if isinstance(san, list) else [san],
+            san=san,
             output_cert=cert_path,
             output_key=key_path,
             not_after=not_after,
@@ -266,8 +274,18 @@ async def _rotate_certificate(desired: dict, connector) -> dict:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-async def _load_connector(connector_type: str, connector_id: Optional[str], db: AsyncSession):
-    """Load and credential-attach a connector by id (preferred) or by type."""
+async def _load_connector(
+    connector_type: str,
+    connector_id: Optional[str],
+    db: AsyncSession,
+    organization_id: Optional[uuid.UUID] = None,
+):
+    """Load and credential-attach a connector by id (preferred) or by type.
+
+    When ``organization_id`` is provided the fallback type-based lookup is
+    scoped to that org so we never accidentally grab a connector from a
+    different tenant.
+    """
     from app.models.connector import Connector, ConnectorType
     from app.services.connector_service import _attach_credentials
 
@@ -279,10 +297,11 @@ async def _load_connector(connector_type: str, connector_id: Optional[str], db: 
             pass
 
     if not connector and connector_type:
+        conditions = [Connector.connector_type == ConnectorType(connector_type)]
+        if organization_id is not None:
+            conditions.append(Connector.organization_id == organization_id)
         res = await db.execute(
-            select(Connector).where(
-                Connector.connector_type == ConnectorType(connector_type),
-            ).limit(1)
+            select(Connector).where(*conditions).limit(1)
         )
         connector = res.scalar_one_or_none()
 
