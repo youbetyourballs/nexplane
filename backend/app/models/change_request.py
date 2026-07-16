@@ -561,6 +561,8 @@ class ChangeType(str, enum.Enum):
     # Generic catalog action
     catalog_action = "catalog_action"
     catalog_workflow = "catalog_workflow"
+    # Credential rotation campaign
+    credential_rotation = "credential_rotation"
     # Reference scan and update
     scan_for_references = "scan_for_references"
     update_reference = "update_reference"
@@ -603,6 +605,8 @@ class ChangeRequestStatus(str, enum.Enum):
     batch_running = "batch_running"
     batch_aborted = "batch_aborted"
     completed_with_errors = "completed_with_errors"
+    # Credential rotation: step failed, operator action required
+    paused = "paused"
 
 
 class ChangeRequest(Base):
