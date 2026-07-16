@@ -648,6 +648,9 @@ async def retry_step(
     if cr.status != ChangeRequestStatus.paused:
         raise HTTPException(status_code=400, detail="CR must be paused to retry a step")
 
+    if user.role not in (UserRole.admin, UserRole.approver):
+        raise HTTPException(status_code=403, detail="Only admins and approvers can retry a rotation step")
+
     run_res = await db.execute(
         select(ExecutionRun)
         .where(ExecutionRun.change_request_id == cr_id)
@@ -696,6 +699,9 @@ async def skip_step(
         raise HTTPException(status_code=400, detail="skip-step is only valid for credential_rotation CRs")
     if cr.status != ChangeRequestStatus.paused:
         raise HTTPException(status_code=400, detail="CR must be paused to skip a step")
+
+    if user.role not in (UserRole.admin, UserRole.approver):
+        raise HTTPException(status_code=403, detail="Only admins and approvers can skip a rotation step")
 
     run_res = await db.execute(
         select(ExecutionRun)
