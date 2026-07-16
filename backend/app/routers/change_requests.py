@@ -30,6 +30,27 @@ from app.compliance.freeze import require_no_active_freeze
 
 router = APIRouter(prefix="/change-requests", tags=["Change Requests"])
 
+import asyncio
+import logging as _logging
+
+_router_logger = _logging.getLogger(__name__)
+
+
+async def _resume_execution(cr_id: uuid.UUID) -> None:
+    """Fire execute_steps and transition CR to failed if it raises."""
+    from app.services.credential_rotation_executor import execute_steps
+    from app.database import AsyncSessionLocal
+    try:
+        await execute_steps(cr_id)
+    except Exception as exc:
+        _router_logger.error("execute_steps failed for CR %s: %s", cr_id, exc)
+        async with AsyncSessionLocal() as _db:
+            _cr = await _db.get(ChangeRequest, cr_id)
+            if _cr:
+                _cr.status = ChangeRequestStatus.failed
+                _cr.updated_at = datetime.now(timezone.utc)
+                await _db.commit()
+
 _CR_OPTIONS = [
     selectinload(ChangeRequest.requester),
     selectinload(ChangeRequest.change_plan),
@@ -641,7 +662,15 @@ async def retry_step(
 ):
     """Reset the failed step to pending and resume execution."""
     from app.models.change_request import ChangeType
-    cr = await _get_cr(db, cr_id, user.organization_id)
+    _cr_locked_res = await db.execute(
+        select(ChangeRequest).where(
+            ChangeRequest.id == cr_id,
+            ChangeRequest.organization_id == user.organization_id,
+        ).with_for_update()
+    )
+    cr = _cr_locked_res.scalar_one_or_none()
+    if not cr:
+        raise HTTPException(status_code=404, detail="Change request not found")
 
     if cr.change_type != ChangeType.credential_rotation:
         raise HTTPException(status_code=400, detail="retry-step is only valid for credential_rotation CRs")
@@ -677,12 +706,12 @@ async def retry_step(
     cr.updated_at = datetime.now(timezone.utc)
     await db.commit()
 
-    import asyncio
-    from app.services.credential_rotation_executor import execute_steps
-    asyncio.ensure_future(execute_steps(cr_id))
+    asyncio.ensure_future(_resume_execution(cr_id))
 
-    await db.refresh(cr)
-    return cr
+    result = await db.execute(
+        select(ChangeRequest).where(ChangeRequest.id == cr_id).options(*_CR_OPTIONS)
+    )
+    return result.scalar_one()
 
 
 @router.post("/{cr_id}/skip-step", response_model=ChangeRequestRead)
@@ -693,7 +722,15 @@ async def skip_step(
 ):
     """Mark the failed step as skipped and resume execution (or complete if last step)."""
     from app.models.change_request import ChangeType
-    cr = await _get_cr(db, cr_id, user.organization_id)
+    _cr_locked_res = await db.execute(
+        select(ChangeRequest).where(
+            ChangeRequest.id == cr_id,
+            ChangeRequest.organization_id == user.organization_id,
+        ).with_for_update()
+    )
+    cr = _cr_locked_res.scalar_one_or_none()
+    if not cr:
+        raise HTTPException(status_code=404, detail="Change request not found")
 
     if cr.change_type != ChangeType.credential_rotation:
         raise HTTPException(status_code=400, detail="skip-step is only valid for credential_rotation CRs")
@@ -733,19 +770,21 @@ async def skip_step(
         # Mark the execution run completed so rollback can find it via _load_cr_and_run
         run.status = ExecutionStatus.completed
         await db.commit()
-        await db.refresh(cr)
-        return cr
+        result = await db.execute(
+            select(ChangeRequest).where(ChangeRequest.id == cr_id).options(*_CR_OPTIONS)
+        )
+        return result.scalar_one()
 
     cr.status = ChangeRequestStatus.executing
     cr.updated_at = datetime.now(timezone.utc)
     await db.commit()
 
-    import asyncio
-    from app.services.credential_rotation_executor import execute_steps
-    asyncio.ensure_future(execute_steps(cr_id))
+    asyncio.ensure_future(_resume_execution(cr_id))
 
-    await db.refresh(cr)
-    return cr
+    result = await db.execute(
+        select(ChangeRequest).where(ChangeRequest.id == cr_id).options(*_CR_OPTIONS)
+    )
+    return result.scalar_one()
 
 
 @router.post("/{cr_id}/confirm-stateful", status_code=200)

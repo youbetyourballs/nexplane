@@ -2,7 +2,6 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 """Serial execution engine for credential_rotation CRs with FILO rollback."""
-import importlib
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -132,7 +131,23 @@ async def execute_steps(cr_id: uuid.UUID) -> dict:
                 run.result = {"steps": steps}
                 await db.commit()
 
-        return {"steps": steps}
+        # All steps done — transition to completed
+        step_state = {"steps": steps}
+        cr.status = ChangeRequestStatus.completed
+        cr.updated_at = datetime.now(timezone.utc)
+        run_q = await db.execute(
+            select(ExecutionRun).where(
+                ExecutionRun.change_request_id == cr_id,
+                ExecutionRun.status.in_(["running", "pending"])
+            ).order_by(ExecutionRun.started_at.desc()).limit(1)
+        )
+        run_completed = run_q.scalar_one_or_none()
+        if run_completed:
+            run_completed.status = ExecutionStatus.completed
+            run_completed.result = {"execution": step_state}
+            run_completed.completed_at = datetime.now(timezone.utc)
+        await db.commit()
+        return step_state
 
 
 async def execute_filo_rollback(cr_id: uuid.UUID, execution_result: dict) -> dict:
@@ -158,16 +173,10 @@ async def execute_filo_rollback(cr_id: uuid.UUID, execution_result: dict) -> dic
 
             connector = await _resolve_connector(connector_type, cr.organization_id, db)
 
-            # Resolve executor module
+            # Resolve executor module via catalog service
             mod = None
             try:
-                action_def = catalog.get_action_def(connector_type, action_id)
-                executor_ref = action_def.get("executor", "")
-                parts = executor_ref.split(".")
-                if len(parts) == 2:
-                    mod = importlib.import_module(
-                        f"app.connectors.executors.{parts[0]}.{parts[1]}"
-                    )
+                mod = catalog.get_executor(connector_type, action_id)
             except Exception as exc:
                 rollback_steps.append({
                     "index": step["index"],
@@ -200,4 +209,5 @@ async def execute_filo_rollback(cr_id: uuid.UUID, execution_result: dict) -> dic
     all_ok = all(
         r["rollback_result"].get("rolled_back", False) for r in rollback_steps
     )
-    return {"rollback_steps": rollback_steps, "all_rolled_back": all_ok}
+    has_warnings = not all_ok and bool(rollback_steps)
+    return {"rollback_steps": rollback_steps, "all_rolled_back": all_ok, "has_warnings": has_warnings}

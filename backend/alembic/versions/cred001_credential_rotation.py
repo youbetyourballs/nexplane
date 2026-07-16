@@ -18,6 +18,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute("ALTER TYPE change_type ADD VALUE IF NOT EXISTS 'credential_rotation'")
     op.execute("ALTER TYPE change_request_status ADD VALUE IF NOT EXISTS 'paused'")
+    op.execute("ALTER TYPE change_request_status ADD VALUE IF NOT EXISTS 'rolled_back_with_warnings'")
 
 
 def downgrade() -> None:

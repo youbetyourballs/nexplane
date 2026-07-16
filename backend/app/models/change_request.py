@@ -607,6 +607,8 @@ class ChangeRequestStatus(str, enum.Enum):
     completed_with_errors = "completed_with_errors"
     # Credential rotation: step failed, operator action required
     paused = "paused"
+    # Credential rotation: rollback completed but some steps could not be undone
+    rolled_back_with_warnings = "rolled_back_with_warnings"
 
 
 class ChangeRequest(Base):

@@ -98,7 +98,7 @@ def _rollback_cr(client, cr_id, timeout):
     while time.time() < deadline:
         cr = client.client.get(f"{base}/change-requests/{cr_id}").json()
         status = cr.get("status", "")
-        if status in ("rolled_back", "rollback_partial", "rollback_failed"):
+        if status in ("rolled_back", "rolled_back_with_warnings", "rollback_partial", "rollback_failed"):
             return cr
         time.sleep(5)
     raise TimeoutError(f"Rollback timeout for CR {cr_id}")
@@ -182,7 +182,7 @@ class TestCredentialRotation:
         log("[PHASE1] Both steps completed — triggering FILO rollback")
 
         rb_cr = _rollback_cr(self.client, cr["id"], ROLLBACK_TIMEOUT)
-        assert rb_cr["status"] in ("rolled_back", "rollback_partial"), \
+        assert rb_cr["status"] in ("rolled_back", "rolled_back_with_warnings", "rollback_partial"), \
             f"Unexpected rollback status: {rb_cr['status']}"
         log(f"[PHASE1] Rollback status: {rb_cr['status']}")
 
@@ -258,9 +258,10 @@ class TestCredentialRotation:
 
         log("[PHASE2] Triggering rollback — only step 0 should unwind")
         rb_cr = _rollback_cr(self.client, cr_updated["id"], ROLLBACK_TIMEOUT)
-        # rollback_failed is acceptable here: step 0 is rotate_iam_key which explicitly returns
-        # rolled_back=False (manual deactivation required). Skipped step 1 must not appear.
-        assert rb_cr["status"] in ("rolled_back", "rollback_partial", "rollback_failed"), \
+        # rollback_failed/rolled_back_with_warnings are acceptable here: step 0 is rotate_iam_key
+        # which explicitly returns rolled_back=False (manual deactivation required).
+        # Skipped step 1 must not appear.
+        assert rb_cr["status"] in ("rolled_back", "rolled_back_with_warnings", "rollback_partial", "rollback_failed"), \
             f"Unexpected rollback status: {rb_cr['status']}"
 
         rb_verified = False

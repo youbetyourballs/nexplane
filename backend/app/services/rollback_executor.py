@@ -190,12 +190,10 @@ async def execute_cr_rollback(
         if cr.change_type.value == "credential_rotation":
             from app.services.credential_rotation_executor import execute_filo_rollback
             result = await execute_filo_rollback(cr.id, execution_result)
-            rb_steps = result.get("rollback_steps", [])
-            step_outcomes = [
-                {"success": r["rollback_result"].get("rolled_back", False)}
-                for r in rb_steps
-            ]
-            cr.status = _determine_rollback_status(step_outcomes, rollback_ran=True)
+            if result.get("has_warnings"):
+                cr.status = ChangeRequestStatus.rolled_back_with_warnings
+            else:
+                cr.status = ChangeRequestStatus.rolled_back
             cr.updated_at = datetime.now(timezone.utc)
             await db.commit()
             return result
