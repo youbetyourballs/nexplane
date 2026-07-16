@@ -787,6 +787,124 @@ async def skip_step(
     return result.scalar_one()
 
 
+@router.post("/{cr_id}/retry-verify", status_code=202)
+async def retry_verify(
+    cr_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-run Phase 5 verification for all failed dependents on a paused certificate_rotation CR."""
+    from app.models.change_request import ChangeType
+    _cr_locked_res = await db.execute(
+        select(ChangeRequest).where(
+            ChangeRequest.id == cr_id,
+            ChangeRequest.organization_id == user.organization_id,
+        ).with_for_update()
+    )
+    cr = _cr_locked_res.scalar_one_or_none()
+    if not cr:
+        raise HTTPException(status_code=404, detail="Change request not found")
+
+    if cr.change_type != ChangeType.certificate_rotation:
+        raise HTTPException(status_code=400, detail="retry-verify is only valid for certificate_rotation CRs")
+    if cr.status != ChangeRequestStatus.paused:
+        raise HTTPException(status_code=400, detail="CR must be paused to retry verification")
+
+    if user.role not in (UserRole.admin, UserRole.approver):
+        raise HTTPException(status_code=403, detail="Only admins and approvers can retry verification")
+
+    run_res = await db.execute(
+        select(ExecutionRun)
+        .where(ExecutionRun.change_request_id == cr_id)
+        .order_by(ExecutionRun.started_at.desc())
+        .limit(1)
+    )
+    run = run_res.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No execution run found")
+
+    result = dict(run.result or {})
+    dependents = result.get("dependents", [])
+    reset = False
+    for dep in dependents:
+        vr = dep.get("verify_result") or {}
+        if not vr.get("success"):
+            dep["verify_result"] = None
+            reset = True
+    if not reset:
+        raise HTTPException(status_code=409, detail="No failed verify result found to retry")
+
+    result["dependents"] = dependents
+    result["paused"] = False
+    run.result = result
+    run.status = ExecutionStatus.running
+    cr.status = ChangeRequestStatus.executing
+    cr.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    asyncio.ensure_future(_resume_execution(cr_id))
+
+    return {"status": "retrying"}
+
+
+@router.post("/{cr_id}/skip-verify", status_code=202)
+async def skip_verify(
+    cr_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark all remaining verify failures as skipped and complete a paused certificate_rotation CR."""
+    from app.models.change_request import ChangeType
+    _cr_locked_res = await db.execute(
+        select(ChangeRequest).where(
+            ChangeRequest.id == cr_id,
+            ChangeRequest.organization_id == user.organization_id,
+        ).with_for_update()
+    )
+    cr = _cr_locked_res.scalar_one_or_none()
+    if not cr:
+        raise HTTPException(status_code=404, detail="Change request not found")
+
+    if cr.change_type != ChangeType.certificate_rotation:
+        raise HTTPException(status_code=400, detail="skip-verify is only valid for certificate_rotation CRs")
+    if cr.status != ChangeRequestStatus.paused:
+        raise HTTPException(status_code=400, detail="CR must be paused to skip verification")
+
+    if user.role not in (UserRole.admin, UserRole.approver):
+        raise HTTPException(status_code=403, detail="Only admins and approvers can skip verification")
+
+    run_res = await db.execute(
+        select(ExecutionRun)
+        .where(ExecutionRun.change_request_id == cr_id)
+        .order_by(ExecutionRun.started_at.desc())
+        .limit(1)
+    )
+    run = run_res.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No execution run found")
+
+    result = dict(run.result or {})
+    dependents = result.get("dependents", [])
+    skipped = False
+    for dep in dependents:
+        vr = dep.get("verify_result") or {}
+        if not vr.get("success"):
+            dep["verify_result"] = {"success": True, "skipped": True, "fingerprint": None, "error": None}
+            skipped = True
+    if not skipped:
+        raise HTTPException(status_code=409, detail="No failed verify result found to skip")
+
+    result["dependents"] = dependents
+    result["paused"] = False
+    run.result = result
+    run.status = ExecutionStatus.completed
+    cr.status = ChangeRequestStatus.completed
+    cr.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {"status": "completed"}
+
+
 @router.post("/{cr_id}/confirm-stateful", status_code=200)
 async def confirm_stateful(
     cr_id: uuid.UUID,
