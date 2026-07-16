@@ -348,7 +348,7 @@ async def _update_dependents(dependents: list, rotation_result: dict, db: AsyncS
                         {
                             "cert_pem": rotation_result["cert_pem"],
                             "key_pem": rotation_result["key_pem"],
-                            "reload_command": "nginx -s reload",
+                            "reload_command": dep.get("reload_command", "nginx -s reload"),
                         },
                         [dep.get("asset_id", "")],
                         connector,
@@ -572,14 +572,21 @@ async def execute_certificate_rotation(cr_id: uuid.UUID) -> dict:
             _persist(run, {"phase": "rotate", "dependents": dependents, "rotation_result": rotation_result})
             await db.commit()
 
-        # Phase 4 — Update (only if not yet done)
-        if not any(d.get("update_result") for d in dependents):
-            logger.info("[cert-rotation] Phase 4: update")
-            dependents = await _update_dependents(dependents, rotation_result, db)
+        # Phase 4 — Update (process only dependents lacking update_result)
+        pending_update = [d for d in dependents if not d.get("update_result")]
+        if pending_update:
+            logger.info("[cert-rotation] Phase 4: update (%d pending)", len(pending_update))
+            updated = await _update_dependents(pending_update, rotation_result, db)
+            dependents = _merge_by_index([d for d in dependents if d.get("update_result")], updated)
             _persist(run, {"phase": "update", "dependents": dependents, "rotation_result": rotation_result})
             await db.commit()
-            if any(d["update_result"] and not d["update_result"].get("success", True) for d in dependents):
-                return _build_result(dependents, rotation_result, phase="update", paused=True)
+
+        # Check for update failures — unconditionally, before entering phase 5
+        if any(
+            d.get("update_result") and not d["update_result"].get("success", True)
+            for d in dependents
+        ):
+            return _build_result(dependents, rotation_result, phase="update", paused=True)
 
         # Phase 5 — Verify (skip already-verified dependents on resume)
         if not all(d.get("verify_result") for d in dependents):
