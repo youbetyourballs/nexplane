@@ -326,3 +326,282 @@ async def _load_step_ca_connector(organization_id: uuid.UUID, db: AsyncSession):
     if connector:
         await _attach_credentials(connector, db)
     return connector
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — Update
+# ---------------------------------------------------------------------------
+
+async def _update_dependents(dependents: list, rotation_result: dict, db: AsyncSession) -> list:
+    """Push new cert to each dependent. Returns updated list; sets update_result on each."""
+    updated = []
+    for dep in dependents:
+        dep = dict(dep)
+        try:
+            connector = await _load_connector(dep["connector_type"], dep.get("connector_id"), db)
+            if dep["type"] == "host":
+                if dep["connector_type"] == "nexplane_agent":
+                    from app.connectors.catalog_service import get_catalog_service
+                    catalog = get_catalog_service()
+                    mod = catalog.get_executor("nexplane_agent", "manage_tls_certificates")
+                    result = await mod.execute(
+                        {
+                            "cert_pem": rotation_result["cert_pem"],
+                            "key_pem": rotation_result["key_pem"],
+                            "reload_command": "nginx -s reload",
+                        },
+                        [dep.get("asset_id", "")],
+                        connector,
+                    )
+                    dep["update_result"] = result
+                else:
+                    # SSM deploy path
+                    from app.connectors.catalog_service import get_catalog_service
+                    catalog = get_catalog_service()
+                    mod = catalog.get_executor("step_ca", "rotate_certificate")
+                    result = await mod.execute(
+                        {
+                            "subject": rotation_result["subject"],
+                            "deploy_via_ssm": True,
+                            "instance_id": dep.get("asset_id", ""),
+                        },
+                        [],
+                        connector,
+                    )
+                    dep["update_result"] = result
+
+            elif dep["type"] == "k8s_secret":
+                from app.connectors.catalog_service import get_catalog_service
+                catalog = get_catalog_service()
+                mod = catalog.get_executor("kubernetes", "patch_secret")
+                result = await mod.execute(
+                    {
+                        "namespace": dep.get("namespace", "default"),
+                        "name": dep["name"],
+                        "data": {"tls.crt": rotation_result["cert_pem"], "tls.key": rotation_result["key_pem"]},
+                    },
+                    [],
+                    connector,
+                )
+                dep["update_result"] = result
+
+            elif dep["type"] == "aws_secret":
+                from app.connectors.catalog_service import get_catalog_service
+                catalog = get_catalog_service()
+                mod = catalog.get_executor("aws", "rotate_secrets_manager_secret")
+                result = await mod.execute(
+                    {
+                        "secret_id": dep["secret_id"],
+                        "new_value": rotation_result["cert_pem"],
+                    },
+                    [],
+                    connector,
+                )
+                dep["update_result"] = result
+
+            else:
+                dep["update_result"] = {"success": False, "error": f"Unknown dependent type: {dep['type']}"}
+
+        except Exception as exc:
+            logger.error("Update failed for dependent %s: %s", dep.get("index"), exc)
+            dep["update_result"] = {"success": False, "error": str(exc)}
+
+        updated.append(dep)
+
+    return updated
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — Verify
+# ---------------------------------------------------------------------------
+
+async def _verify_dependents(
+    dependents: list,
+    rotation_result: dict,
+    verify_timeout_seconds: int,
+    db: AsyncSession,
+) -> list:
+    """After waiting verify_timeout_seconds, probe each dependent."""
+    import asyncio
+    await asyncio.sleep(verify_timeout_seconds)
+
+    updated = []
+    for dep in dependents:
+        dep = dict(dep)
+        try:
+            if dep["type"] == "host":
+                pem = _tls_probe_pem(dep["host"], dep.get("port", 443))
+                if pem:
+                    served_fp = _pem_fingerprint(pem)
+                    if served_fp == rotation_result["fingerprint"]:
+                        dep["verify_result"] = {"success": True, "fingerprint": served_fp, "error": None}
+                    else:
+                        dep["verify_result"] = {
+                            "success": False,
+                            "fingerprint": served_fp,
+                            "error": f"Fingerprint mismatch: got {served_fp}, expected {rotation_result['fingerprint']}",
+                        }
+                else:
+                    dep["verify_result"] = {"success": False, "fingerprint": None, "error": "TLS probe returned no cert"}
+
+            elif dep["type"] == "k8s_secret":
+                connector = await _load_connector(dep["connector_type"], dep.get("connector_id"), db)
+                from app.connectors.catalog_service import get_catalog_service
+                catalog = get_catalog_service()
+                mod = catalog.get_executor("kubernetes", "get_secret")
+                result = await mod.execute(
+                    {"namespace": dep.get("namespace", "default"), "name": dep["name"]},
+                    [],
+                    connector,
+                )
+                stored = (result.get("data") or {}).get("tls.crt") or result.get("value", "")
+                if rotation_result["cert_pem"].strip() in (stored or "").strip():
+                    dep["verify_result"] = {"success": True, "fingerprint": None, "error": None}
+                else:
+                    dep["verify_result"] = {"success": False, "fingerprint": None, "error": "Secret value does not match new cert PEM"}
+
+            elif dep["type"] == "aws_secret":
+                connector = await _load_connector(dep["connector_type"], dep.get("connector_id"), db)
+                from app.connectors.catalog_service import get_catalog_service
+                catalog = get_catalog_service()
+                mod = catalog.get_executor("aws", "get_secret_value")
+                result = await mod.execute({"secret_id": dep["secret_id"]}, [], connector)
+                stored = result.get("secret_string") or result.get("value", "")
+                if rotation_result["cert_pem"].strip() in (stored or "").strip():
+                    dep["verify_result"] = {"success": True, "fingerprint": None, "error": None}
+                else:
+                    dep["verify_result"] = {"success": False, "fingerprint": None, "error": "Secret value does not match new cert PEM"}
+
+            else:
+                dep["verify_result"] = {"success": False, "fingerprint": None, "error": f"Unknown type: {dep['type']}"}
+
+        except Exception as exc:
+            logger.error("Verify failed for dependent %s: %s", dep.get("index"), exc)
+            dep["verify_result"] = {"success": False, "fingerprint": None, "error": str(exc)}
+
+        updated.append(dep)
+
+    return updated
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _persist(run, data: dict) -> None:
+    """Write data to ExecutionRun.result in-place (caller must commit)."""
+    if run:
+        run.result = data
+
+
+def _build_result(dependents: list, rotation_result: Optional[dict], phase: str, paused: bool) -> dict:
+    has_warnings = any(
+        d.get("verify_result") and not d["verify_result"].get("success")
+        for d in dependents
+    )
+    return {
+        "phase": phase,
+        "dependents": dependents,
+        "rotation_result": rotation_result,
+        "rollback_strategy": None,
+        "has_warnings": has_warnings,
+        "paused": paused,
+    }
+
+
+def _merge_by_index(existing: list, new_items: list) -> list:
+    """Merge two lists of dependents by index, new_items overriding existing."""
+    merged = {d["index"]: d for d in existing}
+    for d in new_items:
+        merged[d["index"]] = d
+    return [merged[k] for k in sorted(merged)]
+
+
+# ---------------------------------------------------------------------------
+# Main orchestrator
+# ---------------------------------------------------------------------------
+
+async def execute_certificate_rotation(cr_id: uuid.UUID) -> dict:
+    """Run all 5 phases for a certificate_rotation CR. Persists phase state after each step."""
+    from app.models.change_request import ChangeRequest, ChangeRequestStatus
+    from app.models.execution_run import ExecutionRun, ExecutionStatus
+
+    async with AsyncSessionLocal() as db:
+        cr_res = await db.execute(select(ChangeRequest).where(ChangeRequest.id == cr_id))
+        cr = cr_res.scalar_one()
+        desired = cr.desired_outcome or {}
+
+        run_res = await db.execute(
+            select(ExecutionRun).where(
+                ExecutionRun.change_request_id == cr_id,
+                ExecutionRun.status.in_([ExecutionStatus.running, ExecutionStatus.pending]),
+            ).order_by(ExecutionRun.started_at.desc()).limit(1)
+        )
+        run = run_res.scalar_one_or_none()
+        if not run:
+            run_res2 = await db.execute(
+                select(ExecutionRun).where(ExecutionRun.change_request_id == cr_id)
+                .order_by(ExecutionRun.started_at.desc()).limit(1)
+            )
+            run = run_res2.scalar_one_or_none()
+
+        existing = (run.result or {}) if run else {}
+        dependents = existing.get("dependents", [])
+        rotation_result = existing.get("rotation_result")
+        verify_timeout_seconds = desired.get("verify_timeout_seconds", 10)
+
+        # Phase 1 — Scan (only if no dependents yet)
+        if not dependents:
+            logger.info("[cert-rotation] Phase 1: scan for dependents")
+            dependents = await _scan_dependents(desired, cr.organization_id, db)
+            _persist(run, {"phase": "scan", "dependents": dependents, "rotation_result": None})
+            await db.commit()
+
+        # Phase 2 — Snapshot (only if snapshots not yet taken)
+        if dependents and not any(d.get("snapshot") is not None for d in dependents):
+            logger.info("[cert-rotation] Phase 2: snapshot")
+            dependents = await _snapshot_dependents(dependents, db, organization_id=cr.organization_id)
+            _persist(run, {"phase": "snapshot", "dependents": dependents, "rotation_result": rotation_result})
+            await db.commit()
+
+        # Phase 3 — Rotate (only if not yet done)
+        if not rotation_result:
+            logger.info("[cert-rotation] Phase 3: rotate")
+            step_ca_connector = await _load_step_ca_connector(cr.organization_id, db)
+            rotation_result = await _rotate_certificate(desired, step_ca_connector)
+            _persist(run, {"phase": "rotate", "dependents": dependents, "rotation_result": rotation_result})
+            await db.commit()
+
+        # Phase 4 — Update (only if not yet done)
+        if not any(d.get("update_result") for d in dependents):
+            logger.info("[cert-rotation] Phase 4: update")
+            dependents = await _update_dependents(dependents, rotation_result, db)
+            _persist(run, {"phase": "update", "dependents": dependents, "rotation_result": rotation_result})
+            await db.commit()
+            if any(d["update_result"] and not d["update_result"].get("success", True) for d in dependents):
+                return _build_result(dependents, rotation_result, phase="update", paused=True)
+
+        # Phase 5 — Verify (skip already-verified dependents on resume)
+        if not all(d.get("verify_result") for d in dependents):
+            logger.info("[cert-rotation] Phase 5: verify (timeout=%ss)", verify_timeout_seconds)
+            pending = [d for d in dependents if not d.get("verify_result")]
+            already = [d for d in dependents if d.get("verify_result")]
+            verified = await _verify_dependents(pending, rotation_result, verify_timeout_seconds, db)
+            dependents = _merge_by_index(already, verified)
+            _persist(run, {"phase": "verify", "dependents": dependents, "rotation_result": rotation_result})
+            await db.commit()
+
+        failed = [d for d in dependents if not (d.get("verify_result") or {}).get("success")]
+        paused = bool(failed)
+        result = _build_result(dependents, rotation_result, phase="verify", paused=paused)
+
+        if not paused:
+            # Transition to completed
+            cr.status = ChangeRequestStatus.completed
+            cr.updated_at = datetime.now(timezone.utc)
+            if run:
+                run.status = ExecutionStatus.completed
+                run.result = result
+            await db.commit()
+
+        return result
