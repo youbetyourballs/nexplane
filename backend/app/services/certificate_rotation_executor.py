@@ -612,3 +612,129 @@ async def execute_certificate_rotation(cr_id: uuid.UUID) -> dict:
             await db.commit()
 
         return result
+
+
+# ---------------------------------------------------------------------------
+# Rollback
+# ---------------------------------------------------------------------------
+
+def _cert_has_24h_remaining(pem: str) -> bool:
+    """Return True if cert PEM has more than 24h until expiry."""
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.backends import default_backend
+        cert = x509.load_pem_x509_certificate(pem.encode(), default_backend())
+        try:
+            expiry = cert.not_valid_after_utc
+        except AttributeError:
+            expiry = cert.not_valid_after.replace(tzinfo=timezone.utc)
+        remaining = expiry - datetime.now(timezone.utc)
+        return remaining.total_seconds() > 86400
+    except Exception:
+        return False
+
+
+async def execute_certificate_rollback(cr_id: uuid.UUID, execution_result: dict) -> dict:
+    """FILO unwind of all updated dependents."""
+    from app.models.change_request import ChangeRequest
+
+    async with AsyncSessionLocal() as db:
+        cr_res = await db.execute(select(ChangeRequest).where(ChangeRequest.id == cr_id))
+        cr = cr_res.scalar_one()
+        desired = cr.desired_outcome or {}
+        trigger_reason = desired.get("trigger_reason", "scheduled")
+
+        dependents = execution_result.get("dependents", [])
+
+        # Determine global rollback strategy
+        if trigger_reason == "compromise":
+            global_strategy = "reissue"
+        else:
+            # Try strategy B: find any type-A (host) dependent with a valid snapshot
+            global_strategy = "reissue"
+            for dep in dependents:
+                if dep["type"] == "host" and dep.get("snapshot") and dep.get("snapshot_fingerprint"):
+                    if _cert_has_24h_remaining(dep["snapshot"]):
+                        global_strategy = "restore"
+                        break
+
+        rollback_steps = []
+        # FILO: reverse index order
+        for dep in sorted(dependents, key=lambda d: d["index"], reverse=True):
+            step = {"index": dep["index"], "strategy": global_strategy, "rolled_back": False, "error": None}
+            try:
+                connector = await _load_connector(dep["connector_type"], dep.get("connector_id"), db)
+
+                if global_strategy == "restore" and dep.get("snapshot"):
+                    # Strategy B: restore snapshot
+                    if dep["type"] == "host":
+                        from app.connectors.catalog_service import get_catalog_service
+                        catalog = get_catalog_service()
+                        mod = catalog.get_executor("nexplane_agent", "manage_tls_certificates")
+                        result = await mod.execute(
+                            {
+                                "cert_pem": dep["snapshot"],
+                                "key_pem": dep.get("snapshot_key", dep["snapshot"]),
+                                "reload_command": dep.get("reload_command", "nginx -s reload"),
+                            },
+                            [dep.get("asset_id", "")],
+                            connector,
+                        )
+                        step["rollback_result"] = result
+                        step["rolled_back"] = True
+                    elif dep["type"] == "k8s_secret":
+                        from app.connectors.catalog_service import get_catalog_service
+                        catalog = get_catalog_service()
+                        mod = catalog.get_executor("kubernetes", "patch_secret")
+                        result = await mod.execute(
+                            {
+                                "namespace": dep.get("namespace", "default"),
+                                "name": dep["name"],
+                                "data": dep["snapshot"],
+                            },
+                            [],
+                            connector,
+                        )
+                        step["rollback_result"] = result
+                        step["rolled_back"] = True
+                    elif dep["type"] == "aws_secret":
+                        from app.connectors.catalog_service import get_catalog_service
+                        catalog = get_catalog_service()
+                        mod = catalog.get_executor("aws", "rotate_secrets_manager_secret")
+                        result = await mod.execute(
+                            {"secret_id": dep["secret_id"], "new_value": dep["snapshot"]},
+                            [],
+                            connector,
+                        )
+                        step["rollback_result"] = result
+                        step["rolled_back"] = True
+                    else:
+                        step["error"] = f"Cannot restore unknown type: {dep['type']}"
+                else:
+                    # Strategy A: re-issue fresh cert
+                    step_ca_connector = await _load_step_ca_connector(cr.organization_id, db)
+                    new_rotation = await _rotate_certificate(desired, step_ca_connector)
+                    # Push fresh cert to dependent via same path as phase 4
+                    fresh_dependents = await _update_dependents([dep], new_rotation, db)
+                    fresh_dep = fresh_dependents[0]
+                    update_ok = (fresh_dep.get("update_result") or {}).get("success", False)
+                    step["rollback_result"] = fresh_dep.get("update_result")
+                    step["rolled_back"] = update_ok
+                    if not update_ok:
+                        step["error"] = (fresh_dep.get("update_result") or {}).get("error", "Re-issue failed")
+
+            except Exception as exc:
+                logger.error("Rollback failed for dependent %s: %s", dep.get("index"), exc)
+                step["error"] = str(exc)
+
+            rollback_steps.append(step)
+
+        all_rolled_back = all(s["rolled_back"] for s in rollback_steps)
+        has_warnings = not all_rolled_back
+
+        return {
+            "rollback_steps": rollback_steps,
+            "all_rolled_back": all_rolled_back,
+            "has_warnings": has_warnings,
+            "rollback_strategy": global_strategy,
+        }
