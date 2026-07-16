@@ -143,7 +143,7 @@ async def execute_filo_rollback(cr_id: uuid.UUID, execution_result: dict) -> dic
     """
     from app.connectors.catalog_service import get_catalog_service
 
-    steps = execution_result.get("steps", [])
+    steps = execution_result.get("steps") or execution_result.get("execution", {}).get("steps", [])
     completed = [s for s in steps if s.get("status") == "completed"]
     rollback_steps = []
     catalog = get_catalog_service()

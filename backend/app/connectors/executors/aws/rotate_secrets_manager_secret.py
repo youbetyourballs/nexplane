@@ -85,12 +85,22 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         return {"rolled_back": False, "reason": "no old_version to restore"}
     sm = _sm_client(connector, execution_result)
     try:
-        # Restore the old version
-        sm.update_secret_version_stage(
-            SecretId=secret_id,
-            VersionStage="AWSCURRENT",
-            MoveToVersionId=old_version,
-        )
+        # Find the current version so we can pass RemoveFromVersionId (required by AWS API)
+        try:
+            current_meta = sm.get_secret_value(SecretId=secret_id)
+            current_version = current_meta.get("VersionId")
+        except Exception:
+            current_version = None
+
+        kwargs = {
+            "SecretId": secret_id,
+            "VersionStage": "AWSCURRENT",
+            "MoveToVersionId": old_version,
+        }
+        if current_version and current_version != old_version:
+            kwargs["RemoveFromVersionId"] = current_version
+
+        sm.update_secret_version_stage(**kwargs)
         return {"rolled_back": True, "restored_version": old_version}
     except Exception as e:
         return {"rolled_back": False, "reason": str(e)}

@@ -730,6 +730,8 @@ async def skip_step(
     if not has_more:
         cr.status = ChangeRequestStatus.completed
         cr.updated_at = datetime.now(timezone.utc)
+        # Mark the execution run completed so rollback can find it via _load_cr_and_run
+        run.status = ExecutionStatus.completed
         await db.commit()
         await db.refresh(cr)
         return cr
