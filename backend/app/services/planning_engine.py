@@ -424,6 +424,16 @@ def generate_plan(
             verification_plan={},
         )
 
+    if ct == ChangeType.certificate_rotation:
+        _validate_certificate_rotation_fields(desired)
+        return ChangePlanData(
+            generated_steps=[],
+            preflight_checks=[],
+            blast_radius=_calculate_blast_radius(change_request, assets, safety_result, steps=[]),
+            rollback_plan={},
+            verification_plan={},
+        )
+
     change_def = _load_change_type_def(ct)
     steps = [
         _resolve_step(step_def, i + 1, desired, assets, catalog)
@@ -436,6 +446,57 @@ def generate_plan(
         rollback_plan=_generate_rollback_plan(ct, desired),
         verification_plan=_generate_verification_plan(change_def),
     )
+
+
+def _validate_certificate_rotation_fields(desired: dict) -> None:
+    """Validate certificate_rotation desired_outcome fields synchronously."""
+    from app.services.change_plan_service import PlanBlockedError
+    errors = []
+    if not desired.get("subject"):
+        errors.append("certificate_rotation requires 'subject'")
+    tr = desired.get("trigger_reason", "")
+    if tr not in ("scheduled", "compromise"):
+        errors.append("trigger_reason must be 'scheduled' or 'compromise'")
+    scope = desired.get("scan_scope") or []
+    if not scope:
+        errors.append("scan_scope must be a non-empty list")
+    if errors:
+        raise PlanBlockedError(errors)
+
+
+async def _validate_certificate_rotation(desired: dict, org_id: str) -> None:
+    """Async validation for certificate_rotation (used in async contexts and tests)."""
+    from app.services.change_plan_service import PlanBlockedError
+    errors = []
+    if not desired.get("subject"):
+        errors.append("certificate_rotation requires 'subject'")
+    tr = desired.get("trigger_reason", "")
+    if tr not in ("scheduled", "compromise"):
+        errors.append("trigger_reason must be 'scheduled' or 'compromise'")
+    scope = desired.get("scan_scope") or []
+    if not scope:
+        errors.append("scan_scope must be a non-empty list")
+    if errors:
+        raise PlanBlockedError(errors)
+    connector = await _find_connector_for_type("step_ca", org_id)
+    if not connector:
+        raise PlanBlockedError(["No step_ca connector configured for this organization"])
+
+
+async def _find_connector_for_type(connector_type: str, org_id: str):
+    """Look up a connector by type for the given org. Returns None if not found."""
+    import uuid as _uuid
+    from app.models.connector import Connector, ConnectorType
+    from sqlalchemy import select
+    from app.db.session import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(
+            select(Connector).where(
+                Connector.organization_id == _uuid.UUID(org_id),
+                Connector.connector_type == ConnectorType(connector_type),
+            ).limit(1)
+        )
+        return res.scalar_one_or_none()
 
 
 def _generate_preflight_checks(change_def: dict) -> list[dict]:
