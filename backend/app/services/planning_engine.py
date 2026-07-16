@@ -403,6 +403,27 @@ def generate_plan(
             verification_plan={},
         )
 
+    if ct == ChangeType.credential_rotation:
+        steps_spec = desired.get("steps", [])
+        if not steps_spec:
+            from app.services.change_plan_service import PlanBlockedError
+            raise PlanBlockedError(["credential_rotation requires at least one step"])
+        for i, spec in enumerate(steps_spec, start=1):
+            conn_t = spec.get("connector_type", "")
+            act_id = spec.get("action_id", "")
+            try:
+                catalog.get_action_def(conn_t, act_id)
+            except KeyError:
+                from app.services.change_plan_service import PlanBlockedError
+                raise PlanBlockedError([f"Unknown catalog action at step {i}: {conn_t}.{act_id}"])
+        return ChangePlanData(
+            generated_steps=[],
+            preflight_checks=[],
+            blast_radius=_calculate_blast_radius(change_request, assets, safety_result, steps=[]),
+            rollback_plan={},
+            verification_plan={},
+        )
+
     change_def = _load_change_type_def(ct)
     steps = [
         _resolve_step(step_def, i + 1, desired, assets, catalog)
