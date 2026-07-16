@@ -164,6 +164,45 @@ async def _create_certificate_rotation_cr(
 
         cr.status = ChangeRequestStatus.awaiting_approval
         cr.updated_at = datetime.now(timezone.utc)
+        await db.flush()
+
+        # Replicate the side effects of the submit-for-approval HTTP endpoint:
+        # 1. Audit event
+        from app.services.audit_service import record_event
+        await record_event(
+            db,
+            org_uuid,
+            "change_request.submitted_for_approval",
+            {"change_request_id": str(cr_id), "risk_level": cr.risk_level.value},
+            actor_id=system_user_id,
+            change_request_id=cr_id,
+        )
+
+        # 2. In-app notification to approvers/admins
+        try:
+            from app.models.user import User, UserRole
+            from app.services.notification_service import NotificationService, NotificationEvent
+            _approvers_result = await db.execute(
+                select(User).where(
+                    User.organization_id == org_uuid,
+                    User.role.in_([UserRole.approver, UserRole.admin]),
+                )
+            )
+            _approvers = _approvers_result.scalars().all()
+            if _approvers:
+                _notif_svc = NotificationService(db)
+                await _notif_svc.emit(NotificationEvent(
+                    event_type="cr.awaiting_approval",
+                    organization_id=str(org_uuid),
+                    actor_id=str(system_user_id),
+                    resource_id=str(cr_id),
+                    resource_type="change_request",
+                    message=f"Change request '[Auto] Certificate rotation: {subject}' is awaiting your approval",
+                    recipients=[str(u.id) for u in _approvers],
+                ))
+        except Exception as _notif_exc:
+            logger.warning("Auto-trigger CR notification failed for %s: %s", subject, _notif_exc)
+
         await db.commit()
 
         logger.info(
@@ -257,7 +296,7 @@ async def _check_tls_certs(db) -> None:
                         if not cr_created:
                             await _create_expiry_finding(
                                 db, asset, "tls_certificate",
-                                f"TLS certificate on {hostname} expires in {days_left} days ({expiry.date()})",
+                                f"auto-CR creation failed; TLS certificate on {hostname} expires in {days_left} days ({expiry.date()})",
                                 days_left,
                             )
                     else:
