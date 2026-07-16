@@ -195,7 +195,7 @@ async def execute_cr_rollback(
                 {"success": r["rollback_result"].get("rolled_back", False)}
                 for r in rb_steps
             ]
-            cr.status = _determine_rollback_status(step_outcomes, rollback_ran=bool(rb_steps) or not rb_steps)
+            cr.status = _determine_rollback_status(step_outcomes, rollback_ran=True)
             cr.updated_at = datetime.now(timezone.utc)
             await db.commit()
             return result
