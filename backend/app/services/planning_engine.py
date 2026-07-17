@@ -442,6 +442,27 @@ def generate_plan(
             verification_plan={},
         )
 
+    if ct == ChangeType.credential_rotation_fanout:
+        desired = change_request.desired_outcome or {}
+        try:
+            _validate_credential_rotation_fanout_fields(desired)
+        except ValueError as exc:
+            from app.services.change_plan_service import PlanBlockedError
+            raise PlanBlockedError([str(exc)])
+        return ChangePlanData(
+            generated_steps=[{
+                "step_number": 1,
+                "connector_type": "internal",
+                "action_id": "credential_rotation_fanout",
+                "parameters": desired,
+                "purpose": "orchestrate",
+            }],
+            preflight_checks=[],
+            blast_radius=_calculate_blast_radius(change_request, assets, safety_result, steps=[]),
+            rollback_plan={},
+            verification_plan={},
+        )
+
     change_def = _load_change_type_def(ct)
     steps = [
         _resolve_step(step_def, i + 1, desired, assets, catalog)
@@ -454,6 +475,23 @@ def generate_plan(
         rollback_plan=_generate_rollback_plan(ct, desired),
         verification_plan=_generate_verification_plan(change_def),
     )
+
+
+def _validate_credential_rotation_fanout_fields(desired: dict) -> None:
+    """Validate credential_rotation_fanout desired_outcome fields synchronously."""
+    search_terms = desired.get("search_terms")
+    if not search_terms or not isinstance(search_terms, list):
+        raise ValueError("desired_outcome.search_terms must be a non-empty list")
+    scan_scope = desired.get("scan_scope")
+    if not scan_scope or not isinstance(scan_scope, list):
+        raise ValueError("desired_outcome.scan_scope must be a non-empty list")
+    valid_scopes = {"aws", "kubernetes", "nexplane_agent"}
+    for s in scan_scope:
+        if s not in valid_scopes:
+            raise ValueError(f"Invalid scan_scope entry: {s!r}. Must be one of {sorted(valid_scopes)}")
+    rotate = desired.get("rotate")
+    if not rotate and not desired.get("new_value"):
+        raise ValueError("desired_outcome.new_value is required when rotate is not specified")
 
 
 def _validate_certificate_rotation_fields(desired: dict) -> None:
