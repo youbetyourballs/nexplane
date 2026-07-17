@@ -563,6 +563,7 @@ class ChangeType(str, enum.Enum):
     catalog_workflow = "catalog_workflow"
     # Credential rotation campaign
     credential_rotation = "credential_rotation"
+    credential_rotation_fanout = "credential_rotation_fanout"
     certificate_rotation = "certificate_rotation"
     # Reference scan and update
     scan_for_references = "scan_for_references"
