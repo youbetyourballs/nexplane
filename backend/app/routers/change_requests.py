@@ -37,13 +37,20 @@ _router_logger = _logging.getLogger(__name__)
 
 
 async def _resume_execution(cr_id: uuid.UUID) -> None:
-    """Fire execute_steps and transition CR to failed if it raises."""
-    from app.services.credential_rotation_executor import execute_steps
+    """Fire execute_steps (or fanout equivalent) and transition CR to failed if it raises."""
     from app.database import AsyncSessionLocal
     try:
-        await execute_steps(cr_id)
+        async with AsyncSessionLocal() as _check_db:
+            _cr_obj = await _check_db.get(ChangeRequest, cr_id)
+            _ct = _cr_obj.change_type.value if _cr_obj else None
+        if _ct == "credential_rotation_fanout":
+            from app.services.credential_rotation_fanout_executor import execute_credential_rotation_fanout
+            await execute_credential_rotation_fanout(str(cr_id))
+        else:
+            from app.services.credential_rotation_executor import execute_steps
+            await execute_steps(cr_id)
     except Exception as exc:
-        _router_logger.error("execute_steps failed for CR %s: %s", cr_id, exc)
+        _router_logger.error("resume_execution failed for CR %s: %s", cr_id, exc)
         async with AsyncSessionLocal() as _db:
             _cr = await _db.get(ChangeRequest, cr_id)
             if _cr:
@@ -805,8 +812,8 @@ async def retry_verify(
     if not cr:
         raise HTTPException(status_code=404, detail="Change request not found")
 
-    if cr.change_type != ChangeType.certificate_rotation:
-        raise HTTPException(status_code=400, detail="retry-verify is only valid for certificate_rotation CRs")
+    if cr.change_type not in (ChangeType.certificate_rotation, ChangeType.credential_rotation_fanout):
+        raise HTTPException(status_code=400, detail="retry-verify is only valid for certificate_rotation and credential_rotation_fanout CRs")
     if cr.status != ChangeRequestStatus.paused:
         raise HTTPException(status_code=400, detail="CR must be paused to retry verification")
 
@@ -824,9 +831,11 @@ async def retry_verify(
         raise HTTPException(status_code=404, detail="No execution run found")
 
     result = dict(run.result or {})
-    dependents = result.get("dependents", [])
+    # certificate_rotation uses "dependents"; credential_rotation_fanout uses "consumers"
+    _list_key = "consumers" if cr.change_type == ChangeType.credential_rotation_fanout else "dependents"
+    items = result.get(_list_key, [])
     reset = False
-    for dep in dependents:
+    for dep in items:
         vr = dep.get("verify_result") or {}
         if not vr.get("success"):
             dep["verify_result"] = None
@@ -834,7 +843,7 @@ async def retry_verify(
     if not reset:
         raise HTTPException(status_code=409, detail="No failed verify result found to retry")
 
-    result["dependents"] = dependents
+    result[_list_key] = items
     result["paused"] = False
     run.result = result
     run.status = ExecutionStatus.running
@@ -865,8 +874,8 @@ async def skip_verify(
     if not cr:
         raise HTTPException(status_code=404, detail="Change request not found")
 
-    if cr.change_type != ChangeType.certificate_rotation:
-        raise HTTPException(status_code=400, detail="skip-verify is only valid for certificate_rotation CRs")
+    if cr.change_type not in (ChangeType.certificate_rotation, ChangeType.credential_rotation_fanout):
+        raise HTTPException(status_code=400, detail="skip-verify is only valid for certificate_rotation and credential_rotation_fanout CRs")
     if cr.status != ChangeRequestStatus.paused:
         raise HTTPException(status_code=400, detail="CR must be paused to skip verification")
 
@@ -884,9 +893,11 @@ async def skip_verify(
         raise HTTPException(status_code=404, detail="No execution run found")
 
     result = dict(run.result or {})
-    dependents = result.get("dependents", [])
+    # certificate_rotation uses "dependents"; credential_rotation_fanout uses "consumers"
+    _list_key = "consumers" if cr.change_type == ChangeType.credential_rotation_fanout else "dependents"
+    items = result.get(_list_key, [])
     skipped = False
-    for dep in dependents:
+    for dep in items:
         vr = dep.get("verify_result") or {}
         if not vr.get("success"):
             dep["verify_result"] = {"success": True, "skipped": True, "fingerprint": None, "error": None}
@@ -894,7 +905,7 @@ async def skip_verify(
     if not skipped:
         raise HTTPException(status_code=409, detail="No failed verify result found to skip")
 
-    result["dependents"] = dependents
+    result[_list_key] = items
     result["paused"] = False
     run.result = result
     run.status = ExecutionStatus.completed

@@ -183,6 +183,37 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
             )
             return
 
+    # credential_rotation_fanout: handle paused mid-run (update error or verify failure) or completion
+    if data.get("change_type") == "credential_rotation_fanout":
+        if isinstance(execution_result, dict) and execution_result.get("paused"):
+            if execution_run_id:
+                await update_execution_run_status(
+                    execution_run_id, "running", execution_result
+                )
+            await write_audit_event(
+                organization_id=org_id,
+                event_type="execution.paused",
+                event_payload={"phase": (execution_result or {}).get("phase", "verify")},
+                actor_id=actor_id,
+                change_request_id=cr_id,
+            )
+            await update_change_request_status(cr_id, "paused")
+            return
+        else:
+            await update_change_request_status(cr_id, "completed")
+            if execution_run_id:
+                await update_execution_run_status(
+                    execution_run_id, "completed", {"execution": execution_result}
+                )
+            await write_audit_event(
+                organization_id=org_id,
+                event_type="workflow.completed",
+                event_payload={"outcome": "success"},
+                actor_id=actor_id,
+                change_request_id=cr_id,
+            )
+            return
+
     # Soft-failure: executor returned {"failed": True, ...} with partial step_results preserved.
     # activity_execute_change wraps the executor result as {"steps": [{"result": executor_dict}]},
     # so we check both the top-level result and the first step's result.
