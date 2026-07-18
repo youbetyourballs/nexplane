@@ -15,6 +15,7 @@ class AssetCreate(BaseModel):
     criticality: Criticality
     asset_metadata: dict = {}
     tags: list[str] = []
+    connector_id: Optional[uuid.UUID] = None
 
 
 class AssetRead(BaseModel):

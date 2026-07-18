@@ -889,8 +889,7 @@ class TestCertificateRotation:
             crs = r.json() if isinstance(r.json(), list) else r.json().get("items", [])
             matches = [
                 c for c in crs
-                if (c.get("desired_outcome") or {}).get("subject") == EXPIRING_SUBJECT
-                and c.get("title", "").startswith("[Auto]")
+                if c.get("title", "") == f"[Auto] Certificate rotation: {EXPIRING_SUBJECT}"
             ]
             if matches:
                 auto_cr = matches[0]
