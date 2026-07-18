@@ -654,9 +654,16 @@ class TestCredentialRotationFanoutSmoke:
             "connector_type": "kubernetes",
             "name": conn_name,
             "display_name": conn_name,
-            "credentials": {"kubeconfig": kubeconfig_b64},
         })
         _k8s_conn_id = _k8s_conn.get("id")
+        # POST /connectors silently drops credentials — must PUT separately
+        creds_resp = client.client.put(
+            f"{client.base}/connectors/{_k8s_conn_id}/credentials",
+            json={"credentials": {"kubeconfig": kubeconfig_b64}},
+        )
+        assert creds_resp.status_code in (200, 201, 204), (
+            f"PUT /connectors/{_k8s_conn_id}/credentials failed {creds_resp.status_code}: {creds_resp.text}"
+        )
         log(f"[FANOUT] K8s connector registered: {_k8s_conn_id}")
         cls._provisioned_connector_id = _k8s_conn_id
 
