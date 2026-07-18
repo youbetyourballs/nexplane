@@ -33,12 +33,20 @@ async def _load_connector_by_type(connector_type: str, organization_id, db):
         select(Connector).where(
             Connector.organization_id == organization_id,
             Connector.connector_type == ConnectorType(connector_type),
-        ).limit(1)
+        )
     )
-    conn = res.scalar_one_or_none()
-    if conn:
+    conns = res.scalars().all()
+    if not conns:
+        return None
+    # Prefer connectors that have credentials — attach and return first with non-empty creds.
+    first = None
+    for conn in conns:
         await _attach_credentials(conn, db)
-    return conn
+        if conn.credentials:
+            return conn
+        if first is None:
+            first = conn
+    return first
 
 
 async def _build_scan_proxy(cr_id, org_id, search_terms: list, region=None) -> object:
