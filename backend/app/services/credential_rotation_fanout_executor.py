@@ -108,6 +108,11 @@ async def _update_consumer(consumer: dict, new_value: str, db, connector_cache: 
         return {"status": "error", "error": f"No {connector_type} connector found"}
 
     params = {**surface_meta, "old_value": old_value, "new_value": new_value}
+    # Remap generic 'name' to surface-specific key expected by update functions
+    if surface == "k8s_configmap" and "name" in params and "configmap_name" not in params:
+        params["configmap_name"] = params.pop("name")
+    elif surface in ("k8s_deployment_env", "k8s_deployment_spec") and "name" in params and "deployment_name" not in params:
+        params["deployment_name"] = params.pop("name")
     proxy = type("_UpdateCR", (), {"parameters": params})()
 
     try:
