@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 from app.database import AsyncSessionLocal
 from app.models.asset import Asset
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +127,15 @@ async def _create_certificate_rotation_cr(
 
         cr_id = _uuid.uuid4()
         org_uuid = _uuid.UUID(organization_id) if isinstance(organization_id, str) else organization_id
-        # Sentinel system-user UUID used throughout the codebase for worker-generated CRs
-        system_user_id = _uuid.UUID("00000000-0000-0000-0000-000000000001")
+        # Look up an admin user for the org to satisfy the FK; fall back to any user in the org
+        from sqlalchemy import select as _sel
+        from app.models.user import User as _User
+        _user_res = await db.execute(
+            _sel(_User.id).where(_User.organization_id == org_uuid).order_by(_User.id).limit(1)
+        )
+        system_user_id = _user_res.scalar_one_or_none()
+        if system_user_id is None:
+            raise RuntimeError(f"No user found for organization {org_uuid}")
 
         cr = ChangeRequest(
             id=cr_id,
@@ -233,23 +241,28 @@ async def _check_step_ca_certs(db) -> None:
     )
     near_expiry = res.scalars().all()
     for inv in near_expiry:
+        inv_subject = inv.subject
+        inv_san = list(inv.san) if inv.san else [inv.subject]
+        inv_org = str(inv.organization_id)
+        inv_fp = inv.fingerprint
+        inv_exp = inv.expires_at
         try:
             cr_created = await _create_certificate_rotation_cr(
                 db,
-                subject=inv.subject,
-                san=list(inv.san) if inv.san else [inv.subject],
-                organization_id=str(inv.organization_id),
+                subject=inv_subject,
+                san=inv_san,
+                organization_id=inv_org,
                 trigger_reason="scheduled",
             )
             if not cr_created:
-                days_left = max(0, (inv.expires_at - datetime.now(timezone.utc)).days)
+                days_left = max(0, (inv_exp - datetime.now(timezone.utc)).days)
                 await _create_expiry_finding(
                     db, None, "tls_certificate",
-                    f"cert {inv.fingerprint[:16]} ({inv.subject}) expires in {days_left}d — CR creation failed",
+                    f"cert {inv_fp[:16]} ({inv_subject}) expires in {days_left}d — CR creation failed",
                     days_left,
                 )
         except Exception as e:
-            logger.debug("step-CA cert check failed for %s: %s", inv.subject, e)
+            logger.debug("step-CA cert check failed for %s: %s", inv_subject, e)
 
 
 async def check_credential_expiry() -> None:
@@ -433,8 +446,9 @@ async def _create_expiry_finding(db, asset, credential_type: str, message: str, 
             cr = ChangeRequest(
                 id=uuid.uuid4(),
                 organization_id=asset.organization_id,
-                # requester_id omitted — system-generated, set a sentinel zero UUID
-                requester_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+                requester_id=(await db.execute(
+                    select(User).where(User.organization_id == asset.organization_id).order_by(User.id).limit(1)
+                )).scalar_one().id,
                 title=f"[AUTO] Renew {credential_type} expiring in {days_left}d — {message[:60]}",
                 description=f"Auto-generated emergency CR by credential_expiry_monitor. {message}",
                 change_type=(

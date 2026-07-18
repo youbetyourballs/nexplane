@@ -203,16 +203,27 @@ def _provision_kind_ec2(ec2_client, ssm_client, iam_client):
                 for p in sgs[0].get("IpPermissions", [])
             )
             if not port_open:
-                ec2_client.authorize_security_group_ingress(
-                    GroupId=sg_id,
-                    IpPermissions=[{
-                        "IpProtocol": "tcp",
-                        "FromPort": KUBE_API_PORT,
-                        "ToPort": KUBE_API_PORT,
-                        "IpRanges": [{"CidrIp": "10.0.0.0/8"}],
-                        "Ipv6Ranges": [],
-                    }],
+            for cidr in ("10.0.0.0/8", "172.16.0.0/12"):
+                already = any(
+                    p.get("FromPort") == KUBE_API_PORT and p.get("ToPort") == KUBE_API_PORT
+                    and any(r.get("CidrIp") == cidr for r in p.get("IpRanges", []))
+                    for p in sgs[0].get("IpPermissions", [])
                 )
+                if not already:
+                    try:
+                        ec2_client.authorize_security_group_ingress(
+                            GroupId=sg_id,
+                            IpPermissions=[{
+                                "IpProtocol": "tcp",
+                                "FromPort": KUBE_API_PORT,
+                                "ToPort": KUBE_API_PORT,
+                                "IpRanges": [{"CidrIp": cidr, "Description": f"k8s cert-smoke {cidr}"}],
+                                "Ipv6Ranges": [],
+                            }],
+                        )
+                        log(f"  Opened port {KUBE_API_PORT} in SG {sg_id} for {cidr}")
+                    except Exception as _sg_exc:
+                        log(f"  SG rule {cidr}: {_sg_exc}")
     except Exception as exc:
         log(f"  Warning: SG update failed: {exc}")
 
