@@ -188,7 +188,7 @@ def _build_result(consumers: list, rotation_result: dict, phase: str, paused: bo
         "consumers": consumers,
         "paused": paused,
         "has_warnings": any(
-            c.get("update_result", {}).get("status") not in (None, "updated", "skipped")
+            (c.get("update_result") or {}).get("status") not in (None, "updated", "skipped")
             for c in consumers
         ),
     }
