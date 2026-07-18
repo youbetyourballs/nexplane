@@ -198,11 +198,6 @@ def _provision_kind_ec2(ec2_client, ssm_client, iam_client):
         )["SecurityGroups"]
         if sgs:
             sg_id = sgs[0]["GroupId"]
-            port_open = any(
-                p.get("FromPort") == KUBE_API_PORT and p.get("ToPort") == KUBE_API_PORT
-                for p in sgs[0].get("IpPermissions", [])
-            )
-            if not port_open:
             for cidr in ("10.0.0.0/8", "172.16.0.0/12"):
                 already = any(
                     p.get("FromPort") == KUBE_API_PORT and p.get("ToPort") == KUBE_API_PORT
