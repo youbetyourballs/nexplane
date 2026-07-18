@@ -18,7 +18,10 @@ def _matches(value, search_terms):
     return [t for t in search_terms if t.lower() in value.lower()]
 
 
-def _hit(surface, location, matched_term, snippet, namespace, kind, name, node_name=None, pod_ip=None):
+def _hit(surface, location, matched_term, snippet, namespace, kind, name, node_name=None, pod_ip=None, data_key=None):
+    meta = {"namespace": namespace, "kind": kind, "name": name}
+    if data_key is not None:
+        meta["data_key"] = data_key
     return {
         "surface": surface,
         "location": location,
@@ -27,11 +30,7 @@ def _hit(surface, location, matched_term, snippet, namespace, kind, name, node_n
         "consumer_identity": {
             "stable_id": f"{namespace}/{kind}/{name}",
             "hostname": node_name or pod_ip,
-            "surface_metadata": {
-                "namespace": namespace,
-                "kind": kind,
-                "name": name,
-            },
+            "surface_metadata": meta,
         },
     }
 
@@ -72,6 +71,7 @@ async def scan_configmaps(cr, connector, db):
                     namespace=ns,
                     kind="ConfigMap",
                     name=name,
+                    data_key=key,
                 ))
 
     return {"hits": hits, "scanned": scanned}
