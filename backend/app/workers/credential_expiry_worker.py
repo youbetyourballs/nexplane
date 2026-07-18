@@ -221,35 +221,35 @@ async def _create_certificate_rotation_cr(
 
 
 async def _check_step_ca_certs(db) -> None:
-    """Auto-renew step-CA certs via ACME before they expire."""
-    step_ca_connectors = await _get_connectors_by_type(db, "step_ca")
-    for connector in step_ca_connectors:
+    """Auto-trigger certificate_rotation CRs for platform-issued certs nearing expiry.
+
+    Queries CertificateInventory (written at issuance) instead of calling the
+    step-ca CLI, which lacks a cert-listing command in v0.27.
+    """
+    from app.models.certificate_inventory import CertificateInventory
+    threshold = datetime.now(timezone.utc) + timedelta(days=ACME_RENEW_DAYS)
+    res = await db.execute(
+        select(CertificateInventory).where(CertificateInventory.expires_at <= threshold)
+    )
+    near_expiry = res.scalars().all()
+    for inv in near_expiry:
         try:
-            from app.connectors.executors.step_ca._client import StepCAClient
-            client = StepCAClient.from_connector(connector)
-            certs = client.list_certificates()
-            for cert in certs:
-                if not cert["expiry"]:
-                    continue
-                days_left = (cert["expiry"] - datetime.now(timezone.utc)).days
-                if days_left <= ACME_RENEW_DAYS:
-                    subject = cert.get("subject", cert["serial"])
-                    san = [subject]
-                    cr_created = await _create_certificate_rotation_cr(
-                        db,
-                        subject=subject,
-                        san=san,
-                        organization_id=str(connector.organization_id),
-                        trigger_reason="scheduled",
-                    )
-                    if not cr_created:
-                        await _create_expiry_finding(
-                            db, None, "tls_certificate",
-                            f"step-CA cert {cert['serial']} ({cert.get('subject', '')}) expires in {days_left}d — auto-renewal failed or CR creation failed",
-                            days_left,
-                        )
+            cr_created = await _create_certificate_rotation_cr(
+                db,
+                subject=inv.subject,
+                san=list(inv.san) if inv.san else [inv.subject],
+                organization_id=str(inv.organization_id),
+                trigger_reason="scheduled",
+            )
+            if not cr_created:
+                days_left = max(0, (inv.expires_at - datetime.now(timezone.utc)).days)
+                await _create_expiry_finding(
+                    db, None, "tls_certificate",
+                    f"cert {inv.fingerprint[:16]} ({inv.subject}) expires in {days_left}d — CR creation failed",
+                    days_left,
+                )
         except Exception as e:
-            logger.debug("step-CA cert check failed for connector %s: %s", connector.id, e)
+            logger.debug("step-CA cert check failed for %s: %s", inv.subject, e)
 
 
 async def check_credential_expiry() -> None:

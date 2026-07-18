@@ -190,15 +190,15 @@ async def _snapshot_dependents(
                     dep["connector_type"], dep.get("connector_id"), db, organization_id
                 )
                 if connector:
-                    from app.connectors.catalog_service import get_catalog_service
-                    catalog = get_catalog_service()
-                    mod = catalog.get_executor("kubernetes", "get_secret")
-                    result = await mod.execute(
-                        {"namespace": dep.get("namespace", "default"), "name": dep["name"]},
-                        [],
-                        connector,
-                    )
-                    dep["snapshot"] = result.get("data") or result.get("value")
+                    from app.connectors.executors.kubernetes._client import get_k8s_client
+                    clients = get_k8s_client(connector)
+                    if clients:
+                        secret = clients["core"].read_namespaced_secret(
+                            dep["name"], dep.get("namespace", "default")
+                        )
+                        dep["snapshot"] = dict(secret.data or {})
+                    else:
+                        dep["snapshot"] = None
                 else:
                     dep["snapshot"] = None
 
@@ -371,19 +371,20 @@ async def _update_dependents(dependents: list, rotation_result: dict, db: AsyncS
                     dep["update_result"] = result
 
             elif dep["type"] == "k8s_secret":
-                from app.connectors.catalog_service import get_catalog_service
-                catalog = get_catalog_service()
-                mod = catalog.get_executor("kubernetes", "patch_secret")
-                result = await mod.execute(
-                    {
-                        "namespace": dep.get("namespace", "default"),
-                        "name": dep["name"],
-                        "data": {"tls.crt": rotation_result["cert_pem"], "tls.key": rotation_result["key_pem"]},
-                    },
-                    [],
-                    connector,
-                )
-                dep["update_result"] = result
+                import base64 as _b64
+                from app.connectors.executors.kubernetes._client import get_k8s_client
+                clients = get_k8s_client(connector)
+                if not clients:
+                    dep["update_result"] = {"success": False, "error": "No kubeconfig available"}
+                else:
+                    encoded = {
+                        "tls.crt": _b64.b64encode(rotation_result["cert_pem"].encode()).decode(),
+                        "tls.key": _b64.b64encode(rotation_result["key_pem"].encode()).decode(),
+                    }
+                    clients["core"].patch_namespaced_secret(
+                        dep["name"], dep.get("namespace", "default"), {"data": encoded}
+                    )
+                    dep["update_result"] = {"success": True}
 
             elif dep["type"] == "aws_secret":
                 from app.connectors.catalog_service import get_catalog_service
@@ -446,19 +447,21 @@ async def _verify_dependents(
 
             elif dep["type"] == "k8s_secret":
                 connector = await _load_connector(dep["connector_type"], dep.get("connector_id"), db)
-                from app.connectors.catalog_service import get_catalog_service
-                catalog = get_catalog_service()
-                mod = catalog.get_executor("kubernetes", "get_secret")
-                result = await mod.execute(
-                    {"namespace": dep.get("namespace", "default"), "name": dep["name"]},
-                    [],
-                    connector,
-                )
-                stored = (result.get("data") or {}).get("tls.crt") or result.get("value", "")
-                if rotation_result["cert_pem"].strip() in (stored or "").strip():
-                    dep["verify_result"] = {"success": True, "fingerprint": None, "error": None}
+                import base64 as _b64
+                from app.connectors.executors.kubernetes._client import get_k8s_client
+                clients = get_k8s_client(connector) if connector else None
+                if not clients:
+                    dep["verify_result"] = {"success": False, "fingerprint": None, "error": "No K8s client"}
                 else:
-                    dep["verify_result"] = {"success": False, "fingerprint": None, "error": "Secret value does not match new cert PEM"}
+                    secret = clients["core"].read_namespaced_secret(
+                        dep["name"], dep.get("namespace", "default")
+                    )
+                    raw_b64 = (secret.data or {}).get("tls.crt", "")
+                    stored_pem = _b64.b64decode(raw_b64).decode() if raw_b64 else ""
+                    if rotation_result["cert_pem"].strip() in stored_pem.strip():
+                        dep["verify_result"] = {"success": True, "fingerprint": None, "error": None}
+                    else:
+                        dep["verify_result"] = {"success": False, "fingerprint": None, "error": "Secret tls.crt does not match new cert PEM"}
 
             elif dep["type"] == "aws_secret":
                 connector = await _load_connector(dep["connector_type"], dep.get("connector_id"), db)
@@ -586,6 +589,31 @@ async def execute_certificate_rotation(cr_id: uuid.UUID) -> dict:
             step_ca_connector = await _load_step_ca_connector(cr.organization_id, db)
             rotation_result = await _rotate_certificate(desired, step_ca_connector)
             _persist(run, {"phase": "rotate", "dependents": dependents, "rotation_result": rotation_result})
+            # Write inventory entry for expiry worker
+            try:
+                from app.models.certificate_inventory import CertificateInventory
+                from cryptography import x509 as _x509
+                from cryptography.hazmat.backends import default_backend as _backend
+                _cert = _x509.load_pem_x509_certificate(
+                    rotation_result["cert_pem"].encode(), _backend()
+                )
+                try:
+                    _expires = _cert.not_valid_after_utc
+                except AttributeError:
+                    _expires = _cert.not_valid_after.replace(tzinfo=timezone.utc)
+                _inv = CertificateInventory(
+                    id=uuid.uuid4(),
+                    organization_id=cr.organization_id,
+                    subject=desired.get("subject", ""),
+                    san=desired.get("san") or [],
+                    fingerprint=rotation_result["fingerprint"],
+                    issued_at=datetime.fromisoformat(rotation_result["issued_at"]),
+                    expires_at=_expires,
+                    change_request_id=cr_id,
+                )
+                db.add(_inv)
+            except Exception as _inv_exc:
+                logger.warning("CertificateInventory write failed: %s", _inv_exc)
             await db.commit()
 
         # Phase 4 — Update (process only dependents lacking update_result)
@@ -719,19 +747,18 @@ async def execute_certificate_rollback(cr_id: uuid.UUID, execution_result: dict)
                                     "error", "Re-issue fallback failed (no snapshot_key)"
                                 )
                     elif dep["type"] == "k8s_secret":
-                        from app.connectors.catalog_service import get_catalog_service
-                        catalog = get_catalog_service()
-                        mod = catalog.get_executor("kubernetes", "patch_secret")
-                        result = await mod.execute(
-                            {
-                                "namespace": dep.get("namespace", "default"),
-                                "name": dep["name"],
-                                "data": dep["snapshot"],
-                            },
-                            [],
-                            connector,
-                        )
-                        step["rollback_result"] = result
+                        from app.connectors.executors.kubernetes._client import get_k8s_client
+                        clients = get_k8s_client(connector) if connector else None
+                        if not clients:
+                            step["error"] = "No K8s client for rollback"
+                        else:
+                            clients["core"].patch_namespaced_secret(
+                                dep["name"],
+                                dep.get("namespace", "default"),
+                                {"data": dep["snapshot"]},
+                            )
+                            step["rollback_result"] = {"success": True}
+                            step["rolled_back"] = True
                         step["rolled_back"] = True
                     elif dep["type"] == "aws_secret":
                         from app.connectors.catalog_service import get_catalog_service
