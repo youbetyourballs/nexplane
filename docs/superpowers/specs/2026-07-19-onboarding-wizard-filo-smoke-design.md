@@ -58,7 +58,7 @@ Three phases, all using the platform's existing AWS connector (no manual infra s
 
 #### Phase 3 — §2 regression guard
 
-1. Submit a wizard CR that will produce an EC2 instance that never serves on port 443. Mechanism: pass a nonexistent or intentionally broken AMI ID in `provision_instance` params (instance launches but `cloud-init` fails and port 443 never opens), or override `PROVISION_HEALTH_TIMEOUT_SECS=30` for the smoke container to keep the test fast.
+1. Submit a wizard CR using a valid AMI but with `PROVISION_HEALTH_TIMEOUT_SECS=30` (set in the smoke environment to keep the test fast) and provision the instance into a security group that blocks inbound port 443 from the platform. The instance launches but the health check can never succeed.
 2. Approve and poll.
 3. Assert:
    - CR reaches `STATE_FAILED` (not `STATE_COMPLETE`)
