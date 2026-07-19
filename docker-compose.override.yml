@@ -2,9 +2,12 @@ services:
   backend:
     ports:
       - "0.0.0.0:8000:8000"
+    volumes:
+      - /home/ec2-user/nexplane-deploy:/mnt/commercial
     environment:
       CORS_ORIGINS: "http://100.101.186.39:3000"
       SECRET_KEY: dev-secret-key-change-in-production-32chars
+      NEXPLANE_COMMERCIAL_CATALOG_PATH: /mnt/commercial/catalog
     command: >
       sh -c "tailscaled --tun=userspace-networking --state=/var/lib/tailscale-state/tailscaled.state &
              sleep 3 &&
