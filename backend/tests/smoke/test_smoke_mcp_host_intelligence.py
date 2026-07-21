@@ -15,9 +15,11 @@ Prerequisites:
 from __future__ import annotations
 
 import os
+import time as _time
 import uuid
 
 import pytest
+from smoke_helpers import NexplaneClient, get_connector_creds_from_db, smoke_run_cr, smoke_rollback_cr
 
 # All tests in this module share one event loop so the asyncpg connection pool
 # (bound to the first loop) stays valid across test functions.
@@ -32,6 +34,166 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 # ---------------------------------------------------------------------------
 
 _AGENT_AVAILABLE: bool | None = None  # lazily evaluated once per session
+
+_SMOKE_CLIENT: NexplaneClient | None = None
+_SMOKE_LAUNCH_CR_ID: str | None = None
+_SMOKE_BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
+_SMOKE_EMAIL = os.environ.get("SMOKE_EMAIL", "admin@nexplane.local")
+_SMOKE_PASSWORD = os.environ.get("SMOKE_PASSWORD", "changeme")
+
+
+def setup_module(module):
+    """Provision an ephemeral EC2 instance and deploy a Nexplane agent so tests run live."""
+    global _AGENT_AVAILABLE, _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID
+
+    # Fast path: caller already provided ASSET_ID — skip provisioning
+    if os.environ.get("ASSET_ID"):
+        print("  [setup] ASSET_ID already set — skipping ephemeral provisioning")
+        _AGENT_AVAILABLE = True
+        return
+
+    client = NexplaneClient(_SMOKE_BASE_URL, _SMOKE_EMAIL, _SMOKE_PASSWORD)
+    _SMOKE_CLIENT = client
+
+    # 1. Resolve AWS cloud account asset
+    cloud_account_id = client.get_cloud_account_asset_id()
+
+    # 2. Launch ephemeral EC2 instance
+    print("  [setup] Launching nexplane-smoke-host-intel EC2 instance...")
+    launch_cr = smoke_run_cr(
+        client,
+        "ec2_launch",
+        {
+            "mode": "quick",
+            "name": "nexplane-smoke-host-intel",
+            "os": "amazon_linux",
+            "instance_type": "t3.small",
+            "iam_instance_profile": "NexplaneEC2TestProfile",
+            "rollback_strategy": "terminate_instance",
+        },
+        asset_ids=[cloud_account_id],
+        timeout=300,
+    )
+    _SMOKE_LAUNCH_CR_ID = launch_cr["id"]
+
+    # 3. Extract instance_id and ec2_asset_id from execution steps
+    instance_id = None
+    ec2_asset_id = None
+    for run in launch_cr.get("execution_runs", []):
+        if "rollback" in run.get("workflow_id", ""):
+            continue
+        steps = (run.get("result") or {}).get("execution", {}).get("steps", [])
+        for s in steps:
+            result = s.get("result") or {}
+            if not instance_id and result.get("instance_id"):
+                instance_id = result["instance_id"]
+            if not ec2_asset_id and result.get("_auto_asset_id"):
+                ec2_asset_id = result["_auto_asset_id"]
+    if not instance_id:
+        raise AssertionError(f"ec2_launch CR completed but no instance_id found in steps: {launch_cr}")
+
+    print(f"  [setup] Launched {instance_id} (asset={ec2_asset_id})")
+
+    # 4. Fetch instance hostname and private IP via boto3
+    aws_creds = get_connector_creds_from_db("aws")
+    import boto3
+    ec2_boto = boto3.client(
+        "ec2",
+        aws_access_key_id=aws_creds["access_key_id"],
+        aws_secret_access_key=aws_creds["secret_access_key"],
+        region_name=aws_creds.get("region", "us-east-1"),
+    )
+    desc = ec2_boto.describe_instances(InstanceIds=[instance_id])
+    inst_data = desc["Reservations"][0]["Instances"][0]
+    private_ip = inst_data.get("PrivateIpAddress", "")
+    hostname = inst_data.get("PrivateDnsName", "").split(".")[0]
+    print(f"  [setup] Instance hostname={hostname} private_ip={private_ip}")
+
+    # 5. Wait for SSM agent readiness
+    print("  [setup] Waiting for SSM agent readiness...")
+    ssm = boto3.client(
+        "ssm",
+        aws_access_key_id=aws_creds["access_key_id"],
+        aws_secret_access_key=aws_creds["secret_access_key"],
+        region_name=aws_creds.get("region", "us-east-1"),
+    )
+    ssm_deadline = _time.time() + 300
+    while _time.time() < ssm_deadline:
+        resp = ssm.describe_instance_information(
+            Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+        )
+        if resp.get("InstanceInformationList"):
+            print("  [setup] SSM agent ready")
+            break
+        _time.sleep(15)
+    else:
+        raise TimeoutError(f"SSM not ready for {instance_id} after 300s")
+
+    # 6. Deploy Nexplane agent via CR
+    print("  [setup] Deploying Nexplane agent...")
+    agent_secret = client.get_agent_secret()
+    smoke_run_cr(
+        client,
+        "deploy_nexplane_agent",
+        {
+            "instance_id": instance_id,
+            "nexplane_url": "http://100.101.186.39:8000",
+            "nexplane_secret": agent_secret,
+        },
+        asset_ids=[ec2_asset_id] if ec2_asset_id else None,
+        timeout=300,
+    )
+
+    # 7. Wait for agent registration in the platform
+    print("  [setup] Waiting for agent to register...")
+    agent_asset_id = None
+    reg_deadline = _time.time() + 300
+    while _time.time() < reg_deadline:
+        # Try searching by hostname first
+        candidates = []
+        if hostname:
+            try:
+                candidates = client.get(f"/assets", params={"asset_type": "server", "q": hostname})
+            except Exception:
+                pass
+        # Also scan recent server assets for agent_version
+        if not candidates:
+            try:
+                all_servers = client.get("/assets", params={"asset_type": "server", "limit": 200})
+                candidates = [
+                    a for a in all_servers
+                    if (a.get("asset_metadata") or {}).get("agent_version")
+                    or (private_ip and a.get("name", "") == hostname)
+                ]
+            except Exception:
+                pass
+        for asset in candidates:
+            meta = asset.get("asset_metadata") or {}
+            if meta.get("agent_version") or (private_ip and asset.get("name", "") == hostname):
+                agent_asset_id = asset["id"]
+                break
+        if agent_asset_id:
+            print(f"  [setup] Agent registered as asset {agent_asset_id}")
+            break
+        _time.sleep(15)
+    else:
+        raise TimeoutError("Nexplane agent did not register within 300s")
+
+    # 8. Give agent one full collection cycle before tests begin
+    print("  [setup] Sleeping 60s for initial collection cycle...")
+    _time.sleep(60)
+
+    os.environ["ASSET_ID"] = agent_asset_id
+    _AGENT_AVAILABLE = True
+    print("  [setup] Setup complete — 17 tests will run against live agent")
+
+
+def teardown_module(module):
+    """Roll back the ephemeral EC2 launch CR to terminate the smoke instance."""
+    global _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID
+    if _SMOKE_LAUNCH_CR_ID and _SMOKE_CLIENT:
+        print(f"  [teardown] Rolling back EC2 launch CR {_SMOKE_LAUNCH_CR_ID}...")
+        smoke_rollback_cr(_SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID)
 
 
 async def _agent_registered(asset_id: str) -> bool:

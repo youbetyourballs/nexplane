@@ -350,6 +350,62 @@ class NexplaneClient:
         fail(f"{title} — timed out after {timeout}s")
 
 # ---------------------------------------------------------------------------
+# Standalone CR helpers (used by setup_module / teardown_module in test files)
+# ---------------------------------------------------------------------------
+
+import time as _time_sh
+
+
+def smoke_run_cr(client, change_type, params, asset_ids=None, timeout=360):
+    """Execute a CR end-to-end (create→plan→approve→execute→poll) via REST.
+    Returns the completed CR dict. Raises AssertionError on failure, TimeoutError on timeout."""
+    body = {
+        "title": f"[smoke-infra] {change_type}",
+        "change_type": change_type,
+        "desired_outcome": params,
+    }
+    if asset_ids:
+        body["target_asset_ids"] = asset_ids
+    cr = client.post("/change-requests", json=body)
+    cr_id = cr["id"]
+    client.post(f"/change-requests/{cr_id}/plan")
+    deadline = _time_sh.time() + 120
+    while _time_sh.time() < deadline:
+        cr_state = client.get(f"/change-requests/{cr_id}")
+        if cr_state.get("status") == "awaiting_approval":
+            break
+        if cr_state.get("status") in ("failed", "rejected"):
+            raise AssertionError(f"Infra CR {cr_id} failed at planning: {cr_state}")
+        _time_sh.sleep(5)
+    client.post(f"/change-requests/{cr_id}/submit-for-approval")
+    client.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "smoke infra"})
+    client.post(f"/change-requests/{cr_id}/execute")
+    deadline = _time_sh.time() + timeout
+    while _time_sh.time() < deadline:
+        cr_state = client.get(f"/change-requests/{cr_id}")
+        status = cr_state.get("status", "")
+        if status == "completed":
+            return cr_state
+        if status in ("failed", "rejected", "cancelled"):
+            raise AssertionError(f"Infra CR {cr_id} ({change_type}) failed: {cr_state}")
+        _time_sh.sleep(10)
+    raise TimeoutError(f"Infra CR {cr_id} ({change_type}) timed out after {timeout}s")
+
+
+def smoke_rollback_cr(client, cr_id, timeout=300):
+    """Roll back a completed CR. Swallows all errors (safe for teardown)."""
+    try:
+        client.post(f"/change-requests/{cr_id}/rollback")
+        deadline = _time_sh.time() + timeout
+        while _time_sh.time() < deadline:
+            cr = client.get(f"/change-requests/{cr_id}")
+            if cr.get("status") in ("rolled_back", "rollback_completed", "rollback_failed"):
+                return
+            _time_sh.sleep(10)
+    except Exception as _e:
+        print(f"  [teardown] rollback {cr_id} swallowed error: {_e}")
+
+# ---------------------------------------------------------------------------
 # Tailscale helpers (AWS-specific but used by AWS phases)
 # ---------------------------------------------------------------------------
 
