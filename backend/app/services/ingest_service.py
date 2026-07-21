@@ -5,7 +5,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.asset import Asset, AssetType, Environment, Criticality
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from app.models.asset import Asset, AssetType, Environment, Criticality, asset_connectors_table
 from app.connectors.catalog_service import ActionCatalogService
 
 # Ordered list of metadata keys to try when looking up the external ID.
@@ -135,6 +136,12 @@ class IngestService:
                 )
                 db.add(asset)
                 await db.flush()
+                if connector_id and asset.id:
+                    await db.execute(
+                        pg_insert(asset_connectors_table)
+                        .values(asset_id=asset.id, connector_id=connector_id)
+                        .on_conflict_do_nothing()
+                    )
                 upserted_assets.append(asset)
                 created += 1
 

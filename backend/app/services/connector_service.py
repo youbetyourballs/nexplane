@@ -5,6 +5,7 @@ import asyncio
 import random
 from typing import Any
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.connectors.catalog_service import get_catalog_service
 
 
@@ -121,6 +122,13 @@ async def _upsert_auto_asset(payload: dict, organization_id, db, connector_id=No
         )
         db.add(asset)
         await db.flush()
+        if connector_id and asset.id:
+            from app.models.asset import asset_connectors_table
+            await db.execute(
+                pg_insert(asset_connectors_table)
+                .values(asset_id=asset.id, connector_id=connector_id)
+                .on_conflict_do_nothing()
+            )
         return asset
 
 
