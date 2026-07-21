@@ -118,7 +118,10 @@ async def _create_approver_api_token(approver_bearer: str) -> str:
     )
     resp.raise_for_status()
     data = resp.json()
-    return data.get("raw_token") or data.get("token") or data["id"]
+    token = data.get("raw_token") or data.get("token")
+    if token:
+        return token
+    pytest.fail(f"Could not extract token from /api/v1/tokens response: {list(data.keys())}")
 
 
 async def _poll_cr(cr_id: str, timeout: int = 600) -> dict:
@@ -140,7 +143,8 @@ async def _poll_cr(cr_id: str, timeout: int = 600) -> dict:
 
 async def _submit_and_execute(cr_id: str, approver_token: str) -> dict:
     """Submit for approval, approve as approver, execute, poll to terminal."""
-    await submit_for_approval(token=API_TOKEN, cr_id=cr_id)
+    submitted = await submit_for_approval(token=API_TOKEN, cr_id=cr_id)
+    check_for_budget_pause(submitted)
     log(f"  CR {cr_id} submitted for approval")
 
     approved = await approve_change_request(token=approver_token, cr_id=cr_id,
