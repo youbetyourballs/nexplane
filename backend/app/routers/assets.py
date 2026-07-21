@@ -292,6 +292,9 @@ async def detach_connector_from_asset(
     asset = await db.get(Asset, asset_id)
     if not asset or asset.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Asset not found")
+    connector = await db.get(Connector, connector_id)
+    if connector and connector.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Connector not found")
     await db.execute(
         delete(asset_connectors_table).where(
             asset_connectors_table.c.asset_id == asset_id,
