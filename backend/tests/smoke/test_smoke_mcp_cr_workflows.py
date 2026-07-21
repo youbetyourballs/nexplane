@@ -45,13 +45,14 @@ import asyncio
 import os
 import sys
 import time
+import time as _time
 
 import pytest
 
 sys.path.insert(0, "/app")
 sys.path.insert(0, "/app/tests/smoke")
 
-from smoke_helpers import NexplaneClient, check_for_budget_pause, log
+from smoke_helpers import NexplaneClient, check_for_budget_pause, get_connector_creds_from_db, log, smoke_run_cr, smoke_rollback_cr
 
 from app.mcp_tools.change_requests import (
     approve_change_request,
@@ -72,6 +73,286 @@ API_TOKEN = os.environ.get("API_TOKEN", "")
 ASSET_ID = os.environ.get("ASSET_ID", "")
 
 _STATE: dict = {}
+
+# ---------------------------------------------------------------------------
+# Module-level smoke infra state
+# ---------------------------------------------------------------------------
+
+_SMOKE_CLIENT = None
+_SMOKE_LAUNCH_CR_ID = None
+_SMOKE_INSTANCE_ID = None
+_SMOKE_BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
+_SMOKE_EMAIL = os.environ.get("SMOKE_EMAIL", "admin@nexplane.local")
+_SMOKE_PASSWORD = os.environ.get("SMOKE_PASSWORD", "changeme")
+
+
+def _ssm_run(instance_id, command, aws_creds, timeout=120):
+    """Run a shell command on the instance via SSM. Returns stdout."""
+    import boto3
+    ssm = boto3.client(
+        "ssm",
+        aws_access_key_id=aws_creds["access_key_id"],
+        aws_secret_access_key=aws_creds["secret_access_key"],
+        region_name=aws_creds.get("region", "us-east-1"),
+    )
+    resp = ssm.send_command(
+        InstanceIds=[instance_id],
+        DocumentName="AWS-RunShellScript",
+        Parameters={"commands": [command]},
+    )
+    cmd_id = resp["Command"]["CommandId"]
+    deadline = _time.time() + timeout
+    while _time.time() < deadline:
+        _time.sleep(5)
+        result = ssm.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+        if result["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+            return result.get("StandardOutputContent", "").strip()
+    raise TimeoutError(f"SSM command on {instance_id} timed out after {timeout}s")
+
+
+def setup_module(module):
+    """Provision ephemeral EC2 instance + agent + connectors for CR workflow tests."""
+    global _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID, _SMOKE_INSTANCE_ID, ASSET_ID
+
+    # Fast-path: ASSET_ID already set externally — skip provisioning
+    if os.environ.get("ASSET_ID"):
+        print(f"[setup_module] ASSET_ID={os.environ['ASSET_ID']} already set — skipping provisioning")
+        ASSET_ID = os.environ["ASSET_ID"]
+        return
+
+    client = NexplaneClient(_SMOKE_BASE_URL, _SMOKE_EMAIL, _SMOKE_PASSWORD)
+    _SMOKE_CLIENT = client
+
+    # Get cloud account asset for the AWS connector
+    cloud_account_id = client.get_cloud_account_asset_id()
+    print(f"[setup_module] cloud_account_id={cloud_account_id}")
+
+    # Launch EC2 instance via platform CR
+    print("[setup_module] Launching EC2 instance via ec2_launch CR…")
+    launch_cr = smoke_run_cr(
+        client,
+        "ec2_launch",
+        {
+            "mode": "quick",
+            "name": "nexplane-smoke-cr-workflows",
+            "os": "amazon_linux",
+            "instance_type": "t3.small",
+            "iam_instance_profile": "NexplaneEC2TestProfile",
+            "rollback_strategy": "terminate_instance",
+        },
+        asset_ids=[cloud_account_id],
+        timeout=300,
+    )
+    _SMOKE_LAUNCH_CR_ID = launch_cr["id"]
+
+    # Extract instance_id and ec2_asset_id from execution_runs steps
+    instance_id = None
+    ec2_asset_id = None
+    for run in launch_cr.get("execution_runs", []):
+        steps = (run.get("result") or {}).get("execution", {}).get("steps", [])
+        for s in steps:
+            r = s.get("result") or {}
+            if not instance_id and r.get("instance_id"):
+                instance_id = r["instance_id"]
+            if not ec2_asset_id and r.get("_auto_asset_id"):
+                ec2_asset_id = r["_auto_asset_id"]
+        if not instance_id:
+            # Also try top-level result
+            top = (run.get("result") or {}).get("execution", {})
+            if top.get("instance_id"):
+                instance_id = top["instance_id"]
+            if top.get("_auto_asset_id"):
+                ec2_asset_id = top["_auto_asset_id"]
+
+    if not instance_id:
+        raise RuntimeError(f"Could not extract instance_id from ec2_launch CR: {launch_cr}")
+
+    _SMOKE_INSTANCE_ID = instance_id
+    print(f"[setup_module] instance_id={instance_id} ec2_asset_id={ec2_asset_id}")
+
+    # Get AWS credentials from DB
+    aws_creds = get_connector_creds_from_db("aws")
+    if not aws_creds:
+        raise RuntimeError("No AWS credentials found in DB — cannot proceed with SSM")
+
+    # Wait for SSM agent to register on the new instance
+    import boto3
+    ssm_client = boto3.client(
+        "ssm",
+        aws_access_key_id=aws_creds["access_key_id"],
+        aws_secret_access_key=aws_creds["secret_access_key"],
+        region_name=aws_creds.get("region", "us-east-1"),
+    )
+    print("[setup_module] Waiting for SSM agent registration…")
+    ssm_deadline = _time.time() + 300
+    while _time.time() < ssm_deadline:
+        resp = ssm_client.describe_instance_information(
+            Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+        )
+        if resp.get("InstanceInformationList"):
+            print("[setup_module] SSM agent registered ✅")
+            break
+        _time.sleep(15)
+    else:
+        raise TimeoutError(f"SSM agent not ready on {instance_id} after 300s")
+
+    # Install Docker + Postgres + dummy app via SSM
+    print("[setup_module] Installing Docker + Postgres via SSM…")
+    _ssm_run(
+        instance_id,
+        (
+            "sudo yum install -y docker postgresql15-server 2>&1 | tail -3 && "
+            "sudo systemctl enable --now docker && "
+            "sudo postgresql-setup --initdb 2>/dev/null || true && "
+            "sudo systemctl enable --now postgresql && "
+            "sudo -u postgres createdb smoke_db 2>/dev/null || true && "
+            "mkdir -p /tmp/smoke-app && "
+            "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
+        ),
+        aws_creds,
+        timeout=120,
+    )
+    print("[setup_module] Docker + Postgres installed ✅")
+
+    # Deploy nexplane agent via platform CR
+    print("[setup_module] Deploying nexplane agent…")
+    agent_cr = smoke_run_cr(
+        client,
+        "deploy_nexplane_agent",
+        {
+            "instance_id": instance_id,
+            "nexplane_url": "http://100.101.186.39:8000",
+            "nexplane_secret": client.get_agent_secret(),
+        },
+        asset_ids=[ec2_asset_id] if ec2_asset_id else None,
+        timeout=300,
+    )
+    print(f"[setup_module] deploy_nexplane_agent CR={agent_cr['id']} completed ✅")
+
+    # Get instance private IP and hostname via boto3
+    ec2_boto = boto3.client(
+        "ec2",
+        aws_access_key_id=aws_creds["access_key_id"],
+        aws_secret_access_key=aws_creds["secret_access_key"],
+        region_name=aws_creds.get("region", "us-east-1"),
+    )
+    ec2_info = ec2_boto.describe_instances(InstanceIds=[instance_id])
+    reservation = ec2_info["Reservations"][0]["Instances"][0]
+    private_ip = reservation.get("PrivateIpAddress", "")
+    private_dns = reservation.get("PrivateDnsName", "")
+    hostname = private_dns.split(".")[0] if private_dns else instance_id
+    print(f"[setup_module] private_ip={private_ip} hostname={hostname}")
+
+    # Poll for agent registration in platform assets
+    print("[setup_module] Polling for agent registration in platform…")
+    agent_asset_id = None
+    agent_deadline = _time.time() + 300
+    while _time.time() < agent_deadline:
+        # Search by hostname first
+        try:
+            assets_by_name = client.get("/assets", params={"asset_type": "server", "q": hostname})
+            for a in assets_by_name:
+                if (a.get("asset_metadata") or {}).get("agent_version"):
+                    agent_asset_id = a["id"]
+                    break
+        except Exception:
+            pass
+        if not agent_asset_id:
+            try:
+                assets_all = client.get("/assets", params={"asset_type": "server", "limit": 200})
+                for a in assets_all:
+                    meta = a.get("asset_metadata") or {}
+                    if meta.get("agent_version") and (
+                        hostname in (a.get("name") or "")
+                        or private_ip in str(meta)
+                    ):
+                        agent_asset_id = a["id"]
+                        break
+            except Exception:
+                pass
+        if agent_asset_id:
+            print(f"[setup_module] Agent asset registered: {agent_asset_id} ✅")
+            break
+        _time.sleep(15)
+    else:
+        raise TimeoutError(f"Agent not registered in platform assets after 300s (hostname={hostname})")
+
+    # Attach AWS connector to the agent asset
+    try:
+        connectors = client.get("/connectors")
+        aws_connector = next((c for c in connectors if c.get("connector_type") == "aws"), None)
+        if aws_connector:
+            client.put(f"/assets/{agent_asset_id}/connector", json={"connector_id": aws_connector["id"]})
+            print(f"[setup_module] AWS connector {aws_connector['id']} attached to asset ✅")
+        else:
+            print("[setup_module] WARNING: No AWS connector found — skipping connector attach")
+    except Exception as _e:
+        print(f"[setup_module] WARNING: Could not attach AWS connector: {_e}")
+
+    # Create S3 backup storage
+    try:
+        bucket = "nexplane-smoke-backup-test"
+        existing_storage = client.get("/backup-storage")
+        storage_name = f"smoke-s3-{bucket}"
+        if not any(s.get("name") == storage_name for s in existing_storage):
+            client.post("/backup-storage", json={
+                "name": storage_name,
+                "storage_type": "s3",
+                "config": {
+                    "bucket": bucket,
+                    "prefix": "smoke/",
+                    "aws_access_key_id": aws_creds.get("access_key_id", ""),
+                    "aws_secret_access_key": aws_creds.get("secret_access_key", ""),
+                    "region": aws_creds.get("region", "us-east-1"),
+                },
+            })
+            print(f"[setup_module] S3 backup storage '{storage_name}' created ✅")
+        else:
+            print(f"[setup_module] S3 backup storage '{storage_name}' already exists ✅")
+    except Exception as _e:
+        print(f"[setup_module] WARNING: Could not create backup storage: {_e}")
+
+    # Create SSH connector with ephemeral key pair
+    try:
+        import paramiko
+        import io as _io
+        ssh_key = paramiko.RSAKey.generate(2048)
+        priv_buf = _io.StringIO()
+        ssh_key.write_private_key(priv_buf)
+        private_key_pem = priv_buf.getvalue()
+        public_key_line = f"ssh-rsa {ssh_key.get_base64()} nexplane-smoke"
+        _ssm_run(
+            instance_id,
+            f'mkdir -p /home/ec2-user/.ssh && echo "{public_key_line}" >> /home/ec2-user/.ssh/authorized_keys && chmod 600 /home/ec2-user/.ssh/authorized_keys',
+            aws_creds,
+            timeout=30,
+        )
+        ssh_conn = client.post("/connectors", json={"name": "smoke-cr-workflow-ssh", "connector_type": "ssh"})
+        client.put(f"/connectors/{ssh_conn['id']}/credentials", json={
+            "hostname": private_ip,
+            "port": 22,
+            "username": "ec2-user",
+            "private_key": private_key_pem,
+        })
+        print(f"[setup_module] SSH connector {ssh_conn['id']} created ✅")
+    except Exception as _e:
+        print(f"[setup_module] WARNING: Could not create SSH connector: {_e}")
+
+    # Wait for agent first collection cycle
+    print("[setup_module] Waiting 60s for agent first collection cycle…")
+    _time.sleep(60)
+
+    # Set ASSET_ID for all test functions
+    os.environ["ASSET_ID"] = agent_asset_id
+    ASSET_ID = agent_asset_id
+    print(f"[setup_module] All infra ready — ASSET_ID={agent_asset_id}")
+
+
+def teardown_module(module):
+    if _SMOKE_LAUNCH_CR_ID and _SMOKE_CLIENT:
+        print(f"\n[teardown_module] Rolling back EC2 launch CR {_SMOKE_LAUNCH_CR_ID}…")
+        smoke_rollback_cr(_SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID)
+        print("[teardown_module] EC2 terminated ✅")
 
 
 def _require(*keys: str) -> None:
@@ -229,20 +510,6 @@ async def test_MCP_SNAPSHOT_create_and_execute():
     approver_token = _STATE.get("approver_token")
     if not approver_token:
         pytest.skip("approver_token not set — setup phase failed")
-
-    # Verify the asset has an AWS connector (EBS snapshot requires EC2 instance context)
-    from app.database import AsyncSessionLocal
-    from app.models.asset import Asset
-    import uuid
-    async with AsyncSessionLocal() as db:
-        asset = await db.get(Asset, uuid.UUID(ASSET_ID))
-    if asset is None:
-        pytest.skip(f"Asset {ASSET_ID} not found in DB")
-    if not asset.connector_id:
-        pytest.skip(
-            f"Asset {ASSET_ID} has no connector attached — "
-            "agent_os_upgrade requires an AWS or nexplane_agent connector with EBS access"
-        )
 
     cr = await create_change_request(
         token=API_TOKEN,
@@ -467,25 +734,6 @@ async def test_MCP_DB_MIGRATE_dump():
     approver_token = _STATE.get("approver_token")
     if not approver_token:
         pytest.skip("approver_token not set")
-
-    # agent_backup with database_dump strategy requires SSH creds on the connector
-    from app.database import AsyncSessionLocal
-    from app.models.asset import Asset
-    from app.models.connector import Connector as _Connector
-    import uuid
-    async with AsyncSessionLocal() as db:
-        asset = await db.get(Asset, uuid.UUID(ASSET_ID))
-        if not asset or not asset.connector_id:
-            pytest.skip(_DB_MIGRATE_SKIP_REASON)
-        conn = await db.get(_Connector, asset.connector_id)
-        try:
-            from app.services.connector_service import _attach_credentials
-            await _attach_credentials(conn, db)
-        except Exception:
-            pass
-        creds = getattr(conn, "credentials", {}) or {}
-        if not (creds.get("hostname") or creds.get("host")):
-            pytest.skip(_DB_MIGRATE_SKIP_REASON)
 
     cr = await create_change_request(
         token=API_TOKEN,
