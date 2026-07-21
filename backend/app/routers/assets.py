@@ -249,10 +249,7 @@ async def list_asset_connectors(
         ).where(asset_connectors_table.c.asset_id == asset_id)
     )
     connectors = result.scalars().all()
-    return [
-        ConnectorSummary(id=c.id, name=c.name, connector_type=c.connector_type.value)
-        for c in connectors
-    ]
+    return [ConnectorSummary.model_validate(c) for c in connectors]
 
 
 @router.post("/{asset_id}/connectors", response_model=ConnectorSummary, status_code=201)
@@ -282,7 +279,7 @@ async def attach_connector_to_asset(
         )
     )
     await db.commit()
-    return ConnectorSummary(id=connector.id, name=connector.name, connector_type=connector.connector_type.value)
+    return ConnectorSummary.model_validate(connector)
 
 
 @router.delete("/{asset_id}/connectors/{connector_id}", status_code=204)
