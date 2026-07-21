@@ -131,8 +131,9 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
 
             if db_type == "postgres":
                 # Ensure the target database exists before restoring into it.
+                # Use 'export PGPASSWORD' so the variable is available across the pipeline.
                 create_db_cmd = (
-                    f"PGPASSWORD={_shell_quote(target_db_password)} "
+                    f"export PGPASSWORD={_shell_quote(target_db_password)}; "
                     f"psql -h {target_db_host} -p {target_db_port} "
                     f"-U {_shell_quote(target_db_user)} postgres "
                     f'-c "CREATE DATABASE {target_db_name}" 2>&1 || true'
@@ -141,8 +142,8 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                 _co.channel.recv_exit_status()  # wait, ignore failure (already exists is fine)
 
                 restore_cmd = (
+                    f"export PGPASSWORD={_shell_quote(target_db_password)}; "
                     f"gunzip -c {remote_tmp} | "
-                    f"PGPASSWORD={_shell_quote(target_db_password)} "
                     f"psql -h {target_db_host} -p {target_db_port} "
                     f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)}"
                 )
