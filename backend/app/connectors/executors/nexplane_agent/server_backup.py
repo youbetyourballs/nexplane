@@ -21,11 +21,16 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         raise RuntimeError("server_backup: no asset_ids provided")
 
     capture_strategy = parameters.get("capture_strategy")
-    if not capture_strategy:
+    parameters = dict(parameters)  # don't mutate caller's dict
+    if not capture_strategy or not parameters.get("backup_storage_id"):
         target = await _load_backup_target(str(asset_ids[0]))
-        capture_strategy = (
-            getattr(target, "capture_strategy", None) if target else None
-        ) or "ebs_snapshot"
+        if target:
+            if not capture_strategy:
+                capture_strategy = getattr(target, "capture_strategy", None) or "ebs_snapshot"
+            if not parameters.get("backup_storage_id") and target.storage_id:
+                parameters["backup_storage_id"] = str(target.storage_id)
+        else:
+            capture_strategy = capture_strategy or "ebs_snapshot"
 
     strategy = get_strategy(capture_strategy)
     return await strategy.backup(parameters, asset_ids, connector)
