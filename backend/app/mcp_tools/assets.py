@@ -40,13 +40,14 @@ async def list_assets(
     Returns summary fields — use get_asset for full detail.
     """
     from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
     from app.models.asset import Asset
 
     user, db, db_cm = await _auth(token)
     try:
         stmt = select(Asset).where(
             Asset.organization_id == user.organization_id
-        ).order_by(Asset.created_at.desc()).limit(limit)
+        ).options(selectinload(Asset.connectors)).order_by(Asset.created_at.desc()).limit(limit)
 
         if asset_type:
             stmt = stmt.where(Asset.asset_type == asset_type)
@@ -70,6 +71,10 @@ async def list_assets(
                 "connector_id": str(a.connector_id) if a.connector_id else None,
                 "tags": a.tags,
                 "created_at": a.created_at.isoformat() if a.created_at else None,
+                "connectors": [
+                    {"id": str(c.id), "name": c.name, "connector_type": c.connector_type.value}
+                    for c in (a.connectors or [])
+                ],
             }
             for a in assets
         ]
@@ -84,6 +89,7 @@ async def get_asset(token: str, asset_id: str) -> dict[str, Any]:
     Use before creating a CR to understand what you're touching.
     """
     from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
     from app.models.asset import Asset
 
     user, db, db_cm = await _auth(token)
@@ -92,7 +98,7 @@ async def get_asset(token: str, asset_id: str) -> dict[str, Any]:
             select(Asset).where(
                 Asset.id == _uuid.UUID(asset_id),
                 Asset.organization_id == user.organization_id,
-            )
+            ).options(selectinload(Asset.connectors))
         )
         a = result.scalar_one_or_none()
         if a is None:
@@ -107,6 +113,10 @@ async def get_asset(token: str, asset_id: str) -> dict[str, Any]:
             "tags": a.tags,
             "metadata": a.asset_metadata,
             "created_at": a.created_at.isoformat() if a.created_at else None,
+            "connectors": [
+                {"id": str(c.id), "name": c.name, "connector_type": c.connector_type.value}
+                for c in (a.connectors or [])
+            ],
         }
     finally:
         await db_cm.__aexit__(None, None, None)
