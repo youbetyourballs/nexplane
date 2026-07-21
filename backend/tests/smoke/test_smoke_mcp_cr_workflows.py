@@ -288,12 +288,27 @@ def setup_module(module):
         connectors = client.get("/connectors")
         aws_connector = next((c for c in connectors if c.get("connector_type") == "aws"), None)
         if aws_connector:
-            client.put(f"/assets/{agent_asset_id}/connector", json={"connector_id": aws_connector["id"]})
-            print(f"[setup_module] AWS connector {aws_connector['id']} attached to asset ✅")
+            try:
+                # Use raw httpx client to capture status_code (409 = already attached, also OK)
+                _resp = client.client.post(
+                    f"{client.base}/assets/{agent_asset_id}/connectors",
+                    json={"connector_id": aws_connector["id"]},
+                )
+                if _resp.status_code in (200, 201, 409):
+                    print(f"[setup_module] AWS connector {aws_connector['id']} attached to agent asset ✅")
+                    _STATE["aws_connector_attached"] = True
+                else:
+                    print(f"[setup_module] WARNING: Could not attach AWS connector: HTTP {_resp.status_code} {_resp.text}")
+                    _STATE["aws_connector_attached"] = False
+            except Exception as _attach_e:
+                print(f"[setup_module] WARNING: Could not attach AWS connector: {_attach_e}")
+                _STATE["aws_connector_attached"] = False
         else:
             print("[setup_module] WARNING: No AWS connector found — skipping connector attach")
+            _STATE["aws_connector_attached"] = False
     except Exception as _e:
         print(f"[setup_module] WARNING: Could not attach AWS connector: {_e}")
+        _STATE["aws_connector_attached"] = False
 
     # Ensure S3 bucket exists and create backup-storage record pointing to it
     try:
