@@ -37,14 +37,15 @@ _AGENT_AVAILABLE: bool | None = None  # lazily evaluated once per session
 
 _SMOKE_CLIENT: NexplaneClient | None = None
 _SMOKE_LAUNCH_CR_ID: str | None = None
+_SMOKE_API_TOKEN_ID: str | None = None
 _SMOKE_BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
-_SMOKE_EMAIL = os.environ.get("SMOKE_EMAIL", "admin@nexplane.local")
-_SMOKE_PASSWORD = os.environ.get("SMOKE_PASSWORD", "changeme")
+_SMOKE_EMAIL = os.environ.get("SMOKE_EMAIL", "admin@acme.example")
+_SMOKE_PASSWORD = os.environ.get("SMOKE_PASSWORD", "admin123")
 
 
 def setup_module(module):
     """Provision an ephemeral EC2 instance and deploy a Nexplane agent so tests run live."""
-    global _AGENT_AVAILABLE, _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID
+    global _AGENT_AVAILABLE, _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID, _SMOKE_API_TOKEN_ID
 
     # Fast path: caller already provided ASSET_ID — skip provisioning
     if os.environ.get("ASSET_ID"):
@@ -137,7 +138,7 @@ def setup_module(module):
         "deploy_nexplane_agent",
         {
             "instance_id": instance_id,
-            "nexplane_url": "http://100.101.186.39:8000",
+            "nexplane_url": "http://172.31.1.233:8000",
             "nexplane_secret": agent_secret,
         },
         asset_ids=[ec2_asset_id] if ec2_asset_id else None,
@@ -184,13 +185,26 @@ def setup_module(module):
     _time.sleep(60)
 
     os.environ["ASSET_ID"] = agent_asset_id
+
+    # 9. Create a short-lived API token for the MCP tool calls
+    token_resp = client.post("/api/v1/tokens", json={"name": "smoke-host-intel"})
+    raw_token = token_resp["raw_token"]
+    _SMOKE_API_TOKEN_ID = token_resp["id"]
+    os.environ["API_TOKEN"] = raw_token
+    print("  [setup] API token created for MCP tool calls")
+
     _AGENT_AVAILABLE = True
     print("  [setup] Setup complete — 17 tests will run against live agent")
 
 
 def teardown_module(module):
     """Roll back the ephemeral EC2 launch CR to terminate the smoke instance."""
-    global _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID
+    global _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID, _SMOKE_API_TOKEN_ID
+    if _SMOKE_API_TOKEN_ID and _SMOKE_CLIENT:
+        try:
+            _SMOKE_CLIENT.delete(f"/api/v1/tokens/{_SMOKE_API_TOKEN_ID}")
+        except Exception:
+            pass
     if _SMOKE_LAUNCH_CR_ID and _SMOKE_CLIENT:
         print(f"  [teardown] Rolling back EC2 launch CR {_SMOKE_LAUNCH_CR_ID}...")
         smoke_rollback_cr(_SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID)

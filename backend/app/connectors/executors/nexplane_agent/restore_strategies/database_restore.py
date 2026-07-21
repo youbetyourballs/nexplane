@@ -137,20 +137,20 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                     f"-U {_shell_quote(target_db_user)} postgres "
                     f'-c "CREATE DATABASE {target_db_name}" 2>&1 || true'
                 )
-                _, _co, _ce = ssh.exec_command(create_db_cmd)
+                _, _co, _ce = ssh.exec_command(create_db_cmd, timeout=60)
                 _co.channel.recv_exit_status()  # wait, ignore failure (already exists is fine)
 
                 restore_cmd = (
                     f"gunzip -c {remote_tmp} | "
                     f"PGPASSWORD={_shell_quote(target_db_password)} "
                     f"psql -h {target_db_host} -p {target_db_port} "
-                    f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)}"
+                    f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)} 2>/dev/null"
                 )
                 verify_cmd = (
                     f"PGPASSWORD={_shell_quote(target_db_password)} "
                     f"psql -h {target_db_host} -p {target_db_port} "
                     f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)} "
-                    f'-c "SELECT 1"'
+                    f'-c "SELECT 1" 2>/dev/null'
                 )
             elif db_type == "mysql":
                 # Ensure the target database exists before restoring into it.
@@ -205,13 +205,15 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                     f'--eval "db.runCommand({{ping:1}})"'
                 )
 
-            _, stdout, stderr = ssh.exec_command(restore_cmd)
+            # timeout=180 prevents stdout.read() blocking forever if restore hangs.
+            # 2>/dev/null in restore_cmd prevents stderr buffer deadlock.
+            _, stdout, stderr = ssh.exec_command(restore_cmd, timeout=180)
             exit_code = stdout.channel.recv_exit_status()
             if exit_code != 0:
                 err = stderr.read(2048).decode(errors="replace")
                 raise RuntimeError(f"database_restore: restore failed (exit={exit_code}): {err}")
 
-            _, vstdout, vstderr = ssh.exec_command(verify_cmd)
+            _, vstdout, vstderr = ssh.exec_command(verify_cmd, timeout=60)
             vexit = vstdout.channel.recv_exit_status()
             if vexit != 0:
                 err = vstderr.read(2048).decode(errors="replace")

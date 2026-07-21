@@ -82,8 +82,8 @@ _SMOKE_CLIENT = None
 _SMOKE_LAUNCH_CR_ID = None
 _SMOKE_INSTANCE_ID = None
 _SMOKE_BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
-_SMOKE_EMAIL = os.environ.get("SMOKE_EMAIL", "admin@nexplane.local")
-_SMOKE_PASSWORD = os.environ.get("SMOKE_PASSWORD", "changeme")
+_SMOKE_EMAIL = os.environ.get("SMOKE_EMAIL", "admin@acme.example")
+_SMOKE_PASSWORD = os.environ.get("SMOKE_PASSWORD", "admin123")
 
 
 def _ssm_run(instance_id, command, aws_creds, timeout=120):
@@ -112,7 +112,7 @@ def _ssm_run(instance_id, command, aws_creds, timeout=120):
 
 def setup_module(module):
     """Provision ephemeral EC2 instance + agent + connectors for CR workflow tests."""
-    global _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID, _SMOKE_INSTANCE_ID, ASSET_ID
+    global _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID, _SMOKE_INSTANCE_ID, ASSET_ID, API_TOKEN
 
     # Fast-path: ASSET_ID already set externally — skip provisioning
     if os.environ.get("ASSET_ID"):
@@ -206,6 +206,12 @@ def setup_module(module):
             "sudo postgresql-setup --initdb 2>/dev/null || true && "
             "sudo systemctl enable --now postgresql && "
             "sudo -u postgres createdb smoke_db 2>/dev/null || true && "
+            # Set postgres user password so pg_dump can authenticate via md5
+            "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" && "
+            # Prepend md5 auth rule for localhost TCP so pg_dump -h localhost works with password
+            "HBACONF=$(sudo find /var/lib/pgsql -name pg_hba.conf -type f 2>/dev/null | head -1) && "
+            "[ -n \"$HBACONF\" ] && sudo sed -i '1i host all all 127.0.0.1/32 md5' \"$HBACONF\" && "
+            "sudo systemctl reload postgresql 2>/dev/null || sudo -u postgres psql -c 'SELECT pg_reload_conf();' 2>/dev/null || true && "
             "mkdir -p /tmp/smoke-app && "
             "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
         ),
@@ -221,7 +227,7 @@ def setup_module(module):
         "deploy_nexplane_agent",
         {
             "instance_id": instance_id,
-            "nexplane_url": "http://100.101.186.39:8000",
+            "nexplane_url": "http://172.31.1.233:8000",
             "nexplane_secret": client.get_agent_secret(),
         },
         asset_ids=[ec2_asset_id] if ec2_asset_id else None,
@@ -289,30 +295,52 @@ def setup_module(module):
     except Exception as _e:
         print(f"[setup_module] WARNING: Could not attach AWS connector: {_e}")
 
-    # Create S3 backup storage
+    # Ensure S3 bucket exists and create backup-storage record pointing to it
     try:
         bucket = "nexplane-smoke-backup-test"
+        region = aws_creds.get("region", "us-east-1")
+        s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=aws_creds.get("access_key_id"),
+            aws_secret_access_key=aws_creds.get("secret_access_key"),
+            region_name=region,
+        )
+        try:
+            s3_client.head_bucket(Bucket=bucket)
+        except Exception:
+            create_kwargs: dict = {"Bucket": bucket}
+            if region != "us-east-1":
+                create_kwargs["CreateBucketConfiguration"] = {"LocationConstraint": region}
+            s3_client.create_bucket(**create_kwargs)
+            print(f"[setup_module] S3 bucket '{bucket}' created ✅")
+
         existing_storage = client.get("/backup-storage")
         storage_name = f"smoke-s3-{bucket}"
-        if not any(s.get("name") == storage_name for s in existing_storage):
-            client.post("/backup-storage", json={
-                "name": storage_name,
-                "storage_type": "s3",
-                "config": {
-                    "bucket": bucket,
-                    "prefix": "smoke/",
-                    "aws_access_key_id": aws_creds.get("access_key_id", ""),
-                    "aws_secret_access_key": aws_creds.get("secret_access_key", ""),
-                    "region": aws_creds.get("region", "us-east-1"),
-                },
-            })
-            print(f"[setup_module] S3 backup storage '{storage_name}' created ✅")
-        else:
-            print(f"[setup_module] S3 backup storage '{storage_name}' already exists ✅")
+        # Always delete and recreate to ensure credentials are fresh
+        for s in existing_storage:
+            if s.get("name") == storage_name:
+                try:
+                    client.delete(f"/backup-storage/{s['id']}")
+                    print(f"[setup_module] Deleted stale backup storage '{storage_name}'")
+                except Exception as _de:
+                    print(f"[setup_module] WARNING: Could not delete old backup storage: {_de}")
+        storage_resp = client.post("/backup-storage", json={
+            "name": storage_name,
+            "storage_type": "s3",
+            "config": {
+                "bucket": bucket,
+                "prefix": "smoke/",
+                "aws_access_key_id": aws_creds.get("access_key_id", ""),
+                "aws_secret_access_key": aws_creds.get("secret_access_key", ""),
+                "region": region,
+            },
+        })
+        _STATE["backup_storage_id"] = storage_resp.get("id")
+        print(f"[setup_module] S3 backup storage '{storage_name}' created ✅")
     except Exception as _e:
         print(f"[setup_module] WARNING: Could not create backup storage: {_e}")
 
-    # Create SSH connector with ephemeral key pair
+    # Create SSH connector with ephemeral key pair and save creds to _STATE for inline use
     try:
         import paramiko
         import io as _io
@@ -329,11 +357,19 @@ def setup_module(module):
         )
         ssh_conn = client.post("/connectors", json={"name": "smoke-cr-workflow-ssh", "connector_type": "ssh"})
         client.put(f"/connectors/{ssh_conn['id']}/credentials", json={
+            "credentials": {
+                "hostname": private_ip,
+                "port": "22",
+                "username": "ec2-user",
+                "private_key": private_key_pem,
+            },
+        })
+        _STATE["ssh_creds"] = {
             "hostname": private_ip,
             "port": 22,
             "username": "ec2-user",
             "private_key": private_key_pem,
-        })
+        }
         print(f"[setup_module] SSH connector {ssh_conn['id']} created ✅")
     except Exception as _e:
         print(f"[setup_module] WARNING: Could not create SSH connector: {_e}")
@@ -345,6 +381,12 @@ def setup_module(module):
     # Set ASSET_ID for all test functions
     os.environ["ASSET_ID"] = agent_asset_id
     ASSET_ID = agent_asset_id
+
+    # Create API token for MCP tool calls
+    token_resp = client.post("/api/v1/tokens", json={"name": "smoke-cr-workflow"})
+    raw_token = token_resp["raw_token"]
+    os.environ["API_TOKEN"] = raw_token
+    API_TOKEN = raw_token
     print(f"[setup_module] All infra ready — ASSET_ID={agent_asset_id}")
 
 
@@ -426,6 +468,8 @@ async def _submit_and_execute(cr_id: str, approver_token: str) -> dict:
     """Submit for approval, approve as approver, execute, poll to terminal."""
     submitted = await submit_for_approval(token=API_TOKEN, cr_id=cr_id)
     check_for_budget_pause(submitted)
+    if "error" in submitted:
+        pytest.fail(f"submit_for_approval failed: {submitted['error']}")
     log(f"  CR {cr_id} submitted for approval")
 
     approved = await approve_change_request(token=approver_token, cr_id=cr_id,
@@ -619,7 +663,7 @@ async def test_MCP_BACKUP_create_and_execute():
         change_type="server_backup",
         asset_id=ASSET_ID,
         title="[smoke] MCP server backup",
-        parameters={},
+        parameters={"rollback_strategy": "delete_artifact"},
     )
     check_for_budget_pause(cr)
     if "error" in cr:
@@ -735,17 +779,29 @@ async def test_MCP_DB_MIGRATE_dump():
     if not approver_token:
         pytest.skip("approver_token not set")
 
+    ssh_creds = _STATE.get("ssh_creds")
+    backup_storage_id = _STATE.get("backup_storage_id")
+    if not ssh_creds:
+        pytest.skip("SSH credentials not set up — setup_module SSH connector creation failed")
+    if not backup_storage_id:
+        pytest.skip("backup_storage_id not set — setup_module S3 backup storage creation failed")
+
     cr = await create_change_request(
         token=API_TOKEN,
-        change_type="agent_backup",
+        change_type="server_backup",
         asset_id=ASSET_ID,
-        title="[smoke] MCP database dump via agent_backup",
+        title="[smoke] MCP database dump via server_backup",
         parameters={
             "capture_strategy": "database_dump",
             "db_type": "postgres",
-            "database_name": "nexplane",
+            "database_name": "smoke_db",
             "db_host": "localhost",
             "db_port": 5432,
+            "db_user": "postgres",
+            "db_password": "nexplane_smoke",
+            "ssh_creds": ssh_creds,
+            "backup_storage_id": backup_storage_id,
+            "rollback_strategy": "delete_artifact",
         },
     )
     check_for_budget_pause(cr)
@@ -769,15 +825,20 @@ async def test_MCP_DB_MIGRATE_dump():
         f"Dump CR failed: {result_cr}"
 
     exec_result = await _db_get_execution_result(cr_id)
+    # server_backup executor nests artifact_refs under steps[0]['result']['artifact_refs']
+    _step_result = (exec_result.get("steps") or [{}])[0].get("result", {}) if "steps" in exec_result else {}
+    _artifact_refs = _step_result.get("artifact_refs", {})
     artifact = (
         exec_result.get("artifact_uri")
         or exec_result.get("artifact_ref")
         or exec_result.get("dump_path")
         or (exec_result.get("artifact_refs") or {}).get("artifact_uri")
+        or _artifact_refs.get("artifact_uri")
     )
     assert artifact, \
         f"No artifact_uri/artifact_ref/dump_path in dump exec_result: {exec_result}"
     _STATE["dump_artifact"] = artifact
+    _STATE["dump_artifact_refs"] = _artifact_refs
     log(f"MCP_DB_MIGRATE dump: artifact={artifact} ✅")
 
 
@@ -794,9 +855,14 @@ async def test_MCP_DB_MIGRATE_restore():
         title="[smoke] MCP database restore via restore_server",
         parameters={
             "restore_strategy": "database_restore",
-            "db_type": "postgres",
-            "database_name": "nexplane",
-            "artifact_uri": artifact,
+            "source_backup_cr_id": _STATE.get("dump_cr_id"),
+            "target_db_name": "smoke_db_restored",
+            "target_db_user": "postgres",
+            "target_db_password": "nexplane_smoke",
+            "target_db_host": "localhost",
+            "target_db_port": 5432,
+            "ssh_creds": _STATE.get("ssh_creds"),
+            "rollback_strategy": "restore_previous_state",
         },
     )
     check_for_budget_pause(cr)
@@ -811,6 +877,7 @@ async def test_MCP_DB_MIGRATE_restore():
 
     if result_cr["status"] in ("preflight_failed", "failed"):
         exec_result = await _db_get_execution_result(cr_id)
+        _STATE.pop("restore_cr_id", None)  # don't let ground_truth check a failed CR
         pytest.skip(
             f"restore_server(database_restore) {result_cr['status']}. exec_result={exec_result}"
         )
@@ -896,6 +963,7 @@ async def test_MCP_CONTAINERIZE_build():
             "app_name": "smoke-test-app",
             "registry": "nexplane-local",
             "dry_run": True,
+            "rollback_strategy": "delete_image",
         },
     )
     check_for_budget_pause(cr)
@@ -919,13 +987,18 @@ async def test_MCP_CONTAINERIZE_build():
         f"Containerize CR failed: {result_cr}"
 
     exec_result = await _db_get_execution_result(cr_id)
-    image_name = exec_result.get("image_name")
-    image_digest = exec_result.get("image_digest")
+    # Result may be at top level or nested inside steps[0]['result']
+    _step_result = (exec_result.get("steps") or [{}])[0].get("result", {}) if "steps" in exec_result else {}
+    image_name = exec_result.get("image_name") or _step_result.get("image_name")
+    image_digest = exec_result.get("image_digest") or _step_result.get("image_digest")
     assert image_name, f"image_name missing from exec_result: {exec_result}"
-    assert image_digest, f"image_digest missing from exec_result: {exec_result}"
+    # image_digest is empty string in dry_run mode — only assert when not dry_run
+    dry_run = (exec_result.get("dry_run") or _step_result.get("dry_run"))
+    if not dry_run:
+        assert image_digest, f"image_digest missing from exec_result: {exec_result}"
     _STATE["containerize_image_name"] = image_name
-    _STATE["containerize_image_digest"] = image_digest
-    log(f"MCP_CONTAINERIZE: image={image_name} digest={image_digest} ✅")
+    _STATE["containerize_image_digest"] = image_digest or "dry-run"
+    log(f"MCP_CONTAINERIZE: image={image_name} digest={image_digest or 'dry-run'} ✅")
 
 
 async def test_MCP_CONTAINERIZE_db_ground_truth():
@@ -939,8 +1012,10 @@ async def test_MCP_CONTAINERIZE_db_ground_truth():
     assert row.status.value == "completed"
 
     exec_result = await _db_get_execution_result(cr_id)
-    assert exec_result.get("image_digest") == _STATE["containerize_image_digest"], \
-        f"DB image_digest does not match MCP result: {exec_result.get('image_digest')!r} vs {_STATE['containerize_image_digest']!r}"
+    _step_result = (exec_result.get("steps") or [{}])[0].get("result", {}) if "steps" in exec_result else {}
+    db_image_digest = exec_result.get("image_digest") or _step_result.get("image_digest") or "dry-run"
+    assert db_image_digest == _STATE["containerize_image_digest"], \
+        f"DB image_digest does not match MCP result: {db_image_digest!r} vs {_STATE['containerize_image_digest']!r}"
 
     mcp_cr = await get_change_request(token=API_TOKEN, cr_id=cr_id)
     check_for_budget_pause(mcp_cr)

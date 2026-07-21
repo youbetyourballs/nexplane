@@ -488,8 +488,18 @@ async def submit_for_approval(token: str, cr_id: str) -> dict:
         cr = result.scalar_one_or_none()
         if cr is None:
             return {"error": "Change request not found"}
-        if cr.status != ChangeRequestStatus.draft:
-            return {"error": f"CR must be in draft state to submit for approval; current status: {cr.status}"}
+        if cr.status not in (ChangeRequestStatus.draft, ChangeRequestStatus.planned):
+            return {"error": f"CR must be in draft or planned state to submit for approval; current status: {cr.status}"}
+
+        # Auto-generate plan if still in draft (planning is required before approval)
+        if cr.status == ChangeRequestStatus.draft:
+            try:
+                from app.services.change_plan_service import plan_cr as _plan_cr, PlanBlockedError
+                await _plan_cr(db, cr)
+                await db.commit()
+                await db.refresh(cr)
+            except Exception as _plan_err:
+                return {"error": f"Plan generation failed: {_plan_err}"}
 
         cr.status = ChangeRequestStatus.awaiting_approval
         await db.commit()

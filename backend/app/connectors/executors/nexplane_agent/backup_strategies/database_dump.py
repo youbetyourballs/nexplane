@@ -132,16 +132,19 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
 
             # Build dump command per db_type
             if db_type == "postgres":
+                # Redirect stderr to /dev/null to prevent a paramiko deadlock:
+                # if pg_dump writes a warning/prompt to stderr and the stderr buffer
+                # fills, the remote process blocks, stalling the stdout read loop.
                 dump_cmd = (
                     f"PGPASSWORD={_shell_quote(db_password)} "
                     f"pg_dump -h {db_host} -p {db_port} -U {_shell_quote(db_user)} "
-                    f"{_shell_quote(db_name)} | gzip"
+                    f"{_shell_quote(db_name)} 2>/dev/null | gzip"
                 )
                 dump_format = "sql.gz"
             elif db_type == "mysql":
                 dump_cmd = (
                     f"mysqldump -h {db_host} -P {db_port} -u {_shell_quote(db_user)} "
-                    f"-p{_shell_quote(db_password)} {_shell_quote(db_name)} | gzip"
+                    f"-p{_shell_quote(db_password)} {_shell_quote(db_name)} 2>/dev/null | gzip"
                 )
                 dump_format = "sql.gz"
             else:  # mongodb
@@ -162,7 +165,9 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
                 )
                 dump_format = "archive.gz"
 
-            _, stdout, stderr = ssh.exec_command(dump_cmd)
+            # timeout=180 prevents stdout.read() blocking forever if the remote
+            # command hangs (e.g. pg_dump waiting for auth that never arrives).
+            _, stdout, stderr = ssh.exec_command(dump_cmd, timeout=180)
             with open(tmp_path, "wb") as f:
                 while True:
                     chunk = stdout.read(65536)
