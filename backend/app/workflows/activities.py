@@ -11,7 +11,7 @@ runner they are called directly as coroutines from the workflow.
 import uuid
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import select
+from sqlalchemy import select, select as sa_select
 from sqlalchemy.orm import selectinload
 
 from app.database import AsyncSessionLocal
@@ -200,6 +200,17 @@ async def activity_execute_change(
     carried_context: dict = {}
 
     async with AsyncSessionLocal() as db:
+        # Extract org_id once from the CR at the start of the step loop
+        org_id = None
+        try:
+            _cr_row = (await db.execute(
+                select(ChangeRequest).where(ChangeRequest.id == uuid.UUID(change_request_id))
+            )).scalar_one_or_none()
+            if _cr_row:
+                org_id = str(_cr_row.organization_id)
+        except Exception:
+            pass  # org_id extraction is best-effort; executor will fail if it truly needs it
+
         for step in generated_steps:
             connector_type = step.get("connector_type", "")
             action_id = step.get("action_id", "")
@@ -214,16 +225,8 @@ async def activity_execute_change(
             # can persist pre-state without receiving these through plan parameters.
             parameters.setdefault("cr_id", change_request_id)
             parameters.setdefault("step_id", f"step_{step.get('step_number', 0)}")
-            # Resolve org_id from the CR row if not already in parameters
-            if "org_id" not in parameters:
-                try:
-                    _cr_row = (await db.execute(
-                        select(ChangeRequest).where(ChangeRequest.id == uuid.UUID(change_request_id))
-                    )).scalar_one_or_none()
-                    if _cr_row:
-                        parameters["org_id"] = str(_cr_row.organization_id)
-                except Exception:
-                    pass  # org_id injection is best-effort; executor will fail if it truly needs it
+            if org_id:
+                parameters.setdefault("org_id", org_id)
 
             step_connector_id = step.get("connector_id")
 
@@ -238,36 +241,30 @@ async def activity_execute_change(
                     await connector_service._attach_credentials(connector, db)
 
             # Middle tier: if no locked connector, check asset-scoped connectors first
-            if connector is None and step.get("connector_type") and asset_ids:
+            if connector is None and step.get("connector_type") and asset_ids and org_id:
                 try:
-                    from sqlalchemy import select as sa_select
                     from app.models.asset import asset_connectors_table
-                    _asset_id = asset_ids[0] if asset_ids else None
-                    if _asset_id:
-                        _ct_enum = ConnectorType(step["connector_type"])
-                        _cr_for_org = (await db.execute(
-                            select(ChangeRequest).where(ChangeRequest.id == uuid.UUID(change_request_id))
-                        )).scalar_one_or_none()
-                        if _cr_for_org:
-                            _ac_result = await db.execute(
-                                sa_select(Connector)
-                                .join(
-                                    asset_connectors_table,
-                                    Connector.id == asset_connectors_table.c.connector_id,
-                                )
-                                .where(
-                                    asset_connectors_table.c.asset_id == uuid.UUID(str(_asset_id)),
-                                    Connector.connector_type == _ct_enum,
-                                    Connector.organization_id == _cr_for_org.organization_id,
-                                )
-                                .limit(1)
-                            )
-                            _asset_conn = _ac_result.scalar()
-                            if _asset_conn:
-                                connector = _asset_conn
-                                await connector_service._attach_credentials(connector, db)
-                                logger.info("Step %s: using asset-scoped connector %s (type=%s, asset=%s)",
-                                            step.get("step_number"), connector.id, step["connector_type"], _asset_id)
+                    _asset_id = asset_ids[0]
+                    _ct_enum = ConnectorType(step["connector_type"])
+                    _ac_result = await db.execute(
+                        sa_select(Connector)
+                        .join(
+                            asset_connectors_table,
+                            Connector.id == asset_connectors_table.c.connector_id,
+                        )
+                        .where(
+                            asset_connectors_table.c.asset_id == uuid.UUID(str(_asset_id)),
+                            Connector.connector_type == _ct_enum,
+                            Connector.organization_id == uuid.UUID(org_id),
+                        )
+                        .limit(1)
+                    )
+                    _asset_conn = _ac_result.scalar()
+                    if _asset_conn:
+                        connector = _asset_conn
+                        await connector_service._attach_credentials(connector, db)
+                        logger.info("Step %s: using asset-scoped connector %s (type=%s, asset=%s)",
+                                    step.get("step_number"), connector.id, step["connector_type"], _asset_id)
                 except Exception as _exc:
                     logger.debug("activities: asset-scoped connector lookup failed: %s", _exc)
                     connector = None
