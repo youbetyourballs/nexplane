@@ -4,8 +4,20 @@
 import uuid
 from datetime import datetime
 from typing import Literal, Optional
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 from app.models.asset import AssetType, Environment, Criticality
+
+
+class ConnectorSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    connector_type: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AssetConnectorAdd(BaseModel):
+    connector_id: uuid.UUID
 
 
 class AssetCreate(BaseModel):
@@ -33,6 +45,7 @@ class AssetRead(BaseModel):
     asset_metadata: dict
     tags: list[str]
     created_at: datetime
+    connectors: list[ConnectorSummary] = []
 
 
 class AssetUpdate(BaseModel):

@@ -6,17 +6,18 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import select, insert, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db, AsyncSessionLocal
-from app.models.asset import Asset, Environment, AssetType, Criticality
+from app.models.asset import Asset, Environment, AssetType, Criticality, asset_connectors_table
+from app.models.connector import Connector
 from app.models.change_plan import ChangePlan, PlanGeneratedBy
 from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType, RiskLevel
 from app.models.user import User
 from app.routers import current_user
-from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate, BulkTagOperation
+from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate, BulkTagOperation, ConnectorSummary, AssetConnectorAdd
 from app.services.audit_service import record_event
 from app.services.planning_engine import generate_plan
 from app.services.safety_engine import score_change_request
@@ -226,6 +227,81 @@ async def update_asset(
         connector_name=None,
         connector_type=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Multi-connector endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/{asset_id}/connectors", response_model=list[ConnectorSummary])
+async def list_asset_connectors(
+    asset_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    asset = await db.get(Asset, asset_id)
+    if not asset or asset.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    result = await db.execute(
+        select(Connector).join(
+            asset_connectors_table,
+            Connector.id == asset_connectors_table.c.connector_id
+        ).where(asset_connectors_table.c.asset_id == asset_id)
+    )
+    connectors = result.scalars().all()
+    return [
+        ConnectorSummary(id=c.id, name=c.name, connector_type=c.connector_type.value)
+        for c in connectors
+    ]
+
+
+@router.post("/{asset_id}/connectors", response_model=ConnectorSummary, status_code=201)
+async def attach_connector_to_asset(
+    asset_id: uuid.UUID,
+    body: AssetConnectorAdd,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    asset = await db.get(Asset, asset_id)
+    if not asset or asset.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    connector = await db.get(Connector, body.connector_id)
+    if not connector or connector.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Connector not found in this org")
+    existing = await db.execute(
+        select(asset_connectors_table).where(
+            asset_connectors_table.c.asset_id == asset_id,
+            asset_connectors_table.c.connector_id == body.connector_id,
+        )
+    )
+    if existing.first():
+        raise HTTPException(status_code=409, detail="Connector already attached to asset")
+    await db.execute(
+        insert(asset_connectors_table).values(
+            asset_id=asset_id, connector_id=body.connector_id
+        )
+    )
+    await db.commit()
+    return ConnectorSummary(id=connector.id, name=connector.name, connector_type=connector.connector_type.value)
+
+
+@router.delete("/{asset_id}/connectors/{connector_id}", status_code=204)
+async def detach_connector_from_asset(
+    asset_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    asset = await db.get(Asset, asset_id)
+    if not asset or asset.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    await db.execute(
+        delete(asset_connectors_table).where(
+            asset_connectors_table.c.asset_id == asset_id,
+            asset_connectors_table.c.connector_id == connector_id,
+        )
+    )
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
