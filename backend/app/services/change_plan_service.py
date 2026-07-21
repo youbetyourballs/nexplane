@@ -55,7 +55,7 @@ async def plan_cr(db: AsyncSession, cr: ChangeRequest) -> PlanResult:
 
     asset_ids = [uuid.UUID(str(aid)) for aid in (cr.target_asset_ids or [])]
     assets_result = await db.execute(
-        select(Asset).options(selectinload(Asset.connector)).where(Asset.id.in_(asset_ids))
+        select(Asset).options(selectinload(Asset.connector), selectinload(Asset.connectors)).where(Asset.id.in_(asset_ids))
     )
     assets = list(assets_result.scalars().all())
 
