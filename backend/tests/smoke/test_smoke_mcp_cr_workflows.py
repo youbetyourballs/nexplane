@@ -168,6 +168,7 @@ def setup_module(module):
         raise RuntimeError(f"Could not extract instance_id from ec2_launch CR: {launch_cr}")
 
     _SMOKE_INSTANCE_ID = instance_id
+    _STATE["instance_id"] = instance_id
     print(f"[setup_module] instance_id={instance_id} ec2_asset_id={ec2_asset_id}")
 
     # Get AWS credentials from DB
@@ -699,7 +700,10 @@ async def test_MCP_BACKUP_create_and_execute():
         change_type="server_backup",
         asset_id=ASSET_ID,
         title="[smoke] MCP server backup",
-        parameters={"rollback_strategy": "delete_artifact"},
+        parameters={
+            "rollback_strategy": "delete_artifact",
+            "instance_id": _STATE.get("instance_id", ""),
+        },
     )
     check_for_budget_pause(cr)
     if "error" in cr:
