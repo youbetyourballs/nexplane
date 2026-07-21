@@ -29,7 +29,13 @@ def test_picks_aws_connector_for_aws_step(monkeypatch):
     agent_conn = _make_connector("nexplane_agent", "bbbbbbbb-0000-0000-0000-000000000002")
     asset = _make_asset([agent_conn, aws_conn])
 
+    executor_mock = MagicMock()
+    executor_mock.execute = MagicMock()
+    executor_mock.rollback = MagicMock()
+    executor_mock.ROLLBACK_CAPABILITY = "full"
+
     catalog = MagicMock()
+    catalog.get_executor.return_value = executor_mock
     aws_option = MagicMock()
     aws_option.connector_type = "aws"
     aws_option.execution_tier = 1

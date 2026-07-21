@@ -95,6 +95,8 @@ def test_planning_engine_warns_when_rollback_returns_false(tmp_path):
     # Write a fake executor file with a no-op rollback
     executor_file = tmp_path / "fake_noop.py"
     executor_file.write_text(
+        "ROLLBACK_CAPABILITY = 'irreversible'\n"
+        "ROLLBACK_REASON = 'rolled_back=False always; this action cannot be undone'\n\n"
         "async def execute(parameters, asset_ids, connector):\n"
         "    return {}\n\n"
         "async def rollback(parameters, execution_result, connector):\n"
