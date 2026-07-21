@@ -352,8 +352,20 @@ def setup_module(module):
         })
         _STATE["backup_storage_id"] = storage_resp.get("id")
         print(f"[setup_module] S3 backup storage '{storage_name}' created ✅")
+
+        # Create backup target linking this agent asset to the backup storage
+        bt_resp = client.post("/backup-targets", json={
+            "target_description": "smoke-backup-target",
+            "asset_id": agent_asset_id,
+            "storage_id": _STATE["backup_storage_id"],
+            "backup_tier": "machine",
+            "capture_strategy": "ebs_snapshot",
+            "expected_cadence_hours": 24,
+        })
+        _STATE["backup_target_id"] = bt_resp.get("id")
+        print(f"[setup_module] Backup target {_STATE['backup_target_id']} created for agent asset ✅")
     except Exception as _e:
-        print(f"[setup_module] WARNING: Could not create backup storage: {_e}")
+        print(f"[setup_module] WARNING: Could not create backup storage/target: {_e}")
 
     # Create SSH connector with ephemeral key pair and save creds to _STATE for inline use
     try:
