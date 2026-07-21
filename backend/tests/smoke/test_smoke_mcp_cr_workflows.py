@@ -216,7 +216,7 @@ def setup_module(module):
             "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
         ),
         aws_creds,
-        timeout=120,
+        timeout=300,
     )
     print("[setup_module] Docker + Postgres installed ✅")
 
@@ -547,8 +547,17 @@ async def _db_get_execution_result(cr_id: str) -> dict:
         if run is None:
             return {}
         raw = run.result or {}
-        # Workflows wrap the executor result under "execution" key
-        return raw.get("execution", raw)
+        # Workflows wrap the executor result under "execution" key as:
+        # {"execution": {"steps": [{"result": <executor_return>}]}}
+        execution = raw.get("execution", raw)
+        # If the execution dict contains steps, merge step[0].result into the top level
+        # so callers can do exec_result.get("snapshot_id") etc. without walking steps.
+        steps = execution.get("steps", []) if isinstance(execution, dict) else []
+        if steps and isinstance(steps[0].get("result"), dict):
+            merged = dict(steps[0]["result"])
+            merged.update({k: v for k, v in execution.items() if k != "steps"})
+            return merged
+        return execution
 
 
 # ---------------------------------------------------------------------------

@@ -237,8 +237,14 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
         options = [o for o in options if o.connector_type == locked_connector_type]
     elif _connector_by_type:
         # Keep only options whose connector type the asset has a connector for.
+        # Fall back to all options if none of the asset connectors can satisfy this action —
+        # e.g. an asset with only aws attached still needs nexplane_agent for agent_os_upgrade.
         available_types = set(_connector_by_type.keys())
-        options = [o for o in options if o.connector_type in available_types]
+        narrowed = [o for o in options if o.connector_type in available_types]
+        if narrowed:
+            options = narrowed
+        # else: no connector on this asset handles this action — leave options unfiltered
+        # so the best catalog match is used (execution will rely on activities.py fallback)
 
     # After narrowing, sort by execution_tier ascending (safest first).
     options = sorted(options, key=lambda o: getattr(o, "execution_tier", 99))
