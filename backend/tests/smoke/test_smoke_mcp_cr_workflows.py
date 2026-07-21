@@ -207,11 +207,12 @@ def setup_module(module):
             "sudo postgresql-setup --initdb 2>/dev/null || true && "
             "sudo systemctl enable --now postgresql && "
             "sudo -u postgres createdb smoke_db 2>/dev/null || true && "
-            # Set postgres user password so pg_dump can authenticate via md5
-            "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" && "
-            # Prepend md5 auth rule for localhost TCP so pg_dump -h localhost works with password
+            # Set postgres user password so pg_dump can authenticate via password
+            "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" 2>/dev/null || true && "
+            # Prepend trust rule for localhost TCP (both IPv4 and IPv6) so all tools can connect without password
             "HBACONF=$(sudo find /var/lib/pgsql -name pg_hba.conf -type f 2>/dev/null | head -1) && "
-            "[ -n \"$HBACONF\" ] && sudo sed -i '1i host all all 127.0.0.1/32 md5' \"$HBACONF\" && "
+            "[ -n \"$HBACONF\" ] && sudo sed -i '1i host all all ::1/128 trust' \"$HBACONF\" && "
+            "[ -n \"$HBACONF\" ] && sudo sed -i '1i host all all 127.0.0.1/32 trust' \"$HBACONF\" && "
             "sudo systemctl reload postgresql 2>/dev/null || sudo -u postgres psql -c 'SELECT pg_reload_conf();' 2>/dev/null || true && "
             "mkdir -p /tmp/smoke-app && "
             "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
