@@ -130,59 +130,27 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                 sftp.close()
 
             if db_type == "postgres":
-                # Use UNIX socket peer auth (no -h flag, no password, no sudo).
-                # Requires the OS user running the SSH session to be a PostgreSQL
-                # superuser (e.g. ec2-user created with createuser --superuser).
-                # This avoids PGPASSWORD/TCP auth issues and sudo audit-plugin
-                # failures in non-TTY paramiko sessions.
-                _use_peer = not target_db_user or target_db_user == "postgres"
+                create_db_cmd = (
+                    f"PGPASSWORD={_shell_quote(target_db_password)} "
+                    f"psql -h {target_db_host} -p {target_db_port} "
+                    f"-U {_shell_quote(target_db_user)} postgres "
+                    f'-c "CREATE DATABASE {target_db_name}" 2>&1 || true'
+                )
+                _, _co, _ce = ssh.exec_command(create_db_cmd, timeout=60)
+                _co.channel.recv_exit_status()
 
-                if _use_peer:
-                    # Locate the PostgreSQL UNIX socket at runtime (path varies by distro)
-                    _find_sock = (
-                        "SOCK=$(find /var/run/postgresql /tmp -maxdepth 1 "
-                        f"-name '.s.PGSQL.{target_db_port}' 2>/dev/null | head -1) && "
-                        "if [ -n \"$SOCK\" ]; then PGHOST=$(dirname \"$SOCK\"); "
-                        "else PGHOST=/tmp; fi && export PGHOST"
-                    )
-                    create_db_cmd = (
-                        f"{_find_sock} && "
-                        f'psql -c "CREATE DATABASE {target_db_name}" 2>&1 || true'
-                    )
-                    _, _co, _ = ssh.exec_command(create_db_cmd, timeout=60)
-                    _co.channel.recv_exit_status()
-
-                    restore_cmd = (
-                        f"{_find_sock} && "
-                        f"gunzip -c {remote_tmp} | psql {_shell_quote(target_db_name)}"
-                    )
-                    verify_cmd = (
-                        f"{_find_sock} && "
-                        f'psql {_shell_quote(target_db_name)} -c "SELECT 1" 2>/dev/null'
-                    )
-                else:
-                    # Explicit non-default user: use TCP + PGPASSWORD
-                    create_db_cmd = (
-                        f"PGPASSWORD={_shell_quote(target_db_password)} "
-                        f"psql -h {target_db_host} -p {target_db_port} "
-                        f"-U {_shell_quote(target_db_user)} postgres "
-                        f'-c "CREATE DATABASE {target_db_name}" 2>&1 || true'
-                    )
-                    _, _co, _ce = ssh.exec_command(create_db_cmd, timeout=60)
-                    _co.channel.recv_exit_status()
-
-                    restore_cmd = (
-                        f"gunzip -c {remote_tmp} | "
-                        f"PGPASSWORD={_shell_quote(target_db_password)} "
-                        f"psql -h {target_db_host} -p {target_db_port} "
-                        f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)}"
-                    )
-                    verify_cmd = (
-                        f"PGPASSWORD={_shell_quote(target_db_password)} "
-                        f"psql -h {target_db_host} -p {target_db_port} "
-                        f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)} "
-                        f'-c "SELECT 1" 2>/dev/null'
-                    )
+                restore_cmd = (
+                    f"gunzip -c {remote_tmp} | "
+                    f"PGPASSWORD={_shell_quote(target_db_password)} "
+                    f"psql -h {target_db_host} -p {target_db_port} "
+                    f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)}"
+                )
+                verify_cmd = (
+                    f"PGPASSWORD={_shell_quote(target_db_password)} "
+                    f"psql -h {target_db_host} -p {target_db_port} "
+                    f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)} "
+                    f'-c "SELECT 1" 2>/dev/null'
+                )
             elif db_type == "mysql":
                 # Ensure the target database exists before restoring into it.
                 create_db_cmd = (

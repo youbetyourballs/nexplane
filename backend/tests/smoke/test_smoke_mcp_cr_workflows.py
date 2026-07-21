@@ -209,16 +209,9 @@ def setup_module(module):
             # Wait for PostgreSQL to be fully ready before running psql commands
             "for i in 1 2 3 4 5 6 7 8 9 10; do sudo -u postgres pg_isready -q && break || sleep 2; done && "
             "sudo -u postgres createdb smoke_db 2>/dev/null || true && "
-            # Create an ec2-user PostgreSQL superuser so the nexplane agent SSH session
-            # can connect via UNIX socket peer auth without needing sudo or passwords.
-            "sudo -u postgres createuser --superuser ec2-user 2>/dev/null || true && "
-            # Add ec2-user to postgres group so it can access the socket directory
-            "sudo usermod -aG postgres ec2-user 2>/dev/null || true && "
-            # Also set postgres password for TCP fallback paths.
-            "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" 2>/dev/null || true && "
-            # Prepend trust rule for localhost TCP (both IPv4 and IPv6) so all tools can connect without password
-            "HBACONF=$(sudo find /etc /var -name pg_hba.conf -type f 2>/dev/null | head -1) && "
-            "if [ -n \"$HBACONF\" ]; then printf 'host all all 127.0.0.1/32 trust\\nhost all all ::1/128 trust\\n' | sudo tee /tmp/hba_prepend.conf > /dev/null && sudo bash -c \"cat /tmp/hba_prepend.conf '$HBACONF' > /tmp/pg_hba_new.conf && cp /tmp/pg_hba_new.conf '$HBACONF' && chown postgres:postgres '$HBACONF'\" && sudo systemctl reload postgresql 2>/dev/null || true; fi && "
+            # Set postgres password for TCP auth (scram-sha-256). No pg_hba.conf changes
+            # needed — the default after initdb allows host connections with password auth.
+            "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" && "
             "mkdir -p /tmp/smoke-app && "
             "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
         ),
