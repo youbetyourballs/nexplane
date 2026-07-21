@@ -131,26 +131,19 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
 
             if db_type == "postgres":
                 # Ensure the target database exists before restoring into it.
-                # Use 'export PGPASSWORD' so the variable is available across the pipeline.
+                # Use sudo -u postgres for peer auth (no password needed over UNIX socket).
                 create_db_cmd = (
-                    f"export PGPASSWORD={_shell_quote(target_db_password)}; "
-                    f"psql -h {target_db_host} -p {target_db_port} "
-                    f"-U {_shell_quote(target_db_user)} postgres "
-                    f'-c "CREATE DATABASE {target_db_name}" 2>&1 || true'
+                    f"sudo -u postgres psql postgres "
+                    f'-c "CREATE DATABASE {_shell_quote(target_db_name)}" 2>&1 || true'
                 )
                 _, _co, _ce = ssh.exec_command(create_db_cmd, timeout=60)
                 _co.channel.recv_exit_status()  # wait, ignore failure (already exists is fine)
 
                 restore_cmd = (
-                    f"export PGPASSWORD={_shell_quote(target_db_password)}; "
-                    f"gunzip -c {remote_tmp} | "
-                    f"psql -h {target_db_host} -p {target_db_port} "
-                    f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)}"
+                    f"gunzip -c {remote_tmp} | sudo -u postgres psql {_shell_quote(target_db_name)}"
                 )
                 verify_cmd = (
-                    f"PGPASSWORD={_shell_quote(target_db_password)} "
-                    f"psql -h {target_db_host} -p {target_db_port} "
-                    f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)} "
+                    f"sudo -u postgres psql {_shell_quote(target_db_name)} "
                     f'-c "SELECT 1" 2>/dev/null'
                 )
             elif db_type == "mysql":
