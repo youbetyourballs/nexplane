@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 revision = "cert005"
-down_revision = "cert004"
+down_revision = "cert004_cert_inventory"
 branch_labels = None
 depends_on = None
 
