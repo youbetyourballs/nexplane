@@ -4,12 +4,22 @@
 import uuid
 from typing import Optional
 from datetime import datetime
-from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON
+from sqlalchemy import String, DateTime, func, ForeignKey, Enum as SAEnum, JSON, Table, Column
+import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 import enum
 
 from app.database import Base
+
+asset_connectors_table = Table(
+    "asset_connectors",
+    Base.metadata,
+    Column("asset_id", PG_UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), primary_key=True),
+    Column("connector_id", PG_UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), primary_key=True),
+    Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()"), nullable=False),
+)
 
 
 class AssetType(str, enum.Enum):
@@ -69,3 +79,9 @@ class Asset(Base):
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="assets")
     connector: Mapped[Optional["Connector"]] = relationship("Connector", foreign_keys=[connector_id], lazy="select")
+    connectors: Mapped[list["Connector"]] = relationship(
+        "Connector",
+        secondary="asset_connectors",
+        lazy="select",
+        viewonly=False,
+    )
