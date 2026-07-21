@@ -202,18 +202,18 @@ def setup_module(module):
     _ssm_run(
         instance_id,
         (
-            "sudo yum install -y docker postgresql15-server 2>&1 | tail -3 && "
+            "sudo yum install -y docker postgresql15 postgresql15-server 2>&1 | tail -3 && "
             "sudo systemctl enable --now docker && "
             "sudo postgresql-setup --initdb 2>/dev/null || true && "
             "sudo systemctl enable --now postgresql && "
+            # Wait for PostgreSQL to be fully ready before running psql commands
+            "for i in 1 2 3 4 5 6 7 8 9 10; do sudo -u postgres pg_isready -q && break || sleep 2; done && "
             "sudo -u postgres createdb smoke_db 2>/dev/null || true && "
-            # Set postgres user password so pg_dump can authenticate via password
-            "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" 2>/dev/null || true && "
+            # Set postgres user password so pg_dump/psql can authenticate via password
+            "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" && "
             # Prepend trust rule for localhost TCP (both IPv4 and IPv6) so all tools can connect without password
-            "HBACONF=$(sudo find /var/lib/pgsql -name pg_hba.conf -type f 2>/dev/null | head -1) && "
-            "[ -n \"$HBACONF\" ] && sudo sed -i '1i host all all ::1/128 trust' \"$HBACONF\" && "
-            "[ -n \"$HBACONF\" ] && sudo sed -i '1i host all all 127.0.0.1/32 trust' \"$HBACONF\" && "
-            "sudo systemctl reload postgresql 2>/dev/null || sudo -u postgres psql -c 'SELECT pg_reload_conf();' 2>/dev/null || true && "
+            "HBACONF=$(sudo find /etc /var -name pg_hba.conf -type f 2>/dev/null | head -1) && "
+            "if [ -n \"$HBACONF\" ]; then printf 'host all all 127.0.0.1/32 trust\\nhost all all ::1/128 trust\\n' | sudo tee /tmp/hba_prepend.conf > /dev/null && sudo bash -c \"cat /tmp/hba_prepend.conf '$HBACONF' > /tmp/pg_hba_new.conf && cp /tmp/pg_hba_new.conf '$HBACONF' && chown postgres:postgres '$HBACONF'\" && sudo systemctl reload postgresql 2>/dev/null || true; fi && "
             "mkdir -p /tmp/smoke-app && "
             "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
         ),
