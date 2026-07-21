@@ -116,6 +116,7 @@ def test_planning_engine_warns_when_rollback_returns_false(tmp_path):
     asset.asset_type.value = "server"
     asset.connector_id = None
     asset.connector = None
+    asset.connectors = []
 
     step_def = {
         "generic_action": "test_conn_fake_noop",
@@ -155,6 +156,7 @@ def test_planning_engine_no_warning_for_clean_rollback(tmp_path):
     asset.asset_type.value = "server"
     asset.connector_id = None
     asset.connector = None
+    asset.connectors = []
 
     step_def = {
         "generic_action": "test_conn_fake_clean",
@@ -184,6 +186,7 @@ def test_planning_engine_raises_when_executor_missing_execute():
     asset.asset_type.value = "server"
     asset.connector_id = None
     asset.connector = None
+    asset.connectors = []
 
     step_def = {
         "generic_action": "test_conn_broken_action",

@@ -208,16 +208,17 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
     generic_action = step_def["generic_action"]
     asset_types = [a.asset_type.value for a in assets]
 
-    # Determine if all assets share a single connector
-    connector_ids = {a.connector_id for a in assets if a.connector_id is not None}
+    # Build a map: connector_type → connector from asset.connectors (all assets, first asset wins per type).
+    # getattr + "or []" handles legacy assets, mock objects, and assets loaded without selectinload.
+    _connector_by_type: dict[str, object] = {}
+    for _a in assets:
+        for _c in (getattr(_a, "connectors", None) or []):
+            _ct = _c.connector_type.value if hasattr(_c.connector_type, "value") else str(_c.connector_type)
+            if _ct not in _connector_by_type:
+                _connector_by_type[_ct] = _c
+
     locked_connector_type = None
     locked_connector_id = None
-    if len(connector_ids) == 1:
-        asset_with_connector = next(a for a in assets if a.connector_id is not None)
-        # Use the FK value directly — connector relationship may not be loaded in async context
-        locked_connector_id = str(asset_with_connector.connector_id)
-        if asset_with_connector.connector is not None:
-            locked_connector_type = asset_with_connector.connector.connector_type.value
 
     # Allow callers to hint a specific connector via desired_outcome._locked_connector_type / _locked_connector_id.
     # This is used by smoke tests and programmatic CR creation to bypass asset-based inference.
@@ -231,11 +232,16 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
     if not options:
         options = catalog.get_options_for_action(generic_action)
 
-    # Filter to locked connector type when determined
-    if locked_connector_type and options:
-        locked_options = [o for o in options if o.connector_type == locked_connector_type]
-        if locked_options:
-            options = locked_options
+    # Per-step resolution: if no explicit type override, narrow options to what this asset actually has.
+    if locked_connector_type:
+        options = [o for o in options if o.connector_type == locked_connector_type]
+    elif _connector_by_type:
+        # Keep only options whose connector type the asset has a connector for.
+        available_types = set(_connector_by_type.keys())
+        options = [o for o in options if o.connector_type in available_types]
+
+    # After narrowing, sort by execution_tier ascending (safest first).
+    options = sorted(options, key=lambda o: getattr(o, "execution_tier", 99))
 
     if not options:
         return {
@@ -250,7 +256,7 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
             "parameters": {**_resolve_parameters(generic_action, desired, assets), **step_def.get("param_overrides", {})},
             "rollback_action": None,
             "rollback_connector_type": None,
-            "connector_id": locked_connector_id,
+            "connector_id": None,
             "estimated_duration_seconds": 30,
             "blast_radius_hint": None,
         }
@@ -281,6 +287,14 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
         log.warning("Planning: executor module not importable for %s.%s: %s", best.connector_type, best.action_id, exc)
         rollback_warning = f"Executor module not found for {best.connector_type}.{best.action_id} — step cannot execute"
 
+    # Determine which connector to record for this step.
+    if locked_connector_id:
+        step_connector_id = locked_connector_id
+    elif best.connector_type in _connector_by_type:
+        step_connector_id = str(_connector_by_type[best.connector_type].id)
+    else:
+        step_connector_id = None
+
     step: dict[str, Any] = {
         "step_number": step_number,
         "name": action_def.get("display_name", generic_action.replace("_", " ").title()),
@@ -296,7 +310,7 @@ def _resolve_step(step_def: dict, step_number: int, desired: dict, assets: list[
         "parameters": {**_resolve_parameters(generic_action, desired, assets), **step_def.get("param_overrides", {})},
         "rollback_action": rollback_action,
         "rollback_connector_type": best.connector_type if rollback_action else None,
-        "connector_id": locked_connector_id,
+        "connector_id": step_connector_id,
         "estimated_duration_seconds": action_def.get("estimated_duration_seconds", 30),
         "blast_radius_hint": action_def.get("blast_radius_hint"),
     }
