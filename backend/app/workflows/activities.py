@@ -237,6 +237,41 @@ async def activity_execute_change(
                 if connector:
                     await connector_service._attach_credentials(connector, db)
 
+            # Middle tier: if no locked connector, check asset-scoped connectors first
+            if connector is None and step.get("connector_type") and asset_ids:
+                try:
+                    from sqlalchemy import select as sa_select
+                    from app.models.asset import asset_connectors_table
+                    _asset_id = asset_ids[0] if asset_ids else None
+                    if _asset_id:
+                        _ct_enum = ConnectorType(step["connector_type"])
+                        _cr_for_org = (await db.execute(
+                            select(ChangeRequest).where(ChangeRequest.id == uuid.UUID(change_request_id))
+                        )).scalar_one_or_none()
+                        if _cr_for_org:
+                            _ac_result = await db.execute(
+                                sa_select(Connector)
+                                .join(
+                                    asset_connectors_table,
+                                    Connector.id == asset_connectors_table.c.connector_id,
+                                )
+                                .where(
+                                    asset_connectors_table.c.asset_id == uuid.UUID(str(_asset_id)),
+                                    Connector.connector_type == _ct_enum,
+                                    Connector.organization_id == _cr_for_org.organization_id,
+                                )
+                                .limit(1)
+                            )
+                            _asset_conn = _ac_result.scalar()
+                            if _asset_conn:
+                                connector = _asset_conn
+                                await connector_service._attach_credentials(connector, db)
+                                logger.info("Step %s: using asset-scoped connector %s (type=%s, asset=%s)",
+                                            step.get("step_number"), connector.id, step["connector_type"], _asset_id)
+                except Exception as _exc:
+                    logger.debug("activities: asset-scoped connector lookup failed: %s", _exc)
+                    connector = None
+
             # Fallback: if no locked connector but connector_type is known, look up any
             # active connector of that type in the org (needed for wazuh/falco/infisical phases
             # where the plan is generated without a locked connector_id).

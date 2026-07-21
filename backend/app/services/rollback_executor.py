@@ -100,23 +100,32 @@ async def _executor_fallback(
             from sqlalchemy import select as _sa_select
             async with AsyncSessionLocal() as _rdb:
                 if _step_connector_id:
+                    # Load ONLY the connector recorded at execution time. Fail loudly if missing.
                     _conn_obj = await _rdb.get(_Connector, uuid.UUID(str(_step_connector_id)))
-                    if _conn_obj:
-                        await _attach_credentials(_conn_obj, _rdb)
-                        _connector = _conn_obj
-                # If no connector found via step_id, find one by type in the org
-                if not _connector and _connector_type_from_result:
-                    from app.models.connector import ConnectorType as _ConnectorType
-                    _res = await _rdb.execute(
-                        _sa_select(_Connector).where(
-                            _Connector.organization_id == cr.organization_id,
-                            _Connector.connector_type == _ConnectorType(_connector_type_from_result),
-                        ).limit(1)
-                    )
-                    _conn_obj = _res.scalar_one_or_none()
-                    if _conn_obj:
-                        await _attach_credentials(_conn_obj, _rdb)
-                        _connector = _conn_obj
+                    if _conn_obj is None:
+                        raise RuntimeError(
+                            f"rollback_executor: connector {_step_connector_id} no longer exists — "
+                            f"cannot safely roll back. Restore the connector or roll back manually."
+                        )
+                    await _attach_credentials(_conn_obj, _rdb)
+                    _connector = _conn_obj
+                else:
+                    # No recorded connector_id — legacy plan without pinned connector.
+                    # Fall back to org-wide by type for backward compatibility.
+                    if _connector_type_from_result:
+                        from app.models.connector import ConnectorType as _ConnectorType
+                        _res = await _rdb.execute(
+                            _sa_select(_Connector).where(
+                                _Connector.organization_id == cr.organization_id,
+                                _Connector.connector_type == _ConnectorType(_connector_type_from_result),
+                            ).limit(1)
+                        )
+                        _conn_obj = _res.scalar_one_or_none()
+                        if _conn_obj:
+                            await _attach_credentials(_conn_obj, _rdb)
+                            _connector = _conn_obj
+        except RuntimeError:
+            raise
         except Exception as exc:
             logger.warning("Could not load connector for rollback: %s", exc)
 
