@@ -138,16 +138,26 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                 _use_peer = not target_db_user or target_db_user == "postgres"
 
                 if _use_peer:
+                    # Locate the PostgreSQL UNIX socket at runtime (path varies by distro)
+                    _find_sock = (
+                        "SOCK=$(find /var/run/postgresql /tmp -maxdepth 1 "
+                        f"-name '.s.PGSQL.{target_db_port}' 2>/dev/null | head -1) && "
+                        "if [ -n \"$SOCK\" ]; then PGHOST=$(dirname \"$SOCK\"); "
+                        "else PGHOST=/tmp; fi && export PGHOST"
+                    )
                     create_db_cmd = (
+                        f"{_find_sock} && "
                         f'psql -c "CREATE DATABASE {target_db_name}" 2>&1 || true'
                     )
                     _, _co, _ = ssh.exec_command(create_db_cmd, timeout=60)
                     _co.channel.recv_exit_status()
 
                     restore_cmd = (
+                        f"{_find_sock} && "
                         f"gunzip -c {remote_tmp} | psql {_shell_quote(target_db_name)}"
                     )
                     verify_cmd = (
+                        f"{_find_sock} && "
                         f'psql {_shell_quote(target_db_name)} -c "SELECT 1" 2>/dev/null'
                     )
                 else:

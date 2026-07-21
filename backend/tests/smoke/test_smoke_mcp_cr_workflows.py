@@ -212,6 +212,8 @@ def setup_module(module):
             # Create an ec2-user PostgreSQL superuser so the nexplane agent SSH session
             # can connect via UNIX socket peer auth without needing sudo or passwords.
             "sudo -u postgres createuser --superuser ec2-user 2>/dev/null || true && "
+            # Add ec2-user to postgres group so it can access the socket directory
+            "sudo usermod -aG postgres ec2-user 2>/dev/null || true && "
             # Also set postgres password for TCP fallback paths.
             "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" 2>/dev/null || true && "
             # Prepend trust rule for localhost TCP (both IPv4 and IPv6) so all tools can connect without password
