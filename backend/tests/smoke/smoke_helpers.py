@@ -49,6 +49,38 @@ def fail(msg: str) -> None:
     log(msg, ok=False)
     raise SystemExit(1)
 
+
+# Budget signals from the backend's AI proxy layer
+_BUDGET_SIGNALS = frozenset({
+    "quota", "budget", "rate_limit", "insufficient_quota",
+    "context_length_exceeded", "billing", "capacity",
+})
+
+
+def check_for_budget_pause(result: "dict | None") -> None:
+    """
+    Call after every MCP tool call result. If the result contains an AI
+    budget-exhaustion signal, print a clear pause message and exit with
+    code 2 (distinct from pytest failure exit code 1) so the operator
+    knows to expand the API cap before resuming.
+    """
+    if not isinstance(result, dict):
+        return
+    # Check HTTP-level error propagated into result
+    error_text = str(result.get("error", "")).lower()
+    detail_text = str(result.get("detail", "")).lower()
+    combined = error_text + " " + detail_text
+    if any(sig in combined for sig in _BUDGET_SIGNALS):
+        phase = result.get("phase", "unknown phase")
+        api = "Claude" if "claude" in combined or "anthropic" in combined else \
+              "OpenAI" if "openai" in combined else "AI"
+        log(f"BUDGET_PAUSE: {api} API cap hit during {phase}. "
+            f"Expand the budget cap then re-run from this phase.", ok=False)
+        print(f"\n⚠️  AI API budget exhausted ({api}). "
+              f"Passed phases are already committed. "
+              f"Expand the cap and resume.\n")
+        sys.exit(2)
+
 # ---------------------------------------------------------------------------
 # NexplaneClient
 # ---------------------------------------------------------------------------
