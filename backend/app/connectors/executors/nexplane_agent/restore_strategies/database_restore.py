@@ -144,7 +144,7 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                     f"gunzip -c {remote_tmp} | "
                     f"PGPASSWORD={_shell_quote(target_db_password)} "
                     f"psql -h {target_db_host} -p {target_db_port} "
-                    f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)} 2>&1"
+                    f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)}"
                 )
                 verify_cmd = (
                     f"PGPASSWORD={_shell_quote(target_db_password)} "
