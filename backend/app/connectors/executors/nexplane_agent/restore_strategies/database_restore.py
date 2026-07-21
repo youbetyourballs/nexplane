@@ -130,28 +130,50 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                 sftp.close()
 
             if db_type == "postgres":
-                # Ensure the target database exists before restoring into it.
-                create_db_cmd = (
-                    f"PGPASSWORD={_shell_quote(target_db_password)} "
-                    f"psql -h {target_db_host} -p {target_db_port} "
-                    f"-U {_shell_quote(target_db_user)} postgres "
-                    f'-c "CREATE DATABASE {target_db_name}" 2>&1 || true'
-                )
-                _, _co, _ce = ssh.exec_command(create_db_cmd, timeout=60)
-                _co.channel.recv_exit_status()  # wait, ignore failure (already exists is fine)
+                # Prefer peer auth via UNIX socket (sudo -u postgres) so we don't depend
+                # on pg_hba.conf TCP password rules or PGPASSWORD env propagation.
+                # get_pty=True gives sudo a TTY so the sudoers audit plugin initialises.
+                _use_sudo = not target_db_user or target_db_user == "postgres"
 
-                restore_cmd = (
-                    f"gunzip -c {remote_tmp} | "
-                    f"PGPASSWORD={_shell_quote(target_db_password)} "
-                    f"psql -h {target_db_host} -p {target_db_port} "
-                    f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)}"
-                )
-                verify_cmd = (
-                    f"PGPASSWORD={_shell_quote(target_db_password)} "
-                    f"psql -h {target_db_host} -p {target_db_port} "
-                    f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)} "
-                    f'-c "SELECT 1" 2>/dev/null'
-                )
+                if _use_sudo:
+                    create_db_cmd = (
+                        f"sudo -u postgres psql "
+                        f'-c "CREATE DATABASE {target_db_name}" 2>&1 || true'
+                    )
+                    _, _co, _ = ssh.exec_command(create_db_cmd, timeout=60, get_pty=True)
+                    _co.channel.recv_exit_status()
+
+                    restore_cmd = (
+                        f"sudo -u postgres sh -c "
+                        f"'gunzip -c {remote_tmp} | psql {_shell_quote(target_db_name)}'"
+                    )
+                    verify_cmd = (
+                        f"sudo -u postgres psql {_shell_quote(target_db_name)} "
+                        f'-c "SELECT 1"'
+                    )
+                else:
+                    # Non-default user: fall back to TCP + PGPASSWORD
+                    create_db_cmd = (
+                        f"PGPASSWORD={_shell_quote(target_db_password)} "
+                        f"psql -h {target_db_host} -p {target_db_port} "
+                        f"-U {_shell_quote(target_db_user)} postgres "
+                        f'-c "CREATE DATABASE {target_db_name}" 2>&1 || true'
+                    )
+                    _, _co, _ce = ssh.exec_command(create_db_cmd, timeout=60)
+                    _co.channel.recv_exit_status()
+
+                    restore_cmd = (
+                        f"gunzip -c {remote_tmp} | "
+                        f"PGPASSWORD={_shell_quote(target_db_password)} "
+                        f"psql -h {target_db_host} -p {target_db_port} "
+                        f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)}"
+                    )
+                    verify_cmd = (
+                        f"PGPASSWORD={_shell_quote(target_db_password)} "
+                        f"psql -h {target_db_host} -p {target_db_port} "
+                        f"-U {_shell_quote(target_db_user)} {_shell_quote(target_db_name)} "
+                        f'-c "SELECT 1" 2>/dev/null'
+                    )
             elif db_type == "mysql":
                 # Ensure the target database exists before restoring into it.
                 create_db_cmd = (
@@ -205,18 +227,32 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                     f'--eval "db.runCommand({{ping:1}})"'
                 )
 
-            # timeout=180 prevents stdout.read() blocking forever if restore hangs.
-            # 2>/dev/null in restore_cmd prevents stderr buffer deadlock.
-            _, stdout, stderr = ssh.exec_command(restore_cmd, timeout=180)
-            exit_code = stdout.channel.recv_exit_status()
-            if exit_code != 0:
-                err = stderr.read(2048).decode(errors="replace")
-                raise RuntimeError(f"database_restore: restore failed (exit={exit_code}): {err}")
+            # Use get_pty for sudo-based postgres restore so the sudoers audit
+            # plugin initialises correctly. With a PTY, stderr merges into stdout,
+            # so drain stdout to avoid buffer deadlock and capture tail for errors.
+            _pty = db_type == "postgres" and _use_sudo  # noqa: F821
+            _, stdout, stderr = ssh.exec_command(restore_cmd, timeout=180, get_pty=_pty)
+            if _pty:
+                _out_tail = b""
+                while True:
+                    chunk = stdout.read(4096)
+                    if not chunk:
+                        break
+                    _out_tail = (_out_tail + chunk)[-512:]
+                exit_code = stdout.channel.recv_exit_status()
+                if exit_code != 0:
+                    err = _out_tail.decode(errors="replace")
+                    raise RuntimeError(f"database_restore: restore failed (exit={exit_code}): {err}")
+            else:
+                exit_code = stdout.channel.recv_exit_status()
+                if exit_code != 0:
+                    err = stderr.read(2048).decode(errors="replace")
+                    raise RuntimeError(f"database_restore: restore failed (exit={exit_code}): {err}")
 
-            _, vstdout, vstderr = ssh.exec_command(verify_cmd, timeout=60)
+            _, vstdout, vstderr = ssh.exec_command(verify_cmd, timeout=60, get_pty=_pty)
             vexit = vstdout.channel.recv_exit_status()
             if vexit != 0:
-                err = vstderr.read(2048).decode(errors="replace")
+                err = (vstdout.read(2048) if _pty else vstderr.read(2048)).decode(errors="replace")
                 raise RuntimeError(f"database_restore: verify failed (exit={vexit}): {err}")
 
             ssh.exec_command(f"rm -f {remote_tmp}")
