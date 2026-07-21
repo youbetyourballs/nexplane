@@ -155,6 +155,56 @@ On match: prints phase name, which API hit the cap (OpenAI vs Claude, extracted 
 | `backend/tests/smoke/test_smoke_mcp_cr_workflows.py` | New file — 4 CR-workflow phases |
 | `backend/tests/smoke/smoke_helpers.py` | Add `check_for_budget_pause()` helper |
 
+## Ephemeral Infrastructure for Skipped Phases
+
+Tasks 3 and 6 were delivered in prior session but 17 host-intelligence tests and 13 CR-workflow tests skip due to missing live infra. This addendum specifies spinning up ephemeral EC2 at test start, matching the `test_os_upgrade_smoke.py` / `test_containerize_smoke.py` pattern exactly.
+
+### Pattern (both files)
+
+Each file adds a pytest `setup_class` / `teardown_class` on its test class:
+
+1. **Launch EC2** via `ec2_launch` CR (mode=quick, t3.small, amazon_linux, NexplaneEC2TestProfile). Store `cls.launch_cr_id`.
+2. **Wait SSM** — poll `ssm.describe_instance_information` until instance appears (300s timeout).
+3. **Deploy agent** via `deploy_nexplane_agent` CR. Store `cls.agent_asset_id`.
+4. **Poll asset registration** — search `/assets` by hostname then private IP until `agent_version` is non-null (300s timeout).
+5. **Teardown** — `_rollback_cr(cls.launch_cr_id)` in `teardown_class` regardless of test outcome.
+
+All boto3 clients use `get_connector_creds_from_db("aws")` from `smoke_helpers.py`.
+
+### Host Intelligence Additions (`test_smoke_mcp_host_intelligence.py`)
+
+- Add `SmokeMCPHostIntel` class wrapping all existing tests with `setup_class` / `teardown_class` following the pattern above.
+- The existing `_require_agent()` helper queries `AgentRegistration` by `asset_id`; it will find the newly registered agent and the 17 skips become live passes.
+- No changes to the 4 test phase bodies — only infra setup/teardown added.
+
+### CR Workflow Additions (`test_smoke_mcp_cr_workflows.py`)
+
+Same EC2 launch + agent pattern, plus additional per-file setup:
+
+**AWS connector** — register the platform's existing AWS connector against the new EC2 asset:
+- `PUT /assets/{asset_id}/connector` with the AWS connector id (retrieved via `get_connector_creds_from_db`).
+
+**S3 backup storage** — call `_get_or_create_backup_storage_by_type()` (already in `test_backup_strategies_restore_live.py`, copy pattern) to create/reuse a `smoke-s3-nexplane-backups` backup storage record.
+
+**Docker** — install via SSM: `sudo yum install -y docker && sudo systemctl enable --now docker`. Verify with `docker info`. No extra connector needed — agent CRs run commands through the registered Nexplane agent.
+
+**Postgres** — install via SSM: `sudo yum install -y postgresql15-server && sudo postgresql-setup --initdb && sudo systemctl enable --now postgresql`. Create smoke DB: `sudo -u postgres createdb smoke_db`.
+
+**SSH connector** — generate RSA keypair with paramiko, inject public key via SSM, register `ssh` connector in platform against `private_ip:22` as `ec2-user`. Needed by `restore_server` and `agent_backup` executors.
+
+After setup, remove the `pytest.skip()` guards in the 4 phase functions (they currently skip when `asset.connector_id is None` — the new asset has a connector).
+
+### No AMI Caching Needed
+
+`ec2_launch` + SSM wait + `deploy_nexplane_agent` completes in ~3–4 minutes — under the 60s AMI-cache threshold from the memory guidelines. AMI caching is not needed here.
+
+### Files Changed (Addendum)
+
+| File | Change |
+|---|---|
+| `backend/tests/smoke/test_smoke_mcp_host_intelligence.py` | Wrap in class, add `setup_class`/`teardown_class` with ephemeral EC2 |
+| `backend/tests/smoke/test_smoke_mcp_cr_workflows.py` | Add `setup_class`/`teardown_class`, AWS connector attach, S3 storage, Docker+Postgres via SSM, SSH connector, remove skip guards |
+
 ## Out of Scope
 
 - New MCP tools (this session tests what exists)

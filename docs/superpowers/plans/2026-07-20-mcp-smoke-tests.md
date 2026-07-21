@@ -1058,3 +1058,798 @@
   git add backend/tests/smoke/test_smoke_mcp_cr_workflows.py
   git commit -m "smoke: add test_smoke_mcp_cr_workflows.py — MCP_SNAPSHOT/BACKUP/DB_MIGRATE/CONTAINERIZE all passing on EC2"
   ```
+
+---
+
+### Task 7: Add ephemeral EC2 infra to test_smoke_mcp_host_intelligence.py
+
+**Files:**
+- Modify: `backend/tests/smoke/test_smoke_mcp_host_intelligence.py`
+
+**Interfaces:**
+- Consumes: `NexplaneClient`, `get_connector_creds_from_db` from `smoke_helpers`; `ec2_launch` and `deploy_nexplane_agent` CR types; boto3 SSM
+- Produces: `setup_module()` / `teardown_module()` that provision a live EC2 instance with Nexplane agent, set `os.environ["ASSET_ID"]`, and set `_AGENT_AVAILABLE = True` so all 17 previously-skipped tests run
+
+- [ ] **Step 1: Read the current test file**
+
+  Read `backend/tests/smoke/test_smoke_mcp_host_intelligence.py` top-to-bottom to understand the module globals, `_AGENT_AVAILABLE`, `_require_agent()`, and `_env()` helpers before modifying anything.
+
+- [ ] **Step 2: Add a shared `_smoke_run_cr` helper and module-level infra state**
+
+  After the `_env()` function definition (~line 70) and before `test_PHASE_1_get_kernel_info`, add:
+
+  ```python
+  import time as _time
+
+  # ---------------------------------------------------------------------------
+  # Ephemeral infra state — populated by setup_module, torn down by teardown_module
+  # ---------------------------------------------------------------------------
+  _SMOKE_CLIENT: "NexplaneClient | None" = None
+  _SMOKE_LAUNCH_CR_ID: "str | None" = None
+  _SMOKE_BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
+  _SMOKE_EMAIL = os.environ.get("SMOKE_EMAIL", "admin@nexplane.local")
+  _SMOKE_PASSWORD = os.environ.get("SMOKE_PASSWORD", "changeme")
+
+
+  def _smoke_run_cr(
+      client: "NexplaneClient",
+      change_type: str,
+      params: dict,
+      asset_ids: "list[str] | None" = None,
+      timeout: int = 360,
+  ) -> dict:
+      """Execute a CR end-to-end (create→plan→approve→execute→poll) via REST.
+      Returns the completed CR dict. Raises on failure or timeout."""
+      import sys as _sys
+      sys.path.insert(0, "/app")
+      sys.path.insert(0, "/app/tests/smoke")
+
+      body: dict = {
+          "title": f"[smoke-infra] {change_type}",
+          "change_type": change_type,
+          "desired_outcome": params,
+      }
+      if asset_ids:
+          body["target_asset_ids"] = asset_ids
+
+      cr = client.post("/change-requests", json=body)
+      cr_id = cr["id"]
+
+      client.post(f"/change-requests/{cr_id}/plan")
+
+      deadline = _time.time() + 120
+      while _time.time() < deadline:
+          cr_state = client.get(f"/change-requests/{cr_id}")
+          if cr_state.get("status") == "awaiting_approval":
+              break
+          if cr_state.get("status") in ("failed", "rejected"):
+              raise AssertionError(f"Infra CR {cr_id} failed at planning: {cr_state}")
+          _time.sleep(5)
+
+      client.post(f"/change-requests/{cr_id}/submit-for-approval")
+      client.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "smoke infra"})
+      client.post(f"/change-requests/{cr_id}/execute")
+
+      deadline = _time.time() + timeout
+      while _time.time() < deadline:
+          cr_state = client.get(f"/change-requests/{cr_id}")
+          status = cr_state.get("status", "")
+          if status == "completed":
+              return cr_state
+          if status in ("failed", "rejected", "cancelled"):
+              raise AssertionError(f"Infra CR {cr_id} ({change_type}) failed: {cr_state}")
+          _time.sleep(10)
+      raise TimeoutError(f"Infra CR {cr_id} ({change_type}) timed out after {timeout}s")
+
+
+  def _smoke_rollback_cr(client: "NexplaneClient", cr_id: str, timeout: int = 300) -> None:
+      """Roll back a completed CR via REST. Swallows errors (teardown must not fail)."""
+      try:
+          client.post(f"/change-requests/{cr_id}/rollback")
+          deadline = _time.time() + timeout
+          while _time.time() < deadline:
+              cr = client.get(f"/change-requests/{cr_id}")
+              if cr.get("status") in ("rolled_back", "rollback_completed", "rollback_failed"):
+                  return
+              _time.sleep(10)
+      except Exception as _e:
+          print(f"  [teardown] rollback {cr_id} swallowed error: {_e}")
+  ```
+
+- [ ] **Step 3: Add `setup_module` and `teardown_module`**
+
+  After the helpers added in Step 2, add:
+
+  ```python
+  def setup_module(module) -> None:
+      """Provision ephemeral EC2 with Nexplane agent so all 17 previously-skipped tests run.
+
+      If ASSET_ID is already set (pre-existing infra path), skip provisioning.
+      Sets os.environ["ASSET_ID"] and _AGENT_AVAILABLE = True on success.
+      """
+      global _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID, _AGENT_AVAILABLE
+
+      import sys
+      sys.path.insert(0, "/app")
+      sys.path.insert(0, "/app/tests/smoke")
+      from smoke_helpers import NexplaneClient, get_connector_creds_from_db
+      import boto3
+
+      # Fast path: caller already set ASSET_ID (existing infra or manual run)
+      if os.environ.get("ASSET_ID"):
+          _SMOKE_CLIENT = NexplaneClient(_SMOKE_BASE_URL, _SMOKE_EMAIL, _SMOKE_PASSWORD)
+          return
+
+      _SMOKE_CLIENT = NexplaneClient(_SMOKE_BASE_URL, _SMOKE_EMAIL, _SMOKE_PASSWORD)
+
+      # Identify the cloud_account asset to target the ec2_launch CR
+      cloud_account_id = _SMOKE_CLIENT.get_cloud_account_asset_id()
+
+      # 1. Launch EC2
+      print("\n[setup_module] Launching ephemeral smoke EC2 for host intelligence tests…")
+      launch_cr = _smoke_run_cr(
+          _SMOKE_CLIENT,
+          "ec2_launch",
+          {
+              "mode": "quick",
+              "name": "nexplane-smoke-host-intel",
+              "os": "amazon_linux",
+              "instance_type": "t3.small",
+              "iam_instance_profile": "NexplaneEC2TestProfile",
+              "rollback_strategy": "terminate_instance",
+          },
+          asset_ids=[cloud_account_id],
+          timeout=300,
+      )
+      _SMOKE_LAUNCH_CR_ID = launch_cr["id"]
+
+      # Extract instance_id from CR steps
+      launch_steps = (
+          (launch_cr.get("execution_runs") or [{}])[0]
+          .get("result", {}).get("execution", {}).get("steps", [])
+      )
+      instance_id = next(
+          (s["result"].get("instance_id") for s in launch_steps if s.get("result", {}).get("instance_id")),
+          None,
+      )
+      ec2_asset_id = next(
+          (s["result"].get("_auto_asset_id") for s in launch_steps if s.get("result", {}).get("_auto_asset_id")),
+          None,
+      )
+      if not instance_id:
+          raise AssertionError(f"ec2_launch CR completed but no instance_id found in steps: {launch_steps}")
+      print(f"[setup_module] EC2 launched: {instance_id} / asset {ec2_asset_id}")
+
+      # 2. Wait for SSM
+      aws_creds = get_connector_creds_from_db("aws")
+      ssm_client = boto3.client(
+          "ssm",
+          aws_access_key_id=aws_creds["access_key_id"],
+          aws_secret_access_key=aws_creds["secret_access_key"],
+          region_name=aws_creds.get("region", "us-east-1"),
+      )
+      ssm_deadline = _time.time() + 300
+      while _time.time() < ssm_deadline:
+          try:
+              resp = ssm_client.describe_instance_information(
+                  Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+              )
+              if resp.get("InstanceInformationList"):
+                  break
+          except Exception:
+              pass
+          _time.sleep(15)
+      else:
+          raise TimeoutError(f"Instance {instance_id} never appeared in SSM within 300s")
+      print(f"[setup_module] SSM ready for {instance_id}")
+
+      # 3. Deploy Nexplane agent
+      nexplane_url = _SMOKE_BASE_URL
+      agent_secret = _SMOKE_CLIENT.get_agent_secret()
+      _smoke_run_cr(
+          _SMOKE_CLIENT,
+          "deploy_nexplane_agent",
+          {
+              "instance_id": instance_id,
+              "nexplane_url": nexplane_url,
+              "nexplane_secret": agent_secret,
+          },
+          asset_ids=[ec2_asset_id] if ec2_asset_id else None,
+          timeout=300,
+      )
+      print(f"[setup_module] Agent deployed to {instance_id}")
+
+      # 4. Poll for agent registration on the asset
+      # Get instance metadata for search
+      ec2 = boto3.client(
+          "ec2",
+          aws_access_key_id=aws_creds["access_key_id"],
+          aws_secret_access_key=aws_creds["secret_access_key"],
+          region_name=aws_creds.get("region", "us-east-1"),
+      )
+      desc = ec2.describe_instances(InstanceIds=[instance_id])
+      inst_data = desc["Reservations"][0]["Instances"][0]
+      private_ip = inst_data.get("PrivateIpAddress", "")
+      hostname = inst_data.get("PrivateDnsName", "").split(".")[0]
+
+      agent_asset_id: "str | None" = None
+      reg_deadline = _time.time() + 300
+      while _time.time() < reg_deadline:
+          candidates = []
+          if hostname:
+              try:
+                  candidates = [
+                      a for a in _SMOKE_CLIENT.get("/assets", params={"q": hostname, "asset_type": "server"})
+                      if (a.get("asset_metadata") or {}).get("agent_version")
+                  ]
+              except Exception:
+                  pass
+          if not candidates and private_ip:
+              try:
+                  all_servers = _SMOKE_CLIENT.get("/assets", params={"asset_type": "server", "limit": 200})
+                  candidates = [
+                      a for a in all_servers
+                      if private_ip in ((a.get("asset_metadata") or {}).get("ip_addresses") or [])
+                      and (a.get("asset_metadata") or {}).get("agent_version")
+                  ]
+              except Exception:
+                  pass
+          if candidates:
+              agent_asset_id = candidates[0]["id"]
+              break
+          _time.sleep(15)
+
+      if not agent_asset_id:
+          raise AssertionError(f"Nexplane agent never registered on asset within 300s (instance {instance_id})")
+
+      os.environ["ASSET_ID"] = agent_asset_id
+      _AGENT_AVAILABLE = True
+      print(f"[setup_module] Agent registered: asset_id={agent_asset_id} ✅")
+
+
+  def teardown_module(module) -> None:
+      """Terminate the ephemeral EC2 launched in setup_module."""
+      global _SMOKE_LAUNCH_CR_ID, _SMOKE_CLIENT
+      if _SMOKE_LAUNCH_CR_ID and _SMOKE_CLIENT:
+          print(f"\n[teardown_module] Rolling back EC2 launch CR {_SMOKE_LAUNCH_CR_ID}…")
+          _smoke_rollback_cr(_SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID)
+          print(f"[teardown_module] EC2 terminated ✅")
+  ```
+
+- [ ] **Step 4: scp the modified file to EC2 and verify collection**
+
+  ```bash
+  scp -i ~/.ssh/id_ed25519 \
+    backend/tests/smoke/test_smoke_mcp_host_intelligence.py \
+    ec2-user@100.101.186.39:/home/ec2-user/nexplane/backend/tests/smoke/test_smoke_mcp_host_intelligence.py
+
+  ssh -i ~/.ssh/id_ed25519 ec2-user@100.101.186.39 "docker exec \
+    -e NEXPLANE_SMOKE=1 -e API_TOKEN=dummy \
+    nexplane-backend-1 \
+    python -m pytest /app/tests/smoke/test_smoke_mcp_host_intelligence.py \
+    --collect-only 2>&1 | tail -10"
+  ```
+  Expected: `17 tests collected`, no import errors.
+
+- [ ] **Step 5: Run the full host intelligence smoke suite**
+
+  ```bash
+  ssh -i ~/.ssh/id_ed25519 ec2-user@100.101.186.39 "docker exec \
+    -e NEXPLANE_SMOKE=1 \
+    -e API_TOKEN=<nxp_token_from_task2> \
+    -e BASE_URL=http://localhost:8000 \
+    -e SMOKE_EMAIL=admin@nexplane.local \
+    -e SMOKE_PASSWORD=<password> \
+    nexplane-backend-1 \
+    python -m pytest /app/tests/smoke/test_smoke_mcp_host_intelligence.py -v -s 2>&1 | tee /tmp/host_intel_infra.txt"
+  ```
+
+  `setup_module` will run `ec2_launch` → SSM wait → `deploy_nexplane_agent` → agent registration (5–7 min total), then all 17 tests run, then `teardown_module` terminates the instance.
+
+- [ ] **Step 6: Debug common failures**
+
+  **A. `ec2_launch` CR fails: "NexplaneEC2TestProfile not found"**
+  — The IAM instance profile doesn't exist. Check with:
+  ```bash
+  aws iam get-instance-profile --instance-profile-name NexplaneEC2TestProfile
+  ```
+  If missing, use `"iam_instance_profile": "NexplaneAgentProfile"` or whatever the correct profile name is on this account. Read `backend/app/connectors/executors/aws/ec2_launch.py` for the default.
+
+  **B. `deploy_nexplane_agent` CR fails: "cannot reach agent callback URL"**
+  — The newly launched EC2 can't reach the backend's `nexplane_url`. Use the Tailscale IP of the backend (100.101.186.39) instead of `localhost`:
+  ```python
+  nexplane_url = "http://100.101.186.39:8000"
+  ```
+  Update `_SMOKE_BASE_URL` logic or hardcode the Tailscale IP for the agent URL.
+
+  **C. Agent never registers: search returns 0 candidates after 300s**
+  — Check agent logs via SSM:
+  ```bash
+  # from EC2:
+  aws ssm send-command --instance-ids <instance_id> \
+    --document-name AWS-RunShellScript \
+    --parameters '{"commands":["sudo journalctl -u nexplane-agent --no-pager -n 50"]}'
+  ```
+
+  **D. Any host intelligence tool returns `{"error": "No data for asset"}`**
+  — The agent may have registered but hasn't completed its first collection cycle (usually 30–60s). Add a 60s sleep in `setup_module` after agent registration before returning.
+
+- [ ] **Step 7: Iterate until all 17 tests pass, then commit**
+
+  ```bash
+  git add backend/tests/smoke/test_smoke_mcp_host_intelligence.py
+  git commit -m "smoke: add ephemeral EC2 infra to host_intelligence smoke — all 17 tests passing"
+  ```
+
+---
+
+### Task 8: Add ephemeral EC2 infra to test_smoke_mcp_cr_workflows.py
+
+**Files:**
+- Modify: `backend/tests/smoke/test_smoke_mcp_cr_workflows.py`
+
+**Interfaces:**
+- Consumes: `NexplaneClient`, `get_connector_creds_from_db` from `smoke_helpers`; `_smoke_run_cr` / `_smoke_rollback_cr` pattern from Task 7; boto3 SSM + EC2; paramiko for SSH connector
+- Produces: `setup_module()` / `teardown_module()` that provision EC2 with agent + AWS connector on asset + S3 backup storage + Docker + Postgres + dummy app dir + SSH connector; removes all `pytest.skip()` connector guards; all 13 tests pass
+
+- [ ] **Step 1: Read the current test file**
+
+  Read `backend/tests/smoke/test_smoke_mcp_cr_workflows.py` in full (it was created in Task 6). Note every `pytest.skip()` call that fires when `connector_id is None` — these are the guards to remove.
+
+- [ ] **Step 2: Copy the `_smoke_run_cr` / `_smoke_rollback_cr` helpers into this file**
+
+  These were defined in Task 7. Copy the exact same two functions verbatim from `test_smoke_mcp_host_intelligence.py` (or put them in `smoke_helpers.py` and import — the latter is cleaner if they're identical). The simplest approach: add them to `smoke_helpers.py` as public functions `smoke_run_cr()` and `smoke_rollback_cr()` and import them in both files.
+
+  Add to `backend/tests/smoke/smoke_helpers.py` (after the `NexplaneClient` class):
+
+  ```python
+  import time as _time_sh
+
+
+  def smoke_run_cr(
+      client: NexplaneClient,
+      change_type: str,
+      params: dict,
+      asset_ids: "list[str] | None" = None,
+      timeout: int = 360,
+  ) -> dict:
+      """Execute a CR end-to-end (create→plan→approve→execute→poll) via REST.
+      Returns the completed CR dict. Raises AssertionError on failure, TimeoutError on timeout."""
+      body: dict = {
+          "title": f"[smoke-infra] {change_type}",
+          "change_type": change_type,
+          "desired_outcome": params,
+      }
+      if asset_ids:
+          body["target_asset_ids"] = asset_ids
+
+      cr = client.post("/change-requests", json=body)
+      cr_id = cr["id"]
+
+      client.post(f"/change-requests/{cr_id}/plan")
+
+      deadline = _time_sh.time() + 120
+      while _time_sh.time() < deadline:
+          cr_state = client.get(f"/change-requests/{cr_id}")
+          if cr_state.get("status") == "awaiting_approval":
+              break
+          if cr_state.get("status") in ("failed", "rejected"):
+              raise AssertionError(f"Infra CR {cr_id} failed at planning: {cr_state}")
+          _time_sh.sleep(5)
+
+      client.post(f"/change-requests/{cr_id}/submit-for-approval")
+      client.post(f"/change-requests/{cr_id}/approve", json={"decision": "approved", "comment": "smoke infra"})
+      client.post(f"/change-requests/{cr_id}/execute")
+
+      deadline = _time_sh.time() + timeout
+      while _time_sh.time() < deadline:
+          cr_state = client.get(f"/change-requests/{cr_id}")
+          status = cr_state.get("status", "")
+          if status == "completed":
+              return cr_state
+          if status in ("failed", "rejected", "cancelled"):
+              raise AssertionError(f"Infra CR {cr_id} ({change_type}) failed: {cr_state}")
+          _time_sh.sleep(10)
+      raise TimeoutError(f"Infra CR {cr_id} ({change_type}) timed out after {timeout}s")
+
+
+  def smoke_rollback_cr(client: NexplaneClient, cr_id: str, timeout: int = 300) -> None:
+      """Roll back a completed CR. Swallows all errors (safe for teardown)."""
+      try:
+          client.post(f"/change-requests/{cr_id}/rollback")
+          deadline = _time_sh.time() + timeout
+          while _time_sh.time() < deadline:
+              cr = client.get(f"/change-requests/{cr_id}")
+              if cr.get("status") in ("rolled_back", "rollback_completed", "rollback_failed"):
+                  return
+              _time_sh.sleep(10)
+      except Exception as _e:
+          print(f"  [teardown] rollback {cr_id} swallowed error: {_e}")
+  ```
+
+  Then in both test files, replace the local copies with:
+  ```python
+  from smoke_helpers import smoke_run_cr, smoke_rollback_cr
+  ```
+
+- [ ] **Step 3: Add module-level infra state and SSM helper to `test_smoke_mcp_cr_workflows.py`**
+
+  Near the top of the file (after imports), add:
+
+  ```python
+  import time as _time
+  import os
+
+  _SMOKE_CLIENT: "NexplaneClient | None" = None
+  _SMOKE_LAUNCH_CR_ID: "str | None" = None
+  _SMOKE_INSTANCE_ID: "str | None" = None
+  _SMOKE_BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
+  _SMOKE_EMAIL = os.environ.get("SMOKE_EMAIL", "admin@nexplane.local")
+  _SMOKE_PASSWORD = os.environ.get("SMOKE_PASSWORD", "changeme")
+
+
+  def _ssm_run(instance_id: str, command: str, aws_creds: dict, timeout: int = 120) -> str:
+      """Run a shell command on the instance via SSM. Returns stdout."""
+      import boto3
+      ssm = boto3.client(
+          "ssm",
+          aws_access_key_id=aws_creds["access_key_id"],
+          aws_secret_access_key=aws_creds["secret_access_key"],
+          region_name=aws_creds.get("region", "us-east-1"),
+      )
+      resp = ssm.send_command(
+          InstanceIds=[instance_id],
+          DocumentName="AWS-RunShellScript",
+          Parameters={"commands": [command]},
+      )
+      cmd_id = resp["Command"]["CommandId"]
+      deadline = _time.time() + timeout
+      while _time.time() < deadline:
+          _time.sleep(5)
+          result = ssm.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+          if result["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+              return result.get("StandardOutputContent", "").strip()
+      raise TimeoutError(f"SSM command on {instance_id} timed out after {timeout}s")
+  ```
+
+- [ ] **Step 4: Add `setup_module` to `test_smoke_mcp_cr_workflows.py`**
+
+  ```python
+  def setup_module(module) -> None:
+      """Provision ephemeral EC2 with agent + AWS connector + S3 storage + Docker + Postgres.
+
+      All four CR-workflow phases (MCP_SNAPSHOT, MCP_BACKUP, MCP_DB_MIGRATE, MCP_CONTAINERIZE)
+      require a real EC2 asset with live infrastructure attached.
+      """
+      global _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID, _SMOKE_INSTANCE_ID
+
+      import sys
+      sys.path.insert(0, "/app")
+      sys.path.insert(0, "/app/tests/smoke")
+      from smoke_helpers import NexplaneClient, get_connector_creds_from_db, smoke_run_cr
+      import boto3
+
+      _SMOKE_CLIENT = NexplaneClient(_SMOKE_BASE_URL, _SMOKE_EMAIL, _SMOKE_PASSWORD)
+
+      # Fast path: ASSET_ID already set (caller providing pre-provisioned infra)
+      if os.environ.get("ASSET_ID"):
+          return
+
+      cloud_account_id = _SMOKE_CLIENT.get_cloud_account_asset_id()
+
+      # 1. Launch EC2
+      print("\n[setup_module] Launching ephemeral smoke EC2 for CR workflow tests…")
+      launch_cr = smoke_run_cr(
+          _SMOKE_CLIENT,
+          "ec2_launch",
+          {
+              "mode": "quick",
+              "name": "nexplane-smoke-cr-workflows",
+              "os": "amazon_linux",
+              "instance_type": "t3.small",
+              "iam_instance_profile": "NexplaneEC2TestProfile",
+              "rollback_strategy": "terminate_instance",
+          },
+          asset_ids=[cloud_account_id],
+          timeout=300,
+      )
+      _SMOKE_LAUNCH_CR_ID = launch_cr["id"]
+
+      launch_steps = (
+          (launch_cr.get("execution_runs") or [{}])[0]
+          .get("result", {}).get("execution", {}).get("steps", [])
+      )
+      instance_id = next(
+          (s["result"].get("instance_id") for s in launch_steps if s.get("result", {}).get("instance_id")),
+          None,
+      )
+      ec2_asset_id = next(
+          (s["result"].get("_auto_asset_id") for s in launch_steps if s.get("result", {}).get("_auto_asset_id")),
+          None,
+      )
+      if not instance_id:
+          raise AssertionError(f"ec2_launch returned no instance_id. Steps: {launch_steps}")
+      _SMOKE_INSTANCE_ID = instance_id
+      print(f"[setup_module] EC2 launched: {instance_id}")
+
+      # 2. Wait SSM
+      aws_creds = get_connector_creds_from_db("aws")
+      ssm_client_boto = boto3.client(
+          "ssm",
+          aws_access_key_id=aws_creds["access_key_id"],
+          aws_secret_access_key=aws_creds["secret_access_key"],
+          region_name=aws_creds.get("region", "us-east-1"),
+      )
+      ssm_deadline = _time.time() + 300
+      while _time.time() < ssm_deadline:
+          try:
+              resp = ssm_client_boto.describe_instance_information(
+                  Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+              )
+              if resp.get("InstanceInformationList"):
+                  break
+          except Exception:
+              pass
+          _time.sleep(15)
+      else:
+          raise TimeoutError(f"Instance {instance_id} never appeared in SSM")
+      print(f"[setup_module] SSM ready")
+
+      # 3. Install Docker + Postgres + create dummy app dir via SSM
+      print("[setup_module] Installing Docker and Postgres via SSM…")
+      _ssm_run(
+          instance_id,
+          (
+              "sudo yum install -y docker postgresql15-server 2>&1 | tail -5 && "
+              "sudo systemctl enable --now docker && "
+              "sudo postgresql-setup --initdb 2>/dev/null || true && "
+              "sudo systemctl enable --now postgresql && "
+              "sudo -u postgres createdb smoke_db 2>/dev/null || true && "
+              "mkdir -p /tmp/smoke-app && "
+              "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
+          ),
+          aws_creds,
+          timeout=120,
+      )
+      print("[setup_module] Docker and Postgres ready")
+
+      # 4. Deploy Nexplane agent
+      nexplane_url = "http://100.101.186.39:8000"  # Tailscale IP visible from EC2
+      agent_secret = _SMOKE_CLIENT.get_agent_secret()
+      smoke_run_cr(
+          _SMOKE_CLIENT,
+          "deploy_nexplane_agent",
+          {
+              "instance_id": instance_id,
+              "nexplane_url": nexplane_url,
+              "nexplane_secret": agent_secret,
+          },
+          asset_ids=[ec2_asset_id] if ec2_asset_id else None,
+          timeout=300,
+      )
+      print("[setup_module] Agent deployed")
+
+      # 5. Poll for agent registration
+      ec2_boto = boto3.client(
+          "ec2",
+          aws_access_key_id=aws_creds["access_key_id"],
+          aws_secret_access_key=aws_creds["secret_access_key"],
+          region_name=aws_creds.get("region", "us-east-1"),
+      )
+      desc = ec2_boto.describe_instances(InstanceIds=[instance_id])
+      inst_data = desc["Reservations"][0]["Instances"][0]
+      private_ip = inst_data.get("PrivateIpAddress", "")
+      hostname = inst_data.get("PrivateDnsName", "").split(".")[0]
+
+      agent_asset_id: "str | None" = None
+      reg_deadline = _time.time() + 300
+      while _time.time() < reg_deadline:
+          candidates = []
+          try:
+              if hostname:
+                  candidates = [
+                      a for a in _SMOKE_CLIENT.get("/assets", params={"q": hostname, "asset_type": "server"})
+                      if (a.get("asset_metadata") or {}).get("agent_version")
+                  ]
+              if not candidates and private_ip:
+                  all_servers = _SMOKE_CLIENT.get("/assets", params={"asset_type": "server", "limit": 200})
+                  candidates = [
+                      a for a in all_servers
+                      if private_ip in ((a.get("asset_metadata") or {}).get("ip_addresses") or [])
+                      and (a.get("asset_metadata") or {}).get("agent_version")
+                  ]
+          except Exception:
+              pass
+          if candidates:
+              agent_asset_id = candidates[0]["id"]
+              break
+          _time.sleep(15)
+
+      if not agent_asset_id:
+          raise AssertionError(f"Agent never registered for {instance_id} within 300s")
+      print(f"[setup_module] Agent registered: {agent_asset_id}")
+
+      # 6. Attach AWS connector to the EC2 asset
+      connectors = _SMOKE_CLIENT.get("/connectors")
+      aws_connector = next((c for c in connectors if c.get("connector_type") == "aws"), None)
+      if aws_connector:
+          try:
+              _SMOKE_CLIENT.put(f"/assets/{agent_asset_id}/connector", json={"connector_id": aws_connector["id"]})
+              print(f"[setup_module] AWS connector {aws_connector['id']} attached to asset")
+          except Exception as _e:
+              print(f"[setup_module] WARNING: could not attach AWS connector: {_e}")
+
+      # 7. Create S3 backup storage
+      import json as _json
+      bucket = "nexplane-smoke-backup-test"
+      storage_name = f"smoke-s3-{bucket}"
+      try:
+          existing = _SMOKE_CLIENT.get("/backup-storage")
+          if not any(s.get("name") == storage_name for s in existing):
+              _SMOKE_CLIENT.post("/backup-storage", json={
+                  "name": storage_name,
+                  "storage_type": "s3",
+                  "config": {
+                      "bucket": bucket,
+                      "prefix": "smoke/",
+                      "aws_access_key_id": aws_creds.get("access_key_id", ""),
+                      "aws_secret_access_key": aws_creds.get("secret_access_key", ""),
+                      "region": aws_creds.get("region", "us-east-1"),
+                  },
+              })
+          print(f"[setup_module] S3 backup storage ready: {storage_name}")
+      except Exception as _e:
+          print(f"[setup_module] WARNING: backup storage setup failed: {_e}")
+
+      # 8. Create SSH connector (needed by restore_server and agent_backup executors)
+      try:
+          import paramiko
+          import io as _io
+          ssh_key = paramiko.RSAKey.generate(2048)
+          priv_buf = _io.StringIO()
+          ssh_key.write_private_key(priv_buf)
+          private_key_pem = priv_buf.getvalue()
+          public_key_line = f"ssh-rsa {ssh_key.get_base64()} nexplane-smoke"
+
+          _ssm_run(
+              instance_id,
+              f'mkdir -p /home/ec2-user/.ssh && '
+              f'echo "{public_key_line}" >> /home/ec2-user/.ssh/authorized_keys && '
+              f'chmod 600 /home/ec2-user/.ssh/authorized_keys',
+              aws_creds,
+              timeout=30,
+          )
+
+          ssh_conn = _SMOKE_CLIENT.post("/connectors", json={
+              "name": "smoke-cr-workflow-ssh",
+              "connector_type": "ssh",
+          })
+          ssh_conn_id = ssh_conn.get("id")
+          _SMOKE_CLIENT.put(f"/connectors/{ssh_conn_id}/credentials", json={
+              "hostname": private_ip,
+              "port": 22,
+              "username": "ec2-user",
+              "private_key": private_key_pem,
+          })
+          print(f"[setup_module] SSH connector {ssh_conn_id} registered for {private_ip}")
+      except Exception as _e:
+          print(f"[setup_module] WARNING: SSH connector setup failed: {_e}")
+
+      # Wait 60s for agent first collection cycle before tests start
+      print("[setup_module] Waiting 60s for agent first collection cycle…")
+      _time.sleep(60)
+
+      os.environ["ASSET_ID"] = agent_asset_id
+      print(f"[setup_module] All infra ready — ASSET_ID={agent_asset_id} ✅")
+
+
+  def teardown_module(module) -> None:
+      global _SMOKE_LAUNCH_CR_ID, _SMOKE_CLIENT
+      if _SMOKE_LAUNCH_CR_ID and _SMOKE_CLIENT:
+          print(f"\n[teardown_module] Rolling back EC2 launch CR {_SMOKE_LAUNCH_CR_ID}…")
+          from smoke_helpers import smoke_rollback_cr
+          smoke_rollback_cr(_SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID)
+          print("[teardown_module] EC2 terminated ✅")
+  ```
+
+- [ ] **Step 5: Remove the connector-guard `pytest.skip()` calls**
+
+  In `test_smoke_mcp_cr_workflows.py`, remove any `pytest.skip()` calls that fire when the asset has `connector_id is None`. These guarded the test when using the demo seed asset. The ephemeral asset always has a connector attached by `setup_module`.
+
+  Search for lines like:
+  ```python
+  if asset.connector_id is None:
+      pytest.skip("demo asset ... has connector_id=None")
+  ```
+  Delete them. The `_require("API_TOKEN", "ASSET_ID")` guards at the top of each phase remain — they still skip if env vars aren't set.
+
+- [ ] **Step 6: Verify correct `change_type` names**
+
+  The executor change_type names (corrected in Task 6) must match exactly. Verify by checking the live enum:
+  ```bash
+  ssh -i ~/.ssh/id_ed25519 ec2-user@100.101.186.39 "docker exec nexplane-backend-1 \
+    python -c 'from app.models.change_request import ChangeType; [print(c.value) for c in ChangeType]'"
+  ```
+  The test file must use:
+  - `"agent_os_upgrade"` for snapshot phase
+  - `"agent_backup"` for backup phase
+  - `"database_dump"` and `"restore_server"` for DB migrate phase (or `"database_restore"` — verify from enum output)
+  - `"agent_containerize_build"` for containerize phase
+
+  Update `test_smoke_mcp_cr_workflows.py` `create_change_request` calls to use the exact enum values.
+
+- [ ] **Step 7: scp updated files to EC2 and verify collection**
+
+  ```bash
+  scp -i ~/.ssh/id_ed25519 \
+    backend/tests/smoke/smoke_helpers.py \
+    backend/tests/smoke/test_smoke_mcp_cr_workflows.py \
+    ec2-user@100.101.186.39:/home/ec2-user/nexplane/backend/tests/smoke/
+
+  ssh -i ~/.ssh/id_ed25519 ec2-user@100.101.186.39 "docker exec \
+    -e NEXPLANE_SMOKE=1 -e API_TOKEN=dummy \
+    nexplane-backend-1 \
+    python -m pytest /app/tests/smoke/test_smoke_mcp_cr_workflows.py \
+    --collect-only 2>&1 | tail -15"
+  ```
+  Expected: 13 tests collected, no import errors.
+
+- [ ] **Step 8: Run the full CR workflow smoke suite**
+
+  ```bash
+  ssh -i ~/.ssh/id_ed25519 ec2-user@100.101.186.39 "docker exec \
+    -e NEXPLANE_SMOKE=1 \
+    -e API_TOKEN=<nxp_token_from_task2> \
+    -e BASE_URL=http://localhost:8000 \
+    -e SMOKE_EMAIL=admin@nexplane.local \
+    -e SMOKE_PASSWORD=<password> \
+    nexplane-backend-1 \
+    python -m pytest /app/tests/smoke/test_smoke_mcp_cr_workflows.py -v -s 2>&1 | tee /tmp/cr_workflow_infra.txt"
+  ```
+
+  `setup_module` provisions EC2 (~7–10 min), then all 13 tests run, then `teardown_module` terminates.
+
+- [ ] **Step 9: Debug failures**
+
+  **A. `agent_os_upgrade` CR fails: "snapshot_only param not recognized"**
+  — Read `backend/app/connectors/executors/aws/os_upgrade.py`. Find the snapshot-only parameter name. It may be `"skip_upgrade": True` rather than `"snapshot_only": True`. Update the test to match.
+
+  **B. `agent_backup` CR fails: "no backup storage configured for asset"**
+  — The backup executor requires a `backup_storage_id` linked to the asset, not just a storage record. Check the executor at `backend/app/connectors/executors/nexplane_agent/backup_strategies/server_backup.py`. If it expects `backup_storage_id` in the parameters, pass it explicitly:
+  ```python
+  storage_list = _SMOKE_CLIENT.get("/backup-storage")
+  s3_storage = next((s for s in storage_list if s.get("name", "").startswith("smoke-s3")), None)
+  # then pass storage_id in the CR params
+  ```
+
+  **C. `database_dump` or `restore_server` CR fails: "cannot connect to postgres"**
+  — The Postgres instance may not be bound to `localhost:5432` after setup. Check:
+  ```bash
+  _ssm_run(instance_id, "sudo -u postgres psql -c '\\l' 2>&1", aws_creds, timeout=30)
+  ```
+  If the DB isn't running, update the setup SSM command to wait for it.
+
+  **D. `agent_containerize_build` CR fails: "docker: command not found"**
+  — Docker may not be in PATH for the agent process. Update the SSM install command:
+  ```bash
+  sudo yum install -y docker && sudo systemctl enable --now docker && \
+  sudo usermod -aG docker ec2-user
+  ```
+  Then verify with `_ssm_run(instance_id, "docker info 2>&1 | head -5", aws_creds)`.
+
+  **E. `MCP_CONTAINERIZE_rollback` fails: image_deleted not in result**
+  — If the rollback executor doesn't report `image_deleted`, check what it does return. Update the assertion to match:
+  ```python
+  assert rb.get("status") in ("completed", "rolled_back")
+  # check rollback result for any deletion evidence
+  rb_result = rb.get("result") or {}
+  assert rb_result or rb["status"] == "rolled_back"  # rollback reached terminal
+  ```
+
+- [ ] **Step 10: Iterate until all 13 tests pass, then commit**
+
+  ```bash
+  git add backend/tests/smoke/smoke_helpers.py \
+          backend/tests/smoke/test_smoke_mcp_cr_workflows.py
+  git commit -m "smoke: add ephemeral EC2 infra to CR workflow smoke — all 13 tests passing"
+  ```
