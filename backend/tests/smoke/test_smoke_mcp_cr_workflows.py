@@ -957,6 +957,7 @@ async def test_MCP_DB_MIGRATE_restore():
     if result_cr["status"] in ("preflight_failed", "failed"):
         exec_result = await _db_get_execution_result(cr_id)
         _STATE.pop("restore_cr_id", None)  # don't let ground_truth check a failed CR
+        log(f"MCP_DB_MIGRATE restore FAILED: status={result_cr['status']} exec_result={exec_result}")
         pytest.skip(
             f"restore_server(database_restore) {result_cr['status']}. exec_result={exec_result}"
         )
