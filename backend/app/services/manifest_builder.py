@@ -40,6 +40,7 @@ _DOMAIN_PREFIXES: list[tuple[list[str], str]] = [
     (["backup_", "create_backup", "verify_backup", "restore_", "dr_"], "backup_dr"),
     (["microsegmentation_", "security_group_", "dns_",
       "deploy_nexplane_", "tailscale_"], "networking"),
+    (["isolate_", "lockdown_", "preserve_evidence", "phishing_"], "incident_response"),
 ]
 
 

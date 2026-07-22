@@ -48,23 +48,19 @@ async def test_server_backup_execute_returns_artifact_refs():
             "prefix": "backups/org/asset/cr/",
             "artifacts": {"snapshot_ids": ["snap-123"]},
         },
+        "_asset_ids": ["00000000-0000-0000-0000-000000000003"],
     }
 
+    mock_strategy = MagicMock()
+    mock_strategy.backup = AsyncMock(return_value=fake_result)
+
     with patch(
-        "app.connectors.executors.nexplane_agent.server_backup._do_backup",
-        new_callable=AsyncMock,
-        return_value=fake_result,
-    ), patch(
-        "app.connectors.executors.nexplane_agent.server_backup._load_aws_creds",
-        new_callable=AsyncMock,
-        return_value=mock_connector.credentials,
-    ), patch(
-        "app.connectors.executors.nexplane_agent.server_backup._load_storage_config",
-        new_callable=AsyncMock,
-        return_value={"storage_type": "s3", "config": {"bucket": "test-bucket", "prefix": "backups/org/asset/cr/"}},
+        "app.connectors.executors.nexplane_agent.server_backup.get_strategy",
+        return_value=mock_strategy,
     ):
         result = await execute(
             parameters={
+                "capture_strategy": "ebs_snapshot",
                 "aws_connector_id": "00000000-0000-0000-0000-000000000001",
                 "backup_storage_id": "00000000-0000-0000-0000-000000000002",
                 "instance_id": "i-0abc123",
@@ -85,6 +81,7 @@ async def test_server_backup_rollback_deletes_artifacts():
     execution_result = {
         "_asset_ids": ["00000000-0000-0000-0000-000000000003"],
         "artifact_refs": {
+            "capture_strategy": "ebs_snapshot",
             "storage_type": "s3",
             "bucket_or_path": "test-bucket",
             "prefix": "backups/org/asset/cr/",
@@ -92,20 +89,15 @@ async def test_server_backup_rollback_deletes_artifacts():
         },
     }
 
-    mock_ec2 = MagicMock()
-    mock_ec2.delete_snapshot = MagicMock()
+    mock_strategy = MagicMock()
+    mock_strategy.rollback = AsyncMock(return_value={
+        "rolled_back": True,
+        "deleted_snapshots": ["snap-123", "snap-456"],
+    })
 
     with patch(
-        "app.connectors.executors.nexplane_agent.server_backup._delete_s3_prefix",
-        new_callable=AsyncMock,
-        return_value={"deleted_count": 1},
-    ), patch(
-        "app.connectors.executors.nexplane_agent.server_backup._load_aws_creds",
-        new_callable=AsyncMock,
-        return_value={},
-    ), patch(
-        "app.connectors.executors.nexplane_agent.server_backup._ec2_client",
-        return_value=mock_ec2,
+        "app.connectors.executors.nexplane_agent.server_backup.get_strategy",
+        return_value=mock_strategy,
     ):
         result = await rollback(
             parameters={},
@@ -115,8 +107,6 @@ async def test_server_backup_rollback_deletes_artifacts():
 
     assert result.get("rolled_back") is True
     assert result.get("deleted_snapshots") == ["snap-123", "snap-456"]
-    mock_ec2.delete_snapshot.assert_any_call(SnapshotId="snap-123")
-    mock_ec2.delete_snapshot.assert_any_call(SnapshotId="snap-456")
 
 
 @pytest.mark.asyncio
@@ -250,14 +240,15 @@ async def test_restore_server_rollback_terminates_instance():
         "_asset_ids": ["00000000-0000-0000-0000-000000000003"],
         "new_instance_id": "i-0new123",
         "restore_mode": "hybrid",
+        "artifact_refs": {"restore_strategy": "launch_ami"},
     }
 
+    mock_strategy = MagicMock()
+    mock_strategy.rollback = AsyncMock(return_value={"rolled_back": True, "terminated_instance_id": "i-0new123"})
+
     with patch(
-        "app.connectors.executors.nexplane_agent.restore_server._load_aws_creds",
-        new_callable=AsyncMock, return_value={"aws_region": "us-east-1"},
-    ), patch(
-        "app.connectors.executors.nexplane_agent.restore_server._terminate_instance",
-        new_callable=AsyncMock, return_value={"rolled_back": True, "terminated_instance_id": "i-0new123"},
+        "app.connectors.executors.nexplane_agent.restore_strategies.get_strategy",
+        return_value=mock_strategy,
     ):
         result = await rollback(
             parameters={"aws_connector_id": "00000000-0000-0000-0000-000000000001"},

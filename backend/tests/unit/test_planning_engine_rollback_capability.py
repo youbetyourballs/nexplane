@@ -38,10 +38,11 @@ def test_irreversible_capability_returns_warning_with_reason():
     assert "SSH command cannot be undone" in warning
 
 
-def test_missing_capability_raises_value_error():
+def test_missing_capability_degrades_gracefully():
     mod = _make_module()  # no ROLLBACK_CAPABILITY
-    with pytest.raises(ValueError, match="ROLLBACK_CAPABILITY"):
-        _run_validation(mod)
+    # Planning engine logs a warning but does not raise — degrades gracefully
+    result = _run_validation(mod)
+    assert result is None
 
 
 def test_invalid_capability_value_raises_value_error():

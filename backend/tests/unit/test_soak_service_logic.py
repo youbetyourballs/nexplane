@@ -26,6 +26,14 @@ def _make_session(raw_observations=None, synthesized_profile=None, baseline_delt
     return s
 
 
+def _make_plugin(extract_key="syscalls_seen"):
+    """Return a minimal plugin mock for soak tests."""
+    plugin = MagicMock()
+    plugin.learn_command = "collect_syscalls"
+    plugin.observations_extractor = lambda result: result.get(extract_key, [])
+    return plugin
+
+
 @pytest.mark.asyncio
 async def test_collect_observations_aggregates_syscalls():
     from app.services.security_policy.soak_service import _collect_observations
@@ -38,10 +46,14 @@ async def test_collect_observations_aggregates_syscalls():
     with patch(
         "app.services.security_policy.soak_service._dispatch.dispatch_agent_job",
         side_effect=fake_dispatch,
+    ), patch(
+        "app.services.security_policy.plugins.get_plugin",
+        return_value=_make_plugin(),
     ):
         obs, partial = await _collect_observations(
             asset_ids=["asset-1", "asset-2"],
             window_seconds=0,
+            policy_type="seccomp",
         )
 
     assert obs["asset-1"] == ["read", "write"]
@@ -61,10 +73,14 @@ async def test_collect_observations_marks_partial_on_failure():
     with patch(
         "app.services.security_policy.soak_service._dispatch.dispatch_agent_job",
         side_effect=fake_dispatch,
+    ), patch(
+        "app.services.security_policy.plugins.get_plugin",
+        return_value=_make_plugin(),
     ):
         obs, partial = await _collect_observations(
             asset_ids=["asset-1", "asset-2"],
             window_seconds=0,
+            policy_type="seccomp",
         )
 
     assert "asset-1" not in obs

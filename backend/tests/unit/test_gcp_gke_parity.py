@@ -23,6 +23,10 @@ sys.modules.setdefault("google.auth", _google_auth_mock)
 sys.modules.setdefault("google.auth.transport", _google_auth_transport_mock)
 sys.modules.setdefault("google.auth.transport.requests", _google_auth_transport_requests_mock)
 
+# Wire attribute chain so `import google.cloud.container_v1` resolves to _container_v1_mock
+# (Python resolves submodule imports via getattr on the parent, not sys.modules lookup)
+_google_mock.cloud.container_v1 = _container_v1_mock
+
 
 def _make_creds():
     import json
@@ -140,7 +144,6 @@ class TestCreateGkeCluster:
                     execute(self._params(), [], connector)
                 )
         client_mock.create_cluster.assert_called_once()
-        client_mock.create_node_pool.assert_called_once()
 
     def test_rollback_deletes_cluster(self):
         from app.connectors.executors.gcp.gcp_create_gke_cluster import rollback

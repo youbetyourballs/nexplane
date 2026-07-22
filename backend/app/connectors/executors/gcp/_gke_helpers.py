@@ -11,7 +11,7 @@ async def poll_gke_operation(client, op_name: str, timeout: int, project_id: str
     op_name may be a short name (operation-xxx) or a full resource path.
     If short, project_id and location are required to build the full path.
     """
-    from google.cloud import container_v1
+    import google.cloud.container_v1 as container_v1
     loop = asyncio.get_event_loop()
 
     # Normalise to full resource path

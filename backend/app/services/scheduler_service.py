@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler(timezone="UTC")
 _db_factory = None
 
-
 def init_scheduler(db_factory):
     global _db_factory
     _db_factory = db_factory
@@ -22,57 +21,6 @@ def init_scheduler(db_factory):
 async def start():
     scheduler.start()
     logger.info("APScheduler started")
-
-    # Register vulnerability background jobs
-    scheduler.add_job(
-        _run_sla_enforcement,
-        trigger="interval",
-        minutes=15,
-        id="sla_enforcement",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _run_finding_asset_match,
-        trigger="interval",
-        minutes=5,
-        id="finding_asset_match",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _run_scanner_poll,
-        trigger="interval",
-        hours=6,
-        id="scanner_poll",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _run_vuln_sla_escalation,
-        trigger="interval",
-        minutes=15,
-        id="vuln_sla_escalation",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _run_smoke_reaper,
-        trigger="interval",
-        minutes=30,
-        id="smoke_reaper",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _run_identity_sync,
-        trigger="interval",
-        hours=4,
-        id="identity_sync",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _run_kev_refresh,
-        trigger="interval",
-        hours=24,
-        id="cisa_kev_refresh",
-        replace_existing=True,
-    )
 
     if _db_factory is None:
         return
@@ -375,3 +323,14 @@ async def promote_queued_changes(db) -> None:
     # For each CR, check if a maintenance window is open; if so, promote to approved
     for cr in crs:
         pass  # Window check and promotion logic wired when maintenance window service is active
+
+
+# Register static background jobs at module level so scheduler.get_jobs() returns
+# them without requiring start() to have been called (enables unit-test assertions).
+scheduler.add_job(_run_sla_enforcement, trigger="interval", minutes=15, id="sla_enforcement", replace_existing=True)
+scheduler.add_job(_run_finding_asset_match, trigger="interval", minutes=5, id="finding_asset_match", replace_existing=True)
+scheduler.add_job(_run_scanner_poll, trigger="interval", hours=6, id="scanner_poll", replace_existing=True)
+scheduler.add_job(_run_vuln_sla_escalation, trigger="interval", minutes=15, id="vuln_sla_escalation", replace_existing=True)
+scheduler.add_job(_run_smoke_reaper, trigger="interval", minutes=30, id="smoke_reaper", replace_existing=True)
+scheduler.add_job(_run_identity_sync, trigger="interval", hours=4, id="identity_sync", replace_existing=True)
+scheduler.add_job(_run_kev_refresh, trigger="interval", hours=24, id="cisa_kev_refresh", replace_existing=True)
