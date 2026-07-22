@@ -218,7 +218,7 @@ def setup_module(module):
             # initdb must run first so the data dir/pg_hba.conf exist before we overwrite them.
             "HBACONF=$(find /var/lib/pgsql -name pg_hba.conf 2>/dev/null | head -1) && "
             "[ -n \"$HBACONF\" ] || HBACONF=/var/lib/pgsql/data/pg_hba.conf && "
-            "printf 'local all all peer\\nhost all all 127.0.0.1/32 md5\\nhost all all ::1/128 md5\\n' | sudo tee \"$HBACONF\" > /dev/null && "
+            "printf 'local all all peer\\nhost all all 127.0.0.1/32 scram-sha-256\\nhost all all ::1/128 scram-sha-256\\n' | sudo tee \"$HBACONF\" > /dev/null && "
             "sudo systemctl enable --now postgresql && "
             # Wait for PostgreSQL to be fully ready before running psql commands
             "for i in 1 2 3 4 5 6 7 8 9 10; do sudo -u postgres pg_isready -q && break || sleep 2; done && "
