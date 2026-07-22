@@ -212,20 +212,20 @@ def setup_module(module):
             "sudo yum install -y docker postgresql15 postgresql15-server 2>&1 | tail -3 && "
             "sudo systemctl enable --now docker && "
             "sudo postgresql-setup --initdb 2>/dev/null || true && "
-            # Replace pg_hba.conf with one that allows md5 password auth over TCP.
-            # The default AL2023 pg_hba.conf uses 'ident' for TCP which blocks password auth.
-            # Using 'tee' write (not prepend) avoids the file corruption that crashed PG before.
-            # initdb must run first so the data dir/pg_hba.conf exist before we overwrite them.
-            "HBACONF=$(find /var/lib/pgsql -name pg_hba.conf 2>/dev/null | head -1) && "
-            "[ -n \"$HBACONF\" ] || HBACONF=/var/lib/pgsql/data/pg_hba.conf && "
-            "printf 'local all all peer\\nhost all all 127.0.0.1/32 trust\\nhost all all ::1/128 trust\\n' | sudo tee \"$HBACONF\" > /dev/null && "
-            # Confirm the file was actually written — fail fast if not
-            "grep -q trust \"$HBACONF\" && "
             "sudo systemctl enable --now postgresql && "
-            # Wait for PostgreSQL to be fully ready before running psql commands
+            # Wait for PostgreSQL to be fully ready (peer auth via socket works by default)
             "for i in 1 2 3 4 5 6 7 8 9 10; do sudo -u postgres pg_isready -q && break || sleep 2; done && "
+            # Get the ACTUAL hba_file path from the running PG instance
+            "HBACONF=$(sudo -u postgres psql -t -c 'SHOW hba_file' | tr -d ' \\n') && "
+            "[ -n \"$HBACONF\" ] || HBACONF=/var/lib/pgsql/data/pg_hba.conf && "
+            # Replace pg_hba.conf: peer for socket, scram-sha-256 for TCP localhost.
+            # Use 'tee' (not cat+cp) to avoid the file corruption that crashed PG before.
+            "printf 'local all all peer\\nhost all all 127.0.0.1/32 scram-sha-256\\nhost all all ::1/128 scram-sha-256\\n' | sudo tee \"$HBACONF\" > /dev/null && "
+            "grep -q scram \"$HBACONF\" && "
+            # Reload pg_hba.conf without restarting (SIGHUP — PostgreSQL keeps running)
+            "sudo systemctl reload postgresql && "
             "sudo -u postgres createdb smoke_db 2>/dev/null || true && "
-            # Set postgres password for TCP md5 auth
+            # Set password AFTER reload so it's stored as scram-sha-256
             "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" && "
             "mkdir -p /tmp/smoke-app && "
             "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
