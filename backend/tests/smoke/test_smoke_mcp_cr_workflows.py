@@ -182,6 +182,7 @@ def setup_module(module):
     aws_creds = get_connector_creds_from_db("aws")
     if not aws_creds:
         raise RuntimeError("No AWS credentials found in DB — cannot proceed with SSM")
+    _STATE["aws_creds"] = aws_creds
 
     # Wait for SSM agent to register on the new instance
     import boto3
@@ -206,7 +207,7 @@ def setup_module(module):
 
     # Install Docker + Postgres + dummy app via SSM
     print("[setup_module] Installing Docker + Postgres via SSM…")
-    _ssm_run(
+    _ssm_out = _ssm_run(
         instance_id,
         (
             "sudo yum install -y docker postgresql15 postgresql15-server 2>&1 | tail -3 && "
@@ -238,6 +239,7 @@ def setup_module(module):
         aws_creds,
         timeout=300,
     )
+    print(f"[setup_module] SSM setup output:\n{_ssm_out}")
     print("[setup_module] Docker + Postgres installed ✅")
 
     # Deploy nexplane agent via platform CR
@@ -906,6 +908,24 @@ async def test_MCP_DB_MIGRATE_restore():
     approver_token = _STATE.get("approver_token")
     if not artifact:
         pytest.skip("dump_artifact not set — dump phase failed or skipped")
+
+    # Diagnostic: check pg_hba.conf state right before restore
+    instance_id = _STATE.get("instance_id")
+    aws_creds = _STATE.get("aws_creds")
+    if instance_id and aws_creds:
+        try:
+            _diag = _ssm_run(
+                instance_id,
+                "HBACONF=$(sudo -u postgres psql -t -c 'SHOW hba_file' 2>/dev/null | tr -d ' \\n'); "
+                "echo DIAG_HBACONF=$HBACONF; "
+                "[ -n \"$HBACONF\" ] && sudo cat \"$HBACONF\" || echo 'DIAG: could not get hba_file'; "
+                "PGPASSWORD=nexplane_smoke psql -h 127.0.0.1 -p 5432 -U postgres -c 'SELECT 1' && echo DIAG_TCP_AUTH=ok || echo DIAG_TCP_AUTH=FAILED",
+                aws_creds,
+                timeout=60,
+            )
+            log(f"MCP_DB_MIGRATE restore: pre-restore diag:\n{_diag}")
+        except Exception as _de:
+            log(f"MCP_DB_MIGRATE restore: pre-restore diag failed: {_de}")
 
     cr = await create_change_request(
         token=API_TOKEN,
