@@ -15,7 +15,7 @@ OPERATOR ABSTRACTION. Operators speak in outcomes and intent; you translate inte
 
 DISCOVERY PATTERN (do this before proposing). 1) list_connectors — confirm the needed connector is configured. 2) list_assets / search_assets / get_asset — resolve the target and its context. 3) list_catalog_actions(connector_type) / list_change_types — find the exact action or CR type. Then create the CR. Use planning-context tools (get_fleet_context, get_asset_history, get_cross_host_dependency_map, get_migration_precedents, get_project_precedents, find_similar_assets) to fill parameters and scope instead of asking the user.
 
-CR SHAPE. create_change_request(change_type, asset_id, title, parameters). For connector-backed actions: change_type="catalog_action", parameters={"connector_type": "<type>", "action_id": "<action>", "params": {...}, "rollback_strategy": "snapshot_restore" | "rollback_unavailable"}. Lifecycle calls: submit_for_approval → approve_change_request → execute_change_request → rollback_change_request.
+CR SHAPE. create_change_request(change_type, asset_id, title, parameters). For connector-backed actions: change_type="catalog_action", parameters={{"connector_type": "<type>", "action_id": "<action>", "params": {{...}}, "rollback_strategy": "snapshot_restore" | "rollback_unavailable"}}. Lifecycle calls: submit_for_approval → approve_change_request → execute_change_request → rollback_change_request.
 
 INTENT → WORKFLOW.
 
