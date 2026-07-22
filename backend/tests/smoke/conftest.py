@@ -6,12 +6,19 @@ Pytest configuration for smoke tests.
 Adds the smoke directory to sys.path for relative imports of smoke_helpers.
 """
 import sys
+import pytest
 from pathlib import Path
 
 # Add the smoke test directory to sys.path so smoke_helpers can be imported
 smoke_dir = Path(__file__).parent
 if str(smoke_dir) not in sys.path:
     sys.path.insert(0, str(smoke_dir))
+
+
+@pytest.fixture(autouse=True)
+def reset_event_loop():
+    """Override parent conftest fixture — smoke tests run in pytest-asyncio's managed loop."""
+    yield
 
 
 def pytest_configure(config):
