@@ -17,7 +17,7 @@ export function DemoOrgSwitcher() {
   const [orgs, setOrgs] = useState<DemoOrg[]>([]);
 
   useEffect(() => {
-    fetch('/demo/orgs')
+    fetch('/api/demo/orgs')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => { if (data) setOrgs(data); })
       .catch(() => {});

@@ -34,6 +34,14 @@ const proxyEntries = Object.fromEntries(
   ])
 );
 
+// /api/ in dev mirrors what nginx does in production: strip the /api prefix
+// before forwarding to the backend so the same URL paths work in both envs.
+proxyEntries["/api"] = {
+  target: backendTarget,
+  changeOrigin: true,
+  rewrite: (path: string) => path.replace(/^\/api/, ""),
+};
+
 export default defineConfig({
   plugins: [react()],
   server: {
