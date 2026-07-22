@@ -178,22 +178,8 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
             exit_code = stdout.channel.recv_exit_status()
             if exit_code != 0:
                 err = stderr.read(2048).decode(errors="replace")
-                # Attach a quick port/container diagnostic to help debug failures.
-                _diag_parts = []
-                for _dc in [
-                    f"nc -z -w3 {db_host} {db_port} && echo PORT_OK || echo PORT_CLOSED",
-                    "sudo docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null | head -10 || echo NO_DOCKER",
-                ]:
-                    try:
-                        _, _dout, _ = ssh.exec_command(_dc, timeout=10)
-                        _dout_txt = _dout.read().decode(errors="replace").strip()
-                    except Exception as _de:
-                        _dout_txt = f"err:{_de}"
-                    _diag_parts.append(f"[{_dc[:40]}]={_dout_txt}")
                 raise RuntimeError(
                     f"database_dump: {db_type} dump failed (exit={exit_code}): {err}"
-                    f" [DIAG ssh={creds.get('hostname')} target={db_host}:{db_port};"
-                    f" {'; '.join(_diag_parts)}]"
                 )
             size_bytes = os.path.getsize(tmp_path)
             return tmp_path, size_bytes, dump_format
