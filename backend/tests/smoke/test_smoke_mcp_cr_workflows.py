@@ -222,11 +222,16 @@ def setup_module(module):
             # Use 'tee' (not cat+cp) to avoid the file corruption that crashed PG before.
             "printf 'local all all peer\\nhost all all 127.0.0.1/32 scram-sha-256\\nhost all all ::1/128 scram-sha-256\\n' | sudo tee \"$HBACONF\" > /dev/null && "
             "grep -q scram \"$HBACONF\" && "
-            # Reload pg_hba.conf without restarting (SIGHUP — PostgreSQL keeps running)
-            "sudo systemctl reload postgresql && "
+            "echo 'NEXPLANE_DEBUG: HBACONF='$HBACONF && "
+            "cat \"$HBACONF\" && "
+            # Restart (not reload) PG so it picks up the new pg_hba.conf on fresh start
+            "sudo systemctl restart postgresql && "
+            "for i in 1 2 3 4 5 6 7 8 9 10; do sudo -u postgres pg_isready -q && break || sleep 2; done && "
             "sudo -u postgres createdb smoke_db 2>/dev/null || true && "
-            # Set password AFTER reload so it's stored as scram-sha-256
+            # Set password AFTER restart so it's stored with the new scram-sha-256 config
             "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" && "
+            # Verify TCP password auth works before proceeding
+            "PGPASSWORD=nexplane_smoke psql -h 127.0.0.1 -p 5432 -U postgres -c 'SELECT 1' && "
             "mkdir -p /tmp/smoke-app && "
             "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
         ),
