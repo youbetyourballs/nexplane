@@ -106,7 +106,14 @@ def _ssm_run(instance_id, command, aws_creds, timeout=120):
         _time.sleep(5)
         result = ssm.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
         if result["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
-            return result.get("StandardOutputContent", "").strip()
+            stdout = result.get("StandardOutputContent", "").strip()
+            stderr = result.get("StandardErrorContent", "").strip()
+            if result["Status"] != "Success":
+                raise RuntimeError(
+                    f"SSM command on {instance_id} {result['Status']} "
+                    f"(rc={result.get('ResponseCode', '?')}): {stderr or stdout}"
+                )
+            return stdout
     raise TimeoutError(f"SSM command on {instance_id} timed out after {timeout}s")
 
 
@@ -205,12 +212,18 @@ def setup_module(module):
             "sudo yum install -y docker postgresql15 postgresql15-server 2>&1 | tail -3 && "
             "sudo systemctl enable --now docker && "
             "sudo postgresql-setup --initdb 2>/dev/null || true && "
+            # Replace pg_hba.conf with one that allows md5 password auth over TCP.
+            # The default AL2023 pg_hba.conf uses 'ident' for TCP which blocks password auth.
+            # Using 'tee' write (not prepend) avoids the file corruption that crashed PG before.
+            # initdb must run first so the data dir/pg_hba.conf exist before we overwrite them.
+            "HBACONF=$(find /var/lib/pgsql -name pg_hba.conf 2>/dev/null | head -1) && "
+            "[ -n \"$HBACONF\" ] || HBACONF=/var/lib/pgsql/data/pg_hba.conf && "
+            "printf 'local all all peer\\nhost all all 127.0.0.1/32 md5\\nhost all all ::1/128 md5\\n' | sudo tee \"$HBACONF\" > /dev/null && "
             "sudo systemctl enable --now postgresql && "
             # Wait for PostgreSQL to be fully ready before running psql commands
             "for i in 1 2 3 4 5 6 7 8 9 10; do sudo -u postgres pg_isready -q && break || sleep 2; done && "
             "sudo -u postgres createdb smoke_db 2>/dev/null || true && "
-            # Set postgres password for TCP auth (scram-sha-256). No pg_hba.conf changes
-            # needed — the default after initdb allows host connections with password auth.
+            # Set postgres password for TCP md5 auth
             "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" && "
             "mkdir -p /tmp/smoke-app && "
             "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
