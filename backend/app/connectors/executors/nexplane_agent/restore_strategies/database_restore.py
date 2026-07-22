@@ -204,23 +204,26 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                     f'--eval "db.runCommand({{ping:1}})"'
                 )
 
-            # Debug: verify auth works via this SSH session right before restore
-            _diag_cmd = (
-                f"PGPASSWORD={_shell_quote(target_db_password)} "
-                f"psql -h {target_db_host} -p {target_db_port} "
-                f"-U {_shell_quote(target_db_user)} postgres "
-                f'-c "SELECT 1" 2>&1 && echo RESTORE_AUTH_OK || echo RESTORE_AUTH_FAIL'
-            )
-            _, _do, _ = ssh.exec_command(_diag_cmd, timeout=30)
-            _diag_result = _do.read().decode(errors="replace").strip()
-            logger.warning("database_restore: pre-restore SSH auth diag: %s", _diag_result)
+            # Debug: capture SSH session diagnostics — embed in error if restore fails
+            _diag_parts = []
+            for _dc in [
+                "ss -tlnp | grep 5432 || echo NO_5432",
+                f"cat /var/lib/pgsql/data/pg_hba.conf 2>/dev/null || echo NO_HBACONF",
+                (f"PGPASSWORD={_shell_quote(target_db_password)} "
+                 f"psql -h {target_db_host} -p {target_db_port} "
+                 f"-U {_shell_quote(target_db_user)} postgres "
+                 f'-c "SELECT 1" 2>&1 && echo AUTH_OK || echo AUTH_FAIL'),
+            ]:
+                _, _dout, _ = ssh.exec_command(_dc, timeout=30)
+                _diag_parts.append(f"CMD:{_dc[:50]}|OUT:{_dout.read().decode(errors='replace').strip()}")
 
             # timeout=180 prevents stdout.read() blocking forever if restore hangs.
             _, stdout, stderr = ssh.exec_command(restore_cmd, timeout=180)
             exit_code = stdout.channel.recv_exit_status()
             if exit_code != 0:
                 err = stderr.read(2048).decode(errors="replace")
-                raise RuntimeError(f"database_restore: restore failed (exit={exit_code}): {err}")
+                _diag_str = " | ".join(_diag_parts)
+                raise RuntimeError(f"database_restore: restore failed (exit={exit_code}): {err} [SSH_DIAG: {_diag_str}]")
 
             _, vstdout, vstderr = ssh.exec_command(verify_cmd, timeout=60)
             vexit = vstdout.channel.recv_exit_status()
