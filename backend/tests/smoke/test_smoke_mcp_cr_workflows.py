@@ -205,34 +205,31 @@ def setup_module(module):
     else:
         raise TimeoutError(f"SSM agent not ready on {instance_id} after 300s")
 
-    # Install Docker + Postgres + dummy app via SSM
+    # Install Docker + Postgres (via Docker on port 5434) + dummy app via SSM.
+    # Using Docker postgres on port 5434 avoids conflicts with anything already on 5432
+    # (e.g., docker-proxy from a prior container) and eliminates native postgresql15
+    # installation complexity on AL2023.
     print("[setup_module] Installing Docker + Postgres via SSM…")
     _ssm_out = _ssm_run(
         instance_id,
         (
-            "sudo yum install -y docker postgresql15 postgresql15-server 2>&1 | tail -3 && "
+            "sudo yum install -y docker postgresql15 2>&1 && "
             "sudo systemctl enable --now docker && "
-            "sudo postgresql-setup --initdb 2>/dev/null || true && "
-            "sudo systemctl enable --now postgresql && "
-            # Wait for PostgreSQL to be fully ready (peer auth via socket works by default)
-            "for i in 1 2 3 4 5 6 7 8 9 10; do sudo -u postgres pg_isready -q && break || sleep 2; done && "
-            # Get the ACTUAL hba_file path from the running PG instance
-            "HBACONF=$(sudo -u postgres psql -t -c 'SHOW hba_file' | tr -d ' \\n') && "
-            "[ -n \"$HBACONF\" ] || HBACONF=/var/lib/pgsql/data/pg_hba.conf && "
-            # Replace pg_hba.conf: peer for socket, trust for TCP localhost (smoke test only).
-            # trust auth eliminates password complexity — instance is ephemeral and VPC-internal.
-            # Use 'tee' (not cat+cp) to avoid the file corruption that crashed PG before.
-            "printf 'local all all peer\\nhost all all 127.0.0.1/32 trust\\nhost all all ::1/128 trust\\n' | sudo tee \"$HBACONF\" > /dev/null && "
-            "grep -q trust \"$HBACONF\" && "
-            "echo 'NEXPLANE_DEBUG: HBACONF='$HBACONF && "
-            "cat \"$HBACONF\" && "
-            # Restart (not reload) PG so it picks up the new pg_hba.conf on fresh start
-            "sudo systemctl restart postgresql && "
-            "for i in 1 2 3 4 5 6 7 8 9 10; do sudo -u postgres pg_isready -q && break || sleep 2; done && "
-            "sudo -u postgres createdb smoke_db 2>/dev/null || true && "
-            "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'nexplane_smoke';\" && "
-            # Verify TCP auth works (no password needed with trust)
-            "psql -h 127.0.0.1 -p 5432 -U postgres -c 'SELECT 1' && "
+            # Pull postgres:15 image and start on port 5434 to avoid port 5432 conflicts
+            "sudo docker pull postgres:15 && "
+            "sudo docker run -d --name smoke-postgres --restart unless-stopped "
+            "-e POSTGRES_PASSWORD=nexplane_smoke "
+            "-e POSTGRES_USER=postgres "
+            "-e POSTGRES_DB=smoke_db "
+            "-p 127.0.0.1:5434:5432 "
+            "postgres:15 && "
+            # Wait for postgres to be ready inside container
+            "for i in $(seq 1 30); do "
+            "sudo docker exec smoke-postgres pg_isready -U postgres -q && break || sleep 2; "
+            "done && "
+            # Verify TCP auth works via psql client (postgresql15 provides psql)
+            "PGPASSWORD=nexplane_smoke psql -h 127.0.0.1 -p 5434 -U postgres smoke_db -c 'SELECT 1' && "
+            "echo 'NEXPLANE_DEBUG: smoke-postgres container ready on port 5434' && "
             "mkdir -p /tmp/smoke-app && "
             "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
         ),
@@ -857,7 +854,7 @@ async def test_MCP_DB_MIGRATE_dump():
             "db_type": "postgres",
             "database_name": "smoke_db",
             "db_host": "127.0.0.1",
-            "db_port": 5432,
+            "db_port": 5434,
             "db_user": "postgres",
             "db_password": "nexplane_smoke",
             "ssh_creds": ssh_creds,
@@ -916,10 +913,8 @@ async def test_MCP_DB_MIGRATE_restore():
         try:
             _diag = _ssm_run(
                 instance_id,
-                "HBACONF=$(sudo -u postgres psql -t -c 'SHOW hba_file' 2>/dev/null | tr -d ' \\n'); "
-                "echo DIAG_HBACONF=$HBACONF; "
-                "[ -n \"$HBACONF\" ] && sudo cat \"$HBACONF\" || echo 'DIAG: could not get hba_file'; "
-                "PGPASSWORD=nexplane_smoke psql -h 127.0.0.1 -p 5432 -U postgres -c 'SELECT 1' && echo DIAG_TCP_AUTH=ok || echo DIAG_TCP_AUTH=FAILED",
+                "sudo docker ps --filter name=smoke-postgres --format '{{.Status}}' && "
+                "PGPASSWORD=nexplane_smoke psql -h 127.0.0.1 -p 5434 -U postgres smoke_db -c 'SELECT 1' && echo DIAG_TCP_AUTH=ok || echo DIAG_TCP_AUTH=FAILED",
                 aws_creds,
                 timeout=60,
             )
@@ -939,7 +934,7 @@ async def test_MCP_DB_MIGRATE_restore():
             "target_db_user": "postgres",
             "target_db_password": "nexplane_smoke",
             "target_db_host": "127.0.0.1",
-            "target_db_port": 5432,
+            "target_db_port": 5434,
             "ssh_creds": _STATE.get("ssh_creds"),
             "rollback_strategy": "restore_previous_state",
         },

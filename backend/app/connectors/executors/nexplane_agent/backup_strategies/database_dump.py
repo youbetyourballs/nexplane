@@ -132,19 +132,21 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
 
             # Build dump command per db_type
             if db_type == "postgres":
-                # Redirect stderr to /dev/null to prevent a paramiko deadlock:
-                # if pg_dump writes a warning/prompt to stderr and the stderr buffer
-                # fills, the remote process blocks, stalling the stdout read loop.
+                # pipefail: propagate pg_dump exit code through the gzip pipeline.
+                # stderr redirect prevents paramiko deadlock (buffer fill stalls stdout read).
                 dump_cmd = (
+                    f"bash -c 'set -o pipefail; "
                     f"PGPASSWORD={_shell_quote(db_password)} "
                     f"pg_dump -h {db_host} -p {db_port} -U {_shell_quote(db_user)} "
-                    f"{_shell_quote(db_name)} 2>/dev/null | gzip"
+                    f"{_shell_quote(db_name)} 2>/tmp/pg_dump_stderr | gzip; "
+                    f"EC=$?; cat /tmp/pg_dump_stderr >&2; exit $EC'"
                 )
                 dump_format = "sql.gz"
             elif db_type == "mysql":
                 dump_cmd = (
+                    f"bash -c 'set -o pipefail; "
                     f"mysqldump -h {db_host} -P {db_port} -u {_shell_quote(db_user)} "
-                    f"-p{_shell_quote(db_password)} {_shell_quote(db_name)} 2>/dev/null | gzip"
+                    f"-p{_shell_quote(db_password)} {_shell_quote(db_name)} 2>/dev/null | gzip'"
                 )
                 dump_format = "sql.gz"
             else:  # mongodb
@@ -153,15 +155,12 @@ async def backup(params: dict, asset_ids: list, connector) -> dict:
                     f"--authenticationDatabase admin "
                     if db_user else ""
                 )
-                # Redirect mongodump stderr to /dev/null to avoid a paramiko
-                # deadlock: mongodump writes progress to stderr; if the SSH
-                # channel's stderr buffer fills up the process blocks, which
-                # stalls gzip and makes the stdout read loop hang forever.
                 dump_cmd = (
+                    f"bash -c 'set -o pipefail; "
                     f"mongodump --host {db_host} --port {db_port} "
                     f"{_mongo_auth}"
                     f"--db {_shell_quote(db_name)} "
-                    f"--archive 2>/dev/null | gzip"
+                    f"--archive 2>/dev/null | gzip'"
                 )
                 dump_format = "archive.gz"
 

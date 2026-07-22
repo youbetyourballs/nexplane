@@ -204,27 +204,12 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                     f'--eval "db.runCommand({{ping:1}})"'
                 )
 
-            # Debug: capture SSH session diagnostics — embed in error if restore fails
-            _diag_parts = []
-            for _dc in [
-                "sudo ss -tlnp | grep 5432 || echo NO_5432",
-                "sudo cat /var/lib/pgsql/data/pg_hba.conf 2>/dev/null || sudo cat /var/lib/pgsql/15/data/pg_hba.conf 2>/dev/null || echo NO_HBACONF",
-                "sudo -u postgres psql -t -c 'SHOW data_directory' 2>&1 || echo NO_DATA_DIR",
-                (f"PGPASSWORD={_shell_quote(target_db_password)} "
-                 f"psql -h {target_db_host} -p {target_db_port} "
-                 f"-U {_shell_quote(target_db_user)} postgres "
-                 f'-c "SELECT 1" 2>&1 && echo AUTH_OK || echo AUTH_FAIL'),
-            ]:
-                _, _dout, _ = ssh.exec_command(_dc, timeout=30)
-                _diag_parts.append(f"CMD:{_dc[:50]}|OUT:{_dout.read().decode(errors='replace').strip()}")
-
             # timeout=180 prevents stdout.read() blocking forever if restore hangs.
             _, stdout, stderr = ssh.exec_command(restore_cmd, timeout=180)
             exit_code = stdout.channel.recv_exit_status()
             if exit_code != 0:
                 err = stderr.read(2048).decode(errors="replace")
-                _diag_str = " | ".join(_diag_parts)
-                raise RuntimeError(f"database_restore: restore failed (exit={exit_code}): {err} [SSH_DIAG: {_diag_str}]")
+                raise RuntimeError(f"database_restore: restore failed (exit={exit_code}): {err}")
 
             _, vstdout, vstderr = ssh.exec_command(verify_cmd, timeout=60)
             vexit = vstdout.channel.recv_exit_status()
