@@ -207,8 +207,9 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
             # Debug: capture SSH session diagnostics — embed in error if restore fails
             _diag_parts = []
             for _dc in [
-                "ss -tlnp | grep 5432 || echo NO_5432",
-                f"cat /var/lib/pgsql/data/pg_hba.conf 2>/dev/null || echo NO_HBACONF",
+                "sudo ss -tlnp | grep 5432 || echo NO_5432",
+                "sudo cat /var/lib/pgsql/data/pg_hba.conf 2>/dev/null || sudo cat /var/lib/pgsql/15/data/pg_hba.conf 2>/dev/null || echo NO_HBACONF",
+                "sudo -u postgres psql -t -c 'SHOW data_directory' 2>&1 || echo NO_DATA_DIR",
                 (f"PGPASSWORD={_shell_quote(target_db_password)} "
                  f"psql -h {target_db_host} -p {target_db_port} "
                  f"-U {_shell_quote(target_db_user)} postgres "
