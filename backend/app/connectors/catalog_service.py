@@ -7,6 +7,7 @@ import importlib.util
 import json
 import logging
 import pathlib
+import sys
 import types
 from dataclasses import dataclass
 
@@ -152,6 +153,10 @@ class ActionCatalogService:
         spec = importlib.util.spec_from_file_location(executor_ref, executor_file)
         if spec is None or spec.loader is None:
             raise ImportError(f"Could not create module spec for '{executor_file}'")
+
+        commercial_root = str(self._commercial_catalog_dir.parent)
+        if commercial_root not in sys.path:
+            sys.path.insert(0, commercial_root)
 
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)

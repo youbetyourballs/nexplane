@@ -12,7 +12,7 @@ from app.models.user import User
 from app.routers import current_user
 from app.schemas.api_token import TokenCreate, TokenRead, TokenCreatedResponse
 
-router = APIRouter(prefix="/api/v1/tokens", tags=["API Tokens"])
+router = APIRouter(prefix="/tokens", tags=["API Tokens"])
 
 
 @router.post("", response_model=TokenCreatedResponse, status_code=201)
