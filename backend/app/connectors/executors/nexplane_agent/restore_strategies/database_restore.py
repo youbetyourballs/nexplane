@@ -54,12 +54,12 @@ def _ssh_connect(creds: dict):
 
 
 async def _get_ssh_creds(params: dict, connector, asset_ids: list) -> dict:
-    creds = getattr(connector, "credentials", {}) or {}
-    if not (creds.get("hostname") or creds.get("host")):
-        inline = params.get("ssh_creds") or {}
-        if inline:
-            creds = dict(creds)
-            creds.update(inline)
+    # params["ssh_creds"] is an explicit per-request override and always wins when present.
+    inline = params.get("ssh_creds") or {}
+    if inline:
+        creds = dict(inline)
+    else:
+        creds = getattr(connector, "credentials", {}) or {}
     if not (creds.get("hostname") or creds.get("host")):
         try:
             asset_id_str = str(asset_ids[0]) if asset_ids else ""

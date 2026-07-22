@@ -205,39 +205,25 @@ def setup_module(module):
     else:
         raise TimeoutError(f"SSM agent not ready on {instance_id} after 300s")
 
-    # Install Docker + Postgres (via Docker on port 5434) + dummy app via SSM.
-    # Using Docker postgres on port 5434 avoids conflicts with anything already on 5432
-    # (e.g., docker-proxy from a prior container) and eliminates native postgresql15
-    # installation complexity on AL2023.
-    print("[setup_module] Installing Docker + Postgres via SSM…")
+    # Install Docker + postgresql15 client + dummy Dockerfile via SSM.
+    # We install Docker first (needed by deploy_nexplane_agent) but do NOT start postgres
+    # yet — starting postgres before agent deploy risks OOM on t3.small (2GB RAM) because
+    # the agent deployment itself pulls Docker images that briefly spike memory usage.
+    print("[setup_module] Installing Docker + postgresql15 client via SSM…")
     _ssm_out = _ssm_run(
         instance_id,
         (
             "sudo yum install -y docker postgresql15 2>&1 && "
             "sudo systemctl enable --now docker && "
-            # Pull postgres:15 image and start on port 5434 to avoid port 5432 conflicts
-            "sudo docker pull postgres:15 && "
-            "sudo docker run -d --name smoke-postgres --restart unless-stopped "
-            "-e POSTGRES_PASSWORD=nexplane_smoke "
-            "-e POSTGRES_USER=postgres "
-            "-e POSTGRES_DB=smoke_db "
-            "-p 127.0.0.1:5434:5432 "
-            "postgres:15 && "
-            # Wait for postgres to be ready inside container
-            "for i in $(seq 1 30); do "
-            "sudo docker exec smoke-postgres pg_isready -U postgres -q && break || sleep 2; "
-            "done && "
-            # Verify TCP auth works via psql client (postgresql15 provides psql)
-            "PGPASSWORD=nexplane_smoke psql -h 127.0.0.1 -p 5434 -U postgres smoke_db -c 'SELECT 1' && "
-            "echo 'NEXPLANE_DEBUG: smoke-postgres container ready on port 5434' && "
             "mkdir -p /tmp/smoke-app && "
-            "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile"
+            "printf 'FROM alpine:latest\\nCMD [\"echo\", \"smoke\"]\\n' > /tmp/smoke-app/Dockerfile && "
+            "echo DOCKER_READY"
         ),
         aws_creds,
         timeout=300,
     )
     print(f"[setup_module] SSM setup output:\n{_ssm_out}")
-    print("[setup_module] Docker + Postgres installed ✅")
+    print("[setup_module] Docker + postgresql15 client installed ✅")
 
     # Deploy nexplane agent via platform CR
     print("[setup_module] Deploying nexplane agent…")
@@ -301,6 +287,64 @@ def setup_module(module):
         _time.sleep(15)
     else:
         raise TimeoutError(f"Agent not registered in platform assets after 300s (hostname={hostname})")
+
+    # Start postgres AFTER agent is registered — avoids OOM during agent image pull.
+    # Uses Docker on port 5434 (avoids conflicts with any existing 5432 occupant).
+    print("[setup_module] Starting smoke-postgres container on port 5434…")
+    _pg_out = _ssm_run(
+        instance_id,
+        (
+            "sudo docker pull postgres:15-alpine 2>&1 | tail -3 && "
+            "sudo docker run -d --name smoke-postgres --restart unless-stopped "
+            "-e POSTGRES_PASSWORD=nexplane_smoke "
+            "-e POSTGRES_USER=postgres "
+            "-e POSTGRES_DB=smoke_db "
+            "-p 127.0.0.1:5434:5432 "
+            "postgres:15-alpine && "
+            "for i in $(seq 1 30); do "
+            "sudo docker exec smoke-postgres pg_isready -U postgres -q && break || sleep 2; "
+            "done && "
+            "PGPASSWORD=nexplane_smoke psql -h 127.0.0.1 -p 5434 -U postgres smoke_db -c 'SELECT 1' && "
+            "echo 'NEXPLANE_DEBUG: smoke-postgres ready on port 5434'"
+        ),
+        aws_creds,
+        timeout=300,
+    )
+    print(f"[setup_module] smoke-postgres output:\n{_pg_out}")
+    print("[setup_module] smoke-postgres container started ✅")
+
+    # Attach nexplane_agent connector to the agent asset so the planning engine's
+    # asset-scoped connector lookup (priority 2) finds a nexplane_agent connector
+    # with no SSH creds — allowing database_dump to fall through to params["ssh_creds"].
+    # Without this, the org-level fallback (priority 3) can pick a stale connector
+    # from a previous smoke run that has a wrong hostname.
+    try:
+        connectors = client.get("/connectors")
+        # Find the nexplane_agent connector with no SSH credentials (the real one)
+        nxp_agent_connector = next(
+            (c for c in connectors
+             if c.get("connector_type") == "nexplane_agent"
+             and not (c.get("credentials") or {}).get("hostname")),
+            None
+        )
+        if not nxp_agent_connector:
+            # Any nexplane_agent connector will do — asset-scoped takes priority over org fallback
+            nxp_agent_connector = next(
+                (c for c in connectors if c.get("connector_type") == "nexplane_agent"), None
+            )
+        if nxp_agent_connector:
+            _nxp_resp = client.client.post(
+                f"{client.base}/assets/{agent_asset_id}/connectors",
+                json={"connector_id": nxp_agent_connector["id"]},
+            )
+            if _nxp_resp.status_code in (200, 201, 409):
+                print(f"[setup_module] nexplane_agent connector {nxp_agent_connector['id']} attached to agent asset ✅")
+            else:
+                print(f"[setup_module] WARNING: Could not attach nexplane_agent connector: HTTP {_nxp_resp.status_code}")
+        else:
+            print("[setup_module] WARNING: No nexplane_agent connector found in org")
+    except Exception as _nxp_e:
+        print(f"[setup_module] WARNING: Could not attach nexplane_agent connector: {_nxp_e}")
 
     # Attach AWS connector to the agent asset
     try:
@@ -416,6 +460,19 @@ def setup_module(module):
             "username": "ec2-user",
             "private_key": private_key_pem,
         }
+        # Attach SSH connector to the agent asset so executor's asset-scoped lookup
+        # picks this connector (with smoke EC2 hostname) instead of a stale org-level one.
+        try:
+            _ssh_resp = client.client.post(
+                f"{client.base}/assets/{agent_asset_id}/connectors",
+                json={"connector_id": ssh_conn["id"]},
+            )
+            if _ssh_resp.status_code in (200, 201, 409):
+                print(f"[setup_module] SSH connector {ssh_conn['id']} attached to agent asset ✅")
+            else:
+                print(f"[setup_module] WARNING: SSH attach HTTP {_ssh_resp.status_code}: {_ssh_resp.text}")
+        except Exception as _ae:
+            print(f"[setup_module] WARNING: Could not attach SSH connector to asset: {_ae}")
         print(f"[setup_module] SSH connector {ssh_conn['id']} created ✅")
     except Exception as _e:
         print(f"[setup_module] WARNING: Could not create SSH connector: {_e}")
@@ -835,7 +892,11 @@ async def test_MCP_DB_MIGRATE_dump():
     _require("API_TOKEN", "ASSET_ID")
     approver_token = _STATE.get("approver_token")
     if not approver_token:
-        pytest.skip("approver_token not set")
+        # When running with -k DB_MIGRATE, test_MCP_SNAPSHOT_setup is deselected.
+        # Initialize the approver token on-demand so the phase is self-contained.
+        bearer = _get_approver_token()
+        _STATE["approver_token"] = await _create_approver_api_token(bearer)
+        approver_token = _STATE["approver_token"]
 
     ssh_creds = _STATE.get("ssh_creds")
     backup_storage_id = _STATE.get("backup_storage_id")
@@ -843,6 +904,30 @@ async def test_MCP_DB_MIGRATE_dump():
         pytest.skip("SSH credentials not set up — setup_module SSH connector creation failed")
     if not backup_storage_id:
         pytest.skip("backup_storage_id not set — setup_module S3 backup storage creation failed")
+
+    # Ensure smoke-postgres container is running on the target instance.
+    # It may have stopped due to OOM pressure after the nexplane agent was deployed.
+    instance_id = _STATE.get("instance_id")
+    aws_creds = _STATE.get("aws_creds")
+    if instance_id and aws_creds:
+        try:
+            _pg_status = await asyncio.to_thread(
+                _ssm_run,
+                instance_id,
+                (
+                    "sudo docker start smoke-postgres 2>/dev/null || true && "
+                    "for i in $(seq 1 15); do "
+                    "sudo docker exec smoke-postgres pg_isready -U postgres -q && break || sleep 2; "
+                    "done && "
+                    "PGPASSWORD=nexplane_smoke psql -h 127.0.0.1 -p 5434 -U postgres smoke_db -c 'SELECT 1' && "
+                    "echo SMOKE_PG_READY"
+                ),
+                aws_creds,
+                90,
+            )
+            log(f"MCP_DB_MIGRATE dump: smoke-postgres pre-flight: {_pg_status[-80:]}")
+        except Exception as _pre:
+            log(f"MCP_DB_MIGRATE dump: smoke-postgres pre-flight failed: {_pre}")
 
     cr = await create_change_request(
         token=API_TOKEN,
