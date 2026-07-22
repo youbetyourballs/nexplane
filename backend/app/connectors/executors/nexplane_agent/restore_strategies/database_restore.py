@@ -204,6 +204,17 @@ async def restore(params: dict, asset_ids: list, connector) -> dict:
                     f'--eval "db.runCommand({{ping:1}})"'
                 )
 
+            # Debug: verify auth works via this SSH session right before restore
+            _diag_cmd = (
+                f"PGPASSWORD={_shell_quote(target_db_password)} "
+                f"psql -h {target_db_host} -p {target_db_port} "
+                f"-U {_shell_quote(target_db_user)} postgres "
+                f'-c "SELECT 1" 2>&1 && echo RESTORE_AUTH_OK || echo RESTORE_AUTH_FAIL'
+            )
+            _, _do, _ = ssh.exec_command(_diag_cmd, timeout=30)
+            _diag_result = _do.read().decode(errors="replace").strip()
+            logger.warning("database_restore: pre-restore SSH auth diag: %s", _diag_result)
+
             # timeout=180 prevents stdout.read() blocking forever if restore hangs.
             _, stdout, stderr = ssh.exec_command(restore_cmd, timeout=180)
             exit_code = stdout.channel.recv_exit_status()
