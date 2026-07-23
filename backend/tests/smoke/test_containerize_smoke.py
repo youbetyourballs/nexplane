@@ -330,6 +330,20 @@ class TestContainerizeSmoke:
         )
         log(f"CONTAINERIZE setup: dummy service {DUMMY_SERVICE} installed")
 
+        # Install Docker so the live build test can run
+        _ssm_run(
+            cls.instance_id,
+            (
+                "sudo dnf install -y docker 2>&1 | tail -3 && "
+                "sudo systemctl enable --now docker && "
+                "sudo usermod -aG docker ec2-user && "
+                "echo DOCKER_READY"
+            ),
+            cls.aws_creds,
+            timeout=120,
+        )
+        log("CONTAINERIZE setup: Docker installed ✅")
+
         # Set up SSH connector for the SSH-inplace test phase
         # Generate RSA keypair, inject public key via SSM, register SSH connector in platform
         try:
