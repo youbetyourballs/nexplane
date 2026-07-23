@@ -207,10 +207,9 @@ class TestDbMajorVersionUpgradeSmoke:
             snap_id = result["snapshot_result"].get("snapshot_id")
             log(f"DB_UPGRADE_POSTGRES: upgrade completed, snap={snap_id}")
 
-            # Verify version via direct check on the host
+            # Verify version via direct check on the host (agent creates container named pg16)
             pg_version = _run(
-                "docker exec pg12 psql -U postgres -c 'SELECT version();' -t 2>/dev/null || "
-                "docker exec pg16 psql -U postgres -c 'SELECT version();' -t 2>/dev/null || echo UNKNOWN",
+                "PGPASSWORD=testpw psql -h localhost -p 15433 -U postgres -c 'SELECT version();' -t 2>/dev/null || echo UNKNOWN",
                 check=False,
             ).stdout.strip()
             assert "16" in pg_version, f"Expected PG16 version string, got: {pg_version!r}"
@@ -218,8 +217,7 @@ class TestDbMajorVersionUpgradeSmoke:
 
             # Verify canary data survived upgrade
             canary = _run(
-                "docker exec pg12 psql -U postgres -c 'SELECT val FROM smoke_canary;' -t 2>/dev/null || "
-                "docker exec pg16 psql -U postgres -c 'SELECT val FROM smoke_canary;' -t 2>/dev/null || echo MISSING",
+                "PGPASSWORD=testpw psql -h localhost -p 15433 -U postgres -c 'SELECT val FROM smoke_canary;' -t 2>/dev/null || echo MISSING",
                 check=False,
             ).stdout.strip()
             assert "before-upgrade" in canary, f"Canary data missing post-upgrade: {canary!r}"
@@ -303,9 +301,9 @@ class TestDbMajorVersionUpgradeSmoke:
             )
             log(f"DB_UPGRADE_MYSQL: upgrade complete, snap={result['snapshot_result'].get('snapshot_id')}")
 
-            # Verify version
+            # Verify version (agent creates container named mysql8.0, mapped to port 13307)
             mysql_ver = _run(
-                "docker exec mysql57 mysql -uroot -ptestpw -e 'SELECT @@version;' 2>/dev/null || echo UNKNOWN",
+                "mysql -h 127.0.0.1 --protocol=tcp -P 13307 -uroot -ptestpw --skip-column-names -e 'SELECT @@version;' 2>/dev/null || echo UNKNOWN",
                 check=False,
             ).stdout.strip()
             assert "8.0" in mysql_ver, f"Expected MySQL 8.0 version, got: {mysql_ver!r}"
@@ -313,7 +311,7 @@ class TestDbMajorVersionUpgradeSmoke:
 
             # Verify canary
             canary = _run(
-                "docker exec mysql57 mysql -uroot -ptestpw smoke -e 'SELECT val FROM canary;' 2>/dev/null || echo MISSING",
+                "mysql -h 127.0.0.1 --protocol=tcp -P 13307 -uroot -ptestpw smoke --skip-column-names -e 'SELECT val FROM canary;' 2>/dev/null || echo MISSING",
                 check=False,
             ).stdout.strip()
             assert "before-upgrade" in canary, f"Canary missing post-upgrade: {canary!r}"
@@ -331,7 +329,7 @@ class TestDbMajorVersionUpgradeSmoke:
             assert "5.7" in mysql_ver_after, f"Expected MySQL 5.7 after rollback: {mysql_ver_after!r}"
             log("DB_UPGRADE_MYSQL: PASSED — rollback restored version 5.7")
         finally:
-            _run("docker rm -f mysql57 mysql80 2>/dev/null || true", check=False)
+            _run("docker rm -f mysql57 mysql8.0 2>/dev/null || true", check=False)
 
     # -----------------------------------------------------------------------
     # Phase DB_UPGRADE_MONGODB
@@ -373,7 +371,6 @@ class TestDbMajorVersionUpgradeSmoke:
                     "target_version": "7.0",
                     "db_host": "localhost",
                     "db_port": 27117,
-                    "db_user": "admin",
                 },
                 [asset_id],
                 timeout=1800,  # Mongo multi-hop can take 30 min

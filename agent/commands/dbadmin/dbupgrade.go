@@ -62,10 +62,10 @@ func DbPreflightExecute(params map[string]any) (map[string]any, error) {
 			"-h", host, "--protocol=tcp", "-P", port, "-u", user, "--password="+password, "-e", "SELECT version();")
 	case "mongodb":
 		mongoArgs := []string{"--host", host, "--port", port, "--eval", "db.version()", "--quiet"}
-		if user != "" {
-			mongoArgs = append(mongoArgs, "--username", user)
-		}
 		if password != "" {
+			if user != "" {
+				mongoArgs = append(mongoArgs, "--username", user)
+			}
 			mongoArgs = append(mongoArgs, "--password", password)
 		}
 		connOut, connErr, connRunErr = runCmd(nil, "mongosh", mongoArgs...)
@@ -126,10 +126,10 @@ func DbVersionQueryExecute(params map[string]any) (map[string]any, error) {
 			"-h", host, "--protocol=tcp", "-P", port, "-u", user, "--password="+password, "-e", query)
 	case "mongodb":
 		mongoArgs := []string{"--host", host, "--port", port, "--eval", query, "--quiet"}
-		if user != "" {
-			mongoArgs = append(mongoArgs, "--username", user)
-		}
 		if password != "" {
+			if user != "" {
+				mongoArgs = append(mongoArgs, "--username", user)
+			}
 			mongoArgs = append(mongoArgs, "--password", password)
 		}
 		out, errOut, err = runCmd(nil, "mongosh", mongoArgs...)
@@ -286,10 +286,14 @@ func DbUpgradeMongoFcvHopExecute(params map[string]any) (map[string]any, error) 
 	toVersion := str(params, "to_version")
 
 	eval := fmt.Sprintf("db.adminCommand({setFeatureCompatibilityVersion: \"%s\"})", toVersion)
-	out, errOut, err := runCmd(nil, "mongosh",
-		"--host", host, "--port", portStr,
-		"--username", user, "--password", password,
-		"--eval", eval, "--quiet")
+	fcvArgs := []string{"--host", host, "--port", portStr, "--eval", eval, "--quiet"}
+	if password != "" {
+		if user != "" {
+			fcvArgs = append(fcvArgs, "--username", user)
+		}
+		fcvArgs = append(fcvArgs, "--password", password)
+	}
+	out, errOut, err := runCmd(nil, "mongosh", fcvArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("mongo fcv hop failed: %s %s", out, errOut)
 	}
