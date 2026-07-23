@@ -304,7 +304,13 @@ class TestContainerizeSmoke:
             asset = cls.client.get(f"/assets/{agent_asset_id}")
             meta = dict(asset.get("asset_metadata") or {})
             apps = [a for a in meta.get("applications", []) if a.get("name") != "nexplane-smoke-app"]
-            apps.append({"name": "nexplane-smoke-app", "systemd_unit": DUMMY_SERVICE, "language": "python"})
+            apps.append({
+                "name": "nexplane-smoke-app",
+                "systemd_unit": DUMMY_SERVICE,
+                "binary": "/usr/bin/sleep",
+                "os_family": "rhel",
+                "process_user": "nobody",
+            })
             meta["applications"] = apps
             cls.client.client.patch(
                 f"{cls.client.base}/assets/{agent_asset_id}",
@@ -420,11 +426,23 @@ class TestContainerizeSmoke:
         registry = aws_creds.get("ecr_registry") or aws_creds.get("registry")
         if not registry:
             pytest.skip("No ECR registry in AWS creds (ecr_registry field) — skipping live build")
+        app_profile = {
+            "name": "nexplane-smoke-app",
+            "systemd_unit": DUMMY_SERVICE,
+            "binary": "/usr/bin/sleep",
+            "os_family": "rhel",
+            "process_user": "nobody",
+        }
         cr = _run_cr(
             self.client,
             "[smoke] containerize_build live",
             "agent_containerize_build",
-            {"app_name": "nexplane-smoke-app", "registry": registry, "dry_run": False},
+            {
+                "app_name": "nexplane-smoke-app",
+                "app_profile": app_profile,
+                "registry": registry,
+                "dry_run": False,
+            },
             asset_ids=[self.agent_asset_id],
         )
         cr_id = cr["id"]

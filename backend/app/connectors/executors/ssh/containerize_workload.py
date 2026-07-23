@@ -24,6 +24,7 @@ Parameters:
 
 import asyncio
 import logging
+import re
 
 ROLLBACK_CAPABILITY = "full"
 
@@ -91,14 +92,21 @@ async def _build_image(connector, service_name: str, registry: str) -> dict:
         f"systemctl show -p ExecStart --value {service_name} 2>/dev/null",
     )
     exec_start = stdout.strip()
-    # ExecStart format: "path=<binary> argv[]=<binary> <arg1> <arg2> ..."
-    # Fall back to splitting on whitespace if the format differs
+    # systemctl show -p ExecStart --value returns structured format:
+    #   { path=/bin/sleep ; argv[]=/bin/sleep infinity ; ignore_errors=no ; ... }
+    # Extract argv[] value which contains the full command + args.
     binary = ""
     exec_args: list[str] = []
     if exec_start:
-        tokens = exec_start.split()
-        binary = tokens[0] if tokens else ""
-        exec_args = tokens  # first token is binary, rest are args
+        m = re.search(r"argv\[\]=([^;]+)", exec_start)
+        if m:
+            exec_args = m.group(1).strip().split()
+            binary = exec_args[0] if exec_args else ""
+        else:
+            # Plain format fallback (older systemd or already parsed)
+            tokens = exec_start.split()
+            binary = tokens[0] if tokens else ""
+            exec_args = tokens
     if not binary:
         binary = f"/usr/bin/{service_name.replace('.service', '')}"
         exec_args = [binary]

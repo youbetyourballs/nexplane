@@ -44,16 +44,18 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     dry_run = bool(parameters.get("dry_run", False))
 
-    if dry_run:
-        # Dry-run: skip DB app_profile lookup — agent will inspect the host itself
-        app_profile = {"name": app_name}
-    else:
-        app_profile = await _load_app_profile(str(asset_id), app_name)
-        if app_profile is None:
-            raise ValueError(
-                f"Application '{app_name}' not found in asset_metadata.applications[]. "
-                "Run agent_appdiscovery first."
-            )
+    # Accept explicit app_profile override (avoids race with agent discovery overwriting metadata)
+    app_profile = parameters.get("app_profile")
+    if not app_profile:
+        if dry_run:
+            app_profile = {"name": app_name}
+        else:
+            app_profile = await _load_app_profile(str(asset_id), app_name)
+            if app_profile is None:
+                raise ValueError(
+                    f"Application '{app_name}' not found in asset_metadata.applications[]. "
+                    "Run agent_appdiscovery first."
+                )
 
     agent_params = {
         "app_profile": app_profile,
