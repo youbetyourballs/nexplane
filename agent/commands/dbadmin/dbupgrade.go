@@ -59,11 +59,16 @@ func DbPreflightExecute(params map[string]any) (map[string]any, error) {
 			"-h", host, "-p", port, "-U", user, "-c", "SELECT version();", "--tuples-only", "--no-align")
 	case "mysql":
 		connOut, connErr, connRunErr = runCmd(nil, "mysql",
-			"-h", host, "-P", port, "-u", user, "--password="+password, "-e", "SELECT version();")
+			"-h", host, "--protocol=tcp", "-P", port, "-u", user, "--password="+password, "-e", "SELECT version();")
 	case "mongodb":
-		connOut, connErr, connRunErr = runCmd(nil, "mongosh",
-			"--host", host, "--port", port, "--username", user, "--password", password,
-			"--eval", "db.version()", "--quiet")
+		mongoArgs := []string{"--host", host, "--port", port, "--eval", "db.version()", "--quiet"}
+		if user != "" {
+			mongoArgs = append(mongoArgs, "--username", user)
+		}
+		if password != "" {
+			mongoArgs = append(mongoArgs, "--password", password)
+		}
+		connOut, connErr, connRunErr = runCmd(nil, "mongosh", mongoArgs...)
 	default:
 		return map[string]any{"status": "preflight_blocked", "error": "unknown engine: " + engine}, nil
 	}
@@ -118,11 +123,16 @@ func DbVersionQueryExecute(params map[string]any) (map[string]any, error) {
 			"-h", host, "-p", port, "-U", user, "-c", query, "--tuples-only", "--no-align")
 	case "mysql":
 		out, errOut, err = runCmd(nil, "mysql",
-			"-h", host, "-P", port, "-u", user, "--password="+password, "-e", query)
+			"-h", host, "--protocol=tcp", "-P", port, "-u", user, "--password="+password, "-e", query)
 	case "mongodb":
-		out, errOut, err = runCmd(nil, "mongosh",
-			"--host", host, "--port", port, "--username", user, "--password", password,
-			"--eval", query, "--quiet")
+		mongoArgs := []string{"--host", host, "--port", port, "--eval", query, "--quiet"}
+		if user != "" {
+			mongoArgs = append(mongoArgs, "--username", user)
+		}
+		if password != "" {
+			mongoArgs = append(mongoArgs, "--password", password)
+		}
+		out, errOut, err = runCmd(nil, "mongosh", mongoArgs...)
 	default:
 		return nil, fmt.Errorf("unknown engine: %s", engine)
 	}
@@ -154,7 +164,7 @@ func DbUpgradePostgresDumpRestoreExecute(params map[string]any) (map[string]any,
 	targetPortStr := strconv.Itoa(targetPort)
 
 	out, errOut, err := runCmd(pgEnv, "pg_dumpall",
-		"-h", host, "-p", portStr, "-U", user, "-f", dumpPath)
+		"-h", host, "-p", portStr, "-U", user, "--no-role-passwords", "-f", dumpPath)
 	if err != nil {
 		return nil, fmt.Errorf("pg_dumpall failed: %s %s", out, errOut)
 	}
@@ -224,7 +234,7 @@ func DbUpgradeMysqlExecute(params map[string]any) (map[string]any, error) {
 	targetPortStr := strconv.Itoa(targetPort)
 
 	out, errOut, err := runCmd(nil, "mysqldump",
-		"-h", host, "-P", portStr, "-u", user, "--password="+password,
+		"-h", host, "--protocol=tcp", "-P", portStr, "-u", user, "--password="+password,
 		"--all-databases", "--result-file="+dumpPath)
 	if err != nil {
 		return nil, fmt.Errorf("mysqldump failed: %s %s", out, errOut)
