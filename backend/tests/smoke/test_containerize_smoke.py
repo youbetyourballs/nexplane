@@ -299,6 +299,21 @@ class TestContainerizeSmoke:
         cls.agent_asset_id = agent_asset_id
         log(f"CONTAINERIZE setup: agent registered as {agent_asset_id}")
 
+        # Seed asset_metadata.applications so the live build test can find nexplane-smoke-app
+        try:
+            asset = cls.client.get(f"/assets/{agent_asset_id}")
+            meta = dict(asset.get("asset_metadata") or {})
+            apps = [a for a in meta.get("applications", []) if a.get("name") != "nexplane-smoke-app"]
+            apps.append({"name": "nexplane-smoke-app", "systemd_unit": DUMMY_SERVICE, "language": "python"})
+            meta["applications"] = apps
+            cls.client.client.patch(
+                f"{cls.client.base}/assets/{agent_asset_id}",
+                json={"asset_metadata": meta},
+            )
+            log(f"CONTAINERIZE setup: seeded nexplane-smoke-app into asset_metadata.applications")
+        except Exception as e:
+            log(f"CONTAINERIZE setup: WARNING — could not seed app profile: {e}")
+
         # Install dummy systemd service for retire/SSH-inplace phases
         _ssm_run(
             cls.instance_id,
