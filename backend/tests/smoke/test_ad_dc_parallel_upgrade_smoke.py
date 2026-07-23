@@ -147,9 +147,9 @@ def test_phase1_smoke_setup():
     source_ami = _get_or_create_smoke_ami(ec2, ssm, version="2019")
     print(f"[smoke_setup] Source DC AMI: {source_ami}")
 
-    # Get default subnet/SG from existing smoke infra tag
+    # Get subnet/SG — use nexplane-smoke-dc SG which has WinRM + LDAP + AD ports open in VPC
     default_subnet = aws_creds.get("smoke_subnet_id") or _resolve_default_subnet(ec2, region)
-    default_sg = aws_creds.get("smoke_security_group_id") or _resolve_default_sg(ec2, region)
+    default_sg = aws_creds.get("smoke_dc_security_group_id") or _resolve_dc_smoke_sg(ec2)
     _smoke_state["subnet_id"] = default_subnet
     _smoke_state["sg_ids"] = [default_sg]
 
@@ -306,12 +306,23 @@ def _resolve_default_subnet(ec2, region: str) -> str:
     raise RuntimeError("No default subnet found; set smoke_subnet_id in AWS connector creds")
 
 
-def _resolve_default_sg(ec2, region: str) -> str:
+def _resolve_dc_smoke_sg(ec2) -> str:
+    """Return the nexplane-smoke-dc SG (has WinRM + LDAP + AD ports open in VPC)."""
+    resp = ec2.describe_security_groups(Filters=[{"Name": "group-name", "Values": ["nexplane-smoke-dc"]}])
+    groups = resp.get("SecurityGroups", [])
+    if groups:
+        return groups[0]["GroupId"]
+    # Fall back to nexplane-smoke-winrm
+    resp = ec2.describe_security_groups(Filters=[{"Name": "group-name", "Values": ["nexplane-smoke-winrm"]}])
+    groups = resp.get("SecurityGroups", [])
+    if groups:
+        return groups[0]["GroupId"]
+    # Last resort: default
     resp = ec2.describe_security_groups(Filters=[{"Name": "group-name", "Values": ["default"]}])
     groups = resp.get("SecurityGroups", [])
     if groups:
         return groups[0]["GroupId"]
-    raise RuntimeError("No default security group found")
+    raise RuntimeError("No suitable security group found for DC smoke test")
 
 
 # ---------------------------------------------------------------------------
