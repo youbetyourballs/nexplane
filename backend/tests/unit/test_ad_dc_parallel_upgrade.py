@@ -89,7 +89,7 @@ def test_preflight_blocks_single_dc_domain():
     session_mock.run_ps.side_effect = [
         _winrm_ok("ready"),                                   # WinRM ready check
         _winrm_ok("corp.example.com"),                        # Get-ADDomain
-        _winrm_ok("DC01.corp.example.com"),                   # Get-ADDomainController list
+        _winrm_ok("10.0.1.10"),                               # Get-ADDomainController list (source DC only)
         _winrm_ok("1"),                                       # DC count = 1
         _winrm_ok("PDCEmulator          DC01\nRIDMaster    DC01"),  # netdom query fsmo
         _winrm_ok("Windows2016Domain"),                       # Get-ADDomain DomainMode
@@ -129,7 +129,7 @@ def test_preflight_dry_run_returns_report():
     session_mock.run_ps.side_effect = [
         _winrm_ok("ready"),
         _winrm_ok("corp.example.com"),
-        _winrm_ok("DC01.corp.example.com\nDC02.corp.example.com"),
+        _winrm_ok("10.0.1.10,DC02.corp.example.com"),
         _winrm_ok("2"),
         _winrm_ok("PDCEmulator          DC01\nRIDMaster    DC01\nInfrastructureMaster    DC01"),
         _winrm_ok("Windows2016Domain"),
