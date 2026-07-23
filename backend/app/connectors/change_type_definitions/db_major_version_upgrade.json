@@ -3,8 +3,11 @@
   "display_name": "Database Major Version Upgrade",
   "description": "Upgrade a database engine to a new major version with pre-flight checks, snapshot-based rollback, and post-upgrade verification.",
   "rollback_capability": "full",
-  "executor": "nexplane_agent",
-  "action_id": "execute_db_major_version_upgrade",
+  "steps": [
+    {"generic_action": "db_major_version_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
   "parameters": {
     "engine":             { "type": "string",  "required": true,  "enum": ["postgres", "mysql", "mongodb"] },
     "target_version":     { "type": "string",  "required": true },
