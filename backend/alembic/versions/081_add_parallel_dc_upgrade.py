@@ -22,7 +22,7 @@ depends_on = None
 
 def upgrade():
     op.execute(
-        "ALTER TYPE changetype ADD VALUE IF NOT EXISTS 'ad_dc_parallel_upgrade'"
+        "ALTER TYPE change_type ADD VALUE IF NOT EXISTS 'ad_dc_parallel_upgrade'"
     )
 
 
