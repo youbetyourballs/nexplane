@@ -29,7 +29,7 @@ NEW_TYPES = [
 
 def upgrade():
     for value in NEW_TYPES:
-        op.execute(f"ALTER TYPE changetype ADD VALUE IF NOT EXISTS '{value}'")
+        op.execute(f"ALTER TYPE change_type ADD VALUE IF NOT EXISTS '{value}'")
 
 
 def downgrade():
