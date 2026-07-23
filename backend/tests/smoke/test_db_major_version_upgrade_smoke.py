@@ -154,7 +154,7 @@ class TestDbMajorVersionUpgradeSmoke:
         log("DB_UPGRADE_POSTGRES: launching postgres:12 container")
         _run("docker rm -f pg12 2>/dev/null || true", check=False)
         _run(
-            "docker run -d --name pg12 -e POSTGRES_PASSWORD=testpw -p 5432:5432 postgres:12"
+            "docker run -d --name pg12 -e POSTGRES_PASSWORD=testpw -p 15432:5432 postgres:12"
         )
         _wait_docker(
             "docker exec pg12 pg_isready -U postgres",
@@ -180,7 +180,7 @@ class TestDbMajorVersionUpgradeSmoke:
                     "target_version": "16",
                     "strategy": "dump_restore",
                     "db_host": "localhost",
-                    "db_port": 5432,
+                    "db_port": 15432,
                     "db_user": "postgres",
                     "db_password": "testpw",
                 },
@@ -252,7 +252,7 @@ class TestDbMajorVersionUpgradeSmoke:
         log("DB_UPGRADE_MYSQL: launching mysql:5.7 container")
         _run("docker rm -f mysql57 2>/dev/null || true", check=False)
         _run(
-            "docker run -d --name mysql57 -e MYSQL_ROOT_PASSWORD=testpw -p 3306:3306 mysql:5.7"
+            "docker run -d --name mysql57 -e MYSQL_ROOT_PASSWORD=testpw -p 13306:3306 mysql:5.7"
         )
         _wait_docker(
             "docker exec mysql57 mysqladmin ping -uroot -ptestpw --silent",
@@ -278,7 +278,7 @@ class TestDbMajorVersionUpgradeSmoke:
                     "source_version": "5.7",
                     "target_version": "8.0",
                     "db_host": "localhost",
-                    "db_port": 3306,
+                    "db_port": 13306,
                     "db_user": "root",
                     "db_password": "testpw",
                 },
@@ -339,7 +339,7 @@ class TestDbMajorVersionUpgradeSmoke:
         # --- Infra setup ---
         log("DB_UPGRADE_MONGODB: launching mongo:4.4 container with replica set")
         _run("docker rm -f mongo44 2>/dev/null || true", check=False)
-        _run("docker run -d --name mongo44 -p 27017:27017 mongo:4.4 --replSet rs0")
+        _run("docker run -d --name mongo44 -p 27117:27017 mongo:4.4 --replSet rs0")
         _wait_docker(
             "docker exec mongo44 mongosh --quiet --eval 'db.runCommand({ping:1})'",
             timeout=90,
@@ -366,7 +366,7 @@ class TestDbMajorVersionUpgradeSmoke:
                     "source_version": "4.4",
                     "target_version": "7.0",
                     "db_host": "localhost",
-                    "db_port": 27017,
+                    "db_port": 27117,
                     "db_user": "admin",
                 },
                 [asset_id],

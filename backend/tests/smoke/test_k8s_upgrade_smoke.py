@@ -98,7 +98,15 @@ def _export_kubeconfig(name: str, path: str):
 
 def _kubeconfig_base64(path: str) -> str:
     with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode()
+        content = f.read().decode()
+    # When running on the EC2 host, kind sets server=https://127.0.0.1:<port>.
+    # The executor runs inside the Docker container where 127.0.0.1 is the container
+    # itself. Rewrite to the Docker bridge gateway so the container can reach kind's
+    # API server on the host.
+    import re as _re
+    docker_gw = "172.17.0.1"
+    content = _re.sub(r"https://127\.0\.0\.1:", f"https://{docker_gw}:", content)
+    return base64.b64encode(content.encode()).decode()
 
 
 def _kubectl(args: list, kubeconfig: str = None, check: bool = True) -> subprocess.CompletedProcess:
