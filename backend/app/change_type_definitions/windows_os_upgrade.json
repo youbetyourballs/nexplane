@@ -1,0 +1,67 @@
+{
+  "change_type": "windows_os_upgrade",
+  "display_name": "Windows Server OS Upgrade",
+  "description": "Performs a Windows Server in-place OS upgrade via Windows Update or DISM. Takes an EBS snapshot (EC2) or VSS shadow copy (on-prem) before upgrade. Polls for agent re-registration after the reboot (up to 30 minutes). Full rollback via EBS volume swap.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "target_version": {
+      "type": "string",
+      "required": true,
+      "label": "Target Version",
+      "description": "Target Windows Server version (e.g. 2022 or 2025). Supported paths: 2016→2019, 2019→2022."
+    },
+    "iso_path": {
+      "type": "string",
+      "required": false,
+      "label": "ISO Path",
+      "description": "Path to Windows Server ISO on the target host (required for DISM upgrade; omit for Windows Update)"
+    },
+    "health_check_command": {
+      "type": "string",
+      "required": false,
+      "label": "Health Check Command",
+      "description": "Optional PowerShell command to run post-upgrade to verify application health"
+    },
+    "skip_snapshot": {
+      "type": "boolean",
+      "required": false,
+      "label": "Skip Snapshot",
+      "description": "Skip pre-upgrade snapshot (not allowed on prod assets)",
+      "default": false
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight and DISM compatibility check only — no changes applied",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "backup_restore",
+    "description": "EC2 path: EBS root volume swap from pre-upgrade snapshot. On-prem path: VSS shadow copy restore. Agent re-registration verified after restore."
+  },
+  "steps": [
+    {
+      "step": "preflight",
+      "generic_action": "windows_os_upgrade",
+      "description": "Check disk space, validate upgrade path, run DISM compatibility scan"
+    },
+    {
+      "step": "snapshot",
+      "generic_action": "windows_os_upgrade",
+      "description": "Take EBS snapshot (EC2) or VSS shadow copy (on-prem)"
+    },
+    {
+      "step": "upgrade",
+      "generic_action": "windows_os_upgrade",
+      "description": "Trigger Windows Update or DISM upgrade; wait for agent re-registration"
+    },
+    {
+      "step": "verify",
+      "generic_action": "windows_os_upgrade",
+      "description": "Confirm OS version, services, and optional application health check"
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "change_type": "ad_domain_functional_level_upgrade",
+  "display_name": "AD Domain/Forest Functional Level Upgrade (Irreversible)",
+  "description": "Raises the Active Directory domain or forest functional level. IRREVERSIBLE — Microsoft does not support lowering the functional level once raised. All DCs must be at the target OS version before applying. Preflight blocks if any DC cannot support the target level.",
+  "risk_level_default": "critical",
+  "incident_response": false,
+  "parameters": {
+    "target_level": {
+      "type": "string",
+      "required": true,
+      "label": "Target Functional Level",
+      "description": "Target DFL/FFL (e.g. Win2019, Win2025, WinThreshold for 2016)"
+    },
+    "scope": {
+      "type": "string",
+      "required": false,
+      "label": "Scope",
+      "description": "domain (default) | forest",
+      "default": "domain"
+    },
+    "domain_name": {
+      "type": "string",
+      "required": true,
+      "label": "Domain Name",
+      "description": "AD domain FQDN"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight DC inventory check only — no level change applied",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "none",
+    "description": "IRREVERSIBLE — Active Directory does not support lowering the domain or forest functional level once raised."
+  },
+  "steps": [
+    {
+      "step": "preflight",
+      "generic_action": "ad_domain_functional_level_upgrade",
+      "description": "Inventory all DCs and verify all support the target functional level"
+    },
+    {
+      "step": "raise_level",
+      "generic_action": "ad_domain_functional_level_upgrade",
+      "description": "Raise domain or forest functional level — IRREVERSIBLE"
+    }
+  ]
+}

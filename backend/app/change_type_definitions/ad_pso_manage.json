@@ -1,0 +1,101 @@
+{
+  "change_type": "ad_pso_manage",
+  "display_name": "Fine-Grained Password Policy (PSO) Management",
+  "description": "Creates or updates an Active Directory Password Settings Object (PSO) and applies it to security groups or users. Supports create, update, and delete operations. Rollback removes newly created PSOs or restores previous settings.",
+  "risk_level_default": "medium",
+  "incident_response": false,
+  "parameters": {
+    "domain_name": {
+      "type": "string",
+      "required": true,
+      "label": "Domain Name",
+      "description": "AD domain FQDN"
+    },
+    "pso_name": {
+      "type": "string",
+      "required": true,
+      "label": "PSO Name",
+      "description": "Name of the Password Settings Object"
+    },
+    "operation": {
+      "type": "string",
+      "required": false,
+      "label": "Operation",
+      "description": "create | update | delete (default: create)",
+      "default": "create"
+    },
+    "precedence": {
+      "type": "integer",
+      "required": true,
+      "label": "Precedence",
+      "description": "PSO precedence value (lower = higher priority; must be unique)"
+    },
+    "min_password_length": {
+      "type": "integer",
+      "required": false,
+      "label": "Minimum Password Length",
+      "description": "Minimum password length (default: 14)",
+      "default": 14
+    },
+    "password_history_count": {
+      "type": "integer",
+      "required": false,
+      "label": "Password History Count",
+      "description": "Number of previous passwords remembered (default: 24)",
+      "default": 24
+    },
+    "max_password_age_days": {
+      "type": "integer",
+      "required": false,
+      "label": "Max Password Age (days)",
+      "description": "Maximum password age in days (default: 90)",
+      "default": 90
+    },
+    "lockout_threshold": {
+      "type": "integer",
+      "required": false,
+      "label": "Lockout Threshold",
+      "description": "Failed logon attempts before lockout (default: 5)",
+      "default": 5
+    },
+    "applies_to": {
+      "type": "array",
+      "required": false,
+      "label": "Applies To",
+      "description": "List of group or user DNs to apply this PSO to"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight only — no PSO created or modified",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "full",
+    "description": "For create: remove the PSO. For update: restore previous PSO settings from captured pre-change state. For delete: re-create PSO from captured state."
+  },
+  "steps": [
+    {
+      "step": "preflight",
+      "generic_action": "ad_pso_manage",
+      "description": "Verify precedence is unique and target groups/users exist"
+    },
+    {
+      "step": "snapshot_existing",
+      "generic_action": "ad_pso_manage",
+      "description": "Capture existing PSO state for rollback (update/delete operations)"
+    },
+    {
+      "step": "apply_pso",
+      "generic_action": "ad_pso_manage",
+      "description": "Create, update, or delete the PSO"
+    },
+    {
+      "step": "apply_subjects",
+      "generic_action": "ad_pso_manage",
+      "description": "Apply PSO to specified groups and users"
+    }
+  ]
+}

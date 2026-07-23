@@ -1,0 +1,70 @@
+{
+  "change_type": "ad_stale_computer_cleanup",
+  "display_name": "Stale Computer Account Cleanup",
+  "description": "Identifies and remediates stale Active Directory computer accounts using a staged lifecycle: disable accounts inactive beyond the threshold, then delete accounts that have been disabled for the retention period. Dry-run mode reports candidates without making changes.",
+  "risk_level_default": "medium",
+  "incident_response": false,
+  "parameters": {
+    "domain_name": {
+      "type": "string",
+      "required": true,
+      "label": "Domain Name",
+      "description": "AD domain FQDN"
+    },
+    "inactive_days_threshold": {
+      "type": "integer",
+      "required": false,
+      "label": "Inactive Days Threshold",
+      "description": "Accounts with no logon for this many days are candidates for disabling (default: 90)",
+      "default": 90
+    },
+    "disabled_retention_days": {
+      "type": "integer",
+      "required": false,
+      "label": "Disabled Retention Days",
+      "description": "Accounts disabled for this many days are candidates for deletion (default: 30)",
+      "default": 30
+    },
+    "target_ou": {
+      "type": "string",
+      "required": false,
+      "label": "Target OU DN",
+      "description": "Scope cleanup to a specific OU (default: entire domain)"
+    },
+    "disable_only": {
+      "type": "boolean",
+      "required": false,
+      "label": "Disable Only",
+      "description": "Only disable stale accounts — do not delete any accounts (default: false)",
+      "default": false
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Report stale account candidates only — no accounts disabled or deleted",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "full",
+    "description": "Re-enable all disabled accounts from this run. Deleted accounts cannot be restored via rollback — use AD Recycle Bin or backup restore for deleted accounts if recycle bin was enabled."
+  },
+  "steps": [
+    {
+      "step": "inventory",
+      "generic_action": "ad_stale_computer_cleanup",
+      "description": "Query AD for stale computer accounts based on lastLogonTimestamp and pwdLastSet"
+    },
+    {
+      "step": "disable_stale",
+      "generic_action": "ad_stale_computer_cleanup",
+      "description": "Disable computer accounts inactive beyond threshold"
+    },
+    {
+      "step": "delete_expired",
+      "generic_action": "ad_stale_computer_cleanup",
+      "description": "Delete accounts that have been disabled beyond the retention period"
+    }
+  ]
+}

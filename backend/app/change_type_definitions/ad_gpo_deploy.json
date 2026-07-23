@@ -1,0 +1,77 @@
+{
+  "change_type": "ad_gpo_deploy",
+  "display_name": "GPO Deployment with Pilot OU Rollout",
+  "description": "Creates and links a Group Policy Object (GPO) with a staged rollout: pilot OU first, then domain-wide. Validates policy application before broadening scope. Rollback removes GPO links and deletes the GPO.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "domain_name": {
+      "type": "string",
+      "required": true,
+      "label": "Domain Name",
+      "description": "AD domain FQDN"
+    },
+    "gpo_name": {
+      "type": "string",
+      "required": true,
+      "label": "GPO Name",
+      "description": "Name of the Group Policy Object to create"
+    },
+    "gpo_settings_json": {
+      "type": "string",
+      "required": true,
+      "label": "GPO Settings (JSON)",
+      "description": "JSON blob describing registry/security/script settings to apply"
+    },
+    "pilot_ou": {
+      "type": "string",
+      "required": true,
+      "label": "Pilot OU DN",
+      "description": "Distinguished name of the pilot OU for initial rollout (e.g. OU=Pilot,DC=corp,DC=example,DC=com)"
+    },
+    "target_ous": {
+      "type": "array",
+      "required": false,
+      "label": "Target OUs",
+      "description": "List of OU DNs to link GPO after pilot validation (empty = domain root only)"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight only — no GPO created",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "full",
+    "description": "Remove all GPO links and delete the GPO using Remove-GPLink and Remove-GPO."
+  },
+  "steps": [
+    {
+      "step": "preflight",
+      "generic_action": "ad_gpo_deploy",
+      "description": "Verify GPO name is unique and pilot OU exists"
+    },
+    {
+      "step": "create_gpo",
+      "generic_action": "ad_gpo_deploy",
+      "description": "Create GPO and apply settings"
+    },
+    {
+      "step": "link_pilot",
+      "generic_action": "ad_gpo_deploy",
+      "description": "Link GPO to pilot OU and wait for policy application"
+    },
+    {
+      "step": "validate_pilot",
+      "generic_action": "ad_gpo_deploy",
+      "description": "Validate GPO applied correctly on pilot OU machines"
+    },
+    {
+      "step": "link_production",
+      "generic_action": "ad_gpo_deploy",
+      "description": "Link GPO to production OUs after pilot validation"
+    }
+  ]
+}

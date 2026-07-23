@@ -1,0 +1,71 @@
+{
+  "change_type": "k8s_cluster_upgrade",
+  "display_name": "Kubernetes Cluster Upgrade",
+  "description": "Upgrade a Kubernetes cluster (EKS, GKE, AKS, or kubeadm) by exactly one minor version. Enforces +1 minor version constraint and scans for removed API violations before the irreversible control-plane step. Node pools are upgraded in a rolling fashion and can be rolled back to their previous image.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "target_version": {
+      "type": "string",
+      "required": true,
+      "label": "Target Version",
+      "description": "Target Kubernetes minor version (e.g. 1.29). Must be exactly one minor version ahead of current."
+    },
+    "cluster_type": {
+      "type": "string",
+      "required": false,
+      "label": "Cluster Type",
+      "description": "eks | gke | aks | kubeadm | auto (default: auto-detected)",
+      "default": "auto"
+    },
+    "node_pool_strategy": {
+      "type": "string",
+      "required": false,
+      "label": "Node Pool Strategy",
+      "description": "rolling (default) | blue_green",
+      "default": "rolling"
+    },
+    "drain_timeout_seconds": {
+      "type": "integer",
+      "required": false,
+      "label": "Drain Timeout (s)",
+      "description": "Seconds to wait for a node to drain before failing (default: 300)",
+      "default": 300
+    },
+    "max_unavailable": {
+      "type": "integer",
+      "required": false,
+      "label": "Max Unavailable Nodes",
+      "description": "Maximum nodes that can be unavailable at once during rolling upgrade (default: 1)",
+      "default": 1
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight checks only — no changes applied",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "partial",
+    "description": "Node pools are restored to previous image (FILO order). Control plane upgrade is irreversible — Kubernetes does not support downgrade of the control plane."
+  },
+  "steps": [
+    {
+      "step": "preflight",
+      "generic_action": "k8s_cluster_upgrade",
+      "description": "Validate version path, scan for removed API violations, check node resource headroom"
+    },
+    {
+      "step": "control_plane_upgrade",
+      "generic_action": "k8s_cluster_upgrade",
+      "description": "Upgrade the Kubernetes control plane — IRREVERSIBLE"
+    },
+    {
+      "step": "node_pool_upgrade",
+      "generic_action": "k8s_cluster_upgrade",
+      "description": "Rolling node pool upgrade with drain/cordon and PDB respect"
+    }
+  ]
+}

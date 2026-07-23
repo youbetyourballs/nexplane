@@ -1,0 +1,75 @@
+{
+  "change_type": "ad_trust_create",
+  "display_name": "AD Forest/Domain Trust Creation",
+  "description": "Creates an Active Directory forest or domain trust relationship and validates Kerberos authentication across the trust boundary. Supports one-way and two-way trusts, external and forest trust types.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "source_domain": {
+      "type": "string",
+      "required": true,
+      "label": "Source Domain",
+      "description": "FQDN of the local domain establishing the trust"
+    },
+    "target_domain": {
+      "type": "string",
+      "required": true,
+      "label": "Target Domain",
+      "description": "FQDN of the remote domain or forest to trust"
+    },
+    "trust_type": {
+      "type": "string",
+      "required": false,
+      "label": "Trust Type",
+      "description": "external | forest (default: external)",
+      "default": "external"
+    },
+    "trust_direction": {
+      "type": "string",
+      "required": false,
+      "label": "Trust Direction",
+      "description": "one_way_inbound | one_way_outbound | two_way (default: two_way)",
+      "default": "two_way"
+    },
+    "target_domain_admin_user": {
+      "type": "string",
+      "required": true,
+      "label": "Target Domain Admin User",
+      "description": "Admin username on the target domain for trust negotiation"
+    },
+    "target_domain_admin_password": {
+      "type": "string",
+      "required": true,
+      "label": "Target Domain Admin Password",
+      "description": "Admin password on the target domain (stored encrypted)"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run connectivity preflight only — no trust created",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "full",
+    "description": "Remove the trust relationship using Remove-ADTrust on both sides of the trust boundary."
+  },
+  "steps": [
+    {
+      "step": "preflight",
+      "generic_action": "ad_trust_create",
+      "description": "Verify DNS resolution and connectivity between source and target domains"
+    },
+    {
+      "step": "create_trust",
+      "generic_action": "ad_trust_create",
+      "description": "Create the trust relationship via New-ADTrust or netdom"
+    },
+    {
+      "step": "validate_kerberos",
+      "generic_action": "ad_trust_create",
+      "description": "Validate Kerberos authentication across the trust boundary"
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "change_type": "ad_dc_parallel_upgrade",
+  "display_name": "Parallel DC Upgrade (Microsoft Paradigm)",
+  "description": "Upgrades a domain controller using the Microsoft-prescribed parallel paradigm: promote a new DC at the target Windows Server version, wait for AD replication to converge, transfer FSMO roles, then demote the old DC. Replaces deprecated in-place DC upgrade. Fully reversible.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "new_dc_asset_id": {
+      "type": "string",
+      "required": true,
+      "label": "New DC Asset ID",
+      "description": "Nexplane asset ID of the new domain controller (must already be joined to the domain)"
+    },
+    "new_dc_hostname": {
+      "type": "string",
+      "required": true,
+      "label": "New DC Hostname",
+      "description": "FQDN or IP of the new domain controller"
+    },
+    "domain_name": {
+      "type": "string",
+      "required": true,
+      "label": "Domain Name",
+      "description": "AD domain FQDN (e.g. corp.example.com)"
+    },
+    "target_os_version": {
+      "type": "string",
+      "required": false,
+      "label": "Target OS Version",
+      "description": "Windows Server version of the new DC (e.g. 2025)"
+    },
+    "transfer_fsmo": {
+      "type": "boolean",
+      "required": false,
+      "label": "Transfer FSMO Roles",
+      "description": "Transfer FSMO roles from old to new DC (default: true)",
+      "default": true
+    },
+    "demote_old_dc": {
+      "type": "boolean",
+      "required": false,
+      "label": "Demote Old DC",
+      "description": "Demote the old DC after FSMO transfer (default: true)",
+      "default": true
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight only — no promotion or demotion",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "reconstitution",
+    "description": "FILO rollback: (1) re-promote old DC, (2) seize FSMO roles back to old DC, (3) demote new DC."
+  },
+  "steps": [
+    {
+      "step": "preflight",
+      "generic_action": "ad_dc_parallel_upgrade",
+      "description": "Verify new DC is online, domain-joined, and reachable"
+    },
+    {
+      "step": "promote_new_dc",
+      "generic_action": "ad_dc_parallel_upgrade",
+      "description": "Install ADDS role and run dcpromo on new DC"
+    },
+    {
+      "step": "verify_replication",
+      "generic_action": "ad_dc_parallel_upgrade",
+      "description": "Wait for AD replication to converge on new DC"
+    },
+    {
+      "step": "transfer_fsmo",
+      "generic_action": "ad_dc_parallel_upgrade",
+      "description": "Transfer FSMO roles to new DC"
+    },
+    {
+      "step": "demote_old_dc",
+      "generic_action": "ad_dc_parallel_upgrade",
+      "description": "Demote old DC by removing ADDS role"
+    }
+  ]
+}
