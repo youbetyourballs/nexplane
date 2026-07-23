@@ -116,10 +116,12 @@ _smoke_state = {
 # ---------------------------------------------------------------------------
 
 def _skip_if_no_creds():
-    if not _platform_has_creds("active_directory"):
-        pytest.skip("No AD connector creds in platform DB")
-    if not _platform_has_creds("aws"):
+    aws_creds = get_connector_creds_from_db("aws")
+    if not aws_creds:
         pytest.skip("No AWS connector creds in platform DB")
+    ad_creds = get_connector_creds_from_db("active_directory")
+    if not ad_creds:
+        pytest.skip("No AD connector creds in platform DB")
 
 
 # ---------------------------------------------------------------------------
@@ -132,8 +134,9 @@ def test_phase1_smoke_setup():
 
     import boto3
 
-    aws_connector = _api("get", "/connectors?connector_type=aws")[0]
-    aws_creds = aws_connector["credentials"]
+    aws_creds = get_connector_creds_from_db("aws")
+    if not aws_creds:
+        pytest.skip("No AWS connector creds in platform DB")
     _smoke_state["aws_creds"] = aws_creds
     region = aws_creds.get("region", "us-east-1")
     _smoke_state["region"] = region
