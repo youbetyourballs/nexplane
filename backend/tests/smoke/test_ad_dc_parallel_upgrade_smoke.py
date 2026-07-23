@@ -65,35 +65,210 @@ def _platform_has_creds(connector_type: str) -> bool:
         return False
 
 
-def _get_smoke_dc_ami(ec2, ssm, version="2019") -> str:
-    """Return the pre-configured DC AMI from SSM cache.
+_DC_AMI_SSM_KEY = "/nexplane/smoke-amis/dc-smoke-prebuilt/2019"
+_DC_ADMIN_PASSWORD = "SmokeTest1234!"
+_DC_DOMAIN = "smoke.nexplane.local"
+_DC_NETBIOS = "SMOKE"
+_SSM_PROFILE = "nexplane-smoke-ssm"
 
-    The AMI must be a Windows Server with:
-    - AD DS installed and promoted as a domain controller
-    - ADWS (Active Directory Web Services) running
-    - WinRM HTTP (port 5985) enabled and accessible within VPC
-    - At least one other DC in the domain (so preflight dc_count_safe passes after adding new DC)
 
-    This AMI is NOT automatically created — it must be pre-built and stored in SSM.
-    Build it by: launching a Windows Server AMI, configuring AD DS, enabling WinRM,
-    then creating an AMI snapshot and storing the AMI ID in SSM at the cache_key below.
+def _ssm_run_ps_dc(ssm, instance_id: str, ps_command: str, timeout: int = 600) -> str:
+    """Run a PowerShell command via SSM on a Windows instance. Returns stdout."""
+    resp = ssm.send_command(
+        InstanceIds=[instance_id],
+        DocumentName="AWS-RunPowerShellScript",
+        Parameters={"commands": [ps_command]},
+    )
+    cmd_id = resp["Command"]["CommandId"]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(10)
+        try:
+            result = ssm.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+        except Exception:
+            continue
+        if result["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+            return result.get("StandardOutputContent", "").strip()
+    raise TimeoutError(f"SSM command timed out after {timeout}s on {instance_id}")
+
+
+def _build_dc_ami(ec2, ssm, aws_creds: dict) -> str:
     """
-    cache_key = f"/nexplane/smoke-amis/dc-smoke-prebuilt/{version}"
+    Build a fresh Windows 2019 DC AMI with AD DS promoted and WinRM enabled.
+    Password is set to _DC_ADMIN_PASSWORD. Stores AMI ID in SSM.
+    Takes ~15-25 minutes.
+    """
+    import boto3
+
+    region = aws_creds.get("region", "us-east-1")
+    subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
+    sg_id = aws_creds.get("smoke_dc_security_group_id")
+
+    # Find latest Windows Server 2019 Base AMI
+    images = ec2.describe_images(
+        Owners=["amazon"],
+        Filters=[
+            {"Name": "name", "Values": ["Windows_Server-2019-English-Full-Base-*"]},
+            {"Name": "state", "Values": ["available"]},
+        ],
+    )["Images"]
+    if not images:
+        pytest.fail("No Windows Server 2019 Base AMI found in AWS")
+    base_ami = sorted(images, key=lambda x: x["CreationDate"], reverse=True)[0]["ImageId"]
+    print(f"[dc_ami_build] Base AMI: {base_ami}")
+
+    # UserData to set password before AD DS promotion
+    import base64 as _b64
+    userdata_ps = (
+        "<powershell>"
+        f"net accounts /minpwage:0; "
+        f"net user Administrator {_DC_ADMIN_PASSWORD}; "
+        "Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -name 'fDenyTSConnections' -Value 0; "
+        "Enable-PSRemoting -Force; "
+        "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '*' -Force; "
+        "winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'; "
+        "winrm set winrm/config/service/auth '@{Basic=\"true\"}';"
+        "</powershell>"
+    )
+    userdata_b64 = _b64.b64encode(userdata_ps.encode()).decode()
+
+    launch_kwargs = dict(
+        ImageId=base_ami,
+        InstanceType="t3.medium",
+        MinCount=1, MaxCount=1,
+        IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData=userdata_b64,
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name", "Value": "nexplane-smoke-dc-builder"},
+            {"Key": "nexplane-purpose", "Value": "smoke-dc-ami-build"},
+        ]}],
+    )
+    if subnet_id:
+        launch_kwargs["SubnetId"] = subnet_id
+    if sg_id:
+        launch_kwargs["SecurityGroupIds"] = [sg_id]
+
+    resp = ec2.run_instances(**launch_kwargs)
+    instance_id = resp["Instances"][0]["InstanceId"]
+    print(f"[dc_ami_build] Launched {instance_id} — waiting for running")
+
+    try:
+        ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+        print(f"[dc_ami_build] Instance running, waiting for SSM (up to 10 min)")
+
+        # Wait for SSM
+        deadline = time.time() + 600
+        while time.time() < deadline:
+            time.sleep(30)
+            info = ssm.describe_instance_information(
+                Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+            )
+            if info.get("InstanceInformationList"):
+                print(f"[dc_ami_build] SSM ready")
+                break
+        else:
+            pytest.fail(f"SSM never ready for {instance_id}")
+
+        # Wait a bit for UserData to finish
+        time.sleep(60)
+
+        # Install AD DS and promote via SSM
+        print(f"[dc_ami_build] Installing AD DS role")
+        _ssm_run_ps_dc(ssm, instance_id, (
+            "Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools -ErrorAction Stop"
+        ), timeout=300)
+
+        print(f"[dc_ami_build] Promoting to DC (triggers reboot)")
+        _ssm_run_ps_dc(ssm, instance_id, (
+            f"Install-ADDSForest -DomainName '{_DC_DOMAIN}' "
+            f"-DomainNetbiosName '{_DC_NETBIOS}' "
+            f"-SafeModeAdministratorPassword (ConvertTo-SecureString '{_DC_ADMIN_PASSWORD}' -AsPlainText -Force) "
+            "-InstallDns -Force -NoRebootOnCompletion:$false"
+        ), timeout=600)
+
+        print(f"[dc_ami_build] Waiting for reboot + AD DS startup (~5 min)")
+        time.sleep(120)
+
+        # Wait for SSM again after reboot
+        deadline = time.time() + 600
+        while time.time() < deadline:
+            time.sleep(30)
+            info = ssm.describe_instance_information(
+                Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+            )
+            if info.get("InstanceInformationList"):
+                print(f"[dc_ami_build] SSM ready after reboot")
+                break
+        else:
+            pytest.fail(f"SSM never ready after reboot for {instance_id}")
+
+        # Wait for NTDS service
+        time.sleep(60)
+        _ssm_run_ps_dc(ssm, instance_id, (
+            "for ($i=0; $i -lt 10; $i++) { "
+            "  if ((Get-Service NTDS -ErrorAction SilentlyContinue).Status -eq 'Running') { break } "
+            "  Start-Sleep 30 "
+            "}"
+        ), timeout=360)
+
+        # Ensure WinRM basic auth is enabled after domain promotion resets config
+        _ssm_run_ps_dc(ssm, instance_id, (
+            f"net accounts /minpwage:0; "
+            f"net user Administrator {_DC_ADMIN_PASSWORD}; "
+            "winrm quickconfig -quiet; "
+            "Enable-PSRemoting -Force; "
+            "winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'; "
+            "winrm set winrm/config/service/auth '@{Basic=\"true\"}';"
+        ), timeout=120)
+
+        # Create AMI
+        print(f"[dc_ami_build] Creating AMI")
+        ami_resp = ec2.create_image(
+            InstanceId=instance_id,
+            Name=f"nexplane-smoke-dc-2019-{int(time.time())}",
+            Description=f"Windows 2019 DC for smoke tests — domain={_DC_DOMAIN} pass=SmokeTest1234!",
+            NoReboot=False,
+        )
+        new_ami_id = ami_resp["ImageId"]
+
+        ec2.get_waiter("image_available").wait(
+            ImageIds=[new_ami_id],
+            WaiterConfig={"Delay": 30, "MaxAttempts": 60},
+        )
+        print(f"[dc_ami_build] AMI ready: {new_ami_id}")
+
+        # Store in SSM
+        ssm.put_parameter(Name=_DC_AMI_SSM_KEY, Value=new_ami_id, Type="String", Overwrite=True)
+        print(f"[dc_ami_build] Stored in SSM: {_DC_AMI_SSM_KEY} = {new_ami_id}")
+
+        return new_ami_id
+
+    finally:
+        ec2.terminate_instances(InstanceIds=[instance_id])
+        print(f"[dc_ami_build] Build instance {instance_id} terminated")
+
+
+def _get_smoke_dc_ami(ec2, ssm, version="2019", aws_creds: dict = None) -> str:
+    """Return the pre-configured DC AMI from SSM cache. Builds one if absent."""
+    cache_key = _DC_AMI_SSM_KEY
     try:
         resp = ssm.get_parameter(Name=cache_key)
         ami_id = resp["Parameter"]["Value"]
-        # Verify AMI still exists and is available
         img_resp = ec2.describe_images(ImageIds=[ami_id])
         images = img_resp.get("Images", [])
         if images and images[0].get("State") == "available":
+            print(f"[dc_ami] Using cached AMI: {ami_id}")
             return ami_id
-        raise RuntimeError(f"AMI {ami_id} is not available (state: {images[0].get('State') if images else 'not found'})")
-    except Exception as exc:
-        raise pytest.skip.Exception(
-            f"Pre-configured DC smoke AMI not found in SSM at {cache_key}: {exc}. "
-            f"Build the AMI first: launch Windows Server {version}, install+promote AD DS, "
-            f"enable WinRM HTTP, create AMI, store AMI ID in SSM at {cache_key}."
+        print(f"[dc_ami] Cached AMI {ami_id} is not available — rebuilding")
+    except Exception:
+        print(f"[dc_ami] No cached AMI in SSM — building fresh DC AMI")
+
+    if aws_creds is None:
+        pytest.skip(
+            f"No DC smoke AMI in SSM at {cache_key} and no aws_creds provided for building. "
+            "Pass aws_creds to _get_smoke_dc_ami to auto-build."
         )
+    return _build_dc_ami(ec2, ssm, aws_creds)
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +325,7 @@ def test_phase1_smoke_setup():
     ec2 = _make_ec2_client(aws_creds, region)
     ssm = _make_ssm_client(aws_creds, region)
 
-    source_ami = _get_smoke_dc_ami(ec2, ssm, version="2019")
+    source_ami = _get_smoke_dc_ami(ec2, ssm, version="2019", aws_creds=aws_creds)
     print(f"[smoke_setup] Source DC AMI: {source_ami}")
 
     # Get subnet/SG — use nexplane-smoke-dc SG which has WinRM + LDAP + AD ports open in VPC
@@ -164,8 +339,16 @@ def test_phase1_smoke_setup():
     _smoke_state["domain_admin_password"] = domain_admin_password
 
     import base64 as _b64
-    # Reset Administrator password via UserData so AMI password mismatch is not an issue
-    _userdata_ps = f"<powershell>net user Administrator {domain_admin_password}</powershell>"
+    # Reset Administrator password via UserData.
+    # On a DC, domain password minimum-age policy can block immediate resets.
+    # We disable it first (net accounts /minpwage:0), reset, then restore.
+    _userdata_ps = (
+        "<powershell>"
+        "net accounts /minpwage:0; "
+        f"net user Administrator {domain_admin_password}; "
+        "net accounts /minpwage:1"
+        "</powershell>"
+    )
     _userdata_b64 = _b64.b64encode(_userdata_ps.encode()).decode()
     run_resp = ec2.run_instances(
         ImageId=source_ami,
@@ -459,7 +642,7 @@ def test_phase3_smoke_rollback():
     ssm = _make_ssm_client(aws_creds, region)
 
     # Provision a fresh source DC for rollback test
-    source_ami = _get_smoke_dc_ami(ec2, ssm, version="2019")
+    source_ami = _get_smoke_dc_ami(ec2, ssm, version="2019", aws_creds=aws_creds)
     run_resp = ec2.run_instances(
         ImageId=source_ami,
         InstanceType="t3.medium",
