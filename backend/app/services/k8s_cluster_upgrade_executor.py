@@ -636,6 +636,14 @@ async def execute_k8s_cluster_upgrade_rollback(
     rollback_results = []
     has_warnings = False
 
+    # If no pools completed, nothing to roll back
+    if not completed_pools_sorted:
+        return {
+            "rollback_note": _ROLLBACK_NOTE,
+            "pools_rolled_back": [],
+            "has_warnings": False,
+        }
+
     cr = await _load_cr(cr_id)
     if cr is None:
         return {"error": f"CR {cr_id} not found during rollback", "has_warnings": True}

@@ -244,6 +244,18 @@ async def execute_cr_rollback(
             await db.commit()
             return result
 
+        # k8s_cluster_upgrade: FILO rollback of node pools (control plane irreversible)
+        if cr.change_type.value == "k8s_cluster_upgrade":
+            from app.services.k8s_cluster_upgrade_executor import execute_k8s_cluster_upgrade_rollback
+            result = await execute_k8s_cluster_upgrade_rollback(cr.id, execution_result)
+            if result.get("has_warnings"):
+                cr.status = ChangeRequestStatus.rolled_back_with_warnings
+            else:
+                cr.status = ChangeRequestStatus.rolled_back
+            cr.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            return result
+
         # credential_rotation_fanout: FILO rollback across all consumers
         if cr.change_type.value == "credential_rotation_fanout":
             from app.services.credential_rotation_fanout_executor import execute_fanout_rollback
