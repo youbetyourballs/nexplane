@@ -90,7 +90,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
                 image_name = sr["image_name"]
                 image_digest = sr.get("image_digest", "")
                 break
-    if not image_name or not image_digest:
+    if not image_name:
         return {"rolled_back": False, "reason": "no_image_coordinates", "_rollback_no_op": True}
 
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job

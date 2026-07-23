@@ -83,13 +83,12 @@ async def _executor_fallback(
         # For catalog_action CRs, _ct is "catalog_action" which doesn't map to any
         # executor module. Use the action_id from the execution steps instead so the
         # executor's native rollback() is found correctly.
-        if _ct == "catalog_action":
-            _action_id_from_step = next(
-                (s.get("action_id") for s in _exec_steps_for_ct if s.get("action_id")),
-                None,
-            )
-            if _action_id_from_step:
-                _ct = _action_id_from_step
+        _action_id_from_step = next(
+            (s.get("action_id") for s in _exec_steps_for_ct if s.get("action_id")),
+            None,
+        )
+        if _ct == "catalog_action" and _action_id_from_step:
+            _ct = _action_id_from_step
         _connector = None
         # Resolve connector object for credentials if a connector_id is in the step
         _step_connector_id = next(
@@ -144,6 +143,17 @@ async def _executor_fallback(
                 break
             except Exception:
                 continue
+
+        # Fallback: if change_type didn't match a catalog entry but the step recorded
+        # an action_id (e.g. "ssh_containerize_workload" CR whose step action_id is
+        # "containerize_workload"), retry with the step's action_id.
+        if _mod is None and _action_id_from_step and _action_id_from_step != _ct:
+            for _conn_type in _conn_types_to_try:
+                try:
+                    _mod = _catalog.get_executor(_conn_type, _action_id_from_step)
+                    break
+                except Exception:
+                    continue
 
         if _mod and hasattr(_mod, "rollback"):
             # Extract step 1 result from nested execution structure so
