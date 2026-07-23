@@ -66,12 +66,13 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "dry_run": dry_run,
     }
 
-    return await dispatch_agent_job(
+    agent_result = await dispatch_agent_job(
         command="containerize_build",
         parameters=agent_params,
         asset_ids=list(asset_ids),
         timeout_seconds=300,
     )
+    return {**agent_result, "_target_asset_ids": [str(a) for a in asset_ids]}
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
@@ -95,7 +96,11 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
 
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 
-    asset_ids = execution_result.get("asset_ids") or []
+    asset_ids = (
+        execution_result.get("_target_asset_ids")
+        or execution_result.get("asset_ids")
+        or []
+    )
     if not asset_ids and parameters.get("asset_ids"):
         asset_ids = parameters["asset_ids"]
 
