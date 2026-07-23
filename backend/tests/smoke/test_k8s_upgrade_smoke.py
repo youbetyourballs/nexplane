@@ -109,7 +109,7 @@ def _kubeconfig_base64(path: str) -> str:
     # API server on the host.
     import re as _re
     docker_gw = "172.17.0.1"
-    content = _re.sub(r"https://127\.0\.0\.1:", f"https://{docker_gw}:", content)
+    content = _re.sub(r"https://(127\.0\.0\.1|0\.0\.0\.0):", f"https://{docker_gw}:", content)
     return base64.b64encode(content.encode()).decode()
 
 

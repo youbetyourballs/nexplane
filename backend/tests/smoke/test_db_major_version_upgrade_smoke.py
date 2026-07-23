@@ -344,14 +344,12 @@ class TestDbMajorVersionUpgradeSmoke:
             "docker exec mongo44 mongo --quiet --eval 'db.runCommand({ping:1})'",
             timeout=90,
         )
-        _run(
+        _run("docker exec mongo44 mongo --quiet --eval 'rs.initiate()'", check=False)
+        # Wait for primary election before writing canary
+        _wait_docker(
             "docker exec mongo44 mongo --quiet --eval "
-            "\"try { rs.status() } catch(e) { rs.initiate() }\""
-        )
-        time.sleep(5)  # Let replica set initialize
-        _run(
-            "docker exec mongo44 mongo --quiet --eval \""
-            "db.getSiblingDB('smoke').canary.insertOne({val: 'before-upgrade'})\""
+            "\"db.getSiblingDB('smoke').canary.insertOne({val: 'before-upgrade'})\"",
+            timeout=60,
         )
         log("DB_UPGRADE_MONGODB: mongo:4.4 ready with canary doc")
 
