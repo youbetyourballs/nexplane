@@ -75,27 +75,18 @@ def _ssm_run_ps(ssm, instance_id: str, ps_command: str, timeout: int = 120) -> s
 
 
 def _get_agent_secret() -> str:
-    """Read the org-level nexplane agent secret from the platform database."""
-    import subprocess as _sp
-    result = _sp.run(
-        ["docker", "exec", "nexplane-backend-1", "python3", "-c", (
-            "import asyncio, sys; sys.path.insert(0, '/app');"
-            "from sqlalchemy import text; from app.database import AsyncSessionLocal;"
-            "from app.services.secrets_service import SecretsService;"
-            "from app import config as app_config;"
-            "async def main():"
-            "    async with AsyncSessionLocal() as db:"
-            "        r = await db.execute(text('SELECT agent_secret_encrypted FROM organization_settings LIMIT 1'));"
-            "        row = r.first();"
-            "        s = SecretsService(app_config.settings.SECRET_KEY);"
-            "        print(s.decrypt(row[0]));"
-            "asyncio.run(main())"
-        )],
-        capture_output=True, text=True, timeout=30,
-    )
-    secret = result.stdout.strip()
+    """Read the org-level nexplane agent secret via the platform API."""
+    import requests as _req
+    s = _req.Session()
+    r = s.post(f"{BASE_URL}/auth/login", json={"email": EMAIL, "password": PASSWORD})
+    assert r.ok, f"login failed: {r.text}"
+    token = r.json()["access_token"]
+    s.headers.update({"Authorization": f"Bearer {token}"})
+    r2 = s.get(f"{BASE_URL}/settings/agent-secret")
+    assert r2.ok, f"agent-secret endpoint failed: {r2.text}"
+    secret = r2.json().get("agent_secret_plaintext") or r2.json().get("agent_secret") or r2.json().get("secret")
     if not secret:
-        pytest.fail(f"Could not retrieve agent secret: {result.stderr}")
+        pytest.fail(f"Could not retrieve agent secret from API: {r2.json()}")
     return secret
 
 
