@@ -207,7 +207,7 @@ def _run_cr_full_lifecycle(client: NexplaneClient, label: str, action_id: str,
             "action_id": action_id,
             "params": params,
         },
-        "asset_ids": asset_ids,
+        "target_asset_ids": asset_ids,
     }
     resp = client.client.post(f"{base}/change-requests", json=body)
     assert resp.status_code in (200, 201), f"[{label}] CR create failed {resp.status_code}: {resp.text}"
