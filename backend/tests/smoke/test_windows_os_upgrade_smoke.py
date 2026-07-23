@@ -81,6 +81,15 @@ def get_or_create_windows_smoke_ami(ec2, ssm, creds: dict) -> str:
     except Exception:
         pass
 
+    # Check for agent_install_url before attempting to provision
+    agent_install_url = creds.get("agent_install_url", "")
+    if not agent_install_url:
+        pytest.skip(
+            "agent_install_url not set in AWS creds and no cached AMI found — "
+            "cannot build Windows smoke AMI; set agent_install_url in AWS connector creds or "
+            f"pre-cache AMI at SSM key {_AMI_CACHE_KEY}"
+        )
+
     log("[WINDOWS_SMOKE] No cached AMI — provisioning fresh Windows 2019 instance")
 
     # Find latest Windows Server 2019 Base AMI from AWS
@@ -138,10 +147,6 @@ def get_or_create_windows_smoke_ami(ec2, ssm, creds: dict) -> str:
         pytest.fail(f"SSM agent never came online for {instance_id}")
 
     # Install nexplane agent via SSM
-    agent_install_url = creds.get("agent_install_url", "")
-    if not agent_install_url:
-        pytest.skip("agent_install_url not set in AWS creds — cannot install nexplane agent for smoke AMI")
-
     log(f"[WINDOWS_SMOKE] Installing nexplane agent on {instance_id}")
     _ssm_run_ps(
         ssm,
