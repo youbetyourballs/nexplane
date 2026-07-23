@@ -483,6 +483,45 @@ def generate_plan(
             verification_plan={},
         )
 
+    if ct == ChangeType.k8s_cluster_upgrade:
+        desired = change_request.desired_outcome or {}
+        target_version = desired.get("target_version", "")
+        if not target_version:
+            from app.services.change_plan_service import PlanBlockedError
+            raise PlanBlockedError(["k8s_cluster_upgrade requires 'target_version' in desired_outcome"])
+        strategy = desired.get("node_pool_strategy", "rolling")
+        if strategy not in ("rolling", "blue_green"):
+            from app.services.change_plan_service import PlanBlockedError
+            raise PlanBlockedError([f"node_pool_strategy must be 'rolling' or 'blue_green', got: {strategy!r}"])
+        intent_summary = (
+            f"Upgrade Kubernetes cluster to v{target_version}.\n\n"
+            f"Strategy: {strategy.replace('_', '-').title()} ({desired.get('max_unavailable', 1)} node(s) at a time)\n"
+            f"Drain timeout: {desired.get('drain_timeout_seconds', 300)}s\n\n"
+            f"WARNING: The control plane upgrade is IRREVERSIBLE. Once approved, "
+            f"the control plane cannot be downgraded. Node pool upgrades can be "
+            f"rolled back to prior image versions.\n\n"
+            f"Pre-flight will scan all running workloads for removed APIs before "
+            f"proceeding. The control plane upgrade will not start until pre-flight passes."
+        )
+        return ChangePlanData(
+            generated_steps=[],
+            preflight_checks=[
+                {
+                    "name": "k8s_cluster_reachable",
+                    "description": "Kubernetes cluster must be reachable via the attached connector",
+                    "check_type": "connector_reachable",
+                    "expected_result": "pass",
+                }
+            ],
+            blast_radius=_calculate_blast_radius(change_request, assets, safety_result, steps=[]),
+            rollback_plan={
+                "rollback_capability": "partial",
+                "note": "Node pools reversible; control plane irreversible",
+                "intent_summary": intent_summary,
+            },
+            verification_plan={"phase": "verify", "checks": ["node_versions", "system_pods", "workload_health"]},
+        )
+
     change_def = _load_change_type_def(ct)
     steps = [
         _resolve_step(step_def, i + 1, desired, assets, catalog)
