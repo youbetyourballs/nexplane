@@ -219,6 +219,8 @@ def _build_dc_ami(ec2, ssm, aws_creds: dict) -> str:
             "Enable-PSRemoting -Force; "
             "winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'; "
             "winrm set winrm/config/service/auth '@{Basic=\"true\"}';"
+            "New-NetFirewallRule -DisplayName 'WinRM-HTTP-Any' -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -Profile Any -ErrorAction SilentlyContinue; "
+            "Set-NetFirewallRule -DisplayName 'Windows Remote Management (HTTP-In)' -Profile Any -Enabled True -ErrorAction SilentlyContinue;"
         ), timeout=120)
 
         # Create AMI
@@ -346,7 +348,13 @@ def test_phase1_smoke_setup():
         "<powershell>"
         "net accounts /minpwage:0; "
         f"net user Administrator {domain_admin_password}; "
-        "net accounts /minpwage:1"
+        "net accounts /minpwage:1; "
+        "winrm quickconfig -quiet; "
+        "Enable-PSRemoting -Force; "
+        "winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'; "
+        "winrm set winrm/config/service/auth '@{Basic=\"true\"}'; "
+        "New-NetFirewallRule -DisplayName 'WinRM-HTTP-Any' -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -Profile Any -ErrorAction SilentlyContinue; "
+        "Set-NetFirewallRule -DisplayName 'Windows Remote Management (HTTP-In)' -Profile Any -Enabled True -ErrorAction SilentlyContinue"
         "</powershell>"
     )
     _userdata_b64 = _b64.b64encode(_userdata_ps.encode()).decode()
