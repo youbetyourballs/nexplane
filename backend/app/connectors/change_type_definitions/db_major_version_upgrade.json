@@ -1,0 +1,25 @@
+{
+  "change_type": "db_major_version_upgrade",
+  "display_name": "Database Major Version Upgrade",
+  "description": "Upgrade a database engine to a new major version with pre-flight checks, snapshot-based rollback, and post-upgrade verification.",
+  "rollback_capability": "full",
+  "executor": "nexplane_agent",
+  "action_id": "execute_db_major_version_upgrade",
+  "parameters": {
+    "engine":             { "type": "string",  "required": true,  "enum": ["postgres", "mysql", "mongodb"] },
+    "target_version":     { "type": "string",  "required": true },
+    "source_version":     { "type": "string",  "required": false },
+    "strategy":           { "type": "string",  "required": false, "enum": ["dump_restore", "in_place"], "default": "dump_restore" },
+    "db_host":            { "type": "string",  "required": false, "default": "localhost" },
+    "db_port":            { "type": "integer", "required": false },
+    "db_name":            { "type": "string",  "required": false },
+    "db_user":            { "type": "string",  "required": false },
+    "db_password":        { "type": "string",  "required": false, "sensitive": true },
+    "rds_instance_id":    { "type": "string",  "required": false },
+    "snapshot_s3_bucket": { "type": "string",  "required": false },
+    "health_check_url":   { "type": "string",  "required": false },
+    "dry_run":            { "type": "boolean", "required": false, "default": false },
+    "skip_snapshot":      { "type": "boolean", "required": false, "default": false },
+    "mongo_fcv_chain":    { "type": "array",   "required": false }
+  }
+}
