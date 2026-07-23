@@ -126,7 +126,8 @@ var commands = map[string]CommandFunc{
 	"collect_forensics":    forensics.Execute,
 	"audit_cis_compliance": compliance.AuditCISComplianceExecute,
 	// Containerize build
-	"containerize_build": containerizebuild.ContainerizeBuildExecute,
+	"containerize_build":          containerizebuild.ContainerizeBuildExecute,
+	"containerize_build_rollback": containerizebuild.ContainerizeBuildRollbackExecute,
 	// Containerize retire
 	"containerize_retire": containerizeretire.ContainerizeRetireExecute,
 	// Deep discover (containerization)

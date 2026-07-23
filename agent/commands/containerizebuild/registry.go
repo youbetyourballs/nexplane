@@ -162,6 +162,71 @@ func ecrLoginIfNeeded(imageName string) error {
 	return nil
 }
 
+// DeleteImage removes a Docker image from ECR (or any registry) by name/digest.
+// Parameters: image_name (required), image_digest (optional).
+// Returns {"deleted": true/false, "image_name": "..."}.
+func DeleteImage(imageName, imageDigest string) (map[string]any, error) {
+	if imageName == "" {
+		return map[string]any{"deleted": false, "reason": "no_image_name"}, nil
+	}
+
+	// Authenticate to ECR if needed before attempting delete
+	if err := ecrLoginIfNeeded(imageName); err != nil {
+		return nil, fmt.Errorf("ECR login failed: %w", err)
+	}
+
+	// If we have an ECR registry + digest, delete from ECR directly via AWS CLI
+	// (docker rmi only removes locally; ECR delete-image removes from registry)
+	if strings.Contains(imageName, ".dkr.ecr.") && imageDigest != "" {
+		host := strings.SplitN(imageName, "/", 2)[0]
+		parts := strings.Split(host, ".")
+		region := ""
+		for i, p := range parts {
+			if p == "ecr" && i+1 < len(parts) {
+				region = parts[i+1]
+				break
+			}
+		}
+		// repo name is everything after host/
+		imageRef := strings.SplitN(imageName, "/", 2)
+		repoWithTag := ""
+		if len(imageRef) > 1 {
+			repoWithTag = imageRef[1]
+		}
+		// strip tag to get repo name only
+		repoName := strings.SplitN(repoWithTag, ":", 2)[0]
+		if region != "" && repoName != "" {
+			digest := imageDigest
+			if !strings.HasPrefix(digest, "sha256:") {
+				digest = "sha256:" + digest
+			}
+			delCmd := exec.Command(
+				"aws", "ecr", "batch-delete-image",
+				"--region", region,
+				"--repository-name", repoName,
+				"--image-ids", fmt.Sprintf("imageDigest=%s", digest),
+			)
+			var delOut, delErr bytes.Buffer
+			delCmd.Stdout = &delOut
+			delCmd.Stderr = &delErr
+			if err := delCmd.Run(); err != nil {
+				return nil, fmt.Errorf("ecr batch-delete-image failed: %w\nstderr: %s", err, delErr.String())
+			}
+			return map[string]any{"deleted": true, "image_name": imageName, "image_digest": imageDigest}, nil
+		}
+	}
+
+	// Fallback: docker rmi (removes locally; best-effort for non-ECR)
+	rmiCmd := exec.Command("docker", "rmi", "--force", imageName)
+	var rmiOut, rmiErr bytes.Buffer
+	rmiCmd.Stdout = &rmiOut
+	rmiCmd.Stderr = &rmiErr
+	if err := rmiCmd.Run(); err != nil {
+		return nil, fmt.Errorf("docker rmi failed: %w\nstderr: %s", err, rmiErr.String())
+	}
+	return map[string]any{"deleted": true, "image_name": imageName}, nil
+}
+
 func extractDigest(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		if idx := strings.Index(line, "sha256:"); idx >= 0 {

@@ -75,6 +75,17 @@ func ContainerizeBuildExecute(params map[string]any) (map[string]any, error) {
 	}, nil
 }
 
+// ContainerizeBuildRollbackExecute is the entry point for the containerize_build_rollback command.
+// Expected params: image_name (required), image_digest (optional).
+func ContainerizeBuildRollbackExecute(params map[string]any) (map[string]any, error) {
+	imageName := stringParam(params, "image_name", "")
+	imageDigest := stringParam(params, "image_digest", "")
+	if imageName == "" {
+		return map[string]any{"deleted": false, "reason": "no_image_name"}, nil
+	}
+	return DeleteImage(imageName, imageDigest)
+}
+
 func stringParam(params map[string]any, key, defaultVal string) string {
 	if v, ok := params[key]; ok {
 		if s, ok := v.(string); ok && s != "" {
