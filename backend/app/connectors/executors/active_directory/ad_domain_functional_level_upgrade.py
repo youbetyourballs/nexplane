@@ -3,8 +3,9 @@
 
 from app.connectors.executors.active_directory.ad_tier_zero import (
     ROLLBACK_CAPABILITY_DFL as ROLLBACK_CAPABILITY,
+    ROLLBACK_REASON,
     execute_dfl_upgrade as execute,
     rollback_dfl_upgrade as rollback,
 )
 
-__all__ = ["ROLLBACK_CAPABILITY", "execute", "rollback"]
+__all__ = ["ROLLBACK_CAPABILITY", "ROLLBACK_REASON", "execute", "rollback"]

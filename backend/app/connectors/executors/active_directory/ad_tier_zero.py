@@ -20,6 +20,17 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 
+# Module-level rollback contract (worst-case across all CR types in this file).
+# ad_domain_functional_level_upgrade is a one-way door — once the DFL is raised
+# Active Directory does not provide a supported downgrade path.
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = (
+    "Domain and forest functional level upgrades are permanent: Active Directory "
+    "provides no supported mechanism to lower the functional level once raised. "
+    "Other CR types in this module (trust, GPO, PSO, stale cleanup) are fully "
+    "reversible, but the DFL operation governs the module-level contract."
+)
+
 # ---------------------------------------------------------------------------
 # ad_domain_functional_level_upgrade
 # ---------------------------------------------------------------------------
