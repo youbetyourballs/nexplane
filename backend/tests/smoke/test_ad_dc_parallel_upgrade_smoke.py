@@ -226,7 +226,7 @@ def _build_dc_ami(ec2, ssm, aws_creds: dict) -> str:
         ami_resp = ec2.create_image(
             InstanceId=instance_id,
             Name=f"nexplane-smoke-dc-2019-{int(time.time())}",
-            Description=f"Windows 2019 DC for smoke tests — domain={_DC_DOMAIN} pass=SmokeTest1234!",
+            Description=f"Windows 2019 DC for smoke tests, domain={_DC_DOMAIN}",
             NoReboot=False,
         )
         new_ami_id = ami_resp["ImageId"]
