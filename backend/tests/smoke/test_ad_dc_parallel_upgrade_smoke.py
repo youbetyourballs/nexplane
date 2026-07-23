@@ -15,25 +15,35 @@ Run: docker exec nexplane-backend-1 python -m pytest /app/tests/smoke/test_ad_dc
 """
 import asyncio
 import os
+import sys
 import time
 
 import pytest
-import requests
+
+sys.path.insert(0, os.path.dirname(__file__))
+from smoke_helpers import NexplaneClient, get_connector_creds_from_db
 
 # ---------------------------------------------------------------------------
 # Platform helpers
 # ---------------------------------------------------------------------------
 
-PLATFORM_URL = os.environ.get("PLATFORM_URL", "http://localhost:8000")
-PLATFORM_TOKEN = os.environ.get("PLATFORM_TOKEN", "")
+BASE_URL = os.environ.get("NEXPLANE_BASE_URL", "http://localhost:8000")
+EMAIL = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
+PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 
-_HEADERS = {"Authorization": f"Bearer {PLATFORM_TOKEN}", "Content-Type": "application/json"}
+_client: NexplaneClient = None
+
+
+def _get_client() -> NexplaneClient:
+    global _client
+    if _client is None:
+        _client = NexplaneClient(BASE_URL, EMAIL, PASSWORD)
+    return _client
 
 
 def _api(method, path, **kwargs):
-    resp = getattr(requests, method)(f"{PLATFORM_URL}{path}", headers=_HEADERS, **kwargs)
-    resp.raise_for_status()
-    return resp.json()
+    c = _get_client()
+    return getattr(c, method)(path, **kwargs)
 
 
 def _poll_cr(cr_id, terminal_statuses=("completed", "failed", "rollback_completed", "rollback_failed"),
