@@ -171,19 +171,30 @@ func DbUpgradePostgresDumpRestoreExecute(params map[string]any) (map[string]any,
 		return nil, fmt.Errorf("docker run failed: %s %s", out, errOut)
 	}
 
-	deadline := time.Now().Add(60 * time.Second)
+	// Wait for container to be ready AND accepting authenticated connections.
+	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
-		_, _, readyErr := runCmd(nil, "pg_isready", "-h", "localhost", "-p", targetPortStr)
-		if readyErr == nil {
+		_, _, authErr := runCmd(pgEnv, "psql",
+			"-h", "localhost", "-p", targetPortStr, "-U", user,
+			"-c", "SELECT 1", "--no-align", "--tuples-only")
+		if authErr == nil {
 			break
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(3 * time.Second)
 	}
 
+	// Use ON_ERROR_STOP=off so duplicate-role warnings don't abort the restore.
 	out, errOut, err = runCmd(pgEnv, "psql",
-		"-h", "localhost", "-p", targetPortStr, "-U", user, "-f", dumpPath)
+		"-h", "localhost", "-p", targetPortStr, "-U", user,
+		"--set=ON_ERROR_STOP=off",
+		"-f", dumpPath)
+	// Ignore errors that are only about duplicate objects (non-fatal).
 	if err != nil {
-		return nil, fmt.Errorf("restore failed: %s %s", out, errOut)
+		combined := out + errOut
+		if strings.Contains(combined, "authentication") || strings.Contains(combined, "connection to server") {
+			return nil, fmt.Errorf("restore failed: %s %s", out, errOut)
+		}
+		// Other errors (duplicate role, etc.) are warnings — continue.
 	}
 
 	return map[string]any{

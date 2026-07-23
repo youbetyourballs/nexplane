@@ -121,6 +121,14 @@ def _rollback_cr(client: NexplaneClient, cr_id: str, label: str,
 
 
 def _execution_result(cr: dict) -> dict:
+    """Extract the step result from the CR's execution_runs."""
+    # CR API returns execution_runs[].result.execution.steps[0].result
+    runs = cr.get("execution_runs") or []
+    if runs:
+        run_result = runs[0].get("result") or {}
+        steps = run_result.get("execution", {}).get("steps", [])
+        if steps:
+            return steps[0].get("result") or {}
     return cr.get("execution_result") or {}
 
 
