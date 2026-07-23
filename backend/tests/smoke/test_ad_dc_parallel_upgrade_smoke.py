@@ -159,6 +159,14 @@ def test_phase1_smoke_setup():
     _smoke_state["subnet_id"] = default_subnet
     _smoke_state["sg_ids"] = [default_sg]
 
+    # Resolve password early so it can be baked into UserData
+    domain_admin_password = aws_creds.get("smoke_dc_admin_password", "SmokeTest1234!")
+    _smoke_state["domain_admin_password"] = domain_admin_password
+
+    import base64 as _b64
+    # Reset Administrator password via UserData so AMI password mismatch is not an issue
+    _userdata_ps = f"<powershell>net user Administrator {domain_admin_password}</powershell>"
+    _userdata_b64 = _b64.b64encode(_userdata_ps.encode()).decode()
     run_resp = ec2.run_instances(
         ImageId=source_ami,
         InstanceType="t3.medium",
@@ -166,6 +174,7 @@ def test_phase1_smoke_setup():
         SecurityGroupIds=[default_sg],
         MinCount=1,
         MaxCount=1,
+        UserData=_userdata_b64,
         TagSpecifications=[{
             "ResourceType": "instance",
             "Tags": [
@@ -184,9 +193,7 @@ def test_phase1_smoke_setup():
     _smoke_state["source_private_ip"] = source_private_ip
     print(f"[smoke_setup] Source DC private IP: {source_private_ip}")
 
-    # Wait for WinRM (Windows first-boot takes time)
-    domain_admin_password = aws_creds.get("smoke_dc_admin_password", "SmokeTest1234!")
-    _smoke_state["domain_admin_password"] = domain_admin_password
+    # Wait for WinRM (Windows first-boot takes time; UserData resets password on boot)
     _wait_winrm(source_private_ip, "Administrator", domain_admin_password, timeout_s=1200)
     print(f"[smoke_setup] WinRM reachable on {source_private_ip}")
 
@@ -380,7 +387,7 @@ def test_phase2_smoke_execute():
     print(f"[smoke_execute] CR submitted for approval")
 
     # Approve
-    _api("post", f"/change-requests/{cr_id}/approve")
+    _api("post", f"/change-requests/{cr_id}/approve", json={"decision": "approved"})
     print(f"[smoke_execute] CR approved")
 
     # Execute
