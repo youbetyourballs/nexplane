@@ -4,7 +4,7 @@
 """
 DB Major Version Upgrade Smoke Tests.
 
-Provisions Docker containers on the EC2 smoke host per engine,
+Provisions Docker containers on the EC2 smoke host via subprocess,
 drives CRs through the full Nexplane lifecycle, and verifies rollback.
 
 Run:
@@ -13,11 +13,12 @@ Run:
 
 Skip conditions:
     - 'smoke_db_asset_id' missing from AWS connector credentials in platform DB
-    - Per-engine skip if Docker pull fails (infra issue, not code bug)
+    - No AgentRegistration for the smoke asset (agent not running)
 """
 
 import os
 import sys
+import subprocess
 import time
 import pytest
 
@@ -30,6 +31,27 @@ PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 
 DB_UPGRADE_TIMEOUT = 900   # 15 min — upgrade + verify + rollback
 POLL_INTERVAL      = 15
+
+
+# ---------------------------------------------------------------------------
+# Docker infra helpers (run on the host via subprocess)
+# ---------------------------------------------------------------------------
+
+def _run(cmd: str, check: bool = True, timeout: int = 120) -> subprocess.CompletedProcess:
+    """Run a shell command on the EC2 host."""
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                          timeout=timeout, check=check)
+
+
+def _wait_docker(check_cmd: str, timeout: int = 90, poll: int = 3) -> None:
+    """Poll until check_cmd exits 0 or timeout."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r = subprocess.run(check_cmd, shell=True, capture_output=True)
+        if r.returncode == 0:
+            return
+        time.sleep(poll)
+    raise TimeoutError(f"Timed out waiting for: {check_cmd}")
 
 
 # ---------------------------------------------------------------------------
@@ -102,42 +124,6 @@ def _execution_result(cr: dict) -> dict:
     return cr.get("execution_result") or {}
 
 
-def _ssm_on_smoke_host(client: NexplaneClient, asset_id: str, command: str,
-                        label: str) -> str:
-    """Run a shell command on the smoke EC2 host via SSM CR and return stdout."""
-    base = client.base
-    body = {
-        "title": f"[smoke-infra] {label}",
-        "change_type": "ssm_command",
-        "desired_outcome": {
-            "document_name": "AWS-RunShellScript",
-            "command": command,
-            "rollback_strategy": "rollback_unavailable",
-        },
-        "asset_ids": [asset_id],
-    }
-    r = client.client.post(f"{base}/change-requests", json=body)
-    assert r.status_code in (200, 201), f"SSM CR create failed: {r.text}"
-    cr_id = r.json()["id"]
-    for step in ["plan", "submit-for-approval"]:
-        client.client.post(f"{base}/change-requests/{cr_id}/{step}")
-    client.client.post(
-        f"{base}/change-requests/{cr_id}/approve",
-        json={"decision": "approved", "comment": "smoke-infra"},
-    )
-    client.client.post(f"{base}/change-requests/{cr_id}/execute")
-    deadline = time.time() + 120
-    while time.time() < deadline:
-        cr = client.client.get(f"{base}/change-requests/{cr_id}").json()
-        if cr.get("status") == "completed":
-            result = _execution_result(cr)
-            return result.get("stdout", "").strip()
-        if cr.get("status") in ("failed", "rejected"):
-            raise AssertionError(f"SSM CR failed: {cr.get('execution_result', '')}")
-        time.sleep(5)
-    raise TimeoutError(f"SSM CR {cr_id} timed out")
-
-
 # ---------------------------------------------------------------------------
 # Test class
 # ---------------------------------------------------------------------------
@@ -164,105 +150,92 @@ class TestDbMajorVersionUpgradeSmoke:
         """
         asset_id = self.asset_id
 
-        # --- Infra setup: launch postgres:12 container ---
+        # --- Infra setup: launch postgres:12 container via subprocess ---
         log("DB_UPGRADE_POSTGRES: launching postgres:12 container")
-        _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker rm -f pg12 2>/dev/null || true; "
-            "docker run -d --name pg12 -e POSTGRES_PASSWORD=testpw -p 5432:5432 postgres:12",
-            "launch-pg12",
+        _run("docker rm -f pg12 2>/dev/null || true", check=False)
+        _run(
+            "docker run -d --name pg12 -e POSTGRES_PASSWORD=testpw -p 5432:5432 postgres:12"
         )
-        # Wait for postgres ready
-        _ssm_on_smoke_host(
-            self.client, asset_id,
-            "for i in $(seq 1 30); do "
-            "  docker exec pg12 pg_isready -U postgres && break || sleep 2; "
-            "done",
-            "wait-pg12-ready",
+        _wait_docker(
+            "docker exec pg12 pg_isready -U postgres",
+            timeout=90,
         )
         # Seed canary data
-        _ssm_on_smoke_host(
-            self.client, asset_id,
+        _run(
             "docker exec pg12 psql -U postgres -c \""
             "CREATE TABLE IF NOT EXISTS smoke_canary (id serial, val text); "
-            "INSERT INTO smoke_canary(val) VALUES ('before-upgrade');\"",
-            "seed-pg12",
+            "INSERT INTO smoke_canary(val) VALUES ('before-upgrade');\""
         )
         log("DB_UPGRADE_POSTGRES: postgres:12 container ready with canary data")
 
-        # --- Execute CR ---
-        cr = _cr_lifecycle(
-            self.client,
-            "[smoke] db_major_version_upgrade postgres 12->16",
-            "db_major_version_upgrade",
-            {
-                "engine": "postgres",
-                "source_version": "12",
-                "target_version": "16",
-                "strategy": "dump_restore",
-                "db_host": "localhost",
-                "db_port": 5432,
-                "db_user": "postgres",
-                "db_password": "testpw",
-            },
-            [asset_id],
-        )
-        cr_id = cr["id"]
-        result = _execution_result(cr)
+        try:
+            # --- Execute CR ---
+            cr = _cr_lifecycle(
+                self.client,
+                "[smoke] db_major_version_upgrade postgres 12->16",
+                "db_major_version_upgrade",
+                {
+                    "engine": "postgres",
+                    "source_version": "12",
+                    "target_version": "16",
+                    "strategy": "dump_restore",
+                    "db_host": "localhost",
+                    "db_port": 5432,
+                    "db_user": "postgres",
+                    "db_password": "testpw",
+                },
+                [asset_id],
+            )
+            cr_id = cr["id"]
+            result = _execution_result(cr)
 
-        # --- Assert upgrade success ---
-        assert result.get("status") in ("completed", "verify_failed"), (
-            f"Unexpected CR status: {result}"
-        )
-        assert result.get("snapshot_result", {}).get("snapshot_id"), (
-            f"Expected snapshot_id in result: {result}"
-        )
-        log(f"DB_UPGRADE_POSTGRES: upgrade completed, snap={result['snapshot_result'].get('snapshot_id')}")
+            # --- Assert upgrade success ---
+            assert result.get("status") in ("completed", "verify_failed"), (
+                f"Unexpected CR status: {result}"
+            )
+            assert result.get("snapshot_result", {}).get("snapshot_id"), (
+                f"Expected snapshot_id in result: {result}"
+            )
+            snap_id = result["snapshot_result"].get("snapshot_id")
+            log(f"DB_UPGRADE_POSTGRES: upgrade completed, snap={snap_id}")
 
-        # Verify version via direct query on the host
-        pg_version = _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker exec pg12 psql -U postgres -c 'SELECT version();' -t 2>/dev/null || "
-            "docker exec pg16 psql -U postgres -c 'SELECT version();' -t 2>/dev/null || echo UNKNOWN",
-            "check-pg-version-post-upgrade",
-        )
-        assert "16" in pg_version, f"Expected PG16 version string, got: {pg_version!r}"
-        log(f"DB_UPGRADE_POSTGRES: version confirmed: {pg_version[:80]}")
+            # Verify version via direct check on the host
+            pg_version = _run(
+                "docker exec pg12 psql -U postgres -c 'SELECT version();' -t 2>/dev/null || "
+                "docker exec pg16 psql -U postgres -c 'SELECT version();' -t 2>/dev/null || echo UNKNOWN",
+                check=False,
+            ).stdout.strip()
+            assert "16" in pg_version, f"Expected PG16 version string, got: {pg_version!r}"
+            log(f"DB_UPGRADE_POSTGRES: version confirmed: {pg_version[:80]}")
 
-        # Verify canary data survived upgrade
-        canary = _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker exec pg12 psql -U postgres -c 'SELECT val FROM smoke_canary;' -t 2>/dev/null || "
-            "docker exec pg16 psql -U postgres -c 'SELECT val FROM smoke_canary;' -t 2>/dev/null || echo MISSING",
-            "check-canary-post-upgrade",
-        )
-        assert "before-upgrade" in canary, f"Canary data missing post-upgrade: {canary!r}"
-        log("DB_UPGRADE_POSTGRES: canary data survived upgrade")
+            # Verify canary data survived upgrade
+            canary = _run(
+                "docker exec pg12 psql -U postgres -c 'SELECT val FROM smoke_canary;' -t 2>/dev/null || "
+                "docker exec pg16 psql -U postgres -c 'SELECT val FROM smoke_canary;' -t 2>/dev/null || echo MISSING",
+                check=False,
+            ).stdout.strip()
+            assert "before-upgrade" in canary, f"Canary data missing post-upgrade: {canary!r}"
+            log("DB_UPGRADE_POSTGRES: canary data survived upgrade")
 
-        # --- Rollback ---
-        log("DB_UPGRADE_POSTGRES: triggering rollback")
-        cr_rb = _rollback_cr(self.client, cr_id, "pg-upgrade-rollback")
-        rb_result = _execution_result(cr_rb)
-        assert rb_result.get("rolled_back") is True, f"Rollback not confirmed: {rb_result}"
-        log(f"DB_UPGRADE_POSTGRES: rollback complete, strategy={rb_result.get('strategy')}")
+            # --- Rollback ---
+            log("DB_UPGRADE_POSTGRES: triggering rollback")
+            cr_rb = _rollback_cr(self.client, cr_id, "pg-upgrade-rollback")
+            rb_result = _execution_result(cr_rb)
+            assert rb_result.get("rolled_back") is True, f"Rollback not confirmed: {rb_result}"
+            log(f"DB_UPGRADE_POSTGRES: rollback complete, strategy={rb_result.get('strategy')}")
 
-        # Verify version is back to 12
-        pg_version_after = _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker exec pg12 psql -U postgres -c 'SELECT version();' -t 2>/dev/null || echo UNKNOWN",
-            "check-pg-version-post-rollback",
-        )
-        assert "12" in pg_version_after, (
-            f"Expected PG12 after rollback, got: {pg_version_after!r}"
-        )
-        log(f"DB_UPGRADE_POSTGRES: PASSED — rollback restored version 12")
-
-        # Cleanup
-        _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker rm -f pg12 pg16 2>/dev/null || true",
-            "cleanup-pg-containers",
-        )
+            # Verify version is back to 12
+            pg_version_after = _run(
+                "docker exec pg12 psql -U postgres -c 'SELECT version();' -t 2>/dev/null || echo UNKNOWN",
+                check=False,
+            ).stdout.strip()
+            assert "12" in pg_version_after, (
+                f"Expected PG12 after rollback, got: {pg_version_after!r}"
+            )
+            log("DB_UPGRADE_POSTGRES: PASSED — rollback restored version 12")
+        finally:
+            # Cleanup
+            _run("docker rm -f pg12 pg16 2>/dev/null || true", check=False)
 
     # -----------------------------------------------------------------------
     # Phase DB_UPGRADE_MYSQL
@@ -277,93 +250,80 @@ class TestDbMajorVersionUpgradeSmoke:
 
         # --- Infra setup ---
         log("DB_UPGRADE_MYSQL: launching mysql:5.7 container")
-        _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker rm -f mysql57 2>/dev/null || true; "
-            "docker run -d --name mysql57 -e MYSQL_ROOT_PASSWORD=testpw -p 3306:3306 mysql:5.7",
-            "launch-mysql57",
+        _run("docker rm -f mysql57 2>/dev/null || true", check=False)
+        _run(
+            "docker run -d --name mysql57 -e MYSQL_ROOT_PASSWORD=testpw -p 3306:3306 mysql:5.7"
         )
-        _ssm_on_smoke_host(
-            self.client, asset_id,
-            "for i in $(seq 1 40); do "
-            "  docker exec mysql57 mysqladmin ping -uroot -ptestpw --silent && break || sleep 3; "
-            "done",
-            "wait-mysql57-ready",
+        _wait_docker(
+            "docker exec mysql57 mysqladmin ping -uroot -ptestpw --silent",
+            timeout=120,
         )
-        _ssm_on_smoke_host(
-            self.client, asset_id,
+        _run(
             "docker exec mysql57 mysql -uroot -ptestpw -e \""
             "CREATE DATABASE IF NOT EXISTS smoke; "
             "USE smoke; "
             "CREATE TABLE IF NOT EXISTS canary (val varchar(100)); "
-            "INSERT INTO canary VALUES ('before-upgrade');\"",
-            "seed-mysql57",
+            "INSERT INTO canary VALUES ('before-upgrade');\""
         )
         log("DB_UPGRADE_MYSQL: mysql:5.7 container ready with canary data")
 
-        # --- Execute CR ---
-        cr = _cr_lifecycle(
-            self.client,
-            "[smoke] db_major_version_upgrade mysql 5.7->8.0",
-            "db_major_version_upgrade",
-            {
-                "engine": "mysql",
-                "source_version": "5.7",
-                "target_version": "8.0",
-                "db_host": "localhost",
-                "db_port": 3306,
-                "db_user": "root",
-                "db_password": "testpw",
-            },
-            [asset_id],
-        )
-        cr_id = cr["id"]
-        result = _execution_result(cr)
+        try:
+            # --- Execute CR ---
+            cr = _cr_lifecycle(
+                self.client,
+                "[smoke] db_major_version_upgrade mysql 5.7->8.0",
+                "db_major_version_upgrade",
+                {
+                    "engine": "mysql",
+                    "source_version": "5.7",
+                    "target_version": "8.0",
+                    "db_host": "localhost",
+                    "db_port": 3306,
+                    "db_user": "root",
+                    "db_password": "testpw",
+                },
+                [asset_id],
+            )
+            cr_id = cr["id"]
+            result = _execution_result(cr)
 
-        assert result.get("status") in ("completed", "verify_failed"), (
-            f"Unexpected status: {result}"
-        )
-        assert result.get("snapshot_result", {}).get("snapshot_id"), (
-            f"Expected snapshot: {result}"
-        )
-        log(f"DB_UPGRADE_MYSQL: upgrade complete, snap={result['snapshot_result'].get('snapshot_id')}")
+            assert result.get("status") in ("completed", "verify_failed"), (
+                f"Unexpected status: {result}"
+            )
+            assert result.get("snapshot_result", {}).get("snapshot_id"), (
+                f"Expected snapshot: {result}"
+            )
+            log(f"DB_UPGRADE_MYSQL: upgrade complete, snap={result['snapshot_result'].get('snapshot_id')}")
 
-        # Verify version
-        mysql_ver = _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker exec mysql57 mysql -uroot -ptestpw -e 'SELECT @@version;' 2>/dev/null || echo UNKNOWN",
-            "check-mysql-version-post-upgrade",
-        )
-        assert "8.0" in mysql_ver, f"Expected MySQL 8.0 version, got: {mysql_ver!r}"
-        log(f"DB_UPGRADE_MYSQL: version confirmed: {mysql_ver[:80]}")
+            # Verify version
+            mysql_ver = _run(
+                "docker exec mysql57 mysql -uroot -ptestpw -e 'SELECT @@version;' 2>/dev/null || echo UNKNOWN",
+                check=False,
+            ).stdout.strip()
+            assert "8.0" in mysql_ver, f"Expected MySQL 8.0 version, got: {mysql_ver!r}"
+            log(f"DB_UPGRADE_MYSQL: version confirmed: {mysql_ver[:80]}")
 
-        # Verify canary
-        canary = _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker exec mysql57 mysql -uroot -ptestpw smoke -e 'SELECT val FROM canary;' 2>/dev/null || echo MISSING",
-            "check-canary-mysql-post-upgrade",
-        )
-        assert "before-upgrade" in canary, f"Canary missing post-upgrade: {canary!r}"
-        log("DB_UPGRADE_MYSQL: canary data survived upgrade")
+            # Verify canary
+            canary = _run(
+                "docker exec mysql57 mysql -uroot -ptestpw smoke -e 'SELECT val FROM canary;' 2>/dev/null || echo MISSING",
+                check=False,
+            ).stdout.strip()
+            assert "before-upgrade" in canary, f"Canary missing post-upgrade: {canary!r}"
+            log("DB_UPGRADE_MYSQL: canary data survived upgrade")
 
-        # --- Rollback ---
-        cr_rb = _rollback_cr(self.client, cr_id, "mysql-upgrade-rollback")
-        rb_result = _execution_result(cr_rb)
-        assert rb_result.get("rolled_back") is True, f"Rollback not confirmed: {rb_result}"
+            # --- Rollback ---
+            cr_rb = _rollback_cr(self.client, cr_id, "mysql-upgrade-rollback")
+            rb_result = _execution_result(cr_rb)
+            assert rb_result.get("rolled_back") is True, f"Rollback not confirmed: {rb_result}"
 
-        mysql_ver_after = _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker exec mysql57 mysql -uroot -ptestpw -e 'SELECT @@version;' 2>/dev/null || echo UNKNOWN",
-            "check-mysql-version-post-rollback",
-        )
-        assert "5.7" in mysql_ver_after, f"Expected MySQL 5.7 after rollback: {mysql_ver_after!r}"
-        log("DB_UPGRADE_MYSQL: PASSED — rollback restored version 5.7")
-
-        _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker rm -f mysql57 mysql80 2>/dev/null || true",
-            "cleanup-mysql-containers",
-        )
+            mysql_ver_after = _run(
+                "docker exec mysql57 mysql -uroot -ptestpw -e 'SELECT @@version;' 2>/dev/null || echo UNKNOWN",
+                check=False,
+            ).stdout.strip()
+            assert "5.7" in mysql_ver_after, f"Expected MySQL 5.7 after rollback: {mysql_ver_after!r}"
+            log("DB_UPGRADE_MYSQL: PASSED — rollback restored version 5.7")
+        finally:
+            _run("docker rm -f mysql57 mysql80 2>/dev/null || true", check=False)
 
     # -----------------------------------------------------------------------
     # Phase DB_UPGRADE_MONGODB
@@ -378,100 +338,83 @@ class TestDbMajorVersionUpgradeSmoke:
 
         # --- Infra setup ---
         log("DB_UPGRADE_MONGODB: launching mongo:4.4 container with replica set")
-        _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker rm -f mongo44 2>/dev/null || true; "
-            "docker run -d --name mongo44 -p 27017:27017 mongo:4.4 --replSet rs0",
-            "launch-mongo44",
+        _run("docker rm -f mongo44 2>/dev/null || true", check=False)
+        _run("docker run -d --name mongo44 -p 27017:27017 mongo:4.4 --replSet rs0")
+        _wait_docker(
+            "docker exec mongo44 mongosh --quiet --eval 'db.runCommand({ping:1})'",
+            timeout=90,
         )
-        _ssm_on_smoke_host(
-            self.client, asset_id,
-            "for i in $(seq 1 30); do "
-            "  docker exec mongo44 mongosh --quiet --eval 'db.runCommand({ping:1})' && break || sleep 3; "
-            "done",
-            "wait-mongo44-ready",
-        )
-        _ssm_on_smoke_host(
-            self.client, asset_id,
+        _run(
             "docker exec mongo44 mongosh --quiet --eval "
-            "\"try { rs.status() } catch(e) { rs.initiate() }\"",
-            "initiate-rs0",
+            "\"try { rs.status() } catch(e) { rs.initiate() }\""
         )
-        _ssm_on_smoke_host(
-            self.client, asset_id,
-            "sleep 5 && docker exec mongo44 mongosh --quiet --eval \""
-            "db.getSiblingDB('smoke').canary.insertOne({val: 'before-upgrade'})\"",
-            "seed-mongo44",
+        time.sleep(5)  # Let replica set initialize
+        _run(
+            "docker exec mongo44 mongosh --quiet --eval \""
+            "db.getSiblingDB('smoke').canary.insertOne({val: 'before-upgrade'})\""
         )
         log("DB_UPGRADE_MONGODB: mongo:4.4 ready with canary doc")
 
-        # --- Execute CR ---
-        cr = _cr_lifecycle(
-            self.client,
-            "[smoke] db_major_version_upgrade mongodb 4.4->7.0",
-            "db_major_version_upgrade",
-            {
-                "engine": "mongodb",
-                "source_version": "4.4",
-                "target_version": "7.0",
-                "db_host": "localhost",
-                "db_port": 27017,
-                "db_user": "admin",
-            },
-            [asset_id],
-            timeout=1800,  # Mongo multi-hop can take 30 min
-        )
-        cr_id = cr["id"]
-        result = _execution_result(cr)
+        try:
+            # --- Execute CR ---
+            cr = _cr_lifecycle(
+                self.client,
+                "[smoke] db_major_version_upgrade mongodb 4.4->7.0",
+                "db_major_version_upgrade",
+                {
+                    "engine": "mongodb",
+                    "source_version": "4.4",
+                    "target_version": "7.0",
+                    "db_host": "localhost",
+                    "db_port": 27017,
+                    "db_user": "admin",
+                },
+                [asset_id],
+                timeout=1800,  # Mongo multi-hop can take 30 min
+            )
+            cr_id = cr["id"]
+            result = _execution_result(cr)
 
-        assert result.get("status") in ("completed", "verify_failed"), (
-            f"Unexpected status: {result}"
-        )
-        upgrade_result = result.get("upgrade_result", {})
-        assert upgrade_result.get("completed_hops") == ["4.4->5.0", "5.0->6.0", "6.0->7.0"], (
-            f"Expected all 3 FCV hops, got: {upgrade_result.get('completed_hops')}"
-        )
-        log(f"DB_UPGRADE_MONGODB: all FCV hops complete: {upgrade_result.get('completed_hops')}")
+            assert result.get("status") in ("completed", "verify_failed"), (
+                f"Unexpected status: {result}"
+            )
+            upgrade_result = result.get("upgrade_result", {})
+            assert upgrade_result.get("completed_hops") == ["4.4->5.0", "5.0->6.0", "6.0->7.0"], (
+                f"Expected all 3 FCV hops, got: {upgrade_result.get('completed_hops')}"
+            )
+            log(f"DB_UPGRADE_MONGODB: all FCV hops complete: {upgrade_result.get('completed_hops')}")
 
-        # Verify version
-        mongo_ver = _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker exec mongo44 mongosh --quiet --eval "
-            "\"db.version()\" 2>/dev/null || echo UNKNOWN",
-            "check-mongo-version-post-upgrade",
-        )
-        assert "7.0" in mongo_ver, f"Expected MongoDB 7.0, got: {mongo_ver!r}"
-        log(f"DB_UPGRADE_MONGODB: version confirmed: {mongo_ver[:80]}")
+            # Verify version
+            mongo_ver = _run(
+                "docker exec mongo44 mongosh --quiet --eval \"db.version()\" 2>/dev/null || echo UNKNOWN",
+                check=False,
+            ).stdout.strip()
+            assert "7.0" in mongo_ver, f"Expected MongoDB 7.0, got: {mongo_ver!r}"
+            log(f"DB_UPGRADE_MONGODB: version confirmed: {mongo_ver[:80]}")
 
-        # Verify canary
-        canary = _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker exec mongo44 mongosh --quiet --eval \""
-            "JSON.stringify(db.getSiblingDB('smoke').canary.findOne())\" 2>/dev/null || echo MISSING",
-            "check-canary-mongo-post-upgrade",
-        )
-        assert "before-upgrade" in canary, f"Canary doc missing post-upgrade: {canary!r}"
-        log("DB_UPGRADE_MONGODB: canary data survived upgrade")
+            # Verify canary
+            canary = _run(
+                "docker exec mongo44 mongosh --quiet --eval \""
+                "JSON.stringify(db.getSiblingDB('smoke').canary.findOne())\" 2>/dev/null || echo MISSING",
+                check=False,
+            ).stdout.strip()
+            assert "before-upgrade" in canary, f"Canary doc missing post-upgrade: {canary!r}"
+            log("DB_UPGRADE_MONGODB: canary data survived upgrade")
 
-        # --- Rollback ---
-        cr_rb = _rollback_cr(self.client, cr_id, "mongo-upgrade-rollback", timeout=1800)
-        rb_result = _execution_result(cr_rb)
-        assert rb_result.get("rolled_back") is True, f"Rollback not confirmed: {rb_result}"
-        log(f"DB_UPGRADE_MONGODB: rollback complete, strategy={rb_result.get('strategy')}")
+            # --- Rollback ---
+            cr_rb = _rollback_cr(self.client, cr_id, "mongo-upgrade-rollback", timeout=1800)
+            rb_result = _execution_result(cr_rb)
+            assert rb_result.get("rolled_back") is True, f"Rollback not confirmed: {rb_result}"
+            log(f"DB_UPGRADE_MONGODB: rollback complete, strategy={rb_result.get('strategy')}")
 
-        # Verify version is back to 4.4
-        mongo_ver_after = _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker exec mongo44 mongosh --quiet --eval \"db.version()\" 2>/dev/null || echo UNKNOWN",
-            "check-mongo-version-post-rollback",
-        )
-        assert "4.4" in mongo_ver_after, (
-            f"Expected MongoDB 4.4 after rollback, got: {mongo_ver_after!r}"
-        )
-        log("DB_UPGRADE_MONGODB: PASSED — rollback restored version 4.4")
-
-        _ssm_on_smoke_host(
-            self.client, asset_id,
-            "docker rm -f mongo44 mongo50 mongo60 mongo70 2>/dev/null || true",
-            "cleanup-mongo-containers",
-        )
+            # Verify version is back to 4.4
+            mongo_ver_after = _run(
+                "docker exec mongo44 mongosh --quiet --eval \"db.version()\" 2>/dev/null || echo UNKNOWN",
+                check=False,
+            ).stdout.strip()
+            assert "4.4" in mongo_ver_after, (
+                f"Expected MongoDB 4.4 after rollback, got: {mongo_ver_after!r}"
+            )
+            log("DB_UPGRADE_MONGODB: PASSED — rollback restored version 4.4")
+        finally:
+            _run("docker rm -f mongo44 mongo50 mongo60 mongo70 2>/dev/null || true", check=False)
