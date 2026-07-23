@@ -2,17 +2,76 @@
   "connector_type": "active_directory",
   "display_name": "Active Directory",
   "credential_fields": [
-    {"name": "server", "label": "Server Hostname/IP", "type": "string", "required": true},
-    {"name": "port", "label": "Port", "type": "string", "required": false, "default": "389"},
-    {"name": "base_dn", "label": "Base DN", "type": "string", "required": true},
-    {"name": "bind_dn", "label": "Bind DN", "type": "string", "required": true},
-    {"name": "bind_password", "label": "Bind Password", "type": "password", "required": true},
-    {"name": "use_ssl", "label": "Use SSL/TLS", "type": "string", "required": false, "default": "false"},
-    {"name": "winrm_hostname", "label": "WinRM Hostname (for DC ops)", "type": "string", "required": false},
-    {"name": "winrm_port", "label": "WinRM Port", "type": "string", "required": false, "default": "5985"},
-    {"name": "winrm_username", "label": "WinRM Username", "type": "string", "required": false},
-    {"name": "winrm_password", "label": "WinRM Password", "type": "password", "required": false},
-    {"name": "winrm_use_ssl", "label": "WinRM Use SSL", "type": "string", "required": false, "default": "false"}
+    {
+      "name": "server",
+      "label": "Server Hostname/IP",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "port",
+      "label": "Port",
+      "type": "string",
+      "required": false,
+      "default": "389"
+    },
+    {
+      "name": "base_dn",
+      "label": "Base DN",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "bind_dn",
+      "label": "Bind DN",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "bind_password",
+      "label": "Bind Password",
+      "type": "password",
+      "required": true
+    },
+    {
+      "name": "use_ssl",
+      "label": "Use SSL/TLS",
+      "type": "string",
+      "required": false,
+      "default": "false"
+    },
+    {
+      "name": "winrm_hostname",
+      "label": "WinRM Hostname (for DC ops)",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "winrm_port",
+      "label": "WinRM Port",
+      "type": "string",
+      "required": false,
+      "default": "5985"
+    },
+    {
+      "name": "winrm_username",
+      "label": "WinRM Username",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "winrm_password",
+      "label": "WinRM Password",
+      "type": "password",
+      "required": false
+    },
+    {
+      "name": "winrm_use_ssl",
+      "label": "WinRM Use SSL",
+      "type": "string",
+      "required": false,
+      "default": "false"
+    }
   ],
   "actions": [
     {
@@ -21,7 +80,9 @@
       "action_type": "ingest",
       "display_name": "Discover AD Computers",
       "description": "Discovers all AD-joined computers with OU path, OS, and last logon metadata",
-      "produces_asset_types": ["server"],
+      "produces_asset_types": [
+        "server"
+      ],
       "applicable_asset_types": [],
       "executor": "active_directory.discover_computers",
       "estimated_duration_seconds": 20
@@ -32,7 +93,9 @@
       "action_type": "ingest",
       "display_name": "Discover AD Identities",
       "description": "Discovers users, service accounts, and admin accounts with group memberships and enabled status",
-      "produces_asset_types": ["identity"],
+      "produces_asset_types": [
+        "identity"
+      ],
       "applicable_asset_types": [],
       "executor": "active_directory.discover_identities",
       "estimated_duration_seconds": 30
@@ -43,7 +106,9 @@
       "action_type": "ingest",
       "display_name": "Discover AD Groups",
       "description": "Discovers all security and distribution groups with member counts",
-      "produces_asset_types": ["identity"],
+      "produces_asset_types": [
+        "identity"
+      ],
       "applicable_asset_types": [],
       "executor": "active_directory.discover_groups",
       "estimated_duration_seconds": 20
@@ -55,14 +120,24 @@
       "execution_tier": 1,
       "display_name": "Disable Account",
       "description": "Disables a user or service account in Active Directory",
-      "applicable_asset_types": ["identity"],
-      "parameters": [{"name": "username", "type": "string", "required": true}],
+      "applicable_asset_types": [
+        "identity"
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "type": "string",
+          "required": true
+        }
+      ],
       "executor": "active_directory.disable_account",
       "rollback_action": "enable_account",
       "rollback_connector_type": "active_directory",
       "estimated_duration_seconds": 5,
       "blast_radius_hint": "account_access_loss",
-      "safety_notes": ["Verify no critical services depend on this account before disabling"]
+      "safety_notes": [
+        "Verify no critical services depend on this account before disabling"
+      ]
     },
     {
       "action_id": "enable_account",
@@ -71,8 +146,16 @@
       "execution_tier": 1,
       "display_name": "Enable Account",
       "description": "Re-enables a disabled Active Directory account",
-      "applicable_asset_types": ["identity"],
-      "parameters": [{"name": "username", "type": "string", "required": true}],
+      "applicable_asset_types": [
+        "identity"
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "type": "string",
+          "required": true
+        }
+      ],
       "executor": "active_directory.enable_account",
       "estimated_duration_seconds": 5
     },
@@ -83,8 +166,16 @@
       "execution_tier": 1,
       "display_name": "Reset Password",
       "description": "Forces a password reset on next login for the specified account",
-      "applicable_asset_types": ["identity"],
-      "parameters": [{"name": "username", "type": "string", "required": true}],
+      "applicable_asset_types": [
+        "identity"
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "type": "string",
+          "required": true
+        }
+      ],
       "executor": "active_directory.reset_password",
       "estimated_duration_seconds": 5
     },
@@ -95,10 +186,20 @@
       "execution_tier": 1,
       "display_name": "Add to Group",
       "description": "Adds an account to a security group",
-      "applicable_asset_types": ["identity"],
+      "applicable_asset_types": [
+        "identity"
+      ],
       "parameters": [
-        {"name": "username", "type": "string", "required": true},
-        {"name": "group_name", "type": "string", "required": true}
+        {
+          "name": "username",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "group_name",
+          "type": "string",
+          "required": true
+        }
       ],
       "executor": "active_directory.add_to_group",
       "rollback_action": "remove_from_group",
@@ -111,10 +212,20 @@
       "execution_tier": 1,
       "display_name": "Remove from Group",
       "description": "Removes an account from a security group",
-      "applicable_asset_types": ["identity"],
+      "applicable_asset_types": [
+        "identity"
+      ],
       "parameters": [
-        {"name": "username", "type": "string", "required": true},
-        {"name": "group_name", "type": "string", "required": true}
+        {
+          "name": "username",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "group_name",
+          "type": "string",
+          "required": true
+        }
       ],
       "executor": "active_directory.remove_from_group",
       "estimated_duration_seconds": 5
@@ -126,8 +237,16 @@
       "execution_tier": 1,
       "display_name": "Enforce MFA",
       "description": "Flags the account for mandatory MFA enrollment on next login",
-      "applicable_asset_types": ["identity"],
-      "parameters": [{"name": "username", "type": "string", "required": true}],
+      "applicable_asset_types": [
+        "identity"
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "type": "string",
+          "required": true
+        }
+      ],
       "executor": "active_directory.enforce_mfa",
       "estimated_duration_seconds": 5
     },
@@ -138,8 +257,16 @@
       "execution_tier": 1,
       "display_name": "Unlock Account",
       "description": "Unlocks a locked-out Active Directory account",
-      "applicable_asset_types": ["identity"],
-      "parameters": [{"name": "username", "type": "string", "required": true}],
+      "applicable_asset_types": [
+        "identity"
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "type": "string",
+          "required": true
+        }
+      ],
       "executor": "active_directory.unlock_account",
       "estimated_duration_seconds": 5
     },
@@ -149,11 +276,26 @@
       "action_type": "ingest",
       "display_name": "List DNS Records",
       "description": "Lists DNS records in an AD-integrated zone via PowerShell on the DC",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "parameters": [
-        {"name": "zone_name", "type": "string", "required": true},
-        {"name": "record_type", "type": "string", "required": false, "description": "A, CNAME, MX, etc. — omit for all types"},
-        {"name": "dc_hostname", "type": "string", "required": false}
+        {
+          "name": "zone_name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "record_type",
+          "type": "string",
+          "required": false,
+          "description": "A, CNAME, MX, etc. \u00e2\u20ac\u201d omit for all types"
+        },
+        {
+          "name": "dc_hostname",
+          "type": "string",
+          "required": false
+        }
       ],
       "executor": "active_directory.list_dns_records",
       "estimated_duration_seconds": 10,
@@ -166,14 +308,44 @@
       "execution_tier": 1,
       "display_name": "Create DNS Record",
       "description": "Creates an A, CNAME, or TXT record in an AD-integrated DNS zone",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "parameters": [
-        {"name": "zone_name", "type": "string", "required": true},
-        {"name": "record_name", "type": "string", "required": true, "description": "Hostname without zone suffix"},
-        {"name": "record_type", "type": "string", "required": true, "description": "A, CNAME, or TXT"},
-        {"name": "value", "type": "string", "required": true, "description": "IP for A, target for CNAME, string for TXT"},
-        {"name": "ttl", "type": "integer", "required": false, "default": 300},
-        {"name": "dc_hostname", "type": "string", "required": false}
+        {
+          "name": "zone_name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "record_name",
+          "type": "string",
+          "required": true,
+          "description": "Hostname without zone suffix"
+        },
+        {
+          "name": "record_type",
+          "type": "string",
+          "required": true,
+          "description": "A, CNAME, or TXT"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "required": true,
+          "description": "IP for A, target for CNAME, string for TXT"
+        },
+        {
+          "name": "ttl",
+          "type": "integer",
+          "required": false,
+          "default": 300
+        },
+        {
+          "name": "dc_hostname",
+          "type": "string",
+          "required": false
+        }
       ],
       "executor": "active_directory.create_dns_record",
       "rollback_action": "delete_dns_record",
@@ -187,12 +359,30 @@
       "execution_tier": 1,
       "display_name": "Delete DNS Record",
       "description": "Deletes a DNS record from an AD-integrated zone",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "parameters": [
-        {"name": "zone_name", "type": "string", "required": true},
-        {"name": "record_name", "type": "string", "required": true},
-        {"name": "record_type", "type": "string", "required": true},
-        {"name": "dc_hostname", "type": "string", "required": false}
+        {
+          "name": "zone_name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "record_name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "record_type",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dc_hostname",
+          "type": "string",
+          "required": false
+        }
       ],
       "executor": "active_directory.delete_dns_record",
       "estimated_duration_seconds": 10,
@@ -205,14 +395,41 @@
       "execution_tier": 1,
       "display_name": "Update DNS Record",
       "description": "Updates an existing DNS record value in an AD-integrated zone (delete + create)",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "parameters": [
-        {"name": "zone_name", "type": "string", "required": true},
-        {"name": "record_name", "type": "string", "required": true},
-        {"name": "record_type", "type": "string", "required": true},
-        {"name": "new_value", "type": "string", "required": true},
-        {"name": "ttl", "type": "integer", "required": false, "default": 300},
-        {"name": "dc_hostname", "type": "string", "required": false}
+        {
+          "name": "zone_name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "record_name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "record_type",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "new_value",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "ttl",
+          "type": "integer",
+          "required": false,
+          "default": 300
+        },
+        {
+          "name": "dc_hostname",
+          "type": "string",
+          "required": false
+        }
       ],
       "executor": "active_directory.update_dns_record",
       "rollback_action": "update_dns_record",
@@ -226,16 +443,31 @@
       "execution_tier": 1,
       "display_name": "DC Integrity Check",
       "description": "Read-only health check: replication status, SYSVOL consistency, GPO baseline hash, unauthorized privileged accounts",
-      "applicable_asset_types": ["server", "identity"],
+      "applicable_asset_types": [
+        "server",
+        "identity"
+      ],
       "parameters": [
-        {"name": "dc_hostname", "type": "string", "required": false, "description": "DC to check (defaults to server in connector credentials)"},
-        {"name": "baseline_gpo_hash", "type": "string", "required": false, "description": "Expected GPO hash to compare against (from a previous snapshot)"}
+        {
+          "name": "dc_hostname",
+          "type": "string",
+          "required": false,
+          "description": "DC to check (defaults to server in connector credentials)"
+        },
+        {
+          "name": "baseline_gpo_hash",
+          "type": "string",
+          "required": false,
+          "description": "Expected GPO hash to compare against (from a previous snapshot)"
+        }
       ],
       "executor": "active_directory.dc_integrity_check",
       "rollback_action": null,
       "estimated_duration_seconds": 30,
       "blast_radius_hint": "none",
-      "safety_notes": ["Read-only operation — no changes made to AD"]
+      "safety_notes": [
+        "Read-only operation \u00e2\u20ac\u201d no changes made to AD"
+      ]
     },
     {
       "action_id": "ad_forest_snapshot",
@@ -244,19 +476,40 @@
       "execution_tier": 2,
       "display_name": "AD Forest Snapshot",
       "description": "Captures ntds.dit, SYSVOL, and GPO state to immutable S3 storage. Requires AD DS service stop/start on the target DC.",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "parameters": [
-        {"name": "s3_bucket", "type": "string", "required": true, "description": "S3 bucket for snapshot storage"},
-        {"name": "s3_prefix", "type": "string", "required": false, "description": "Key prefix (default: ad-snapshots/{timestamp})"},
-        {"name": "dc_hostname", "type": "string", "required": false},
-        {"name": "include_sysvol", "type": "boolean", "required": false, "default": true}
+        {
+          "name": "s3_bucket",
+          "type": "string",
+          "required": true,
+          "description": "S3 bucket for snapshot storage"
+        },
+        {
+          "name": "s3_prefix",
+          "type": "string",
+          "required": false,
+          "description": "Key prefix (default: ad-snapshots/{timestamp})"
+        },
+        {
+          "name": "dc_hostname",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "include_sysvol",
+          "type": "boolean",
+          "required": false,
+          "default": true
+        }
       ],
       "executor": "active_directory.ad_forest_snapshot",
       "rollback_action": "ad_forest_snapshot_cleanup",
       "estimated_duration_seconds": 120,
       "blast_radius_hint": "service_interruption",
       "safety_notes": [
-        "Stops AD DS service briefly for ntds.dit consistency — brief authentication disruption expected",
+        "Stops AD DS service briefly for ntds.dit consistency \u00e2\u20ac\u201d brief authentication disruption expected",
         "Ensure at least one other DC is available before running",
         "S3 bucket should have Object Lock enabled for immutability"
       ]
@@ -267,10 +520,21 @@
       "action_type": "ingest",
       "display_name": "Discover AD Snapshots",
       "description": "Lists available AD forest snapshots in S3 with timestamps and artifact inventory",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "parameters": [
-        {"name": "s3_bucket", "type": "string", "required": true},
-        {"name": "s3_prefix", "type": "string", "required": false, "default": "ad-snapshots/"}
+        {
+          "name": "s3_bucket",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "s3_prefix",
+          "type": "string",
+          "required": false,
+          "default": "ad-snapshots/"
+        }
       ],
       "executor": "active_directory.discover_ad_snapshots",
       "estimated_duration_seconds": 10
@@ -281,32 +545,113 @@
       "action_type": "change",
       "execution_tier": 3,
       "display_name": "AD Forest Restore",
-      "description": "Restores ntds.dit and SYSVOL from S3 snapshot onto a pre-provisioned clean Windows Server, promotes it as a DC, and cuts over DNS. DESTRUCTIVE — use only for post-incident recovery.",
-      "applicable_asset_types": ["server"],
+      "description": "Restores ntds.dit and SYSVOL from S3 snapshot onto a pre-provisioned clean Windows Server, promotes it as a DC, and cuts over DNS. DESTRUCTIVE \u00e2\u20ac\u201d use only for post-incident recovery.",
+      "applicable_asset_types": [
+        "server"
+      ],
       "parameters": [
-        {"name": "target_hostname", "type": "string", "required": true, "description": "WinRM-accessible clean Windows Server to restore onto"},
-        {"name": "winrm_username", "type": "string", "required": true},
-        {"name": "winrm_password", "type": "password", "required": true},
-        {"name": "winrm_port", "type": "integer", "required": false, "default": 5985},
-        {"name": "winrm_use_ssl", "type": "boolean", "required": false, "default": false},
-        {"name": "snapshot_s3_key", "type": "string", "required": true, "description": "S3 key of the ntds.dit snapshot to restore"},
-        {"name": "s3_bucket", "type": "string", "required": true, "description": "S3 bucket containing the snapshot"},
-        {"name": "domain_name", "type": "string", "required": true, "description": "e.g. corp.example.com"},
-        {"name": "domain_netbios_name", "type": "string", "required": false, "description": "Defaults to first label of domain_name uppercased"},
-        {"name": "safe_mode_password", "type": "password", "required": true, "description": "DSRM password for the restored DC"},
-        {"name": "existing_dc_hostnames", "type": "array", "required": false, "description": "WinRM-checked for reachability; halt if any respond"},
-        {"name": "dns_update_mode", "type": "string", "required": false, "default": "manual", "description": "route53 | azure | manual"},
-        {"name": "route53_zone_id", "type": "string", "required": false, "description": "Required if dns_update_mode == route53"},
-        {"name": "azure_zone_name", "type": "string", "required": false, "description": "Required if dns_update_mode == azure"},
-        {"name": "azure_resource_group", "type": "string", "required": false, "description": "Required if dns_update_mode == azure"},
-        {"name": "aws_region", "type": "string", "required": false, "default": "us-east-1"}
+        {
+          "name": "target_hostname",
+          "type": "string",
+          "required": true,
+          "description": "WinRM-accessible clean Windows Server to restore onto"
+        },
+        {
+          "name": "winrm_username",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "winrm_password",
+          "type": "password",
+          "required": true
+        },
+        {
+          "name": "winrm_port",
+          "type": "integer",
+          "required": false,
+          "default": 5985
+        },
+        {
+          "name": "winrm_use_ssl",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "snapshot_s3_key",
+          "type": "string",
+          "required": true,
+          "description": "S3 key of the ntds.dit snapshot to restore"
+        },
+        {
+          "name": "s3_bucket",
+          "type": "string",
+          "required": true,
+          "description": "S3 bucket containing the snapshot"
+        },
+        {
+          "name": "domain_name",
+          "type": "string",
+          "required": true,
+          "description": "e.g. corp.example.com"
+        },
+        {
+          "name": "domain_netbios_name",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to first label of domain_name uppercased"
+        },
+        {
+          "name": "safe_mode_password",
+          "type": "password",
+          "required": true,
+          "description": "DSRM password for the restored DC"
+        },
+        {
+          "name": "existing_dc_hostnames",
+          "type": "array",
+          "required": false,
+          "description": "WinRM-checked for reachability; halt if any respond"
+        },
+        {
+          "name": "dns_update_mode",
+          "type": "string",
+          "required": false,
+          "default": "manual",
+          "description": "route53 | azure | manual"
+        },
+        {
+          "name": "route53_zone_id",
+          "type": "string",
+          "required": false,
+          "description": "Required if dns_update_mode == route53"
+        },
+        {
+          "name": "azure_zone_name",
+          "type": "string",
+          "required": false,
+          "description": "Required if dns_update_mode == azure"
+        },
+        {
+          "name": "azure_resource_group",
+          "type": "string",
+          "required": false,
+          "description": "Required if dns_update_mode == azure"
+        },
+        {
+          "name": "aws_region",
+          "type": "string",
+          "required": false,
+          "default": "us-east-1"
+        }
       ],
       "executor": "active_directory.ad_forest_restore",
       "rollback_action": null,
       "estimated_duration_seconds": 1800,
       "blast_radius_hint": "infrastructure_replacement",
       "safety_notes": [
-        "DESTRUCTIVE — promotes a new DC and cuts over DNS",
+        "DESTRUCTIVE \u00e2\u20ac\u201d promotes a new DC and cuts over DNS",
         "Operator must pre-provision a clean Windows Server and pass its hostname",
         "Verify all existing DCs are isolated before running (use existing_dc_hostnames to enforce)",
         "This is a post-incident recovery operation, not routine maintenance"
@@ -319,7 +664,9 @@
       "execution_tier": 3,
       "display_name": "AD DC Decommission",
       "description": "Terminate or shut down compromised DCs after a forest restore. EC2 instances terminated via AWS API; WinRM hosts isolated and shut down; iLO/iDRAC hosts stubbed pending oob_management connector.",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "parameters": [
         {
           "name": "compromised_dcs",
@@ -327,16 +674,30 @@
           "required": true,
           "description": "List of DCs to decommission. Each entry: {type: ec2|winrm|ilodrac, instance_id|winrm_hostname|hostname, name, pam_path (ilodrac only)}"
         },
-        {"name": "winrm_username", "type": "string", "required": false, "description": "Falls back to connector credentials"},
-        {"name": "winrm_password", "type": "password", "required": false},
-        {"name": "winrm_port", "type": "integer", "required": false, "default": 5985}
+        {
+          "name": "winrm_username",
+          "type": "string",
+          "required": false,
+          "description": "Falls back to connector credentials"
+        },
+        {
+          "name": "winrm_password",
+          "type": "password",
+          "required": false
+        },
+        {
+          "name": "winrm_port",
+          "type": "integer",
+          "required": false,
+          "default": 5985
+        }
       ],
       "executor": "active_directory.ad_dc_decommission",
       "rollback_action": null,
       "estimated_duration_seconds": 120,
       "blast_radius_hint": "infrastructure_termination",
       "safety_notes": [
-        "DESTRUCTIVE AND NOT REVERSIBLE — EC2 instances are permanently terminated",
+        "DESTRUCTIVE AND NOT REVERSIBLE \u00e2\u20ac\u201d EC2 instances are permanently terminated",
         "Run only after ad_forest_restore is verified and the new DC is confirmed healthy",
         "For iLO/iDRAC entries: manually power off the host and update pam_path for future runs"
       ]
@@ -348,11 +709,27 @@
       "execution_tier": 2,
       "display_name": "AD Tiered Backup",
       "description": "Microsoft tier model backup: Tier 0 (DC/PKI/ADFS), Tier 1 (servers), Tier 2 (desktops) with separate schedules and isolated restore paths",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "parameters": [
-        {"name": "tier", "type": "string", "required": true, "description": "0, 1, or 2"},
-        {"name": "s3_bucket", "type": "string", "required": true},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "tier",
+          "type": "string",
+          "required": true,
+          "description": "0, 1, or 2"
+        },
+        {
+          "name": "s3_bucket",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "active_directory.ad_tiered_backup",
       "rollback_action": null,
@@ -365,19 +742,346 @@
       "execution_tier": 1,
       "display_name": "Create User",
       "description": "Creates a new Active Directory user account in the specified OU with a temporary password",
-      "applicable_asset_types": ["identity"],
+      "applicable_asset_types": [
+        "identity"
+      ],
       "parameters": [
-        {"name": "username", "type": "string", "required": true},
-        {"name": "first_name", "type": "string", "required": true},
-        {"name": "last_name", "type": "string", "required": true},
-        {"name": "ou", "type": "string", "required": false},
-        {"name": "temp_password", "type": "string", "required": true}
+        {
+          "name": "username",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "first_name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "last_name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "ou",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "temp_password",
+          "type": "string",
+          "required": true
+        }
       ],
       "executor": "active_directory.create_user",
       "rollback_action": "delete_user",
       "estimated_duration_seconds": 10,
       "blast_radius_hint": "new_account_created",
-      "safety_notes": ["Ensure temp_password meets domain complexity requirements"]
+      "safety_notes": [
+        "Ensure temp_password meets domain complexity requirements"
+      ]
+    },
+    {
+      "action_id": "ad_dc_parallel_upgrade",
+      "action_type": "change",
+      "applicable_asset_types": [
+        "server"
+      ],
+      "blast_radius_hint": "domain_controller_promotion_demotion",
+      "description": "Upgrades a domain controller using the Microsoft-prescribed parallel paradigm: promote a new DC at the target OS version, wait for AD replication, transfer FSMO roles, then demote the old DC.",
+      "display_name": "Parallel DC Upgrade",
+      "estimated_duration_seconds": 3600,
+      "execution_tier": 4,
+      "executor": "active_directory.ad_dc_parallel_upgrade",
+      "generic_action": "ad_dc_parallel_upgrade",
+      "parameters": [
+        {
+          "name": "new_dc_asset_id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "new_dc_hostname",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "domain_name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "target_os_version",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "transfer_fsmo",
+          "required": false,
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "name": "demote_old_dc",
+          "required": false,
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "rollback_strategy": "full"
+    },
+    {
+      "action_id": "ad_domain_functional_level_upgrade",
+      "action_type": "change",
+      "applicable_asset_types": [
+        "server"
+      ],
+      "blast_radius_hint": "irreversible_domain_configuration_change",
+      "description": "Raises the AD domain or forest functional level. IRREVERSIBLE.",
+      "display_name": "AD Domain Functional Level Upgrade (Irreversible)",
+      "estimated_duration_seconds": 120,
+      "execution_tier": 5,
+      "executor": "active_directory.ad_domain_functional_level_upgrade",
+      "generic_action": "ad_domain_functional_level_upgrade",
+      "parameters": [
+        {
+          "name": "target_level",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "scope",
+          "required": false,
+          "type": "string",
+          "default": "domain"
+        },
+        {
+          "name": "domain_name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "rollback_strategy": "irreversible",
+      "safety_notes": [
+        "This operation CANNOT be undone."
+      ]
+    },
+    {
+      "action_id": "ad_trust_create",
+      "action_type": "change",
+      "applicable_asset_types": [
+        "server"
+      ],
+      "blast_radius_hint": "cross_domain_authentication_change",
+      "description": "Creates a forest or domain trust relationship with Kerberos validation.",
+      "display_name": "Create AD Trust",
+      "estimated_duration_seconds": 300,
+      "execution_tier": 4,
+      "executor": "active_directory.ad_trust_create",
+      "generic_action": "ad_trust_create",
+      "parameters": [
+        {
+          "name": "target_domain",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "trust_type",
+          "required": false,
+          "type": "string",
+          "default": "forest"
+        },
+        {
+          "name": "trust_direction",
+          "required": false,
+          "type": "string",
+          "default": "bidirectional"
+        },
+        {
+          "name": "trust_password",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "domain_name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "rollback_strategy": "full"
+    },
+    {
+      "action_id": "ad_gpo_deploy",
+      "action_type": "change",
+      "applicable_asset_types": [
+        "server"
+      ],
+      "blast_radius_hint": "policy_applied_to_domain_objects",
+      "description": "Creates and deploys a Group Policy Object with pilot OU rollout.",
+      "display_name": "Deploy Group Policy Object (Pilot Rollout)",
+      "estimated_duration_seconds": 180,
+      "execution_tier": 4,
+      "executor": "active_directory.ad_gpo_deploy",
+      "generic_action": "ad_gpo_deploy",
+      "parameters": [
+        {
+          "name": "gpo_name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "gpo_settings",
+          "required": true,
+          "type": "object"
+        },
+        {
+          "name": "pilot_ou",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "target_ous",
+          "required": false,
+          "type": "array"
+        },
+        {
+          "name": "domain_name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "rollback_strategy": "full"
+    },
+    {
+      "action_id": "ad_pso_manage",
+      "action_type": "change",
+      "applicable_asset_types": [
+        "server"
+      ],
+      "blast_radius_hint": "password_policy_change_for_affected_users",
+      "description": "Creates, updates, or deletes a Fine-Grained Password Policy (PSO).",
+      "display_name": "Manage Fine-Grained Password Policy (PSO)",
+      "estimated_duration_seconds": 60,
+      "execution_tier": 3,
+      "executor": "active_directory.ad_pso_manage",
+      "generic_action": "ad_pso_manage",
+      "parameters": [
+        {
+          "name": "action",
+          "required": false,
+          "type": "string",
+          "default": "create"
+        },
+        {
+          "name": "pso_name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "pso_settings",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "name": "applies_to",
+          "required": false,
+          "type": "array"
+        },
+        {
+          "name": "precedence",
+          "required": false,
+          "type": "integer",
+          "default": 10
+        },
+        {
+          "name": "domain_name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "rollback_strategy": "full"
+    },
+    {
+      "action_id": "ad_stale_computer_cleanup",
+      "action_type": "change",
+      "applicable_asset_types": [
+        "server"
+      ],
+      "blast_radius_hint": "computer_account_disabled_or_deleted",
+      "description": "Identifies and disables or deletes stale AD computer accounts.",
+      "display_name": "Stale Computer Account Cleanup",
+      "estimated_duration_seconds": 300,
+      "execution_tier": 3,
+      "executor": "active_directory.ad_stale_computer_cleanup",
+      "generic_action": "ad_stale_computer_cleanup",
+      "parameters": [
+        {
+          "name": "stale_days",
+          "required": false,
+          "type": "integer",
+          "default": 90
+        },
+        {
+          "name": "action",
+          "required": false,
+          "type": "string",
+          "default": "disable"
+        },
+        {
+          "name": "target_ou",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "exclude_ous",
+          "required": false,
+          "type": "array"
+        },
+        {
+          "name": "domain_name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "rollback_strategy": "partial",
+      "safety_notes": [
+        "Deleted accounts cannot be recovered without AD Recycle Bin"
+      ]
     }
   ]
 }

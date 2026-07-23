@@ -494,6 +494,13 @@ class ChangeType(str, enum.Enum):
     ad_dc_decommission = "ad_dc_decommission"
     ad_tiered_backup = "ad_tiered_backup"
     discover_ad_snapshots = "discover_ad_snapshots"
+    # AD tier-zero operations
+    ad_dc_parallel_upgrade = "ad_dc_parallel_upgrade"
+    ad_domain_functional_level_upgrade = "ad_domain_functional_level_upgrade"
+    ad_trust_create = "ad_trust_create"
+    ad_gpo_deploy = "ad_gpo_deploy"
+    ad_pso_manage = "ad_pso_manage"
+    ad_stale_computer_cleanup = "ad_stale_computer_cleanup"
     # AD DNS management
     list_dns_records = "list_dns_records"
     create_dns_record = "create_dns_record"
@@ -555,6 +562,12 @@ class ChangeType(str, enum.Enum):
     audit_software_inventory = "audit_software_inventory"
     audit_cis_compliance = "audit_cis_compliance"
     platform_upgrade = "platform_upgrade"
+    # Database major version upgrades
+    db_major_version_upgrade = "db_major_version_upgrade"
+    # Kubernetes cluster upgrades
+    k8s_cluster_upgrade = "k8s_cluster_upgrade"
+    # Windows OS upgrades
+    windows_os_upgrade = "windows_os_upgrade"
     # Agent tunnel management
     agent_reverse_tunnel_enable = "agent_reverse_tunnel_enable"
     agent_reverse_tunnel_disable = "agent_reverse_tunnel_disable"
