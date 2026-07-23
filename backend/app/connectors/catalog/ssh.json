@@ -284,7 +284,6 @@
                                            }
                                        ],
                         "executor":  "ssh.containerize_workload",
-                        "rollback_action":  "restore_bare_metal_service",
                         "estimated_duration_seconds":  60,
                         "blast_radius_hint":  "host_service_interruption",
                         "safety_notes":  [

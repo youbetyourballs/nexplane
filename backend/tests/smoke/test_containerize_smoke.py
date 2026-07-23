@@ -350,6 +350,32 @@ class TestContainerizeSmoke:
         )
         log("CONTAINERIZE setup: Docker installed ✅")
 
+        # Pre-authenticate to ECR so the agent's docker push succeeds
+        # (released agent binary lacks ecrLoginIfNeeded; pre-auth covers it)
+        aws_creds = cls.aws_creds or {}
+        ecr_registry = aws_creds.get("ecr_registry") or aws_creds.get("registry") or ""
+        if ecr_registry and ".dkr.ecr." in ecr_registry:
+            ecr_region = "us-east-1"
+            try:
+                parts = ecr_registry.split(".")
+                for i, p in enumerate(parts):
+                    if p == "ecr" and i + 1 < len(parts):
+                        ecr_region = parts[i + 1]
+                        break
+            except Exception:
+                pass
+            _ssm_run(
+                cls.instance_id,
+                (
+                    f"aws ecr get-login-password --region {ecr_region} "
+                    f"| docker login --username AWS --password-stdin {ecr_registry} "
+                    f"&& echo ECR_LOGIN_OK || echo ECR_LOGIN_FAILED"
+                ),
+                cls.aws_creds,
+                timeout=30,
+            )
+            log(f"CONTAINERIZE setup: ECR pre-auth for {ecr_registry} ✅")
+
         # Set up SSH connector for the SSH-inplace test phase
         # Generate RSA keypair, inject public key via SSM, register SSH connector in platform
         try:
