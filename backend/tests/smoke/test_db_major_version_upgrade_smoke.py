@@ -255,7 +255,7 @@ class TestDbMajorVersionUpgradeSmoke:
             "docker run -d --name mysql57 -e MYSQL_ROOT_PASSWORD=testpw -p 13306:3306 mysql:5.7"
         )
         _wait_docker(
-            "docker exec mysql57 mysqladmin ping -uroot -ptestpw --silent",
+            "docker exec mysql57 mysql -uroot -ptestpw -e 'SELECT 1' 2>/dev/null",
             timeout=120,
         )
         _run(
@@ -341,16 +341,16 @@ class TestDbMajorVersionUpgradeSmoke:
         _run("docker rm -f mongo44 2>/dev/null || true", check=False)
         _run("docker run -d --name mongo44 -p 27117:27017 mongo:4.4 --replSet rs0")
         _wait_docker(
-            "docker exec mongo44 mongosh --quiet --eval 'db.runCommand({ping:1})'",
+            "docker exec mongo44 mongo --quiet --eval 'db.runCommand({ping:1})'",
             timeout=90,
         )
         _run(
-            "docker exec mongo44 mongosh --quiet --eval "
+            "docker exec mongo44 mongo --quiet --eval "
             "\"try { rs.status() } catch(e) { rs.initiate() }\""
         )
         time.sleep(5)  # Let replica set initialize
         _run(
-            "docker exec mongo44 mongosh --quiet --eval \""
+            "docker exec mongo44 mongo --quiet --eval \""
             "db.getSiblingDB('smoke').canary.insertOne({val: 'before-upgrade'})\""
         )
         log("DB_UPGRADE_MONGODB: mongo:4.4 ready with canary doc")

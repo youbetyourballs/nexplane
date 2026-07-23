@@ -138,6 +138,15 @@ var commands = map[string]CommandFunc{
 	"db_permission_change": dbadmin.ExecuteCommand,
 	"configure_db_audit":   dbadmin.ExecuteCommand,
 	"db_connection_config": dbadmin.ExecuteCommand,
+	"db_preflight": dbadmin.DbPreflightExecute,
+	"db_upgrade_postgres_dump_restore": dbadmin.DbUpgradePostgresDumpRestoreExecute,
+	"db_version_query": dbadmin.DbVersionQueryExecute,
+	"db_upgrade_mysql": dbadmin.DbUpgradeMysqlExecute,
+	"db_upgrade_mongo_fcv_hop": dbadmin.DbUpgradeMongoFcvHopExecute,
+	"db_dump_to_s3": dbadmin.DbDumpToS3Execute,
+	"db_restore_from_s3_dump": dbadmin.DbRestoreFromS3DumpExecute,
+	"db_dump_local": dbadmin.DbDumpLocalExecute,
+	"db_restore_from_local_dump": dbadmin.DbRestoreFromLocalDumpExecute,
 	// Software inventory (CIS Control 2)
 	"list_installed_packages": listpkgs.Execute,
 	// Linux patching (Spec 5f)

@@ -226,6 +226,8 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
             return await _rollback_rds(asset_id, snapshot_result, connector)
         elif snapshot_type == "s3_dump":
             return await _rollback_s3_dump(asset_id, snapshot_result, parameters, connector)
+        elif snapshot_type == "local_dump":
+            return await _rollback_local_dump(asset_id, snapshot_result, parameters, connector)
         else:
             # EBS snapshot (in_place postgres, mysql, mongodb)
             return await _rollback_ebs(asset_id, snapshot_result, connector)
@@ -296,6 +298,22 @@ async def _take_snapshot(asset_id: str, p: dict, connector, cr_id: str = "unknow
             "snapshot_id": snap_id,
             "snapshot_arn": snap_arn,
             "rds_instance_id": rds_instance_id,
+            "snapshot_completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    if strategy == "dump_restore" and not snapshot_s3_bucket and not rds_instance_id:
+        # --- Local file dump (no S3 or RDS) — stores dump on agent host filesystem ---
+        dump_path = f"/tmp/nexplane_{asset_id[:8]}_{timestamp}_dump.sql.gz"
+        await dispatch_agent_job(
+            command="db_dump_local",
+            parameters={**p, "dump_path": dump_path},
+            asset_ids=[asset_id],
+            timeout_seconds=3600,
+        )
+        return {
+            "snapshot_type": "local_dump",
+            "snapshot_id": dump_path,
+            "dump_path": dump_path,
             "snapshot_completed_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -612,4 +630,29 @@ async def _rollback_ebs(asset_id: str, snapshot_result: dict, connector) -> dict
         "old_volume_id": result.get("old_volume_id"),
         "agent_recovered": result.get("agent_recovered"),
         "notes": "Old volume tagged nexplane-rollback-orphan for operator cleanup",
+    }
+
+
+async def _rollback_local_dump(
+    asset_id: str, snapshot_result: dict, parameters: dict, connector
+) -> dict:
+    """Restore from local dump file on agent host."""
+    dump_path = snapshot_result.get("dump_path") or snapshot_result.get("snapshot_id")
+    if not dump_path:
+        return {"rolled_back": False, "reason": "no dump_path in snapshot_result"}
+
+    p = parameters.get("desired_outcome") or parameters
+    await dispatch_agent_job(
+        command="db_restore_from_local_dump",
+        parameters={
+            **p,
+            "dump_path": dump_path,
+        },
+        asset_ids=[asset_id],
+        timeout_seconds=7200,
+    )
+    return {
+        "rolled_back": True,
+        "strategy": "local_dump_restore",
+        "dump_path": dump_path,
     }

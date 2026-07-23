@@ -82,7 +82,11 @@ def _create_kind_cluster(name: str, image: str):
     if _kind_cluster_exists(name):
         log(f"kind cluster {name} already exists")
         return
-    _run(["kind", "create", "cluster", "--name", name, "--image", image, "--wait", "120s"], timeout=180)
+    # Bind API server to 0.0.0.0 so Docker containers can reach it via 172.17.0.1
+    kind_config = "/tmp/nexplane-kind-config.yaml"
+    with open(kind_config, "w") as f:
+        f.write("kind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nnetworking:\n  apiServerAddress: 0.0.0.0\n")
+    _run(["kind", "create", "cluster", "--name", name, "--image", image, "--config", kind_config, "--wait", "120s"], timeout=180)
 
 
 def _delete_kind_cluster(name: str):
