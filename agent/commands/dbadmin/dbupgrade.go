@@ -365,7 +365,16 @@ func DbDumpLocalExecute(params map[string]any) (map[string]any, error) {
 	case "postgres":
 		dumpCmd = fmt.Sprintf("pg_dumpall -h %s -p %d -U %s | gzip > %s", host, port, user, dumpPath)
 	case "mysql":
-		dumpCmd = fmt.Sprintf("mysqldump -h %s -P %d -u %s --all-databases | gzip > %s", host, port, user, dumpPath)
+		dumpCmd = fmt.Sprintf("mysqldump -h %s --protocol=tcp -P %d -u %s --all-databases | gzip > %s", host, port, user, dumpPath)
+	case "mongodb":
+		authArgs := ""
+		if password != "" {
+			if user != "" {
+				authArgs += fmt.Sprintf(" --username %s", user)
+			}
+			authArgs += fmt.Sprintf(" --password %s", password)
+		}
+		dumpCmd = fmt.Sprintf("mongodump --host %s --port %d --archive --gzip%s > %s", host, port, authArgs, dumpPath)
 	default:
 		return nil, fmt.Errorf("db_dump_local: unsupported engine %q", engine)
 	}
@@ -378,6 +387,76 @@ func DbDumpLocalExecute(params map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("db_dump_local failed: %s: %w", stderr.String(), err)
 	}
 	return map[string]any{"dump_path": dumpPath, "status": "ok"}, nil
+}
+
+func DbUpgradeMongoDbDumpRestoreExecute(params map[string]any) (map[string]any, error) {
+	host := str(params, "db_host")
+	portStr := str(params, "db_port")
+	if portStr == "" {
+		portStr = strconv.Itoa(intParam(params, "db_port"))
+	}
+	user := str(params, "db_user")
+	password := str(params, "db_password")
+	targetVersion := str(params, "target_version")
+
+	dumpPath := "/tmp/nexplane_mongo_dump.gz"
+
+	port, _ := strconv.Atoi(portStr)
+	if port == 0 {
+		port = 27017
+	}
+	targetPort := port + 1
+	targetPortStr := strconv.Itoa(targetPort)
+
+	// Dump from source
+	dumpArgs := []string{"--host", host, "--port", portStr, "--archive=" + dumpPath, "--gzip", "--quiet"}
+	if password != "" {
+		if user != "" {
+			dumpArgs = append(dumpArgs, "--username", user)
+		}
+		dumpArgs = append(dumpArgs, "--password", password)
+	}
+	out, errOut, err := runCmd(nil, "mongodump", dumpArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("mongodump failed: %s %s", out, errOut)
+	}
+
+	// Start target-version container
+	containerName := "mongo" + strings.ReplaceAll(targetVersion, ".", "")
+	runCmd(nil, "docker", "rm", "-f", containerName)
+
+	out, errOut, err = runCmd(nil, "docker", "run", "-d",
+		"--name", containerName,
+		"-p", targetPortStr+":27017",
+		"mongo:"+targetVersion)
+	if err != nil {
+		return nil, fmt.Errorf("docker run mongo failed: %s %s", out, errOut)
+	}
+
+	// Wait for container to be ready
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		_, _, readyErr := runCmd(nil, "mongosh",
+			"--host", "127.0.0.1", "--port", targetPortStr,
+			"--eval", "db.adminCommand({ping:1})", "--quiet")
+		if readyErr == nil {
+			break
+		}
+		time.Sleep(3 * time.Second)
+	}
+
+	// Restore into target container
+	restoreArgs := []string{"--host", "127.0.0.1", "--port", targetPortStr, "--archive=" + dumpPath, "--gzip"}
+	out, errOut, err = runCmd(nil, "mongorestore", restoreArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("mongorestore failed: %s %s", out, errOut)
+	}
+
+	return map[string]any{
+		"stdout":         "mongodb upgrade completed",
+		"target_port":    targetPort,
+		"target_version": targetVersion,
+	}, nil
 }
 
 func DbRestoreFromLocalDumpExecute(params map[string]any) (map[string]any, error) {
@@ -396,6 +475,15 @@ func DbRestoreFromLocalDumpExecute(params map[string]any) (map[string]any, error
 		restoreCmd = fmt.Sprintf("gunzip < %s | psql -h %s -p %d -U %s", dumpPath, host, port, user)
 	case "mysql":
 		restoreCmd = fmt.Sprintf("gunzip < %s | mysql -h %s --protocol=tcp -P %d -u %s", dumpPath, host, port, user)
+	case "mongodb":
+		authArgs := ""
+		if password != "" {
+			if user != "" {
+				authArgs += fmt.Sprintf(" --username %s", user)
+			}
+			authArgs += fmt.Sprintf(" --password %s", password)
+		}
+		restoreCmd = fmt.Sprintf("mongorestore --host %s --port %d --archive --gzip%s < %s", host, port, authArgs, dumpPath)
 	default:
 		return nil, fmt.Errorf("db_restore_from_local_dump: unsupported engine %q", engine)
 	}

@@ -174,14 +174,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # --- Phase 2: Snapshot ---
     snapshot_result = {}
-    # MongoDB FCV upgrades are reversible via FCV downgrade — no dump snapshot needed
-    if engine == "mongodb":
-        snapshot_result = {
-            "snapshot_type": "fcv_reversible",
-            "snapshot_id": f"fcv:{p.get('source_version')}",
-            "source_version": p.get("source_version"),
-        }
-    elif not p["skip_snapshot"]:
+    if not p["skip_snapshot"]:
         snapshot_result = await _take_snapshot(asset_id, p, connector)
     else:
         logger.warning(f"skip_snapshot=True for asset {asset_id} — no rollback artifact")
@@ -426,7 +419,18 @@ async def _upgrade(asset_id: str, p: dict, connector) -> dict:
         }
 
     elif engine == "mongodb":
-        return await _mongo_fcv_chain(asset_id, p)
+        result = await dispatch_agent_job(
+            command="db_upgrade_mongo_dump_restore",
+            parameters=p,
+            asset_ids=[asset_id],
+            timeout_seconds=3600,
+        )
+        return {
+            "upgrade_status": "completed",
+            "engine": engine,
+            "agent_result": result,
+            "upgraded_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     else:
         raise ValueError(f"Unknown engine: {engine!r}")
@@ -477,12 +481,12 @@ async def _verify(asset_id: str, p: dict, connector, upgrade_result: dict = None
     smoke_commands = {
         "postgres": "SELECT version();",
         "mysql":    "SELECT @@version;",
-        "mongodb":  '{"serverStatus": 1}',
+        "mongodb":  "db.version()",
     }
 
     # For dump_restore upgrades, the upgraded DB runs on port+1 (agent spins up a new container)
     verify_port = p.get("db_port")
-    if engine in ("postgres", "mysql") and p.get("strategy", "dump_restore") == "dump_restore":
+    if engine in ("postgres", "mysql", "mongodb") and p.get("strategy", "dump_restore") == "dump_restore":
         agent_result = (upgrade_result or {}).get("agent_result", {})
         target_port = agent_result.get("target_port")
         if target_port:

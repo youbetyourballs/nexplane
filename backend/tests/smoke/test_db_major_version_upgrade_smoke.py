@@ -336,25 +336,23 @@ class TestDbMajorVersionUpgradeSmoke:
 
     def test_db_upgrade_mongodb(self):
         """
-        DB_UPGRADE_MONGODB: Docker mongo:4.4 -> mongo:7.0 via sequential FCV bumps.
-        Verifies FCV chain completion and rollback restores 4.4.
+        DB_UPGRADE_MONGODB: Docker mongo:4.4 -> mongo:7.0 via dump/restore.
+        Agent dumps from 4.4 (port 27117), restores into new mongo:7.0 container (port 27118).
+        Rollback restores dump back into original 4.4 container.
         """
         asset_id = self.asset_id
 
         # --- Infra setup ---
-        log("DB_UPGRADE_MONGODB: launching mongo:4.4 container with replica set")
-        _run("docker rm -f mongo44 2>/dev/null || true", check=False)
-        _run("docker run -d --name mongo44 -p 27117:27017 mongo:4.4 --replSet rs0")
+        log("DB_UPGRADE_MONGODB: launching mongo:4.4 container")
+        _run("docker rm -f mongo44 mongo70 2>/dev/null || true", check=False)
+        _run("docker run -d --name mongo44 -p 27117:27017 mongo:4.4")
         _wait_docker(
             "docker exec mongo44 mongo --quiet --eval 'db.runCommand({ping:1})'",
             timeout=90,
         )
-        _run("docker exec mongo44 mongo --quiet --eval 'rs.initiate()'", check=False)
-        # Wait for primary election before writing canary
-        _wait_docker(
+        _run(
             "docker exec mongo44 mongo --quiet --eval "
-            "\"db.getSiblingDB('smoke').canary.insertOne({val: 'before-upgrade'})\"",
-            timeout=60,
+            "\"db.getSiblingDB('smoke').canary.insert({val: 'before-upgrade'})\"",
         )
         log("DB_UPGRADE_MONGODB: mongo:4.4 ready with canary doc")
 
@@ -372,7 +370,7 @@ class TestDbMajorVersionUpgradeSmoke:
                     "db_port": 27117,
                 },
                 [asset_id],
-                timeout=1800,  # Mongo multi-hop can take 30 min
+                timeout=1800,
             )
             cr_id = cr["id"]
             result = _execution_result(cr)
@@ -380,24 +378,20 @@ class TestDbMajorVersionUpgradeSmoke:
             assert result.get("status") in ("completed", "verify_failed"), (
                 f"Unexpected status: {result}"
             )
-            upgrade_result = result.get("upgrade_result", {})
-            assert upgrade_result.get("completed_hops") == ["4.4->5.0", "5.0->6.0", "6.0->7.0"], (
-                f"Expected all 3 FCV hops, got: {upgrade_result.get('completed_hops')}"
-            )
-            log(f"DB_UPGRADE_MONGODB: all FCV hops complete: {upgrade_result.get('completed_hops')}")
+            log(f"DB_UPGRADE_MONGODB: upgrade completed, snap={result.get('snapshot_result', {}).get('dump_path')}")
 
-            # Verify version
+            # Upgraded container runs on port 27118 (27117 + 1), named mongo70
             mongo_ver = _run(
-                "docker exec mongo44 mongosh --quiet --eval \"db.version()\" 2>/dev/null || echo UNKNOWN",
+                "mongosh --host localhost --port 27118 --quiet --eval \"db.version()\" 2>/dev/null || echo UNKNOWN",
                 check=False,
             ).stdout.strip()
             assert "7.0" in mongo_ver, f"Expected MongoDB 7.0, got: {mongo_ver!r}"
             log(f"DB_UPGRADE_MONGODB: version confirmed: {mongo_ver[:80]}")
 
-            # Verify canary
+            # Verify canary doc migrated
             canary = _run(
-                "docker exec mongo44 mongosh --quiet --eval \""
-                "JSON.stringify(db.getSiblingDB('smoke').canary.findOne())\" 2>/dev/null || echo MISSING",
+                "mongosh --host localhost --port 27118 smoke --quiet --eval "
+                "\"JSON.stringify(db.canary.findOne())\" 2>/dev/null || echo MISSING",
                 check=False,
             ).stdout.strip()
             assert "before-upgrade" in canary, f"Canary doc missing post-upgrade: {canary!r}"
@@ -409,9 +403,9 @@ class TestDbMajorVersionUpgradeSmoke:
             rb_result = _execution_result(cr_rb)
             log(f"DB_UPGRADE_MONGODB: rollback complete, strategy={rb_result.get('strategy')}")
 
-            # Verify version is back to 4.4
+            # Original mongo44 (port 27117) should still have 4.4 data
             mongo_ver_after = _run(
-                "docker exec mongo44 mongosh --quiet --eval \"db.version()\" 2>/dev/null || echo UNKNOWN",
+                "docker exec mongo44 mongo --quiet --eval \"db.version()\" 2>/dev/null || echo UNKNOWN",
                 check=False,
             ).stdout.strip()
             assert "4.4" in mongo_ver_after, (
@@ -419,4 +413,4 @@ class TestDbMajorVersionUpgradeSmoke:
             )
             log("DB_UPGRADE_MONGODB: PASSED — rollback restored version 4.4")
         finally:
-            _run("docker rm -f mongo44 mongo50 mongo60 mongo70 2>/dev/null || true", check=False)
+            _run("docker rm -f mongo44 mongo70 2>/dev/null || true", check=False)

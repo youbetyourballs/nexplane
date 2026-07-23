@@ -144,6 +144,7 @@ var commands = map[string]CommandFunc{
 	"db_version_query": dbadmin.DbVersionQueryExecute,
 	"db_upgrade_mysql": dbadmin.DbUpgradeMysqlExecute,
 	"db_upgrade_mongo_fcv_hop": dbadmin.DbUpgradeMongoFcvHopExecute,
+	"db_upgrade_mongo_dump_restore": dbadmin.DbUpgradeMongoDbDumpRestoreExecute,
 	"db_dump_to_s3": dbadmin.DbDumpToS3Execute,
 	"db_restore_from_s3_dump": dbadmin.DbRestoreFromS3DumpExecute,
 	"db_dump_local": dbadmin.DbDumpLocalExecute,
