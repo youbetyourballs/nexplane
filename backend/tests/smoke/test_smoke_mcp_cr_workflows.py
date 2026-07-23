@@ -486,7 +486,7 @@ def setup_module(module):
     ASSET_ID = agent_asset_id
 
     # Create API token for MCP tool calls
-    token_resp = client.post("/api/v1/tokens", json={"name": "smoke-cr-workflow"})
+    token_resp = client.post("/tokens", json={"name": "smoke-cr-workflow"})
     raw_token = token_resp["raw_token"]
     os.environ["API_TOKEN"] = raw_token
     API_TOKEN = raw_token
@@ -537,7 +537,7 @@ async def _create_approver_api_token(approver_bearer: str) -> str:
     """Create an MCP-compatible nxp_ token for the approver."""
     import httpx
     resp = httpx.post(
-        f"{BASE_URL}/api/v1/tokens",
+        f"{BASE_URL}/tokens",
         headers={"Authorization": f"Bearer {approver_bearer}"},
         json={"name": "smoke-approver", "scopes": []},
         timeout=30,
@@ -547,7 +547,7 @@ async def _create_approver_api_token(approver_bearer: str) -> str:
     token = data.get("raw_token") or data.get("token")
     if token:
         return token
-    pytest.fail(f"Could not extract token from /api/v1/tokens response: {list(data.keys())}")
+    pytest.fail(f"Could not extract token from /tokens response: {list(data.keys())}")
 
 
 async def _poll_cr(cr_id: str, timeout: int = 600) -> dict:

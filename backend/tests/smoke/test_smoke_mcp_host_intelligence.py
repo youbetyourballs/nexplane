@@ -187,7 +187,7 @@ def setup_module(module):
     os.environ["ASSET_ID"] = agent_asset_id
 
     # 9. Create a short-lived API token for the MCP tool calls
-    token_resp = client.post("/api/v1/tokens", json={"name": "smoke-host-intel"})
+    token_resp = client.post("/tokens", json={"name": "smoke-host-intel"})
     raw_token = token_resp["raw_token"]
     _SMOKE_API_TOKEN_ID = token_resp["id"]
     os.environ["API_TOKEN"] = raw_token
@@ -202,7 +202,7 @@ def teardown_module(module):
     global _SMOKE_CLIENT, _SMOKE_LAUNCH_CR_ID, _SMOKE_API_TOKEN_ID
     if _SMOKE_API_TOKEN_ID and _SMOKE_CLIENT:
         try:
-            _SMOKE_CLIENT.delete(f"/api/v1/tokens/{_SMOKE_API_TOKEN_ID}")
+            _SMOKE_CLIENT.delete(f"/tokens/{_SMOKE_API_TOKEN_ID}")
         except Exception:
             pass
     if _SMOKE_LAUNCH_CR_ID and _SMOKE_CLIENT:
