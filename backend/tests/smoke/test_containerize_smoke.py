@@ -374,7 +374,7 @@ class TestContainerizeSmoke:
                     json={
                         "credentials": {
                             "hostname": private_ip,
-                            "port": 22,
+                            "port": "22",
                             "username": "ec2-user",
                             "private_key": private_key_pem,
                         }
