@@ -343,10 +343,12 @@ class TestContainerizeSmoke:
                 cred_resp = cls.client.client.put(
                     f"{cls.client.base}/connectors/{conn_id}/credentials",
                     json={
-                        "hostname": private_ip,
-                        "port": 22,
-                        "username": "ec2-user",
-                        "private_key": private_key_pem,
+                        "credentials": {
+                            "hostname": private_ip,
+                            "port": 22,
+                            "username": "ec2-user",
+                            "private_key": private_key_pem,
+                        }
                     },
                 )
                 if cred_resp.status_code in (200, 201, 204):
