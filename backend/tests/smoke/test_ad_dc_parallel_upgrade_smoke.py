@@ -141,18 +141,8 @@ def test_phase1_smoke_setup():
     region = aws_creds.get("region", "us-east-1")
     _smoke_state["region"] = region
 
-    ec2 = boto3.client(
-        "ec2",
-        region_name=region,
-        aws_access_key_id=aws_creds.get("aws_access_key_id"),
-        aws_secret_access_key=aws_creds.get("aws_secret_access_key"),
-    )
-    ssm = boto3.client(
-        "ssm",
-        region_name=region,
-        aws_access_key_id=aws_creds.get("aws_access_key_id"),
-        aws_secret_access_key=aws_creds.get("aws_secret_access_key"),
-    )
+    ec2 = _make_ec2_client(aws_creds, region)
+    ssm = _make_ssm_client(aws_creds, region)
 
     source_ami = _get_or_create_smoke_ami(ec2, ssm, version="2019")
     print(f"[smoke_setup] Source DC AMI: {source_ami}")
@@ -243,13 +233,48 @@ def test_phase1_smoke_setup():
 
 def _wait_ec2_running(ec2, instance_id: str, timeout_s: int = 600) -> str:
     deadline = time.monotonic() + timeout_s
+    time.sleep(5)  # brief pause for EC2 propagation after run_instances
     while time.monotonic() < deadline:
-        resp = ec2.describe_instances(InstanceIds=[instance_id])
-        inst = resp["Reservations"][0]["Instances"][0]
-        if inst["State"]["Name"] == "running":
-            return inst["PrivateIpAddress"]
+        try:
+            resp = ec2.describe_instances(InstanceIds=[instance_id])
+            reservations = resp.get("Reservations", [])
+            if not reservations:
+                time.sleep(10)
+                continue
+            inst = reservations[0]["Instances"][0]
+            if inst["State"]["Name"] == "running":
+                return inst["PrivateIpAddress"]
+        except Exception as exc:
+            if "InvalidInstanceID" in str(exc) or "NotFound" in str(exc):
+                time.sleep(10)
+                continue
+            raise
         time.sleep(30)
     raise TimeoutError(f"Instance {instance_id} not running after {timeout_s}s")
+
+
+def _make_boto3_kwargs(creds: dict) -> dict:
+    """Build boto3 client kwargs from connector creds (handles both access_key_id and aws_access_key_id)."""
+    kwargs = {}
+    key_id = creds.get("aws_access_key_id") or creds.get("access_key_id")
+    secret = creds.get("aws_secret_access_key") or creds.get("secret_access_key")
+    session_token = creds.get("aws_session_token") or creds.get("session_token")
+    if key_id:
+        kwargs["aws_access_key_id"] = key_id
+        kwargs["aws_secret_access_key"] = secret
+    if session_token:
+        kwargs["aws_session_token"] = session_token
+    return kwargs
+
+
+def _make_ec2_client(creds: dict, region: str):
+    import boto3
+    return boto3.client("ec2", region_name=region, **_make_boto3_kwargs(creds))
+
+
+def _make_ssm_client(creds: dict, region: str):
+    import boto3
+    return boto3.client("ssm", region_name=region, **_make_boto3_kwargs(creds))
 
 
 def _wait_winrm(hostname: str, username: str, password: str, timeout_s: int = 1200):
@@ -404,19 +429,10 @@ def test_phase3_smoke_rollback():
     if not _smoke_state["aws_creds"]:
         pytest.skip("smoke_setup did not populate aws_creds")
 
-    import boto3
     aws_creds = _smoke_state["aws_creds"]
     region = _smoke_state["region"]
-    ec2 = boto3.client(
-        "ec2", region_name=region,
-        aws_access_key_id=aws_creds.get("aws_access_key_id"),
-        aws_secret_access_key=aws_creds.get("aws_secret_access_key"),
-    )
-    ssm = boto3.client(
-        "ssm", region_name=region,
-        aws_access_key_id=aws_creds.get("aws_access_key_id"),
-        aws_secret_access_key=aws_creds.get("aws_secret_access_key"),
-    )
+    ec2 = _make_ec2_client(aws_creds, region)
+    ssm = _make_ssm_client(aws_creds, region)
 
     # Provision a fresh source DC for rollback test
     source_ami = _get_or_create_smoke_ami(ec2, ssm, version="2019")
@@ -533,14 +549,9 @@ def test_phase4_smoke_teardown():
     """Terminate all smoke EC2 instances and deregister smoke assets."""
     _skip_if_no_creds()
 
-    import boto3
     aws_creds = _smoke_state.get("aws_creds") or {}
     region = _smoke_state.get("region", "us-east-1")
-    ec2 = boto3.client(
-        "ec2", region_name=region,
-        aws_access_key_id=aws_creds.get("aws_access_key_id"),
-        aws_secret_access_key=aws_creds.get("aws_secret_access_key"),
-    )
+    ec2 = _make_ec2_client(aws_creds, region)
 
     instances_to_terminate = []
     if _smoke_state.get("source_instance_id"):
