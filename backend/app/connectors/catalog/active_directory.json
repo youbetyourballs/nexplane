@@ -787,53 +787,94 @@
         "server"
       ],
       "blast_radius_hint": "domain_controller_promotion_demotion",
-      "description": "Upgrades a domain controller using the Microsoft-prescribed parallel paradigm: promote a new DC at the target OS version, wait for AD replication, transfer FSMO roles, then demote the old DC.",
+      "description": "Upgrades a domain controller using the Microsoft-prescribed parallel paradigm: provision a new DC at the target Windows Server version via EC2, wait for AD replication, transfer FSMO roles, validate the new DC, then demote the old DC. Full rollback at every phase.",
       "display_name": "Parallel DC Upgrade",
       "estimated_duration_seconds": 3600,
       "execution_tier": 4,
       "executor": "active_directory.ad_dc_parallel_upgrade",
       "generic_action": "ad_dc_parallel_upgrade",
+      "rollback_capability": "full",
+      "rollback_strategy": "full",
       "parameters": [
         {
-          "name": "new_dc_asset_id",
+          "name": "source_dc_asset_id",
+          "label": "Source DC Asset ID",
+          "type": "string",
           "required": true,
-          "type": "string"
+          "description": "Asset ID of the DC being replaced; used to look up WinRM hostname and connector"
         },
         {
-          "name": "new_dc_hostname",
+          "name": "target_windows_version",
+          "label": "Target Windows Server Version",
+          "type": "string",
           "required": true,
-          "type": "string"
+          "enum": ["2022", "2019"],
+          "description": "Windows Server version for the new DC"
         },
         {
-          "name": "domain_name",
+          "name": "domain_admin_username",
+          "label": "Domain Admin Username",
+          "type": "string",
           "required": true,
-          "type": "string"
+          "description": "Domain admin account for DCPromo and FSMO operations (e.g. CORP\\Administrator)"
         },
         {
-          "name": "target_os_version",
+          "name": "domain_admin_password",
+          "label": "Domain Admin Password",
+          "type": "password",
           "required": false,
-          "type": "string"
+          "description": "Password; sourced from connector creds winrm_password if absent"
         },
         {
-          "name": "transfer_fsmo",
+          "name": "new_dc_instance_type",
+          "label": "New DC EC2 Instance Type",
+          "type": "string",
           "required": false,
+          "default": "t3.medium"
+        },
+        {
+          "name": "new_dc_subnet_id",
+          "label": "New DC Subnet ID",
+          "type": "string",
+          "required": false,
+          "description": "VPC subnet for the new DC instance; defaults to same subnet as source DC"
+        },
+        {
+          "name": "new_dc_security_group_ids",
+          "label": "New DC Security Group IDs",
+          "type": "array",
+          "required": false,
+          "description": "Security groups for the new DC; defaults to same SGs as source DC"
+        },
+        {
+          "name": "skip_fsmo_transfer",
+          "label": "Skip FSMO Transfer",
           "type": "boolean",
-          "default": true
+          "required": false,
+          "default": false,
+          "description": "If true, do not transfer FSMOs (use when source DC holds no FSMOs)"
         },
         {
-          "name": "demote_old_dc",
+          "name": "replication_timeout_minutes",
+          "label": "Replication Timeout (minutes)",
+          "type": "integer",
           "required": false,
-          "type": "boolean",
-          "default": true
+          "default": 30
         },
         {
           "name": "dry_run",
-          "required": false,
+          "label": "Dry Run",
           "type": "boolean",
-          "default": false
+          "required": false,
+          "default": false,
+          "description": "Run pre-flight only; return report without provisioning anything"
         }
       ],
-      "rollback_strategy": "full"
+      "safety_notes": [
+        "Pre-flight blocks on any critical issue — WinRM unreachable, single-DC domain, functional level mismatch",
+        "Rollback: demote new DC (Case A) or seize FSMOs back then demote (Case B); irreversible once source DC is demoted (Case C)",
+        "Source DC demotion is irreversible without manual re-promotion — verify new DC health before approving"
+      ]
     },
     {
       "action_id": "ad_domain_functional_level_upgrade",
