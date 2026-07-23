@@ -65,29 +65,35 @@ def _platform_has_creds(connector_type: str) -> bool:
         return False
 
 
-def _get_or_create_smoke_ami(ec2, ssm, version="2019") -> str:
-    """Return cached DC AMI ID from SSM, or resolve from AWS public parameter store."""
-    cache_key = f"/nexplane/smoke-amis/dc-smoke/{version}"
+def _get_smoke_dc_ami(ec2, ssm, version="2019") -> str:
+    """Return the pre-configured DC AMI from SSM cache.
+
+    The AMI must be a Windows Server with:
+    - AD DS installed and promoted as a domain controller
+    - ADWS (Active Directory Web Services) running
+    - WinRM HTTP (port 5985) enabled and accessible within VPC
+    - At least one other DC in the domain (so preflight dc_count_safe passes after adding new DC)
+
+    This AMI is NOT automatically created — it must be pre-built and stored in SSM.
+    Build it by: launching a Windows Server AMI, configuring AD DS, enabling WinRM,
+    then creating an AMI snapshot and storing the AMI ID in SSM at the cache_key below.
+    """
+    cache_key = f"/nexplane/smoke-amis/dc-smoke-prebuilt/{version}"
     try:
         resp = ssm.get_parameter(Name=cache_key)
         ami_id = resp["Parameter"]["Value"]
-        # Verify AMI still exists
-        ec2.describe_images(ImageIds=[ami_id])
-        return ami_id
-    except Exception:
-        pass
-    # Resolve from public SSM path
-    ssm_path = {
-        "2022": "/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base",
-        "2019": "/aws/service/ami-windows-latest/Windows_Server-2019-English-Full-Base",
-    }[version]
-    resp = ssm.get_parameter(Name=ssm_path)
-    ami_id = resp["Parameter"]["Value"]
-    try:
-        ssm.put_parameter(Name=cache_key, Value=ami_id, Type="String", Overwrite=True)
-    except Exception:
-        pass
-    return ami_id
+        # Verify AMI still exists and is available
+        img_resp = ec2.describe_images(ImageIds=[ami_id])
+        images = img_resp.get("Images", [])
+        if images and images[0].get("State") == "available":
+            return ami_id
+        raise RuntimeError(f"AMI {ami_id} is not available (state: {images[0].get('State') if images else 'not found'})")
+    except Exception as exc:
+        raise pytest.skip.Exception(
+            f"Pre-configured DC smoke AMI not found in SSM at {cache_key}: {exc}. "
+            f"Build the AMI first: launch Windows Server {version}, install+promote AD DS, "
+            f"enable WinRM HTTP, create AMI, store AMI ID in SSM at {cache_key}."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +150,7 @@ def test_phase1_smoke_setup():
     ec2 = _make_ec2_client(aws_creds, region)
     ssm = _make_ssm_client(aws_creds, region)
 
-    source_ami = _get_or_create_smoke_ami(ec2, ssm, version="2019")
+    source_ami = _get_smoke_dc_ami(ec2, ssm, version="2019")
     print(f"[smoke_setup] Source DC AMI: {source_ami}")
 
     # Get subnet/SG — use nexplane-smoke-dc SG which has WinRM + LDAP + AD ports open in VPC
@@ -446,7 +452,7 @@ def test_phase3_smoke_rollback():
     ssm = _make_ssm_client(aws_creds, region)
 
     # Provision a fresh source DC for rollback test
-    source_ami = _get_or_create_smoke_ami(ec2, ssm, version="2019")
+    source_ami = _get_smoke_dc_ami(ec2, ssm, version="2019")
     run_resp = ec2.run_instances(
         ImageId=source_ami,
         InstanceType="t3.medium",
