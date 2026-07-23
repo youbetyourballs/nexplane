@@ -3592,46 +3592,53 @@
         "workstation"
       ],
       "blast_radius_hint": "system_unavailable_during_upgrade_reboot",
-      "description": "Performs a Windows Server in-place OS upgrade via Windows Update or DISM. Takes an EBS snapshot before upgrade. Agent re-registers after the reboot (up to 30 min wait). Full rollback via EBS volume swap.",
-      "display_name": "Windows OS Upgrade",
-      "estimated_duration_seconds": 2700,
+      "description": "Upgrade Windows Server in-place (2019\u21922022). Takes a pre-upgrade EBS snapshot (EC2) or VSS shadow copy (on-prem). Handles OS restart and agent re-registration automatically. Full rollback via EBS volume swap or VSS restore instructions.",
+      "display_name": "Windows OS In-Place Upgrade",
+      "estimated_duration_seconds": 4500,
       "execution_tier": 4,
       "executor": "nexplane_agent.windows_os_upgrade",
       "generic_action": "windows_os_upgrade",
+      "rollback_capability": "full",
       "parameters": [
         {
           "name": "target_version",
           "required": true,
           "type": "string",
-          "description": "e.g. 2025 for Windows Server 2025"
-        },
-        {
-          "name": "upgrade_method",
-          "required": false,
-          "type": "string",
-          "default": "windows_update"
+          "enum": ["2019", "2022"],
+          "description": "Target Windows Server version. Supported: 2016\u21922019, 2019\u21922022."
         },
         {
           "name": "iso_path",
           "required": false,
-          "type": "string"
-        },
-        {
-          "name": "dry_run",
-          "required": false,
-          "type": "boolean",
-          "default": false
+          "type": "string",
+          "description": "Path to upgrade ISO accessible to the agent (local path or UNC share). If omitted, uses Windows Update."
         },
         {
           "name": "skip_snapshot",
           "required": false,
           "type": "boolean",
-          "default": false
+          "default": false,
+          "description": "Skip pre-upgrade snapshot. Not permitted on production assets."
+        },
+        {
+          "name": "health_check_command",
+          "required": false,
+          "type": "string",
+          "description": "PowerShell command run post-upgrade to validate application health. Must exit 0 on success."
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false,
+          "description": "Run pre-flight checks only. No snapshot taken, no upgrade started."
         }
       ],
       "rollback_strategy": "full",
       "safety_notes": [
-        "Upgrade requires reboot \u2014 agent will be unavailable for up to 30 minutes"
+        "Upgrade requires reboot \u2014 agent will be unavailable for up to 30 minutes",
+        "Pre-upgrade EBS snapshot (EC2) or VSS shadow copy (on-prem) taken automatically before upgrade",
+        "skip_snapshot=true is blocked on assets tagged environment: prod"
       ]
     }
   ]
