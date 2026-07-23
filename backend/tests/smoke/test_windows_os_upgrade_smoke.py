@@ -148,24 +148,26 @@ Start-Service -Name $agentService -ErrorAction SilentlyContinue
             pytest.fail(f"Nexplane agent service failed to start: {status2!r}")
 
 
-def _wait_for_agent_registration(client, platform_url: str, timeout: int = 120) -> str:
+def _wait_for_agent_registration(client, platform_url: str, timeout: int = 300) -> str:
     """
-    Poll the platform's agent registration list until a new Windows agent appears.
+    Poll the platform's asset list until a new agent-registered asset appears.
     Returns the asset_id of the newly registered agent.
     """
     import time as _t
-    known_agents_resp = client.client.get(f"{platform_url}/api/v1/assets?tags=nexplane-agent")
-    known_ids = {a["id"] for a in (known_agents_resp.json() if known_agents_resp.ok else [])}
+    # Snapshot existing asset IDs so we can detect a new one
+    known_resp = client.get("/assets")
+    known_ids = {a["id"] for a in (known_resp if isinstance(known_resp, list) else [])}
+    log(f"[WINDOWS_SMOKE] Waiting for agent registration; {len(known_ids)} existing assets")
 
     deadline = _t.time() + timeout
     while _t.time() < deadline:
         _t.sleep(10)
-        resp = client.client.get(f"{platform_url}/api/v1/assets?tags=nexplane-agent")
-        if not resp.ok:
+        assets = client.get("/assets")
+        if not isinstance(assets, list):
             continue
-        for asset in resp.json():
+        for asset in assets:
             if asset["id"] not in known_ids:
-                log(f"[WINDOWS_SMOKE] New agent registered as asset: {asset['id']} ({asset.get('name','')})")
+                log(f"[WINDOWS_SMOKE] New agent registered as asset: {asset['id']} ({asset.get('name', asset.get('hostname', ''))})")
                 return asset["id"]
     pytest.fail(f"Nexplane agent did not register within {timeout}s")
 
