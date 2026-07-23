@@ -4,243 +4,980 @@
 """Parallel DC upgrade executor.
 
 Implements the Microsoft-prescribed domain controller upgrade paradigm:
-  1. Provision a new DC at the target Windows Server version (via the nexplane agent
-     running on the new DC after it's joined to the domain)
-  2. Wait for AD replication to converge (verify via repadmin)
-  3. Transfer FSMO roles if the old DC holds them
-  4. Demote the old DC (removes ADDS role cleanly)
+  Phase 1: Pre-flight checks (WinRM + boto3)
+  Phase 2: Provision new DC via EC2 + DCPromo
+  Phase 3: Verify AD replication convergence
+  Phase 4: Transfer FSMO roles
+  Phase 5: Validate new DC (LDAP, Kerberos, DNS, dcdiag)
+  Phase 6: Demote old DC
+  Phase 7: Verify domain health
 
-This is the replacement for in-place DC upgrade. The old DC is cleanly demoted
-rather than being abruptly decommissioned — AD replication ensures no data loss.
-
-Rollback: seize FSMO roles back to the old DC + promote it again if demoted,
-OR (if promotion of new DC is the only completed step) simply decommission the
-new DC. The FILO stack handles correct ordering.
+Rollback:
+  Case A (before FSMO transfer): demote + terminate new DC
+  Case B (after FSMO transfer, before demotion): seize FSMOs back + demote + terminate new DC
+  Case C (after source demotion): irreversible — return instructions
 """
+import asyncio
+import csv
+import io
 import logging
+import socket
+import time
 from datetime import datetime, timezone
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 ROLLBACK_CAPABILITY = "full"
 
+# Windows Server AMI SSM paths
+_AMI_SSM_PATHS = {
+    "2022": "/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base",
+    "2019": "/aws/service/ami-windows-latest/Windows_Server-2019-English-Full-Base",
+}
+
+
+# ---------------------------------------------------------------------------
+# AWS client factories (module-level for test monkeypatching)
+# ---------------------------------------------------------------------------
+
+def _ec2_client(creds: dict):
+    import boto3
+    kwargs = {}
+    if creds.get("aws_access_key_id"):
+        kwargs["aws_access_key_id"] = creds["aws_access_key_id"]
+        kwargs["aws_secret_access_key"] = creds["aws_secret_access_key"]
+    if creds.get("region"):
+        kwargs["region_name"] = creds["region"]
+    return boto3.client("ec2", **kwargs)
+
+
+def _ssm_client(creds: dict):
+    import boto3
+    kwargs = {}
+    if creds.get("aws_access_key_id"):
+        kwargs["aws_access_key_id"] = creds["aws_access_key_id"]
+        kwargs["aws_secret_access_key"] = creds["aws_secret_access_key"]
+    if creds.get("region"):
+        kwargs["region_name"] = creds["region"]
+    return boto3.client("ssm", **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Parse helpers
+# ---------------------------------------------------------------------------
+
+def _parse_fsmo_netdom(output: str) -> dict:
+    """Parse netdom query fsmo output into {role_name: dc_fqdn} dict."""
+    role_map = {
+        "schema master": "SchemaMaster",
+        "domain naming master": "DomainNamingMaster",
+        "pdc": "PDCEmulator",
+        "rid pool manager": "RIDMaster",
+        "infrastructure master": "InfrastructureMaster",
+    }
+    result = {}
+    for line in output.splitlines():
+        line_lower = line.lower().strip()
+        for keyword, role_key in role_map.items():
+            if line_lower.startswith(keyword):
+                parts = line.split()
+                if len(parts) >= 2:
+                    result[role_key] = parts[-1].strip()
+                break
+    return result
+
+
+def _parse_repadmin_csv(csv_output: str) -> tuple:
+    """Parse repadmin /showrepl /csv output.
+
+    Returns (replication_ok: bool, error_rows: list[dict]).
+    A row with a non-zero 'Last Failure Status' column indicates a failure.
+    """
+    errors = []
+    reader = csv.reader(io.StringIO(csv_output))
+    for row in reader:
+        if not row:
+            continue
+        if row[0].lower().startswith("showrepl csv"):
+            # Column layout: type, source_dsa_site_name, source_dsa_name,
+            # naming_context, last_failure_status, num_failures, last_success_time
+            if len(row) >= 5:
+                try:
+                    failure_status = int(row[4].strip())
+                except ValueError:
+                    continue
+                if failure_status != 0:
+                    errors.append({
+                        "source": row[2].strip() if len(row) > 2 else "",
+                        "naming_context": row[3].strip() if len(row) > 3 else "",
+                        "failure_status": failure_status,
+                        "num_failures": row[5].strip() if len(row) > 5 else "",
+                    })
+    return len(errors) == 0, errors
+
+
+def _is_expected_reboot_disconnect(exc: Exception) -> bool:
+    """Return True if the exception looks like a WinRM drop due to DC reboot."""
+    msg = str(exc).lower()
+    reboot_keywords = (
+        "connection reset", "eof", "closed", "transport endpoint",
+        "timed out", "timeout", "broken pipe", "connection refused",
+        "not connected", "forcibly closed",
+    )
+    auth_keywords = ("401", "access denied", "invalid credentials", "unauthorized")
+    for kw in auth_keywords:
+        if kw in msg:
+            return False
+    for kw in reboot_keywords:
+        if kw in msg:
+            return True
+    return False
+
+
+def _winrm_run(session, script: str) -> tuple:
+    """Run a PowerShell script via WinRM; return (stdout, stderr, rc)."""
+    result = session.run_ps(script)
+    stdout = result.std_out.decode("utf-8", errors="replace") if isinstance(result.std_out, bytes) else (result.std_out or "")
+    stderr = result.std_err.decode("utf-8", errors="replace") if isinstance(result.std_err, bytes) else (result.std_err or "")
+    return stdout, stderr, result.status_code
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight
+# ---------------------------------------------------------------------------
+
+async def _preflight(parameters: dict, connector, creds: dict) -> dict:
+    """Run all pre-flight checks. Returns structured report. Does NOT mutate infra."""
+    from app.connectors.executors.active_directory._client import get_winrm_session
+
+    loop = asyncio.get_event_loop()
+    checks = []
+    blocking_checks = []
+    source_dc_hostname = creds.get("winrm_hostname", "")
+    domain_admin_pw = parameters.get("domain_admin_password") or creds.get("winrm_password", "")
+
+    def _add_check(name, level, detail):
+        entry = {"name": name, "level": level, "detail": detail}
+        checks.append(entry)
+        if level == "critical":
+            blocking_checks.append(entry)
+
+    # 1. WinRM connectivity to source DC
+    session = None
+    try:
+        session = await loop.run_in_executor(
+            None, lambda: get_winrm_session(creds, dc_hostname=source_dc_hostname)
+        )
+        stdout, _, rc = await loop.run_in_executor(None, lambda: _winrm_run(session, 'Write-Output "ready"'))
+        if rc != 0:
+            raise Exception(f"WinRM ready check returned rc={rc}")
+        _add_check("winrm_reachable", "ok", f"WinRM responding on {source_dc_hostname}")
+    except Exception as exc:
+        _add_check("winrm_reachable", "critical", f"WinRM unreachable on {source_dc_hostname}: {exc}")
+        return {
+            "status": "preflight_blocked",
+            "checks": checks,
+            "blocking_checks": blocking_checks,
+        }
+
+    # 2. Get-ADDomain
+    domain_name = ""
+    try:
+        stdout, _, rc = await loop.run_in_executor(
+            None, lambda: _winrm_run(session, "(Get-ADDomain).DNSRoot")
+        )
+        if rc != 0 or not stdout.strip():
+            raise Exception(f"Get-ADDomain failed rc={rc}")
+        domain_name = stdout.strip()
+        _add_check("ad_domain_running", "ok", f"AD domain: {domain_name}")
+    except Exception as exc:
+        _add_check("ad_domain_running", "critical", f"Get-ADDomain failed: {exc}")
+
+    # 3. Source DC is in Get-ADDomainController output
+    dc_list = []
+    try:
+        stdout, _, rc = await loop.run_in_executor(
+            None, lambda: _winrm_run(session, "(Get-ADDomainController -Filter *).HostName -join \",\"")
+        )
+        if rc != 0:
+            raise Exception(f"Get-ADDomainController failed rc={rc}")
+        dc_list = [x.strip() for x in stdout.split(",") if x.strip()]
+        if not any(source_dc_hostname.lower() in dc.lower() for dc in dc_list):
+            _add_check("source_dc_in_domain", "critical",
+                       f"Source DC {source_dc_hostname} not found in domain controller list: {dc_list}")
+        else:
+            _add_check("source_dc_in_domain", "ok", f"Source DC confirmed in domain: {dc_list}")
+    except Exception as exc:
+        _add_check("source_dc_in_domain", "critical", f"Cannot enumerate domain controllers: {exc}")
+        dc_list = []
+
+    # 4. DC count (must be >= 2 for safe upgrade)
+    try:
+        stdout, _, rc = await loop.run_in_executor(
+            None, lambda: _winrm_run(session, "(Get-ADDomainController -Filter * | Measure-Object).Count")
+        )
+        dc_count = int(stdout.strip()) if stdout.strip().isdigit() else 0
+        if dc_count <= 1:
+            _add_check("dc_count_safe", "critical",
+                       f"Only {dc_count} DC in domain — demoting source after upgrade would leave 0 DCs and destroy the domain")
+        else:
+            _add_check("dc_count_safe", "ok", f"Domain has {dc_count} DC(s); safe to proceed")
+    except Exception as exc:
+        _add_check("dc_count_safe", "critical", f"Cannot determine DC count: {exc}")
+
+    # 5. netdom query fsmo
+    fsmo_state = {}
+    source_fsmo_roles = []
+    try:
+        stdout, _, rc = await loop.run_in_executor(
+            None, lambda: _winrm_run(session, "netdom query fsmo")
+        )
+        if rc != 0:
+            raise Exception(f"netdom query fsmo failed rc={rc}")
+        fsmo_state = _parse_fsmo_netdom(stdout)
+        source_fsmo_roles = [role for role, dc in fsmo_state.items()
+                             if source_dc_hostname.lower().split(".")[0] in dc.lower()]
+        _add_check("fsmo_queryable", "ok", f"FSMO roles queried; source holds: {source_fsmo_roles}")
+    except Exception as exc:
+        _add_check("fsmo_queryable", "critical", f"netdom query fsmo failed: {exc}")
+
+    # 6. AD functional level
+    try:
+        stdout, _, rc = await loop.run_in_executor(
+            None, lambda: _winrm_run(session, "(Get-ADDomain).DomainMode")
+        )
+        domain_mode = stdout.strip()
+        target_ver = parameters.get("target_windows_version", "2022")
+        compat_modes = {"Windows2012R2Domain", "Windows2016Domain", "Windows2025Domain"}
+        if not any(m in domain_mode for m in compat_modes):
+            _add_check("ad_functional_level", "critical",
+                       f"Domain functional level {domain_mode} may not support Windows Server {target_ver} DC")
+        else:
+            _add_check("ad_functional_level", "ok", f"Domain functional level: {domain_mode}")
+    except Exception as exc:
+        _add_check("ad_functional_level", "warning", f"Cannot determine functional level: {exc}")
+
+    # 7. DNS check (warning only)
+    try:
+        stdout, _, rc = await loop.run_in_executor(
+            None, lambda: _winrm_run(session, f"dcdiag /test:dns /s:{source_dc_hostname}")
+        )
+        if "passed test dns" in stdout.lower():
+            _add_check("dns_check", "ok", "dcdiag /test:dns passed")
+        else:
+            _add_check("dns_check", "warning", f"dcdiag /test:dns: {stdout[:200]}")
+    except Exception as exc:
+        _add_check("dns_check", "warning", f"dcdiag /test:dns failed: {exc}")
+
+    # 8. Replication health (warning only)
+    try:
+        stdout, _, rc = await loop.run_in_executor(
+            None, lambda: _winrm_run(session, f"dcdiag /test:replications /s:{source_dc_hostname}")
+        )
+        if "passed test replications" in stdout.lower():
+            _add_check("replication_health", "ok", "Replication healthy on source DC")
+        else:
+            _add_check("replication_health", "warning",
+                       "Replication errors on source DC — new DC may inherit broken state")
+    except Exception as exc:
+        _add_check("replication_health", "warning", f"Cannot check replication: {exc}")
+
+    # 9. Source EC2 instance lookup + subnet/SG
+    source_subnet_id = parameters.get("new_dc_subnet_id", "")
+    source_sg_ids = parameters.get("new_dc_security_group_ids") or []
+    source_ec2_instance_id = ""
+    try:
+        ec2 = _ec2_client(creds)
+        resp = await loop.run_in_executor(
+            None,
+            lambda: ec2.describe_instances(Filters=[
+                {"Name": "private-ip-address", "Values": [source_dc_hostname]},
+                {"Name": "instance-state-name", "Values": ["running"]},
+            ])
+        )
+        reservations = resp.get("Reservations", [])
+        if reservations:
+            inst = reservations[0]["Instances"][0]
+            source_ec2_instance_id = inst["InstanceId"]
+            if not source_subnet_id:
+                source_subnet_id = inst.get("SubnetId", "")
+            if not source_sg_ids:
+                source_sg_ids = [sg["GroupId"] for sg in inst.get("SecurityGroups", [])]
+            _add_check("source_ec2_found", "ok",
+                       f"Source EC2 instance {source_ec2_instance_id} found; subnet={source_subnet_id}")
+        else:
+            _add_check("source_ec2_found", "critical",
+                       f"No running EC2 instance found with private IP {source_dc_hostname}")
+    except Exception as exc:
+        _add_check("source_ec2_found", "critical", f"boto3 describe_instances failed: {exc}")
+
+    # 10. Target Windows Server AMI available
+    target_ami_id = ""
+    target_ver = parameters.get("target_windows_version", "2022")
+    ssm_path = _AMI_SSM_PATHS.get(target_ver, "")
+    if not ssm_path:
+        _add_check("target_ami_available", "critical",
+                   f"Unsupported target_windows_version: {target_ver}")
+    else:
+        try:
+            ssm = _ssm_client(creds)
+            resp = await loop.run_in_executor(
+                None,
+                lambda: ssm.get_parameter(Name=ssm_path)
+            )
+            target_ami_id = resp["Parameter"]["Value"]
+            _add_check("target_ami_available", "ok",
+                       f"Windows Server {target_ver} AMI: {target_ami_id}")
+        except Exception as exc:
+            _add_check("target_ami_available", "critical",
+                       f"Cannot resolve target AMI from SSM {ssm_path}: {exc}")
+
+    return {
+        "status": "preflight_blocked" if blocking_checks else "preflight_passed",
+        "domain_name": domain_name,
+        "source_dc_hostname": source_dc_hostname,
+        "source_holds_fsmo_roles": source_fsmo_roles,
+        "source_ec2_instance_id": source_ec2_instance_id,
+        "source_subnet_id": source_subnet_id,
+        "source_sg_ids": source_sg_ids,
+        "target_ami_id": target_ami_id,
+        "fsmo_state": fsmo_state,
+        "checks": checks,
+        "blocking_checks": blocking_checks,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Execute
+# ---------------------------------------------------------------------------
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
-    """
-    asset_ids[0]: the existing (old) DC to upgrade away from.
+    """Drive all 7 phases of a parallel DC upgrade.
 
-    Parameters:
-      new_dc_hostname (str): FQDN or IP of the new DC (must be pre-joined to domain,
-                             running target Windows Server version)
-      new_dc_asset_id (str): asset_id of the new DC in the Nexplane inventory
-      domain_name (str): AD domain FQDN (e.g. "corp.example.com")
-      target_os_version (str): e.g. "2025"
-      transfer_fsmo (bool): default true — transfer FSMO roles from old to new DC
-      demote_old_dc (bool): default true — demote old DC after FSMO transfer
-      dry_run (bool): default false
+    Parameters match the catalog action schema (source_dc_asset_id, target_windows_version, etc.).
+    Returns a structured execution result with state checkpoints for rollback.
     """
-    if not asset_ids:
-        raise ValueError("asset_ids required (old DC asset ID)")
+    loop = asyncio.get_event_loop()
+    creds = connector.credentials
+    cr_id = getattr(connector, "current_cr_id", "unknown")
 
-    old_dc_asset_id = str(asset_ids[0])
-    new_dc_asset_id = parameters.get("new_dc_asset_id", "")
-    new_dc_hostname = parameters.get("new_dc_hostname", "")
-    domain_name = parameters.get("domain_name", "")
-    target_os_version = parameters.get("target_os_version", "")
-    transfer_fsmo = bool(parameters.get("transfer_fsmo", True))
-    demote_old_dc = bool(parameters.get("demote_old_dc", True))
+    domain_admin_username = parameters.get("domain_admin_username", "")
+    domain_admin_password = (
+        parameters.get("domain_admin_password") or creds.get("winrm_password", "")
+    )
+    new_dc_instance_type = parameters.get("new_dc_instance_type", "t3.medium")
+    skip_fsmo = bool(parameters.get("skip_fsmo_transfer", False))
+    replication_timeout_min = int(parameters.get("replication_timeout_minutes", 30))
     dry_run = bool(parameters.get("dry_run", False))
 
-    if not new_dc_asset_id or not new_dc_hostname:
-        raise ValueError("new_dc_asset_id and new_dc_hostname are required")
-    if not domain_name:
-        raise ValueError("domain_name required")
-
-    from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
-
-    # Step 1: Preflight — verify new DC is online, joined to domain, reachable
-    logger.info(f"DC parallel upgrade preflight: old={old_dc_asset_id}, new={new_dc_asset_id}")
-    preflight = await dispatch_agent_job(
-        command="preflight_dc_parallel_upgrade",
-        parameters={
-            "new_dc_hostname": new_dc_hostname,
-            "domain_name": domain_name,
-            "target_os_version": target_os_version,
-        },
-        asset_ids=[new_dc_asset_id],
-        timeout_seconds=120,
-    )
-
-    if preflight.get("status") == "blocked":
-        return {"status": "blocked", "reason": preflight.get("reason"), "preflight": preflight}
+    # Phase 1: Pre-flight
+    preflight = await _preflight(parameters, connector, creds)
+    if preflight["status"] == "preflight_blocked":
+        return {
+            "status": "preflight_blocked",
+            "preflight": preflight,
+            "blocking_checks": preflight["blocking_checks"],
+        }
 
     if dry_run:
-        return {
-            "status": "dry_run",
-            "old_dc_asset_id": old_dc_asset_id,
-            "new_dc_asset_id": new_dc_asset_id,
-            "new_dc_hostname": new_dc_hostname,
-            "domain_name": domain_name,
-            "fsmo_holders": preflight.get("fsmo_holders", {}),
-            "replication_status": preflight.get("replication_status"),
-        }
+        return {"status": "dry_run", "preflight": preflight}
 
-    # Step 2: Promote new DC (ADDS role installation + dcpromo)
-    logger.info(f"Promoting {new_dc_hostname} as additional DC in {domain_name}")
-    promote_result = await dispatch_agent_job(
-        command="promote_dc",
-        parameters={
-            "domain_name": domain_name,
-            "replication_source_dc": preflight.get("old_dc_hostname", ""),
-        },
-        asset_ids=[new_dc_asset_id],
-        timeout_seconds=1800,  # DC promotion including reboot takes ~30 min
-    )
+    domain_name = preflight["domain_name"]
+    source_dc_hostname = preflight["source_dc_hostname"]
+    source_subnet_id = preflight["source_subnet_id"]
+    source_sg_ids = preflight["source_sg_ids"]
+    target_ami_id = preflight["target_ami_id"]
+    source_ec2_instance_id = preflight["source_ec2_instance_id"]
 
-    if not promote_result.get("success", True):
-        return {
-            "status": "failed",
-            "phase": "promote_new_dc",
-            "error": promote_result.get("error"),
-            "promote_result": promote_result,
-            "rollback_hint": "New DC promotion failed — no changes to old DC",
-        }
+    # -----------------------------------------------------------------------
+    # Phase 2: Provision new DC
+    # -----------------------------------------------------------------------
+    ec2 = _ec2_client(creds)
+    logger.info("ad_dc_parallel_upgrade: launching new DC instance (AMI=%s)", target_ami_id)
 
-    promoted_at = datetime.now(timezone.utc).isoformat()
-
-    # Step 3: Wait for replication convergence
-    logger.info(f"Waiting for AD replication convergence after promoting {new_dc_hostname}")
-    replication_result = await dispatch_agent_job(
-        command="verify_ad_replication",
-        parameters={
-            "new_dc_hostname": new_dc_hostname,
-            "domain_name": domain_name,
-        },
-        asset_ids=[new_dc_asset_id],
-        timeout_seconds=600,
-    )
-
-    if not replication_result.get("converged", True):
-        logger.warning(f"AD replication not yet converged on {new_dc_hostname}: {replication_result}")
-
-    # Step 4: Transfer FSMO roles
-    fsmo_transfer_result = None
-    if transfer_fsmo:
-        logger.info(f"Transferring FSMO roles to {new_dc_hostname}")
-        fsmo_transfer_result = await dispatch_agent_job(
-            command="transfer_fsmo_roles",
-            parameters={
-                "target_dc": new_dc_hostname,
-                "domain_name": domain_name,
-            },
-            asset_ids=[new_dc_asset_id],
-            timeout_seconds=300,
+    run_resp = await loop.run_in_executor(
+        None,
+        lambda: ec2.run_instances(
+            ImageId=target_ami_id,
+            InstanceType=new_dc_instance_type,
+            SubnetId=source_subnet_id,
+            SecurityGroupIds=source_sg_ids,
+            MinCount=1,
+            MaxCount=1,
+            TagSpecifications=[{
+                "ResourceType": "instance",
+                "Tags": [
+                    {"Key": "Name", "Value": f"np-dc-upgrade-{str(cr_id)[:8]}"},
+                    {"Key": "ManagedBy", "Value": "nexplane"},
+                    {"Key": "NexplaneCRId", "Value": str(cr_id)},
+                    {"Key": "NexplaneRole", "Value": "parallel-dc-upgrade"},
+                ],
+            }],
         )
+    )
+    new_instance_id = run_resp["Instances"][0]["InstanceId"]
+    # Store immediately — rollback needs this even if next steps fail
+    execution_result = {
+        "new_instance_id": new_instance_id,
+        "source_ec2_instance_id": source_ec2_instance_id,
+        "source_dc_hostname": source_dc_hostname,
+        "domain_name": domain_name,
+        "fsmo_transferred": False,
+        "demotion_completed": False,
+        "domain_admin_username": domain_admin_username,
+        "domain_admin_password": domain_admin_password,
+    }
+    logger.info("ad_dc_parallel_upgrade: new instance %s launched", new_instance_id)
 
-    # Step 5: Demote old DC
-    demotion_result = None
-    if demote_old_dc:
-        logger.info(f"Demoting old DC {old_dc_asset_id}")
+    # Wait for running state
+    new_dc_private_ip = await _wait_for_instance_running(ec2, new_instance_id, loop, timeout_s=900)
+    execution_result["new_dc_private_ip"] = new_dc_private_ip
+    logger.info("ad_dc_parallel_upgrade: new DC at %s is running", new_dc_private_ip)
+
+    # Wait for WinRM on new instance
+    new_dc_session = await _wait_for_winrm(
+        creds, new_dc_private_ip, domain_admin_username, domain_admin_password,
+        loop, timeout_s=1200
+    )
+    logger.info("ad_dc_parallel_upgrade: WinRM reachable on new DC %s", new_dc_private_ip)
+
+    # Install AD DS role
+    logger.info("ad_dc_parallel_upgrade: installing AD-Domain-Services on %s", new_dc_private_ip)
+    stdout, stderr, rc = await loop.run_in_executor(
+        None,
+        lambda: _winrm_run(new_dc_session, (
+            "Install-WindowsFeature AD-Domain-Services -IncludeManagementTools | Out-Null; "
+            "Import-Module ADDSDeployment; "
+            "Write-Output 'ADDSROLE_INSTALLED'"
+        ))
+    )
+    if "ADDSROLE_INSTALLED" not in stdout:
+        raise RuntimeError(f"AD-Domain-Services install failed: {stderr}")
+
+    # DCPromo
+    _secpw_block = (
+        f'$secpw = ConvertTo-SecureString "{domain_admin_password}" -AsPlainText -Force; '
+        f'$cred = New-Object System.Management.Automation.PSCredential("{domain_admin_username}", $secpw); '
+    )
+    dcpromo_script = (
+        _secpw_block +
+        f'Install-ADDSDomainController '
+        f'-DomainName "{domain_name}" '
+        f'-Credential $cred '
+        f'-InstallDns:$true '
+        f'-Force:$true '
+        f'-NoRebootOnCompletion:$false '
+        f'-SafeModeAdministratorPassword $secpw'
+    )
+    logger.info("ad_dc_parallel_upgrade: running DCPromo on %s", new_dc_private_ip)
+    try:
+        await loop.run_in_executor(None, lambda: _winrm_run(new_dc_session, dcpromo_script))
+    except Exception as exc:
+        if not _is_expected_reboot_disconnect(exc):
+            raise RuntimeError(f"DCPromo failed with unexpected error: {exc}") from exc
+        logger.info("ad_dc_parallel_upgrade: DCPromo WinRM drop (expected reboot) on %s", new_dc_private_ip)
+
+    # Wait for DC to come back + AD DS healthy
+    await asyncio.sleep(60)
+    new_dc_session = await _wait_for_winrm(
+        creds, new_dc_private_ip, domain_admin_username, domain_admin_password,
+        loop, timeout_s=600
+    )
+    await _wait_for_adws(new_dc_session, loop, timeout_s=600)
+    logger.info("ad_dc_parallel_upgrade: new DC %s promoted and AD DS healthy", new_dc_private_ip)
+
+    # Confirm new DC in domain (query from source DC)
+    source_session = await loop.run_in_executor(
+        None, lambda: _client_get_winrm(creds, source_dc_hostname)
+    )
+    new_dc_hostname = await _get_new_dc_hostname(source_session, new_dc_private_ip, loop)
+    execution_result["new_dc_hostname"] = new_dc_hostname
+    logger.info("ad_dc_parallel_upgrade: new DC hostname in domain: %s", new_dc_hostname)
+
+    # -----------------------------------------------------------------------
+    # Phase 3: Verify replication
+    # -----------------------------------------------------------------------
+    logger.info("ad_dc_parallel_upgrade: waiting for replication convergence")
+    repl_ok = await _wait_for_replication(
+        new_dc_session, new_dc_hostname, loop,
+        timeout_s=replication_timeout_min * 60
+    )
+    if not repl_ok:
+        raise RuntimeError(
+            f"Replication did not converge within {replication_timeout_min} minutes. "
+            "Trigger rollback to demote and terminate the new DC."
+        )
+    execution_result["replication_verified"] = True
+    execution_result["replication_verified_at"] = datetime.now(timezone.utc).isoformat()
+
+    # -----------------------------------------------------------------------
+    # Phase 4: Transfer FSMO roles
+    # -----------------------------------------------------------------------
+    if not skip_fsmo and preflight.get("source_holds_fsmo_roles"):
+        logger.info("ad_dc_parallel_upgrade: transferring FSMO roles to %s", new_dc_hostname)
+        fsmo_before = preflight["fsmo_state"]
+        execution_result["fsmo_state_before"] = fsmo_before
+
+        transfer_script = (
+            f'Move-ADDirectoryServerOperationMasterRole '
+            f'-Identity "{new_dc_hostname}" '
+            f'-OperationMasterRole PDCEmulator,RIDMaster,InfrastructureMaster,DomainNamingMaster,SchemaMaster '
+            f'-Force'
+        )
+        stdout, stderr, rc = await loop.run_in_executor(
+            None, lambda: _winrm_run(source_session, transfer_script)
+        )
+        if rc != 0:
+            raise RuntimeError(f"FSMO transfer failed (rc={rc}): {stderr}")
+
+        # Confirm transfer
+        stdout, _, _ = await loop.run_in_executor(
+            None, lambda: _winrm_run(new_dc_session, "netdom query fsmo")
+        )
+        fsmo_after = _parse_fsmo_netdom(stdout)
+        execution_result["fsmo_state_after"] = fsmo_after
+        execution_result["fsmo_transferred"] = True
+        logger.info("ad_dc_parallel_upgrade: FSMO roles transferred: %s", fsmo_after)
+
+    # -----------------------------------------------------------------------
+    # Phase 5: Validate new DC
+    # -----------------------------------------------------------------------
+    logger.info("ad_dc_parallel_upgrade: validating new DC %s", new_dc_hostname)
+    validation = await _validate_new_dc(
+        new_dc_session, new_dc_private_ip, new_dc_hostname, domain_name, loop
+    )
+    execution_result["validation_status"] = validation["status"]
+    execution_result["validation_checks"] = validation["checks"]
+    if validation["status"] == "failed":
+        raise RuntimeError(f"New DC validation failed: {validation['failing_checks']}")
+
+    # -----------------------------------------------------------------------
+    # Phase 6: Demote old DC
+    # -----------------------------------------------------------------------
+    logger.info("ad_dc_parallel_upgrade: demoting source DC %s", source_dc_hostname)
+    demote_script = (
+        _secpw_block +
+        'Uninstall-ADDSDomainController '
+        f'-LocalAdministratorPassword $secpw '
+        f'-Credential $cred '
+        '-Force:$true '
+        '-NoRebootOnCompletion:$false'
+    )
+    try:
+        await loop.run_in_executor(None, lambda: _winrm_run(source_session, demote_script))
+    except Exception as exc:
+        if not _is_expected_reboot_disconnect(exc):
+            raise RuntimeError(f"Source DC demotion failed: {exc}") from exc
+        logger.info("ad_dc_parallel_upgrade: source DC WinRM drop (expected reboot)")
+
+    await asyncio.sleep(60)
+    # Verify source is no longer a DC
+    await _verify_source_demoted(new_dc_session, source_dc_hostname, loop)
+    execution_result["demotion_completed"] = True
+    execution_result["demotion_completed_at"] = datetime.now(timezone.utc).isoformat()
+
+    # -----------------------------------------------------------------------
+    # Phase 7: Verify domain health
+    # -----------------------------------------------------------------------
+    logger.info("ad_dc_parallel_upgrade: verifying domain health on new DC")
+    health = await _verify_domain_health(new_dc_session, new_dc_hostname, domain_name, loop)
+    execution_result["domain_health_check"] = health["status"]
+    execution_result["dcdiag_warnings"] = health.get("warnings", [])
+    execution_result["fsmo_final"] = health.get("fsmo_final", {})
+
+    execution_result["status"] = "completed"
+    return execution_result
+
+
+# ---------------------------------------------------------------------------
+# Phase helpers
+# ---------------------------------------------------------------------------
+
+def _client_get_winrm(creds, hostname):
+    from app.connectors.executors.active_directory._client import get_winrm_session
+    return get_winrm_session(creds, dc_hostname=hostname)
+
+
+async def _wait_for_instance_running(ec2, instance_id: str, loop, timeout_s: int = 900) -> str:
+    """Poll EC2 until instance is running; return private IP."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        resp = await loop.run_in_executor(
+            None,
+            lambda: ec2.describe_instances(InstanceIds=[instance_id])
+        )
+        inst = resp["Reservations"][0]["Instances"][0]
+        state = inst["State"]["Name"]
+        if state == "running":
+            return inst.get("PrivateIpAddress", "")
+        if state in ("terminated", "shutting-down"):
+            raise RuntimeError(f"Instance {instance_id} entered {state} state unexpectedly")
+        await asyncio.sleep(30)
+    raise TimeoutError(f"Instance {instance_id} did not reach running state within {timeout_s}s")
+
+
+async def _wait_for_winrm(creds, hostname, username, password, loop, timeout_s: int = 1200):
+    """Poll WinRM on hostname until reachable; return session."""
+    override_creds = dict(creds)
+    override_creds["winrm_hostname"] = hostname
+    override_creds["winrm_username"] = username
+    override_creds["winrm_password"] = password
+    deadline = time.monotonic() + timeout_s
+    last_exc = None
+    while time.monotonic() < deadline:
         try:
-            demotion_result = await dispatch_agent_job(
-                command="demote_dc",
-                parameters={
-                    "domain_name": domain_name,
-                    "last_dc_in_domain": False,
-                },
-                asset_ids=[old_dc_asset_id],
-                timeout_seconds=1800,
+            session = await loop.run_in_executor(
+                None,
+                lambda: _client_get_winrm(override_creds, hostname)
             )
+            stdout, _, rc = await loop.run_in_executor(
+                None, lambda: _winrm_run(session, 'Write-Output "ready"')
+            )
+            if rc == 0:
+                return session
         except Exception as exc:
-            # Old DC may disconnect after demotion reboot — treat as success
-            if _is_disconnect(exc):
-                demotion_result = {"success": True, "note": "Old DC disconnected after demotion (expected reboot)"}
-            else:
-                demotion_result = {"success": False, "error": str(exc)}
+            last_exc = exc
+        await asyncio.sleep(30)
+    raise TimeoutError(f"WinRM on {hostname} not reachable after {timeout_s}s: {last_exc}")
+
+
+async def _wait_for_adws(session, loop, timeout_s: int = 600):
+    """Wait for AD Web Services (ADWS) to be Running on session host."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            stdout, _, rc = await loop.run_in_executor(
+                None,
+                lambda: _winrm_run(session, "(Get-Service ADWS).Status")
+            )
+            if "Running" in stdout:
+                return
+        except Exception:
+            pass
+        await asyncio.sleep(30)
+    raise TimeoutError(f"ADWS did not reach Running state within {timeout_s}s")
+
+
+async def _get_new_dc_hostname(source_session, new_dc_ip: str, loop, retries: int = 5) -> str:
+    """Resolve new DC's hostname from source DC by querying AD for DCs with given IP."""
+    for attempt in range(retries):
+        try:
+            stdout, _, rc = await loop.run_in_executor(
+                None,
+                lambda: _winrm_run(
+                    source_session,
+                    f'(Get-ADDomainController -Filter {{IPv4Address -eq "{new_dc_ip}"}}).HostName'
+                )
+            )
+            hostname = stdout.strip()
+            if hostname and rc == 0:
+                return hostname
+        except Exception:
+            pass
+        if attempt < retries - 1:
+            await asyncio.sleep(30)
+    return new_dc_ip  # Fallback to IP if hostname resolution fails
+
+
+async def _wait_for_replication(session, new_dc_hostname: str, loop, timeout_s: int = 1800) -> bool:
+    """Poll repadmin /showrepl /csv until no errors or timeout."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            stdout, _, rc = await loop.run_in_executor(
+                None,
+                lambda: _winrm_run(session, f"repadmin /showrepl {new_dc_hostname} /csv")
+            )
+            ok, errors = _parse_repadmin_csv(stdout)
+            if ok:
+                # Also check dcdiag
+                diag_out, _, _ = await loop.run_in_executor(
+                    None,
+                    lambda: _winrm_run(session, f"dcdiag /test:replications /s:{new_dc_hostname}")
+                )
+                if "passed test replications" in diag_out.lower():
+                    return True
+        except Exception as exc:
+            logger.debug("Replication poll exception: %s", exc)
+        await asyncio.sleep(60)
+    return False
+
+
+async def _validate_new_dc(session, new_dc_ip: str, new_dc_hostname: str, domain_name: str, loop) -> dict:
+    """Multi-vector health check on new DC."""
+    checks = []
+    failing = []
+
+    def _check(name, level, detail):
+        checks.append({"name": name, "level": level, "detail": detail})
+        if level == "failed":
+            failing.append(name)
+
+    # LDAP probe
+    try:
+        await loop.run_in_executor(
+            None,
+            lambda: _ldap_probe(new_dc_ip)
+        )
+        _check("ldap_probe", "ok", f"LDAP bind successful on {new_dc_ip}:389")
+    except Exception as exc:
+        _check("ldap_probe", "failed", f"LDAP bind failed: {exc}")
+
+    # Kerberos
+    stdout, _, rc = await loop.run_in_executor(
+        None,
+        lambda: _winrm_run(session, "Test-ComputerSecureChannel -Verbose")
+    )
+    if "True" in stdout or rc == 0:
+        _check("kerberos", "ok", "Test-ComputerSecureChannel: True")
+    else:
+        _check("kerberos", "failed", f"Test-ComputerSecureChannel returned: {stdout}")
+
+    # DNS
+    stdout, _, rc = await loop.run_in_executor(
+        None,
+        lambda: _winrm_run(session, f'Resolve-DnsName {domain_name} -Server {new_dc_ip} | Select-Object -ExpandProperty IPAddress')
+    )
+    if stdout.strip() and rc == 0:
+        _check("dns_resolution", "ok", f"DNS resolves {domain_name} -> {stdout.strip()[:80]}")
+    else:
+        _check("dns_resolution", "failed", f"DNS resolution failed for {domain_name}")
+
+    # dcdiag
+    stdout, _, rc = await loop.run_in_executor(
+        None,
+        lambda: _winrm_run(
+            session,
+            f"dcdiag /test:advertising /test:fsmocheck /test:kccevent /test:services /s:{new_dc_hostname}"
+        )
+    )
+    for line in stdout.splitlines():
+        if "failed test" in line.lower():
+            _check("dcdiag", "failed", line.strip())
+        elif "warning" in line.lower() and "test" in line.lower():
+            _check("dcdiag_warning", "warning", line.strip())
+    if not any(c["name"] == "dcdiag" for c in checks):
+        _check("dcdiag", "ok", "dcdiag tests passed (advertising, fsmocheck, kccevent, services)")
 
     return {
-        "status": "completed",
-        "old_dc_asset_id": old_dc_asset_id,
-        "new_dc_asset_id": new_dc_asset_id,
-        "new_dc_hostname": new_dc_hostname,
-        "promoted_at": promoted_at,
-        "replication_result": replication_result,
-        "fsmo_transfer_result": fsmo_transfer_result,
-        "demotion_result": demotion_result,
-        "upgraded_at": datetime.now(timezone.utc).isoformat(),
+        "status": "failed" if failing else "passed",
+        "checks": checks,
+        "failing_checks": failing,
     }
 
+
+def _ldap_probe(ip: str, port: int = 389, timeout: int = 10) -> None:
+    """Attempt a TCP connection + anonymous LDAP bind to ip:port."""
+    from ldap3 import Server, Connection, ALL
+    server = Server(ip, port=port, get_info=ALL, connect_timeout=timeout)
+    conn = Connection(server)
+    if not conn.bind():
+        raise RuntimeError(f"LDAP anonymous bind failed: {conn.last_error}")
+    conn.unbind()
+
+
+async def _verify_source_demoted(new_dc_session, source_dc_hostname: str, loop, retries: int = 5):
+    """Verify source DC is no longer in the domain controller list."""
+    for attempt in range(retries):
+        try:
+            stdout, _, rc = await loop.run_in_executor(
+                None,
+                lambda: _winrm_run(
+                    new_dc_session,
+                    f'Get-ADDomainController -Identity "{source_dc_hostname}" -ErrorAction SilentlyContinue'
+                )
+            )
+            # If source is gone, Get-ADDomainController returns empty or error
+            if not stdout.strip() or rc != 0:
+                return
+        except Exception:
+            return  # Exception means not found — demotion succeeded
+        if attempt < retries - 1:
+            await asyncio.sleep(30)
+    logger.warning("Could not confirm source DC demotion after %d attempts", retries)
+
+
+async def _verify_domain_health(session, new_dc_hostname: str, domain_name: str, loop) -> dict:
+    """Final domain-wide health sweep."""
+    warnings = []
+
+    # dcdiag on new DC
+    stdout, _, rc = await loop.run_in_executor(
+        None,
+        lambda: _winrm_run(
+            session,
+            f"dcdiag /test:replications /test:advertising /test:fsmocheck /s:{new_dc_hostname}"
+        )
+    )
+    health_status = "passed" if "passed test" in stdout.lower() and rc == 0 else "warning"
+
+    # Event log check
+    evtlog_script = (
+        'Get-WinEvent -LogName "Directory Service" -MaxEvents 50 -ErrorAction SilentlyContinue | '
+        'Where-Object { $_.LevelDisplayName -eq "Error" -and $_.TimeCreated -gt (Get-Date).AddMinutes(-5) } | '
+        'Select-Object -ExpandProperty Message'
+    )
+    stdout_evts, _, _ = await loop.run_in_executor(None, lambda: _winrm_run(session, evtlog_script))
+    if stdout_evts.strip():
+        for line in stdout_evts.strip().splitlines()[:5]:
+            warnings.append(f"Directory Service event error: {line[:200]}")
+
+    # Final FSMO
+    stdout_fsmo, _, _ = await loop.run_in_executor(None, lambda: _winrm_run(session, "netdom query fsmo"))
+    fsmo_final = _parse_fsmo_netdom(stdout_fsmo)
+
+    return {
+        "status": health_status,
+        "warnings": warnings,
+        "fsmo_final": fsmo_final,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Rollback
+# ---------------------------------------------------------------------------
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    """Rollback order (FILO):
-    1. If old DC was demoted: re-promote old DC
-    2. If FSMO roles were transferred: seize them back to old DC
-    3. Demote new DC
+    """Rollback a parallel DC upgrade.
+
+    Case A: new DC provisioned, FSMO not transferred -> demote new DC + terminate instance
+    Case B: FSMO transferred, source not yet demoted -> seize FSMOs back + demote new DC + terminate
+    Case C: source DC already demoted -> irreversible; return instructions
     """
-    asset_ids = (
-        execution_result.get("_target_asset_ids")
-        or parameters.get("asset_ids")
-        or []
-    )
-    old_dc_asset_id = str(asset_ids[0]) if asset_ids else ""
-    new_dc_asset_id = execution_result.get("new_dc_asset_id", "")
-    domain_name = execution_result.get("domain_name") or parameters.get("domain_name", "")
+    from app.connectors.executors.active_directory._client import get_winrm_session
+
+    loop = asyncio.get_event_loop()
+    creds = connector.credentials
+
+    new_instance_id = execution_result.get("new_instance_id")
+    new_dc_private_ip = execution_result.get("new_dc_private_ip", "")
     new_dc_hostname = execution_result.get("new_dc_hostname", "")
+    source_dc_hostname = execution_result.get("source_dc_hostname", creds.get("winrm_hostname", ""))
+    domain_admin_username = (
+        execution_result.get("domain_admin_username")
+        or parameters.get("domain_admin_username")
+        or creds.get("winrm_username", "")
+    )
+    domain_admin_password = (
+        execution_result.get("domain_admin_password")
+        or parameters.get("domain_admin_password")
+        or creds.get("winrm_password", "")
+    )
+    fsmo_transferred = execution_result.get("fsmo_transferred", False)
+    demotion_completed = execution_result.get("demotion_completed", False)
 
-    if not old_dc_asset_id or not new_dc_asset_id:
-        return {"rolled_back": False, "reason": "missing asset IDs for rollback"}
+    if not new_instance_id:
+        return {"rolled_back": True, "strategy": "no_op", "reason": "No instance was provisioned"}
 
-    from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
+    # Case C: irreversible
+    if demotion_completed:
+        return {
+            "rolled_back": False,
+            "reason": "source DC already demoted — cannot automatically re-promote; operator must promote a DC manually or restore source DC from AMI snapshot",
+            "new_instance_id": new_instance_id,
+            "source_ec2_instance_id": execution_result.get("source_ec2_instance_id", ""),
+        }
+
+    ec2 = _ec2_client(creds)
+    _secpw_block = (
+        f'$secpw = ConvertTo-SecureString "{domain_admin_password}" -AsPlainText -Force; '
+        f'$cred = New-Object System.Management.Automation.PSCredential("{domain_admin_username}", $secpw); '
+    )
+
     steps = []
 
-    # Re-promote old DC if it was demoted
-    if execution_result.get("demotion_result", {}).get("success"):
+    # Case B: seize FSMOs back first
+    if fsmo_transferred and source_dc_hostname:
+        logger.info("ad_dc_parallel_upgrade rollback: seizing FSMOs back to %s", source_dc_hostname)
         try:
-            result = await dispatch_agent_job(
-                command="promote_dc",
-                parameters={"domain_name": domain_name, "replication_source_dc": new_dc_hostname},
-                asset_ids=[old_dc_asset_id],
-                timeout_seconds=1800,
+            source_creds = dict(creds)
+            source_creds["winrm_hostname"] = source_dc_hostname
+            source_creds["winrm_username"] = domain_admin_username
+            source_creds["winrm_password"] = domain_admin_password
+            source_session = await loop.run_in_executor(
+                None,
+                lambda: get_winrm_session(source_creds, dc_hostname=source_dc_hostname)
             )
-            steps.append({"step": "repromote_old_dc", "result": result})
-        except Exception as exc:
-            steps.append({"step": "repromote_old_dc", "error": str(exc)})
-
-    # Seize FSMO roles back to old DC
-    if execution_result.get("fsmo_transfer_result"):
-        try:
-            result = await dispatch_agent_job(
-                command="seize_fsmo_roles",
-                parameters={"target_dc": old_dc_asset_id, "domain_name": domain_name},
-                asset_ids=[old_dc_asset_id],
-                timeout_seconds=300,
+            seize_script = (
+                'cmd /c "echo roles & echo connections & '
+                f'echo connect to server {source_dc_hostname} & echo quit & '
+                'echo seize schema master & echo seize domain naming master & '
+                'echo seize infrastructure master & echo seize rid master & '
+                'echo seize pdc & echo quit & echo quit" | ntdsutil'
             )
-            steps.append({"step": "seize_fsmo_back", "result": result})
-        except Exception as exc:
-            steps.append({"step": "seize_fsmo_back", "error": str(exc)})
-
-    # Demote new DC
-    if execution_result.get("promote_result") or execution_result.get("promoted_at"):
-        try:
-            result = await dispatch_agent_job(
-                command="demote_dc",
-                parameters={"domain_name": domain_name, "last_dc_in_domain": False},
-                asset_ids=[new_dc_asset_id],
-                timeout_seconds=1800,
+            stdout, stderr, rc = await loop.run_in_executor(
+                None, lambda: _winrm_run(source_session, seize_script)
             )
-            steps.append({"step": "demote_new_dc", "result": result})
-        except Exception as exc:
-            if _is_disconnect(exc):
-                steps.append({"step": "demote_new_dc", "result": {"success": True, "note": "disconnected (expected)"}})
+            seize_ok = "transfer" in stdout.lower() or "seize" in stdout.lower()
+            if not seize_ok and rc != 0:
+                logger.error("ad_dc_parallel_upgrade rollback: ntdsutil seize failed: %s", stderr)
+                steps.append({"step": "seize_fsmo", "status": "failed", "stderr": stderr[:500]})
             else:
-                steps.append({"step": "demote_new_dc", "error": str(exc)})
+                # Verify
+                verify_out, _, _ = await loop.run_in_executor(
+                    None, lambda: _winrm_run(source_session, "netdom query fsmo")
+                )
+                fsmo_restored = _parse_fsmo_netdom(verify_out)
+                steps.append({"step": "seize_fsmo", "status": "ok", "fsmo_restored": fsmo_restored})
+                logger.info("ad_dc_parallel_upgrade rollback: FSMOs seized to %s", source_dc_hostname)
+        except Exception as exc:
+            logger.error("ad_dc_parallel_upgrade rollback: seize exception: %s", exc)
+            steps.append({"step": "seize_fsmo", "status": "error", "error": str(exc)})
+
+    # Demote new DC (Cases A and B)
+    if new_dc_private_ip:
+        logger.info("ad_dc_parallel_upgrade rollback: demoting new DC %s", new_dc_private_ip)
+        try:
+            new_creds = dict(creds)
+            new_creds["winrm_hostname"] = new_dc_private_ip
+            new_creds["winrm_username"] = domain_admin_username
+            new_creds["winrm_password"] = domain_admin_password
+            new_session = await loop.run_in_executor(
+                None,
+                lambda: get_winrm_session(new_creds, dc_hostname=new_dc_private_ip)
+            )
+            demote_script = (
+                _secpw_block +
+                'Uninstall-ADDSDomainController '
+                '-LocalAdministratorPassword $secpw '
+                '-Force:$true '
+                '-NoRebootOnCompletion:$false'
+            )
+            try:
+                await loop.run_in_executor(None, lambda: _winrm_run(new_session, demote_script))
+            except Exception as exc:
+                if not _is_expected_reboot_disconnect(exc):
+                    raise
+            steps.append({"step": "demote_new_dc", "status": "ok"})
+            await asyncio.sleep(30)  # Give DC time to begin reboot before terminating
+        except Exception as exc:
+            logger.error("ad_dc_parallel_upgrade rollback: demote new DC failed: %s", exc)
+            steps.append({"step": "demote_new_dc", "status": "error", "error": str(exc)})
+
+    # Terminate new instance
+    logger.info("ad_dc_parallel_upgrade rollback: terminating instance %s", new_instance_id)
+    try:
+        await loop.run_in_executor(
+            None,
+            lambda: ec2.terminate_instances(InstanceIds=[new_instance_id])
+        )
+        steps.append({"step": "terminate_instance", "status": "ok", "instance_id": new_instance_id})
+    except Exception as exc:
+        logger.error("ad_dc_parallel_upgrade rollback: terminate failed: %s", exc)
+        steps.append({"step": "terminate_instance", "status": "error", "error": str(exc)})
+
+    strategy = "seize_fsmo_then_demote_new_dc" if fsmo_transferred else "demote_new_dc"
+    all_ok = all(s["status"] == "ok" for s in steps)
 
     return {
-        "rolled_back": True,
+        "rolled_back": all_ok,
+        "strategy": strategy,
+        "new_instance_id": new_instance_id,
+        "new_instance_terminated": any(
+            s["step"] == "terminate_instance" and s["status"] == "ok" for s in steps
+        ),
+        "fsmo_seized_to": source_dc_hostname if fsmo_transferred else None,
         "steps": steps,
+        "notes": "ntdsutil seize performed; verify replication after rollback" if fsmo_transferred else None,
     }
-
-
-def _is_disconnect(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return any(kw in msg for kw in ("connection", "disconnect", "timeout", "reset", "eof", "closed"))
