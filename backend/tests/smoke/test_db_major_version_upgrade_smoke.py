@@ -226,13 +226,13 @@ class TestDbMajorVersionUpgradeSmoke:
             # --- Rollback ---
             log("DB_UPGRADE_POSTGRES: triggering rollback")
             cr_rb = _rollback_cr(self.client, cr_id, "pg-upgrade-rollback")
+            assert cr_rb.get("status") == "rolled_back", f"Rollback not confirmed: {cr_rb.get('status')}"
             rb_result = _execution_result(cr_rb)
-            assert rb_result.get("rolled_back") is True, f"Rollback not confirmed: {rb_result}"
             log(f"DB_UPGRADE_POSTGRES: rollback complete, strategy={rb_result.get('strategy')}")
 
-            # Verify version is back to 12
+            # Verify version is back to 12 (restored to original port 15432)
             pg_version_after = _run(
-                "docker exec pg12 psql -U postgres -c 'SELECT version();' -t 2>/dev/null || echo UNKNOWN",
+                "PGPASSWORD=testpw psql -h localhost -p 15432 -U postgres -c 'SELECT version();' -t 2>/dev/null || echo UNKNOWN",
                 check=False,
             ).stdout.strip()
             assert "12" in pg_version_after, (
@@ -319,11 +319,10 @@ class TestDbMajorVersionUpgradeSmoke:
 
             # --- Rollback ---
             cr_rb = _rollback_cr(self.client, cr_id, "mysql-upgrade-rollback")
-            rb_result = _execution_result(cr_rb)
-            assert rb_result.get("rolled_back") is True, f"Rollback not confirmed: {rb_result}"
+            assert cr_rb.get("status") == "rolled_back", f"Rollback not confirmed: {cr_rb.get('status')}"
 
             mysql_ver_after = _run(
-                "docker exec mysql57 mysql -uroot -ptestpw -e 'SELECT @@version;' 2>/dev/null || echo UNKNOWN",
+                "mysql -h 127.0.0.1 --protocol=tcp -P 13306 -uroot -ptestpw --skip-column-names -e 'SELECT @@version;' 2>/dev/null || echo UNKNOWN",
                 check=False,
             ).stdout.strip()
             assert "5.7" in mysql_ver_after, f"Expected MySQL 5.7 after rollback: {mysql_ver_after!r}"
@@ -406,8 +405,8 @@ class TestDbMajorVersionUpgradeSmoke:
 
             # --- Rollback ---
             cr_rb = _rollback_cr(self.client, cr_id, "mongo-upgrade-rollback", timeout=1800)
+            assert cr_rb.get("status") == "rolled_back", f"Rollback not confirmed: {cr_rb.get('status')}"
             rb_result = _execution_result(cr_rb)
-            assert rb_result.get("rolled_back") is True, f"Rollback not confirmed: {rb_result}"
             log(f"DB_UPGRADE_MONGODB: rollback complete, strategy={rb_result.get('strategy')}")
 
             # Verify version is back to 4.4

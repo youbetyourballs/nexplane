@@ -395,7 +395,7 @@ func DbRestoreFromLocalDumpExecute(params map[string]any) (map[string]any, error
 	case "postgres":
 		restoreCmd = fmt.Sprintf("gunzip < %s | psql -h %s -p %d -U %s", dumpPath, host, port, user)
 	case "mysql":
-		restoreCmd = fmt.Sprintf("gunzip < %s | mysql -h %s -P %d -u %s", dumpPath, host, port, user)
+		restoreCmd = fmt.Sprintf("gunzip < %s | mysql -h %s --protocol=tcp -P %d -u %s", dumpPath, host, port, user)
 	default:
 		return nil, fmt.Errorf("db_restore_from_local_dump: unsupported engine %q", engine)
 	}

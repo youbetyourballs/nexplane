@@ -174,7 +174,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # --- Phase 2: Snapshot ---
     snapshot_result = {}
-    if not p["skip_snapshot"]:
+    # MongoDB FCV upgrades are reversible via FCV downgrade — no dump snapshot needed
+    if engine == "mongodb":
+        snapshot_result = {
+            "snapshot_type": "fcv_reversible",
+            "snapshot_id": f"fcv:{p.get('source_version')}",
+            "source_version": p.get("source_version"),
+        }
+    elif not p["skip_snapshot"]:
         snapshot_result = await _take_snapshot(asset_id, p, connector)
     else:
         logger.warning(f"skip_snapshot=True for asset {asset_id} — no rollback artifact")
@@ -193,7 +200,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         }
 
     # --- Phase 4: Verify ---
-    verify_result = await _verify(asset_id, p, connector)
+    verify_result = await _verify(asset_id, p, connector, upgrade_result=upgrade_result)
     verify_status = verify_result.get("verify_status", "failed")
 
     return {
@@ -228,6 +235,8 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
             return await _rollback_s3_dump(asset_id, snapshot_result, parameters, connector)
         elif snapshot_type == "local_dump":
             return await _rollback_local_dump(asset_id, snapshot_result, parameters, connector)
+        elif snapshot_type == "fcv_reversible":
+            return await _rollback_mongo_fcv(asset_id, snapshot_result, parameters, connector)
         else:
             # EBS snapshot (in_place postgres, mysql, mongodb)
             return await _rollback_ebs(asset_id, snapshot_result, connector)
@@ -460,7 +469,7 @@ async def _http_get(url: str, timeout: float = 10.0):
         return await client.get(url, timeout=timeout)
 
 
-async def _verify(asset_id: str, p: dict, connector) -> dict:
+async def _verify(asset_id: str, p: dict, connector, upgrade_result: dict = None) -> dict:
     """Run DB smoke query and optional health check URL."""
     engine = p["engine"]
     target_version = p["target_version"]
@@ -471,6 +480,16 @@ async def _verify(asset_id: str, p: dict, connector) -> dict:
         "mongodb":  '{"serverStatus": 1}',
     }
 
+    # For dump_restore upgrades, the upgraded DB runs on port+1 (agent spins up a new container)
+    verify_port = p.get("db_port")
+    if engine in ("postgres", "mysql") and p.get("strategy", "dump_restore") == "dump_restore":
+        agent_result = (upgrade_result or {}).get("agent_result", {})
+        target_port = agent_result.get("target_port")
+        if target_port:
+            verify_port = target_port
+        elif verify_port:
+            verify_port = int(verify_port) + 1
+
     result = await dispatch_agent_job(
         command="db_version_query",
         parameters={
@@ -478,7 +497,7 @@ async def _verify(asset_id: str, p: dict, connector) -> dict:
             "query": smoke_commands[engine],
             "db_user": p.get("db_user"),
             "db_password": p.get("db_password"),
-            "db_port": p.get("db_port"),
+            "db_port": verify_port,
             "db_host": p.get("db_host", "localhost"),
         },
         asset_ids=[asset_id],
@@ -655,4 +674,47 @@ async def _rollback_local_dump(
         "rolled_back": True,
         "strategy": "local_dump_restore",
         "dump_path": dump_path,
+    }
+
+
+async def _rollback_mongo_fcv(
+    asset_id: str, snapshot_result: dict, parameters: dict, connector
+) -> dict:
+    """Rollback MongoDB FCV by downgrading through the version chain in reverse."""
+    source_version = snapshot_result.get("source_version")
+    if not source_version:
+        return {"rolled_back": False, "reason": "source_version missing from snapshot_result"}
+
+    p = parameters.get("desired_outcome") or parameters
+    target_version = p.get("target_version")
+    if not target_version:
+        return {"rolled_back": False, "reason": "target_version missing from parameters"}
+
+    # Build reverse chain: target -> ... -> source
+    try:
+        forward_chain = _compute_mongo_fcv_chain(source_version, target_version)
+    except ValueError as exc:
+        return {"rolled_back": False, "reason": str(exc)}
+
+    reverse_chain = list(reversed(forward_chain))
+    completed_hops = []
+    for i in range(len(reverse_chain) - 1):
+        from_ver = reverse_chain[i]
+        to_ver = reverse_chain[i + 1]
+        hop_label = f"{from_ver}->{to_ver}"
+        logger.info(f"MongoDB FCV rollback hop: {hop_label}")
+        await dispatch_agent_job(
+            command="db_upgrade_mongo_fcv_hop",
+            parameters={**p, "from_version": from_ver, "to_version": to_ver},
+            asset_ids=[asset_id],
+            timeout_seconds=1800,
+        )
+        completed_hops.append(hop_label)
+
+    return {
+        "rolled_back": True,
+        "strategy": "fcv_downgrade",
+        "source_version": source_version,
+        "target_version": target_version,
+        "completed_hops": completed_hops,
     }
