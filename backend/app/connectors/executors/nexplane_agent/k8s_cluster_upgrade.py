@@ -171,9 +171,6 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     cluster_type = execution_result.get("cluster_type", "auto")
     previous_version = execution_result.get("previous_version", "")
 
-    if not asset_id:
-        return {"rolled_back": False, "reason": "no_asset_id"}
-
     if execution_result.get("status") == "failed" and execution_result.get("phase") == "control_plane":
         return {
             "rolled_back": False,
