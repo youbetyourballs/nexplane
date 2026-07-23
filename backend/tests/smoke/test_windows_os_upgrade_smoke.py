@@ -25,7 +25,10 @@ EMAIL = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
 PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 
 # AMI cache SSM key — Windows Server 2019 with nexplane agent pre-installed
+# Win2022 WinRM AMI (nexplane-smoke-win2022-winrm) — has WinRM + SSM agent configured.
+# Self-provisioning from base AMI + agent install requires agent_install_url in AWS creds.
 _AMI_CACHE_KEY = "/nexplane/smoke-amis/windows-2019-with-agent/v1"
+_SOURCE_OS_VERSION = "2022"  # The cached AMI is Windows Server 2022
 _INSTANCE_TYPE = "t3.medium"
 _NEXPLANE_AGENT_SERVICE = "NexplaneAgent"
 _SSM_INSTANCE_PROFILE = "nexplane-smoke-ssm"
@@ -355,9 +358,10 @@ class TestWindowsOsUpgradeSmoke:
             asset_resp = self.client.client.post(f"{base}/assets", json={
                 "name": f"smoke-windows-dry-run-{instance_id}",
                 "asset_type": "server",
+                "environment": "dev",
+                "criticality": "low",
                 "asset_metadata": {
                     "instance_id": instance_id,
-                    "environment": "dev",
                     "os": "windows",
                 },
             })
@@ -370,7 +374,7 @@ class TestWindowsOsUpgradeSmoke:
                 self.client,
                 "[smoke] windows_os_upgrade dry_run",
                 "windows_os_upgrade",
-                {"target_version": "2022", "dry_run": True},
+                {"target_version": "2025", "dry_run": True},
                 asset_ids=[asset_id],
                 timeout=600,
             )
@@ -387,10 +391,10 @@ class TestWindowsOsUpgradeSmoke:
                 f"disk_ok should be True on fresh instance: {preflight}"
             )
             assert preflight.get("dism_compat_passed") is True, (
-                f"DISM compat should pass on fresh 2019 instance: {preflight}"
+                f"DISM compat should pass on fresh {_SOURCE_OS_VERSION} instance: {preflight}"
             )
-            assert "2019" in preflight.get("current_os", ""), (
-                f"Expected 2019 in current_os, got: {preflight.get('current_os')}"
+            assert _SOURCE_OS_VERSION in preflight.get("current_os", ""), (
+                f"Expected {_SOURCE_OS_VERSION} in current_os, got: {preflight.get('current_os')}"
             )
             log(f"[WINDOWS_SMOKE Phase1] PASS — dry_run preflight OK, current_os={preflight.get('current_os')}")
 
@@ -462,7 +466,7 @@ class TestWindowsOsUpgradeSmoke:
                 self.ssm, instance_id,
                 "(Get-WmiObject Win32_OperatingSystem).Caption",
             )
-            assert "2019" in current_os, f"Expected 2019 pre-upgrade, got: {current_os!r}"
+            assert _SOURCE_OS_VERSION in current_os, f"Expected {_SOURCE_OS_VERSION} pre-upgrade, got: {current_os!r}"
             log(f"[WINDOWS_SMOKE Phase2] Pre-upgrade OS confirmed: {current_os}")
 
             # Register asset
@@ -470,9 +474,10 @@ class TestWindowsOsUpgradeSmoke:
             asset_resp = self.client.client.post(f"{base}/assets", json={
                 "name": f"smoke-windows-full-{instance_id}",
                 "asset_type": "server",
+                "environment": "dev",
+                "criticality": "low",
                 "asset_metadata": {
                     "instance_id": instance_id,
-                    "environment": "dev",
                     "os": "windows",
                 },
             })
@@ -483,10 +488,10 @@ class TestWindowsOsUpgradeSmoke:
             # Run full upgrade CR — 90-minute timeout (upgrade + restart + agent poll)
             cr = _run_cr_full_lifecycle(
                 self.client,
-                "[smoke] windows_os_upgrade 2019->2022",
+                f"[smoke] windows_os_upgrade {_SOURCE_OS_VERSION}->2025",
                 "windows_os_upgrade",
                 {
-                    "target_version": "2022",
+                    "target_version": "2025",
                     "health_check_command": "(Get-WmiObject Win32_OperatingSystem).Caption",
                 },
                 asset_ids=[asset_id],
@@ -549,8 +554,8 @@ class TestWindowsOsUpgradeSmoke:
                 "(Get-WmiObject Win32_OperatingSystem).Caption",
                 timeout=60,
             )
-            assert "2019" in rolled_back_os, (
-                f"SSM OS check post-rollback failed — expected 2019, got: {rolled_back_os!r}"
+            assert _SOURCE_OS_VERSION in rolled_back_os, (
+                f"SSM OS check post-rollback failed — expected {_SOURCE_OS_VERSION}, got: {rolled_back_os!r}"
             )
             log(f"[WINDOWS_SMOKE Phase2] Post-rollback SSM OS verify PASSED: {rolled_back_os}")
             log("[WINDOWS_SMOKE Phase2] FULL PHASE 2 PASSED — upgrade + rollback verified")

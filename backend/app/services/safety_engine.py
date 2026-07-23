@@ -158,6 +158,11 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.estimate_size,
     ChangeType.audit_software_inventory,
     ChangeType.audit_cis_compliance,
+    # High-blast-radius upgrade types with built-in rollback (dump_restore, EBS swap, FILO node pool)
+    ChangeType.db_major_version_upgrade,
+    ChangeType.k8s_cluster_upgrade,
+    ChangeType.windows_os_upgrade,
+    ChangeType.ad_dc_parallel_upgrade,
 }
 
 
