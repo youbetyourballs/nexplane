@@ -77,8 +77,21 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     image_name = execution_result.get("image_name", "")
     image_digest = execution_result.get("image_digest", "")
+    # Result may be nested in execution steps (platform wraps executor return values)
+    if not image_name:
+        steps = (
+            execution_result.get("execution", {}).get("steps")
+            or execution_result.get("steps")
+            or []
+        )
+        for step in steps:
+            sr = step.get("result") or {}
+            if sr.get("image_name"):
+                image_name = sr["image_name"]
+                image_digest = sr.get("image_digest", "")
+                break
     if not image_name or not image_digest:
-        return {"rolled_back": False, "reason": "no_image_coordinates"}
+        return {"rolled_back": False, "reason": "no_image_coordinates", "_rollback_no_op": True}
 
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 
