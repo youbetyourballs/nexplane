@@ -3,7 +3,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -794,6 +794,108 @@ async def skip_step(
     return result.scalar_one()
 
 
+@router.post("/{cr_id}/resume-node-upgrade", response_model=ChangeRequestRead)
+async def resume_node_upgrade(
+    cr_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retry drain for all paused nodes in a k8s_cluster_upgrade CR."""
+    from app.models.change_request import ChangeType
+    _cr_res = await db.execute(
+        select(ChangeRequest).where(
+            ChangeRequest.id == cr_id,
+            ChangeRequest.organization_id == user.organization_id,
+        ).with_for_update()
+    )
+    cr = _cr_res.scalar_one_or_none()
+    if not cr:
+        raise HTTPException(status_code=404, detail="Change request not found")
+    if cr.change_type != ChangeType.k8s_cluster_upgrade:
+        raise HTTPException(status_code=400, detail="resume-node-upgrade is only valid for k8s_cluster_upgrade CRs")
+    if cr.status != ChangeRequestStatus.paused:
+        raise HTTPException(status_code=400, detail="CR must be paused to resume node upgrade")
+    if user.role not in (UserRole.admin, UserRole.approver):
+        raise HTTPException(status_code=403, detail="Only admins and approvers can resume a node upgrade")
+
+    cr.status = ChangeRequestStatus.executing
+    cr.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    asyncio.ensure_future(_resume_execution(cr_id))
+
+    result = await db.execute(
+        select(ChangeRequest).where(ChangeRequest.id == cr_id).options(*_CR_OPTIONS)
+    )
+    return result.scalar_one()
+
+
+@router.post("/{cr_id}/skip-node", response_model=ChangeRequestRead)
+async def skip_node(
+    cr_id: uuid.UUID,
+    body: dict = Body(default={}),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Skip the currently blocked node and continue to the next node in the pool."""
+    from app.models.change_request import ChangeType
+    _cr_res = await db.execute(
+        select(ChangeRequest).where(
+            ChangeRequest.id == cr_id,
+            ChangeRequest.organization_id == user.organization_id,
+        ).with_for_update()
+    )
+    cr = _cr_res.scalar_one_or_none()
+    if not cr:
+        raise HTTPException(status_code=404, detail="Change request not found")
+    if cr.change_type != ChangeType.k8s_cluster_upgrade:
+        raise HTTPException(status_code=400, detail="skip-node is only valid for k8s_cluster_upgrade CRs")
+    if cr.status != ChangeRequestStatus.paused:
+        raise HTTPException(status_code=400, detail="CR must be paused to skip a node")
+    if user.role not in (UserRole.admin, UserRole.approver):
+        raise HTTPException(status_code=403, detail="Only admins and approvers can skip a node")
+
+    run_res = await db.execute(
+        select(ExecutionRun)
+        .where(ExecutionRun.change_request_id == cr_id)
+        .order_by(ExecutionRun.started_at.desc())
+        .limit(1)
+    )
+    run = run_res.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="No execution run found")
+
+    result_data = dict(run.result or {})
+    target_node = body.get("node_name")
+    node_pools = result_data.get("node_pools", [])
+    skipped = False
+    for pool in node_pools:
+        if pool.get("result") == "paused":
+            if target_node is None or pool.get("paused_at_node") == target_node:
+                pool["skipped_nodes"] = pool.get("skipped_nodes", []) + [pool.get("paused_at_node")]
+                pool["result"] = "pending"
+                pool.pop("paused_at_node", None)
+                pool.pop("drain_error", None)
+                pool.pop("pdb_violations", None)
+                skipped = True
+                break
+    if not skipped:
+        raise HTTPException(status_code=409, detail="No paused node found to skip")
+
+    result_data["paused"] = False
+    run.result = result_data
+    cr.status = ChangeRequestStatus.executing
+    cr.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    asyncio.ensure_future(_resume_execution(cr_id))
+
+    final = await db.execute(
+        select(ChangeRequest).where(ChangeRequest.id == cr_id).options(*_CR_OPTIONS)
+    )
+    return final.scalar_one()
+
+
 @router.post("/{cr_id}/retry-verify", status_code=202)
 async def retry_verify(
     cr_id: uuid.UUID,
@@ -812,8 +914,8 @@ async def retry_verify(
     if not cr:
         raise HTTPException(status_code=404, detail="Change request not found")
 
-    if cr.change_type not in (ChangeType.certificate_rotation, ChangeType.credential_rotation_fanout):
-        raise HTTPException(status_code=400, detail="retry-verify is only valid for certificate_rotation and credential_rotation_fanout CRs")
+    if cr.change_type not in (ChangeType.certificate_rotation, ChangeType.credential_rotation_fanout, ChangeType.k8s_cluster_upgrade):
+        raise HTTPException(status_code=400, detail="retry-verify is only valid for certificate_rotation, credential_rotation_fanout, and k8s_cluster_upgrade CRs")
     if cr.status != ChangeRequestStatus.paused:
         raise HTTPException(status_code=400, detail="CR must be paused to retry verification")
 
