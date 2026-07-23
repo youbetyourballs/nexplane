@@ -25,6 +25,7 @@ import (
 	"nexplane-agent/commands/listpkgs"
 	"nexplane-agent/commands/linuxpatch"
 	"nexplane-agent/commands/winpatch"
+	"nexplane-agent/commands/winupgrade"
 	"nexplane-agent/commands/credrotation"
 	"nexplane-agent/commands/macos"
 	"nexplane-agent/commands/forensics"
@@ -158,6 +159,12 @@ var commands = map[string]CommandFunc{
 	// Windows patching (Spec 5f)
 	"apply_windows_patches":      winpatch.ApplyWindowsPatchesExecute,
 	"audit_windows_patch_status": winpatch.AuditWindowsPatchStatusExecute,
+	// Windows OS in-place upgrade (Spec WinUpgrade)
+	"windows_preflight_os_upgrade": winupgrade.PreflightExecute,
+	"windows_vss_create_shadow":    winupgrade.VSSCreateShadowExecute,
+	"windows_start_os_upgrade":     winupgrade.StartOSUpgradeExecute,
+	"windows_verify_os_upgrade":    winupgrade.VerifyOSUpgradeExecute,
+	"windows_vss_restore":          winupgrade.VSSRestoreExecute,
 	// User lockout
 	"lock_local_user": linuxauth.LockLocalUserExecute,
 	// Cross-platform patch audit router
