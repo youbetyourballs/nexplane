@@ -193,6 +193,10 @@ async def activity_execute_change(
             from app.services.credential_rotation_fanout_executor import execute_credential_rotation_fanout
             _result = await execute_credential_rotation_fanout(str(_cr.id))
             return _result
+        elif _cr and _cr.change_type.value == "k8s_cluster_upgrade":
+            from app.services.k8s_cluster_upgrade_executor import execute_k8s_cluster_upgrade
+            _result = await execute_k8s_cluster_upgrade(_cr.id)
+            return _result
 
     step_results = []
     # Carries resolved values forward from steps like resolve_launch_config
