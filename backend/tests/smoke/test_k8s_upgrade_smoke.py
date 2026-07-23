@@ -107,9 +107,19 @@ def _kubeconfig_base64(path: str) -> str:
     # The executor runs inside the Docker container where 127.0.0.1 is the container
     # itself. Rewrite to the Docker bridge gateway so the container can reach kind's
     # API server on the host.
+    # Also patch in insecure-skip-tls-verify because the kind cert is signed for
+    # the kind container's IP, not for 172.17.0.1.
     import re as _re
     docker_gw = "172.17.0.1"
     content = _re.sub(r"https://(127\.0\.0\.1|0\.0\.0\.0):", f"https://{docker_gw}:", content)
+    # Parse and patch the kubeconfig YAML to disable TLS verification
+    kc = yaml.safe_load(content)
+    for cluster in kc.get("clusters", []):
+        cluster_obj = cluster.get("cluster", {})
+        cluster_obj["insecure-skip-tls-verify"] = True
+        cluster_obj.pop("certificate-authority-data", None)
+        cluster_obj.pop("certificate-authority", None)
+    content = yaml.dump(kc)
     return base64.b64encode(content.encode()).decode()
 
 

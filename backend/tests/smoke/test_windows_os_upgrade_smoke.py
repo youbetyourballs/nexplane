@@ -27,11 +27,15 @@ PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 # AMI cache SSM key — Windows Server 2019 with nexplane agent pre-installed
 # Win2022 WinRM AMI (nexplane-smoke-win2022-winrm) — has WinRM + SSM agent configured.
 # Self-provisioning from base AMI + agent install requires agent_install_url in AWS creds.
-_AMI_CACHE_KEY = "/nexplane/smoke-amis/windows-2019-with-agent/v1"
+_AMI_CACHE_KEY = "/nexplane/smoke-amis/windows-2022-winrm/v1"
 _SOURCE_OS_VERSION = "2022"  # The cached AMI is Windows Server 2022
 _INSTANCE_TYPE = "t3.medium"
 _NEXPLANE_AGENT_SERVICE = "NexplaneAgent"
 _SSM_INSTANCE_PROFILE = "nexplane-smoke-ssm"
+_AGENT_S3_BUCKET = "nexplane-agent-downloads"
+_AGENT_S3_KEY = "nexplane-agent-windows-amd64.exe"
+# Platform private IP reachable from EC2 in the same VPC
+_PLATFORM_PRIVATE_IP = "172.31.1.233"
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +72,102 @@ def _ssm_run_ps(ssm, instance_id: str, ps_command: str, timeout: int = 120) -> s
         if result["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
             return result.get("StandardOutputContent", "").strip()
     raise TimeoutError(f"SSM PowerShell timed out after {timeout}s")
+
+
+def _get_agent_secret() -> str:
+    """Read the org-level nexplane agent secret from the platform database."""
+    import subprocess as _sp
+    result = _sp.run(
+        ["docker", "exec", "nexplane-backend-1", "python3", "-c", (
+            "import asyncio, sys; sys.path.insert(0, '/app');"
+            "from sqlalchemy import text; from app.database import AsyncSessionLocal;"
+            "from app.services.secrets_service import SecretsService;"
+            "from app import config as app_config;"
+            "async def main():"
+            "    async with AsyncSessionLocal() as db:"
+            "        r = await db.execute(text('SELECT agent_secret_encrypted FROM organization_settings LIMIT 1'));"
+            "        row = r.first();"
+            "        s = SecretsService(app_config.settings.SECRET_KEY);"
+            "        print(s.decrypt(row[0]));"
+            "asyncio.run(main())"
+        )],
+        capture_output=True, text=True, timeout=30,
+    )
+    secret = result.stdout.strip()
+    if not secret:
+        pytest.fail(f"Could not retrieve agent secret: {result.stderr}")
+    return secret
+
+
+def _install_nexplane_agent_via_ssm(ssm, ec2, instance_id: str, creds: dict, agent_secret: str):
+    """
+    Download the nexplane agent from S3 to the Windows instance via SSM,
+    install it as a Windows service, and start it pointing at the platform.
+    Returns when the service is running.
+    """
+    region = creds.get("region", "us-east-1")
+    platform_url = f"http://{_PLATFORM_PRIVATE_IP}:8000"
+
+    # Generate a presigned URL for the agent binary (valid 1 hour)
+    import boto3 as _boto3
+    s3 = _boto3.client("s3",
+        aws_access_key_id=creds["access_key_id"],
+        aws_secret_access_key=creds["secret_access_key"],
+        region_name=region,
+    )
+    agent_url = s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": _AGENT_S3_BUCKET, "Key": _AGENT_S3_KEY},
+        ExpiresIn=3600,
+    )
+
+    ps = f"""
+$agentExe = "C:\\nexplane-agent-windows-amd64.exe"
+$agentService = "{_NEXPLANE_AGENT_SERVICE}"
+
+# Download agent
+Invoke-WebRequest -Uri '{agent_url}' -OutFile $agentExe -UseBasicParsing
+
+# Install as Windows service
+$svcParams = "-control-plane {platform_url} -secret {agent_secret} -mode service -poll-interval 5s"
+New-Service -Name $agentService -BinaryPathName "$agentExe $svcParams" -DisplayName "Nexplane Agent" -StartupType Automatic -ErrorAction SilentlyContinue
+Start-Service -Name $agentService -ErrorAction SilentlyContinue
+
+(Get-Service -Name $agentService -ErrorAction SilentlyContinue).Status
+"""
+    log(f"[WINDOWS_SMOKE] Installing nexplane agent on {instance_id}")
+    status = _ssm_run_ps(ssm, instance_id, ps, timeout=300)
+    log(f"[WINDOWS_SMOKE] Agent service status: {status!r}")
+    if "Running" not in status:
+        # Try starting it manually
+        status2 = _ssm_run_ps(ssm, instance_id,
+            f"Start-Service -Name {_NEXPLANE_AGENT_SERVICE} -ErrorAction SilentlyContinue; "
+            f"(Get-Service -Name {_NEXPLANE_AGENT_SERVICE}).Status",
+            timeout=60)
+        if "Running" not in status2:
+            pytest.fail(f"Nexplane agent service failed to start: {status2!r}")
+
+
+def _wait_for_agent_registration(client, platform_url: str, timeout: int = 120) -> str:
+    """
+    Poll the platform's agent registration list until a new Windows agent appears.
+    Returns the asset_id of the newly registered agent.
+    """
+    import time as _t
+    known_agents_resp = client.client.get(f"{platform_url}/api/v1/assets?tags=nexplane-agent")
+    known_ids = {a["id"] for a in (known_agents_resp.json() if known_agents_resp.ok else [])}
+
+    deadline = _t.time() + timeout
+    while _t.time() < deadline:
+        _t.sleep(10)
+        resp = client.client.get(f"{platform_url}/api/v1/assets?tags=nexplane-agent")
+        if not resp.ok:
+            continue
+        for asset in resp.json():
+            if asset["id"] not in known_ids:
+                log(f"[WINDOWS_SMOKE] New agent registered as asset: {asset['id']} ({asset.get('name','')})")
+                return asset["id"]
+    pytest.fail(f"Nexplane agent did not register within {timeout}s")
 
 
 def get_or_create_windows_smoke_ami(ec2, ssm, creds: dict) -> str:
@@ -353,20 +453,10 @@ class TestWindowsOsUpgradeSmoke:
             else:
                 pytest.fail(f"SSM never ready for {instance_id}")
 
-            # Register as asset in platform
-            base = self.client.base
-            asset_resp = self.client.client.post(f"{base}/assets", json={
-                "name": f"smoke-windows-dry-run-{instance_id}",
-                "asset_type": "server",
-                "environment": "dev",
-                "criticality": "low",
-                "asset_metadata": {
-                    "instance_id": instance_id,
-                    "os": "windows",
-                },
-            })
-            assert asset_resp.status_code in (200, 201), f"Asset create failed: {asset_resp.text}"
-            asset_id = asset_resp.json()["id"]
+            # Install nexplane agent via SSM and wait for it to register with platform
+            agent_secret = _get_agent_secret()
+            _install_nexplane_agent_via_ssm(self.ssm, self.ec2, instance_id, self.creds, agent_secret)
+            asset_id = _wait_for_agent_registration(self.client, BASE_URL, timeout=120)
             log(f"[WINDOWS_SMOKE Phase1] Asset registered: {asset_id}")
 
             # Run CR with dry_run=True
@@ -461,7 +551,7 @@ class TestWindowsOsUpgradeSmoke:
             else:
                 pytest.fail(f"SSM never ready for {instance_id}")
 
-            # Confirm OS is 2019 before upgrade
+            # Confirm OS is 2022 before upgrade
             current_os = _ssm_run_ps(
                 self.ssm, instance_id,
                 "(Get-WmiObject Win32_OperatingSystem).Caption",
@@ -469,20 +559,10 @@ class TestWindowsOsUpgradeSmoke:
             assert _SOURCE_OS_VERSION in current_os, f"Expected {_SOURCE_OS_VERSION} pre-upgrade, got: {current_os!r}"
             log(f"[WINDOWS_SMOKE Phase2] Pre-upgrade OS confirmed: {current_os}")
 
-            # Register asset
-            base = self.client.base
-            asset_resp = self.client.client.post(f"{base}/assets", json={
-                "name": f"smoke-windows-full-{instance_id}",
-                "asset_type": "server",
-                "environment": "dev",
-                "criticality": "low",
-                "asset_metadata": {
-                    "instance_id": instance_id,
-                    "os": "windows",
-                },
-            })
-            assert asset_resp.status_code in (200, 201), f"Asset create failed: {asset_resp.text}"
-            asset_id = asset_resp.json()["id"]
+            # Install nexplane agent via SSM and wait for it to register with platform
+            agent_secret = _get_agent_secret()
+            _install_nexplane_agent_via_ssm(self.ssm, self.ec2, instance_id, self.creds, agent_secret)
+            asset_id = _wait_for_agent_registration(self.client, BASE_URL, timeout=120)
             log(f"[WINDOWS_SMOKE Phase2] Asset registered: {asset_id}")
 
             # Run full upgrade CR — 90-minute timeout (upgrade + restart + agent poll)
