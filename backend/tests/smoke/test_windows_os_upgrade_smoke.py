@@ -28,6 +28,7 @@ PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 _AMI_CACHE_KEY = "/nexplane/smoke-amis/windows-2019-with-agent/v1"
 _INSTANCE_TYPE = "t3.medium"
 _NEXPLANE_AGENT_SERVICE = "NexplaneAgent"
+_SSM_INSTANCE_PROFILE = "nexplane-smoke-ssm"
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +117,7 @@ def get_or_create_windows_smoke_ami(ec2, ssm, creds: dict) -> str:
         InstanceType=_INSTANCE_TYPE,
         MinCount=1,
         MaxCount=1,
+        IamInstanceProfile={"Name": _SSM_INSTANCE_PROFILE},
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name", "Value": "nexplane-smoke-windows-2019"},
             {"Key": "nexplane-purpose", "Value": "smoke-ami-build"},
@@ -318,6 +320,7 @@ class TestWindowsOsUpgradeSmoke:
             InstanceType=_INSTANCE_TYPE,
             MinCount=1,
             MaxCount=1,
+            IamInstanceProfile={"Name": _SSM_INSTANCE_PROFILE},
             TagSpecifications=[{"ResourceType": "instance", "Tags": [
                 {"Key": "Name", "Value": "nexplane-smoke-windows-os-upgrade-dry-run"},
                 {"Key": "nexplane-purpose", "Value": "smoke-test"},
@@ -425,6 +428,7 @@ class TestWindowsOsUpgradeSmoke:
             InstanceType=_INSTANCE_TYPE,
             MinCount=1,
             MaxCount=1,
+            IamInstanceProfile={"Name": _SSM_INSTANCE_PROFILE},
             TagSpecifications=[{"ResourceType": "instance", "Tags": [
                 {"Key": "Name", "Value": "nexplane-smoke-windows-os-upgrade-full"},
                 {"Key": "nexplane-purpose", "Value": "smoke-test"},
