@@ -429,7 +429,6 @@ async def _load_cr(cr_id: uuid.UUID):
             .options(
                 selectinload(ChangeRequest.change_plan),
                 selectinload(ChangeRequest.execution_runs),
-                selectinload(ChangeRequest.connector),
             )
         )
         return result.scalar_one_or_none()
@@ -495,12 +494,25 @@ async def execute_k8s_cluster_upgrade(cr_id: uuid.UUID) -> dict:
     target_version = desired.get("target_version", "")
     dry_run = desired.get("dry_run", False)
 
-    connector = cr.connector
-    if connector is None:
-        return {"error": "No connector attached to CR", "failed": True}
+    # Load connector from desired_outcome["connector_id"]
+    connector_id_str = desired.get("connector_id")
+    if not connector_id_str:
+        return {"error": "desired_outcome.connector_id is required for k8s_cluster_upgrade", "failed": True}
+    try:
+        connector_uuid = uuid.UUID(str(connector_id_str))
+    except (ValueError, AttributeError) as exc:
+        return {"error": f"Invalid connector_id: {exc}", "failed": True}
 
-    await connector_service._attach_credentials(connector, None)
-    creds = getattr(connector, "credentials", {}) or {}
+    from app.models.connector import Connector
+    connector = None
+    async with AsyncSessionLocal() as _db:
+        from sqlalchemy import select as _select
+        _res = await _db.execute(_select(Connector).where(Connector.id == connector_uuid))
+        connector = _res.scalar_one_or_none()
+        if connector is None:
+            return {"error": f"Connector {connector_uuid} not found", "failed": True}
+        await connector_service._attach_credentials(connector, _db)
+        creds = getattr(connector, "credentials", {}) or {}
 
     # Build k8s clients
     from app.connectors.executors.kubernetes._client import get_k8s_clients
@@ -648,10 +660,21 @@ async def execute_k8s_cluster_upgrade_rollback(
     if cr is None:
         return {"error": f"CR {cr_id} not found during rollback", "has_warnings": True}
 
-    connector = cr.connector
-    if connector:
-        await connector_service._attach_credentials(connector, None)
-    creds = getattr(connector, "credentials", {}) or {} if connector else {}
+    desired = cr.desired_outcome or {}
+    connector_id_str = desired.get("connector_id") or execution_result.get("connector_id")
+    creds = {}
+    if connector_id_str:
+        try:
+            from app.models.connector import Connector
+            async with AsyncSessionLocal() as _db:
+                from sqlalchemy import select as _select
+                _res = await _db.execute(_select(Connector).where(Connector.id == uuid.UUID(str(connector_id_str))))
+                _connector = _res.scalar_one_or_none()
+                if _connector:
+                    await connector_service._attach_credentials(_connector, _db)
+                    creds = getattr(_connector, "credentials", {}) or {}
+        except Exception as exc:
+            log.warning("Could not load connector for rollback: %s", exc)
 
     from app.connectors.executors.kubernetes._client import get_k8s_clients
     try:

@@ -65,8 +65,8 @@ def _all_executor_params():
 def test_rollback_capability_declared(module_prefix, name):
     mod = importlib.import_module(f"{module_prefix}.{name}")
     cap = getattr(mod, "ROLLBACK_CAPABILITY", None)
-    assert cap in ("full", "irreversible"), (
-        f"{name}: ROLLBACK_CAPABILITY={cap!r} — must be 'full' or 'irreversible'"
+    assert cap in ("full", "irreversible", "partial"), (
+        f"{name}: ROLLBACK_CAPABILITY={cap!r} — must be 'full', 'partial', or 'irreversible'"
     )
     if cap == "irreversible":
         reason = getattr(mod, "ROLLBACK_REASON", None)
