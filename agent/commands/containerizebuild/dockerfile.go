@@ -47,11 +47,15 @@ func GenerateDockerfile(app AppProfile) (string, error) {
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString(fmt.Sprintf("COPY %s %s\n", app.Binary, app.Binary))
+	// COPY uses relative paths (strip leading /) — BuildAndPush stages files
+	// into a temp build context under the same relative paths.
+	relBin := strings.TrimPrefix(app.Binary, "/")
+	sb.WriteString(fmt.Sprintf("COPY %s %s\n", relBin, app.Binary))
 	sb.WriteString(fmt.Sprintf("RUN chmod +x %s\n\n", app.Binary))
 
 	for _, cf := range app.ConfigFiles {
-		sb.WriteString(fmt.Sprintf("COPY %s %s\n", cf, cf))
+		relCf := strings.TrimPrefix(cf, "/")
+		sb.WriteString(fmt.Sprintf("COPY %s %s\n", relCf, cf))
 	}
 	if len(app.ConfigFiles) > 0 {
 		sb.WriteString("\n")

@@ -85,18 +85,33 @@ async def _docker_available(connector) -> bool:
 async def _build_image(connector, service_name: str, registry: str) -> dict:
     """Build Docker image on host from service binary. Returns image_name and image_digest."""
     image_tag = f"{registry}/{service_name}:latest"
+    # Extract binary and full argument list from ExecStart
     stdout, _, _ = await _run(
         connector,
-        f"systemctl show -p ExecStart --value {service_name} 2>/dev/null | awk '{{print $1}}'",
+        f"systemctl show -p ExecStart --value {service_name} 2>/dev/null",
     )
-    binary = stdout.strip().split()[0] if stdout.strip() else f"/usr/bin/{service_name.replace('.service', '')}"
+    exec_start = stdout.strip()
+    # ExecStart format: "path=<binary> argv[]=<binary> <arg1> <arg2> ..."
+    # Fall back to splitting on whitespace if the format differs
+    binary = ""
+    exec_args: list[str] = []
+    if exec_start:
+        tokens = exec_start.split()
+        binary = tokens[0] if tokens else ""
+        exec_args = tokens  # first token is binary, rest are args
+    if not binary:
+        binary = f"/usr/bin/{service_name.replace('.service', '')}"
+        exec_args = [binary]
+
     stdout, _, _ = await _run(connector, f"ldd {binary} 2>/dev/null | grep -v vdso | awk '{{print $3}}' | grep '^/' || true")
     libs = [lib.strip() for lib in stdout.splitlines() if lib.strip()]
 
+    # Build a FROM scratch image with the binary + its shared libs
+    cmd_json = ", ".join(f'"{a}"' for a in exec_args)
     dockerfile_lines = ["FROM scratch", f"COPY {binary} {binary}"]
     for lib in libs:
         dockerfile_lines.append(f"COPY {lib} {lib}")
-    dockerfile_lines.append(f'CMD ["{binary}"]')
+    dockerfile_lines.append(f"CMD [{cmd_json}]")
     dockerfile = "\n".join(dockerfile_lines)
 
     await _run(connector, f"printf '%s' '{dockerfile}' > /tmp/nexplane-Dockerfile")

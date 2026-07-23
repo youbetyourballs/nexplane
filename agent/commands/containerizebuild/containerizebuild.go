@@ -54,7 +54,7 @@ func ContainerizeBuildExecute(params map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("GenerateManifests: %w", err)
 	}
 
-	digest, err := BuildAndPush(imageName, dockerfile, dryRun)
+	digest, err := BuildAndPush(imageName, dockerfile, app, dryRun)
 	if err != nil {
 		return nil, fmt.Errorf("BuildAndPush: %w", err)
 	}
