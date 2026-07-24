@@ -136,7 +136,12 @@ def _is_expected_reboot_disconnect(exc: Exception) -> bool:
 
 
 def _winrm_run(session, script: str) -> tuple:
-    """Run a PowerShell script via WinRM; return (stdout, stderr, rc)."""
+    """Run a PowerShell script via WinRM; return (stdout, stderr, rc).
+
+    Always prepends the ActiveDirectory module import — each run_ps call starts
+    a fresh PS session so the module must be loaded every time.
+    """
+    script = "Import-Module ActiveDirectory -ErrorAction SilentlyContinue; " + script
     result = session.run_ps(script)
     stdout = result.std_out.decode("utf-8", errors="replace") if isinstance(result.std_out, bytes) else (result.std_out or "")
     stderr = result.std_err.decode("utf-8", errors="replace") if isinstance(result.std_err, bytes) else (result.std_err or "")
@@ -181,50 +186,86 @@ async def _preflight(parameters: dict, connector, creds: dict) -> dict:
             "blocking_checks": blocking_checks,
         }
 
-    # 2. Get-ADDomain
+    # 2. Get-ADDomain — retry up to 3 times with 15s delay; ADWS may not be
+    #    fully accepting PS cmdlets immediately after the WinRM ready check.
     domain_name = ""
-    try:
-        stdout, _, rc = await loop.run_in_executor(
-            None, lambda: _winrm_run(session, "(Get-ADDomain).DNSRoot")
-        )
-        if rc != 0 or not stdout.strip():
-            raise Exception(f"Get-ADDomain failed rc={rc}")
-        domain_name = stdout.strip()
+    _ad_domain_err = None
+    for _attempt in range(3):
+        try:
+            stdout, stderr, rc = await loop.run_in_executor(
+                None, lambda: _winrm_run(session, "(Get-ADDomain).DNSRoot")
+            )
+            if rc != 0 or not stdout.strip():
+                _ad_domain_err = f"Get-ADDomain rc={rc} stderr={stderr[:200]!r}"
+                if _attempt < 2:
+                    await asyncio.sleep(15)
+                    continue
+                raise Exception(_ad_domain_err)
+            domain_name = stdout.strip()
+            _ad_domain_err = None
+            break
+        except Exception as exc:
+            _ad_domain_err = str(exc)
+            if _attempt < 2:
+                await asyncio.sleep(15)
+    if _ad_domain_err:
+        _add_check("ad_domain_running", "critical", f"Get-ADDomain failed: {_ad_domain_err}")
+    else:
         _add_check("ad_domain_running", "ok", f"AD domain: {domain_name}")
-    except Exception as exc:
-        _add_check("ad_domain_running", "critical", f"Get-ADDomain failed: {exc}")
 
-    # 3. Source DC is in Get-ADDomainController output
+    # 3. Source DC is in Get-ADDomainController output.
+    #    source_dc_hostname may be an IP address; resolve via the DC's own hostname
+    #    so we can match against the FQDN returned by Get-ADDomainController.
     dc_list = []
-    try:
-        stdout, _, rc = await loop.run_in_executor(
-            None, lambda: _winrm_run(session, "(Get-ADDomainController -Filter *).HostName -join \",\"")
-        )
-        if rc != 0:
-            raise Exception(f"Get-ADDomainController failed rc={rc}")
-        dc_list = [x.strip() for x in stdout.split(",") if x.strip()]
-        if not any(source_dc_hostname.lower() in dc.lower() for dc in dc_list):
-            _add_check("source_dc_in_domain", "critical",
-                       f"Source DC {source_dc_hostname} not found in domain controller list: {dc_list}")
-        else:
-            _add_check("source_dc_in_domain", "ok", f"Source DC confirmed in domain: {dc_list}")
-    except Exception as exc:
-        _add_check("source_dc_in_domain", "critical", f"Cannot enumerate domain controllers: {exc}")
-        dc_list = []
+    source_dc_netbios = ""
+    if not _ad_domain_err:
+        try:
+            # Resolve the DC's own short hostname first.
+            hn_out, _, hn_rc = await loop.run_in_executor(
+                None, lambda: _winrm_run(session, "(Get-WmiObject Win32_ComputerSystem).Name")
+            )
+            source_dc_netbios = hn_out.strip().lower()
 
-    # 4. DC count (must be >= 2 for safe upgrade)
-    try:
-        stdout, _, rc = await loop.run_in_executor(
-            None, lambda: _winrm_run(session, "(Get-ADDomainController -Filter * | Measure-Object).Count")
-        )
-        dc_count = int(stdout.strip()) if stdout.strip().isdigit() else 0
-        if dc_count <= 1:
-            _add_check("dc_count_safe", "critical",
-                       f"Only {dc_count} DC in domain — demoting source after upgrade would leave 0 DCs and destroy the domain")
-        else:
-            _add_check("dc_count_safe", "ok", f"Domain has {dc_count} DC(s); safe to proceed")
-    except Exception as exc:
-        _add_check("dc_count_safe", "critical", f"Cannot determine DC count: {exc}")
+            stdout, _, rc = await loop.run_in_executor(
+                None, lambda: _winrm_run(session, "(Get-ADDomainController -Filter *).HostName -join \",\"")
+            )
+            if rc != 0:
+                raise Exception(f"Get-ADDomainController failed rc={rc}")
+            dc_list = [x.strip() for x in stdout.split(",") if x.strip()]
+            # Match by IP, short hostname, or FQDN prefix.
+            def _dc_matches(dc: str) -> bool:
+                dl = dc.lower()
+                return (
+                    source_dc_hostname.lower() in dl
+                    or (source_dc_netbios and dl.startswith(source_dc_netbios))
+                )
+            if not any(_dc_matches(dc) for dc in dc_list):
+                _add_check("source_dc_in_domain", "critical",
+                           f"Source DC {source_dc_hostname} ({source_dc_netbios}) not found in domain controller list: {dc_list}")
+            else:
+                _add_check("source_dc_in_domain", "ok", f"Source DC confirmed in domain: {dc_list}")
+        except Exception as exc:
+            _add_check("source_dc_in_domain", "critical", f"Cannot enumerate domain controllers: {exc}")
+            dc_list = []
+    else:
+        _add_check("source_dc_in_domain", "critical", "Skipped — AD domain check failed")
+
+    # 4. DC count (must be >= 1; parallel upgrade adds a new DC before demoting the old one)
+    if not _ad_domain_err:
+        try:
+            stdout, _, rc = await loop.run_in_executor(
+                None, lambda: _winrm_run(session, "(Get-ADDomainController -Filter * | Measure-Object).Count")
+            )
+            dc_count = int(stdout.strip()) if stdout.strip().isdigit() else 0
+            if dc_count < 1:
+                _add_check("dc_count_safe", "critical",
+                           f"No DCs found in domain — cannot proceed")
+            else:
+                _add_check("dc_count_safe", "ok", f"Domain has {dc_count} DC(s); parallel upgrade will add new DC before demoting source")
+        except Exception as exc:
+            _add_check("dc_count_safe", "critical", f"Cannot determine DC count: {exc}")
+    else:
+        _add_check("dc_count_safe", "critical", "Skipped — AD domain check failed")
 
     # 5. netdom query fsmo
     fsmo_state = {}
@@ -236,27 +277,32 @@ async def _preflight(parameters: dict, connector, creds: dict) -> dict:
         if rc != 0:
             raise Exception(f"netdom query fsmo failed rc={rc}")
         fsmo_state = _parse_fsmo_netdom(stdout)
+        # Match by IP, short hostname (from the DC's own hostname resolved above), or FQDN prefix.
         source_fsmo_roles = [role for role, dc in fsmo_state.items()
-                             if source_dc_hostname.lower().split(".")[0] in dc.lower()]
+                             if (source_dc_hostname.lower().split(".")[0] in dc.lower()
+                                 or (source_dc_netbios and dc.lower().startswith(source_dc_netbios)))]
         _add_check("fsmo_queryable", "ok", f"FSMO roles queried; source holds: {source_fsmo_roles}")
     except Exception as exc:
         _add_check("fsmo_queryable", "critical", f"netdom query fsmo failed: {exc}")
 
     # 6. AD functional level
-    try:
-        stdout, _, rc = await loop.run_in_executor(
-            None, lambda: _winrm_run(session, "(Get-ADDomain).DomainMode")
-        )
-        domain_mode = stdout.strip()
-        target_ver = parameters.get("target_windows_version", "2022")
-        compat_modes = {"Windows2012R2Domain", "Windows2016Domain", "Windows2025Domain"}
-        if not any(m in domain_mode for m in compat_modes):
-            _add_check("ad_functional_level", "critical",
-                       f"Domain functional level {domain_mode} may not support Windows Server {target_ver} DC")
-        else:
-            _add_check("ad_functional_level", "ok", f"Domain functional level: {domain_mode}")
-    except Exception as exc:
-        _add_check("ad_functional_level", "warning", f"Cannot determine functional level: {exc}")
+    if not _ad_domain_err:
+        try:
+            stdout, _, rc = await loop.run_in_executor(
+                None, lambda: _winrm_run(session, "(Get-ADDomain).DomainMode")
+            )
+            domain_mode = stdout.strip()
+            target_ver = parameters.get("target_windows_version", "2022")
+            compat_modes = {"Windows2012R2Domain", "Windows2016Domain", "Windows2025Domain"}
+            if not any(m in domain_mode for m in compat_modes):
+                _add_check("ad_functional_level", "critical",
+                           f"Domain functional level {domain_mode} may not support Windows Server {target_ver} DC")
+            else:
+                _add_check("ad_functional_level", "ok", f"Domain functional level: {domain_mode}")
+        except Exception as exc:
+            _add_check("ad_functional_level", "warning", f"Cannot determine functional level: {exc}")
+    else:
+        _add_check("ad_functional_level", "warning", "Skipped — AD domain check failed")
 
     # 7. DNS check (warning only)
     try:
@@ -600,14 +646,31 @@ def _client_get_winrm(creds, hostname):
 
 
 async def _wait_for_instance_running(ec2, instance_id: str, loop, timeout_s: int = 900) -> str:
-    """Poll EC2 until instance is running; return private IP."""
+    """Poll EC2 until instance is running; return private IP.
+
+    Retries on InvalidInstanceID.NotFound to handle EC2's brief eventual
+    consistency window immediately after RunInstances returns.
+    """
+    import botocore.exceptions
     deadline = time.monotonic() + timeout_s
+    # Brief initial delay to let EC2 propagate the new instance.
+    await asyncio.sleep(5)
     while time.monotonic() < deadline:
-        resp = await loop.run_in_executor(
-            None,
-            lambda: ec2.describe_instances(InstanceIds=[instance_id])
-        )
-        inst = resp["Reservations"][0]["Instances"][0]
+        try:
+            resp = await loop.run_in_executor(
+                None,
+                lambda: ec2.describe_instances(InstanceIds=[instance_id])
+            )
+        except botocore.exceptions.ClientError as exc:
+            if exc.response["Error"]["Code"] == "InvalidInstanceID.NotFound":
+                await asyncio.sleep(10)
+                continue
+            raise
+        reservations = resp.get("Reservations", [])
+        if not reservations:
+            await asyncio.sleep(10)
+            continue
+        inst = reservations[0]["Instances"][0]
         state = inst["State"]["Name"]
         if state == "running":
             return inst.get("PrivateIpAddress", "")
