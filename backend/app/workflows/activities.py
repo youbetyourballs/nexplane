@@ -303,6 +303,9 @@ async def activity_execute_change(
             if connector and (not connector_type or connector_type == "unknown"):
                 connector_type = connector.connector_type.value
 
+            if connector is not None:
+                connector.current_cr_id = change_request_id
+
             try:
                 result = await execute_action(
                     connector_type, action_id, parameters, asset_ids,
