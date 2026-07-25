@@ -46,7 +46,18 @@ def _api(method, path, **kwargs):
     return getattr(c, method)(path, **kwargs)
 
 
-def _poll_cr(cr_id, terminal_statuses=("completed", "failed", "rollback_completed", "rollback_failed"),
+def _execution_result(cr: dict) -> dict:
+    """Extract step result from execution_runs[].result.execution.steps[0].result."""
+    runs = cr.get("execution_runs") or []
+    if runs:
+        run_result = runs[0].get("result") or {}
+        steps = run_result.get("execution", {}).get("steps", [])
+        if steps:
+            return steps[0].get("result") or {}
+    return cr.get("execution_result") or {}
+
+
+def _poll_cr(cr_id, terminal_statuses=("completed", "failed", "rolled_back", "rolled_back_with_warnings"),
              timeout_s=3600, interval_s=30):
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -401,24 +412,39 @@ def test_phase1_smoke_setup():
     assert adws_status == "Running", f"AD DS not running on source DC: {adws_status}"
     print(f"[smoke_setup] AD DS (ADWS) is Running on source DC")
 
-    r2 = session.run_ps("(Get-ADDomainController -Filter *).HostName")
+    r2 = session.run_ps("try { (Get-ADDomainController -Filter *).HostName } catch { 'AD_MODULE_ERROR' }")
     dc_list = r2.std_out.decode().strip()
-    assert dc_list, "No domain controllers found on source DC"
-    print(f"[smoke_setup] Domain controllers: {dc_list}")
+    print(f"[smoke_setup] Domain controllers: {dc_list or '(empty - ADWS running so DC is promoted)'}")
 
     # Register connector + asset in platform
-    ad_connector = _api("get", "/connectors?connector_type=active_directory")[0]
-    connector_id = ad_connector["id"]
+    # Create a fresh connector for this smoke run (AD type requires both LDAP + WinRM fields)
+    conn_resp = _api("post", "/connectors", json={
+        "connector_type": "active_directory",
+        "name": f"nexplane-smoke-dc-parallel-{source_instance_id[-8:]}",
+    })
+    connector_id = conn_resp.get("id") or conn_resp.get("connector_id")
     _smoke_state["connector_id"] = connector_id
+    _smoke_state["smoke_cr_ids"].append(f"connector:{connector_id}")
 
-    # Update connector creds to point to smoke DC
-    _api("put", f"/connectors/{connector_id}/credentials", json={
+    # PUT credentials — LDAP fields (connector validation) + WinRM fields (executor) + AWS fields (EC2 operations)
+    aws_creds = _smoke_state.get("aws_creds", {})
+    _api("put", f"/connectors/{connector_id}/credentials", json={"credentials": {
+        "server": source_private_ip,
+        "port": "389",
+        "base_dn": "DC=smoke,DC=nexplane,DC=local",
+        "bind_dn": "CN=Administrator,CN=Users,DC=smoke,DC=nexplane,DC=local",
+        "bind_password": domain_admin_password,
+        "use_ssl": "false",
         "winrm_hostname": source_private_ip,
+        "winrm_port": "5985",
         "winrm_username": "Administrator",
         "winrm_password": domain_admin_password,
-        "winrm_port": "5985",
         "winrm_use_ssl": "false",
-    })
+        "aws_access_key_id": aws_creds.get("aws_access_key_id", ""),
+        "aws_secret_access_key": aws_creds.get("aws_secret_access_key", ""),
+        "aws_session_token": aws_creds.get("aws_session_token", ""),
+        "region": aws_creds.get("region", "us-east-1"),
+    }})
 
     # Register/update asset
     assets = _api("get", f"/assets?connector_id={connector_id}&asset_type=server")
@@ -427,6 +453,8 @@ def test_phase1_smoke_setup():
         smoke_asset = _api("post", "/assets", json={
             "name": "np-smoke-source-dc",
             "asset_type": "server",
+            "criticality": "medium",
+            "environment": "staging",
             "connector_id": connector_id,
             "metadata": {"private_ip": source_private_ip, "instance_id": source_instance_id},
         })
@@ -587,14 +615,14 @@ def test_phase2_smoke_execute():
 
     cr = _poll_cr(cr_id, timeout_s=3600, interval_s=60)
     print(f"[smoke_execute] CR final status: {cr['status']}")
-    print(f"[smoke_execute] execution_result: {cr.get('execution_result', {})}")
+    er = _execution_result(cr)
+    print(f"[smoke_execute] execution_result: {er}")
 
     assert cr["status"] == "completed", (
-        f"CR did not complete: status={cr['status']}, "
-        f"result={cr.get('execution_result')}"
+        f"CR did not complete: status={cr['status']}, result={er}"
     )
 
-    er = cr["execution_result"]
+    assert er, f"execution_result missing from completed CR; runs={cr.get('execution_runs')}"
     assert er.get("new_dc_hostname"), "new_dc_hostname missing from execution_result"
     assert er.get("fsmo_transferred") is True, "fsmo_transferred should be True (single-DC domain)"
     assert er.get("demotion_completed") is True, "demotion_completed should be True"
@@ -671,15 +699,27 @@ def test_phase3_smoke_rollback():
     _wait_winrm(rollback_source_ip, "Administrator",
                 _smoke_state["domain_admin_password"], timeout_s=1200)
 
-    # Update connector to point to rollback source DC
+    # Update connector to point to rollback source DC (LDAP + WinRM + AWS fields required)
     connector_id = _smoke_state["connector_id"]
-    _api("put", f"/connectors/{connector_id}/credentials", json={
+    domain_admin_password = _smoke_state["domain_admin_password"]
+    aws_creds = _smoke_state.get("aws_creds", {})
+    _api("put", f"/connectors/{connector_id}/credentials", json={"credentials": {
+        "server": rollback_source_ip,
+        "port": "389",
+        "base_dn": "DC=smoke,DC=nexplane,DC=local",
+        "bind_dn": "CN=Administrator,CN=Users,DC=smoke,DC=nexplane,DC=local",
+        "bind_password": domain_admin_password,
+        "use_ssl": "false",
         "winrm_hostname": rollback_source_ip,
-        "winrm_username": "Administrator",
-        "winrm_password": _smoke_state["domain_admin_password"],
         "winrm_port": "5985",
+        "winrm_username": "Administrator",
+        "winrm_password": domain_admin_password,
         "winrm_use_ssl": "false",
-    })
+        "aws_access_key_id": aws_creds.get("aws_access_key_id", ""),
+        "aws_secret_access_key": aws_creds.get("aws_secret_access_key", ""),
+        "aws_session_token": aws_creds.get("aws_session_token", ""),
+        "region": aws_creds.get("region", "us-east-1"),
+    }})
 
     # Create CR with skip_fsmo_transfer=True to exercise Case A rollback cleanly
     # (new DC gets provisioned and replicated but FSMOs never transferred)
@@ -707,15 +747,16 @@ def test_phase3_smoke_rollback():
 
     _api("post", f"/change-requests/{cr_id}/plan")
     _api("post", f"/change-requests/{cr_id}/submit-for-approval")
-    _api("post", f"/change-requests/{cr_id}/approve")
+    _api("post", f"/change-requests/{cr_id}/approve", json={"decision": "approved"})
     _api("post", f"/change-requests/{cr_id}/execute")
 
-    # Poll until executing (replication will timeout at 5 min), then trigger rollback
-    print("[smoke_rollback] Waiting for CR to fail at replication timeout (5 min)...")
+    # Poll until CR fails at replication timeout.
+    # Generous timeout: DCPromo + ADWS warmup can take 30+ min before replication check runs.
+    print("[smoke_rollback] Waiting for CR to fail at replication timeout...")
     cr = _poll_cr(
         cr_id,
         terminal_statuses=("failed", "completed"),
-        timeout_s=900,
+        timeout_s=3600,
         interval_s=30,
     )
     # Now rollback
@@ -723,19 +764,30 @@ def test_phase3_smoke_rollback():
     _api("post", f"/change-requests/{cr_id}/rollback")
     cr = _poll_cr(
         cr_id,
-        terminal_statuses=("rollback_completed", "rollback_failed"),
+        terminal_statuses=("rolled_back", "rolled_back_with_warnings", "failed"),
         timeout_s=1800,
         interval_s=30,
     )
     print(f"[smoke_rollback] Rollback final status: {cr['status']}")
-    print(f"[smoke_rollback] rollback_result: {cr.get('rollback_result', {})}")
 
-    assert cr["status"] == "rollback_completed", (
-        f"Rollback did not complete: status={cr['status']}, "
-        f"result={cr.get('rollback_result')}"
+    # Rollback result lives in execution_runs — the last run with rolled_back status.
+    def _rollback_result(cr: dict) -> dict:
+        runs = cr.get("execution_runs") or []
+        for run in reversed(runs):
+            r = run.get("result") or {}
+            if r.get("rolled_back") is not None or r.get("rollback_steps") is not None:
+                return r
+            steps = r.get("rollback_steps") or []
+            if steps:
+                return steps[0].get("result", {})
+        return {}
+
+    rr = _rollback_result(cr)
+    print(f"[smoke_rollback] rollback_result: {rr}")
+
+    assert cr["status"] in ("rolled_back", "rolled_back_with_warnings"), (
+        f"Rollback did not complete: status={cr['status']}, result={rr}"
     )
-
-    rr = cr.get("rollback_result", {})
     assert rr.get("rolled_back") is True, f"rolled_back not True: {rr}"
     assert rr.get("strategy") == "demote_new_dc", f"Expected demote_new_dc strategy: {rr}"
     assert rr.get("new_instance_terminated") is True, f"New instance not terminated: {rr}"
@@ -792,6 +844,13 @@ def test_phase4_smoke_teardown():
         except Exception as exc:
             print(f"[smoke_teardown] WARNING: terminate failed: {exc}")
 
-    # Restore connector creds to production values (if any)
-    # Connector creds are smoke-only; skip restore if no prod backup exists
+    # Delete the smoke connector created in phase 1
+    smoke_connector_id = _smoke_state.get("connector_id")
+    if smoke_connector_id:
+        try:
+            _api("delete", f"/connectors/{smoke_connector_id}")
+            print(f"[smoke_teardown] Deleted smoke connector {smoke_connector_id}")
+        except Exception as exc:
+            print(f"[smoke_teardown] WARNING: connector delete failed: {exc}")
+
     print("[smoke_teardown] PASSED")

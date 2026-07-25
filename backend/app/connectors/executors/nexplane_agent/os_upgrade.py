@@ -257,17 +257,26 @@ def _make_ec2_client(creds: dict):
             client.describe_availability_zones()
             return client
         except Exception as e:
-            if "RequestExpired" not in str(e) and "AuthFailure" not in str(e) and "ExpiredToken" not in str(e):
+            _auth_err_markers = ("RequestExpired", "AuthFailure", "ExpiredToken",
+                                 "InvalidClientTokenId", "validate", "credentials")
+            if not any(m in str(e) for m in _auth_err_markers):
                 raise
-            logger.info("Stored AWS creds expired; falling back to instance profile")
+            logger.info("Stored AWS creds invalid/expired; falling back to instance profile")
     return boto3.client("ec2", region_name=region)
 
 
 async def _take_snapshot(asset_id: str, instance_id: str, connector, organization_id=None) -> dict:
-    """Take pre-upgrade EBS snapshot. Returns snapshot metadata dict."""
+    """Take pre-upgrade EBS snapshot. Returns snapshot metadata dict.
+
+    Stops the instance before snapshotting to guarantee a consistent root
+    volume image — crash-consistent snapshots of running instances can capture
+    partially-written binaries (ELF corruption) that segfault on restore.
+    The instance is restarted immediately after the snapshot is initiated.
+    """
     creds = await _get_aws_creds(connector, organization_id)
     region = creds.get("region", "us-east-1")
     ec2 = _make_ec2_client(creds)
+    loop = asyncio.get_event_loop()
 
     reservations = ec2.describe_instances(InstanceIds=[instance_id])["Reservations"]
     if not reservations:
@@ -285,6 +294,17 @@ async def _take_snapshot(asset_id: str, instance_id: str, connector, organizatio
     root_vol_id = root_entry["Ebs"]["VolumeId"]
     root_device_name = root_entry["DeviceName"]
 
+    # Stop instance for consistent snapshot, then restart immediately after.
+    logger.info(f"Stopping {instance_id} for consistent pre-upgrade snapshot")
+    await loop.run_in_executor(None, lambda: ec2.stop_instances(InstanceIds=[instance_id]))
+    await loop.run_in_executor(
+        None,
+        lambda: ec2.get_waiter("instance_stopped").wait(
+            InstanceIds=[instance_id],
+            WaiterConfig={"Delay": 10, "MaxAttempts": 30},
+        ),
+    )
+
     snap = ec2.create_snapshot(
         VolumeId=root_vol_id,
         Description=f"Pre-OS-upgrade snapshot for {asset_id} at {datetime.now(timezone.utc).isoformat()}",
@@ -292,6 +312,15 @@ async def _take_snapshot(asset_id: str, instance_id: str, connector, organizatio
             {"Key": "nexplane-purpose", "Value": "pre-os-upgrade"},
             {"Key": "nexplane-asset-id", "Value": asset_id},
         ]}],
+    )
+    logger.info(f"Snapshot {snap['SnapshotId']} initiated — restarting {instance_id}")
+    await loop.run_in_executor(None, lambda: ec2.start_instances(InstanceIds=[instance_id]))
+    await loop.run_in_executor(
+        None,
+        lambda: ec2.get_waiter("instance_running").wait(
+            InstanceIds=[instance_id],
+            WaiterConfig={"Delay": 10, "MaxAttempts": 30},
+        ),
     )
     return {
         "snapshot_id": snap["SnapshotId"],
