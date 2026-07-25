@@ -900,7 +900,13 @@ async def _get_new_dc_hostname(source_session, new_dc_ip: str, loop, retries: in
 
 
 async def _wait_for_replication(session, new_dc_hostname: str, loop, timeout_s: int = 1800) -> bool:
-    """Poll repadmin /showrepl /csv until no errors or timeout."""
+    """Poll repadmin /showrepl /csv until no errors or timeout.
+
+    dcdiag /test:replications is intentionally omitted: it uses DsBindWithSpnEx
+    (Kerberos/SPN) internally which fails with error 5 when the calling process
+    runs under a Basic-auth WinRM session.  repadmin /showrepl /csv measures
+    actual replication success/failure directly and is sufficient.
+    """
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         try:
@@ -910,13 +916,9 @@ async def _wait_for_replication(session, new_dc_hostname: str, loop, timeout_s: 
             )
             ok, errors = _parse_repadmin_csv(stdout)
             if ok:
-                # Also check dcdiag
-                diag_out, _, _ = await loop.run_in_executor(
-                    None,
-                    lambda: _winrm_run(session, f"dcdiag /test:replications /s:{new_dc_hostname}")
-                )
-                if "passed test replications" in diag_out.lower():
-                    return True
+                logger.info("ad_dc_parallel_upgrade: replication converged on %s (0 errors in repadmin)", new_dc_hostname)
+                return True
+            logger.info("ad_dc_parallel_upgrade: replication not yet clean on %s: %s", new_dc_hostname, errors[:3])
         except Exception as exc:
             logger.debug("Replication poll exception: %s", exc)
         await asyncio.sleep(60)
