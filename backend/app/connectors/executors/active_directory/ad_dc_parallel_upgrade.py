@@ -676,12 +676,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         fsmo_before = preflight["fsmo_state"]
         execution_result["fsmo_state_before"] = fsmo_before
 
-        # Run transfer from the SOURCE DC session, targeting the new DC by NetBIOS name.
-        # Using source_session is correct: the source DC is the current FSMO holder and
-        # initiates the graceful transfer. We use NetBIOS name (hostname only, no domain
-        # suffix) to avoid the FQDN AD-object lookup that fails for newly-promoted DCs
-        # whose objects may not yet be fully replicated. No -Force: that triggers seizure
-        # (used only when the holder is unavailable), which hangs when the holder is live.
+        # Run transfer from the NEW DC session, targeting itself by NetBIOS name.
+        # Move-ADDirectoryServerOperationMasterRole uses ADWS (TCP 9389) to connect
+        # from the running DC to the Identity (target) DC. Running from the new DC
+        # and targeting itself means ADWS connects to localhost:9389 — always
+        # reachable regardless of SG rules between instances. The source DC still
+        # cooperates gracefully over AD replication; no -Force needed.
         new_dc_netbios = new_dc_hostname.split(".")[0]
         transfer_script = (
             f'$ErrorActionPreference="Stop"; '
@@ -690,35 +690,13 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             f'-OperationMasterRole PDCEmulator,RIDMaster,InfrastructureMaster,DomainNamingMaster,SchemaMaster '
             f'-Confirm:$false'
         )
-        # Retry loop: after DCPromo the new DC may not yet be reachable from the
-        # source DC via ADWS (port 9389) even though ADWS is Running locally.
-        # AD replication of the new DC's computer object to the source DC takes
-        # a few extra minutes. Retry up to 10 times (10 min total) on
-        # ADServerDownException / "Unable to contact" before giving up.
-        _fsmo_max_attempts = 10
-        _fsmo_delay_s = 60
-        stdout = stderr = ""
-        rc = -1
-        for _attempt in range(1, _fsmo_max_attempts + 1):
-            try:
-                stdout, stderr, rc = await asyncio.wait_for(
-                    loop.run_in_executor(None, lambda: _winrm_run(source_session, transfer_script)),
-                    timeout=300
-                )
-            except asyncio.TimeoutError:
-                raise RuntimeError("FSMO transfer timed out after 300s — DC may need manual role seizure")
-            if rc == 0:
-                break
-            if "Unable to contact" in stderr or "ADServerDownException" in stderr:
-                logger.info(
-                    "ad_dc_parallel_upgrade: FSMO transfer attempt %d/%d — new DC not yet reachable from source; "
-                    "retrying in %ds", _attempt, _fsmo_max_attempts, _fsmo_delay_s
-                )
-                if _attempt < _fsmo_max_attempts:
-                    await asyncio.sleep(_fsmo_delay_s)
-                    continue
-            # Any other error (or final attempt exhausted) — propagate
-            break
+        try:
+            stdout, stderr, rc = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: _winrm_run(new_dc_session, transfer_script)),
+                timeout=300
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError("FSMO transfer timed out after 300s — DC may need manual role seizure")
         if rc != 0:
             raise RuntimeError(f"FSMO transfer failed (rc={rc}): {stderr}")
 
