@@ -556,9 +556,26 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         f'-NoRebootOnCompletion:$false '
         f'-SafeModeAdministratorPassword $secpw'
     )
-    logger.info("ad_dc_parallel_upgrade: running DCPromo on %s", new_dc_private_ip)
+    logger.info("ad_dc_parallel_upgrade: running DCPromo on %s (long WinRM timeout)", new_dc_private_ip)
+    # DCPromo takes 20-30 min — use a long-timeout session so the call
+    # actually waits for the command to finish or the server to reboot.
+    # Default pywinrm read_timeout_sec (~30s) fires long before DCPromo completes,
+    # causing a silent no-op (server never gets promoted).
+    dcpromo_session = await loop.run_in_executor(
+        None,
+        lambda: _client_get_winrm(
+            {**dict(creds), "winrm_username": "Administrator", "winrm_password": domain_admin_password},
+            new_dc_private_ip,
+            operation_timeout_sec=3600,
+            read_timeout_sec=4200,
+        )
+    )
     try:
-        await loop.run_in_executor(None, lambda: _winrm_run(new_dc_session, dcpromo_script))
+        stdout, stderr, rc = await loop.run_in_executor(
+            None, lambda: _winrm_run(dcpromo_session, dcpromo_script)
+        )
+        logger.info("ad_dc_parallel_upgrade: DCPromo completed on %s rc=%s stdout=%r stderr=%r",
+                    new_dc_private_ip, rc, stdout[:500], stderr[:500])
     except Exception as exc:
         if not _is_expected_reboot_disconnect(exc):
             raise RuntimeError(f"DCPromo failed with unexpected error: {exc}") from exc
@@ -717,9 +734,11 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 # Phase helpers
 # ---------------------------------------------------------------------------
 
-def _client_get_winrm(creds, hostname):
+def _client_get_winrm(creds, hostname, operation_timeout_sec=60, read_timeout_sec=120):
     from app.connectors.executors.active_directory._client import get_winrm_session
-    return get_winrm_session(creds, dc_hostname=hostname)
+    return get_winrm_session(creds, dc_hostname=hostname,
+                             operation_timeout_sec=operation_timeout_sec,
+                             read_timeout_sec=read_timeout_sec)
 
 
 async def _wait_for_instance_running(ec2, instance_id: str, loop, timeout_s: int = 900) -> str:

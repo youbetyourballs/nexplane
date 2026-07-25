@@ -40,11 +40,16 @@ async def prepare_ad_target(connector, creds: dict) -> dict:
     return out
 
 
-def get_winrm_session(creds: dict, dc_hostname: str | None = None):
+def get_winrm_session(creds: dict, dc_hostname: str | None = None,
+                      operation_timeout_sec: int = 60, read_timeout_sec: int = 120):
     """Return a winrm.Session using connector winrm_* credentials.
 
     Uses basic transport + run_ps() which base64-encodes scripts via
     -EncodedCommand, bypassing cmd.exe pipe interpretation issues.
+
+    operation_timeout_sec / read_timeout_sec default to 60/120s which is
+    fine for normal management commands. Pass much higher values for long-
+    running commands like Install-ADDSDomainController (use 3600/4200).
     """
     import winrm
 
@@ -58,6 +63,8 @@ def get_winrm_session(creds: dict, dc_hostname: str | None = None):
         auth=(creds["winrm_username"], creds["winrm_password"]),
         transport="basic",
         server_cert_validation="ignore",
+        operation_timeout_sec=operation_timeout_sec,
+        read_timeout_sec=read_timeout_sec,
     )
 
 
