@@ -690,13 +690,35 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             f'-OperationMasterRole PDCEmulator,RIDMaster,InfrastructureMaster,DomainNamingMaster,SchemaMaster '
             f'-Confirm:$false'
         )
-        try:
-            stdout, stderr, rc = await asyncio.wait_for(
-                loop.run_in_executor(None, lambda: _winrm_run(source_session, transfer_script)),
-                timeout=300
-            )
-        except asyncio.TimeoutError:
-            raise RuntimeError("FSMO transfer timed out after 300s — DC may need manual role seizure")
+        # Retry loop: after DCPromo the new DC may not yet be reachable from the
+        # source DC via ADWS (port 9389) even though ADWS is Running locally.
+        # AD replication of the new DC's computer object to the source DC takes
+        # a few extra minutes. Retry up to 10 times (10 min total) on
+        # ADServerDownException / "Unable to contact" before giving up.
+        _fsmo_max_attempts = 10
+        _fsmo_delay_s = 60
+        stdout = stderr = ""
+        rc = -1
+        for _attempt in range(1, _fsmo_max_attempts + 1):
+            try:
+                stdout, stderr, rc = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: _winrm_run(source_session, transfer_script)),
+                    timeout=300
+                )
+            except asyncio.TimeoutError:
+                raise RuntimeError("FSMO transfer timed out after 300s — DC may need manual role seizure")
+            if rc == 0:
+                break
+            if "Unable to contact" in stderr or "ADServerDownException" in stderr:
+                logger.info(
+                    "ad_dc_parallel_upgrade: FSMO transfer attempt %d/%d — new DC not yet reachable from source; "
+                    "retrying in %ds", _attempt, _fsmo_max_attempts, _fsmo_delay_s
+                )
+                if _attempt < _fsmo_max_attempts:
+                    await asyncio.sleep(_fsmo_delay_s)
+                    continue
+            # Any other error (or final attempt exhausted) — propagate
+            break
         if rc != 0:
             raise RuntimeError(f"FSMO transfer failed (rc={rc}): {stderr}")
 
