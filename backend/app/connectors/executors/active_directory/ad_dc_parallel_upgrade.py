@@ -676,23 +676,27 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         fsmo_before = preflight["fsmo_state"]
         execution_result["fsmo_state_before"] = fsmo_before
 
-        # Run transfer from the NEW DC session using $env:COMPUTERNAME as identity.
-        # Running from source_session fails: Move-ADDirectoryServerOperationMasterRole
-        # uses DsBindWithSpnEx (Kerberos/SPN) to contact the target DC, which fails
-        # in a Basic-auth WinRM session ("Cannot find directory server").
-        # Running on the new DC with $env:COMPUTERNAME avoids both the outbound
-        # Kerberos requirement AND the FQDN AD-object lookup that fails on a
-        # newly-promoted DC whose object may not yet be fully replicated.
+        # Run transfer from the SOURCE DC session, targeting the new DC by NetBIOS name.
+        # Using source_session is correct: the source DC is the current FSMO holder and
+        # initiates the graceful transfer. We use NetBIOS name (hostname only, no domain
+        # suffix) to avoid the FQDN AD-object lookup that fails for newly-promoted DCs
+        # whose objects may not yet be fully replicated. No -Force: that triggers seizure
+        # (used only when the holder is unavailable), which hangs when the holder is live.
+        new_dc_netbios = new_dc_hostname.split(".")[0]
         transfer_script = (
-            f'$ErrorActionPreference="Continue"; '
+            f'$ErrorActionPreference="Stop"; '
             f'Move-ADDirectoryServerOperationMasterRole '
-            f'-Identity $env:COMPUTERNAME '
+            f'-Identity "{new_dc_netbios}" '
             f'-OperationMasterRole PDCEmulator,RIDMaster,InfrastructureMaster,DomainNamingMaster,SchemaMaster '
-            f'-Force'
+            f'-Confirm:$false'
         )
-        stdout, stderr, rc = await loop.run_in_executor(
-            None, lambda: _winrm_run(new_dc_session, transfer_script)
-        )
+        try:
+            stdout, stderr, rc = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: _winrm_run(source_session, transfer_script)),
+                timeout=300
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError("FSMO transfer timed out after 300s — DC may need manual role seizure")
         if rc != 0:
             raise RuntimeError(f"FSMO transfer failed (rc={rc}): {stderr}")
 
