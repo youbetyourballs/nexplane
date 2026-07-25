@@ -576,6 +576,27 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # reconnect only after both the promotion and the post-reboot AD DS init are done.
     logger.info("ad_dc_parallel_upgrade: sleeping 30 min for DCPromo+reboot+AD DS init on %s", new_dc_private_ip)
     await asyncio.sleep(1800)
+
+    # Diagnostic: connect fresh and report NTDS + ADWS status before entering the wait loop
+    try:
+        _diag_override = dict(creds)
+        _diag_override["winrm_hostname"] = new_dc_private_ip
+        _diag_override["winrm_username"] = "Administrator"
+        _diag_override["winrm_password"] = domain_admin_password
+        _diag_session = await loop.run_in_executor(None, lambda: _client_get_winrm(_diag_override, new_dc_private_ip))
+        _diag_out, _diag_err, _ = await loop.run_in_executor(
+            None,
+            lambda: _winrm_run(_diag_session, (
+                "$ntds = (Get-Service NTDS -ErrorAction SilentlyContinue).Status; "
+                "$adws = (Get-Service ADWS -ErrorAction SilentlyContinue).Status; "
+                "$isdc = (Get-WmiObject Win32_ComputerSystem).DomainRole; "
+                "Write-Output \"NTDS=$ntds ADWS=$adws DomainRole=$isdc\""
+            ))
+        )
+        logger.info("ad_dc_parallel_upgrade: post-sleep DC diag on %s: %r (err=%r)", new_dc_private_ip, _diag_out[:300], _diag_err[:200])
+    except Exception as _diag_exc:
+        logger.info("ad_dc_parallel_upgrade: post-sleep diag WinRM failed on %s: %s", new_dc_private_ip, _diag_exc)
+
     # _wait_for_adws now creates its own fresh session per attempt, so we pass
     # the connection params directly rather than a potentially stale session.
     await _wait_for_adws(
