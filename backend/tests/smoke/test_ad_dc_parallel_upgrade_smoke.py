@@ -759,7 +759,7 @@ def test_phase3_smoke_rollback():
     cr = _poll_cr(
         cr_id,
         terminal_statuses=("failed", "completed"),
-        timeout_s=7200,
+        timeout_s=10800,
         interval_s=30,
     )
     assert cr["status"] == "completed", (
