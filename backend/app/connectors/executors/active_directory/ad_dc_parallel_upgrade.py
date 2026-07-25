@@ -675,6 +675,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         fsmo_before = preflight["fsmo_state"]
         execution_result["fsmo_state_before"] = fsmo_before
 
+        # Run transfer from the NEW DC session targeting itself.
+        # Running from source_session fails: Move-ADDirectoryServerOperationMasterRole
+        # uses DsBindWithSpnEx (Kerberos/SPN) to contact the target DC, which fails
+        # in a Basic-auth WinRM session ("Cannot find directory server").
+        # Running on the new DC avoids the outbound Kerberos requirement — the new DC
+        # contacts the source DC (current holder) over LDAP to seize the roles.
         transfer_script = (
             f'Move-ADDirectoryServerOperationMasterRole '
             f'-Identity "{new_dc_hostname}" '
@@ -682,7 +688,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             f'-Force'
         )
         stdout, stderr, rc = await loop.run_in_executor(
-            None, lambda: _winrm_run(source_session, transfer_script)
+            None, lambda: _winrm_run(new_dc_session, transfer_script)
         )
         if rc != 0:
             raise RuntimeError(f"FSMO transfer failed (rc={rc}): {stderr}")
