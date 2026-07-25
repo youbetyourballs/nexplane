@@ -512,18 +512,34 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     )
     logger.info("ad_dc_parallel_upgrade: WinRM reachable on new DC %s", new_dc_private_ip)
 
-    # Install AD DS role
+    # Install AD DS role.
+    # Windows Server 2022 requires a reboot after role install before DCPromo
+    # can succeed. Capture RestartNeeded and reboot if required.
     logger.info("ad_dc_parallel_upgrade: installing AD-Domain-Services on %s", new_dc_private_ip)
     stdout, stderr, rc = await loop.run_in_executor(
         None,
         lambda: _winrm_run(new_dc_session, (
-            "Install-WindowsFeature AD-Domain-Services -IncludeManagementTools | Out-Null; "
-            "Import-Module ADDSDeployment; "
+            "$result = Install-WindowsFeature AD-Domain-Services -IncludeManagementTools; "
+            "Write-Output ('RESTART_NEEDED=' + $result.RestartNeeded); "
             "Write-Output 'ADDSROLE_INSTALLED'"
         ))
     )
     if "ADDSROLE_INSTALLED" not in stdout:
         raise RuntimeError(f"AD-Domain-Services install failed: {stderr}")
+
+    needs_restart = "RESTART_NEEDED=Yes" in stdout or "RESTART_NEEDED=Maybe" in stdout
+    if needs_restart:
+        logger.info("ad_dc_parallel_upgrade: AD DS role install requires reboot on %s — rebooting", new_dc_private_ip)
+        try:
+            await loop.run_in_executor(None, lambda: _winrm_run(new_dc_session, "Restart-Computer -Force"))
+        except Exception:
+            pass  # expected disconnect as server reboots
+        await asyncio.sleep(120)  # allow reboot to initiate
+        new_dc_session = await _wait_for_winrm(
+            creds, new_dc_private_ip, "Administrator", domain_admin_password,
+            loop, timeout_s=600
+        )
+        logger.info("ad_dc_parallel_upgrade: %s back up after AD DS role-install reboot", new_dc_private_ip)
 
     # DCPromo
     _secpw_block = (
