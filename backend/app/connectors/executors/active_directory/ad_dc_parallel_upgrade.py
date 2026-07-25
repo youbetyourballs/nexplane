@@ -414,6 +414,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     )
     new_dc_instance_type = parameters.get("new_dc_instance_type", "t3.medium")
     skip_fsmo = bool(parameters.get("skip_fsmo_transfer", False))
+    skip_demotion = bool(parameters.get("skip_source_demotion", False))
     replication_timeout_min = int(parameters.get("replication_timeout_minutes", 30))
     dry_run = bool(parameters.get("dry_run", False))
 
@@ -675,15 +676,17 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         fsmo_before = preflight["fsmo_state"]
         execution_result["fsmo_state_before"] = fsmo_before
 
-        # Run transfer from the NEW DC session targeting itself.
+        # Run transfer from the NEW DC session using $env:COMPUTERNAME as identity.
         # Running from source_session fails: Move-ADDirectoryServerOperationMasterRole
         # uses DsBindWithSpnEx (Kerberos/SPN) to contact the target DC, which fails
         # in a Basic-auth WinRM session ("Cannot find directory server").
-        # Running on the new DC avoids the outbound Kerberos requirement — the new DC
-        # contacts the source DC (current holder) over LDAP to seize the roles.
+        # Running on the new DC with $env:COMPUTERNAME avoids both the outbound
+        # Kerberos requirement AND the FQDN AD-object lookup that fails on a
+        # newly-promoted DC whose object may not yet be fully replicated.
         transfer_script = (
+            f'$ErrorActionPreference="Continue"; '
             f'Move-ADDirectoryServerOperationMasterRole '
-            f'-Identity "{new_dc_hostname}" '
+            f'-Identity $env:COMPUTERNAME '
             f'-OperationMasterRole PDCEmulator,RIDMaster,InfrastructureMaster,DomainNamingMaster,SchemaMaster '
             f'-Force'
         )
@@ -717,6 +720,11 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # -----------------------------------------------------------------------
     # Phase 6: Demote old DC
     # -----------------------------------------------------------------------
+    if skip_demotion:
+        logger.info("ad_dc_parallel_upgrade: skip_source_demotion=True — skipping source DC demotion (smoke/test use only)")
+        execution_result["status"] = "completed_no_demotion"
+        return execution_result
+
     logger.info("ad_dc_parallel_upgrade: demoting source DC %s", source_dc_hostname)
     demote_script = (
         _secpw_block +

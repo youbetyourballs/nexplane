@@ -721,9 +721,11 @@ def test_phase3_smoke_rollback():
         "region": aws_creds.get("region", "us-east-1"),
     }})
 
-    # Create CR with skip_fsmo_transfer=True to exercise Case A rollback cleanly
-    # (new DC gets provisioned and replicated but FSMOs never transferred)
-    # We trigger rollback immediately after the CR is executing and has passed phase 2
+    # Create CR with skip_fsmo_transfer=True and skip_source_demotion=True to exercise
+    # Case A rollback cleanly: new DC gets provisioned, DCPromo'd, and replicated, but
+    # FSMOs are never transferred and source is never demoted. When rollback is triggered
+    # on this completed (but non-destructive) CR, the rollback demotes the new DC and
+    # terminates the instance.
     cr = _api("post", "/change-requests", json={
         "change_type": "ad_dc_parallel_upgrade",
         "title": "Smoke: Parallel DC Upgrade Rollback Test",
@@ -737,8 +739,8 @@ def test_phase3_smoke_rollback():
             "new_dc_instance_type": "t3.medium",
             "new_dc_subnet_id": _smoke_state["subnet_id"],
             "new_dc_security_group_ids": _smoke_state["sg_ids"],
-            "skip_fsmo_transfer": True,  # Stops before FSMO transfer -> Case A rollback
-            "replication_timeout_minutes": 5,
+            "skip_fsmo_transfer": True,       # Don't transfer FSMOs -> Case A rollback
+            "skip_source_demotion": True,     # Don't demote source -> CR completes safely
             "dry_run": False,
         },
     })
@@ -750,17 +752,21 @@ def test_phase3_smoke_rollback():
     _api("post", f"/change-requests/{cr_id}/approve", json={"decision": "approved"})
     _api("post", f"/change-requests/{cr_id}/execute")
 
-    # Poll until CR fails at replication timeout.
-    # Generous timeout: DCPromo + ADWS warmup can take 30+ min before replication check runs.
-    print("[smoke_rollback] Waiting for CR to fail at replication timeout...")
+    # Wait for the CR to complete (skip_source_demotion means it completes without
+    # touching the source DC, leaving us in a clean Case A rollback state).
+    # Generous timeout: DCPromo + ADWS warmup + replication can take 60+ min.
+    print("[smoke_rollback] Waiting for CR to complete (skip_source_demotion=True)...")
     cr = _poll_cr(
         cr_id,
         terminal_statuses=("failed", "completed"),
-        timeout_s=3600,
+        timeout_s=7200,
         interval_s=30,
     )
-    # Now rollback
-    print(f"[smoke_rollback] CR status: {cr['status']} — triggering rollback")
+    assert cr["status"] == "completed", (
+        f"Rollback-test CR did not complete: status={cr['status']}"
+    )
+    # Now rollback — source is still a DC (never demoted), so rollback is Case A
+    print(f"[smoke_rollback] CR completed — triggering Case A rollback")
     _api("post", f"/change-requests/{cr_id}/rollback")
     cr = _poll_cr(
         cr_id,
