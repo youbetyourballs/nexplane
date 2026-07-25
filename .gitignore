@@ -18,3 +18,8 @@ docs/superpowers/
 content/
 # Test databases
 backend/test.db
+# binaries and scratch
+agent/nexplane-agent
+agent/*.old
+*.bak
+backend/smoke-*.yaml
