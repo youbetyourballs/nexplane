@@ -553,20 +553,24 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # does not accept DOMAIN\user format. The local Administrator IS the domain
     # admin after promotion, so the same password works.
     #
-    # First wait for WinRM to go DOWN (confirms actual reboot happened).
-    # Without this, a WinRM operation timeout on the long DCPromo command would
-    # be misread as a reboot disconnect, causing the code to proceed while
-    # DCPromo is still running and ADWS has no chance of being Running.
-    await _wait_for_winrm_down(
+    # Sleep 1800s to cover the full DCPromo + reboot + AD DS init cycle.
+    # Install-ADDSDomainController takes 20-30 min before it triggers a reboot;
+    # WinRM operation timeout fires long before then so we cannot detect the reboot
+    # reliably via WinRM polling. A fixed sleep avoids the race and ensures we
+    # reconnect only after both the promotion and the post-reboot AD DS init are done.
+    logger.info("ad_dc_parallel_upgrade: sleeping 30 min for DCPromo+reboot+AD DS init on %s", new_dc_private_ip)
+    await asyncio.sleep(1800)
+    # _wait_for_adws now creates its own fresh session per attempt, so we pass
+    # the connection params directly rather than a potentially stale session.
+    await _wait_for_adws(
         creds, new_dc_private_ip, "Administrator", domain_admin_password,
         loop, timeout_s=1200
     )
-    # Then wait for WinRM to come back (server finished rebooting).
+    # Get a session for subsequent operations.
     new_dc_session = await _wait_for_winrm(
         creds, new_dc_private_ip, "Administrator", domain_admin_password,
         loop, timeout_s=600
     )
-    await _wait_for_adws(new_dc_session, loop, timeout_s=2400)
     logger.info("ad_dc_parallel_upgrade: new DC %s promoted and AD DS healthy", new_dc_private_ip)
 
     # Confirm new DC in domain (query from source DC)
@@ -768,16 +772,29 @@ async def _wait_for_winrm(creds, hostname, username, password, loop, timeout_s: 
     raise TimeoutError(f"WinRM on {hostname} not reachable after {timeout_s}s: {last_exc}")
 
 
-async def _wait_for_adws(session, loop, timeout_s: int = 600):
-    """Wait for AD Web Services (ADWS) to be Running on session host."""
+async def _wait_for_adws(creds, hostname, username, password, loop, timeout_s: int = 600):
+    """Wait for AD Web Services (ADWS) to be Running.
+
+    Accepts connection parameters and creates a fresh WinRM session on each
+    attempt, so a stale session after a post-DCPromo reboot does not cause
+    every check to silently fail until timeout.
+    """
+    override_creds = dict(creds)
+    override_creds["winrm_hostname"] = hostname
+    override_creds["winrm_username"] = username
+    override_creds["winrm_password"] = password
     deadline = time.monotonic() + timeout_s
     attempt = 0
     while time.monotonic() < deadline:
         attempt += 1
         try:
+            session = await loop.run_in_executor(
+                None,
+                lambda: _client_get_winrm(override_creds, hostname)
+            )
             stdout, stderr, rc = await loop.run_in_executor(
                 None,
-                lambda: _winrm_run(session, "(Get-Service ADWS).Status")
+                lambda s=session: _winrm_run(s, "(Get-Service ADWS).Status")
             )
             logger.info("ad_dc_parallel_upgrade: ADWS check attempt %d: stdout=%r stderr=%r rc=%s",
                         attempt, stdout[:200], stderr[:200], rc)

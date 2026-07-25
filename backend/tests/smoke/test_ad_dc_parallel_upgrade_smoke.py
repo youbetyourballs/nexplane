@@ -611,9 +611,9 @@ def test_phase2_smoke_execute():
 
     # Execute
     _api("post", f"/change-requests/{cr_id}/execute")
-    print(f"[smoke_execute] CR executing — polling (timeout 60 min)")
+    print(f"[smoke_execute] CR executing — polling (timeout 120 min)")
 
-    cr = _poll_cr(cr_id, timeout_s=3600, interval_s=60)
+    cr = _poll_cr(cr_id, timeout_s=7200, interval_s=60)
     print(f"[smoke_execute] CR final status: {cr['status']}")
     er = _execution_result(cr)
     print(f"[smoke_execute] execution_result: {er}")
