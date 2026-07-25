@@ -580,7 +580,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # the connection params directly rather than a potentially stale session.
     await _wait_for_adws(
         creds, new_dc_private_ip, "Administrator", domain_admin_password,
-        loop, timeout_s=1200
+        loop, timeout_s=3600
     )
     # Get a session for subsequent operations.
     new_dc_session = await _wait_for_winrm(
