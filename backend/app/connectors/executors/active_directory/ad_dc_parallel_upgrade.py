@@ -541,6 +541,22 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         )
         logger.info("ad_dc_parallel_upgrade: %s back up after AD DS role-install reboot", new_dc_private_ip)
 
+    # Point the new DC's DNS at the source DC so Install-ADDSDomainController
+    # can resolve the domain and authenticate credentials against it.
+    # Without this the promotion fails with "domain controller could not be contacted".
+    logger.info("ad_dc_parallel_upgrade: setting DNS on %s to source DC %s", new_dc_private_ip, source_dc_hostname)
+    dns_script = (
+        "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1; "
+        f"Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses ('{source_dc_hostname}'); "
+        "Write-Output 'DNS_SET'"
+    )
+    stdout_dns, stderr_dns, rc_dns = await loop.run_in_executor(
+        None, lambda: _winrm_run(new_dc_session, dns_script)
+    )
+    if "DNS_SET" not in stdout_dns:
+        raise RuntimeError(f"Failed to set DNS on new DC: {stderr_dns}")
+    logger.info("ad_dc_parallel_upgrade: DNS set to %s on %s", source_dc_hostname, new_dc_private_ip)
+
     # DCPromo
     _secpw_block = (
         f'$secpw = ConvertTo-SecureString "{domain_admin_password}" -AsPlainText -Force; '
