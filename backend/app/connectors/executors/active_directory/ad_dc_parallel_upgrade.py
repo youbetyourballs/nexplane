@@ -552,7 +552,16 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Post-DCPromo, use bare "Administrator" (not domain-prefixed) — basic auth
     # does not accept DOMAIN\user format. The local Administrator IS the domain
     # admin after promotion, so the same password works.
-    await asyncio.sleep(60)
+    #
+    # First wait for WinRM to go DOWN (confirms actual reboot happened).
+    # Without this, a WinRM operation timeout on the long DCPromo command would
+    # be misread as a reboot disconnect, causing the code to proceed while
+    # DCPromo is still running and ADWS has no chance of being Running.
+    await _wait_for_winrm_down(
+        creds, new_dc_private_ip, "Administrator", domain_admin_password,
+        loop, timeout_s=1200
+    )
+    # Then wait for WinRM to come back (server finished rebooting).
     new_dc_session = await _wait_for_winrm(
         creds, new_dc_private_ip, "Administrator", domain_admin_password,
         loop, timeout_s=600
@@ -705,6 +714,33 @@ async def _wait_for_instance_running(ec2, instance_id: str, loop, timeout_s: int
             raise RuntimeError(f"Instance {instance_id} entered {state} state unexpectedly")
         await asyncio.sleep(30)
     raise TimeoutError(f"Instance {instance_id} did not reach running state within {timeout_s}s")
+
+
+async def _wait_for_winrm_down(creds, hostname, username, password, loop, timeout_s: int = 600):
+    """Wait until WinRM on hostname is UNREACHABLE — confirms the server has rebooted."""
+    override_creds = dict(creds)
+    override_creds["winrm_hostname"] = hostname
+    override_creds["winrm_username"] = username
+    override_creds["winrm_password"] = password
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            session = await loop.run_in_executor(
+                None,
+                lambda: _client_get_winrm(override_creds, hostname)
+            )
+            await loop.run_in_executor(
+                None, lambda: _winrm_run(session, 'Write-Output "ping"')
+            )
+            # Still reachable — DCPromo reboot hasn't happened yet
+            logger.info("ad_dc_parallel_upgrade: WinRM still up on %s (awaiting DCPromo reboot)", hostname)
+        except Exception:
+            logger.info("ad_dc_parallel_upgrade: WinRM down on %s — reboot confirmed", hostname)
+            return
+        await asyncio.sleep(15)
+    # If we never saw it go down, log a warning but continue — the reboot may have been
+    # very fast and WinRM went down and came back before our 15s polling caught it.
+    logger.warning("ad_dc_parallel_upgrade: never observed WinRM down on %s within %ds — proceeding anyway", hostname, timeout_s)
 
 
 async def _wait_for_winrm(creds, hostname, username, password, loop, timeout_s: int = 1200):
