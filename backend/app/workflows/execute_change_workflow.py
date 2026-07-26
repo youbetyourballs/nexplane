@@ -252,6 +252,22 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
             )
             return
 
+    # ad_dc_parallel_upgrade: long-running, no verification step — mark completed immediately.
+    if data.get("change_type") == "ad_dc_parallel_upgrade":
+        await update_change_request_status(cr_id, "completed")
+        if execution_run_id:
+            await update_execution_run_status(
+                execution_run_id, "completed", {"execution": execution_result}
+            )
+        await write_audit_event(
+            organization_id=org_id,
+            event_type="workflow.completed",
+            event_payload={"outcome": "success"},
+            actor_id=actor_id,
+            change_request_id=cr_id,
+        )
+        return
+
     # Soft-failure: executor returned {"failed": True, ...} with partial step_results preserved.
     # activity_execute_change wraps the executor result as {"steps": [{"result": executor_dict}]},
     # so we check both the top-level result and the first step's result.
