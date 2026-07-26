@@ -1173,7 +1173,8 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         try:
             new_creds = dict(creds)
             new_creds["winrm_hostname"] = new_dc_private_ip
-            new_creds["winrm_username"] = domain_admin_username
+            # Post-DCPromo WinRM requires bare "Administrator" — basic auth rejects DOMAIN\user format.
+            new_creds["winrm_username"] = "Administrator"
             new_creds["winrm_password"] = domain_admin_password
             new_session = await loop.run_in_executor(
                 None,
