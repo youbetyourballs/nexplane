@@ -140,6 +140,45 @@ Default credentials (demo only): `admin@acme.example` / `admin123`
 
 ---
 
+## AWS AMI deployment
+
+Nexplane publishes a public AMI to AWS us-east-1 with each release. Launch it directly from the EC2 console — no install script needed.
+
+**Latest AMI:** `ami-055bffa035cefba43` (v1.1.1, us-east-1)
+
+[Launch in EC2 console](https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#LaunchInstanceWizard:ami=ami-055bffa035cefba43)
+
+### Default credentials
+
+| Field | Value |
+|-------|-------|
+| Email | `admin@nexplane.local` |
+| Password | `changeme` |
+
+**Change the password immediately after first login.**
+
+### Configuration
+
+AMI deployments are configured via `/opt/nexplane/docker-compose.ami.yml` on the instance. Edit this file and restart services to apply changes.
+
+```bash
+sudo nano /opt/nexplane/docker-compose.ami.yml
+sudo docker compose -f /opt/nexplane/docker-compose.ami.yml up -d
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ADMIN_EMAIL` | `admin@nexplane.local` | Initial admin login email |
+| `ADMIN_PASSWORD` | `changeme` | Initial admin password |
+| `SECRET_KEY` | `nexplane-default-secret-key-change-before-production` | JWT signing key — **must change in production** |
+| `DEMO_MODE` | `true` | Seeds demo org data on first boot; set to `false` to start empty |
+| `CORS_ORIGINS` | `*` | Allowed CORS origins; restrict to your frontend URL in production |
+| `WEBHOOK_SECRET` | `nexplane-default-webhook-secret-change-before-production` | Inbound webhook HMAC secret |
+
+> ⚠️ The AMI binds port 80 to all interfaces. Use a security group to restrict access — never expose Nexplane directly to the public internet. Tailscale or a site-to-site VPN is the recommended access path.
+
+---
+
 ## Architecture
 
 | Layer | Technology |
