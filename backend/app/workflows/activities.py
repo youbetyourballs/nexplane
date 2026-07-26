@@ -337,14 +337,17 @@ async def activity_execute_change(
                 })
             logger.info("Step %s (%s) completed", step.get("step_number"), action_id)
 
-            # If the executor returned an early-exit status (e.g. skip_source_demotion),
-            # stop the step loop — remaining steps would re-run the same executor.
-            if isinstance(result, dict) and result.get("status") in (
-                "completed_no_demotion",
+            # If the executor returned a terminal status for a known single-step action,
+            # stop the step loop — the planner may generate duplicate steps for these.
+            _single_step_actions = {"ad_dc_parallel_upgrade"}
+            if (
+                action_id in _single_step_actions
+                and isinstance(result, dict)
+                and result.get("status") in ("completed", "completed_no_demotion")
             ):
                 logger.info(
-                    "Step %s returned status=%s — stopping step loop early",
-                    step.get("step_number"), result["status"]
+                    "Step %s (%s) returned status=%s — stopping step loop early",
+                    step.get("step_number"), action_id, result["status"]
                 )
                 break
 
