@@ -337,6 +337,17 @@ async def activity_execute_change(
                 })
             logger.info("Step %s (%s) completed", step.get("step_number"), action_id)
 
+            # If the executor returned an early-exit status (e.g. skip_source_demotion),
+            # stop the step loop — remaining steps would re-run the same executor.
+            if isinstance(result, dict) and result.get("status") in (
+                "completed_no_demotion",
+            ):
+                logger.info(
+                    "Step %s returned status=%s — stopping step loop early",
+                    step.get("step_number"), result["status"]
+                )
+                break
+
     logger.info("All steps completed for change request %s", change_request_id)
     return {"steps": step_results}
 
