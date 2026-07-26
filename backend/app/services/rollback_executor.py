@@ -299,6 +299,10 @@ async def execute_cr_rollback(
                 else:
                     # No steps to roll back — treat as successful (nothing to undo).
                     step_results = [{"success": True}]
+            # Normalize "status: ok/error" step format (returned by executor rollback())
+            # to the "success: bool" format expected by _determine_rollback_status.
+            if step_results and all("success" not in s for s in step_results) and any("status" in s for s in step_results):
+                step_results = [{"success": s.get("status") == "ok"} for s in step_results]
             if result.get("rolled_back") is True and not step_results:
                 # _executor_fallback returned direct {"rolled_back": True} — count as success.
                 step_results = [{"success": True}]
