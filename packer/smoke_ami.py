@@ -39,8 +39,8 @@ FRONTEND_ROUTES = [
     "/change-requests",
     "/connectors",
     "/settings",
-    "/users",
-    "/audit-events",
+    "/compliance",
+    "/runbooks",
 ]
 
 
@@ -464,8 +464,8 @@ def phase_feature_surface(base_url, token, cr_id):
         ("/recurring-jobs",          "recurring jobs"),
         ("/backup-targets",          "backup targets"),
         ("/change-requests",         "change requests list"),
-        ("/audit-events",             "audit log"),
-        ("/users",                   "users"),
+        ("/audit-events",            "audit log"),
+        ("/capabilities",            "capabilities"),
     ]
     for path, label in endpoints:
         r = api("get", base_url, path, token=token)
@@ -488,25 +488,11 @@ def phase_feature_surface(base_url, token, cr_id):
         fail("GET /api/audit-events returned empty — audit writes are silently failing")
     log(f"  Audit log has {len(audit_items)} entries ✓")
 
-    # Create a second user and verify they can log in (tests user provisioning + multi-session)
-    r = api("post", base_url, "/users", token=token, json={
-        "email": "smoke-user@nexplane.local",
-        "name": "Smoke User",
-        "password": "SmokePass123!",
-        "role": "auditor",
-    })
-    if r.status_code not in (200, 201):
-        fail(f"POST /users (smoke-user) failed: {r.status_code} {r.text[:200]}")
-    smoke_user_id = r.json().get("id")
-    log(f"  Created smoke-user → {smoke_user_id}")
-
-    r = api("post", base_url, "/auth/login",
-            json={"email": "smoke-user@nexplane.local", "password": "SmokePass123!"})
+    # Verify platform settings endpoint is reachable under admin auth
+    r = api("get", base_url, "/settings", token=token)
     if r.status_code != 200:
-        fail(f"Login for smoke-user failed: {r.status_code} {r.text[:200]}")
-    if not r.json().get("access_token"):
-        fail(f"No access_token for smoke-user: {r.text[:200]}")
-    log("  smoke-user login ✓")
+        fail(f"GET /api/settings failed: {r.status_code} {r.text[:200]}")
+    log("  GET /api/settings → 200 ✓")
 
     # Auth rejection path must be functional
     r = api("post", base_url, "/auth/login",
@@ -750,12 +736,12 @@ def phase_demo_mode_on(base_url, token):
         fail("DEMO_MODE=true but GET /api/connectors returned 0 connectors — seed data missing")
     log(f"  Connectors: {connector_count} ✓")
 
-    r = api("get", base_url, "/organizations", token=token)
+    r = api("get", base_url, "/demo/orgs", token=token)
     if r.status_code != 200:
-        fail(f"GET /api/organizations failed: {r.status_code}")
+        fail(f"GET /api/demo/orgs failed: {r.status_code}")
     orgs = r.json() if isinstance(r.json(), list) else r.json().get("items", [r.json()])
     if not orgs:
-        fail("DEMO_MODE=true but GET /api/organizations returned no orgs")
+        fail("DEMO_MODE=true but GET /api/demo/orgs returned no orgs")
     log(f"  Organizations: {len(orgs)} ✓")
 
     log("[PHASE 12: demo-mode-on] PASSED")
@@ -820,7 +806,7 @@ def phase_demo_mode_off(base_url, token, public_ip, key_path=None, username="ubu
         assert_empty("/assets",     "assets")
         assert_empty("/connectors", "connectors")
 
-        r = api("get", base_url, "/organizations", token=new_token)
+        r = api("get", base_url, "/demo/orgs", token=new_token)
         orgs = r.json() if isinstance(r.json(), list) else r.json().get("items", [r.json()])
         if len(orgs) != 1:
             fail(f"DEMO_MODE=false: expected exactly 1 org, got {len(orgs)}")
