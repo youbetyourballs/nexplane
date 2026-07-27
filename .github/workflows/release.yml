@@ -7,7 +7,7 @@ on:
 
 permissions:
   packages: write
-  contents: read
+  contents: write
 
 env:
   REGISTRY: ghcr.io
@@ -286,3 +286,22 @@ jobs:
             --cache-control "no-cache"
 
           echo "Launch artifacts published to releases.nexplane.ai/launch/"
+
+      - name: Update README with new AMI ID
+        env:
+          AMI_ID: ${{ needs.build-ami.outputs.ami_id }}
+          VERSION: ${{ needs.build-and-release.outputs.version }}
+        run: |
+          LAUNCH_URL="https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#LaunchInstanceWizard:ami=${AMI_ID}"
+
+          # Replace AMI ID in the badge/link line and the Launch button line
+          sed -i \
+            -e "s|ami-[0-9a-f]\{17\}|${AMI_ID}|g" \
+            -e "s|(v[0-9]\+\.[0-9]\+\.[0-9]\+, us-east-1)|(${VERSION#v}, us-east-1)|g" \
+            README.md
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git diff --cached --quiet || git commit -m "chore: update README AMI to ${AMI_ID} (${VERSION})"
+          git push
