@@ -4,6 +4,7 @@ AMI smoke test — 9-phase functional verification of a freshly launched Nexplan
 Usage: python packer/smoke_ami.py --ami-id ami-xxx --key-name smoke-key --security-group-id sg-xxx
 """
 import argparse
+import ipaddress
 import subprocess
 import sys
 import time
@@ -43,29 +44,49 @@ FRONTEND_ROUTES = [
 ]
 
 
+def _is_rfc1918(host):
+    """Return True if host is an RFC1918 private address."""
+    try:
+        addr = ipaddress.ip_address(host)
+        return addr.is_private
+    except ValueError:
+        return False
+
+
 def ssh_run(host, cmd, key_path=None, username="ubuntu", password=None, timeout=30, check=True):
     """Run cmd on host via SSH. Returns (stdout, stderr, returncode).
 
-    key_path: path to .pem file for key-pair auth (EC2 AMI deployments).
-    password: reserved for VMware/bare-metal image types — raises NotImplementedError until
-              paramiko is added as a dependency in that pipeline.
+    Auth method is selected automatically by IP:
+      - RFC1918 / private IP → password auth (sshpass); suits local and VPC-internal instances.
+      - Public IP            → key-pair auth; suits EC2 AMI smoke runs.
+
+    key_path: path to .pem file (required for public-IP hosts).
+    password: plaintext password (used for RFC1918 hosts; requires sshpass on the runner).
     check: if True, raises RuntimeError on non-zero exit code.
     """
-    if password is not None:
-        raise NotImplementedError(
-            "Password-based SSH is not yet implemented. Add paramiko when VMware pipeline is built."
-        )
-    if key_path is None:
-        raise ValueError("key_path is required for key-pair SSH auth")
-    result = subprocess.run(
-        [
+    if _is_rfc1918(host):
+        if password is None:
+            raise ValueError(
+                f"RFC1918 host {host} requires --ssh-password for password-based auth"
+            )
+        ssh_cmd = [
+            "sshpass", "-p", password,
+            "ssh", "-o", "StrictHostKeyChecking=no", "-o", f"ConnectTimeout={timeout}",
+            f"{username}@{host}",
+            cmd,
+        ]
+    else:
+        if key_path is None:
+            raise ValueError(
+                f"Public host {host} requires --key-name for key-pair auth"
+            )
+        ssh_cmd = [
             "ssh", "-o", "StrictHostKeyChecking=no", "-o", f"ConnectTimeout={timeout}",
             "-i", key_path,
             f"{username}@{host}",
             cmd,
-        ],
-        capture_output=True, text=True, timeout=timeout + 5,
-    )
+        ]
+    result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=timeout + 5)
     if check and result.returncode != 0:
         raise RuntimeError(
             f"ssh_run failed (exit {result.returncode}): {cmd!r}\nstderr: {result.stderr.strip()}"
@@ -152,14 +173,14 @@ def phase_launch(ec2, args):
 
 # ── Phase 2: Container health ─────────────────────────────────────────────────
 
-def phase_container_health(public_ip, key_path):
+def phase_container_health(public_ip, key_path=None, username="ubuntu", password=None):
     log("[PHASE 2: container-health]")
     deadline = time.time() + 300
     while True:
         stdout, stderr, rc = ssh_run(
             public_ip,
             "docker ps --format '{{.Names}}' --filter status=running",
-            key_path=key_path,
+            key_path=key_path, username=username, password=password,
             check=False,
         )
         if rc != 0:
@@ -178,7 +199,7 @@ def phase_container_health(public_ip, key_path):
 
 # ── Phase 3: Authentication ───────────────────────────────────────────────────
 
-def phase_auth(base_url, public_ip=None, key_path=None):
+def phase_auth(base_url, public_ip=None, key_path=None, username="ubuntu", password=None):
     log("[PHASE 3: authentication]")
     deadline = time.time() + 300
     while True:
@@ -191,11 +212,11 @@ def phase_auth(base_url, public_ip=None, key_path=None):
         except requests.exceptions.RequestException as exc:
             status = repr(exc)
         if time.time() >= deadline:
-            if public_ip and key_path:
+            if public_ip and (key_path or password):
                 ssh_out, _, _ = ssh_run(
                     public_ip,
                     "docker logs --tail 50 nexplane-backend-1 2>&1 || true",
-                    key_path=key_path,
+                    key_path=key_path, username=username, password=password,
                     check=False,
                 )
                 log(f"  Backend logs:\n{ssh_out[-2000:]}")
@@ -632,14 +653,14 @@ def phase_mcp(base_url, token):
 
 # ── Phase 10: Initialization quality ─────────────────────────────────────────
 
-def phase_initialization_quality(public_ip, key_path):
+def phase_initialization_quality(public_ip, key_path=None, username="ubuntu", password=None):
     log("[PHASE 10: initialization-quality]")
 
     # Alembic must be at head — catches silent migration failures
     stdout, _, _ = ssh_run(
         public_ip,
         "docker exec nexplane-backend-1 alembic current 2>&1",
-        key_path=key_path,
+        key_path=key_path, username=username, password=password,
     )
     if "(head)" not in stdout:
         fail(f"Alembic is not at head. Output:\n{stdout}")
@@ -650,7 +671,7 @@ def phase_initialization_quality(public_ip, key_path):
     stdout, _, rc = ssh_run(
         public_ip,
         "docker logs nexplane-backend-1 2>&1 | grep -i ' ERROR ' | grep -vi alembic | wc -l",
-        key_path=key_path,
+        key_path=key_path, username=username, password=password,
         check=False,
     )
     error_count = int(stdout.strip() or "0")
@@ -658,7 +679,7 @@ def phase_initialization_quality(public_ip, key_path):
         detail, _, _ = ssh_run(
             public_ip,
             "docker logs nexplane-backend-1 2>&1 | grep -i ' ERROR ' | grep -vi alembic",
-            key_path=key_path,
+            key_path=key_path, username=username, password=password,
             check=False,
         )
         fail(f"Backend has {error_count} ERROR log line(s) on clean boot:\n{detail.strip()}")
@@ -742,7 +763,7 @@ def phase_demo_mode_on(base_url, token):
 
 # ── Phase 13: Demo mode off — empty state after reconfigure ──────────────────
 
-def phase_demo_mode_off(base_url, token, public_ip, key_path):
+def phase_demo_mode_off(base_url, token, public_ip, key_path=None, username="ubuntu", password=None):
     log("[PHASE 13: demo-mode-off]")
     compose_path = "/opt/nexplane/docker-compose.ami.yml"
 
@@ -759,11 +780,11 @@ def phase_demo_mode_off(base_url, token, public_ip, key_path):
                 "'s/DEMO_MODE: \"false\"/DEMO_MODE: \"true\"/' "
                 "/opt/nexplane/docker-compose.ami.yml"
             )
-        ssh_run(public_ip, sed_cmd, key_path=key_path)
+        ssh_run(public_ip, sed_cmd, key_path=key_path, username=username, password=password)
         ssh_run(
             public_ip,
             "sudo docker compose -f /opt/nexplane/docker-compose.ami.yml up -d --force-recreate backend",
-            key_path=key_path,
+            key_path=key_path, username=username, password=password,
         )
         log(f"  Backend restarting ({wait_label})...")
         deadline = time.time() + 120
@@ -816,10 +837,10 @@ def phase_demo_mode_off(base_url, token, public_ip, key_path):
 
 # ── Phase 14: Systemd resilience ─────────────────────────────────────────────
 
-def phase_systemd_resilience(base_url, public_ip, key_path):
+def phase_systemd_resilience(base_url, public_ip, key_path=None, username="ubuntu", password=None):
     log("[PHASE 14: systemd-resilience]")
 
-    ssh_run(public_ip, "sudo systemctl restart nexplane", key_path=key_path)
+    ssh_run(public_ip, "sudo systemctl restart nexplane", key_path=key_path, username=username, password=password)
     log("  nexplane service restarted — waiting for port 80...")
 
     deadline = time.time() + 180
@@ -865,12 +886,30 @@ def cleanup(base_url, token, cr_ids, asset_ids, connector_ids):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description=(
+            "AMI smoke test. Auth method is chosen automatically by IP: "
+            "public IPs use key-pair (--key-name), RFC1918 IPs use password (--ssh-password)."
+        )
+    )
     parser.add_argument("--ami-id",            required=True)
-    parser.add_argument("--key-name",          required=True)
+    parser.add_argument("--key-name",          default=None,
+                        help="EC2 key-pair name (required for public-IP / EC2 runs)")
+    parser.add_argument("--ssh-password",      default=None,
+                        help="SSH password for RFC1918 hosts (local/VPC-internal testing)")
+    parser.add_argument("--ssh-username",      default="ubuntu",
+                        help="SSH username (default: ubuntu)")
     parser.add_argument("--security-group-id", required=True)
     parser.add_argument("--region",            default="us-east-1")
     args = parser.parse_args()
+
+    # ssh_kwargs is passed to every ssh_run call site; auth method is chosen inside ssh_run
+    # based on whether the target IP is RFC1918 or public.
+    ssh_kwargs = {
+        "username": args.ssh_username,
+        "key_path": f"{args.key_name}.pem" if args.key_name else None,
+        "password": args.ssh_password,
+    }
 
     ec2 = boto3.client("ec2", region_name=args.region)
     instance_id  = None
@@ -883,19 +922,19 @@ def main():
 
     try:
         instance_id, public_ip, base_url = phase_launch(ec2, args)
-        phase_container_health(public_ip, key_path=f"{args.key_name}.pem")
-        token = phase_auth(base_url, public_ip=public_ip, key_path=f"{args.key_name}.pem")
+        phase_container_health(public_ip, **ssh_kwargs)
+        token = phase_auth(base_url, public_ip=public_ip, **ssh_kwargs)
         web_id, app_id, db_id, asset_ids = phase_assets(base_url, token)
         aws_conn_id, connector_ids = phase_connectors(base_url, token)
         cr_id, cr_ids = phase_cr_lifecycle(base_url, token, app_id, aws_conn_id)
         phase_rollback(base_url, token, cr_id)
         phase_feature_surface(base_url, token, cr_id)
         phase_mcp(base_url, token)
-        phase_initialization_quality(public_ip, key_path=f"{args.key_name}.pem")
+        phase_initialization_quality(public_ip, **ssh_kwargs)
         phase_frontend_routes(base_url)
         phase_demo_mode_on(base_url, token)
-        token = phase_demo_mode_off(base_url, token, public_ip, key_path=f"{args.key_name}.pem")
-        phase_systemd_resilience(base_url, public_ip, key_path=f"{args.key_name}.pem")
+        token = phase_demo_mode_off(base_url, token, public_ip, **ssh_kwargs)
+        phase_systemd_resilience(base_url, public_ip, **ssh_kwargs)
 
         if token:
             cleanup(base_url, token, cr_ids, asset_ids, connector_ids)
