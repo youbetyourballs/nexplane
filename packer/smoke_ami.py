@@ -528,7 +528,7 @@ def phase_mcp(base_url, token):
     def mcp_call(method, params, call_id, agent_tok, session_id):
         """Send one MCP JSON-RPC request over SSE transport. Returns parsed result."""
         r = requests.post(
-            f"{base_url}/api/mcp/messages",
+            f"{base_url}/api/mcp/messages/",
             params={"session_id": session_id},
             headers={
                 "Authorization": f"Bearer {agent_tok}",
