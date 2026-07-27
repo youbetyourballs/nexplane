@@ -22,6 +22,15 @@ PLAN_TERMINAL  = {"planned", "failed"}
 # Containers expected to be running on the AMI
 EXPECTED_CONTAINERS = ("db", "backend", "webserver")
 
+# All accounts seeded by seed.py when DEMO_MODE=true.
+# Each tuple: (email, password, expected_role)
+SEEDED_ACCOUNTS = [
+    ("admin@nexplane.local",   "changeme",    "admin"),
+    ("operator@acme.example",  "operator123", "security_operator"),
+    ("approver@acme.example",  "approver123", "approver"),
+    ("auditor@acme.example",   "auditor123",  "auditor"),
+]
+
 
 def ssh_run(host, cmd, key_path=None, username="ubuntu", password=None, timeout=30, check=True):
     """Run cmd on host via SSH. Returns (stdout, stderr, returncode).
@@ -194,6 +203,23 @@ def phase_auth(base_url, public_ip=None, key_path=None):
     if me.get("email") != "admin@nexplane.local":
         fail(f"Unexpected /auth/me email: {me.get('email')}")
     log(f"  GET /auth/me → {me.get('email')} ({me.get('role', '?')})")
+
+    log("  Verifying all seeded accounts...")
+    for email, password, expected_role in SEEDED_ACCOUNTS:
+        r = api("post", base_url, "/auth/login", json={"email": email, "password": password})
+        if r.status_code != 200:
+            fail(f"Login failed for {email}: {r.status_code} {r.text[:200]}")
+        acct_token = r.json().get("access_token")
+        if not acct_token:
+            fail(f"No access_token for {email}: {r.text[:200]}")
+        r2 = api("get", base_url, "/auth/me", token=acct_token)
+        if r2.status_code != 200:
+            fail(f"GET /auth/me failed for {email}: {r2.status_code}")
+        actual_role = r2.json().get("role", "")
+        if actual_role != expected_role:
+            fail(f"{email}: expected role '{expected_role}', got '{actual_role}'")
+        log(f"  {email} → role={actual_role} ✓")
+
     log("[PHASE 3: authentication] PASSED")
     return token
 
