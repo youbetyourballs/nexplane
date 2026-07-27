@@ -748,15 +748,22 @@ def phase_demo_mode_off(base_url, token, public_ip, key_path):
     compose_path = "/opt/nexplane/docker-compose.ami.yml"
 
     def restart_backend_and_wait(demo_value, wait_label):
+        if demo_value == "false":
+            sed_cmd = (
+                "sudo sed -i "
+                "'s/DEMO_MODE: \"true\"/DEMO_MODE: \"false\"/' "
+                "/opt/nexplane/docker-compose.ami.yml"
+            )
+        else:
+            sed_cmd = (
+                "sudo sed -i "
+                "'s/DEMO_MODE: \"false\"/DEMO_MODE: \"true\"/' "
+                "/opt/nexplane/docker-compose.ami.yml"
+            )
+        ssh_run(public_ip, sed_cmd, key_path=key_path)
         ssh_run(
             public_ip,
-            f"sudo sed -i 's/DEMO_MODE: \"{('true' if demo_value != 'false' else 'false')}\""
-            f"/DEMO_MODE: \"{demo_value}\"/' {compose_path}",
-            key_path=key_path,
-        )
-        ssh_run(
-            public_ip,
-            f"sudo docker compose -f {compose_path} up -d --force-recreate backend",
+            "sudo docker compose -f /opt/nexplane/docker-compose.ami.yml up -d --force-recreate backend",
             key_path=key_path,
         )
         log(f"  Backend restarting ({wait_label})...")
