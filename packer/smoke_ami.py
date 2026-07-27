@@ -619,6 +619,43 @@ def phase_mcp(base_url, token):
     log("[PHASE 9: mcp-server] PASSED")
 
 
+# ── Phase 10: Initialization quality ─────────────────────────────────────────
+
+def phase_initialization_quality(public_ip, key_path):
+    log("[PHASE 10: initialization-quality]")
+
+    # Alembic must be at head — catches silent migration failures
+    stdout, _, _ = ssh_run(
+        public_ip,
+        "docker exec nexplane-backend-1 alembic current 2>&1",
+        key_path=key_path,
+    )
+    if "(head)" not in stdout:
+        fail(f"Alembic is not at head. Output:\n{stdout}")
+    log("  Alembic at head ✓")
+
+    # Backend must have zero ERROR-level log lines on clean boot
+    # (exclude alembic lines which may contain the word "error" in table names)
+    stdout, _, rc = ssh_run(
+        public_ip,
+        "docker logs nexplane-backend-1 2>&1 | grep -i ' ERROR ' | grep -vi alembic | wc -l",
+        key_path=key_path,
+        check=False,
+    )
+    error_count = int(stdout.strip() or "0")
+    if error_count > 0:
+        detail, _, _ = ssh_run(
+            public_ip,
+            "docker logs nexplane-backend-1 2>&1 | grep -i ' ERROR ' | grep -vi alembic",
+            key_path=key_path,
+            check=False,
+        )
+        fail(f"Backend has {error_count} ERROR log line(s) on clean boot:\n{detail.strip()}")
+    log("  Backend error log: 0 ERROR lines on clean boot ✓")
+
+    log("[PHASE 10: initialization-quality] PASSED")
+
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def cleanup(base_url, token, cr_ids, asset_ids, connector_ids):
@@ -663,13 +700,14 @@ def main():
         phase_rollback(base_url, token, cr_id)
         phase_feature_surface(base_url, token, cr_id)
         phase_mcp(base_url, token)
+        phase_initialization_quality(public_ip, key_path=f"{args.key_name}.pem")
 
         if token:
             cleanup(base_url, token, cr_ids, asset_ids, connector_ids)
 
         log("")
         log("=" * 60)
-        log("AMI SMOKE: ALL 9 PHASES PASSED")
+        log("AMI SMOKE: ALL 10 PHASES PASSED")
         log("=" * 60)
 
     finally:
