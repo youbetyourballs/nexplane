@@ -31,6 +31,18 @@ SEEDED_ACCOUNTS = [
     ("auditor@acme.example",   "auditor123",  "auditor"),
 ]
 
+# All known frontend routes that must return 200 with text/html content type
+FRONTEND_ROUTES = [
+    "/",
+    "/login",
+    "/assets",
+    "/change-requests",
+    "/connectors",
+    "/settings",
+    "/users",
+    "/audit-log",
+]
+
 
 def ssh_run(host, cmd, key_path=None, username="ubuntu", password=None, timeout=30, check=True):
     """Run cmd on host via SSH. Returns (stdout, stderr, returncode).
@@ -656,6 +668,44 @@ def phase_initialization_quality(public_ip, key_path):
     log("[PHASE 10: initialization-quality] PASSED")
 
 
+# ── Phase 11: Frontend route and static asset coverage ───────────────────────
+
+def phase_frontend_routes(base_url):
+    log("[PHASE 11: frontend-routes]")
+
+    # All known SPA routes must return 200 with text/html content type
+    for route in FRONTEND_ROUTES:
+        try:
+            r = requests.get(f"{base_url}{route}", timeout=15, allow_redirects=True)
+        except requests.exceptions.RequestException as exc:
+            fail(f"GET {route} raised exception: {exc}")
+        if r.status_code != 200:
+            fail(f"GET {route} returned {r.status_code} (expected 200)")
+        ct = r.headers.get("content-type", "")
+        if "text/html" not in ct:
+            fail(f"GET {route} content-type is '{ct}' (expected text/html)")
+        log(f"  GET {route} → 200 text/html ✓")
+
+    # Parse root HTML and verify all referenced JS/CSS bundles load
+    r = requests.get(f"{base_url}/", timeout=15)
+    html = r.text
+    import re
+    asset_paths = re.findall(r'(?:src|href)="(/[^"]+\.(?:js|css))"', html)
+    if not asset_paths:
+        fail("No JS/CSS asset paths found in root HTML — Vite build may be broken")
+    log(f"  Found {len(asset_paths)} static asset reference(s) in root HTML")
+    for path in asset_paths:
+        try:
+            head = requests.head(f"{base_url}{path}", timeout=10, allow_redirects=True)
+        except requests.exceptions.RequestException as exc:
+            fail(f"HEAD {path} raised exception: {exc}")
+        if head.status_code != 200:
+            fail(f"Static asset {path} returned {head.status_code} (expected 200)")
+        log(f"  HEAD {path} → 200 ✓")
+
+    log("[PHASE 11: frontend-routes] PASSED")
+
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def cleanup(base_url, token, cr_ids, asset_ids, connector_ids):
@@ -701,13 +751,14 @@ def main():
         phase_feature_surface(base_url, token, cr_id)
         phase_mcp(base_url, token)
         phase_initialization_quality(public_ip, key_path=f"{args.key_name}.pem")
+        phase_frontend_routes(base_url)
 
         if token:
             cleanup(base_url, token, cr_ids, asset_ids, connector_ids)
 
         log("")
         log("=" * 60)
-        log("AMI SMOKE: ALL 10 PHASES PASSED")
+        log("AMI SMOKE: ALL 11 PHASES PASSED")
         log("=" * 60)
 
     finally:
