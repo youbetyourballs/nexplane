@@ -504,7 +504,7 @@ def phase_feature_surface(base_url, token, cr_id):
     # Agent binary must be reachable at the URL baked into the AMI
     agent_url = (
         "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com"
-        "/latest/linux-amd64/nexplane-agent"
+        "/nexplane-agent-linux-amd64-latest"
     )
     try:
         head = requests.head(agent_url, timeout=15, allow_redirects=True)
