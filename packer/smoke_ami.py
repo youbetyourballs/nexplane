@@ -507,6 +507,24 @@ def phase_feature_surface(base_url, token, cr_id):
 def phase_mcp(base_url, token):
     log("[PHASE 9: mcp-server]")
 
+    def mcp_call(method, params, call_id, agent_tok):
+        """Send one MCP JSON-RPC request. Returns the parsed response dict."""
+        r = requests.post(
+            f"{base_url}/api/mcp",
+            headers={
+                "Authorization": f"Bearer {agent_tok}",
+                "Content-Type": "application/json",
+            },
+            json={"jsonrpc": "2.0", "id": call_id, "method": method, "params": params},
+            timeout=20,
+        )
+        if r.status_code != 200:
+            fail(f"MCP {method} returned HTTP {r.status_code}: {r.text[:300]}")
+        data = r.json()
+        if "error" in data:
+            fail(f"MCP {method} returned JSON-RPC error: {data['error']}")
+        return data.get("result", {})
+
     # Create an agent token (required for MCP auth)
     r = api("post", base_url, "/auth/agent-tokens", token=token,
             json={"name": "smoke-ami-mcp", "scopes": ["read", "write"]})
@@ -546,6 +564,53 @@ def phase_mcp(base_url, token):
     except requests.exceptions.Timeout:
         # SSE streams don't close; a timeout after connecting means the endpoint is up
         log("  MCP SSE endpoint → connected (stream open) ✓")
+
+    # MCP initialize handshake
+    result = mcp_call(
+        "initialize",
+        {
+            "protocolVersion": "2024-11-05",
+            "clientInfo": {"name": "smoke", "version": "0.0.1"},
+            "capabilities": {},
+        },
+        call_id=1,
+        agent_tok=agent_token,
+    )
+    server_name = (result.get("serverInfo") or {}).get("name", "")
+    if not server_name:
+        fail(f"MCP initialize: missing serverInfo.name in response: {result}")
+    if "capabilities" not in result:
+        fail(f"MCP initialize: missing capabilities in response: {result}")
+    log(f"  MCP initialize → serverInfo.name={server_name!r} ✓")
+
+    # MCP tools/list — must return a non-empty tool list
+    result = mcp_call("tools/list", {}, call_id=2, agent_tok=agent_token)
+    tools = result.get("tools", [])
+    if not tools:
+        fail("MCP tools/list returned empty tools array — tool registration failed at startup")
+    log(f"  MCP tools/list → {len(tools)} tools registered ✓")
+
+    # MCP tool call — verify MCP → backend → DB path end-to-end
+    # list_change_requests is read-only and always returns (CRs created in phase 6 exist)
+    tool_name = next(
+        (t["name"] for t in tools if "change_request" in t.get("name", "").lower()),
+        None,
+    )
+    if tool_name is None:
+        tool_name = next(
+            (t["name"] for t in tools if "list" in t.get("name", "").lower()),
+            tools[0]["name"],
+        )
+    result = mcp_call(
+        "tools/call",
+        {"name": tool_name, "arguments": {}},
+        call_id=3,
+        agent_tok=agent_token,
+    )
+    # A valid result has "content" key; an error would have been caught by mcp_call()
+    if "content" not in result and "result" not in result:
+        fail(f"MCP tools/call ({tool_name}): unexpected result shape: {result}")
+    log(f"  MCP tools/call ({tool_name}) → valid result ✓")
 
     # Clean up agent token
     r = api("delete", base_url, f"/auth/agent-tokens/{agent_token_id}", token=token)
