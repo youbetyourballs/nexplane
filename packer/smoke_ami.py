@@ -525,27 +525,6 @@ def phase_feature_surface(base_url, token, cr_id):
 def phase_mcp(base_url, token):
     log("[PHASE 9: mcp-server]")
 
-    def mcp_call(method, params, call_id, agent_tok, session_id):
-        """Send one MCP JSON-RPC request over SSE transport. Returns parsed result."""
-        r = requests.post(
-            f"{base_url}/api/mcp/messages/",
-            params={"session_id": session_id},
-            headers={
-                "Authorization": f"Bearer {agent_tok}",
-                "Content-Type": "application/json",
-            },
-            json={"jsonrpc": "2.0", "id": call_id, "method": method, "params": params},
-            timeout=20,
-        )
-        if r.status_code not in (200, 202):
-            fail(f"MCP {method} returned HTTP {r.status_code}: {r.text[:300]}")
-        if r.text.strip():
-            data = r.json()
-            if "error" in data:
-                fail(f"MCP {method} returned JSON-RPC error: {data['error']}")
-            return data.get("result", {})
-        return {}
-
     # Create an agent token (required for MCP auth)
     r = api("post", base_url, "/auth/agent-tokens", token=token,
             json={"name": "smoke-ami-mcp", "scopes": ["read", "write"]})
@@ -567,15 +546,15 @@ def phase_mcp(base_url, token):
     log("  Agent token listed ✓")
 
     # Open the MCP SSE stream in a background thread so the session stays alive
-    # while we POST messages to it. FastMCP SSE transport: GET /mcp/sse emits an
-    # "endpoint" event whose data contains the session_id; the session is only
-    # valid while that connection remains open.
-    import threading, urllib.parse as _up
+    # while we POST messages to it. FastMCP SSE transport: POST /mcp/messages/
+    # returns 202 Accepted (empty body); results are pushed as SSE data events.
+    import threading, queue as _q, json as _json, urllib.parse as _up
     mcp_url = f"{base_url}/api/mcp/sse"
     log(f"  Connecting to MCP SSE endpoint: {mcp_url}")
     session_id = None
     session_id_event = threading.Event()
     sse_error = []
+    response_queue = _q.Queue()  # receives parsed JSON-RPC response dicts
 
     def _sse_reader():
         try:
@@ -583,22 +562,26 @@ def phase_mcp(base_url, token):
                 mcp_url,
                 headers={"Authorization": f"Bearer {agent_token}", "Accept": "text/event-stream"},
                 stream=True,
-                timeout=(10, 60),  # connect timeout, read timeout
+                timeout=(10, 120),
             ) as resp:
                 if resp.status_code != 200:
                     sse_error.append(f"GET /api/mcp/sse returned {resp.status_code}")
                     session_id_event.set()
                     return
                 for raw in resp.iter_lines(decode_unicode=True):
-                    if raw.startswith("data:"):
-                        data_val = raw[5:].strip()
-                        if "session_id=" in data_val:
-                            nonlocal session_id
-                            session_id = _up.parse_qs(_up.urlparse(data_val).query).get("session_id", [None])[0]
-                            session_id_event.set()
-                    if session_id_event.is_set() and session_id:
-                        # Keep reading (keep-alive) until main thread is done
-                        pass
+                    if not raw.startswith("data:"):
+                        continue
+                    data_val = raw[5:].strip()
+                    if "session_id=" in data_val:
+                        nonlocal session_id
+                        session_id = _up.parse_qs(_up.urlparse(data_val).query).get("session_id", [None])[0]
+                        session_id_event.set()
+                    elif session_id_event.is_set() and data_val:
+                        # JSON-RPC response sent back via SSE after a POST /messages/
+                        try:
+                            response_queue.put(_json.loads(data_val))
+                        except _json.JSONDecodeError:
+                            pass
         except Exception as exc:
             sse_error.append(str(exc))
             session_id_event.set()
@@ -615,8 +598,31 @@ def phase_mcp(base_url, token):
     log("  MCP SSE endpoint → 200 text/event-stream ✓")
     log("  MCP session_id captured ✓")
 
-    # MCP initialize handshake (session kept alive by background thread)
-    result = mcp_call(
+    def mcp_call_sse(method, params, call_id, agent_tok, sid):
+        """Send MCP JSON-RPC via POST; read response from SSE stream."""
+        r = requests.post(
+            f"{base_url}/api/mcp/messages/",
+            params={"session_id": sid},
+            headers={
+                "Authorization": f"Bearer {agent_tok}",
+                "Content-Type": "application/json",
+            },
+            json={"jsonrpc": "2.0", "id": call_id, "method": method, "params": params},
+            timeout=20,
+        )
+        if r.status_code not in (200, 202):
+            fail(f"MCP {method} POST returned HTTP {r.status_code}: {r.text[:300]}")
+        # Result arrives via SSE; wait up to 30s
+        try:
+            data = response_queue.get(timeout=30)
+        except _q.Empty:
+            fail(f"MCP {method} — no response on SSE stream within 30s")
+        if "error" in data:
+            fail(f"MCP {method} returned JSON-RPC error: {data['error']}")
+        return data.get("result", {})
+
+    # MCP initialize handshake
+    result = mcp_call_sse(
         "initialize",
         {
             "protocolVersion": "2024-11-05",
@@ -625,13 +631,17 @@ def phase_mcp(base_url, token):
         },
         call_id=1,
         agent_tok=agent_token,
-        session_id=session_id,
+        sid=session_id,
     )
-    log("  MCP initialize → accepted ✓")
+    if not isinstance(result.get("capabilities"), dict):
+        fail(f"MCP initialize result missing capabilities dict: {result}")
+    log("  MCP initialize ✓")
 
     # MCP tools/list — verify tool registration didn't silently fail
-    result = mcp_call("tools/list", {}, call_id=2, agent_tok=agent_token, session_id=session_id)
-    log("  MCP tools/list → accepted ✓")
+    result = mcp_call_sse("tools/list", {}, call_id=2, agent_tok=agent_token, sid=session_id)
+    if not result.get("tools"):
+        fail(f"MCP tools/list returned empty tools list: {result}")
+    log(f"  MCP tools/list ✓ ({len(result['tools'])} tools)")
 
     # Clean up agent token
     r = api("delete", base_url, f"/auth/agent-tokens/{agent_token_id}", token=token)
