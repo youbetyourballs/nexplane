@@ -158,7 +158,7 @@ def phase_container_health(public_ip, key_path):
 
 # ── Phase 3: Authentication ───────────────────────────────────────────────────
 
-def phase_auth(base_url, public_ip=None, args=None):
+def phase_auth(base_url, public_ip=None, key_path=None):
     log("[PHASE 3: authentication]")
     deadline = time.time() + 300
     while True:
@@ -171,13 +171,14 @@ def phase_auth(base_url, public_ip=None, args=None):
         except requests.exceptions.RequestException as exc:
             status = repr(exc)
         if time.time() >= deadline:
-            if public_ip and args:
-                ssh_logs = subprocess.run(
-                    ["ssh", "-o", "StrictHostKeyChecking=no", "-i", f"{args.key_name}.pem",
-                     f"ubuntu@{public_ip}",
-                     "docker logs --tail 50 nexplane-backend-1 2>&1 || true"],
-                    capture_output=True, text=True, timeout=30)
-                log(f"  Backend logs:\n{ssh_logs.stdout[-2000:]}")
+            if public_ip and key_path:
+                ssh_out, _, _ = ssh_run(
+                    public_ip,
+                    "docker logs --tail 50 nexplane-backend-1 2>&1 || true",
+                    key_path=key_path,
+                    check=False,
+                )
+                log(f"  Backend logs:\n{ssh_out[-2000:]}")
             fail(f"Login failed after 300s: {status}")
         log(f"  Backend not ready yet ({status}), retrying in 15s...")
         time.sleep(15)
@@ -512,7 +513,7 @@ def main():
     try:
         instance_id, public_ip, base_url = phase_launch(ec2, args)
         phase_container_health(public_ip, key_path=f"{args.key_name}.pem")
-        token = phase_auth(base_url, public_ip=public_ip, args=args)
+        token = phase_auth(base_url, public_ip=public_ip, key_path=f"{args.key_name}.pem")
         web_id, app_id, db_id, asset_ids = phase_assets(base_url, token)
         aws_conn_id, connector_ids = phase_connectors(base_url, token)
         cr_id, cr_ids = phase_cr_lifecycle(base_url, token, app_id, aws_conn_id)
