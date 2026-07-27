@@ -566,42 +566,56 @@ def phase_mcp(base_url, token):
         fail(f"Agent token {agent_token_id} not in list")
     log("  Agent token listed ✓")
 
-    # Open the MCP SSE stream and capture the session_id from the endpoint event.
-    # FastMCP SSE transport: GET /mcp/sse emits an "endpoint" event whose data is
-    # the POST URL containing the session_id query param.
+    # Open the MCP SSE stream in a background thread so the session stays alive
+    # while we POST messages to it. FastMCP SSE transport: GET /mcp/sse emits an
+    # "endpoint" event whose data contains the session_id; the session is only
+    # valid while that connection remains open.
+    import threading, urllib.parse as _up
     mcp_url = f"{base_url}/api/mcp/sse"
     log(f"  Connecting to MCP SSE endpoint: {mcp_url}")
     session_id = None
-    try:
-        with requests.get(
-            mcp_url,
-            headers={"Authorization": f"Bearer {agent_token}", "Accept": "text/event-stream"},
-            stream=True,
-            timeout=15,
-        ) as resp:
-            if resp.status_code != 200:
-                fail(f"GET /api/mcp/sse returned {resp.status_code} (expected 200)")
-            ct = resp.headers.get("content-type", "")
-            if "text/event-stream" not in ct:
-                fail(f"GET /api/mcp/sse content-type is '{ct}' (expected text/event-stream)")
-            log("  MCP SSE endpoint → 200 text/event-stream ✓")
-            # Read lines until we see the endpoint event
-            for raw in resp.iter_lines(decode_unicode=True):
-                if raw.startswith("data:"):
-                    data_val = raw[5:].strip()
-                    if "session_id=" in data_val:
-                        # data value is the messages URL, e.g. /mcp/messages?session_id=abc
-                        import urllib.parse as _up
-                        session_id = _up.parse_qs(_up.urlparse(data_val).query).get("session_id", [None])[0]
-                        break
-    except requests.exceptions.Timeout:
-        log("  MCP SSE endpoint → connected (stream open, no endpoint event in time)")
+    session_id_event = threading.Event()
+    sse_error = []
 
+    def _sse_reader():
+        try:
+            with requests.get(
+                mcp_url,
+                headers={"Authorization": f"Bearer {agent_token}", "Accept": "text/event-stream"},
+                stream=True,
+                timeout=(10, 60),  # connect timeout, read timeout
+            ) as resp:
+                if resp.status_code != 200:
+                    sse_error.append(f"GET /api/mcp/sse returned {resp.status_code}")
+                    session_id_event.set()
+                    return
+                for raw in resp.iter_lines(decode_unicode=True):
+                    if raw.startswith("data:"):
+                        data_val = raw[5:].strip()
+                        if "session_id=" in data_val:
+                            nonlocal session_id
+                            session_id = _up.parse_qs(_up.urlparse(data_val).query).get("session_id", [None])[0]
+                            session_id_event.set()
+                    if session_id_event.is_set() and session_id:
+                        # Keep reading (keep-alive) until main thread is done
+                        pass
+        except Exception as exc:
+            sse_error.append(str(exc))
+            session_id_event.set()
+
+    sse_thread = threading.Thread(target=_sse_reader, daemon=True)
+    sse_thread.start()
+
+    if not session_id_event.wait(timeout=15):
+        fail("MCP SSE stream timed out waiting for endpoint event")
+    if sse_error:
+        fail(f"MCP SSE stream error: {sse_error[0]}")
     if not session_id:
         fail("MCP SSE stream did not emit an endpoint event with session_id")
-    log(f"  MCP session_id captured ✓")
+    log("  MCP SSE endpoint → 200 text/event-stream ✓")
+    log("  MCP session_id captured ✓")
 
-    # MCP initialize handshake
+    # MCP initialize handshake (session kept alive by background thread)
     result = mcp_call(
         "initialize",
         {
