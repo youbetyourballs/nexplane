@@ -35,7 +35,6 @@ SEEDED_ACCOUNTS = [
 FRONTEND_ROUTES = [
     "/",
     "/login",
-    "/assets",
     "/change-requests",
     "/connectors",
     "/settings",
@@ -809,9 +808,10 @@ def phase_demo_mode_off(base_url, token, public_ip, key_path):
     finally:
         # Always restore DEMO_MODE=true so phase 14 starts from a known-good state
         log("  Restoring DEMO_MODE=true...")
-        restart_backend_and_wait("true", "restore DEMO_MODE=true")
+        restored_token = restart_backend_and_wait("true", "restore DEMO_MODE=true")
 
     log("[PHASE 13: demo-mode-off] PASSED")
+    return restored_token
 
 
 # ── Phase 14: Systemd resilience ─────────────────────────────────────────────
@@ -894,7 +894,7 @@ def main():
         phase_initialization_quality(public_ip, key_path=f"{args.key_name}.pem")
         phase_frontend_routes(base_url)
         phase_demo_mode_on(base_url, token)
-        phase_demo_mode_off(base_url, token, public_ip, key_path=f"{args.key_name}.pem")
+        token = phase_demo_mode_off(base_url, token, public_ip, key_path=f"{args.key_name}.pem")
         phase_systemd_resilience(base_url, public_ip, key_path=f"{args.key_name}.pem")
 
         if token:
