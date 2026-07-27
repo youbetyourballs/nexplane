@@ -706,6 +706,107 @@ def phase_frontend_routes(base_url):
     log("[PHASE 11: frontend-routes] PASSED")
 
 
+# ── Phase 12: Demo mode on — seed data present ───────────────────────────────
+
+def phase_demo_mode_on(base_url, token):
+    log("[PHASE 12: demo-mode-on]")
+
+    def get_count(path):
+        r = api("get", base_url, path, token=token)
+        if r.status_code != 200:
+            fail(f"GET /api{path} failed: {r.status_code}")
+        body = r.json()
+        if isinstance(body, list):
+            return len(body)
+        return body.get("total", body.get("count", len(body.get("items", []))))
+
+    asset_count = get_count("/assets")
+    if asset_count == 0:
+        fail("DEMO_MODE=true but GET /api/assets returned 0 assets — seed data missing")
+    log(f"  Assets: {asset_count} ✓")
+
+    connector_count = get_count("/connectors")
+    if connector_count == 0:
+        fail("DEMO_MODE=true but GET /api/connectors returned 0 connectors — seed data missing")
+    log(f"  Connectors: {connector_count} ✓")
+
+    r = api("get", base_url, "/organizations", token=token)
+    if r.status_code != 200:
+        fail(f"GET /api/organizations failed: {r.status_code}")
+    orgs = r.json() if isinstance(r.json(), list) else r.json().get("items", [r.json()])
+    if not orgs:
+        fail("DEMO_MODE=true but GET /api/organizations returned no orgs")
+    log(f"  Organizations: {len(orgs)} ✓")
+
+    log("[PHASE 12: demo-mode-on] PASSED")
+
+
+# ── Phase 13: Demo mode off — empty state after reconfigure ──────────────────
+
+def phase_demo_mode_off(base_url, token, public_ip, key_path):
+    log("[PHASE 13: demo-mode-off]")
+    compose_path = "/opt/nexplane/docker-compose.ami.yml"
+
+    def restart_backend_and_wait(demo_value, wait_label):
+        ssh_run(
+            public_ip,
+            f"sudo sed -i 's/DEMO_MODE: \"{('true' if demo_value != 'false' else 'false')}\""
+            f"/DEMO_MODE: \"{demo_value}\"/' {compose_path}",
+            key_path=key_path,
+        )
+        ssh_run(
+            public_ip,
+            f"sudo docker compose -f {compose_path} up -d --force-recreate backend",
+            key_path=key_path,
+        )
+        log(f"  Backend restarting ({wait_label})...")
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            try:
+                r = api("post", base_url, "/auth/login",
+                        json={"email": "admin@nexplane.local", "password": "changeme"})
+                if r.status_code == 200:
+                    log(f"  Backend ready ({wait_label}) ✓")
+                    return r.json().get("access_token")
+            except Exception:
+                pass
+            time.sleep(10)
+        fail(f"Backend did not become ready within 120s ({wait_label})")
+
+    try:
+        # Switch to DEMO_MODE=false
+        new_token = restart_backend_and_wait("false", "DEMO_MODE=false")
+
+        # Assert empty state
+        def assert_empty(path, label):
+            r = api("get", base_url, path, token=new_token)
+            if r.status_code != 200:
+                fail(f"GET /api{path} failed: {r.status_code}")
+            body = r.json()
+            count = len(body) if isinstance(body, list) else body.get(
+                "total", body.get("count", len(body.get("items", [])))
+            )
+            if count != 0:
+                fail(f"DEMO_MODE=false but GET /api{path} returned {count} {label} (expected 0)")
+            log(f"  {label}: 0 ✓")
+
+        assert_empty("/assets",     "assets")
+        assert_empty("/connectors", "connectors")
+
+        r = api("get", base_url, "/organizations", token=new_token)
+        orgs = r.json() if isinstance(r.json(), list) else r.json().get("items", [r.json()])
+        if len(orgs) != 1:
+            fail(f"DEMO_MODE=false: expected exactly 1 org, got {len(orgs)}")
+        log(f"  Organizations: 1 (default org only) ✓")
+
+    finally:
+        # Always restore DEMO_MODE=true so phase 14 starts from a known-good state
+        log("  Restoring DEMO_MODE=true...")
+        restart_backend_and_wait("true", "restore DEMO_MODE=true")
+
+    log("[PHASE 13: demo-mode-off] PASSED")
+
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def cleanup(base_url, token, cr_ids, asset_ids, connector_ids):
@@ -752,13 +853,15 @@ def main():
         phase_mcp(base_url, token)
         phase_initialization_quality(public_ip, key_path=f"{args.key_name}.pem")
         phase_frontend_routes(base_url)
+        phase_demo_mode_on(base_url, token)
+        phase_demo_mode_off(base_url, token, public_ip, key_path=f"{args.key_name}.pem")
 
         if token:
             cleanup(base_url, token, cr_ids, asset_ids, connector_ids)
 
         log("")
         log("=" * 60)
-        log("AMI SMOKE: ALL 11 PHASES PASSED")
+        log("AMI SMOKE: ALL 13 PHASES PASSED")
         log("=" * 60)
 
     finally:
