@@ -88,9 +88,9 @@ async def seed():
 
         users = [
             User(id=USER_IDS["admin"], organization_id=ORG_ID,
-                 email=os.environ.get("ADMIN_EMAIL", "admin@acme.example"),
+                 email=os.environ.get("ADMIN_EMAIL", "admin@nexplane.local"),
                  name="Alex Admin", role=UserRole.admin,
-                 hashed_password=hash_password(os.environ.get("ADMIN_PASSWORD", "admin123"))),
+                 hashed_password=hash_password(os.environ.get("ADMIN_PASSWORD", "changeme"))),
             User(id=USER_IDS["operator"], organization_id=ORG_ID, email="operator@acme.example",
                  name="Sam Operator", role=UserRole.security_operator, hashed_password=hash_password("operator123")),
             User(id=USER_IDS["approver"], organization_id=ORG_ID, email="approver@acme.example",

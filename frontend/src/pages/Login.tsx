@@ -80,7 +80,7 @@ export function Login() {
           <div className="mt-6 pt-5 border-t border-slate-100">
             <div className="text-xs text-slate-400 mb-2 font-medium">Demo accounts</div>
             <div className="space-y-1 text-xs text-slate-500 font-mono">
-              <div>admin@acme.example / admin123</div>
+              <div>admin@nexplane.local / changeme</div>
               <div>operator@acme.example / operator123</div>
               <div>approver@acme.example / approver123</div>
               <div>auditor@acme.example / auditor123</div>
