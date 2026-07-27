@@ -814,6 +814,39 @@ def phase_demo_mode_off(base_url, token, public_ip, key_path):
     log("[PHASE 13: demo-mode-off] PASSED")
 
 
+# ── Phase 14: Systemd resilience ─────────────────────────────────────────────
+
+def phase_systemd_resilience(base_url, public_ip, key_path):
+    log("[PHASE 14: systemd-resilience]")
+
+    ssh_run(public_ip, "sudo systemctl restart nexplane", key_path=key_path)
+    log("  nexplane service restarted — waiting for port 80...")
+
+    deadline = time.time() + 180
+    while time.time() < deadline:
+        try:
+            r = requests.get(f"{base_url}/", timeout=5)
+            if r.status_code == 200:
+                log("  GET / → 200 after restart ✓")
+                break
+        except Exception:
+            pass
+        time.sleep(10)
+    else:
+        fail("Platform did not return 200 within 180s after systemctl restart nexplane")
+
+    # Re-authenticate to confirm full stack is operational
+    r = api("post", base_url, "/auth/login",
+            json={"email": "admin@nexplane.local", "password": "changeme"})
+    if r.status_code != 200:
+        fail(f"Login after restart failed: {r.status_code} {r.text[:200]}")
+    if not r.json().get("access_token"):
+        fail("No access_token in login response after restart")
+    log("  Login after restart ✓")
+
+    log("[PHASE 14: systemd-resilience] PASSED")
+
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def cleanup(base_url, token, cr_ids, asset_ids, connector_ids):
@@ -862,13 +895,14 @@ def main():
         phase_frontend_routes(base_url)
         phase_demo_mode_on(base_url, token)
         phase_demo_mode_off(base_url, token, public_ip, key_path=f"{args.key_name}.pem")
+        phase_systemd_resilience(base_url, public_ip, key_path=f"{args.key_name}.pem")
 
         if token:
             cleanup(base_url, token, cr_ids, asset_ids, connector_ids)
 
         log("")
         log("=" * 60)
-        log("AMI SMOKE: ALL 13 PHASES PASSED")
+        log("AMI SMOKE: ALL 14 PHASES PASSED")
         log("=" * 60)
 
     finally:
