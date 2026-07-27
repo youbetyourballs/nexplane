@@ -40,7 +40,7 @@ FRONTEND_ROUTES = [
     "/connectors",
     "/settings",
     "/users",
-    "/audit-log",
+    "/audit-events",
 ]
 
 
@@ -464,7 +464,7 @@ def phase_feature_surface(base_url, token, cr_id):
         ("/recurring-jobs",          "recurring jobs"),
         ("/backup-targets",          "backup targets"),
         ("/change-requests",         "change requests list"),
-        ("/audit-log",               "audit log"),
+        ("/audit-events",             "audit log"),
         ("/users",                   "users"),
     ]
     for path, label in endpoints:
@@ -482,10 +482,10 @@ def phase_feature_surface(base_url, token, cr_id):
     log("  CR from phase 6 appears in change-requests list ✓")
 
     # Audit log must have entries from phases 4-7
-    r = api("get", base_url, "/audit-log", token=token)
+    r = api("get", base_url, "/audit-events", token=token)
     audit_items = r.json() if isinstance(r.json(), list) else r.json().get("items", r.json().get("events", []))
     if not audit_items:
-        fail("GET /api/audit-log returned empty — audit writes are silently failing")
+        fail("GET /api/audit-events returned empty — audit writes are silently failing")
     log(f"  Audit log has {len(audit_items)} entries ✓")
 
     # Create a second user and verify they can log in (tests user provisioning + multi-session)
