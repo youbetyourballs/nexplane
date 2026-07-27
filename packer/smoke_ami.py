@@ -23,6 +23,36 @@ PLAN_TERMINAL  = {"planned", "failed"}
 EXPECTED_CONTAINERS = ("db", "backend", "webserver")
 
 
+def ssh_run(host, cmd, key_path=None, username="ubuntu", password=None, timeout=30, check=True):
+    """Run cmd on host via SSH. Returns (stdout, stderr, returncode).
+
+    key_path: path to .pem file for key-pair auth (EC2 AMI deployments).
+    password: reserved for VMware/bare-metal image types — raises NotImplementedError until
+              paramiko is added as a dependency in that pipeline.
+    check: if True, raises RuntimeError on non-zero exit code.
+    """
+    if password is not None:
+        raise NotImplementedError(
+            "Password-based SSH is not yet implemented. Add paramiko when VMware pipeline is built."
+        )
+    if key_path is None:
+        raise ValueError("key_path is required for key-pair SSH auth")
+    result = subprocess.run(
+        [
+            "ssh", "-o", "StrictHostKeyChecking=no", "-o", f"ConnectTimeout={timeout}",
+            "-i", key_path,
+            f"{username}@{host}",
+            cmd,
+        ],
+        capture_output=True, text=True, timeout=timeout + 5,
+    )
+    if check and result.returncode != 0:
+        raise RuntimeError(
+            f"ssh_run failed (exit {result.returncode}): {cmd!r}\nstderr: {result.stderr.strip()}"
+        )
+    return result.stdout, result.stderr, result.returncode
+
+
 def log(msg):
     print(f"[smoke-ami] {msg}", flush=True)
 
@@ -102,26 +132,25 @@ def phase_launch(ec2, args):
 
 # ── Phase 2: Container health ─────────────────────────────────────────────────
 
-def phase_container_health(public_ip, args):
+def phase_container_health(public_ip, key_path):
     log("[PHASE 2: container-health]")
     deadline = time.time() + 300
     while True:
-        ssh = [
-            "ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
-            "-i", f"{args.key_name}.pem",
-            f"ubuntu@{public_ip}",
+        stdout, stderr, rc = ssh_run(
+            public_ip,
             "docker ps --format '{{.Names}}' --filter status=running",
-        ]
-        result = subprocess.run(ssh, capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
-            fail(f"SSH docker ps failed: {result.stderr.strip()}")
-        running = result.stdout.strip().splitlines()
+            key_path=key_path,
+            check=False,
+        )
+        if rc != 0:
+            fail(f"SSH docker ps failed: {stderr.strip()}")
+        running = stdout.strip().splitlines()
         missing = [e for e in EXPECTED_CONTAINERS if not any(e in n for n in running)]
         if not missing:
             log(f"  Running containers: {running}")
             break
         if time.time() >= deadline:
-            fail(f"Expected containers {missing} not running after 120s. Got: {running}")
+            fail(f"Expected containers {missing} not running after 300s. Got: {running}")
         log(f"  Waiting for containers {missing} (got {running})")
         time.sleep(10)
     log("[PHASE 2: container-health] PASSED")
@@ -482,7 +511,7 @@ def main():
 
     try:
         instance_id, public_ip, base_url = phase_launch(ec2, args)
-        phase_container_health(public_ip, args)
+        phase_container_health(public_ip, key_path=f"{args.key_name}.pem")
         token = phase_auth(base_url, public_ip=public_ip, args=args)
         web_id, app_id, db_id, asset_ids = phase_assets(base_url, token)
         aws_conn_id, connector_ids = phase_connectors(base_url, token)
