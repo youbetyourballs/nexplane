@@ -638,7 +638,8 @@ def phase_mcp(base_url, token):
     log("  MCP initialize ✓")
 
     # MCP tools/list — verify tool registration didn't silently fail
-    result = mcp_call_sse("tools/list", {}, call_id=2, agent_tok=agent_token, sid=session_id)
+    # params must be null (not {}) per MCP spec; {} causes -32602
+    result = mcp_call_sse("tools/list", None, call_id=2, agent_tok=agent_token, sid=session_id)
     if not result.get("tools"):
         fail(f"MCP tools/list returned empty tools list: {result}")
     log(f"  MCP tools/list ✓ ({len(result['tools'])} tools)")
