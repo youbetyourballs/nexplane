@@ -432,6 +432,8 @@ def phase_feature_surface(base_url, token, cr_id):
         ("/recurring-jobs",          "recurring jobs"),
         ("/backup-targets",          "backup targets"),
         ("/change-requests",         "change requests list"),
+        ("/audit-log",               "audit log"),
+        ("/users",                   "users"),
     ]
     for path, label in endpoints:
         r = api("get", base_url, path, token=token)
@@ -446,6 +448,56 @@ def phase_feature_surface(base_url, token, cr_id):
     if cr_id not in cr_ids_in_list:
         fail(f"CR {cr_id} from phase 6 not found in GET /change-requests list")
     log("  CR from phase 6 appears in change-requests list ✓")
+
+    # Audit log must have entries from phases 4-7
+    r = api("get", base_url, "/audit-log", token=token)
+    audit_items = r.json() if isinstance(r.json(), list) else r.json().get("items", r.json().get("events", []))
+    if not audit_items:
+        fail("GET /api/audit-log returned empty — audit writes are silently failing")
+    log(f"  Audit log has {len(audit_items)} entries ✓")
+
+    # Create a second user and verify they can log in (tests user provisioning + multi-session)
+    r = api("post", base_url, "/users", token=token, json={
+        "email": "smoke-user@nexplane.local",
+        "name": "Smoke User",
+        "password": "SmokePass123!",
+        "role": "auditor",
+    })
+    if r.status_code not in (200, 201):
+        fail(f"POST /users (smoke-user) failed: {r.status_code} {r.text[:200]}")
+    smoke_user_id = r.json().get("id")
+    log(f"  Created smoke-user → {smoke_user_id}")
+
+    r = api("post", base_url, "/auth/login",
+            json={"email": "smoke-user@nexplane.local", "password": "SmokePass123!"})
+    if r.status_code != 200:
+        fail(f"Login for smoke-user failed: {r.status_code} {r.text[:200]}")
+    if not r.json().get("access_token"):
+        fail(f"No access_token for smoke-user: {r.text[:200]}")
+    log("  smoke-user login ✓")
+
+    # Auth rejection path must be functional
+    r = api("post", base_url, "/auth/login",
+            json={"email": "admin@nexplane.local", "password": "wrongpassword"})
+    if r.status_code != 401:
+        fail(f"Expected 401 for wrong password, got {r.status_code}")
+    log("  Wrong-password → 401 ✓")
+
+    # Agent binary must be reachable at the URL baked into the AMI
+    agent_url = (
+        "https://nexplane-agent-downloads.s3.us-east-1.amazonaws.com"
+        "/latest/linux-amd64/nexplane-agent"
+    )
+    try:
+        head = requests.head(agent_url, timeout=15, allow_redirects=True)
+        if head.status_code != 200:
+            fail(f"Agent download URL returned {head.status_code}: {agent_url}")
+        content_length = int(head.headers.get("Content-Length", 0))
+        if content_length == 0:
+            fail(f"Agent download URL has Content-Length=0: {agent_url}")
+        log(f"  Agent download URL → 200 ({content_length:,} bytes) ✓")
+    except requests.exceptions.RequestException as exc:
+        fail(f"Agent download URL unreachable: {exc}")
 
     log("[PHASE 8: feature-surface] PASSED")
 
