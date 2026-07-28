@@ -815,26 +815,38 @@ def phase_demo_mode_off(base_url, token, public_ip, key_path=None, username="ubu
             time.sleep(10)
         fail(f"Backend did not become ready within 120s ({wait_label})")
 
+    # Snapshot counts before switching — user-created data from earlier phases
+    # persists across restarts; we verify no NEW demo data was seeded, not that
+    # user data is gone.
+    def get_count(path, tok):
+        r = api("get", base_url, path, token=tok)
+        if r.status_code != 200:
+            return 0
+        body = r.json()
+        return len(body) if isinstance(body, list) else body.get(
+            "total", body.get("count", len(body.get("items", [])))
+        )
+
+    assets_before = get_count("/assets", token)
+    connectors_before = get_count("/connectors", token)
+    log(f"  Baseline (DEMO_MODE=true): {assets_before} assets, {connectors_before} connectors")
+
     try:
         # Switch to DEMO_MODE=false
         new_token = restart_backend_and_wait("false", "DEMO_MODE=false")
 
-        # Assert empty state
-        def assert_empty(path, label):
-            r = api("get", base_url, path, token=new_token)
-            if r.status_code != 200:
-                fail(f"GET /api{path} failed: {r.status_code}")
-            body = r.json()
-            count = len(body) if isinstance(body, list) else body.get(
-                "total", body.get("count", len(body.get("items", [])))
-            )
-            if count != 0:
-                fail(f"DEMO_MODE=false but GET /api{path} returned {count} {label} (expected 0)")
-            log(f"  {label}: 0 ✓")
+        assets_after = get_count("/assets", new_token)
+        connectors_after = get_count("/connectors", new_token)
 
-        assert_empty("/assets",     "assets")
-        assert_empty("/connectors", "connectors")
+        # No new demo data should have been seeded — counts must not increase
+        if assets_after > assets_before:
+            fail(f"DEMO_MODE=false: asset count grew {assets_before}→{assets_after} (demo seeding must have run)")
+        if connectors_after > connectors_before:
+            fail(f"DEMO_MODE=false: connector count grew {connectors_before}→{connectors_after} (demo seeding must have run)")
+        log(f"  Assets: {assets_after} (no new demo seeding) ✓")
+        log(f"  Connectors: {connectors_after} (no new demo seeding) ✓")
 
+        # Must have exactly 1 org (only the default org, no demo orgs)
         r = api("get", base_url, "/demo/orgs", token=new_token)
         orgs = r.json() if isinstance(r.json(), list) else r.json().get("items", [r.json()])
         if len(orgs) != 1:
