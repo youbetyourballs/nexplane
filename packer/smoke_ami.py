@@ -680,9 +680,12 @@ def phase_initialization_quality(public_ip, key_path=None, username="ubuntu", pa
 
     # Backend must have zero ERROR-level log lines on clean boot
     # (exclude alembic lines which may contain the word "error" in table names)
+    # Filter: exclude alembic lines and SQLAlchemy background hint lines
+    # ("Background on this error at: ...") which match ' error ' incidentally
+    _err_filter = "grep -i ' ERROR ' | grep -vi alembic | grep -v 'Background on this error at:'"
     stdout, _, rc = ssh_run(
         public_ip,
-        "docker logs nexplane-backend-1 2>&1 | grep -i ' ERROR ' | grep -vi alembic | wc -l",
+        f"docker logs nexplane-backend-1 2>&1 | {_err_filter} | wc -l",
         key_path=key_path, username=username, password=password,
         check=False,
     )
@@ -690,7 +693,7 @@ def phase_initialization_quality(public_ip, key_path=None, username="ubuntu", pa
     if error_count > 0:
         detail, _, _ = ssh_run(
             public_ip,
-            "docker logs nexplane-backend-1 2>&1 | grep -i ' ERROR ' | grep -vi alembic",
+            f"docker logs nexplane-backend-1 2>&1 | {_err_filter}",
             key_path=key_path, username=username, password=password,
             check=False,
         )
