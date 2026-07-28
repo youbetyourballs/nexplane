@@ -870,27 +870,23 @@ def phase_systemd_resilience(base_url, public_ip, key_path=None, username="ubunt
     ssh_run(public_ip, "sudo systemctl restart nexplane", key_path=key_path, username=username, password=password)
     log("  nexplane service restarted — waiting for port 80...")
 
+    # Poll login endpoint — nginx recovers fast but backend needs more time.
+    # A 200 on GET / only means nginx is up; backend may still be initializing.
     deadline = time.time() + 180
+    login_ok = False
     while time.time() < deadline:
         try:
-            r = requests.get(f"{base_url}/", timeout=5)
-            if r.status_code == 200:
-                log("  GET / → 200 after restart ✓")
+            r = api("post", base_url, "/auth/login",
+                    json={"email": "admin@nexplane.local", "password": "changeme"})
+            if r.status_code == 200 and r.json().get("access_token"):
+                log("  Login after restart ✓")
+                login_ok = True
                 break
         except Exception:
             pass
         time.sleep(10)
-    else:
-        fail("Platform did not return 200 within 180s after systemctl restart nexplane")
-
-    # Re-authenticate to confirm full stack is operational
-    r = api("post", base_url, "/auth/login",
-            json={"email": "admin@nexplane.local", "password": "changeme"})
-    if r.status_code != 200:
-        fail(f"Login after restart failed: {r.status_code} {r.text[:200]}")
-    if not r.json().get("access_token"):
-        fail("No access_token in login response after restart")
-    log("  Login after restart ✓")
+    if not login_ok:
+        fail("Platform did not accept login within 180s after systemctl restart nexplane")
 
     log("[PHASE 14: systemd-resilience] PASSED")
 
