@@ -637,8 +637,20 @@ def phase_mcp(base_url, token):
         fail(f"MCP initialize result missing capabilities dict: {result}")
     log("  MCP initialize ✓")
 
+    # Send notifications/initialized — required by MCP spec before any further requests.
+    # Notifications have no id and return no response.
+    r = requests.post(
+        f"{base_url}/api/mcp/messages/",
+        params={"session_id": session_id},
+        headers={"Authorization": f"Bearer {agent_token}", "Content-Type": "application/json"},
+        json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+        timeout=10,
+    )
+    if r.status_code not in (200, 202):
+        fail(f"notifications/initialized returned HTTP {r.status_code}: {r.text[:200]}")
+    log("  MCP notifications/initialized sent ✓")
+
     # MCP tools/list — verify tool registration didn't silently fail
-    # params must be null (not {}) per MCP spec; {} causes -32602
     result = mcp_call_sse("tools/list", None, call_id=2, agent_tok=agent_token, sid=session_id)
     if not result.get("tools"):
         fail(f"MCP tools/list returned empty tools list: {result}")
