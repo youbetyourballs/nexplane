@@ -157,6 +157,18 @@ Nexplane publishes a public AMI to AWS us-east-1 with each release. Launch it di
 
 **Change the password immediately after first login.**
 
+### SSH access
+
+To edit configuration or environment variables, SSH into the instance using the key pair you selected at launch:
+
+```bash
+ssh -i /path/to/your-key.pem ec2-user@<instance-public-ip>
+```
+
+The instance's public IP is shown on the EC2 console under **Instances → your instance → Public IPv4 address**. Port 22 must be open in the instance's security group (it is by default if you used the quickstart template).
+
+> ⚠️ **Restrict SSH access appropriately.** If the instance has a public IP, limit the security group's port 22 inbound rule to known source IPs rather than `0.0.0.0/0`. If the instance is on a private (RFC 1918) address, place it in a management or otherwise restricted subnet/VLAN with limited lateral reach. The preferred approach for any environment is to avoid exposing SSH publicly altogether — use a VPN (e.g. Tailscale, WireGuard, or a site-to-site VPN) or AWS SSM Session Manager to eliminate the public attack surface entirely.
+
 ### Configuration
 
 AMI deployments are configured via `/opt/nexplane/docker-compose.ami.yml` on the instance. Edit this file and restart services to apply changes.
