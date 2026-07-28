@@ -607,7 +607,7 @@ def phase_mcp(base_url, token):
                 "Authorization": f"Bearer {agent_tok}",
                 "Content-Type": "application/json",
             },
-            json={"jsonrpc": "2.0", "id": call_id, "method": method, "params": params},
+            json={k: v for k, v in {"jsonrpc": "2.0", "id": call_id, "method": method, "params": params}.items() if v is not None},
             timeout=20,
         )
         if r.status_code not in (200, 202):
