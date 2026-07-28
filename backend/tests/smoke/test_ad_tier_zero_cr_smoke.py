@@ -186,10 +186,10 @@ def _launch_dc(ec2, ssm, ami_id, aws_creds) -> tuple:
     ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
     desc = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
-    log(f"  DC running at {private_ip} — waiting for WinRM (up to 5 min)")
+    log(f"  DC running at {private_ip} — waiting for SSM/WinRM (up to 12 min)")
 
-    # Wait for SSM / WinRM readiness
-    deadline = time.time() + 300
+    # Wait for SSM / WinRM readiness — Windows DC needs ~5-8 min to boot + register
+    deadline = time.time() + 720
     while time.time() < deadline:
         time.sleep(20)
         info = ssm.describe_instance_information(
@@ -202,7 +202,7 @@ def _launch_dc(ec2, ssm, ami_id, aws_creds) -> tuple:
         ec2.terminate_instances(InstanceIds=[instance_id])
         pytest.fail(f"SSM never ready for DC instance {instance_id}")
 
-    time.sleep(30)  # Let NTDS / WinRM settle after reboot
+    time.sleep(60)  # Let NTDS / WinRM settle after boot
     return instance_id, private_ip
 
 
