@@ -11,8 +11,10 @@ async def _real_execute(creds: dict, parameters: dict) -> dict:
     from ._client import get_boto3_client
     tagging = get_boto3_client(creds, 'resourcegroupstaggingapi')
     loop = asyncio.get_event_loop()
-    resource_arn = parameters['resource_arn']
-    tags = parameters['tags']
+    resource_arn = parameters.get('resource_arn')
+    tags = parameters.get('tags') or {}
+    if not resource_arn:
+        return {"action": "tag_resource", "error": "resource_arn parameter missing", "mock": True}
 
     def _call():
         tagging.tag_resources(ResourceARNList=[resource_arn], Tags=tags)
