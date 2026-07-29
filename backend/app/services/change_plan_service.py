@@ -16,11 +16,65 @@ from sqlalchemy.orm import selectinload
 
 from app.models.asset import Asset
 from app.models.change_plan import ChangePlan, PlanGeneratedBy
-from app.models.change_request import ChangeRequest, ChangeRequestStatus
+from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType
 from app.services.planning_engine import generate_plan
 from app.services.safety_engine import score_change_request
 
 log = logging.getLogger(__name__)
+
+_OFFBOARD_DISCOVERY_TYPES = {
+    "active_directory", "okta", "entra_id", "google_workspace",
+    "github", "slack", "crowdstrike",
+}
+
+
+async def _discover_account_on_connector(parameters: dict, connector) -> dict:
+    """Call discover_accounts.execute for a single connector. Isolated for testability."""
+    from app.connectors.executors.offboard_user.steps import discover_accounts
+    return await discover_accounts.execute(parameters, connector)
+
+
+async def _run_offboard_discovery(db: AsyncSession, target_email: str, organization_id) -> list[dict]:
+    """Query all identity connectors in the org and discover whether target_email has an account."""
+    from app.models.connector import Connector, ConnectorType
+
+    result = await db.execute(
+        select(Connector).where(
+            Connector.organization_id == organization_id,
+            Connector.connector_type.in_([
+                ConnectorType(t) for t in _OFFBOARD_DISCOVERY_TYPES
+                if t in [e.value for e in ConnectorType]
+            ]),
+        )
+    )
+    connectors = list(result.scalars().all())
+
+    manifest = []
+    for connector in connectors:
+        ct = connector.connector_type.value if hasattr(connector.connector_type, "value") else str(connector.connector_type)
+        try:
+            discovery_result = await _discover_account_on_connector(
+                {"target_email": target_email, "connector_type": ct},
+                connector,
+            )
+            manifest.append({
+                "connector_id": str(connector.id),
+                "connector_type": ct,
+                "found": discovery_result.get("found", False),
+                "account_identifier": discovery_result.get("account_identifier"),
+                "details": discovery_result.get("details", {}),
+            })
+        except Exception as exc:
+            log.warning("Discovery failed for connector %s (%s): %s", connector.id, ct, exc)
+            manifest.append({
+                "connector_id": str(connector.id),
+                "connector_type": ct,
+                "found": False,
+                "account_identifier": None,
+                "details": {"error": str(exc)},
+            })
+
+    return manifest
 
 
 class PlanBlockedError(Exception):
@@ -63,6 +117,86 @@ async def plan_cr(db: AsyncSession, cr: ChangeRequest) -> PlanResult:
 
     if safety_result.is_blocked:
         raise PlanBlockedError(safety_result.blocking_issues)
+
+    # offboard_user: run discovery before plan generation, build plan directly
+    if cr.change_type == ChangeType.offboard_user:
+        desired = cr.desired_outcome or {}
+        target_email = desired.get("target_email")
+        if not target_email:
+            raise PlanBlockedError(["offboard_user requires 'target_email' in desired_outcome"])
+
+        discovery_manifest = await _run_offboard_discovery(db, target_email, cr.organization_id)
+        discovered = [r for r in discovery_manifest if r.get("found")]
+
+        if not discovered:
+            n = len(discovery_manifest)
+            raise PlanBlockedError([
+                f"No accounts found for {target_email} across {n} connected system(s). "
+                "Ensure identity connectors are configured and credentials are valid."
+            ])
+
+        # Resolved connectors for build_plan — only found ones, with account_identifier
+        resolved_connectors = [
+            {
+                "connector_id": r["connector_id"],
+                "connector_type": r["connector_type"],
+                "asset_id": None,
+                "account_identifier": r["account_identifier"],
+            }
+            for r in discovered
+        ]
+
+        # Inject discovery manifest so report step can include it
+        payload = {**desired, "_discovery_manifest": discovery_manifest}
+
+        from app.connectors.executors.offboard_user import build_plan as _offboard_build_plan
+        from app.services.planning_engine import ChangePlanData, _calculate_blast_radius
+
+        generated_steps = await _offboard_build_plan(payload, resolved_connectors)
+
+        plan_data = ChangePlanData(
+            generated_steps=generated_steps,
+            preflight_checks=[],
+            blast_radius=_calculate_blast_radius(cr, assets, safety_result, steps=generated_steps),
+            rollback_plan={
+                "rollback_capability": "full",
+                "filo_order": "phases 4→3→2→1; phases 5 and 6 have no rollback",
+            },
+            verification_plan={"phase": 5, "checks": ["account_disabled_per_connector"]},
+        )
+
+        if cr.change_plan:
+            plan = cr.change_plan
+            plan.generated_steps = plan_data.generated_steps
+            plan.preflight_checks = plan_data.preflight_checks
+            plan.blast_radius = plan_data.blast_radius
+            plan.rollback_plan = plan_data.rollback_plan
+            plan.verification_plan = plan_data.verification_plan
+        else:
+            plan = ChangePlan(
+                change_request_id=cr.id,
+                generated_steps=plan_data.generated_steps,
+                preflight_checks=plan_data.preflight_checks,
+                blast_radius=plan_data.blast_radius,
+                rollback_plan=plan_data.rollback_plan,
+                verification_plan=plan_data.verification_plan,
+                generated_by=PlanGeneratedBy.system,
+            )
+            db.add(plan)
+
+        cr.risk_level = safety_result.risk_level
+        cr.status = ChangeRequestStatus.planned
+        cr.updated_at = datetime.now(timezone.utc)
+        await db.flush()
+
+        return PlanResult(
+            plan=plan,
+            risk_level=safety_result.risk_level.value,
+            risk_score=float(safety_result.risk_score),
+            risk_factors=[f.name for f in safety_result.risk_factors],
+            warnings=list(safety_result.warnings or []),
+            blocking_issues=[],
+        )
 
     plan_data = generate_plan(cr, assets, safety_result)
 
