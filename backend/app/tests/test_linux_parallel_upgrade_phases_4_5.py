@@ -51,6 +51,9 @@ async def test_health_check_port_failure_blocks_cutover(monkeypatch):
     monkeypatch.setattr(lpu, "_run_rsync", AsyncMock(return_value={"bytes_transferred": 0, "files_transferred": 0, "duration_seconds": 1.0}))
     # Simulate port probe failure: port 8080 closed
     monkeypatch.setattr(lpu, "_probe_tcp_port", MagicMock(return_value=False))
+    # Speed up the retry loop for tests
+    monkeypatch.setattr(lpu, "_HEALTH_CHECK_RETRY_SLEEP", 0)
+    monkeypatch.setattr(lpu, "_HEALTH_CHECK_TIMEOUT_SECONDS", 0.1)
 
     result = await lpu.execute(params, [params["source_asset_id"], params["dest_asset_id"]], _make_connector())
     assert result["cutover_completed"] is False
@@ -101,6 +104,8 @@ async def test_cutover_records_checkpoint(monkeypatch):
                 if asset_ids[0] == params["source_asset_id"]:
                     return {"output": "20.04", "exit_code": 0}
                 return {"output": "22.04", "exit_code": 0}
+            if "hostname -I" in parameters.get("command", ""):
+                return {"output": "10.0.0.2", "exit_code": 0}
             return {"output": "", "exit_code": 0}
         return {}
 

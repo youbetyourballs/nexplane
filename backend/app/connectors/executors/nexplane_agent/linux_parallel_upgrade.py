@@ -20,6 +20,9 @@ from app.connectors.executors.nexplane_agent._snapshot_helpers import (
 
 logger = logging.getLogger(__name__)
 
+_HEALTH_CHECK_RETRY_SLEEP = 3  # seconds between TCP probe retries; override in tests
+_HEALTH_CHECK_TIMEOUT_SECONDS = 30  # total wait per port; override in tests
+
 DEFINITION = {
     "name": "linux_parallel_upgrade",
     "display_name": "Linux Parallel Upgrade",
@@ -243,12 +246,12 @@ async def _verify_dest_health(parameters: dict, dest_ip: str) -> None:
 
     for port in ports:
         ok = False
-        deadline = asyncio.get_event_loop().time() + 30
+        deadline = asyncio.get_event_loop().time() + _HEALTH_CHECK_TIMEOUT_SECONDS
         while asyncio.get_event_loop().time() < deadline:
             if _probe_tcp_port(dest_ip, port):
                 ok = True
                 break
-            await asyncio.sleep(3)
+            await asyncio.sleep(_HEALTH_CHECK_RETRY_SLEEP)
         if not ok:
             raise RuntimeError(f"Health check failed: port {port} unreachable on dest after 30s")
 
@@ -518,7 +521,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             [dest_id],
             timeout_seconds=15,
         )
-        dest_ip = dest_ip_result.get("output", "").strip().split()[0]
+        dest_ip_raw = dest_ip_result.get("output", "").strip().split()
+        dest_ip = dest_ip_raw[0] if dest_ip_raw else ""
         await _verify_dest_health(parameters, dest_ip)
 
         # Phase 5 — Cutover
