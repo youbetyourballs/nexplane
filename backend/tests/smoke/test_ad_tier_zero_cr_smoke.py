@@ -219,14 +219,24 @@ def _register_dc_asset(private_ip, aws_creds) -> tuple:
         "connector_type": "active_directory",
     })
     conn_id = connector["id"]
+    # LDAP base_dn derived from domain: smoke.nexplane.local -> DC=smoke,DC=nexplane,DC=local
+    base_dn = ",".join(f"DC={part}" for part in _DC_DOMAIN.split("."))
+    bind_dn = f"CN=Administrator,CN=Users,{base_dn}"
     _api("put", f"/connectors/{conn_id}/credentials", json={
         "credentials": {
-            "host": private_ip,
-            "port": "5985",
-            "username": f"{_DC_NETBIOS}\\Administrator",
-            "password": _DC_ADMIN_PASSWORD,
+            # LDAP fields (required by active_directory connector schema)
+            "server": private_ip,
+            "port": "389",
+            "base_dn": base_dn,
+            "bind_dn": bind_dn,
+            "bind_password": _DC_ADMIN_PASSWORD,
             "use_ssl": "false",
-            "domain": _DC_DOMAIN,
+            # WinRM fields (used by tier-zero executor)
+            "winrm_hostname": private_ip,
+            "winrm_port": "5985",
+            "winrm_username": f"{_DC_NETBIOS}\\Administrator",
+            "winrm_password": _DC_ADMIN_PASSWORD,
+            "winrm_use_ssl": "false",
         }
     })
     log(f"  Registered AD connector {conn_id}")
