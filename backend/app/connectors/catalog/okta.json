@@ -232,6 +232,55 @@
       ],
       "executor": "okta.force_password_reset",
       "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "revoke_okta_sessions",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Offboard: Revoke Okta Sessions",
+      "description": "Revokes all Okta sessions for a user as part of the offboard_user workflow",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "target_email", "type": "string", "required": true}],
+      "executor": "offboard_user.steps.revoke_okta",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "disable_okta_account",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Offboard: Disable Okta Account",
+      "description": "Suspends and deactivates an Okta user as part of the offboard_user workflow",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "target_email", "type": "string", "required": true}],
+      "executor": "offboard_user.steps.revoke_okta",
+      "rollback_action": "enable_okta_account",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "enable_okta_account",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Offboard Rollback: Enable Okta Account",
+      "description": "Re-activates an Okta user as part of offboard_user rollback",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "target_email", "type": "string", "required": true}],
+      "executor": "offboard_user.steps.revoke_okta",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "verify_okta_disabled",
+      "action_type": "verify",
+      "execution_tier": 1,
+      "display_name": "Offboard: Verify Okta Account Disabled",
+      "description": "Verifies Okta account is disabled as part of offboard_user workflow",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "target_email", "type": "string", "required": true},
+        {"name": "connector_type", "type": "string", "required": false},
+        {"name": "account_identifier", "type": "string", "required": false}
+      ],
+      "executor": "offboard_user.steps.verify_disabled",
+      "estimated_duration_seconds": 30
     }
   ]
 }

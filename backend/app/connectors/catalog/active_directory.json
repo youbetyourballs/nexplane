@@ -1123,6 +1123,48 @@
       "safety_notes": [
         "Deleted accounts cannot be recovered without AD Recycle Bin"
       ]
+    },
+    {
+      "action_id": "disable_active_directory_account",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Offboard: Disable AD Account",
+      "description": "Disables an AD account by email as part of the offboard_user workflow",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "target_email", "type": "string", "required": true}
+      ],
+      "executor": "offboard_user.steps.disable_ad",
+      "rollback_action": "enable_active_directory_account",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "enable_active_directory_account",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Offboard Rollback: Enable AD Account",
+      "description": "Re-enables an AD account by email as part of offboard_user rollback",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "target_email", "type": "string", "required": true}
+      ],
+      "executor": "offboard_user.steps.disable_ad",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "verify_active_directory_disabled",
+      "action_type": "verify",
+      "execution_tier": 1,
+      "display_name": "Offboard: Verify AD Account Disabled",
+      "description": "Verifies that an AD account is disabled as part of the offboard_user workflow",
+      "applicable_asset_types": ["identity"],
+      "parameters": [
+        {"name": "target_email", "type": "string", "required": true},
+        {"name": "connector_type", "type": "string", "required": false},
+        {"name": "account_identifier", "type": "string", "required": false}
+      ],
+      "executor": "offboard_user.steps.verify_disabled",
+      "estimated_duration_seconds": 30
     }
   ]
 }

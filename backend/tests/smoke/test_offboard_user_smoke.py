@@ -358,15 +358,15 @@ def test_phase3_discovery_accuracy():
     # At least one AD-related step must be in the plan
     ad_steps = [
         s for s in steps
-        if "active_directory" in (s.get("connector_type", "") or s.get("action", ""))
+        if "active_directory" in (s.get("connector_type", "") or s.get("action_id", ""))
     ]
     assert len(ad_steps) > 0, (
-        f"No AD steps in plan. Steps: {[s.get('action') for s in steps]}"
+        f"No AD steps in plan. Steps: {[s.get('action_id') for s in steps]}"
     )
 
     # Phase 5 verify steps must include an AD entry with correct account_identifier
     verify_steps = [s for s in steps if s.get("phase") == 5]
-    ad_verify = [s for s in verify_steps if "active_directory" in s.get("action", "")]
+    ad_verify = [s for s in verify_steps if "active_directory" in s.get("action_id", "")]
     assert len(ad_verify) == 1, (
         f"Expected 1 AD verify step in phase 5, got: {ad_verify}"
     )
@@ -423,7 +423,7 @@ def test_phase4_full_lifecycle_execute():
     step_results = _step_results(cr)
     verify_results = [
         s for s in step_results
-        if "verify" in (s.get("action", "") or "")
+        if "verify" in (s.get("action_id", "") or "")
     ]
     assert len(verify_results) > 0, (
         "No verification steps found in execution result"
@@ -431,13 +431,13 @@ def test_phase4_full_lifecycle_execute():
     for vr in verify_results:
         result = vr.get("result", {})
         assert result.get("verified") is True, (
-            f"Verification failed for step {vr.get('action')}: {result.get('error')}"
+            f"Verification failed for step {vr.get('action_id')}: {result.get('error')}"
         )
 
     # Assert Phase 6 report was generated
     report_results = [
         s for s in step_results
-        if "report" in (s.get("action", "") or "")
+        if "report" in (s.get("action_id", "") or "")
     ]
     assert len(report_results) == 1, (
         f"Expected 1 report step, got {len(report_results)}"

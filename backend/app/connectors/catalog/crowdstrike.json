@@ -116,6 +116,40 @@
       "executor": "crowdstrike.contain_process",
       "estimated_duration_seconds": 5,
       "safety_notes": ["Verify process name is correct - killing the wrong process may destabilize the host"]
+    },
+    {
+      "action_id": "isolate_crowdstrike_endpoints",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Offboard: Isolate CrowdStrike Endpoints",
+      "description": "Isolates CrowdStrike-managed endpoints for a user as part of offboard_user workflow",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "target_email", "type": "string", "required": true}],
+      "executor": "offboard_user.steps.isolate_crowdstrike",
+      "rollback_action": "lift_crowdstrike_isolation",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "lift_crowdstrike_isolation",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Offboard Rollback: Lift CrowdStrike Isolation",
+      "description": "Lifts CrowdStrike endpoint isolation as part of offboard_user rollback",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "target_email", "type": "string", "required": true}],
+      "executor": "offboard_user.steps.isolate_crowdstrike",
+      "estimated_duration_seconds": 15
+    },
+    {
+      "action_id": "verify_crowdstrike_disabled",
+      "action_type": "verify",
+      "execution_tier": 1,
+      "display_name": "Offboard: Verify CrowdStrike Endpoints Isolated",
+      "description": "Verifies CrowdStrike endpoints are isolated as part of offboard_user workflow",
+      "applicable_asset_types": ["server"],
+      "parameters": [{"name": "target_email", "type": "string", "required": true}, {"name": "connector_type", "type": "string", "required": false}, {"name": "account_identifier", "type": "string", "required": false}],
+      "executor": "offboard_user.steps.verify_disabled",
+      "estimated_duration_seconds": 30
     }
   ]
 }

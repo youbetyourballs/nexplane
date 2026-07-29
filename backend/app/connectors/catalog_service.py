@@ -178,9 +178,9 @@ class ActionCatalogService:
             return self._load_commercial_executor(executor_ref)
 
         parts = executor_ref.split(".")
-        if len(parts) != 2:
-            raise ValueError(f"Invalid executor reference '{executor_ref}' — expected 'connector.module'")
-        module_path = f"app.connectors.executors.{parts[0]}.{parts[1]}"
+        if len(parts) < 2:
+            raise ValueError(f"Invalid executor reference '{executor_ref}' — expected 'connector.module' or 'connector.subdir.module'")
+        module_path = f"app.connectors.executors.{'.'.join(parts)}"
         try:
             return importlib.import_module(module_path)
         except ModuleNotFoundError as exc:

@@ -50,14 +50,15 @@ async def build_plan(payload: dict, resolved_connectors: list[dict]) -> list[dic
         if c["connector_type"] in _SESSION_REVOKE_TYPES:
             steps.append({
                 "name": f"Revoke {c['connector_type']} sessions",
-                "action": f"revoke_{c['connector_type']}_sessions",
+                "action_id": f"revoke_{c['connector_type']}_sessions",
+                "connector_type": c["connector_type"],
                 "connector_id": str(c["connector_id"]),
                 "parameters": {
                     "target_email": payload["target_email"],
                     "asset_id": str(c["asset_id"]) if c.get("asset_id") else None,
                 },
                 "phase": 1,
-                "rollback_action": None,
+                "rollback_action_id": None,
                 "status": "pending",
             })
 
@@ -66,14 +67,15 @@ async def build_plan(payload: dict, resolved_connectors: list[dict]) -> list[dic
         if c["connector_type"] in _ACCOUNT_DISABLE_TYPES:
             steps.append({
                 "name": f"Disable {c['connector_type']} account",
-                "action": f"disable_{c['connector_type']}_account",
+                "action_id": f"disable_{c['connector_type']}_account",
+                "connector_type": c["connector_type"],
                 "connector_id": str(c["connector_id"]),
                 "parameters": {
                     "target_email": payload["target_email"],
                     "asset_id": str(c["asset_id"]) if c.get("asset_id") else None,
                 },
                 "phase": 2,
-                "rollback_action": f"enable_{c['connector_type']}_account",
+                "rollback_action_id": f"enable_{c['connector_type']}_account",
                 "status": "pending",
             })
             _action_connectors.append(c)
@@ -83,14 +85,15 @@ async def build_plan(payload: dict, resolved_connectors: list[dict]) -> list[dic
         if c["connector_type"] in _REMOVAL_TYPES:
             steps.append({
                 "name": f"Remove from {c['connector_type']}",
-                "action": f"remove_{c['connector_type']}_member",
+                "action_id": f"remove_{c['connector_type']}_member",
+                "connector_type": c["connector_type"],
                 "connector_id": str(c["connector_id"]),
                 "parameters": {
                     "target_email": payload["target_email"],
                     "asset_id": str(c["asset_id"]) if c.get("asset_id") else None,
                 },
                 "phase": 3,
-                "rollback_action": f"reinstate_{c['connector_type']}_member",
+                "rollback_action_id": f"reinstate_{c['connector_type']}_member",
                 "status": "pending",
             })
             _action_connectors.append(c)
@@ -101,13 +104,14 @@ async def build_plan(payload: dict, resolved_connectors: list[dict]) -> list[dic
             if c["connector_type"] == "crowdstrike":
                 steps.append({
                     "name": "Isolate CrowdStrike-managed endpoints",
-                    "action": "isolate_crowdstrike_endpoints",
+                    "action_id": "isolate_crowdstrike_endpoints",
+                    "connector_type": "crowdstrike",
                     "connector_id": str(c["connector_id"]),
                     "parameters": {
                         "target_email": payload["target_email"],
                     },
                     "phase": 4,
-                    "rollback_action": "lift_crowdstrike_isolation",
+                    "rollback_action_id": "lift_crowdstrike_isolation",
                     "status": "pending",
                 })
                 _action_connectors.append(c)
@@ -122,7 +126,8 @@ async def build_plan(payload: dict, resolved_connectors: list[dict]) -> list[dic
         seen_verify.add(conn_id)
         steps.append({
             "name": f"Verify {ct} account disabled",
-            "action": f"verify_{ct}_disabled",
+            "action_id": f"verify_{ct}_disabled",
+            "connector_type": ct,
             "connector_id": conn_id,
             "parameters": {
                 "target_email": payload["target_email"],
@@ -130,14 +135,15 @@ async def build_plan(payload: dict, resolved_connectors: list[dict]) -> list[dic
                 "account_identifier": c.get("account_identifier"),
             },
             "phase": 5,
-            "rollback_action": None,
+            "rollback_action_id": None,
             "status": "pending",
         })
 
     # Phase 6: report (always last)
     steps.append({
         "name": "Generate offboarding report",
-        "action": "generate_offboarding_report",
+        "action_id": "generate_offboarding_report",
+        "connector_type": "offboard_user",
         "connector_id": None,
         "parameters": {
             "target_email": payload["target_email"],
@@ -147,8 +153,12 @@ async def build_plan(payload: dict, resolved_connectors: list[dict]) -> list[dic
             "discovery_manifest": payload.get("_discovery_manifest", []),
         },
         "phase": 6,
-        "rollback_action": None,
+        "rollback_action_id": None,
         "status": "pending",
     })
+
+    # Assign step_number (1-indexed) so activities.py can reference them by number
+    for i, step in enumerate(steps, start=1):
+        step["step_number"] = i
 
     return steps

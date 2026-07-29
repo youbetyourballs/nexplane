@@ -1,0 +1,24 @@
+{
+  "connector_type": "offboard_user",
+  "display_name": "Offboard User Workflow",
+  "credential_fields": [],
+  "actions": [
+    {
+      "action_id": "generate_offboarding_report",
+      "action_type": "report",
+      "execution_tier": 1,
+      "display_name": "Generate Offboarding Report",
+      "description": "Generates a structured offboarding report summarising all steps executed across identity systems",
+      "applicable_asset_types": [],
+      "parameters": [
+        {"name": "target_email", "type": "string", "required": true},
+        {"name": "reason", "type": "string", "required": false},
+        {"name": "notify_manager", "type": "boolean", "required": false},
+        {"name": "manager_email", "type": "string", "required": false},
+        {"name": "discovery_manifest", "type": "array", "required": false}
+      ],
+      "executor": "offboard_user.steps.offboarding_report",
+      "estimated_duration_seconds": 2
+    }
+  ]
+}

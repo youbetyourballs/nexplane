@@ -37,6 +37,40 @@
       "executor": "slack.reactivate_user",
       "rollback_action": "deactivate_user",
       "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "remove_slack_member",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Offboard: Deactivate Slack Member",
+      "description": "Deactivates a Slack user as part of offboard_user workflow",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "target_email", "type": "string", "required": true}],
+      "executor": "offboard_user.steps.deactivate_slack",
+      "rollback_action": "reinstate_slack_member",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "reinstate_slack_member",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Offboard Rollback: Reactivate Slack Member",
+      "description": "Reactivates a Slack user as part of offboard_user rollback",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "target_email", "type": "string", "required": true}],
+      "executor": "offboard_user.steps.deactivate_slack",
+      "estimated_duration_seconds": 5
+    },
+    {
+      "action_id": "verify_slack_disabled",
+      "action_type": "verify",
+      "execution_tier": 1,
+      "display_name": "Offboard: Verify Slack Account Disabled",
+      "description": "Verifies Slack account is deactivated as part of offboard_user workflow",
+      "applicable_asset_types": ["identity"],
+      "parameters": [{"name": "target_email", "type": "string", "required": true}, {"name": "connector_type", "type": "string", "required": false}, {"name": "account_identifier", "type": "string", "required": false}],
+      "executor": "offboard_user.steps.verify_disabled",
+      "estimated_duration_seconds": 30
     }
   ]
 }
