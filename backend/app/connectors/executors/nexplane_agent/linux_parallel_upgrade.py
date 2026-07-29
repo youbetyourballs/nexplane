@@ -283,16 +283,17 @@ async def _stop_source(source_id: str, connector) -> None:
             ),
         )
         reservations = instances.get("Reservations", [])
-        if reservations:
-            instance_id = reservations[0]["Instances"][0]["InstanceId"]
-            await loop.run_in_executor(None, lambda: ec2.stop_instances(InstanceIds=[instance_id]))
-            await loop.run_in_executor(
-                None,
-                lambda: ec2.get_waiter("instance_stopped").wait(
-                    InstanceIds=[instance_id],
-                    WaiterConfig={"Delay": 10, "MaxAttempts": 30},
-                ),
-            )
+        if not reservations:
+            raise RuntimeError(f"_stop_source: no EC2 instance found with tag nexplane-asset-id={source_id}")
+        instance_id = reservations[0]["Instances"][0]["InstanceId"]
+        await loop.run_in_executor(None, lambda: ec2.stop_instances(InstanceIds=[instance_id]))
+        await loop.run_in_executor(
+            None,
+            lambda: ec2.get_waiter("instance_stopped").wait(
+                InstanceIds=[instance_id],
+                WaiterConfig={"Delay": 10, "MaxAttempts": 30},
+            ),
+        )
     else:
         await dispatch_agent_job(
             "run_command",
@@ -413,7 +414,10 @@ async def _cutover_dns(source_id: str, dest_id: str, cutover_config: dict, conne
             [asset_id],
             timeout_seconds=15,
         )
-        return result.get("output", "").strip().split()[0]
+        parts = result.get("output", "").strip().split()
+        if not parts:
+            raise RuntimeError(f"Could not determine IP for asset {asset_id}")
+        return parts[0]
 
     target_id = dest_id if not reverse else source_id
     target_ip = await _get_host_ip(target_id)
