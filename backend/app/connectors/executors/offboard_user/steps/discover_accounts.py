@@ -9,17 +9,6 @@ async def execute(parameters: dict, connector) -> dict:
     connector_type = parameters["connector_type"]
     creds = getattr(connector, "credentials", {}) or {}
 
-    if not creds:
-        return {
-            "action": "discover_account",
-            "connector_type": connector_type,
-            "target_email": target_email,
-            "found": False,
-            "account_identifier": None,
-            "details": {},
-            "simulated": True,
-        }
-
     handler = _HANDLERS.get(connector_type)
     if handler is None:
         return {
@@ -29,6 +18,17 @@ async def execute(parameters: dict, connector) -> dict:
             "found": False,
             "account_identifier": None,
             "details": {"error": f"No discovery handler for {connector_type}"},
+        }
+
+    if not creds:
+        return {
+            "action": "discover_account",
+            "connector_type": connector_type,
+            "target_email": target_email,
+            "found": False,
+            "account_identifier": None,
+            "details": {},
+            "simulated": True,
         }
 
     return await handler(target_email, creds)
