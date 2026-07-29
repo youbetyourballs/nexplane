@@ -79,6 +79,10 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
             dn = conn.entries[0].distinguishedName.value
         else:
             dn = user_dn
+        # Clear "must change password" flag before enabling — AD won't enable
+        # an account with pwdLastSet=0 (error 53 unwillingToPerform).
+        # Setting pwdLastSet=-1 marks the password as freshly set (no expiry).
+        conn.modify(dn, {"pwdLastSet": [(MODIFY_REPLACE, [-1])]})
         conn.modify(dn, {"userAccountControl": [(MODIFY_REPLACE, [512])]})
         result = conn.result
         conn.unbind()

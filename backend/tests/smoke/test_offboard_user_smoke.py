@@ -248,6 +248,7 @@ def _create_ad_user(private_ip, base_dn, bind_dn, sam, email) -> str:
             ps_script = (
                 f'$pwd = ConvertTo-SecureString "{_DC_ADMIN_PASSWORD}" -AsPlainText -Force; '
                 f'Set-ADAccountPassword -Identity "{sam}" -NewPassword $pwd -Reset; '
+                f'Set-ADUser -Identity "{sam}" -PasswordNeverExpires $true -ChangePasswordAtLogon $false; '
                 f'Enable-ADAccount -Identity "{sam}"; '
                 f'Write-Output "done"'
             )
