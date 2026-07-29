@@ -50,9 +50,12 @@ async def _run_offboard_discovery(db: AsyncSession, target_email: str, organizat
     )
     connectors = list(result.scalars().all())
 
+    from app.services.connector_service import _attach_credentials
+
     connector_params = []
     for connector in connectors:
         ct = connector.connector_type.value if hasattr(connector.connector_type, "value") else str(connector.connector_type)
+        await _attach_credentials(connector, db)
         connector_params.append((connector, ct))
 
     tasks = [
