@@ -5,6 +5,7 @@
 Shared plan-generation logic used by both the change_requests router
 and the runbook CR bridge.
 """
+import asyncio
 import uuid
 import logging
 from dataclasses import dataclass, field
@@ -49,29 +50,35 @@ async def _run_offboard_discovery(db: AsyncSession, target_email: str, organizat
     )
     connectors = list(result.scalars().all())
 
-    manifest = []
+    connector_params = []
     for connector in connectors:
         ct = connector.connector_type.value if hasattr(connector.connector_type, "value") else str(connector.connector_type)
-        try:
-            discovery_result = await _discover_account_on_connector(
-                {"target_email": target_email, "connector_type": ct},
-                connector,
-            )
-            manifest.append({
-                "connector_id": str(connector.id),
-                "connector_type": ct,
-                "found": discovery_result.get("found", False),
-                "account_identifier": discovery_result.get("account_identifier"),
-                "details": discovery_result.get("details", {}),
-            })
-        except Exception as exc:
-            log.warning("Discovery failed for connector %s (%s): %s", connector.id, ct, exc)
+        connector_params.append((connector, ct))
+
+    tasks = [
+        _discover_account_on_connector({"target_email": target_email, "connector_type": ct}, connector)
+        for connector, ct in connector_params
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    manifest = []
+    for (connector, ct), result in zip(connector_params, results):
+        if isinstance(result, Exception):
+            log.warning("Discovery failed for connector %s (%s): %s", connector.id, ct, result)
             manifest.append({
                 "connector_id": str(connector.id),
                 "connector_type": ct,
                 "found": False,
                 "account_identifier": None,
-                "details": {"error": str(exc)},
+                "details": {"error": str(result)},
+            })
+        else:
+            manifest.append({
+                "connector_id": str(connector.id),
+                "connector_type": ct,
+                "found": result.get("found", False),
+                "account_identifier": result.get("account_identifier"),
+                "details": result.get("details", {}),
             })
 
     return manifest
