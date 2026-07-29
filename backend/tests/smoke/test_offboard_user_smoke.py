@@ -192,8 +192,7 @@ def _create_ad_user(private_ip, base_dn, bind_dn, sam, email) -> str:
          is a no-op for the executor, so the test would skip).
       3. Enable the account (UAC=512) so the executor has something to disable.
     """
-    from ldap3 import Server, Connection, ALL, MODIFY_REPLACE, Tls
-    import ssl
+    from ldap3 import Server, Connection, ALL, MODIFY_REPLACE
 
     user_dn = f"CN={sam},CN=Users,{base_dn}"
     run_id = sam.split("-")[-1]
@@ -211,25 +210,34 @@ def _create_ad_user(private_ip, base_dn, bind_dn, sam, email) -> str:
     result = conn.result
     assert result.get("result") == 0, f"Failed to create AD user {sam}: {result}"
 
-    # Step 2: set password via LDAPS (port 636, TLS)
-    tls = Tls(validate=ssl.CERT_NONE)
-    srv_ssl = Server(private_ip, port=636, use_ssl=True, tls=tls, get_info=ALL)
+    # Step 2: set password and enable account via WinRM/PowerShell (avoids LDAPS dependency)
     try:
-        conn_ssl = Connection(srv_ssl, user=bind_dn, password=_DC_ADMIN_PASSWORD, auto_bind=True)
-        encoded_pwd = f'"{_DC_ADMIN_PASSWORD}"'.encode("utf-16-le")
-        conn_ssl.modify(user_dn, {"unicodePwd": [(MODIFY_REPLACE, [encoded_pwd])]})
-        pwd_result = conn_ssl.result
-        conn_ssl.unbind()
-        if pwd_result.get("result") != 0:
-            log(f"WARNING: password set failed ({pwd_result}); account stays disabled")
+        import winrm
+        winrm_host = private_ip
+        winrm_user = f"{_DC_NETBIOS}\\Administrator"
+        ps_script = (
+            f'$pwd = ConvertTo-SecureString "{_DC_ADMIN_PASSWORD}" -AsPlainText -Force; '
+            f'Set-ADAccountPassword -Identity "{sam}" -NewPassword $pwd -Reset; '
+            f'Enable-ADAccount -Identity "{sam}"; '
+            f'Write-Output "done"'
+        )
+        s = winrm.Session(
+            target=f"http://{winrm_host}:5985/wsman",
+            auth=(winrm_user, _DC_ADMIN_PASSWORD),
+            transport="basic",
+            server_cert_validation="ignore",
+            operation_timeout_sec=30,
+            read_timeout_sec=60,
+        )
+        result_ps = s.run_ps(ps_script)
+        stdout = result_ps.std_out.decode("utf-8", errors="replace").strip()
+        stderr = result_ps.std_err.decode("utf-8", errors="replace").strip()
+        if result_ps.status_code != 0:
+            log(f"WARNING: WinRM password/enable failed (rc={result_ps.status_code}): {stderr}; account stays disabled")
         else:
-            # Step 3: enable the account
-            conn.modify(user_dn, {"userAccountControl": [(MODIFY_REPLACE, [512])]})
-            enable_result = conn.result
-            assert enable_result.get("result") == 0, \
-                f"Failed to enable AD user {sam}: {enable_result}"
+            log(f"Account {sam} enabled via WinRM: {stdout}")
     except Exception as exc:
-        log(f"WARNING: LDAPS unavailable — account {sam} stays disabled ({exc})")
+        log(f"WARNING: WinRM unavailable — account {sam} stays disabled ({exc})")
 
     conn.unbind()
     log(f"Created AD user {sam} ({email})")
