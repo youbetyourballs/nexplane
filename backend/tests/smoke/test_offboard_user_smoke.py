@@ -150,6 +150,35 @@ def _launch_dc(ec2, ssm, ami_id, aws_creds) -> tuple:
         pytest.fail(f"WinRM never reachable on {private_ip}:5985 within 12 min")
 
     time.sleep(30)  # Let NTDS settle after WinRM comes up
+
+    # EC2Launch resets WinRM basic auth settings on every boot — re-enable via SSM.
+    log("Re-enabling WinRM basic auth via SSM...")
+    try:
+        import time as _time
+        winrm_cmd = (
+            "winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'; "
+            "winrm set winrm/config/service/auth '@{Basic=\"true\"}'"
+        )
+        ssm_resp = ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": [winrm_cmd]},
+            TimeoutSeconds=60,
+        )
+        cmd_id = ssm_resp["Command"]["CommandId"]
+        deadline2 = _time.time() + 90
+        while _time.time() < deadline2:
+            _time.sleep(5)
+            inv = ssm.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+            if inv["Status"] == "Success":
+                log("WinRM basic auth enabled via SSM")
+                break
+            if inv["Status"] in ("Failed", "TimedOut", "Cancelled"):
+                log(f"WARNING: SSM WinRM setup failed: {inv.get('StandardErrorContent', '')[:200]}")
+                break
+    except Exception as exc:
+        log(f"WARNING: SSM WinRM auth setup failed: {exc}")
+
     return instance_id, private_ip
 
 
