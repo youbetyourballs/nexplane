@@ -186,23 +186,27 @@ def _launch_dc(ec2, ssm, ami_id, aws_creds) -> tuple:
     ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
     desc = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
-    log(f"  DC running at {private_ip} — waiting for SSM/WinRM (up to 12 min)")
+    log(f"  DC running at {private_ip} — waiting for WinRM port 5985 (up to 12 min)")
 
-    # Wait for SSM / WinRM readiness — Windows DC needs ~5-8 min to boot + register
+    # Wait for WinRM port — more direct than SSM registration for Windows DCs
+    import socket
     deadline = time.time() + 720
+    winrm_ready = False
     while time.time() < deadline:
-        time.sleep(20)
-        info = ssm.describe_instance_information(
-            Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
-        )
-        if info.get("InstanceInformationList"):
-            log(f"  SSM ready on {instance_id}")
+        time.sleep(15)
+        try:
+            s = socket.create_connection((private_ip, 5985), timeout=5)
+            s.close()
+            log(f"  WinRM ready on {private_ip}:5985")
+            winrm_ready = True
             break
-    else:
+        except OSError:
+            pass
+    if not winrm_ready:
         ec2.terminate_instances(InstanceIds=[instance_id])
-        pytest.fail(f"SSM never ready for DC instance {instance_id}")
+        pytest.fail(f"WinRM never reachable on {private_ip}:5985 within 12 min")
 
-    time.sleep(60)  # Let NTDS / WinRM settle after boot
+    time.sleep(30)  # Let NTDS settle after WinRM comes up
     return instance_id, private_ip
 
 
