@@ -6,6 +6,7 @@ import base64
 import logging
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 
@@ -74,7 +75,7 @@ async def _preflight(parameters: dict, asset_ids: list, connector) -> dict:
     for path in sync_paths:
         result = await dispatch_agent_job(
             "run_command",
-            {"command": f"test -e {path} && echo ok || echo missing", "timeout": 10},
+            {"command": f"test -e {shlex.quote(path)} && echo ok || echo missing", "timeout": 10},
             [source_id],
             timeout_seconds=15,
         )
@@ -82,7 +83,7 @@ async def _preflight(parameters: dict, asset_ids: list, connector) -> dict:
             raise RuntimeError(f"sync_paths entry {path!r} does not exist on source")
 
     # Estimate disk usage on source
-    paths_arg = " ".join(sync_paths)
+    paths_arg = " ".join(shlex.quote(p) for p in sync_paths)
     du_result = await dispatch_agent_job(
         "run_command",
         {"command": f"du -sh {paths_arg} 2>/dev/null | tail -1", "timeout": 30},
@@ -142,16 +143,19 @@ async def _phase2_snapshot(source_id: str, connector, execution_result: dict) ->
         logger.warning("[linux_parallel_upgrade] No AWS creds on connector; skipping snapshot")
         return {"snapshot_id": None, "snapshot_skipped": True}
 
-    try:
-        snap = await _take_snapshot(source_id, instance_id, connector)
-        return {"snapshot_id": snap["snapshot_id"], "snapshot_meta": snap, "snapshot_skipped": False}
-    except Exception as exc:
-        logger.warning(f"[linux_parallel_upgrade] Snapshot failed (non-fatal): {exc}")
-        return {"snapshot_id": None, "snapshot_skipped": True}
+    # Confirmed EC2 — take snapshot; failures here are hard errors (don't swallow)
+    snap = await _take_snapshot(source_id, instance_id, connector)
+    return {"snapshot_id": snap["snapshot_id"], "snapshot_meta": snap, "snapshot_skipped": False}
 
 
 async def _generate_temp_keypair() -> tuple:
     """Generate temp Ed25519 keypair. Returns (public_key_line, private_key_b64)."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _generate_temp_keypair_sync)
+
+
+def _generate_temp_keypair_sync() -> tuple:
+    """Sync helper — run in executor to avoid blocking event loop."""
     with tempfile.TemporaryDirectory() as tmpdir:
         key_path = os.path.join(tmpdir, "rsync_key")
         subprocess.run(
