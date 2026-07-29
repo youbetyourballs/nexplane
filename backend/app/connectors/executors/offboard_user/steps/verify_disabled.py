@@ -35,7 +35,17 @@ async def execute(parameters: dict, connector) -> dict:
     for attempt, delay in enumerate(([0] + _DELAYS), start=1):
         if delay:
             await asyncio.sleep(delay)
-        final_state = await checker(account_identifier, creds)
+        try:
+            final_state = await checker(account_identifier, creds)
+        except Exception as exc:
+            return {
+                "action": "verify_disabled",
+                "connector_type": connector_type,
+                "account_identifier": account_identifier,
+                "verified": False,
+                "attempts": attempt,
+                "error": str(exc),
+            }
         if final_state.get("is_disabled"):
             return {
                 "action": "verify_disabled",
