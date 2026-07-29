@@ -212,28 +212,23 @@ def _create_ad_user(private_ip, base_dn, bind_dn, sam, email) -> str:
 
     # Step 2: set password and enable account via WinRM/PowerShell (avoids LDAPS dependency)
     try:
-        import winrm
-        winrm_host = private_ip
-        winrm_user = f"{_DC_NETBIOS}\\Administrator"
+        from app.connectors.executors.active_directory._client import run_winrm_ps
+        winrm_creds = {
+            "winrm_hostname": private_ip,
+            "winrm_port": "5985",
+            "winrm_username": f"{_DC_NETBIOS}\\Administrator",
+            "winrm_password": _DC_ADMIN_PASSWORD,
+            "winrm_use_ssl": "false",
+        }
         ps_script = (
             f'$pwd = ConvertTo-SecureString "{_DC_ADMIN_PASSWORD}" -AsPlainText -Force; '
             f'Set-ADAccountPassword -Identity "{sam}" -NewPassword $pwd -Reset; '
             f'Enable-ADAccount -Identity "{sam}"; '
             f'Write-Output "done"'
         )
-        s = winrm.Session(
-            target=f"http://{winrm_host}:5985/wsman",
-            auth=(winrm_user, _DC_ADMIN_PASSWORD),
-            transport="basic",
-            server_cert_validation="ignore",
-            operation_timeout_sec=30,
-            read_timeout_sec=60,
-        )
-        result_ps = s.run_ps(ps_script)
-        stdout = result_ps.std_out.decode("utf-8", errors="replace").strip()
-        stderr = result_ps.std_err.decode("utf-8", errors="replace").strip()
-        if result_ps.status_code != 0:
-            log(f"WARNING: WinRM password/enable failed (rc={result_ps.status_code}): {stderr}; account stays disabled")
+        stdout, stderr, rc = run_winrm_ps(winrm_creds, ps_script)
+        if rc != 0:
+            log(f"WARNING: WinRM password/enable failed (rc={rc}): {stderr}; account stays disabled")
         else:
             log(f"Account {sam} enabled via WinRM: {stdout}")
     except Exception as exc:
