@@ -47,7 +47,7 @@ async def test_health_check_port_failure_blocks_cutover(monkeypatch):
         return {}
 
     monkeypatch.setattr(lpu, "dispatch_agent_job", _dispatch)
-    monkeypatch.setattr(lpu, "_take_snapshot", AsyncMock(return_value={"snapshot_id": "snap-x", "snapshot_skipped": False}))
+    monkeypatch.setattr(lpu, "_phase2_snapshot", AsyncMock(return_value={"snapshot_id": "snap-x", "snapshot_skipped": False}))
     monkeypatch.setattr(lpu, "_run_rsync", AsyncMock(return_value={"bytes_transferred": 0, "files_transferred": 0, "duration_seconds": 1.0}))
     # Simulate port probe failure: port 8080 closed
     monkeypatch.setattr(lpu, "_probe_tcp_port", MagicMock(return_value=False))
@@ -80,7 +80,7 @@ async def test_health_check_command_failure_blocks_cutover(monkeypatch):
         return {}
 
     monkeypatch.setattr(lpu, "dispatch_agent_job", _dispatch)
-    monkeypatch.setattr(lpu, "_take_snapshot", AsyncMock(return_value={"snapshot_id": "snap-x", "snapshot_skipped": False}))
+    monkeypatch.setattr(lpu, "_phase2_snapshot", AsyncMock(return_value={"snapshot_id": "snap-x", "snapshot_skipped": False}))
     monkeypatch.setattr(lpu, "_run_rsync", AsyncMock(return_value={"bytes_transferred": 0, "files_transferred": 0, "duration_seconds": 1.0}))
     monkeypatch.setattr(lpu, "_probe_tcp_port", MagicMock(return_value=True))
 
@@ -110,7 +110,7 @@ async def test_cutover_records_checkpoint(monkeypatch):
         return {}
 
     monkeypatch.setattr(lpu, "dispatch_agent_job", _dispatch)
-    monkeypatch.setattr(lpu, "_take_snapshot", AsyncMock(return_value={"snapshot_id": "snap-y"}))
+    monkeypatch.setattr(lpu, "_phase2_snapshot", AsyncMock(return_value={"snapshot_id": "snap-y", "snapshot_skipped": False}))
     monkeypatch.setattr(lpu, "_run_rsync", AsyncMock(return_value={"bytes_transferred": 100, "files_transferred": 1, "duration_seconds": 0.5}))
     monkeypatch.setattr(lpu, "_probe_tcp_port", MagicMock(return_value=True))
     monkeypatch.setattr(lpu, "_stop_source", AsyncMock())
