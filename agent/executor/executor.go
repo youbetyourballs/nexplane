@@ -32,6 +32,9 @@ import (
 	"nexplane-agent/commands/compliance"
 	"nexplane-agent/commands/migration"
 	"nexplane-agent/commands/reference"
+	"nexplane-agent/commands/authorizedkeys"
+	"nexplane-agent/commands/rsyncpush"
+	"nexplane-agent/commands/runcommand"
 )
 
 // Result is the outcome of a command execution.
@@ -207,6 +210,11 @@ var commands = map[string]CommandFunc{
 	"reference-scan":    reference.Execute,
 	"reference-update":  reference.UpdateExecute,
 	"reference-restore": reference.RestoreExecute,
+	// Linux parallel upgrade support commands
+	"run_command":           runcommand.RunCommand,
+	"rsync_push":            rsyncpush.Execute,
+	"add_authorized_key":    authorizedkeys.AddAuthorizedKey,
+	"remove_authorized_key": authorizedkeys.RemoveAuthorizedKey,
 	// Credential rotation
 	"rotate_ssh_keys":        credrotation.SSHKeyExecute,
 	"rotate_db_creds":        credrotation.DBRotateExecute,
