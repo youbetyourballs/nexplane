@@ -86,7 +86,7 @@ def get_connection(creds: dict) -> Connection:
     tls = None
     if use_ssl and creds.get("_forward_skip_verify"):
         tls = Tls(validate=ssl.CERT_NONE)
-    server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL, tls=tls)
+    server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL, tls=tls, connect_timeout=10)
     return Connection(server, user=creds["bind_dn"], password=creds["bind_password"], auto_bind=True)
 
 

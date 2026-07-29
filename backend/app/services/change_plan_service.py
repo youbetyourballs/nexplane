@@ -58,7 +58,7 @@ async def _run_offboard_discovery(db: AsyncSession, target_email: str, organizat
         await _attach_credentials(connector, db)
         connector_params.append((connector, ct))
 
-    _DISCOVERY_TIMEOUT_S = 15  # per-connector timeout; prevents slow/dead endpoints from blocking the plan
+    _DISCOVERY_TIMEOUT_S = 20  # per-connector timeout; prevents slow/dead endpoints from blocking the plan
 
     async def _timed_discover(params, connector):
         return await asyncio.wait_for(
