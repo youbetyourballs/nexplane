@@ -2188,6 +2188,88 @@
       "estimated_duration_seconds": 3600
     },
     {
+      "action_id": "linux_parallel_upgrade",
+      "generic_action": "linux_parallel_upgrade",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Linux Parallel Upgrade",
+      "description": "Safely upgrades a Linux host to a newer OS version using a parallel destination instance: preflight, EBS snapshot, rsync data, health check, traffic cutover (EIP/ALB/DNS/static-IP), and scheduled decommission. Full rollback re-points traffic to source.",
+      "applicable_asset_types": [
+        "server"
+      ],
+      "parameters": [
+        {
+          "name": "source_asset_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dest_asset_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "sync_paths",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "cutover_method",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "cutover_config",
+          "type": "object",
+          "required": true
+        },
+        {
+          "name": "sync_exclude",
+          "type": "array",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "pre_sync_runs",
+          "type": "integer",
+          "required": false,
+          "default": 1
+        },
+        {
+          "name": "health_check_ports",
+          "type": "array",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "health_check_command",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "decommission_after_hours",
+          "type": "integer",
+          "required": false,
+          "default": 24
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
+      ],
+      "executor": "nexplane_agent.linux_parallel_upgrade",
+      "rollback_action": "linux_parallel_upgrade",
+      "estimated_duration_seconds": 3600,
+      "safety_notes": [
+        "Ensure dest_asset_id is running a strictly newer OS version than source_asset_id",
+        "EBS snapshot is taken of source before cutover; on-prem hosts skip snapshot",
+        "Decommission is scheduled after decommission_after_hours; set to 0 for manual decommission only",
+        "Rollback re-starts source and re-points traffic — irreversible once source is terminated"
+      ]
+    },
+    {
       "action_id": "ip_campaign",
       "generic_action": "ip_campaign",
       "action_type": "change",

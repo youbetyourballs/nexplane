@@ -211,7 +211,7 @@ async def test_rollback_pre_cutover_no_traffic_change(monkeypatch):
         "cutover_config": {"eip_allocation_id": "eipalloc-abc123"},
         "rollback_capability": ROLLBACK_CAPABILITY_FULL,
     }
-    result = await lpu.rollback(params, execution_result, [params["source_asset_id"], params["dest_asset_id"]], _conn_ec2())
+    result = await lpu.rollback(params, execution_result, _conn_ec2())
     assert not reverse_calls
     assert result["error"] is None
 
@@ -238,7 +238,7 @@ async def test_rollback_post_cutover_reverses_traffic(monkeypatch):
         "cutover_config": {"eip_allocation_id": "eipalloc-abc123"},
         "rollback_capability": "full",
     }
-    result = await lpu.rollback(params, execution_result, [params["source_asset_id"], params["dest_asset_id"]], _conn_ec2())
+    result = await lpu.rollback(params, execution_result, _conn_ec2())
     assert True in reverse_args
     assert result["error"] is None
 

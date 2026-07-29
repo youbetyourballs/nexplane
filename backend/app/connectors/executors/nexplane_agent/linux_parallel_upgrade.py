@@ -32,6 +32,7 @@ DEFINITION = {
     "rollback_capability": "full",
 }
 
+ROLLBACK_CAPABILITY = "full"
 ROLLBACK_CAPABILITY_FULL = "full"
 ROLLBACK_CAPABILITY_IRREVERSIBLE = "irreversible"
 
@@ -561,7 +562,13 @@ def _get_scheduler():
 
 
 async def _phase6_decommission(parameters: dict, execution_result: dict, connector) -> dict:
-    """Phase 6: schedule decommission or record manual-only."""
+    """Phase 6: schedule decommission or record manual-only.
+
+    TODO: APScheduler jobs are in-process only and do not survive a server restart.
+    For durability, the scheduled decommission should be persisted via RecurringJob
+    service (DB-backed) so it survives restarts. This is deferred — out of scope for
+    this commit; tracked as a known limitation.
+    """
     source_id = parameters["source_asset_id"]
     hours = parameters.get("decommission_after_hours", 24)
 
@@ -651,7 +658,7 @@ async def _start_source(source_id: str, connector) -> None:
         logger.warning(f"[linux_parallel_upgrade] _start_source: on-prem source {source_id} cannot be restarted remotely; agent was shut down")
 
 
-async def rollback(parameters: dict, execution_result: dict, asset_ids: list, connector) -> dict:
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     """Reverse cutover, restart source, cancel decommission job."""
     source_id = parameters["source_asset_id"]
     dest_id = parameters["dest_asset_id"]
@@ -668,16 +675,16 @@ async def rollback(parameters: dict, execution_result: dict, asset_ids: list, co
             except Exception as exc:
                 logger.warning(f"[linux_parallel_upgrade] Could not cancel decommission job {job_id}: {exc}")
 
-        # If cutover completed, reverse traffic
-        if execution_result.get("cutover_completed"):
-            await _do_cutover(source_id, dest_id, parameters, connector, reverse=True)
-            rollback_result["actions"].append("reversed_cutover")
-
-        # If source was stopped, restart it
+        # If source was stopped, restart it first so traffic repoint hits a live host
         if execution_result.get("source_stopped"):
             await _start_source(source_id, connector)
             await _check_agent(source_id)
             rollback_result["actions"].append("restarted_source")
+
+        # If cutover completed, reverse traffic (source is now running)
+        if execution_result.get("cutover_completed"):
+            await _do_cutover(source_id, dest_id, parameters, connector, reverse=True)
+            rollback_result["actions"].append("reversed_cutover")
 
     except Exception as exc:
         logger.exception(f"[linux_parallel_upgrade] rollback failed: {exc}")

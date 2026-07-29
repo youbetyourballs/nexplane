@@ -1,6 +1,9 @@
 {
   "change_type": "linux_parallel_upgrade",
   "display_name": "Linux Parallel Upgrade",
+  "steps": [
+    {"generic_action": "linux_parallel_upgrade", "purpose": "execute", "required": true}
+  ],
   "description": "Migrate a Linux host to a new OS version by syncing data to a pre-provisioned dest, cutting over traffic, and scheduling decommission of the old host.",
   "risk_level_default": "high",
   "incident_response": false,
