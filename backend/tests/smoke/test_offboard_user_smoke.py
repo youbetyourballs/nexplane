@@ -172,6 +172,7 @@ def _launch_dc(ec2, ssm, ami_id, aws_creds) -> tuple:
             inv = ssm.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
             if inv["Status"] == "Success":
                 log("WinRM basic auth enabled via SSM")
+                _time.sleep(5)  # brief settle for WinRM listener restart
                 break
             if inv["Status"] in ("Failed", "TimedOut", "Cancelled"):
                 log(f"WARNING: SSM WinRM setup failed: {inv.get('StandardErrorContent', '')[:200]}")
@@ -239,29 +240,39 @@ def _create_ad_user(private_ip, base_dn, bind_dn, sam, email) -> str:
     result = conn.result
     assert result.get("result") == 0, f"Failed to create AD user {sam}: {result}"
 
-    # Step 2: set password and enable account via WinRM/PowerShell (avoids LDAPS dependency)
-    try:
-        from app.connectors.executors.active_directory._client import run_winrm_ps
-        winrm_creds = {
-            "winrm_hostname": private_ip,
-            "winrm_port": "5985",
-            "winrm_username": f"{_DC_NETBIOS}\\Administrator",
-            "winrm_password": _DC_ADMIN_PASSWORD,
-            "winrm_use_ssl": "false",
-        }
-        ps_script = (
-            f'$pwd = ConvertTo-SecureString "{_DC_ADMIN_PASSWORD}" -AsPlainText -Force; '
-            f'Set-ADAccountPassword -Identity "{sam}" -NewPassword $pwd -Reset; '
-            f'Enable-ADAccount -Identity "{sam}"; '
-            f'Write-Output "done"'
-        )
-        stdout, stderr, rc = run_winrm_ps(winrm_creds, ps_script)
-        if rc != 0:
-            log(f"WARNING: WinRM password/enable failed (rc={rc}): {stderr}; account stays disabled")
-        else:
-            log(f"Account {sam} enabled via WinRM: {stdout}")
-    except Exception as exc:
-        log(f"WARNING: WinRM unavailable — account {sam} stays disabled ({exc})")
+    # Step 2: set password and enable account via SSM/PowerShell (avoids LDAPS/WinRM-basic dependency)
+    if _state.get("instance_id") and _state.get("ssm_client"):
+        try:
+            import time as _time
+            ssm_client = _state["ssm_client"]
+            ps_script = (
+                f'$pwd = ConvertTo-SecureString "{_DC_ADMIN_PASSWORD}" -AsPlainText -Force; '
+                f'Set-ADAccountPassword -Identity "{sam}" -NewPassword $pwd -Reset; '
+                f'Enable-ADAccount -Identity "{sam}"; '
+                f'Write-Output "done"'
+            )
+            ssm_resp = ssm_client.send_command(
+                InstanceIds=[_state["instance_id"]],
+                DocumentName="AWS-RunPowerShellScript",
+                Parameters={"commands": [ps_script]},
+                TimeoutSeconds=60,
+            )
+            cmd_id = ssm_resp["Command"]["CommandId"]
+            deadline_ssm = _time.time() + 90
+            while _time.time() < deadline_ssm:
+                _time.sleep(5)
+                inv = ssm_client.get_command_invocation(CommandId=cmd_id, InstanceId=_state["instance_id"])
+                if inv["Status"] == "Success":
+                    stdout = inv.get("StandardOutputContent", "").strip()
+                    log(f"Account {sam} enabled via SSM: {stdout}")
+                    break
+                if inv["Status"] in ("Failed", "TimedOut", "Cancelled"):
+                    log(f"WARNING: SSM password/enable failed: {inv.get('StandardErrorContent', '')[:200]}")
+                    break
+        except Exception as exc:
+            log(f"WARNING: SSM password/enable unavailable — account {sam} stays disabled ({exc})")
+    else:
+        log(f"WARNING: SSM not available — account {sam} stays disabled")
 
     conn.unbind()
     log(f"Created AD user {sam} ({email})")
@@ -299,6 +310,7 @@ def test_phase1_provision_dc():
     _state["instance_id"] = instance_id
     _state["private_ip"] = private_ip
     _state["ec2"] = ec2
+    _state["ssm_client"] = ssm
 
     conn_id, base_dn, bind_dn = _register_ad_connector(private_ip)
     _state["conn_id"] = conn_id
