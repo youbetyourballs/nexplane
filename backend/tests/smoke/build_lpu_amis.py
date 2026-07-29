@@ -21,7 +21,7 @@ SG_ID = "sg-08f614bff1e9aa1b1"
 IAM_PROFILE = "NexplaneEC2TestProfile"
 AGENT_SECRET = "sk-agent-2a9ea7a2367085c2399e4f7f41a2bb2c6fce6d3eaf4f1e7b"
 CLOUD_ACCOUNT_ID = "ddc480c6-f7f9-4966-ac7f-8aa885d0210c"
-NEXPLANE_URL_FROM_INSTANCE = "http://100.101.186.39:8000"
+NEXPLANE_URL_FROM_INSTANCE = "http://172.31.1.233:8000"  # platform private VPC IP
 
 AMI_CONFIGS = [
     {
@@ -103,23 +103,35 @@ def wait_ssm(ec2_id, timeout=300):
     raise TimeoutError(f"SSM not ready for {ec2_id}")
 
 
-def wait_platform_asset(ec2_id, timeout=600):
+def wait_platform_asset(ec2_id, private_ip, timeout=600):
+    """Poll until asset with matching private IP registers with an agent_version."""
+    hostname = f"ip-{private_ip.replace('.', '-')}.ec2.internal"
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             token = get_token()
-            assets = api(token, "get", "/assets", params={"asset_type": "server", "limit": 200})
+            # Search by hostname first
+            assets = api(token, "get", "/assets", params={"q": hostname, "asset_type": "server", "limit": 50})
             if not isinstance(assets, list):
                 assets = assets.get("items", [])
             for a in assets:
                 meta = a.get("asset_metadata") or {}
-                if meta.get("instance_id") == ec2_id and a.get("status") == "active":
-                    log(f"  Platform asset registered: {a['id']}")
+                if (a.get("name") == hostname or private_ip in (meta.get("ip_addresses") or [])) and meta.get("agent_version"):
+                    log(f"  Platform asset registered: {a['id']} ({hostname})")
+                    return a["id"]
+            # Fallback: scan all server assets by IP
+            all_assets = api(token, "get", "/assets", params={"asset_type": "server", "limit": 200})
+            if not isinstance(all_assets, list):
+                all_assets = all_assets.get("items", [])
+            for a in all_assets:
+                meta = a.get("asset_metadata") or {}
+                if private_ip in (meta.get("ip_addresses") or []) and meta.get("agent_version"):
+                    log(f"  Platform asset registered (by IP): {a['id']}")
                     return a["id"]
         except Exception as e:
             log(f"  (waiting for asset: {e})")
         time.sleep(15)
-    raise TimeoutError(f"Asset for {ec2_id} not registered")
+    raise TimeoutError(f"Asset for {ec2_id} ({private_ip}) not registered")
 
 
 def build_ami(config):
@@ -150,7 +162,8 @@ def build_ami(config):
         InstanceIds=[ec2_id],
         WaiterConfig={"Delay": 15, "MaxAttempts": 40},
     )
-    log(f"  {ec2_id} running")
+    private_ip = ec2.describe_instances(InstanceIds=[ec2_id])["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
+    log(f"  {ec2_id} running at {private_ip}")
 
     wait_ssm(ec2_id)
 
@@ -163,7 +176,7 @@ def build_ami(config):
     }, asset_ids=[CLOUD_ACCOUNT_ID], timeout=300)
 
     log("  Waiting for agent to register on platform")
-    wait_platform_asset(ec2_id)
+    wait_platform_asset(ec2_id, private_ip)
 
     log("  Creating AMI snapshot (instance will reboot)")
     ami_resp = ec2.create_image(
