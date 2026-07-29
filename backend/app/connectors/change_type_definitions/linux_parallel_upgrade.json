@@ -1,0 +1,84 @@
+{
+  "change_type": "linux_parallel_upgrade",
+  "display_name": "Linux Parallel Upgrade",
+  "description": "Migrate a Linux host to a new OS version by syncing data to a pre-provisioned dest, cutting over traffic, and scheduling decommission of the old host.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "source_asset_id": {
+      "type": "string",
+      "required": true,
+      "label": "Source Asset ID",
+      "description": "Asset ID of the old host currently serving traffic"
+    },
+    "dest_asset_id": {
+      "type": "string",
+      "required": true,
+      "label": "Dest Asset ID",
+      "description": "Asset ID of the new host (agent installed, app configured)"
+    },
+    "sync_paths": {
+      "type": "array",
+      "required": true,
+      "label": "Sync Paths",
+      "description": "Paths to rsync from source to dest, e.g. [\"/var/lib/app\", \"/etc/app\"]"
+    },
+    "sync_exclude": {
+      "type": "array",
+      "required": false,
+      "label": "Sync Excludes",
+      "description": "rsync exclude patterns, e.g. [\"*.log\", \"*.tmp\"]",
+      "default": []
+    },
+    "pre_sync_runs": {
+      "type": "integer",
+      "required": false,
+      "label": "Pre-Sync Runs",
+      "description": "Run rsync N times before cutover to drain delta (default 1)",
+      "default": 1
+    },
+    "health_check_command": {
+      "type": "string",
+      "required": false,
+      "label": "Health Check Command",
+      "description": "Shell command run on dest to verify app health, e.g. \"curl -sf http://localhost/health\""
+    },
+    "health_check_ports": {
+      "type": "array",
+      "required": false,
+      "label": "Health Check Ports",
+      "description": "TCP ports that must be listening on dest before cutover",
+      "default": []
+    },
+    "cutover_method": {
+      "type": "string",
+      "required": true,
+      "label": "Cutover Method",
+      "description": "Traffic swap method: eip | alb | dns | static_ip"
+    },
+    "cutover_config": {
+      "type": "object",
+      "required": true,
+      "label": "Cutover Config",
+      "description": "Method-specific config (see docs for schema per method)"
+    },
+    "decommission_after_hours": {
+      "type": "integer",
+      "required": false,
+      "label": "Decommission After Hours",
+      "description": "Hours to wait before terminating source (0 = manual only, default 24)",
+      "default": 24
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "If true, run preflight + sync report only, no cutover",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "traffic_reverse",
+    "description": "Reverse traffic cutover, restart source, cancel decommission job if pending"
+  }
+}
