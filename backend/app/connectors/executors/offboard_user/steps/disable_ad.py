@@ -79,11 +79,19 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
             dn = conn.entries[0].distinguishedName.value
         else:
             dn = user_dn
-        # Clear "must change password" flag before enabling — AD won't enable
-        # an account with pwdLastSet=0 (error 53 unwillingToPerform).
-        # Setting pwdLastSet=-1 marks the password as freshly set (no expiry).
-        conn.modify(dn, {"pwdLastSet": [(MODIFY_REPLACE, [-1])]})
-        conn.modify(dn, {"userAccountControl": [(MODIFY_REPLACE, [512])]})
+        # Enabling a disabled account that has pwdLastSet=0 (must-change-at-logon)
+        # fails with error 53 / 52D (WILL_NOT_PERFORM / ERROR_PASSWORD_RESTRICTION).
+        #
+        # Sequence that works on Windows Server 2019 regardless of password policy:
+        #   1. UAC=546  (disabled | normal | PASSWD_NOTREQD)  — marks password not required
+        #   2. UAC=544  (enabled  | normal | PASSWD_NOTREQD)  — enable without password check
+        #   3. UAC=512  (enabled  | normal)                   — clear PASSWD_NOTREQD
+        #
+        # This avoids touching pwdLastSet directly, sidestepping password-age and
+        # complexity policy blocks on the pwdLastSet=-1 modification.
+        conn.modify(dn, {"userAccountControl": [(MODIFY_REPLACE, [546])]})  # disabled+nopasswd
+        conn.modify(dn, {"userAccountControl": [(MODIFY_REPLACE, [544])]})  # enabled+nopasswd
+        conn.modify(dn, {"userAccountControl": [(MODIFY_REPLACE, [512])]})  # enabled, normal
         result = conn.result
         conn.unbind()
         return dn, result
