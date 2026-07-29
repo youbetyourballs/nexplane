@@ -205,7 +205,7 @@ async def plan_cr(db: AsyncSession, cr: ChangeRequest) -> PlanResult:
                 "rollback_capability": "full",
                 "filo_order": "phases 4→3→2→1; phases 5 and 6 have no rollback",
             },
-            verification_plan={"phase": 5, "checks": ["account_disabled_per_connector"]},
+            verification_plan={"phase": 5, "checks": [{"name": "account_disabled_per_connector", "description": "Verify account is disabled across all connected identity systems"}]},
         )
 
         if cr.change_plan:
