@@ -300,6 +300,28 @@ def test_phase2_create_test_user():
     _state["test_user_email"] = email
     _state["test_user_dn"] = user_dn
 
+    # Wait for AD to index the new account before discovery runs
+    log("Waiting 15s for AD to index the new user...")
+    time.sleep(15)
+
+    # Pre-check: confirm discovery will find the user by mail/UPN via LDAP
+    from ldap3 import Server as _Srv, Connection as _Conn, ALL as _ALL
+    private_ip = _state["private_ip"]
+    base_dn = _state["base_dn"]
+    bind_dn = _state["bind_dn"]
+    check_srv = _Srv(private_ip, port=389, get_info=_ALL)
+    check_conn = _Conn(check_srv, user=bind_dn, password=_DC_ADMIN_PASSWORD, auto_bind=True)
+    check_conn.search(base_dn, f"(mail={email})", attributes=["sAMAccountName"])
+    if not check_conn.entries:
+        check_conn.search(base_dn, f"(userPrincipalName={email})", attributes=["sAMAccountName"])
+    found_by_email = bool(check_conn.entries)
+    check_conn.unbind()
+    assert found_by_email, (
+        f"Pre-check failed: user {sam} not findable by mail/UPN ({email}) in AD. "
+        "Discovery will fail. Check that the account was created with the mail attribute."
+    )
+    log(f"Pre-check PASSED: user {sam} visible by email in AD")
+
     log(f"Phase 2 PASSED: test AD user created: {sam}")
 
 
