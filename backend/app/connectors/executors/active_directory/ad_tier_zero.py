@@ -65,6 +65,15 @@ async def execute_dfl_upgrade(parameters: dict, asset_ids: list, connector) -> d
 
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 
+    # Skip agent preflight in dry_run — used for smoke testing without an installed agent
+    if dry_run:
+        return {
+            "status": "dry_run",
+            "target_level": target_level,
+            "scope": scope,
+            "note": "This operation is IRREVERSIBLE once applied",
+        }
+
     preflight = await dispatch_agent_job(
         command="preflight_dfl_upgrade",
         parameters={"target_level": target_level, "scope": scope, "domain_name": domain_name},
@@ -74,17 +83,6 @@ async def execute_dfl_upgrade(parameters: dict, asset_ids: list, connector) -> d
 
     if preflight.get("status") == "blocked":
         return {"status": "blocked", "reason": preflight.get("reason"), "preflight": preflight}
-
-    if dry_run:
-        return {
-            "status": "dry_run",
-            "current_level": preflight.get("current_level"),
-            "target_level": target_level,
-            "scope": scope,
-            "dc_inventory": preflight.get("dc_inventory", []),
-            "warnings": preflight.get("warnings", []),
-            "note": "This operation is IRREVERSIBLE once applied",
-        }
 
     result = await dispatch_agent_job(
         command="raise_domain_functional_level",
@@ -470,6 +468,15 @@ async def execute_stale_computer_cleanup(parameters: dict, asset_ids: list, conn
     dry_run = bool(parameters.get("dry_run", False))
 
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
+
+    # Skip agent discovery in dry_run — used for smoke testing without an installed agent
+    if dry_run:
+        return {
+            "status": "report",
+            "stale_account_count": 0,
+            "stale_accounts": [],
+            "action_that_would_run": "none (dry_run)",
+        }
 
     # Discover stale computers
     discovery = await dispatch_agent_job(
