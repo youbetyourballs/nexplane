@@ -156,7 +156,7 @@ async def _phase2_snapshot(source_id: str, connector, execution_result: dict) ->
 
 async def _generate_temp_keypair() -> tuple:
     """Generate temp Ed25519 keypair. Returns (public_key_line, private_key_b64)."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _generate_temp_keypair_sync)
 
 
@@ -248,8 +248,8 @@ async def _verify_dest_health(parameters: dict, dest_ip: str) -> None:
 
     for port in ports:
         ok = False
-        deadline = asyncio.get_event_loop().time() + _HEALTH_CHECK_TIMEOUT_SECONDS
-        while asyncio.get_event_loop().time() < deadline:
+        deadline = asyncio.get_running_loop().time() + _HEALTH_CHECK_TIMEOUT_SECONDS
+        while asyncio.get_running_loop().time() < deadline:
             if _probe_tcp_port(dest_ip, port):
                 ok = True
                 break
@@ -277,7 +277,7 @@ async def _stop_source(source_id: str, connector) -> None:
     if connector.credentials and connector.credentials.get("access_key_id"):
         creds = await _get_aws_creds(connector)
         ec2 = _make_ec2_client(creds)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         instances = await loop.run_in_executor(
             None,
             lambda: ec2.describe_instances(
@@ -308,7 +308,7 @@ async def _stop_source(source_id: str, connector) -> None:
 async def _cutover_eip(source_id: str, dest_id: str, cutover_config: dict, connector, reverse: bool = False) -> None:
     creds = await _get_aws_creds(connector)
     ec2 = _make_ec2_client(creds)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     eip_id = cutover_config["eip_allocation_id"]
 
     def _get_instance_id(asset_id: str) -> str:
@@ -352,7 +352,7 @@ async def _cutover_alb(source_id: str, dest_id: str, cutover_config: dict, conne
         aws_session_token=creds.get("session_token"),
         region_name=region,
     )
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     tg_arn = cutover_config["target_group_arn"]
     ec2 = _make_ec2_client(creds)
 
@@ -403,7 +403,7 @@ async def _cutover_dns(source_id: str, dest_id: str, cutover_config: dict, conne
         aws_secret_access_key=creds.get("secret_access_key"),
         aws_session_token=creds.get("session_token"),
     )
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     hosted_zone_id = cutover_config["hosted_zone_id"]
     record_name = cutover_config["record_name"]
     record_type = cutover_config["record_type"]
@@ -574,9 +574,14 @@ async def _phase6_decommission(parameters: dict, execution_result: dict, connect
     job_id = str(uuid.uuid4())
     fire_time = datetime.now(timezone.utc) + timedelta(hours=hours)
 
+    # Capture snapshot_id at schedule time — not at fire time — so that a rollback
+    # that clears execution_result["snapshot_id"] between now and fire time doesn't
+    # cause the wrong snapshot_id to be used.
+    _snapshot_id = execution_result.get("snapshot_id")
+
     scheduler = _get_scheduler()
     scheduler.add_job(
-        lambda: asyncio.ensure_future(_terminate_source(source_id, execution_result.get("snapshot_id"), connector)),
+        lambda: asyncio.ensure_future(_terminate_source(source_id, _snapshot_id, connector, execution_result)),
         DateTrigger(run_date=fire_time),
         id=f"decommission_{job_id}",
     )
@@ -586,13 +591,21 @@ async def _phase6_decommission(parameters: dict, execution_result: dict, connect
     return execution_result
 
 
-async def _terminate_source(source_id: str, snapshot_id, connector) -> None:
-    """Terminate source instance and delete snapshot."""
+async def _terminate_source(source_id: str, snapshot_id, connector, execution_result: dict | None = None) -> None:
+    """Terminate source instance and delete snapshot. Marks rollback irreversible.
+
+    NOTE: The in-process execution_result dict is updated so that callers in the
+    same process see the irreversible marker immediately. For server-restart
+    durability, a separate CR state update to the database would be required —
+    that is a known limitation and is not implemented here.
+    """
+    if execution_result is not None:
+        execution_result["rollback_capability"] = ROLLBACK_CAPABILITY_IRREVERSIBLE
     logger.info(f"[linux_parallel_upgrade] decommission: terminating source {source_id}")
     if connector.credentials and connector.credentials.get("access_key_id"):
         creds = await _get_aws_creds(connector)
         ec2 = _make_ec2_client(creds)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         instances = await loop.run_in_executor(
             None,
             lambda: ec2.describe_instances(
@@ -617,7 +630,7 @@ async def _start_source(source_id: str, connector) -> None:
     if connector.credentials and connector.credentials.get("access_key_id"):
         creds = await _get_aws_creds(connector)
         ec2 = _make_ec2_client(creds)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         instances = await loop.run_in_executor(
             None,
             lambda: ec2.describe_instances(
