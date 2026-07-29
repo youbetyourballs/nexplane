@@ -76,6 +76,7 @@ async def build_plan(payload: dict, resolved_connectors: list[dict]) -> list[dic
                 },
                 "phase": 2,
                 "rollback_action_id": f"enable_{c['connector_type']}_account",
+                "rollback_connector_type": c["connector_type"],
                 "status": "pending",
             })
             _action_connectors.append(c)
@@ -94,6 +95,7 @@ async def build_plan(payload: dict, resolved_connectors: list[dict]) -> list[dic
                 },
                 "phase": 3,
                 "rollback_action_id": f"reinstate_{c['connector_type']}_member",
+                "rollback_connector_type": c["connector_type"],
                 "status": "pending",
             })
             _action_connectors.append(c)
@@ -112,6 +114,7 @@ async def build_plan(payload: dict, resolved_connectors: list[dict]) -> list[dic
                     },
                     "phase": 4,
                     "rollback_action_id": "lift_crowdstrike_isolation",
+                    "rollback_connector_type": "crowdstrike",
                     "status": "pending",
                 })
                 _action_connectors.append(c)
