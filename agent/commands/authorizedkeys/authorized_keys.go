@@ -41,8 +41,10 @@ func AddAuthorizedKey(params map[string]any) (map[string]any, error) {
 	}
 	existing, _ := os.ReadFile(authFile)
 	keyLine := strings.TrimSpace(pubKey)
-	if strings.Contains(string(existing), keyLine) {
-		return map[string]any{"added": false, "user": user, "reason": "already present"}, nil
+	for _, line := range strings.Split(string(existing), "\n") {
+		if strings.TrimSpace(line) == keyLine {
+			return map[string]any{"added": false, "user": user, "reason": "already present"}, nil
+		}
 	}
 	f, err := os.OpenFile(authFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {

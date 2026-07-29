@@ -41,7 +41,7 @@ func Execute(params map[string]any) (map[string]any, error) {
 	}
 	args := []string{
 		"-az", "--checksum", "--stats",
-		"-e", fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", keyPath),
+		"-e", fmt.Sprintf("ssh -i '%s' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", keyPath),
 	}
 	if deleteFlag {
 		args = append(args, "--delete")
