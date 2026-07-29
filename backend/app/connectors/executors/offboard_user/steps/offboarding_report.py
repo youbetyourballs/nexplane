@@ -5,11 +5,12 @@ from datetime import datetime, timezone
 
 
 async def execute(parameters: dict, connector) -> dict:
-    """Generate structured offboarding report and optionally notify manager."""
+    """Generate structured offboarding report including discovery manifest and verification results."""
     target_email = parameters["target_email"]
     reason = parameters.get("reason", "unspecified")
     notify_manager = parameters.get("notify_manager", True)
     manager_email = parameters.get("manager_email")
+    discovery_manifest = parameters.get("discovery_manifest", [])
     completed_at = datetime.now(timezone.utc).isoformat()
 
     report = {
@@ -18,6 +19,10 @@ async def execute(parameters: dict, connector) -> dict:
         "reason": reason,
         "completed_at": completed_at,
         "manager_notified": False,
+        "discovery_manifest": discovery_manifest,
+        "systems_offboarded": [
+            r["connector_type"] for r in discovery_manifest if r.get("found")
+        ],
     }
 
     if notify_manager and manager_email:
