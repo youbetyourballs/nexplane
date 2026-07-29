@@ -244,6 +244,8 @@ def _register_dc_asset(private_ip, aws_creds) -> tuple:
     asset = _api("post", "/assets", json={
         "name": f"smoke-tier-zero-dc-{run_id}",
         "asset_type": "server",
+        "criticality": "medium",
+        "environment": "staging",
         "hostname": private_ip,
         "connector_id": conn_id,
         "metadata": {"role": "domain_controller", "domain": _DC_DOMAIN},
