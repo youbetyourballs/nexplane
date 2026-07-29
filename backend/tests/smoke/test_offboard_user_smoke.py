@@ -183,23 +183,55 @@ def _register_ad_connector(private_ip) -> str:
 
 
 def _create_ad_user(private_ip, base_dn, bind_dn, sam, email) -> str:
-    """Create a test AD user via LDAP. Returns user DN."""
-    from ldap3 import Server, Connection, ALL
+    """Create a test AD user via LDAP with SSL for password set. Returns user DN.
+
+    AD will not create an enabled account without a password on the wire, so:
+      1. Create the account disabled (UAC=514) — no password required.
+      2. Set unicodePwd via LDAPS (port 636). If LDAPS is unavailable, the
+         account stays disabled but can still be offboarded (disabled→disabled
+         is a no-op for the executor, so the test would skip).
+      3. Enable the account (UAC=512) so the executor has something to disable.
+    """
+    from ldap3 import Server, Connection, ALL, MODIFY_REPLACE, Tls
+    import ssl
 
     user_dn = f"CN={sam},CN=Users,{base_dn}"
+    run_id = sam.split("-")[-1]
+
+    # Step 1: create disabled account (no password needed)
     srv = Server(private_ip, port=389, get_info=ALL)
     conn = Connection(srv, user=bind_dn, password=_DC_ADMIN_PASSWORD, auto_bind=True)
-    run_id = sam.split("-")[-1]
     conn.add(user_dn, ["top", "person", "organizationalPerson", "user"], {
         "sAMAccountName": sam,
         "userPrincipalName": email,
         "mail": email,
         "displayName": f"Smoke Offboard {run_id}",
-        "userAccountControl": 512,  # enabled, normal account
+        "userAccountControl": 514,  # disabled, normal account — password not required
     })
     result = conn.result
-    conn.unbind()
     assert result.get("result") == 0, f"Failed to create AD user {sam}: {result}"
+
+    # Step 2: set password via LDAPS (port 636, TLS)
+    tls = Tls(validate=ssl.CERT_NONE)
+    srv_ssl = Server(private_ip, port=636, use_ssl=True, tls=tls, get_info=ALL)
+    try:
+        conn_ssl = Connection(srv_ssl, user=bind_dn, password=_DC_ADMIN_PASSWORD, auto_bind=True)
+        encoded_pwd = f'"{_DC_ADMIN_PASSWORD}"'.encode("utf-16-le")
+        conn_ssl.modify(user_dn, {"unicodePwd": [(MODIFY_REPLACE, [encoded_pwd])]})
+        pwd_result = conn_ssl.result
+        conn_ssl.unbind()
+        if pwd_result.get("result") != 0:
+            log(f"WARNING: password set failed ({pwd_result}); account stays disabled")
+        else:
+            # Step 3: enable the account
+            conn.modify(user_dn, {"userAccountControl": [(MODIFY_REPLACE, [512])]})
+            enable_result = conn.result
+            assert enable_result.get("result") == 0, \
+                f"Failed to enable AD user {sam}: {enable_result}"
+    except Exception as exc:
+        log(f"WARNING: LDAPS unavailable — account {sam} stays disabled ({exc})")
+
+    conn.unbind()
     log(f"Created AD user {sam} ({email})")
     return user_dn
 
