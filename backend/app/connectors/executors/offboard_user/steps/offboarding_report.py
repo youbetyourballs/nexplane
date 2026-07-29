@@ -4,7 +4,7 @@
 from datetime import datetime, timezone
 
 
-async def execute(parameters: dict, connector) -> dict:
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Generate structured offboarding report including discovery manifest and verification results."""
     target_email = parameters["target_email"]
     reason = parameters.get("reason", "unspecified")

@@ -32,7 +32,7 @@ _OFFBOARD_DISCOVERY_TYPES = {
 async def _discover_account_on_connector(parameters: dict, connector) -> dict:
     """Call discover_accounts.execute for a single connector. Isolated for testability."""
     from app.connectors.executors.offboard_user.steps import discover_accounts
-    return await discover_accounts.execute(parameters, connector)
+    return await discover_accounts.execute(parameters, [], connector)
 
 
 async def _run_offboard_discovery(db: AsyncSession, target_email: str, organization_id) -> list[dict]:

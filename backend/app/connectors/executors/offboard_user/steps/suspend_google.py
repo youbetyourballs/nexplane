@@ -4,7 +4,7 @@
 from datetime import datetime, timezone
 
 
-async def execute(parameters: dict, connector) -> dict:
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Suspend the Google Workspace account and revoke OAuth tokens."""
     target_email = parameters["target_email"]
     creds = getattr(connector, "credentials", {}) or {}

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 _DELAYS = [2, 4, 8, 16, 30]
 
 
-async def execute(parameters: dict, connector) -> dict:
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     connector_type = parameters["connector_type"]
     account_identifier = parameters["account_identifier"]
     creds = getattr(connector, "credentials", {}) or {}

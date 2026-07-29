@@ -4,7 +4,7 @@
 import asyncio
 
 
-async def execute(parameters: dict, connector) -> dict:
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     target_email = parameters["target_email"]
     connector_type = parameters["connector_type"]
     creds = getattr(connector, "credentials", {}) or {}

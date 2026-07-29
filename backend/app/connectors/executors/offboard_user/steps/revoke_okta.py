@@ -4,7 +4,7 @@
 from datetime import datetime, timezone
 
 
-async def execute(parameters: dict, connector) -> dict:
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Clear all Okta sessions and suspend the account."""
     target_email = parameters["target_email"]
     creds = getattr(connector, "credentials", {}) or {}
