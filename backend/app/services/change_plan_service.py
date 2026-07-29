@@ -59,31 +59,43 @@ async def _run_offboard_discovery(db: AsyncSession, target_email: str, organizat
         connector_params.append((connector, ct))
 
     _DISCOVERY_TIMEOUT_S = 15  # per-connector timeout
-    # Use a dedicated ThreadPoolExecutor sized to the number of connectors so that
-    # all discovery coroutines (which use run_in_executor internally) run truly
-    # concurrently rather than queuing behind the default 6-worker pool.
+    # Run each discovery call in a fresh asyncio sub-loop inside a dedicated
+    # thread, one thread per connector, so that the blocking LDAP connect inside
+    # each thread does not starve others waiting in the default thread pool.
     import concurrent.futures as _cf
+
+    def _sync_discover(params, conn_obj):
+        """Run the async discover_accounts coroutine in a new event loop (thread-safe)."""
+        import asyncio as _asyncio
+        loop = _asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                _discover_account_on_connector(params, conn_obj)
+            )
+        except Exception as exc:
+            raise exc
+        finally:
+            loop.close()
+
     n_connectors = max(len(connector_params), 1)
-    _discovery_executor = _cf.ThreadPoolExecutor(max_workers=n_connectors, thread_name_prefix="offboard-discovery")
+    _discovery_executor = _cf.ThreadPoolExecutor(
+        max_workers=n_connectors, thread_name_prefix="offboard-discovery"
+    )
     loop = asyncio.get_event_loop()
-    _orig_executor = loop._default_executor
 
-    async def _timed_discover(params, conn_obj):
-        return await asyncio.wait_for(
-            _discover_account_on_connector(params, conn_obj),
-            timeout=_DISCOVERY_TIMEOUT_S,
+    futures = [
+        loop.run_in_executor(
+            _discovery_executor,
+            _sync_discover,
+            {"target_email": target_email, "connector_type": ct},
+            connector,
         )
-
-    loop.set_default_executor(_discovery_executor)
-    try:
-        tasks = [
-            _timed_discover({"target_email": target_email, "connector_type": ct}, connector)
-            for connector, ct in connector_params
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-    finally:
-        loop.set_default_executor(_orig_executor)
-        _discovery_executor.shutdown(wait=False)
+        for connector, ct in connector_params
+    ]
+    # Wrap each future in wait_for so slow connectors timeout independently
+    tasks = [asyncio.wait_for(f, timeout=_DISCOVERY_TIMEOUT_S) for f in futures]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    _discovery_executor.shutdown(wait=False)
 
     manifest = []
     for (connector, ct), result in zip(connector_params, results):
