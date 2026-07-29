@@ -50,9 +50,16 @@ async def test_run_offboard_discovery_returns_manifest(monkeypatch):
     async def _mock_discover(params, connector):
         return {"found": True, "account_identifier": "alice", "connector_type": "active_directory", "details": {}}
 
+    async def _noop_attach(connector, db):
+        pass
+
     monkeypatch.setattr(
         "app.services.change_plan_service._discover_account_on_connector",
         _mock_discover,
+    )
+    monkeypatch.setattr(
+        "app.services.connector_service._attach_credentials",
+        _noop_attach,
     )
 
     manifest = await change_plan_service._run_offboard_discovery(db, "alice@corp.com", fake_connector.id)
@@ -79,9 +86,16 @@ async def test_run_offboard_discovery_handles_exception(monkeypatch):
     async def _mock_discover_error(params, connector):
         raise RuntimeError("connection refused")
 
+    async def _noop_attach(connector, db):
+        pass
+
     monkeypatch.setattr(
         "app.services.change_plan_service._discover_account_on_connector",
         _mock_discover_error,
+    )
+    monkeypatch.setattr(
+        "app.services.connector_service._attach_credentials",
+        _noop_attach,
     )
 
     manifest = await change_plan_service._run_offboard_discovery(db, "alice@corp.com", fake_connector.id)

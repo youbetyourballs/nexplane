@@ -29,7 +29,7 @@ async def test_build_plan_empty_connectors_still_has_report():
     payload = {"target_email": "alice@corp.com", "reason": "termination"}
     steps = await build_plan(payload, [])
     assert len(steps) == 1
-    assert steps[0]["action"] == "generate_offboarding_report"
+    assert steps[0]["action_id"] == "generate_offboarding_report"
     assert steps[0]["phase"] == 6
 
 
@@ -51,7 +51,7 @@ async def test_build_plan_report_is_last_and_phase_6():
     connectors = [_connector("okta"), _connector("active_directory")]
     payload = {"target_email": "alice@corp.com", "reason": "termination"}
     steps = await build_plan(payload, connectors)
-    assert steps[-1]["action"] == "generate_offboarding_report"
+    assert steps[-1]["action_id"] == "generate_offboarding_report"
     assert steps[-1]["phase"] == 6
 
 
@@ -65,7 +65,7 @@ async def test_build_plan_verify_steps_in_phase_5():
     steps = await build_plan(payload, connectors)
     verify_steps = [s for s in steps if s["phase"] == 5]
     assert len(verify_steps) == 2
-    verify_actions = [s["action"] for s in verify_steps]
+    verify_actions = [s["action_id"] for s in verify_steps]
     assert "verify_active_directory_disabled" in verify_actions
     assert "verify_okta_disabled" in verify_actions
     for vs in verify_steps:
@@ -79,7 +79,7 @@ async def test_verify_steps_have_no_rollback():
     steps = await build_plan(payload, connectors)
     verify_steps = [s for s in steps if s["phase"] == 5]
     for vs in verify_steps:
-        assert vs["rollback_action"] is None
+        assert vs["rollback_action_id"] is None
 
 
 @pytest.mark.asyncio
@@ -87,7 +87,7 @@ async def test_build_plan_crowdstrike_only_when_requested():
     connectors = [_connector("crowdstrike", account_identifier="dev1,dev2")]
     payload = {"target_email": "alice@corp.com", "reason": "termination", "isolate_endpoints": False}
     steps = await build_plan(payload, connectors)
-    actions = [s["action"] for s in steps]
+    actions = [s["action_id"] for s in steps]
     assert "isolate_crowdstrike_endpoints" not in actions
 
 
@@ -97,4 +97,4 @@ async def test_build_plan_crowdstrike_verify_only_when_isolate_requested():
     payload = {"target_email": "alice@corp.com", "reason": "termination", "isolate_endpoints": True}
     steps = await build_plan(payload, connectors)
     verify_steps = [s for s in steps if s["phase"] == 5]
-    assert any("crowdstrike" in s["action"] for s in verify_steps)
+    assert any("crowdstrike" in s["action_id"] for s in verify_steps)

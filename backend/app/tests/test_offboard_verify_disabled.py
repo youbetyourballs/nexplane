@@ -16,6 +16,7 @@ def _connector_no_creds():
 async def test_no_creds_simulated_pass():
     result = await verify_disabled.execute(
         {"target_email": "alice@corp.com", "connector_type": "active_directory", "account_identifier": "alice"},
+        [],
         _connector_no_creds(),
     )
     assert result["verified"] is True
@@ -28,6 +29,7 @@ async def test_unknown_connector_type_fails():
         credentials = {"some": "cred"}
     result = await verify_disabled.execute(
         {"target_email": "alice@corp.com", "connector_type": "unknown_system", "account_identifier": "alice"},
+        [],
         FakeCon(),
     )
     assert result["verified"] is False
@@ -54,6 +56,7 @@ async def test_ad_disabled_passes_on_first_check(monkeypatch):
 
     result = await verify_disabled.execute(
         {"target_email": "alice@corp.com", "connector_type": "active_directory", "account_identifier": "alice"},
+        [],
         FakeCon(),
     )
     assert result["verified"] is True
@@ -74,6 +77,7 @@ async def test_verify_fails_after_all_retries(monkeypatch):
 
     result = await verify_disabled.execute(
         {"target_email": "alice@corp.com", "connector_type": "active_directory", "account_identifier": "alice"},
+        [],
         FakeCon(),
     )
     assert result["verified"] is False

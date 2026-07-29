@@ -15,6 +15,7 @@ def _connector_no_creds():
 async def test_no_creds_returns_not_found():
     result = await discover_accounts.execute(
         {"target_email": "alice@corp.com", "connector_type": "active_directory"},
+        [],
         _connector_no_creds(),
     )
     assert result["found"] is False
@@ -27,6 +28,7 @@ async def test_no_creds_returns_not_found():
 async def test_unknown_connector_type_returns_not_found():
     result = await discover_accounts.execute(
         {"target_email": "alice@corp.com", "connector_type": "unknown_system"},
+        [],
         _connector_no_creds(),
     )
     assert result["found"] is False
