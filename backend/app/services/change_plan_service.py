@@ -58,19 +58,32 @@ async def _run_offboard_discovery(db: AsyncSession, target_email: str, organizat
         await _attach_credentials(connector, db)
         connector_params.append((connector, ct))
 
-    _DISCOVERY_TIMEOUT_S = 20  # per-connector timeout; prevents slow/dead endpoints from blocking the plan
+    _DISCOVERY_TIMEOUT_S = 15  # per-connector timeout
+    # Use a dedicated ThreadPoolExecutor sized to the number of connectors so that
+    # all discovery coroutines (which use run_in_executor internally) run truly
+    # concurrently rather than queuing behind the default 6-worker pool.
+    import concurrent.futures as _cf
+    n_connectors = max(len(connector_params), 1)
+    _discovery_executor = _cf.ThreadPoolExecutor(max_workers=n_connectors, thread_name_prefix="offboard-discovery")
+    loop = asyncio.get_event_loop()
+    _orig_executor = loop._default_executor
 
-    async def _timed_discover(params, connector):
+    async def _timed_discover(params, conn_obj):
         return await asyncio.wait_for(
-            _discover_account_on_connector(params, connector),
+            _discover_account_on_connector(params, conn_obj),
             timeout=_DISCOVERY_TIMEOUT_S,
         )
 
-    tasks = [
-        _timed_discover({"target_email": target_email, "connector_type": ct}, connector)
-        for connector, ct in connector_params
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    loop.set_default_executor(_discovery_executor)
+    try:
+        tasks = [
+            _timed_discover({"target_email": target_email, "connector_type": ct}, connector)
+            for connector, ct in connector_params
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        loop.set_default_executor(_orig_executor)
+        _discovery_executor.shutdown(wait=False)
 
     manifest = []
     for (connector, ct), result in zip(connector_params, results):
