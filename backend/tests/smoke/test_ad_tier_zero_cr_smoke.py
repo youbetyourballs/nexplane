@@ -91,6 +91,7 @@ def _full_cr_lifecycle(change_type, parameters, asset_ids, connector_id, title_p
         "parameters": parameters,
         "asset_ids": asset_ids,
         "connector_id": connector_id,
+        "desired_outcome": {"summary": f"Smoke test: {title_prefix}"},
     })
     cr_id = cr["id"]
     log(f"  Created CR {cr_id}")
