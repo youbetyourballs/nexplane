@@ -83,15 +83,16 @@ def _poll_cr(cr_id, timeout_s=CR_TIMEOUT, interval_s=POLL_INTERVAL):
 
 
 def _full_cr_lifecycle(change_type, parameters, asset_ids, connector_id, title_prefix):
-    """create → plan → approve → execute. Returns final CR dict."""
+    """create → plan → submit → approve → execute. Returns final CR dict."""
     run_id = uuid.uuid4().hex[:6]
+    # The API accepts target_asset_ids (not asset_ids); execution params go in desired_outcome
+    desired_outcome = {"summary": f"Smoke test: {title_prefix}"}
+    desired_outcome.update(parameters)
     cr = _api("post", "/change-requests", json={
         "title": f"smoke-{title_prefix}-{run_id}",
         "change_type": change_type,
-        "parameters": parameters,
-        "asset_ids": asset_ids,
-        "connector_id": connector_id,
-        "desired_outcome": {"summary": f"Smoke test: {title_prefix}"},
+        "target_asset_ids": asset_ids,
+        "desired_outcome": desired_outcome,
     })
     cr_id = cr["id"]
     log(f"  Created CR {cr_id}")
@@ -255,7 +256,9 @@ def _register_dc_asset(private_ip, aws_creds) -> tuple:
         "metadata": {"role": "domain_controller", "domain": _DC_DOMAIN},
     })
     asset_id = asset["id"]
-    log(f"  Registered DC asset {asset_id}")
+    # Link asset to connector in asset_connectors_table so the workflow can resolve it
+    _api("post", f"/assets/{asset_id}/connectors", json={"connector_id": conn_id})
+    log(f"  Registered DC asset {asset_id} linked to connector {conn_id}")
     return conn_id, asset_id
 
 
@@ -312,15 +315,14 @@ def test_phase2_dfl_upgrade_dry_run():
     cr = _api("post", "/change-requests", json={
         "title": "smoke-dfl-dry-run",
         "change_type": "ad_domain_functional_level_upgrade",
-        "parameters": {
+        "target_asset_ids": [_state["asset_id"]],
+        "desired_outcome": {
+            "summary": "Smoke test: DFL upgrade dry-run",
             "target_level": "2016",
             "scope": "domain",
             "domain_name": _DC_DOMAIN,
             "dry_run": True,
         },
-        "asset_ids": [_state["asset_id"]],
-        "connector_id": _state["connector_id"],
-        "desired_outcome": {"summary": "Smoke test: DFL upgrade dry-run"},
     })
     cr_id = cr["id"]
     _state["cr_ids"].append(cr_id)
@@ -352,7 +354,9 @@ def test_phase3_trust_create_and_rollback():
     cr = _api("post", "/change-requests", json={
         "title": "smoke-trust-create",
         "change_type": "ad_trust_create",
-        "parameters": {
+        "target_asset_ids": [_state["asset_id"]],
+        "desired_outcome": {
+            "summary": "Smoke test: trust create dry-run",
             "target_domain": "other.nexplane.local",
             "trust_type": "external",
             "trust_direction": "outbound",
@@ -360,9 +364,6 @@ def test_phase3_trust_create_and_rollback():
             "domain_name": _DC_DOMAIN,
             "dry_run": True,
         },
-        "asset_ids": [_state["asset_id"]],
-        "connector_id": _state["connector_id"],
-        "desired_outcome": {"summary": "Smoke test: trust create dry-run"},
     })
     cr_id = cr["id"]
     _state["cr_ids"].append(cr_id)
