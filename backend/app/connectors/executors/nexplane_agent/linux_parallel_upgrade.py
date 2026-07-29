@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shlex
+import socket
 import subprocess
 import tempfile
 
@@ -226,6 +227,244 @@ async def _run_rsync(source_id: str, dest_id: str, parameters: dict) -> dict:
     }
 
 
+def _probe_tcp_port(host: str, port: int, timeout: float = 5.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (OSError, ConnectionRefusedError, TimeoutError):
+        return False
+
+
+async def _verify_dest_health(parameters: dict, dest_ip: str) -> None:
+    """Phase 4. Raises RuntimeError on any health check failure."""
+    dest_id = parameters["dest_asset_id"]
+    ports = parameters.get("health_check_ports") or []
+    health_cmd = parameters.get("health_check_command")
+
+    for port in ports:
+        ok = False
+        deadline = asyncio.get_event_loop().time() + 30
+        while asyncio.get_event_loop().time() < deadline:
+            if _probe_tcp_port(dest_ip, port):
+                ok = True
+                break
+            await asyncio.sleep(3)
+        if not ok:
+            raise RuntimeError(f"Health check failed: port {port} unreachable on dest after 30s")
+
+    if health_cmd:
+        result = await dispatch_agent_job(
+            "run_command",
+            {"command": health_cmd, "timeout": 60},
+            [dest_id],
+            timeout_seconds=70,
+        )
+        if result.get("exit_code", 1) != 0:
+            raise RuntimeError(
+                f"Health check command exited {result.get('exit_code')}: {result.get('output', '')}"
+            )
+
+    await _check_agent(dest_id)
+
+
+async def _stop_source(source_id: str, connector) -> None:
+    """Stop source: EC2 stop_instances, or on-prem shutdown via run_command."""
+    if connector.credentials and connector.credentials.get("access_key_id"):
+        creds = await _get_aws_creds(connector)
+        ec2 = _make_ec2_client(creds)
+        loop = asyncio.get_event_loop()
+        instances = await loop.run_in_executor(
+            None,
+            lambda: ec2.describe_instances(
+                Filters=[{"Name": "tag:nexplane-asset-id", "Values": [source_id]}]
+            ),
+        )
+        reservations = instances.get("Reservations", [])
+        if reservations:
+            instance_id = reservations[0]["Instances"][0]["InstanceId"]
+            await loop.run_in_executor(None, lambda: ec2.stop_instances(InstanceIds=[instance_id]))
+            await loop.run_in_executor(
+                None,
+                lambda: ec2.get_waiter("instance_stopped").wait(
+                    InstanceIds=[instance_id],
+                    WaiterConfig={"Delay": 10, "MaxAttempts": 30},
+                ),
+            )
+    else:
+        await dispatch_agent_job(
+            "run_command",
+            {"command": "shutdown -h now", "timeout": 10},
+            [source_id],
+            timeout_seconds=15,
+        )
+
+
+async def _cutover_eip(source_id: str, dest_id: str, cutover_config: dict, connector, reverse: bool = False) -> None:
+    creds = await _get_aws_creds(connector)
+    ec2 = _make_ec2_client(creds)
+    loop = asyncio.get_event_loop()
+    eip_id = cutover_config["eip_allocation_id"]
+
+    def _get_instance_id(asset_id: str) -> str:
+        result = ec2.describe_instances(
+            Filters=[{"Name": "tag:nexplane-asset-id", "Values": [asset_id]}]
+        )
+        return result["Reservations"][0]["Instances"][0]["InstanceId"]
+
+    if not reverse:
+        addr = ec2.describe_addresses(AllocationIds=[eip_id])["Addresses"][0]
+        if addr.get("AssociationId"):
+            await loop.run_in_executor(
+                None, lambda: ec2.disassociate_address(AssociationId=addr["AssociationId"])
+            )
+        dest_instance_id = await loop.run_in_executor(None, lambda: _get_instance_id(dest_id))
+        await loop.run_in_executor(
+            None,
+            lambda: ec2.associate_address(AllocationId=eip_id, InstanceId=dest_instance_id),
+        )
+    else:
+        addr = ec2.describe_addresses(AllocationIds=[eip_id])["Addresses"][0]
+        if addr.get("AssociationId"):
+            await loop.run_in_executor(
+                None, lambda: ec2.disassociate_address(AssociationId=addr["AssociationId"])
+            )
+        source_instance_id = await loop.run_in_executor(None, lambda: _get_instance_id(source_id))
+        await loop.run_in_executor(
+            None,
+            lambda: ec2.associate_address(AllocationId=eip_id, InstanceId=source_instance_id),
+        )
+
+
+async def _cutover_alb(source_id: str, dest_id: str, cutover_config: dict, connector, reverse: bool = False) -> None:
+    import boto3
+    creds = await _get_aws_creds(connector)
+    region = creds.get("region", "us-east-1")
+    elbv2 = boto3.client(
+        "elbv2",
+        aws_access_key_id=creds.get("access_key_id"),
+        aws_secret_access_key=creds.get("secret_access_key"),
+        aws_session_token=creds.get("session_token"),
+        region_name=region,
+    )
+    loop = asyncio.get_event_loop()
+    tg_arn = cutover_config["target_group_arn"]
+    ec2 = _make_ec2_client(creds)
+
+    def _get_instance_id(asset_id: str) -> str:
+        result = ec2.describe_instances(
+            Filters=[{"Name": "tag:nexplane-asset-id", "Values": [asset_id]}]
+        )
+        return result["Reservations"][0]["Instances"][0]["InstanceId"]
+
+    if not reverse:
+        new_id = await loop.run_in_executor(None, lambda: _get_instance_id(dest_id))
+        old_id = await loop.run_in_executor(None, lambda: _get_instance_id(source_id))
+        await loop.run_in_executor(
+            None, lambda: elbv2.register_targets(TargetGroupArn=tg_arn, Targets=[{"Id": new_id}])
+        )
+        waiter = elbv2.get_waiter("target_in_service")
+        await loop.run_in_executor(
+            None,
+            lambda: waiter.wait(TargetGroupArn=tg_arn, Targets=[{"Id": new_id}],
+                                WaiterConfig={"Delay": 10, "MaxAttempts": 30}),
+        )
+        await loop.run_in_executor(
+            None, lambda: elbv2.deregister_targets(TargetGroupArn=tg_arn, Targets=[{"Id": old_id}])
+        )
+    else:
+        new_id = await loop.run_in_executor(None, lambda: _get_instance_id(source_id))
+        old_id = await loop.run_in_executor(None, lambda: _get_instance_id(dest_id))
+        await loop.run_in_executor(
+            None, lambda: elbv2.register_targets(TargetGroupArn=tg_arn, Targets=[{"Id": new_id}])
+        )
+        waiter = elbv2.get_waiter("target_in_service")
+        await loop.run_in_executor(
+            None,
+            lambda: waiter.wait(TargetGroupArn=tg_arn, Targets=[{"Id": new_id}],
+                                WaiterConfig={"Delay": 10, "MaxAttempts": 30}),
+        )
+        await loop.run_in_executor(
+            None, lambda: elbv2.deregister_targets(TargetGroupArn=tg_arn, Targets=[{"Id": old_id}])
+        )
+
+
+async def _cutover_dns(source_id: str, dest_id: str, cutover_config: dict, connector, reverse: bool = False) -> None:
+    import boto3
+    creds = await _get_aws_creds(connector)
+    r53 = boto3.client(
+        "route53",
+        aws_access_key_id=creds.get("access_key_id"),
+        aws_secret_access_key=creds.get("secret_access_key"),
+        aws_session_token=creds.get("session_token"),
+    )
+    loop = asyncio.get_event_loop()
+    hosted_zone_id = cutover_config["hosted_zone_id"]
+    record_name = cutover_config["record_name"]
+    record_type = cutover_config["record_type"]
+    ttl = cutover_config.get("ttl", 300)
+
+    async def _get_host_ip(asset_id: str) -> str:
+        result = await dispatch_agent_job(
+            "run_command",
+            {"command": "hostname -I | awk '{print $1}'", "timeout": 10},
+            [asset_id],
+            timeout_seconds=15,
+        )
+        return result.get("output", "").strip().split()[0]
+
+    target_id = dest_id if not reverse else source_id
+    target_ip = await _get_host_ip(target_id)
+
+    await loop.run_in_executor(
+        None,
+        lambda: r53.change_resource_record_sets(
+            HostedZoneId=hosted_zone_id,
+            ChangeBatch={
+                "Changes": [{
+                    "Action": "UPSERT",
+                    "ResourceRecordSet": {
+                        "Name": record_name,
+                        "Type": record_type,
+                        "TTL": 60 if not reverse else ttl,
+                        "ResourceRecords": [{"Value": target_ip}],
+                    },
+                }]
+            },
+        ),
+    )
+
+
+async def _cutover_static_ip(source_id: str, dest_id: str, cutover_config: dict, reverse: bool = False) -> None:
+    interface = cutover_config["interface"]
+    ip = cutover_config["ip"]
+    netmask = cutover_config["netmask"]
+    gateway = cutover_config["gateway"]
+
+    add_target = dest_id if not reverse else source_id
+    remove_target = source_id if not reverse else dest_id
+
+    add_cmd = f"ip addr add {ip}/{netmask} dev {interface} && ip route add default via {gateway} || true"
+    remove_cmd = f"ip addr del {ip}/{netmask} dev {interface} || true"
+
+    await dispatch_agent_job("run_command", {"command": add_cmd, "timeout": 15}, [add_target], timeout_seconds=20)
+    await dispatch_agent_job("run_command", {"command": remove_cmd, "timeout": 15}, [remove_target], timeout_seconds=20)
+
+
+async def _do_cutover(source_id: str, dest_id: str, parameters: dict, connector, reverse: bool = False) -> None:
+    method = parameters["cutover_method"]
+    config = parameters["cutover_config"]
+    if method == "eip":
+        await _cutover_eip(source_id, dest_id, config, connector, reverse=reverse)
+    elif method == "alb":
+        await _cutover_alb(source_id, dest_id, config, connector, reverse=reverse)
+    elif method == "dns":
+        await _cutover_dns(source_id, dest_id, config, connector, reverse=reverse)
+    elif method == "static_ip":
+        await _cutover_static_ip(source_id, dest_id, config, reverse=reverse)
+    else:
+        raise RuntimeError(f"Unknown cutover_method: {method!r}")
+
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     """Phase 1-6: preflight → snapshot → sync → health check → cutover → decommission scheduling."""
     source_id = parameters["source_asset_id"]
@@ -271,11 +510,33 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             run_stats = await _run_rsync(source_id, dest_id, parameters)
             execution_result["sync_runs"].append(run_stats)
 
-        # Phases 4-6 not yet implemented
-        raise NotImplementedError("Phases 4-6 not implemented in this task")
+        # Phase 4 — Verify dest health
+        logger.info("[linux_parallel_upgrade] Phase 4: verify dest health")
+        dest_ip_result = await dispatch_agent_job(
+            "run_command",
+            {"command": "hostname -I | awk '{print $1}'", "timeout": 10},
+            [dest_id],
+            timeout_seconds=15,
+        )
+        dest_ip = dest_ip_result.get("output", "").strip().split()[0]
+        await _verify_dest_health(parameters, dest_ip)
 
-    except NotImplementedError:
-        raise
+        # Phase 5 — Cutover
+        logger.info("[linux_parallel_upgrade] Phase 5: cutover")
+        # Final rsync run (the Nth run)
+        final_sync = await _run_rsync(source_id, dest_id, parameters)
+        execution_result["sync_runs"].append(final_sync)
+
+        await _stop_source(source_id, connector)
+        execution_result["source_stopped"] = True
+
+        await _do_cutover(source_id, dest_id, parameters, connector)
+        execution_result["cutover_completed"] = True
+        logger.info("[linux_parallel_upgrade] Phase 5: cutover complete")
+
+        # Phase 6 handled in Task 6 — placeholder return
+        return execution_result
+
     except Exception as exc:
         logger.exception(f"[linux_parallel_upgrade] execute failed: {exc}")
         execution_result["error"] = str(exc)
