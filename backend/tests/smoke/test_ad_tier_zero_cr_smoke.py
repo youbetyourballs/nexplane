@@ -222,10 +222,10 @@ def _register_dc_asset(private_ip, aws_creds) -> tuple:
     _api("put", f"/connectors/{conn_id}/credentials", json={
         "credentials": {
             "host": private_ip,
-            "port": 5985,
+            "port": "5985",
             "username": f"{_DC_NETBIOS}\\Administrator",
             "password": _DC_ADMIN_PASSWORD,
-            "use_ssl": False,
+            "use_ssl": "false",
             "domain": _DC_DOMAIN,
         }
     })
