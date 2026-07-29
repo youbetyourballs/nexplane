@@ -10,6 +10,8 @@ import shlex
 import socket
 import subprocess
 import tempfile
+import uuid
+from datetime import datetime, timedelta, timezone
 
 from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 from app.connectors.executors.nexplane_agent._snapshot_helpers import (
@@ -542,7 +544,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         execution_result["cutover_completed"] = True
         logger.info("[linux_parallel_upgrade] Phase 5: cutover complete")
 
-        # Phase 6 handled in Task 6 — placeholder return
+        # Phase 6 — Hold / schedule decommission
+        logger.info("[linux_parallel_upgrade] Phase 6: decommission scheduling")
+        await _phase6_decommission(parameters, execution_result, connector)
         return execution_result
 
     except Exception as exc:
@@ -551,5 +555,119 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return execution_result
 
 
+def _get_scheduler():
+    from app.services.recurring_job_service import _scheduler
+    return _scheduler
+
+
+async def _phase6_decommission(parameters: dict, execution_result: dict, connector) -> dict:
+    """Phase 6: schedule decommission or record manual-only."""
+    source_id = parameters["source_asset_id"]
+    hours = parameters.get("decommission_after_hours", 24)
+
+    if hours == 0:
+        execution_result["decommission_manual"] = True
+        execution_result["rollback_capability"] = ROLLBACK_CAPABILITY_FULL
+        return execution_result
+
+    from apscheduler.triggers.date import DateTrigger
+    job_id = str(uuid.uuid4())
+    fire_time = datetime.now(timezone.utc) + timedelta(hours=hours)
+
+    scheduler = _get_scheduler()
+    scheduler.add_job(
+        lambda: asyncio.ensure_future(_terminate_source(source_id, execution_result.get("snapshot_id"), connector)),
+        DateTrigger(run_date=fire_time),
+        id=f"decommission_{job_id}",
+    )
+    execution_result["decommission_job_id"] = job_id
+    execution_result["rollback_capability"] = ROLLBACK_CAPABILITY_FULL
+    logger.info(f"[linux_parallel_upgrade] decommission scheduled in {hours}h — job_id={job_id}")
+    return execution_result
+
+
+async def _terminate_source(source_id: str, snapshot_id, connector) -> None:
+    """Terminate source instance and delete snapshot."""
+    logger.info(f"[linux_parallel_upgrade] decommission: terminating source {source_id}")
+    if connector.credentials and connector.credentials.get("access_key_id"):
+        creds = await _get_aws_creds(connector)
+        ec2 = _make_ec2_client(creds)
+        loop = asyncio.get_event_loop()
+        instances = await loop.run_in_executor(
+            None,
+            lambda: ec2.describe_instances(
+                Filters=[{"Name": "tag:nexplane-asset-id", "Values": [source_id]}]
+            ),
+        )
+        reservations = instances.get("Reservations", [])
+        if reservations:
+            instance_id = reservations[0]["Instances"][0]["InstanceId"]
+            await loop.run_in_executor(None, lambda: ec2.terminate_instances(InstanceIds=[instance_id]))
+        if snapshot_id:
+            try:
+                await loop.run_in_executor(None, lambda: ec2.delete_snapshot(SnapshotId=snapshot_id))
+            except Exception as exc:
+                logger.warning(f"[linux_parallel_upgrade] Failed to delete snapshot {snapshot_id}: {exc}")
+    else:
+        await dispatch_agent_job("run_command", {"command": "shutdown -h now"}, [source_id], timeout_seconds=15)
+
+
+async def _start_source(source_id: str, connector) -> None:
+    """Restart stopped source instance (EC2 or on-prem)."""
+    if connector.credentials and connector.credentials.get("access_key_id"):
+        creds = await _get_aws_creds(connector)
+        ec2 = _make_ec2_client(creds)
+        loop = asyncio.get_event_loop()
+        instances = await loop.run_in_executor(
+            None,
+            lambda: ec2.describe_instances(
+                Filters=[{"Name": "tag:nexplane-asset-id", "Values": [source_id]}]
+            ),
+        )
+        reservations = instances.get("Reservations", [])
+        if reservations:
+            instance_id = reservations[0]["Instances"][0]["InstanceId"]
+            await loop.run_in_executor(None, lambda: ec2.start_instances(InstanceIds=[instance_id]))
+            await loop.run_in_executor(
+                None,
+                lambda: ec2.get_waiter("instance_running").wait(
+                    InstanceIds=[instance_id], WaiterConfig={"Delay": 10, "MaxAttempts": 30}
+                ),
+            )
+    else:
+        logger.warning(f"[linux_parallel_upgrade] _start_source: on-prem source {source_id} cannot be restarted remotely; agent was shut down")
+
+
 async def rollback(parameters: dict, execution_result: dict, asset_ids: list, connector) -> dict:
-    raise NotImplementedError("rollback not yet implemented")
+    """Reverse cutover, restart source, cancel decommission job."""
+    source_id = parameters["source_asset_id"]
+    dest_id = parameters["dest_asset_id"]
+    rollback_result = {"error": None, "actions": []}
+
+    try:
+        # Cancel decommission job if pending
+        job_id = execution_result.get("decommission_job_id")
+        if job_id:
+            try:
+                scheduler = _get_scheduler()
+                scheduler.remove_job(f"decommission_{job_id}")
+                rollback_result["actions"].append("cancelled_decommission_job")
+            except Exception as exc:
+                logger.warning(f"[linux_parallel_upgrade] Could not cancel decommission job {job_id}: {exc}")
+
+        # If cutover completed, reverse traffic
+        if execution_result.get("cutover_completed"):
+            await _do_cutover(source_id, dest_id, parameters, connector, reverse=True)
+            rollback_result["actions"].append("reversed_cutover")
+
+        # If source was stopped, restart it
+        if execution_result.get("source_stopped"):
+            await _start_source(source_id, connector)
+            await _check_agent(source_id)
+            rollback_result["actions"].append("restarted_source")
+
+    except Exception as exc:
+        logger.exception(f"[linux_parallel_upgrade] rollback failed: {exc}")
+        rollback_result["error"] = str(exc)
+
+    return rollback_result
