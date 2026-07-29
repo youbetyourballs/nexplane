@@ -99,6 +99,9 @@ def _full_cr_lifecycle(change_type, parameters, asset_ids, connector_id, title_p
     _api("post", f"/change-requests/{cr_id}/plan")
     log(f"  Planned CR {cr_id}")
 
+    _api("post", f"/change-requests/{cr_id}/submit-for-approval")
+    log(f"  Submitted CR {cr_id} for approval")
+
     _api("post", f"/change-requests/{cr_id}/approve",
          json={"decision": "approved", "comment": "tier-zero smoke"})
     log(f"  Approved CR {cr_id}")
@@ -317,11 +320,13 @@ def test_phase2_dfl_upgrade_dry_run():
         },
         "asset_ids": [_state["asset_id"]],
         "connector_id": _state["connector_id"],
+        "desired_outcome": {"summary": "Smoke test: DFL upgrade dry-run"},
     })
     cr_id = cr["id"]
     _state["cr_ids"].append(cr_id)
 
     _api("post", f"/change-requests/{cr_id}/plan")
+    _api("post", f"/change-requests/{cr_id}/submit-for-approval")
     _api("post", f"/change-requests/{cr_id}/approve",
          json={"decision": "approved", "comment": "tier-zero smoke dfl dry-run"})
     _api("post", f"/change-requests/{cr_id}/execute")
@@ -357,11 +362,13 @@ def test_phase3_trust_create_and_rollback():
         },
         "asset_ids": [_state["asset_id"]],
         "connector_id": _state["connector_id"],
+        "desired_outcome": {"summary": "Smoke test: trust create dry-run"},
     })
     cr_id = cr["id"]
     _state["cr_ids"].append(cr_id)
 
     _api("post", f"/change-requests/{cr_id}/plan")
+    _api("post", f"/change-requests/{cr_id}/submit-for-approval")
     _api("post", f"/change-requests/{cr_id}/approve",
          json={"decision": "approved", "comment": "tier-zero smoke trust dry-run"})
     _api("post", f"/change-requests/{cr_id}/execute")
