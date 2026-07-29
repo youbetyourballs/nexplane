@@ -435,6 +435,8 @@ async def activity_execute_rollback(
                     select(Connector).where(Connector.id == uuid.UUID(step_connector_id))
                 )
                 connector = result.scalar_one_or_none()
+                if connector:
+                    await connector_service._attach_credentials(connector, db)
 
             # Fallback: look up any active connector of the rollback type in the org
             # when the plan step has no locked connector_id (same pattern as execute path).
