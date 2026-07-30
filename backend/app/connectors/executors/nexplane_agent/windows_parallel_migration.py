@@ -161,12 +161,44 @@ async def _preflight(parameters: dict, connector) -> dict:
     else:
         raise RuntimeError(f"Unknown cutover_method: {cutover_method!r}")
 
-    return {
+    preflight_result = {
         "source_os": source_os,
         "dest_os": dest_os,
         "source_version": source_ver,
         "dest_version": dest_ver,
     }
+
+    # Read existing DNS TTL so we can restore it after cutover
+    if cutover_method == "dns":
+        import boto3 as _boto3_preflight
+        creds = await _get_aws_creds(connector)
+        r53_preflight = _boto3_preflight.client(
+            "route53",
+            aws_access_key_id=creds.get("access_key_id"),
+            aws_secret_access_key=creds.get("secret_access_key"),
+            aws_session_token=creds.get("session_token"),
+        )
+        hz_id = cutover_config["hosted_zone_id"]
+        record_name = cutover_config["record_name"]
+        loop = asyncio.get_running_loop()
+        try:
+            rrsets = await loop.run_in_executor(
+                None,
+                lambda: r53_preflight.list_resource_record_sets(
+                    HostedZoneId=hz_id,
+                    StartRecordName=record_name,
+                    StartRecordType="A",
+                    MaxItems="1",
+                )["ResourceRecordSets"],
+            )
+            original_ttl = rrsets[0]["TTL"] if rrsets and rrsets[0]["Name"].rstrip(".") == record_name.rstrip(".") else 300
+        except Exception as exc:
+            logger.warning(f"[windows_parallel_migration] Could not read existing DNS TTL: {exc}; defaulting to 300")
+            original_ttl = 300
+        preflight_result["original_dns_ttl"] = original_ttl
+        logger.info(f"[windows_parallel_migration] Preflight: original DNS TTL={original_ttl}")
+
+    return preflight_result
 
 
 async def _phase2_snapshot(source_id: str, connector) -> dict:
@@ -287,9 +319,20 @@ async def _phase4_sync(source_id: str, dest_id: str, parameters: dict, execution
     }
 
 
-async def _phase5_health_check(dest_id: str, parameters: dict) -> dict:
-    """Phase 5: verify dest agent responds and key services are present."""
+async def _phase5_health_check(dest_id: str, parameters: dict, execution_result: dict | None = None) -> dict:
+    """Phase 5: verify dest agent responds, robocopy succeeded, and hostname replacements applied."""
     await _check_agent(dest_id)
+
+    # Check robocopy exit code (exit code >= 8 indicates errors per robocopy spec)
+    sync_result = (execution_result or {}).get("sync", {})
+    robocopy_result = sync_result.get("robocopy", {}) if sync_result else {}
+    robocopy_exit_code = robocopy_result.get("exit_code")
+    if robocopy_exit_code is not None:
+        if robocopy_exit_code >= 8:
+            raise RuntimeError(
+                f"Health check failed: robocopy reported errors (exit_code={robocopy_exit_code})"
+            )
+        logger.info(f"[windows_parallel_migration] health check: robocopy exit_code={robocopy_exit_code} (OK)")
 
     # Verify IIS is configured if inventory captured sites
     inventory = parameters.get("_inventory_snapshot", {})
@@ -304,6 +347,32 @@ async def _phase5_health_check(dest_id: str, parameters: dict) -> dict:
         site_count = check_result.get("output", "0").strip()
         if site_count == "0":
             raise RuntimeError("Health check: IIS sites missing on dest after sync")
+
+    # Verify hostname replacements were applied (check up to 3 file entries)
+    hostname_replacements = (execution_result or {}).get("hostname_replacements") or parameters.get("hostname_replacements") or []
+    file_replacements = [r for r in hostname_replacements if r.get("location", "file") == "file" or "path" in r][:3]
+    for replacement in file_replacements:
+        path = replacement.get("path", "")
+        old_value = replacement.get("old", "")
+        if not path or not old_value:
+            continue
+        # Escape single quotes for PowerShell
+        safe_path = path.replace("'", "''")
+        safe_old = old_value.replace("'", "''")
+        verify_result = await dispatch_agent_job(
+            "run_command",
+            {
+                "command": f"if (Select-String -Path '{safe_path}' -Pattern '{safe_old}') {{ exit 1 }} else {{ exit 0 }}",
+                "timeout": 15,
+            },
+            [dest_id],
+            timeout_seconds=90,
+        )
+        exit_code = verify_result.get("exit_code", 0)
+        if exit_code != 0:
+            raise RuntimeError(
+                f"Health check failed: old hostname string '{old_value}' still present in '{path}' on dest"
+            )
 
     return {"health_check_passed": True}
 
@@ -389,7 +458,7 @@ async def _cutover_eip(source_id: str, dest_id: str, cutover_config: dict, conne
     )
 
 
-async def _cutover_dns(source_id: str, dest_id: str, cutover_config: dict, connector, reverse: bool = False) -> None:
+async def _cutover_dns(source_id: str, dest_id: str, cutover_config: dict, connector, execution_result: dict | None = None, reverse: bool = False) -> None:
     import boto3
     creds = await _get_aws_creds(connector)
     r53 = boto3.client(
@@ -402,10 +471,14 @@ async def _cutover_dns(source_id: str, dest_id: str, cutover_config: dict, conne
     hosted_zone_id = cutover_config["hosted_zone_id"]
     record_name = cutover_config["record_name"]
     record_type = cutover_config["record_type"]
-    ttl = cutover_config.get("ttl", 300)
+    original_ttl = (execution_result or {}).get("original_dns_ttl", cutover_config.get("ttl", 300))
 
     target_id = dest_id if not reverse else source_id
     target_ip = await _get_host_ip(target_id)
+
+    # Forward cutover: lower TTL to 60 first, then restore after pointing to dest
+    # Rollback: restore DNS to source IP using original TTL
+    cutover_ttl = 60 if not reverse else original_ttl
 
     await loop.run_in_executor(
         None,
@@ -417,13 +490,34 @@ async def _cutover_dns(source_id: str, dest_id: str, cutover_config: dict, conne
                     "ResourceRecordSet": {
                         "Name": record_name,
                         "Type": record_type,
-                        "TTL": 60 if not reverse else ttl,
+                        "TTL": cutover_ttl,
                         "ResourceRecords": [{"Value": target_ip}],
                     },
                 }]
             },
         ),
     )
+
+    # After successful forward cutover, restore TTL to original value
+    if not reverse:
+        await loop.run_in_executor(
+            None,
+            lambda: r53.change_resource_record_sets(
+                HostedZoneId=hosted_zone_id,
+                ChangeBatch={
+                    "Changes": [{
+                        "Action": "UPSERT",
+                        "ResourceRecordSet": {
+                            "Name": record_name,
+                            "Type": record_type,
+                            "TTL": original_ttl,
+                            "ResourceRecords": [{"Value": target_ip}],
+                        },
+                    }]
+                },
+            ),
+        )
+        logger.info(f"[windows_parallel_migration] DNS TTL restored to {original_ttl}s for {record_name}")
 
 
 async def _cutover_eni(source_id: str, dest_id: str, cutover_config: dict, connector, reverse: bool = False) -> None:
@@ -464,18 +558,18 @@ async def _cutover_eni(source_id: str, dest_id: str, cutover_config: dict, conne
         lambda: ec2.attach_network_interface(
             NetworkInterfaceId=eni_id,
             InstanceId=attach_to_instance,
-            DeviceIndex=0,
+            DeviceIndex=1,
         ),
     )
 
 
-async def _do_cutover(source_id: str, dest_id: str, parameters: dict, connector, reverse: bool = False) -> None:
+async def _do_cutover(source_id: str, dest_id: str, parameters: dict, connector, execution_result: dict | None = None, reverse: bool = False) -> None:
     method = parameters["cutover_method"]
     config = parameters["cutover_config"]
     if method == "eip":
         await _cutover_eip(source_id, dest_id, config, connector, reverse=reverse)
     elif method == "dns":
-        await _cutover_dns(source_id, dest_id, config, connector, reverse=reverse)
+        await _cutover_dns(source_id, dest_id, config, connector, execution_result=execution_result, reverse=reverse)
     elif method == "eni":
         await _cutover_eni(source_id, dest_id, config, connector, reverse=reverse)
     else:
@@ -564,6 +658,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         logger.info(f"[windows_parallel_migration] Phase 1: preflight source={source_id} dest={dest_id}")
         preflight_report = await _preflight(parameters, connector)
         execution_result["preflight"] = preflight_report
+        if "original_dns_ttl" in preflight_report:
+            execution_result["original_dns_ttl"] = preflight_report["original_dns_ttl"]
 
         if dry_run:
             logger.info("[windows_parallel_migration] dry_run=True — stopping after preflight")
@@ -590,7 +686,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
         # Phase 5 — Health check
         logger.info("[windows_parallel_migration] Phase 5: health check dest")
-        health_result = await _phase5_health_check(dest_id, parameters)
+        health_result = await _phase5_health_check(dest_id, parameters, execution_result=execution_result)
         execution_result["health_check"] = health_result
 
         # Phase 6 — Cutover
@@ -598,7 +694,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         await _stop_source(source_id, connector)
         execution_result["source_stopped"] = True
 
-        await _do_cutover(source_id, dest_id, parameters, connector)
+        await _do_cutover(source_id, dest_id, parameters, connector, execution_result=execution_result)
         execution_result["cutover_completed"] = True
         logger.info("[windows_parallel_migration] Phase 6: cutover complete")
 
@@ -633,7 +729,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
             rollback_result["actions"].append("restarted_source")
 
         if execution_result.get("cutover_completed"):
-            await _do_cutover(source_id, dest_id, parameters, connector, reverse=True)
+            await _do_cutover(source_id, dest_id, parameters, connector, execution_result=execution_result, reverse=True)
             rollback_result["actions"].append("reversed_cutover")
 
     except Exception as exc:
