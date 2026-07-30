@@ -45,7 +45,7 @@ func TestDispatchKnownCommandSucceeds(t *testing.T) {
 }
 
 func TestWinMigrateCommandsRegistered(t *testing.T) {
-	for _, cmd := range []string{"win_inventory", "win_robocopy_push", "win_apply_replacements"} {
+	for _, cmd := range []string{"win_inventory", "win_robocopy_push", "win_apply_replacements", "win_run_ps"} {
 		result := executor.Dispatch(cmd, map[string]any{}, false, nil)
 		// Should fail with a meaningful error (missing params), not "unknown command"
 		if result.Status == "failed" && strings.Contains(result.Error, "unknown command") {

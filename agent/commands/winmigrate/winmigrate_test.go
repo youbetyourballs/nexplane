@@ -20,6 +20,7 @@ func TestWinMigrateCommandsReturnErrorOnNonWindows(t *testing.T) {
 		{"WinventoryExecute", WinventoryExecute},
 		{"RobocopyPushExecute", RobocopyPushExecute},
 		{"ApplyReplacementsExecute", ApplyReplacementsExecute},
+		{name: "win_run_ps", fn: WinRunPsExecute},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

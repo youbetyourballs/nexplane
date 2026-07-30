@@ -324,15 +324,13 @@ async def _phase5_health_check(dest_id: str, parameters: dict, execution_result:
     await _check_agent(dest_id)
 
     # Check robocopy exit code (exit code >= 8 indicates errors per robocopy spec)
-    sync_result = (execution_result or {}).get("sync", {})
-    robocopy_result = sync_result.get("robocopy", {}) if sync_result else {}
-    robocopy_exit_code = robocopy_result.get("exit_code")
-    if robocopy_exit_code is not None:
-        if robocopy_exit_code >= 8:
-            raise RuntimeError(
-                f"Health check failed: robocopy reported errors (exit_code={robocopy_exit_code})"
-            )
-        logger.info(f"[windows_parallel_migration] health check: robocopy exit_code={robocopy_exit_code} (OK)")
+    exit_code = (execution_result or {}).get("sync", {}).get("robocopy", {}).get("exit_code")
+    if exit_code is not None and exit_code >= 8:
+        raise RuntimeError(f"health check failed: robocopy reported errors (exit_code={exit_code})")
+    elif exit_code is None:
+        logger.warning("health check: robocopy exit_code missing from sync result — skipping check")
+    else:
+        logger.info(f"[windows_parallel_migration] health check: robocopy exit_code={exit_code} (OK)")
 
     # Verify IIS is configured if inventory captured sites
     inventory = parameters.get("_inventory_snapshot", {})
@@ -362,16 +360,15 @@ async def _phase5_health_check(dest_id: str, parameters: dict, execution_result:
         verify_result = await dispatch_agent_job(
             "win_run_ps",
             {
-                "command": f"if (Select-String -Path '{safe_path}' -Pattern '{safe_old}') {{ exit 1 }} else {{ exit 0 }}",
+                "command": f"if (Select-String -Path '{safe_path}' -Pattern '{safe_old}' -Quiet) {{ Write-Output 'FOUND' }} else {{ Write-Output 'CLEAN' }}",
                 "timeout": 15,
             },
             [dest_id],
             timeout_seconds=90,
         )
-        exit_code = verify_result.get("exit_code", 0)
-        if exit_code != 0:
+        if verify_result.get("output", "").strip() == "FOUND":
             raise RuntimeError(
-                f"Health check failed: old hostname string '{old_value}' still present in '{path}' on dest"
+                f"health check failed: old hostname string '{old_value}' still present in {path}"
             )
 
     return {"health_check_passed": True}
