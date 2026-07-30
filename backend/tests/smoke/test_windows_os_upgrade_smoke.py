@@ -127,9 +127,15 @@ if (-not (Test-Path $agentExe)) {{ throw "Download failed: $agentExe not found a
 # The agent binary does not implement Windows SCM protocol so New-Service/Start-Service
 # reports Stopped even when running. Scheduled tasks run the binary as a plain process.
 $svcArgs = "-control-plane {platform_url} -secret {agent_secret} -mode service -poll-interval 5s"
-$action = New-ScheduledTaskAction -Execute $agentExe -Argument $svcArgs
+
+# Write a wrapper that restarts the agent instantly on exit (Task Scheduler min restart = 1min,
+# which is too long — the wrapper loop restarts within 2s)
+$runner = "while (`$true) {{ try {{ & `"$agentExe`" $svcArgs }} catch {{}} ; Start-Sleep -Seconds 2 }}"
+$runner | Out-File -FilePath "C:\\nexplane-runner.ps1" -Encoding UTF8
+
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NonInteractive -NoProfile -ExecutionPolicy Bypass -File C:\\nexplane-runner.ps1"
 $trigger = New-ScheduledTaskTrigger -AtStartup
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 20 -RestartInterval (New-TimeSpan -Seconds 10)
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
