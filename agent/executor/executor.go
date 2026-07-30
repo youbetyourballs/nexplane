@@ -26,6 +26,7 @@ import (
 	"nexplane-agent/commands/linuxpatch"
 	"nexplane-agent/commands/winpatch"
 	"nexplane-agent/commands/winupgrade"
+	"nexplane-agent/commands/winmigrate"
 	"nexplane-agent/commands/credrotation"
 	"nexplane-agent/commands/macos"
 	"nexplane-agent/commands/forensics"
@@ -169,6 +170,10 @@ var commands = map[string]CommandFunc{
 	"windows_start_os_upgrade":     winupgrade.StartOSUpgradeExecute,
 	"windows_verify_os_upgrade":    winupgrade.VerifyOSUpgradeExecute,
 	"windows_vss_restore":          winupgrade.VSSRestoreExecute,
+	// Windows parallel migration
+	"win_inventory":          winmigrate.WinventoryExecute,
+	"win_robocopy_push":      winmigrate.RobocopyPushExecute,
+	"win_apply_replacements": winmigrate.ApplyReplacementsExecute,
 	// User lockout
 	"lock_local_user": linuxauth.LockLocalUserExecute,
 	// Cross-platform patch audit router

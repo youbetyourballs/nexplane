@@ -43,3 +43,13 @@ func TestDispatchKnownCommandSucceeds(t *testing.T) {
 		t.Errorf("estimate_image_size should complete, got status=%q error=%q", result.Status, result.Error)
 	}
 }
+
+func TestWinMigrateCommandsRegistered(t *testing.T) {
+	for _, cmd := range []string{"win_inventory", "win_robocopy_push", "win_apply_replacements"} {
+		result := executor.Dispatch(cmd, map[string]any{}, false, nil)
+		// Should fail with a meaningful error (missing params), not "unknown command"
+		if result.Status == "failed" && strings.Contains(result.Error, "unknown command") {
+			t.Errorf("command %q not registered in executor", cmd)
+		}
+	}
+}
