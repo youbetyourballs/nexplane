@@ -114,29 +114,38 @@ def _install_nexplane_agent_via_ssm(ssm, ec2, instance_id: str, creds: dict, age
 
     ps = f"""
 $agentExe = "C:\\nexplane-agent-windows-amd64.exe"
-$agentService = "{_NEXPLANE_AGENT_SERVICE}"
+$taskName = "{_NEXPLANE_AGENT_SERVICE}"
 
 # Download agent
 Invoke-WebRequest -Uri '{agent_url}' -OutFile $agentExe -UseBasicParsing
 
-# Install as Windows service
-$svcParams = "-control-plane {platform_url} -secret {agent_secret} -mode service -poll-interval 5s"
-New-Service -Name $agentService -BinaryPathName "$agentExe $svcParams" -DisplayName "Nexplane Agent" -StartupType Automatic -ErrorAction SilentlyContinue
-Start-Service -Name $agentService -ErrorAction SilentlyContinue
+# Register as a scheduled task (runs as SYSTEM, persists across reboots)
+# The agent binary does not implement Windows SCM protocol so New-Service/Start-Service
+# reports Stopped even when running. Scheduled tasks run the binary as a plain process.
+$svcArgs = "-control-plane {platform_url} -secret {agent_secret} -mode service -poll-interval 5s"
+$action = New-ScheduledTaskAction -Execute $agentExe -Argument $svcArgs
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+Start-ScheduledTask -TaskName $taskName
 
-(Get-Service -Name $agentService -ErrorAction SilentlyContinue).Status
+# Verify the agent process started
+Start-Sleep -Seconds 5
+$proc = Get-Process -Name "nexplane-agent-windows-amd64" -ErrorAction SilentlyContinue
+if ($proc) {{ "Running" }} else {{ "Stopped" }}
 """
     log(f"[WINDOWS_SMOKE] Installing nexplane agent on {instance_id}")
     status = _ssm_run_ps(ssm, instance_id, ps, timeout=300)
-    log(f"[WINDOWS_SMOKE] Agent service status: {status!r}")
+    log(f"[WINDOWS_SMOKE] Agent process status: {status!r}")
     if "Running" not in status:
-        # Try starting it manually
+        # Give it a few more seconds — task scheduler may have a brief delay
         status2 = _ssm_run_ps(ssm, instance_id,
-            f"Start-Service -Name {_NEXPLANE_AGENT_SERVICE} -ErrorAction SilentlyContinue; "
-            f"(Get-Service -Name {_NEXPLANE_AGENT_SERVICE}).Status",
-            timeout=60)
+            "$proc = Get-Process -Name 'nexplane-agent-windows-amd64' -ErrorAction SilentlyContinue; "
+            "if ($proc) { 'Running' } else { 'Stopped' }",
+            timeout=30)
         if "Running" not in status2:
-            pytest.fail(f"Nexplane agent service failed to start: {status2!r}")
+            pytest.fail(f"Nexplane agent process failed to start: {status2!r}")
 
 
 def _wait_for_agent_registration(client, platform_url: str, timeout: int = 300) -> str:
