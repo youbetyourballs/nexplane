@@ -299,17 +299,17 @@ def smoke_resources(request):
         # Fall back to base Windows AMI — will need agent install (slow)
         # Use public Windows Server AMIs (us-east-1 base AMIs)
         _BASE_AMIS = {
-            "2016": "ami-0c2b0d3fb02824d92",  # Windows_Server-2016-English-Full-Base
-            "2019": "ami-07cc1bbe145f35b58",  # Windows_Server-2019-English-Full-Base
-            "2022": "ami-0f496107db66676ff",  # Windows_Server-2022-English-Full-Base
+            "2016": "ami-01acdf90a203dbafd",  # Windows_Server-2016-English-Full-Base-2026.07.15
+            "2019": "ami-0e63f9f6f90117000",  # Windows_Server-2019-English-Full-Base-2026.07.15
+            "2022": "ami-0ed0165f19a049904",  # Windows_Server-2022-English-Full-Base-2026.07.15
         }
         source_ami = _BASE_AMIS[src_ver]
         log(f"WPM smoke: no cached AMI for {src_ver} source — launching fresh instance")
 
     if not dest_ami:
         _BASE_AMIS = {
-            "2019": "ami-07cc1bbe145f35b58",
-            "2022": "ami-0f496107db66676ff",
+            "2019": "ami-0e63f9f6f90117000",
+            "2022": "ami-0ed0165f19a049904",
         }
         dest_ami = _BASE_AMIS[dst_ver]
         log(f"WPM smoke: no cached AMI for {dst_ver} dest, using base AMI {dest_ami}")
