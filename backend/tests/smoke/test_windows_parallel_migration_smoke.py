@@ -304,7 +304,7 @@ def smoke_resources(request):
             "2022": "ami-0f496107db66676ff",  # Windows_Server-2022-English-Full-Base
         }
         source_ami = _BASE_AMIS[src_ver]
-        log(f"WPM smoke: no cached AMI for 2016 source, using base AMI {source_ami}")
+        log(f"WPM smoke: no cached AMI for {src_ver} source — launching fresh instance")
 
     if not dest_ami:
         _BASE_AMIS = {

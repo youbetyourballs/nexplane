@@ -10,4 +10,5 @@ const (
 	CmdWinventory        = "win_inventory"
 	CmdRobocopyPush      = "win_robocopy_push"
 	CmdApplyReplacements = "win_apply_replacements"
+	CmdWinRunPs          = "win_run_ps"
 )

@@ -6,11 +6,14 @@
 package winmigrate
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 func runPS(script string) (string, error) {
@@ -235,6 +238,29 @@ try {
 		return map[string]any{"raw_output": out}, nil
 	}
 	return result, nil
+}
+
+// WinRunPsExecute runs an arbitrary PowerShell command and returns stdout.
+func WinRunPsExecute(params map[string]interface{}) (map[string]interface{}, error) {
+	script, _ := params["command"].(string)
+	if script == "" {
+		return nil, fmt.Errorf("win_run_ps: 'command' parameter is required")
+	}
+	timeoutSecs := 30
+	if t, ok := params["timeout"].(float64); ok && t > 0 {
+		timeoutSecs = int(t)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSecs)*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NonInteractive", "-NoProfile", "-Command", script)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return nil, fmt.Errorf("win_run_ps error: %w\nstderr: %s", err, stderr.String())
+	}
+	return map[string]interface{}{"output": strings.TrimSpace(stdout.String())}, nil
 }
 
 // ApplyReplacementsExecute rewrites hostname references on the dest instance.

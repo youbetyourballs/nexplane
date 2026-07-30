@@ -18,3 +18,7 @@ func RobocopyPushExecute(_ map[string]any) (map[string]any, error) {
 func ApplyReplacementsExecute(_ map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("win_apply_replacements is only supported on Windows")
 }
+
+func WinRunPsExecute(_ map[string]interface{}) (map[string]interface{}, error) {
+	return nil, fmt.Errorf("win_run_ps is only supported on Windows")
+}

@@ -78,7 +78,7 @@ async def _check_agent(asset_id: str, timeout_seconds: int = 90) -> None:
 async def _get_windows_version(asset_id: str) -> str:
     """Return Windows OS Caption string, e.g. 'Microsoft Windows Server 2022 Datacenter'."""
     result = await dispatch_agent_job(
-        "run_command",
+        "win_run_ps",
         {"command": "(Get-WmiObject -Class Win32_OperatingSystem).Caption", "timeout": 15},
         [asset_id],
         timeout_seconds=90,
@@ -89,7 +89,7 @@ async def _get_windows_version(asset_id: str) -> str:
 async def _get_host_ip(asset_id: str) -> str:
     """Return primary private IP of the asset's host."""
     result = await dispatch_agent_job(
-        "run_command",
+        "win_run_ps",
         {"command": "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.*'} | Select-Object -First 1).IPAddress", "timeout": 10},
         [asset_id],
         timeout_seconds=90,
@@ -205,7 +205,7 @@ async def _phase2_snapshot(source_id: str, connector) -> dict:
     """Phase 2: EBS snapshot of source (EC2) or skip (on-prem)."""
     try:
         imds_result = await dispatch_agent_job(
-            "run_command",
+            "win_run_ps",
             {"command": "Invoke-RestMethod -Uri 'http://169.254.169.254/latest/meta-data/instance-id' -TimeoutSec 5", "timeout": 8},
             [source_id],
             timeout_seconds=90,
@@ -228,7 +228,7 @@ async def _phase2_snapshot(source_id: str, connector) -> dict:
 async def _phase3_inventory(source_id: str, parameters: dict) -> dict:
     """Phase 3: run win_inventory on source. Returns {inventory, hostname_refs}."""
     hostname_result = await dispatch_agent_job(
-        "run_command",
+        "win_run_ps",
         {"command": "hostname", "timeout": 10},
         [source_id],
         timeout_seconds=90,
@@ -261,7 +261,7 @@ async def _create_robocopy_account(dest_id: str) -> tuple[str, str]:
         f"Add-LocalGroupMember -Group 'Administrators' -Member '{username}' -ErrorAction SilentlyContinue"
     )
     await dispatch_agent_job(
-        "run_command",
+        "win_run_ps",
         {"command": script, "timeout": 30},
         [dest_id],
         timeout_seconds=90,
@@ -273,7 +273,7 @@ async def _delete_robocopy_account(dest_id: str) -> None:
     """Remove temp robocopy account from dest."""
     try:
         await dispatch_agent_job(
-            "run_command",
+            "win_run_ps",
             {"command": "Remove-LocalUser -Name 'nprobocopy' -ErrorAction SilentlyContinue", "timeout": 15},
             [dest_id],
             timeout_seconds=60,
@@ -339,7 +339,7 @@ async def _phase5_health_check(dest_id: str, parameters: dict, execution_result:
     iis_sites_json = inventory.get("iis_sites", "[]")
     if iis_sites_json and iis_sites_json != "[]":
         check_result = await dispatch_agent_job(
-            "run_command",
+            "win_run_ps",
             {"command": "(Get-Website | Measure-Object).Count", "timeout": 15},
             [dest_id],
             timeout_seconds=90,
@@ -349,7 +349,7 @@ async def _phase5_health_check(dest_id: str, parameters: dict, execution_result:
             raise RuntimeError("Health check: IIS sites missing on dest after sync")
 
     # Verify hostname replacements were applied (check up to 3 file entries)
-    hostname_replacements = (execution_result or {}).get("hostname_replacements") or parameters.get("hostname_replacements") or []
+    hostname_replacements = parameters.get("hostname_replacements", [])
     file_replacements = [r for r in hostname_replacements if r.get("location", "file") == "file" or "path" in r][:3]
     for replacement in file_replacements:
         path = replacement.get("path", "")
@@ -360,7 +360,7 @@ async def _phase5_health_check(dest_id: str, parameters: dict, execution_result:
         safe_path = path.replace("'", "''")
         safe_old = old_value.replace("'", "''")
         verify_result = await dispatch_agent_job(
-            "run_command",
+            "win_run_ps",
             {
                 "command": f"if (Select-String -Path '{safe_path}' -Pattern '{safe_old}') {{ exit 1 }} else {{ exit 0 }}",
                 "timeout": 15,
@@ -405,7 +405,7 @@ async def _stop_source(source_id: str, connector) -> None:
     # On-prem fallback: schedule shutdown with delay so agent can respond
     try:
         await dispatch_agent_job(
-            "run_command",
+            "win_run_ps",
             {"command": "Start-Process -FilePath 'shutdown.exe' -ArgumentList '/s /t 10' -WindowStyle Hidden", "timeout": 5},
             [source_id],
             timeout_seconds=90,

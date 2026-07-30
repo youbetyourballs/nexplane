@@ -174,6 +174,7 @@ var commands = map[string]CommandFunc{
 	"win_inventory":          winmigrate.WinventoryExecute,
 	"win_robocopy_push":      winmigrate.RobocopyPushExecute,
 	"win_apply_replacements": winmigrate.ApplyReplacementsExecute,
+	winmigrate.CmdWinRunPs:   winmigrate.WinRunPsExecute,
 	// User lockout
 	"lock_local_user": linuxauth.LockLocalUserExecute,
 	// Cross-platform patch audit router
