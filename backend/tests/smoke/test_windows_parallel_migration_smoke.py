@@ -44,6 +44,19 @@ AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 SMOKE_SG = os.environ.get("NEXPLANE_SMOKE_SG", "")
 SMOKE_SUBNET = os.environ.get("NEXPLANE_SMOKE_SUBNET", "")
 
+def _get_smoke_sg_subnet():
+    """Return (sg_id, subnet_id) from AWS connector creds, falling back to env vars."""
+    sg = SMOKE_SG
+    subnet = SMOKE_SUBNET
+    if not sg or not subnet:
+        try:
+            creds = get_connector_creds_from_db("aws")
+            sg = sg or creds.get("smoke_sg_id") or creds.get("security_group_id") or ""
+            subnet = subnet or creds.get("smoke_subnet_id") or creds.get("subnet_id") or ""
+        except Exception:
+            pass
+    return sg, subnet
+
 _PLATFORM_PRIVATE_IP = os.environ.get("NEXPLANE_BACKEND_IP", "172.31.1.233")
 
 _SSM_AMI = {
@@ -148,18 +161,13 @@ def _install_nexplane_agent(instance_id: str):
 
 
 def _launch_windows_instance(ami_id: str, name: str) -> str:
-    if not SMOKE_SG:
-        pytest.skip("NEXPLANE_SMOKE_SG not set")
-    if not SMOKE_SUBNET:
-        pytest.skip("NEXPLANE_SMOKE_SUBNET not set")
+    sg, subnet = _get_smoke_sg_subnet()
     ec2 = _ec2()
-    resp = ec2.run_instances(
+    launch_kwargs = dict(
         ImageId=ami_id,
         InstanceType="t3.medium",
         MinCount=1,
         MaxCount=1,
-        SecurityGroupIds=[SMOKE_SG],
-        SubnetId=SMOKE_SUBNET,
         IamInstanceProfile={"Name": "nexplane-smoke-ssm"},
         TagSpecifications=[{
             "ResourceType": "instance",
@@ -169,6 +177,11 @@ def _launch_windows_instance(ami_id: str, name: str) -> str:
             ],
         }],
     )
+    if sg:
+        launch_kwargs["SecurityGroupIds"] = [sg]
+    if subnet:
+        launch_kwargs["SubnetId"] = subnet
+    resp = ec2.run_instances(**launch_kwargs)
     instance_id = resp["Instances"][0]["InstanceId"]
     log(f"WPM smoke: launched {instance_id} ({name}), waiting for running state")
     ec2.get_waiter("instance_running").wait(
@@ -265,14 +278,12 @@ def _rollback_cr(cr_id: str, timeout: int = ROLLBACK_TIMEOUT) -> dict:
 
 
 def _execution_result(cr: dict) -> dict:
-    er = cr.get("execution_result") or {}
-    if isinstance(er, str):
-        import json as _json
-        try:
-            er = _json.loads(er)
-        except Exception:
-            er = {}
-    return er
+    runs = cr.get("execution_runs") or []
+    if runs:
+        steps = (runs[0].get("result") or {}).get("execution", {}).get("steps", [])
+        if steps:
+            return steps[0].get("result") or {}
+    return cr.get("execution_result") or {}
 
 
 # ---------------------------------------------------------------------------

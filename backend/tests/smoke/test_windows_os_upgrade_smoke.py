@@ -130,21 +130,28 @@ $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccou
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
 
-# Poll up to 30s for the agent process — task scheduler startup can take a moment
-$deadline = (Get-Date).AddSeconds(30)
+# Poll up to 90s for the agent process — Windows 2016 scheduled task startup can be slow
+$deadline = (Get-Date).AddSeconds(90)
 $running = $false
 while ((Get-Date) -lt $deadline) {{
     $proc = Get-Process -Name "nexplane-agent-windows-amd64" -ErrorAction SilentlyContinue
     if ($proc) {{ $running = $true; break }}
-    Start-Sleep -Seconds 2
+    Start-Sleep -Seconds 3
 }}
-if ($running) {{ "Running" }} else {{ "Stopped" }}
+if ($running) {{
+    "Running"
+}} else {{
+    $taskInfo = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $taskState = if ($taskInfo) {{ $taskInfo.State }} else {{ "NotFound" }}
+    $lastResult = (Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue).LastTaskResult
+    "Stopped taskState=$taskState lastResult=$lastResult"
+}}
 """
     log(f"[WINDOWS_SMOKE] Installing nexplane agent on {instance_id}")
     status = _ssm_run_ps(ssm, instance_id, ps, timeout=300)
     log(f"[WINDOWS_SMOKE] Agent process status: {status!r}")
     if "Running" not in status:
-        pytest.fail(f"Nexplane agent process failed to start after 30s: {status!r}")
+        pytest.fail(f"Nexplane agent process failed to start after 90s: {status!r}")
 
 
 def _wait_for_agent_registration(client, platform_url: str, timeout: int = 300) -> str:
