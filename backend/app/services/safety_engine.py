@@ -163,6 +163,8 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.k8s_cluster_upgrade,
     ChangeType.windows_os_upgrade,
     ChangeType.ad_dc_parallel_upgrade,
+    ChangeType.linux_parallel_upgrade,
+    ChangeType.windows_parallel_migration,
 }
 
 
