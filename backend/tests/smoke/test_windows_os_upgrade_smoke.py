@@ -130,22 +130,21 @@ $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccou
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
 
-# Verify the agent process started
-Start-Sleep -Seconds 5
-$proc = Get-Process -Name "nexplane-agent-windows-amd64" -ErrorAction SilentlyContinue
-if ($proc) {{ "Running" }} else {{ "Stopped" }}
+# Poll up to 30s for the agent process — task scheduler startup can take a moment
+$deadline = (Get-Date).AddSeconds(30)
+$running = $false
+while ((Get-Date) -lt $deadline) {{
+    $proc = Get-Process -Name "nexplane-agent-windows-amd64" -ErrorAction SilentlyContinue
+    if ($proc) {{ $running = $true; break }}
+    Start-Sleep -Seconds 2
+}}
+if ($running) {{ "Running" }} else {{ "Stopped" }}
 """
     log(f"[WINDOWS_SMOKE] Installing nexplane agent on {instance_id}")
     status = _ssm_run_ps(ssm, instance_id, ps, timeout=300)
     log(f"[WINDOWS_SMOKE] Agent process status: {status!r}")
     if "Running" not in status:
-        # Give it a few more seconds — task scheduler may have a brief delay
-        status2 = _ssm_run_ps(ssm, instance_id,
-            "$proc = Get-Process -Name 'nexplane-agent-windows-amd64' -ErrorAction SilentlyContinue; "
-            "if ($proc) { 'Running' } else { 'Stopped' }",
-            timeout=30)
-        if "Running" not in status2:
-            pytest.fail(f"Nexplane agent process failed to start: {status2!r}")
+        pytest.fail(f"Nexplane agent process failed to start after 30s: {status!r}")
 
 
 def _wait_for_agent_registration(client, platform_url: str, timeout: int = 300) -> str:
