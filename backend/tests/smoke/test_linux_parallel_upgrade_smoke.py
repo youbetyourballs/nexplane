@@ -336,6 +336,15 @@ def smoke_resources():
     source_asset_id = _wait_for_platform_asset(source_instance_id)
     dest_asset_id = _wait_for_platform_asset(dest_instance_id)
 
+    # Patch assets with EC2 instance_id so executor can look up instances by asset ID
+    c = _get_client()
+    for asset_id, instance_id in [(source_asset_id, source_instance_id), (dest_asset_id, dest_instance_id)]:
+        existing = c.get(f"/assets/{asset_id}")
+        meta = existing.get("asset_metadata") or {}
+        meta["instance_id"] = instance_id
+        resp = c.client.patch(f"{c.base}/assets/{asset_id}", json={"asset_metadata": meta})
+        resp.raise_for_status()
+
     resources = {
         "source_instance_id": source_instance_id,
         "dest_instance_id": dest_instance_id,
@@ -408,7 +417,12 @@ def test_linux_parallel_upgrade_full_flow(smoke_resources):
     )
     log(f"LPU smoke: EIP on dest confirmed ({r['dest_instance_id']})")
 
-    # Source must be stopped
+    # Source must be stopped (nohup shutdown takes a few seconds to reach 'stopped')
+    ec2 = _ec2()
+    ec2.get_waiter("instance_stopped").wait(
+        InstanceIds=[r["source_instance_id"]],
+        WaiterConfig={"Delay": 5, "MaxAttempts": 24},
+    )
     source_state = _get_instance_state(r["source_instance_id"])
     assert source_state == "stopped", (
         f"Source instance {r['source_instance_id']} expected stopped, got {source_state!r}"

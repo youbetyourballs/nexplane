@@ -37,10 +37,10 @@ ROLLBACK_CAPABILITY_FULL = "full"
 ROLLBACK_CAPABILITY_IRREVERSIBLE = "irreversible"
 
 
-async def _check_agent(asset_id: str) -> None:
+async def _check_agent(asset_id: str, timeout_seconds: int = 90) -> None:
     """Raise RuntimeError if agent is unreachable."""
     try:
-        await dispatch_agent_job("health_check", {}, [asset_id], timeout_seconds=30)
+        await dispatch_agent_job("health_check", {}, [asset_id], timeout_seconds=timeout_seconds)
     except Exception as exc:
         raise RuntimeError(f"Agent on asset {asset_id} unreachable: {exc}") from exc
 
@@ -51,7 +51,7 @@ async def _get_os_version(asset_id: str) -> tuple:
         "run_command",
         {"command": "grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '\"'", "timeout": 15},
         [asset_id],
-        timeout_seconds=20,
+        timeout_seconds=90,
     )
     version_str = result.get("output", "").strip()
     parts = re.findall(r'\d+', version_str)
@@ -84,7 +84,7 @@ async def _preflight(parameters: dict, asset_ids: list, connector) -> dict:
             "run_command",
             {"command": f"test -e {shlex.quote(path)} && echo ok || echo missing", "timeout": 10},
             [source_id],
-            timeout_seconds=15,
+            timeout_seconds=90,
         )
         if "missing" in result.get("output", ""):
             raise RuntimeError(f"sync_paths entry {path!r} does not exist on source")
@@ -95,7 +95,7 @@ async def _preflight(parameters: dict, asset_ids: list, connector) -> dict:
         "run_command",
         {"command": f"du -sh {paths_arg} 2>/dev/null | tail -1", "timeout": 30},
         [source_id],
-        timeout_seconds=35,
+        timeout_seconds=90,
     )
 
     # Verify cutover method preconditions
@@ -136,7 +136,7 @@ async def _phase2_snapshot(source_id: str, connector, execution_result: dict) ->
             "run_command",
             {"command": "curl -sf http://169.254.169.254/latest/meta-data/instance-id", "timeout": 5},
             [source_id],
-            timeout_seconds=10,
+            timeout_seconds=90,
         )
         instance_id = imds_result.get("output", "").strip()
         exit_code = imds_result.get("exit_code", 1)
@@ -189,7 +189,7 @@ async def _run_rsync(source_id: str, dest_id: str, parameters: dict) -> dict:
         "run_command",
         {"command": "hostname -I | awk '{print $1}'", "timeout": 10},
         [dest_id],
-        timeout_seconds=15,
+        timeout_seconds=90,
     )
     dest_ip = ip_result.get("output", "").strip().split()[0]
     if not dest_ip:
@@ -200,7 +200,7 @@ async def _run_rsync(source_id: str, dest_id: str, parameters: dict) -> dict:
             "add_authorized_key",
             {"public_key": pub_key, "user": "root"},
             [dest_id],
-            timeout_seconds=15,
+            timeout_seconds=90,
         )
         result = await dispatch_agent_job(
             "rsync_push",
@@ -221,7 +221,7 @@ async def _run_rsync(source_id: str, dest_id: str, parameters: dict) -> dict:
                 "remove_authorized_key",
                 {"public_key": pub_key, "user": "root"},
                 [dest_id],
-                timeout_seconds=15,
+                timeout_seconds=90,
             )
         except Exception as exc:
             logger.warning(f"Failed to remove temp authorized key from dest: {exc}")
@@ -273,22 +273,45 @@ async def _verify_dest_health(parameters: dict, dest_ip: str) -> None:
     await _check_agent(dest_id)
 
 
+async def _instance_id_for_asset(asset_id: str, ec2_client=None) -> str:
+    """Return EC2 instance ID for an asset.
+
+    Tries asset_metadata first (works for assets registered without EC2 tags),
+    then falls back to describe_instances tag lookup.
+    """
+    from app.database import AsyncSessionLocal
+    from app.models.asset import Asset
+
+    async with AsyncSessionLocal() as db:
+        asset = await db.get(Asset, uuid.UUID(asset_id))
+        instance_id = (asset.asset_metadata or {}).get("instance_id") if asset else None
+
+    if instance_id:
+        return instance_id
+
+    if ec2_client is None:
+        raise RuntimeError(f"No instance_id in asset metadata for {asset_id} and no EC2 client to fall back to")
+
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: ec2_client.describe_instances(
+            Filters=[{"Name": "tag:nexplane-asset-id", "Values": [asset_id]}]
+        ),
+    )
+    reservations = result.get("Reservations", [])
+    if not reservations:
+        raise RuntimeError(f"No EC2 instance found for asset {asset_id} (no tag and no metadata)")
+    return reservations[0]["Instances"][0]["InstanceId"]
+
+
 async def _stop_source(source_id: str, connector) -> None:
     """Stop source: EC2 stop_instances, or on-prem shutdown via run_command."""
     if connector.credentials and connector.credentials.get("access_key_id"):
         creds = await _get_aws_creds(connector)
         ec2 = _make_ec2_client(creds)
         loop = asyncio.get_running_loop()
-        instances = await loop.run_in_executor(
-            None,
-            lambda: ec2.describe_instances(
-                Filters=[{"Name": "tag:nexplane-asset-id", "Values": [source_id]}]
-            ),
-        )
-        reservations = instances.get("Reservations", [])
-        if not reservations:
-            raise RuntimeError(f"_stop_source: no EC2 instance found with tag nexplane-asset-id={source_id}")
-        instance_id = reservations[0]["Instances"][0]["InstanceId"]
+        instance_id = await _instance_id_for_asset(source_id, ec2)
         await loop.run_in_executor(None, lambda: ec2.stop_instances(InstanceIds=[instance_id]))
         await loop.run_in_executor(
             None,
@@ -298,12 +321,16 @@ async def _stop_source(source_id: str, connector) -> None:
             ),
         )
     else:
-        await dispatch_agent_job(
-            "run_command",
-            {"command": "shutdown -h now", "timeout": 10},
-            [source_id],
-            timeout_seconds=15,
-        )
+        try:
+            # nohup + sleep lets the agent respond before the shutdown takes effect
+            await dispatch_agent_job(
+                "run_command",
+                {"command": "nohup sh -c 'sleep 3 && shutdown -h now' </dev/null >/dev/null 2>&1 &", "timeout": 5},
+                [source_id],
+                timeout_seconds=90,
+            )
+        except Exception as exc:
+            logger.warning(f"[linux_parallel_upgrade] _stop_source: shutdown returned error (instance may be shutting down): {exc}")
 
 
 async def _cutover_eip(source_id: str, dest_id: str, cutover_config: dict, connector, reverse: bool = False) -> None:
@@ -312,19 +339,13 @@ async def _cutover_eip(source_id: str, dest_id: str, cutover_config: dict, conne
     loop = asyncio.get_running_loop()
     eip_id = cutover_config["eip_allocation_id"]
 
-    def _get_instance_id(asset_id: str) -> str:
-        result = ec2.describe_instances(
-            Filters=[{"Name": "tag:nexplane-asset-id", "Values": [asset_id]}]
-        )
-        return result["Reservations"][0]["Instances"][0]["InstanceId"]
-
     if not reverse:
         addr = ec2.describe_addresses(AllocationIds=[eip_id])["Addresses"][0]
         if addr.get("AssociationId"):
             await loop.run_in_executor(
                 None, lambda: ec2.disassociate_address(AssociationId=addr["AssociationId"])
             )
-        dest_instance_id = await loop.run_in_executor(None, lambda: _get_instance_id(dest_id))
+        dest_instance_id = await _instance_id_for_asset(dest_id, ec2)
         await loop.run_in_executor(
             None,
             lambda: ec2.associate_address(AllocationId=eip_id, InstanceId=dest_instance_id),
@@ -335,7 +356,7 @@ async def _cutover_eip(source_id: str, dest_id: str, cutover_config: dict, conne
             await loop.run_in_executor(
                 None, lambda: ec2.disassociate_address(AssociationId=addr["AssociationId"])
             )
-        source_instance_id = await loop.run_in_executor(None, lambda: _get_instance_id(source_id))
+        source_instance_id = await _instance_id_for_asset(source_id, ec2)
         await loop.run_in_executor(
             None,
             lambda: ec2.associate_address(AllocationId=eip_id, InstanceId=source_instance_id),
@@ -357,15 +378,9 @@ async def _cutover_alb(source_id: str, dest_id: str, cutover_config: dict, conne
     tg_arn = cutover_config["target_group_arn"]
     ec2 = _make_ec2_client(creds)
 
-    def _get_instance_id(asset_id: str) -> str:
-        result = ec2.describe_instances(
-            Filters=[{"Name": "tag:nexplane-asset-id", "Values": [asset_id]}]
-        )
-        return result["Reservations"][0]["Instances"][0]["InstanceId"]
-
     if not reverse:
-        new_id = await loop.run_in_executor(None, lambda: _get_instance_id(dest_id))
-        old_id = await loop.run_in_executor(None, lambda: _get_instance_id(source_id))
+        new_id = await _instance_id_for_asset(dest_id, ec2)
+        old_id = await _instance_id_for_asset(source_id, ec2)
         await loop.run_in_executor(
             None, lambda: elbv2.register_targets(TargetGroupArn=tg_arn, Targets=[{"Id": new_id}])
         )
@@ -379,8 +394,8 @@ async def _cutover_alb(source_id: str, dest_id: str, cutover_config: dict, conne
             None, lambda: elbv2.deregister_targets(TargetGroupArn=tg_arn, Targets=[{"Id": old_id}])
         )
     else:
-        new_id = await loop.run_in_executor(None, lambda: _get_instance_id(source_id))
-        old_id = await loop.run_in_executor(None, lambda: _get_instance_id(dest_id))
+        new_id = await _instance_id_for_asset(source_id, ec2)
+        old_id = await _instance_id_for_asset(dest_id, ec2)
         await loop.run_in_executor(
             None, lambda: elbv2.register_targets(TargetGroupArn=tg_arn, Targets=[{"Id": new_id}])
         )
@@ -415,7 +430,7 @@ async def _cutover_dns(source_id: str, dest_id: str, cutover_config: dict, conne
             "run_command",
             {"command": "hostname -I | awk '{print $1}'", "timeout": 10},
             [asset_id],
-            timeout_seconds=15,
+            timeout_seconds=90,
         )
         parts = result.get("output", "").strip().split()
         if not parts:
@@ -456,8 +471,8 @@ async def _cutover_static_ip(source_id: str, dest_id: str, cutover_config: dict,
     add_cmd = f"ip addr add {ip}/{netmask} dev {interface} && ip route add default via {gateway} || true"
     remove_cmd = f"ip addr del {ip}/{netmask} dev {interface} || true"
 
-    await dispatch_agent_job("run_command", {"command": add_cmd, "timeout": 15}, [add_target], timeout_seconds=20)
-    await dispatch_agent_job("run_command", {"command": remove_cmd, "timeout": 15}, [remove_target], timeout_seconds=20)
+    await dispatch_agent_job("run_command", {"command": add_cmd, "timeout": 15}, [add_target], timeout_seconds=90)
+    await dispatch_agent_job("run_command", {"command": remove_cmd, "timeout": 15}, [remove_target], timeout_seconds=90)
 
 
 async def _do_cutover(source_id: str, dest_id: str, parameters: dict, connector, reverse: bool = False) -> None:
@@ -483,6 +498,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     dry_run = parameters.get("dry_run", False)
 
     execution_result = {
+        "source_asset_id": source_id,
+        "dest_asset_id": dest_id,
         "snapshot_id": None,
         "snapshot_skipped": False,
         "cutover_completed": False,
@@ -526,7 +543,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             "run_command",
             {"command": "hostname -I | awk '{print $1}'", "timeout": 10},
             [dest_id],
-            timeout_seconds=15,
+            timeout_seconds=90,
         )
         dest_ip_raw = dest_ip_result.get("output", "").strip().split()
         dest_ip = dest_ip_raw[0] if dest_ip_raw else ""
@@ -613,56 +630,58 @@ async def _terminate_source(source_id: str, snapshot_id, connector, execution_re
         creds = await _get_aws_creds(connector)
         ec2 = _make_ec2_client(creds)
         loop = asyncio.get_running_loop()
-        instances = await loop.run_in_executor(
-            None,
-            lambda: ec2.describe_instances(
-                Filters=[{"Name": "tag:nexplane-asset-id", "Values": [source_id]}]
-            ),
-        )
-        reservations = instances.get("Reservations", [])
-        if reservations:
-            instance_id = reservations[0]["Instances"][0]["InstanceId"]
+        try:
+            instance_id = await _instance_id_for_asset(source_id, ec2)
             await loop.run_in_executor(None, lambda: ec2.terminate_instances(InstanceIds=[instance_id]))
+        except Exception as exc:
+            logger.warning(f"[linux_parallel_upgrade] _terminate_source: could not find/terminate instance for {source_id}: {exc}")
         if snapshot_id:
             try:
                 await loop.run_in_executor(None, lambda: ec2.delete_snapshot(SnapshotId=snapshot_id))
             except Exception as exc:
                 logger.warning(f"[linux_parallel_upgrade] Failed to delete snapshot {snapshot_id}: {exc}")
     else:
-        await dispatch_agent_job("run_command", {"command": "shutdown -h now"}, [source_id], timeout_seconds=15)
+        try:
+            await dispatch_agent_job(
+                "run_command",
+                {"command": "nohup sh -c 'sleep 3 && shutdown -h now' </dev/null >/dev/null 2>&1 &", "timeout": 5},
+                [source_id],
+                timeout_seconds=90,
+            )
+        except Exception as exc:
+            logger.warning(f"[linux_parallel_upgrade] _terminate_source: shutdown returned error (instance may be shutting down): {exc}")
 
 
 async def _start_source(source_id: str, connector) -> None:
     """Restart stopped source instance (EC2 or on-prem)."""
+    import boto3 as _boto3
+    loop = asyncio.get_running_loop()
+
+    # Build EC2 client: prefer connector creds, fall back to platform IAM role.
     if connector.credentials and connector.credentials.get("access_key_id"):
         creds = await _get_aws_creds(connector)
         ec2 = _make_ec2_client(creds)
-        loop = asyncio.get_running_loop()
-        instances = await loop.run_in_executor(
+    else:
+        ec2 = _boto3.client("ec2", region_name="us-east-1")
+
+    try:
+        instance_id = await _instance_id_for_asset(source_id, ec2)
+        await loop.run_in_executor(None, lambda: ec2.start_instances(InstanceIds=[instance_id]))
+        await loop.run_in_executor(
             None,
-            lambda: ec2.describe_instances(
-                Filters=[{"Name": "tag:nexplane-asset-id", "Values": [source_id]}]
+            lambda: ec2.get_waiter("instance_running").wait(
+                InstanceIds=[instance_id], WaiterConfig={"Delay": 10, "MaxAttempts": 30}
             ),
         )
-        reservations = instances.get("Reservations", [])
-        if reservations:
-            instance_id = reservations[0]["Instances"][0]["InstanceId"]
-            await loop.run_in_executor(None, lambda: ec2.start_instances(InstanceIds=[instance_id]))
-            await loop.run_in_executor(
-                None,
-                lambda: ec2.get_waiter("instance_running").wait(
-                    InstanceIds=[instance_id], WaiterConfig={"Delay": 10, "MaxAttempts": 30}
-                ),
-            )
-    else:
-        logger.warning(f"[linux_parallel_upgrade] _start_source: on-prem source {source_id} cannot be restarted remotely; agent was shut down")
+    except Exception as exc:
+        logger.warning(f"[linux_parallel_upgrade] _start_source: could not find/start instance for {source_id}: {exc}")
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     """Reverse cutover, restart source, cancel decommission job."""
     source_id = parameters["source_asset_id"]
     dest_id = parameters["dest_asset_id"]
-    rollback_result = {"error": None, "actions": []}
+    rollback_result: dict = {"actions": []}
 
     try:
         # Cancel decommission job if pending
@@ -678,7 +697,8 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         # If source was stopped, restart it first so traffic repoint hits a live host
         if execution_result.get("source_stopped"):
             await _start_source(source_id, connector)
-            await _check_agent(source_id)
+            # After EC2 start, allow extra time for agent to boot and register
+            await _check_agent(source_id, timeout_seconds=300)
             rollback_result["actions"].append("restarted_source")
 
         # If cutover completed, reverse traffic (source is now running)

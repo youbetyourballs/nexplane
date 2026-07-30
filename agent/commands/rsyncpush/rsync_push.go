@@ -40,7 +40,7 @@ func Execute(params map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("rsync_push: failed to write key: %w", err)
 	}
 	args := []string{
-		"-az", "--checksum", "--stats",
+		"-azR", "--checksum", "--stats",
 		"-e", fmt.Sprintf("ssh -i '%s' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", keyPath),
 	}
 	if deleteFlag {
@@ -56,7 +56,7 @@ func Execute(params map[string]any) (map[string]any, error) {
 			args = append(args, s)
 		}
 	}
-	args = append(args, fmt.Sprintf("%s@%s:", destUser, destHost))
+	args = append(args, fmt.Sprintf("%s@%s:/", destUser, destHost))
 
 	start := time.Now()
 	out, err := exec.Command("rsync", args...).CombinedOutput()

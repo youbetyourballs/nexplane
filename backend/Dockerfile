@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install curl, unzip, iproute2, iptables (needed for Tailscale + Terraform)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl unzip iproute2 iptables \
+    curl unzip iproute2 iptables openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Tailscale via official install script (handles OS detection automatically)

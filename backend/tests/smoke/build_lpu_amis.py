@@ -178,6 +178,33 @@ def build_ami(config):
     log("  Waiting for agent to register on platform")
     wait_platform_asset(ec2_id, private_ip)
 
+    # Verify the installed binary supports run_command before snapshotting
+    log("  Verifying agent binary supports run_command")
+    ssm_client = boto3.client("ssm", region_name=REGION)
+    verify_resp = ssm_client.send_command(
+        InstanceIds=[ec2_id],
+        DocumentName="AWS-RunShellScript",
+        Parameters={"commands": ["grep -c run_command /usr/local/bin/nexplane-agent"]},
+    )
+    verify_cmd_id = verify_resp["Command"]["CommandId"]
+    deadline2 = time.time() + 60
+    while time.time() < deadline2:
+        time.sleep(10)
+        try:
+            inv = ssm_client.get_command_invocation(CommandId=verify_cmd_id, InstanceId=ec2_id)
+            if inv["Status"] in ("Success", "Failed", "Cancelled"):
+                count_str = inv.get("StandardOutputContent", "0").strip()
+                count = int(count_str) if count_str.isdigit() else 0
+                if count < 1:
+                    raise RuntimeError(
+                        f"Agent binary does not contain run_command (grep count={count_str!r}). "
+                        f"Binary size: check S3 download. Re-run after verifying version file."
+                    )
+                log(f"  Agent binary verified: run_command present ({count} occurrences)")
+                break
+        except ssm_client.exceptions.InvocationDoesNotExist:
+            pass
+
     log("  Creating AMI snapshot (instance will reboot)")
     ami_resp = ec2.create_image(
         InstanceId=ec2_id,
