@@ -459,6 +459,8 @@ async def _cutover_eni(source_id: str, dest_id: str, cutover_config: dict, conne
             )
             if ni.get("Status") == "available":
                 break
+        else:
+            raise RuntimeError(f"ENI {eni_id} did not become available after detach (timed out after 150s)")
 
     await loop.run_in_executor(
         None,
@@ -556,7 +558,6 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "rollback_capability": ROLLBACK_CAPABILITY_FULL,
         "cutover_method": parameters.get("cutover_method"),
         "cutover_config": parameters.get("cutover_config"),
-        "error": None,
         "preflight": None,
         "dry_run": dry_run,
     }
