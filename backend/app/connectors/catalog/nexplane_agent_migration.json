@@ -63,6 +63,28 @@
           "default": 0
         }
       ]
+    },
+    {
+      "action_id": "windows_parallel_migration",
+      "display_name": "Windows Parallel Migration",
+      "description": "Migrate a Windows Server instance to a new OS-version instance with full inventory transfer, robocopy data sync, EIP/DNS/ENI cutover, and 24-hour rollback window.",
+      "action_type": "migration",
+      "executor": "nexplane_agent.windows_parallel_migration",
+      "rollback_supported": true,
+      "rollback_capability": "full",
+      "applicable_asset_types": ["server"],
+      "execution_tier": 3,
+      "estimated_duration_seconds": 3600,
+      "parameters": [
+        {"name": "source_asset_id", "type": "string", "required": true},
+        {"name": "dest_asset_id", "type": "string", "required": true},
+        {"name": "cutover_method", "type": "string", "required": true, "enum": ["eip", "dns", "eni"]},
+        {"name": "cutover_config", "type": "object", "required": true},
+        {"name": "hostname_replacements", "type": "array", "required": false, "default": []},
+        {"name": "registry_keys", "type": "array", "required": false, "default": []},
+        {"name": "decommission_after_hours", "type": "integer", "required": false, "default": 24},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ]
     }
   ]
 }
