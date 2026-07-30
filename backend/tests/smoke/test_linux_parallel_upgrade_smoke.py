@@ -175,24 +175,29 @@ def _wait_for_ssm_ready(instance_id: str, timeout: int = 300):
 # Platform helpers
 # ---------------------------------------------------------------------------
 
-def _wait_for_platform_asset(name_tag: str, timeout: int = PROVISION_TIMEOUT) -> str:
-    """Poll platform API until an active server asset with matching Name appears.
+def _wait_for_platform_asset(instance_id: str, timeout: int = PROVISION_TIMEOUT) -> str:
+    """Poll platform API until an asset with the instance's private IP registers with an agent.
     Returns the platform asset id."""
+    ec2 = _ec2()
+    resp = ec2.describe_instances(InstanceIds=[instance_id])
+    private_ip = resp["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
     c = _get_client()
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            items = c.get("/assets", params={"q": name_tag, "asset_type": "server", "limit": 50})
-            if not isinstance(items, list):
-                items = items.get("items", [])
-            for asset in items:
-                if asset.get("name") == name_tag and asset.get("status") == "active":
-                    log(f"LPU smoke: platform asset {asset['id']} registered for {name_tag}")
+            assets = c.get("/assets", params={"asset_type": "server", "limit": 200})
+            if not isinstance(assets, list):
+                assets = assets.get("items", [])
+            for asset in assets:
+                meta = asset.get("asset_metadata") or {}
+                ips = meta.get("ip_addresses") or []
+                if private_ip in ips and meta.get("agent_version"):
+                    log(f"LPU smoke: platform asset {asset['id']} registered for {instance_id} ({private_ip})")
                     return asset["id"]
         except Exception:
             pass
         time.sleep(15)
-    raise TimeoutError(f"Platform asset {name_tag!r} not registered within {timeout}s")
+    raise TimeoutError(f"Platform asset for {instance_id} ({private_ip}) not registered within {timeout}s")
 
 
 def _run_cr(
@@ -327,9 +332,9 @@ def smoke_resources():
     )
     log(f"LPU smoke: nc listener started on dest {dest_instance_id}")
 
-    # Wait for platform asset registration
-    source_asset_id = _wait_for_platform_asset(source_name)
-    dest_asset_id = _wait_for_platform_asset(dest_name)
+    # Wait for platform asset registration (agents register by hostname, look up by private IP)
+    source_asset_id = _wait_for_platform_asset(source_instance_id)
+    dest_asset_id = _wait_for_platform_asset(dest_instance_id)
 
     resources = {
         "source_instance_id": source_instance_id,
