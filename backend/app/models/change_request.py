@@ -570,6 +570,7 @@ class ChangeType(str, enum.Enum):
     k8s_cluster_upgrade = "k8s_cluster_upgrade"
     # Windows OS upgrades
     windows_os_upgrade = "windows_os_upgrade"
+    windows_parallel_migration = "windows_parallel_migration"
     # Agent tunnel management
     agent_reverse_tunnel_enable = "agent_reverse_tunnel_enable"
     agent_reverse_tunnel_disable = "agent_reverse_tunnel_disable"

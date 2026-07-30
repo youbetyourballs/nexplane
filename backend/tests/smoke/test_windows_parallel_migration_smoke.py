@@ -98,7 +98,11 @@ def _ssm_run_ps(instance_id: str, ps_command: str, timeout: int = 120) -> str:
             result = ssm.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
         except ssm.exceptions.InvocationDoesNotExist:
             continue
-        if result["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+        status = result["Status"]
+        if status in ("Success", "Failed", "Cancelled", "TimedOut"):
+            if status != "Success":
+                stderr = result.get("StandardErrorContent", "").strip()
+                raise RuntimeError(f"SSM command failed: {status}\n{stderr}")
             return result.get("StandardOutputContent", "").strip()
     raise TimeoutError(f"SSM PowerShell timed out after {timeout}s")
 

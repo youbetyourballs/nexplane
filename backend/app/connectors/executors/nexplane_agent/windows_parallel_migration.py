@@ -355,19 +355,16 @@ async def _start_source(source_id: str, connector) -> None:
     else:
         ec2 = _boto3.client("ec2", region_name="us-east-1")
 
-    try:
-        instance_id = await _instance_id_for_asset(source_id, ec2)
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, lambda: ec2.start_instances(InstanceIds=[instance_id]))
-        await loop.run_in_executor(
-            None,
-            lambda: ec2.get_waiter("instance_running").wait(
-                InstanceIds=[instance_id],
-                WaiterConfig={"Delay": 10, "MaxAttempts": 30},
-            ),
-        )
-    except Exception as exc:
-        logger.warning(f"[windows_parallel_migration] _start_source failed: {exc}")
+    instance_id = await _instance_id_for_asset(source_id, ec2)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: ec2.start_instances(InstanceIds=[instance_id]))
+    await loop.run_in_executor(
+        None,
+        lambda: ec2.get_waiter("instance_running").wait(
+            InstanceIds=[instance_id],
+            WaiterConfig={"Delay": 10, "MaxAttempts": 30},
+        ),
+    )
 
 
 async def _cutover_eip(source_id: str, dest_id: str, cutover_config: dict, connector, reverse: bool = False) -> None:
@@ -467,7 +464,7 @@ async def _cutover_eni(source_id: str, dest_id: str, cutover_config: dict, conne
         lambda: ec2.attach_network_interface(
             NetworkInterfaceId=eni_id,
             InstanceId=attach_to_instance,
-            DeviceIndex=1,
+            DeviceIndex=0,
         ),
     )
 
