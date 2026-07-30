@@ -393,12 +393,6 @@ def smoke_resources(request):
     source_asset_id = _wait_for_platform_asset(source_instance_id)
     dest_asset_id = _wait_for_platform_asset(dest_instance_id)
 
-    # Allow 90s for agent to stabilize after registration — the scheduled task
-    # may restart once before settling, and the CR's first job dispatch must not
-    # land in a 60s restart gap.
-    log("WPM smoke: waiting 90s for agents to stabilize after registration")
-    time.sleep(90)
-
     # Patch assets with instance_id metadata
     c = _get_client()
     for asset_id, instance_id in [(source_asset_id, source_instance_id), (dest_asset_id, dest_instance_id)]:

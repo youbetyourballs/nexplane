@@ -129,7 +129,7 @@ if (-not (Test-Path $agentExe)) {{ throw "Download failed: $agentExe not found a
 $svcArgs = "-control-plane {platform_url} -secret {agent_secret} -mode service -poll-interval 5s"
 $action = New-ScheduledTaskAction -Execute $agentExe -Argument $svcArgs
 $trigger = New-ScheduledTaskTrigger -AtStartup
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 20 -RestartInterval (New-TimeSpan -Seconds 10)
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
