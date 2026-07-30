@@ -116,8 +116,12 @@ def _install_nexplane_agent_via_ssm(ssm, ec2, instance_id: str, creds: dict, age
 $agentExe = "C:\\nexplane-agent-windows-amd64.exe"
 $taskName = "{_NEXPLANE_AGENT_SERVICE}"
 
+# Force TLS 1.2 — Windows Server 2016 defaults to TLS 1.0 which S3 rejects
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
 # Download agent
 Invoke-WebRequest -Uri '{agent_url}' -OutFile $agentExe -UseBasicParsing
+if (-not (Test-Path $agentExe)) {{ throw "Download failed: $agentExe not found after Invoke-WebRequest" }}
 
 # Register as a scheduled task (runs as SYSTEM, persists across reboots)
 # The agent binary does not implement Windows SCM protocol so New-Service/Start-Service
