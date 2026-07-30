@@ -195,9 +195,12 @@ func RobocopyPushExecute(params map[string]any) (map[string]any, error) {
 
 	xdArgs := make([]string, len(excludeDirs))
 	for i, d := range excludeDirs {
-		xdArgs[i] = fmt.Sprintf(`"%s"`, d)
+		// Use single-quoted PS strings — dir names may contain spaces and
+		// double-quotes inside a splatted @(...) cause parse errors.
+		escaped := strings.ReplaceAll(d, "'", "''")
+		xdArgs[i] = fmt.Sprintf("'%s'", escaped)
 	}
-	xdStr := strings.Join(xdArgs, " ")
+	xdStr := strings.Join(xdArgs, ", ")
 
 	unc := fmt.Sprintf(`\\%s\C$`, destHost)
 
