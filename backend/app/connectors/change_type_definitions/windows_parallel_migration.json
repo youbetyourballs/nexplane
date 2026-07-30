@@ -1,0 +1,68 @@
+{
+  "change_type": "windows_parallel_migration",
+  "display_name": "Windows Parallel Migration",
+  "steps": [
+    {"generic_action": "windows_parallel_migration", "purpose": "execute", "required": true}
+  ],
+  "description": "Migrate a Windows Server instance to a new instance at a higher OS version with full inventory transfer, data sync via robocopy, EIP/DNS/ENI cutover, and 24-hour rollback window.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "source_asset_id": {
+      "type": "string",
+      "required": true,
+      "label": "Source Asset ID",
+      "description": "Asset ID of the source Windows Server instance currently serving traffic"
+    },
+    "dest_asset_id": {
+      "type": "string",
+      "required": true,
+      "label": "Dest Asset ID",
+      "description": "Asset ID of the new Windows Server instance at the target OS version"
+    },
+    "cutover_method": {
+      "type": "string",
+      "required": true,
+      "label": "Cutover Method",
+      "description": "Traffic swap method: eip | dns | eni"
+    },
+    "cutover_config": {
+      "type": "object",
+      "required": true,
+      "label": "Cutover Config",
+      "description": "Method-specific config: {eip_allocation_id} for eip; {hosted_zone_id, record_name, ttl} for dns; {eni_id} for eni"
+    },
+    "registry_keys": {
+      "type": "array",
+      "required": false,
+      "label": "Registry Keys",
+      "description": "Additional HKLM registry key paths to include in inventory scan, e.g. [\"HKLM\\\\SOFTWARE\\\\MyApp\"]",
+      "default": []
+    },
+    "hostname_replacements": {
+      "type": "array",
+      "required": false,
+      "label": "Hostname Replacements",
+      "description": "List of hostname string replacements to apply on dest after sync, e.g. [{\"location\": \"file\", \"path\": \"C:\\\\app\\\\config.ini\", \"old\": \"old-host\", \"new\": \"new-host\"}]",
+      "default": []
+    },
+    "decommission_after_hours": {
+      "type": "integer",
+      "required": false,
+      "label": "Decommission After Hours",
+      "description": "Hours to wait before terminating source (0 = manual only, default 24)",
+      "default": 24
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "If true, run preflight + inventory only, no sync or cutover",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "traffic_reverse",
+    "description": "Reverse cutover (re-associate EIP / restore DNS / re-attach ENI), start source, verify agent responds within 300s"
+  }
+}
