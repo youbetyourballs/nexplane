@@ -105,6 +105,7 @@ def _launch_instance(ami_id: str, name: str) -> str:
         MaxCount=1,
         SecurityGroupIds=[SMOKE_SG],
         SubnetId=SMOKE_SUBNET,
+        IamInstanceProfile={"Name": "NexplaneEC2TestProfile"},
         TagSpecifications=[{
             "ResourceType": "instance",
             "Tags": [
