@@ -33,6 +33,21 @@ func WinventoryExecute(params map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("win_inventory: hostname param is required")
 	}
 
+	extraRegKeysRaw, _ := params["registry_keys"].([]any)
+	var extraRegKeyLines []string
+	for _, k := range extraRegKeysRaw {
+		if s, ok := k.(string); ok {
+			safeKey := strings.ReplaceAll(s, "'", "''")
+			extraRegKeyLines = append(extraRegKeyLines, fmt.Sprintf(`
+$extraKey = Get-Item 'Registry::%s' -ErrorAction SilentlyContinue
+if ($extraKey) {
+    $ev = @{}; $extraKey.GetValueNames() | ForEach-Object { $ev[$_] = $extraKey.GetValue($_).ToString() }
+    $regKeys += [PSCustomObject]@{ path=$extraKey.Name; values=($ev | ConvertTo-Json -Compress) }
+}`, safeKey))
+		}
+	}
+	extraRegScript := strings.Join(extraRegKeyLines, "\n")
+
 	script := fmt.Sprintf(`
 $hostname = '%s'
 $ErrorActionPreference = 'SilentlyContinue'
@@ -102,7 +117,7 @@ Get-ChildItem 'HKLM:\SOFTWARE' -ErrorAction SilentlyContinue | Where-Object {
 }
 $regKeysJson = $regKeys | ConvertTo-Json -Depth 2 -Compress
 if (-not $regKeysJson) { $regKeysJson = '[]' }
-
+%s
 # Hostname reference scan
 $refs = @()
 $configFiles | ForEach-Object {
@@ -131,7 +146,7 @@ if (-not $refsJson) { $refsJson = '[]' }
     env_vars=$envVars; certificates=$certs; config_files=$configFilesJson
     registry_keys=$regKeysJson; hostname_refs=$refsJson
 } | ConvertTo-Json -Depth 1 -Compress
-`, strings.ReplaceAll(hostname, "'", "''"))
+`, strings.ReplaceAll(hostname, "'", "''"), extraRegScript)
 
 	out, err := runPS(script)
 	if err != nil {
@@ -198,8 +213,8 @@ if ($LASTEXITCODE -ne 0) { throw "net use failed (exit $LASTEXITCODE): $netResul
 
 try {
     # Robocopy C:\ to dest C$
-    $args = @('C:\', $unc, '/MIR', '/COPYALL', '/R:3', '/W:5', '/NP', '/LOG:C:\nexplane-robocopy.log', '/XD', %s)
-    & robocopy @args
+    $rcArgs = @('C:\', $unc, '/MIR', '/COPYALL', '/R:3', '/W:5', '/NP', '/LOG:C:\nexplane-robocopy.log', '/XD', %s)
+    & robocopy @rcArgs
     $rc = $LASTEXITCODE
     # Exit codes 0-7 are success (8+ indicate errors)
     if ($rc -ge 8) { throw "robocopy failed with exit code $rc" }
