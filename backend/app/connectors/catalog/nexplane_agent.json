@@ -2270,6 +2270,73 @@
       ]
     },
     {
+      "action_id": "windows_parallel_migration",
+      "generic_action": "windows_parallel_migration",
+      "action_type": "change",
+      "execution_tier": 3,
+      "display_name": "Windows Parallel Migration",
+      "description": "Migrates a Windows Server instance to a new instance at a higher OS version: preflight, full inventory transfer, data sync via robocopy, EIP/DNS/ENI cutover, and 24-hour rollback window.",
+      "applicable_asset_types": [
+        "server"
+      ],
+      "parameters": [
+        {
+          "name": "source_asset_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dest_asset_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "cutover_method",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "cutover_config",
+          "type": "object",
+          "required": true
+        },
+        {
+          "name": "registry_keys",
+          "type": "array",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "hostname_replacements",
+          "type": "array",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "decommission_after_hours",
+          "type": "integer",
+          "required": false,
+          "default": 24
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
+      ],
+      "executor": "nexplane_agent.windows_parallel_migration",
+      "rollback_action": "windows_parallel_migration",
+      "rollback_supported": true,
+      "estimated_duration_seconds": 3600,
+      "safety_notes": [
+        "Ensure dest_asset_id is a Windows Server instance at a higher OS version than source_asset_id",
+        "Robocopy transfers data over SMB (port 445) — ensure security groups allow SMB between source and dest",
+        "Decommission is scheduled after decommission_after_hours; set to 0 for manual decommission only",
+        "Rollback re-points traffic to source — irreversible once source is terminated"
+      ]
+    },
+    {
       "action_id": "ip_campaign",
       "generic_action": "ip_campaign",
       "action_type": "change",
