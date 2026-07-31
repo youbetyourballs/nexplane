@@ -345,6 +345,14 @@ def smoke_resources(request):
         log(f"WPM smoke: installing Nexplane agent on dest {dest_instance_id}")
         _install_nexplane_agent(dest_instance_id)
 
+    # Open SMB (port 445) on dest so robocopy admin-share can connect from source.
+    # Windows Firewall blocks inbound SMB by default on non-domain machines.
+    _ssm_run_ps(
+        dest_instance_id,
+        "netsh advfirewall firewall set rule group='File and Printer Sharing' new enable=Yes",
+    )
+    log(f"WPM smoke: SMB firewall rule enabled on dest {dest_instance_id}")
+
     # Allocate and associate EIP to source
     eip = ec2.allocate_address(Domain="vpc")
     eip_id = eip["AllocationId"]
