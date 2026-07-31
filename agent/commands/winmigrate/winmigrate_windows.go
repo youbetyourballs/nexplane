@@ -208,13 +208,16 @@ func RobocopyPushExecute(params map[string]any) (map[string]any, error) {
 	safePassword := strings.ReplaceAll(destPassword, "'", "''")
 	safeUser := strings.ReplaceAll(destUser, "'", "''")
 
+	// net use with a remote local account requires HOST\username format
+	remoteUser := fmt.Sprintf(`%s\%s`, destHost, safeUser)
+
 	script := fmt.Sprintf(`
 $unc = '%s'
-$user = '.\%s'
+$user = '%s'
 $pw = '%s'
 
-# Mount admin share
-$netResult = & net use $unc /user:$user $pw 2>&1
+# Mount admin share — HOST\user format required for remote local accounts
+$netResult = & net use $unc $pw /user:$user 2>&1
 if ($LASTEXITCODE -ne 0) { throw "net use failed (exit $LASTEXITCODE): $netResult" }
 
 try {
@@ -229,7 +232,7 @@ try {
 } finally {
     & net use $unc /delete /y 2>&1 | Out-Null
 }
-`, unc, safeUser, safePassword, xdStr)
+`, unc, remoteUser, safePassword, xdStr)
 
 	out, err := runPS(script)
 	if err != nil {
