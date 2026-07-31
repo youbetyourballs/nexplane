@@ -148,7 +148,7 @@ if (-not $refsJson) { $refsJson = '[]' }
     services=$services; scheduled_tasks=$tasks; iis_sites=$iis
     env_vars=$envVars; certificates=$certs; config_files=$configFilesJson
     registry_keys=$regKeysJson; hostname_refs=$refsJson
-} | ConvertTo-Json -Depth 1 -Compress
+} | ConvertTo-Json -Depth 3 -Compress
 `, strings.ReplaceAll(hostname, "'", "''"), extraRegScript)
 
 	out, err := runPS(script)
@@ -184,7 +184,12 @@ func RobocopyPushExecute(params map[string]any) (map[string]any, error) {
 	}
 
 	excludesRaw, _ := params["excludes"].([]any)
-	defaultExcludes := []string{"Windows", "Program Files", "Program Files (x86)", "ProgramData\\Microsoft", "$Recycle.Bin", "System Volume Information"}
+	defaultExcludes := []string{
+		"Windows", "Program Files", "Program Files (x86)",
+		"ProgramData",                // entire ProgramData — OS/app state, not user data
+		"$Recycle.Bin", "System Volume Information",
+		"pagefile.sys", "hiberfil.sys", "swapfile.sys", // virtual memory files — can't copy open
+	}
 	var excludeDirs []string
 	excludeDirs = append(excludeDirs, defaultExcludes...)
 	for _, ex := range excludesRaw {
@@ -222,7 +227,7 @@ if ($LASTEXITCODE -ne 0) { throw "net use failed (exit $LASTEXITCODE): $netResul
 
 try {
     # Robocopy C:\ to dest C$
-    $rcArgs = @('C:\', $unc, '/MIR', '/COPYALL', '/R:3', '/W:5', '/NP', '/LOG:C:\nexplane-robocopy.log', '/XD', %s)
+    $rcArgs = @('C:\', $unc, '/MIR', '/COPYALL', '/R:3', '/W:5', '/NP', '/NFL', '/NDL', '/LOG:C:\nexplane-robocopy.log', '/XD', %s)
     & robocopy @rcArgs
     $rc = $LASTEXITCODE
     # Exit codes 0-7 are success (8+ indicate errors)

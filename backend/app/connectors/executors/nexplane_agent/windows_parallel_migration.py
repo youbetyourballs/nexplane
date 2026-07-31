@@ -297,7 +297,7 @@ async def _phase4_sync(source_id: str, dest_id: str, parameters: dict, execution
                 "excludes": parameters.get("sync_exclude", []),
             },
             [source_id],
-            timeout_seconds=1800,  # 30 min for large data volumes
+            timeout_seconds=7200,  # 2hr — C:\ MIR over SMB on large volumes
         )
     finally:
         await _delete_robocopy_account(dest_id)

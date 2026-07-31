@@ -503,7 +503,12 @@ def _debrief(label: str, exec_result: dict, rollback_result: dict | None = None)
         log(f"    {section:<20} {_count(section)}")
 
     hostname_refs = exec_result.get("hostname_refs") or []
-    ref_locs = [r.get("location") if isinstance(r, dict) else r for r in hostname_refs]
+    if isinstance(hostname_refs, str):
+        try:
+            hostname_refs = _json.loads(hostname_refs)
+        except Exception:
+            hostname_refs = []
+    ref_locs = [r.get("location") if isinstance(r, dict) else str(r)[:20] for r in hostname_refs]
     log(f"    {'hostname_refs':<20} {len(hostname_refs)}  {ref_locs}")
 
     # --- Sync detail ---
@@ -615,7 +620,12 @@ def test_windows_parallel_migration_full_flow(smoke_resources):
 
     # Inventory must have captured hostname ref in config file
     hostname_refs = exec_result.get("hostname_refs", [])
-    assert any(ref.get("location") == "file" for ref in hostname_refs), (
+    if isinstance(hostname_refs, str):
+        try:
+            import json as _j; hostname_refs = _j.loads(hostname_refs)
+        except Exception:
+            hostname_refs = []
+    assert any(isinstance(ref, dict) and ref.get("location") == "file" for ref in hostname_refs), (
         f"Expected file hostname_ref in execution_result, got: {hostname_refs}"
     )
     log(f"WPM smoke: hostname_refs captured: {hostname_refs}")
