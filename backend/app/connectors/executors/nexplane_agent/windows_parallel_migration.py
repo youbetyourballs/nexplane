@@ -340,11 +340,7 @@ async def _phase5_health_check(dest_id: str, parameters: dict, execution_result:
         check_result = await dispatch_agent_job(
             "win_run_ps",
             {
-                "command": (
-                    "Import-Module WebAdministration -ErrorAction SilentlyContinue; "
-                    "$c = (Get-Website -ErrorAction SilentlyContinue | Measure-Object).Count; "
-                    "if ($null -eq $c) { '0' } else { $c }"
-                ),
+                "command": "try { Import-Module WebAdministration -ErrorAction Stop; (Get-Website -ErrorAction SilentlyContinue | Measure-Object).Count } catch { 0 }",
                 "timeout": 20,
             },
             [dest_id],
@@ -368,11 +364,7 @@ async def _phase5_health_check(dest_id: str, parameters: dict, execution_result:
         verify_result = await dispatch_agent_job(
             "win_run_ps",
             {
-                "command": (
-                    f"if (-not (Test-Path '{safe_path}')) {{ Write-Output 'MISSING' }} "
-                    f"elseif (Select-String -Path '{safe_path}' -Pattern '{safe_old}' -Quiet -ErrorAction SilentlyContinue) {{ Write-Output 'FOUND' }} "
-                    f"else {{ Write-Output 'CLEAN' }}"
-                ),
+                "command": f"if (-not (Test-Path '{safe_path}')) {{ 'MISSING' }} elseif (Select-String -Path '{safe_path}' -Pattern '{safe_old}' -Quiet -ErrorAction SilentlyContinue) {{ 'FOUND' }} else {{ 'CLEAN' }}",
                 "timeout": 15,
             },
             [dest_id],

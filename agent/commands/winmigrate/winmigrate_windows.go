@@ -245,10 +245,12 @@ try {
     # Robocopy exit codes: 0-7 clean success, 8-15 partial/warnings (locked files etc — acceptable on live system), 16+ fatal
     if ($rc -ge 16) { throw "robocopy fatal error (exit $rc) — check log" }
     $logContent = Get-Content 'C:\nexplane-robocopy.log' -Tail 20 -ErrorAction SilentlyContinue | Out-String
-    [PSCustomObject]@{ exit_code=$rc; log_tail=$logContent } | ConvertTo-Json -Compress
+    $json = [PSCustomObject]@{ exit_code=$rc; log_tail=$logContent } | ConvertTo-Json -Compress
 } finally {
     & net use $unc /delete /y 2>&1 | Out-Null
 }
+# Emit JSON last so no other stdout contaminates the result
+$json
 `, unc, remoteUser, safePassword, xdStr)
 
 	out, err := runPS(script)
