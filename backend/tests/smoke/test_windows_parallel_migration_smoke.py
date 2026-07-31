@@ -441,6 +441,117 @@ def smoke_resources(request):
 
 
 # ---------------------------------------------------------------------------
+# Debrief
+# ---------------------------------------------------------------------------
+
+def _debrief(label: str, exec_result: dict, rollback_result: dict | None = None) -> None:
+    """Print a structured post-run summary for human review and future upgrade confidence."""
+    import json as _json
+
+    sep = "─" * 68
+    log(f"\n{'═' * 68}")
+    log(f"  WPM SMOKE DEBRIEF — {label}")
+    log(sep)
+
+    # --- Phase gate table ---
+    phases = [
+        ("Preflight",     exec_result.get("preflight") is not None,       None),
+        ("Snapshot",      not exec_result.get("snapshot_skipped", True),  "skipped (no IMDS/creds — expected in smoke)"),
+        ("Inventory",     exec_result.get("inventory") is not None,       None),
+        ("Sync",          exec_result.get("sync_completed") is True,      None),
+        ("Health check",  exec_result.get("health_check") is not None,    None),
+        ("Cutover",       exec_result.get("cutover_completed") is True,   None),
+        ("Src stopped",   exec_result.get("source_stopped") is True,      None),
+    ]
+    log("  Phase results:")
+    for name, passed, note in phases:
+        icon = "✅" if passed else ("⚠️ " if note else "❌")
+        suffix = f"  ({note})" if note and not passed else ""
+        log(f"    {icon}  {name}{suffix}")
+
+    # --- Inventory summary ---
+    inv = exec_result.get("inventory") or {}
+    if isinstance(inv, str):
+        try:
+            inv = _json.loads(inv)
+        except Exception:
+            inv = {}
+    def _count(key: str) -> str:
+        val = inv.get(key)
+        if val is None:
+            return "—"
+        if isinstance(val, list):
+            return str(len(val))
+        if isinstance(val, str):
+            try:
+                return str(len(_json.loads(val)))
+            except Exception:
+                return "1 (raw)"
+        return str(val)
+
+    log(f"\n  Inventory captured:")
+    for section in ("services", "scheduled_tasks", "iis_sites", "certificates",
+                    "env_vars", "dns_records", "registry"):
+        log(f"    {section:<20} {_count(section)}")
+
+    hostname_refs = exec_result.get("hostname_refs") or []
+    log(f"    {'hostname_refs':<20} {len(hostname_refs)}  {[r.get('location') for r in hostname_refs]}")
+
+    # --- Sync detail ---
+    sync = exec_result.get("sync") or {}
+    robocopy = sync.get("robocopy") or {}
+    rc = robocopy.get("exit_code")
+    log(f"\n  Sync:")
+    log(f"    robocopy exit_code   {rc!r}  {'(OK — codes 0-7 are success)' if isinstance(rc, int) and rc < 8 else ''}")
+    if robocopy.get("log_tail"):
+        tail_lines = robocopy["log_tail"].strip().splitlines()[-5:]
+        log(f"    robocopy log tail →")
+        for line in tail_lines:
+            log(f"      {line}")
+
+    # --- Health check ---
+    hc = exec_result.get("health_check") or {}
+    log(f"\n  Health check:        {'passed' if hc.get('health_check_passed') else 'not recorded'}")
+
+    # --- Cutover ---
+    log(f"\n  Cutover:")
+    log(f"    method               {exec_result.get('cutover_method')!r}")
+    log(f"    cutover_completed    {exec_result.get('cutover_completed')}")
+    log(f"    source_stopped       {exec_result.get('source_stopped')}")
+    log(f"    rollback_capability  {exec_result.get('rollback_capability')!r}")
+
+    # --- Rollback ---
+    if rollback_result is not None:
+        rb = rollback_result
+        actions = rb.get("actions") or []
+        log(f"\n  Rollback:")
+        log(f"    actions              {actions}")
+        log(f"    rollback_error       {rb.get('error')!r}")
+
+    # --- Gaps / live-upgrade warnings ---
+    warnings: list[str] = []
+    if exec_result.get("snapshot_skipped"):
+        warnings.append("EBS snapshot skipped — live upgrades need AWS creds on the source agent")
+    if not hostname_refs:
+        warnings.append("No hostname_refs found — verify hostname replacement config is correct")
+    if isinstance(rc, int) and rc >= 8:
+        warnings.append(f"Robocopy exit_code={rc} indicates copy errors — check log_tail above")
+    if not hc.get("health_check_passed"):
+        warnings.append("Health check result missing — executor may not be persisting it")
+    if exec_result.get("error"):
+        warnings.append(f"Execution error recorded: {exec_result['error']}")
+
+    if warnings:
+        log(f"\n  ⚠️  Warnings for live-upgrade review:")
+        for w in warnings:
+            log(f"    • {w}")
+    else:
+        log(f"\n  ✅  No warnings — run looks clean for live upgrades")
+
+    log(f"{'═' * 68}\n")
+
+
+# ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
 
@@ -479,6 +590,9 @@ def test_windows_parallel_migration_full_flow(smoke_resources):
     )
     cr_id = cr["id"]
     exec_result = _execution_result(cr)
+
+    # Debrief before assertions so it prints even when a gate fails.
+    _debrief(f"{r['src_ver']}→{r['dst_ver']} execute", exec_result)
 
     assert cr["status"] == "completed", (
         f"CR did not complete: status={cr['status']!r} result={exec_result}"
@@ -545,6 +659,7 @@ def test_windows_parallel_migration_full_flow(smoke_resources):
     # Rollback
     # -------------------------------------------------------------------------
     cr = _rollback_cr(cr_id)
+    rollback_exec = _execution_result(cr)
 
     # EIP must be back on source
     eip_instance = _get_eip_instance(r["eip_id"])
@@ -563,3 +678,17 @@ def test_windows_parallel_migration_full_flow(smoke_resources):
         f"Source {r['source_instance_id']} expected running after rollback, got {source_state!r}"
     )
     log(f"WPM smoke: source running after rollback confirmed — {r['src_ver']}→{r['dst_ver']} PASSED")
+
+    # Rollback result is in the second execution run under the "rollback" key.
+    rb_raw = None
+    for _run in (cr.get("execution_runs") or []):
+        _candidate = (_run.get("result") or {})
+        if "rollback" in _candidate:
+            rb_raw = _candidate["rollback"]
+            break
+        for _step in (_candidate.get("execution") or {}).get("steps", []):
+            _sr = _step.get("result") or {}
+            if "rollback" in _sr:
+                rb_raw = _sr["rollback"]
+                break
+    _debrief(f"{r['src_ver']}→{r['dst_ver']} rollback", exec_result, rollback_result=rb_raw or rollback_exec)
