@@ -713,16 +713,14 @@ def test_windows_parallel_migration_full_flow(smoke_resources):
     )
     log(f"WPM smoke: source running after rollback confirmed — {r['src_ver']}→{r['dst_ver']} PASSED")
 
-    # Rollback result is in the second execution run under the "rollback" key.
+    # Rollback result is stored as the second execution run's result directly
+    # (not nested under a "rollback" key — the rollback executor stores it as the run result).
     rb_raw = None
-    for _run in (cr.get("execution_runs") or []):
-        _candidate = (_run.get("result") or {})
-        if "rollback" in _candidate:
-            rb_raw = _candidate["rollback"]
+    runs = cr.get("execution_runs") or []
+    for _run in runs:
+        _candidate = _run.get("result") or {}
+        # Rollback run result has "actions" key; forward run has "execution" or phase keys
+        if "actions" in _candidate and "execution" not in _candidate:
+            rb_raw = _candidate
             break
-        for _step in (_candidate.get("execution") or {}).get("steps", []):
-            _sr = _step.get("result") or {}
-            if "rollback" in _sr:
-                rb_raw = _sr["rollback"]
-                break
     _debrief(f"{r['src_ver']}→{r['dst_ver']} rollback", exec_result, rollback_result=rb_raw or rollback_exec)

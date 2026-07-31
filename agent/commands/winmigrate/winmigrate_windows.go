@@ -258,8 +258,19 @@ $json
 		return nil, fmt.Errorf("win_robocopy_push: %w", err)
 	}
 
+	// Robocopy prints a "Log File : ..." header to stdout before our $json line.
+	// Take the last non-empty line which is always the ConvertTo-Json output.
+	jsonLine := out
+	if lines := strings.Split(out, "\n"); len(lines) > 1 {
+		for i := len(lines) - 1; i >= 0; i-- {
+			if l := strings.TrimSpace(lines[i]); l != "" {
+				jsonLine = l
+				break
+			}
+		}
+	}
 	var result map[string]any
-	if err := json.Unmarshal([]byte(out), &result); err != nil {
+	if err := json.Unmarshal([]byte(jsonLine), &result); err != nil {
 		return map[string]any{"raw_output": out}, nil
 	}
 	return result, nil
