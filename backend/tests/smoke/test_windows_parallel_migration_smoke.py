@@ -495,7 +495,8 @@ def _debrief(label: str, exec_result: dict, rollback_result: dict | None = None)
         log(f"    {section:<20} {_count(section)}")
 
     hostname_refs = exec_result.get("hostname_refs") or []
-    log(f"    {'hostname_refs':<20} {len(hostname_refs)}  {[r.get('location') for r in hostname_refs]}")
+    ref_locs = [r.get("location") if isinstance(r, dict) else r for r in hostname_refs]
+    log(f"    {'hostname_refs':<20} {len(hostname_refs)}  {ref_locs}")
 
     # --- Sync detail ---
     sync = exec_result.get("sync") or {}
