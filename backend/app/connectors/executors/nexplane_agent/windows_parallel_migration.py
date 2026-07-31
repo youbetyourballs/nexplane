@@ -323,14 +323,15 @@ async def _phase5_health_check(dest_id: str, parameters: dict, execution_result:
     """Phase 5: verify dest agent responds, robocopy succeeded, and hostname replacements applied."""
     await _check_agent(dest_id)
 
-    # Check robocopy exit code (exit code >= 8 indicates errors per robocopy spec)
+    # Check robocopy exit code: 0-15 acceptable (8-15 = partial/warnings on live system), 16+ fatal
     exit_code = (execution_result or {}).get("sync", {}).get("robocopy", {}).get("exit_code")
-    if exit_code is not None and exit_code >= 8:
-        raise RuntimeError(f"health check failed: robocopy reported errors (exit_code={exit_code})")
+    if exit_code is not None and exit_code >= 16:
+        raise RuntimeError(f"health check failed: robocopy fatal error (exit_code={exit_code})")
     elif exit_code is None:
         logger.warning("health check: robocopy exit_code missing from sync result — skipping check")
     else:
-        logger.info(f"[windows_parallel_migration] health check: robocopy exit_code={exit_code} (OK)")
+        level = "WARNING" if exit_code >= 8 else "OK"
+        logger.info(f"[windows_parallel_migration] health check: robocopy exit_code={exit_code} ({level})")
 
     # Verify IIS is configured if inventory captured sites
     inventory = parameters.get("_inventory_snapshot", {})

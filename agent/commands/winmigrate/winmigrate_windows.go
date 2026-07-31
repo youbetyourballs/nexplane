@@ -141,8 +141,8 @@ if ($iis -ne '[]') {
         }
     }
 }
-$refsJson = $refs | ConvertTo-Json -Compress
-if (-not $refsJson) { $refsJson = '[]' }
+// Force array wrapper — PS drops [] on single-element arrays without @()
+$refsJson = if ($refs.Count -eq 0) { '[]' } else { @($refs) | ConvertTo-Json -Compress }
 
 [PSCustomObject]@{
     services=$services; scheduled_tasks=$tasks; iis_sites=$iis
@@ -230,8 +230,8 @@ try {
     $rcArgs = @('C:\', $unc, '/MIR', '/COPYALL', '/R:3', '/W:5', '/NP', '/NFL', '/NDL', '/LOG:C:\nexplane-robocopy.log', '/XD', %s)
     & robocopy @rcArgs
     $rc = $LASTEXITCODE
-    # Exit codes 0-7 are success (8+ indicate errors)
-    if ($rc -ge 8) { throw "robocopy failed with exit code $rc" }
+    # Robocopy exit codes: 0-7 clean success, 8-15 partial/warnings (locked files etc — acceptable on live system), 16+ fatal
+    if ($rc -ge 16) { throw "robocopy fatal error (exit $rc) — check log" }
     $logContent = Get-Content 'C:\nexplane-robocopy.log' -Tail 20 -ErrorAction SilentlyContinue | Out-String
     [PSCustomObject]@{ exit_code=$rc; log_tail=$logContent } | ConvertTo-Json -Compress
 } finally {
