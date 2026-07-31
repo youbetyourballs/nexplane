@@ -356,22 +356,30 @@ async def _phase5_health_check(dest_id: str, parameters: dict, execution_result:
         level = "WARNING" if exit_code >= 8 else "OK"
         logger.info(f"[windows_parallel_migration] health check: robocopy exit_code={exit_code} ({level})")
 
-    # Verify IIS is configured if inventory captured sites
+    # Verify IIS service (W3SVC) is running on dest if source had IIS sites.
+    # IIS applicationHost.config lives in C:\Windows\System32\inetsrv\config — excluded from
+    # robocopy, so site count on dest won't match source. The correct gate is whether IIS
+    # itself is operational so operators can reconfigure/import sites post-cutover.
     inventory = parameters.get("_inventory_snapshot", {})
     iis_sites_json = inventory.get("iis_sites", "[]")
     if iis_sites_json and iis_sites_json != "[]":
         check_result = await dispatch_agent_job(
             "win_run_ps",
             {
-                "command": "try { Import-Module WebAdministration -ErrorAction Stop; (Get-Website -ErrorAction SilentlyContinue | Measure-Object).Count } catch { 0 }",
-                "timeout": 20,
+                "command": "(Get-Service -Name W3SVC -ErrorAction SilentlyContinue).Status",
+                "timeout": 10,
             },
             [dest_id],
-            timeout_seconds=90,
+            timeout_seconds=60,
         )
-        site_count = check_result.get("output", "0").strip()
-        if site_count == "0":
-            raise RuntimeError("Health check: IIS sites missing on dest after sync")
+        w3svc_status = check_result.get("output", "").strip()
+        if w3svc_status != "Running":
+            raise RuntimeError(
+                f"Health check: IIS (W3SVC) is not running on dest (status={w3svc_status!r}). "
+                "IIS must be installed and W3SVC started before migration. "
+                "Note: IIS site registrations live in applicationHost.config (C:\\Windows\\...) "
+                "which is excluded from robocopy — reconfigure sites on dest post-cutover."
+            )
 
     # Verify hostname replacements were applied (check up to 3 file entries)
     hostname_replacements = parameters.get("hostname_replacements", [])
