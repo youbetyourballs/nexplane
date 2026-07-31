@@ -161,11 +161,34 @@ async def _preflight(parameters: dict, connector) -> dict:
     else:
         raise RuntimeError(f"Unknown cutover_method: {cutover_method!r}")
 
+    # Check IIS on source — if present, dest must also have it installed pre-migration.
+    # Robocopy syncs IIS config/content but Windows features must be pre-installed on dest.
+    source_iis = await dispatch_agent_job(
+        "win_run_ps",
+        {"command": "try { Import-Module WebAdministration -ErrorAction Stop; 'installed' } catch { 'missing' }", "timeout": 10},
+        [source_id],
+        timeout_seconds=30,
+    )
+    if source_iis.get("output", "").strip() == "installed":
+        dest_iis = await dispatch_agent_job(
+            "win_run_ps",
+            {"command": "try { Import-Module WebAdministration -ErrorAction Stop; 'installed' } catch { 'missing' }", "timeout": 10},
+            [dest_id],
+            timeout_seconds=30,
+        )
+        if dest_iis.get("output", "").strip() != "installed":
+            raise RuntimeError(
+                "Preflight: source has IIS but dest does not have Web-Server feature installed. "
+                "Install IIS on dest before running migration."
+            )
+        logger.info("[windows_parallel_migration] Preflight: IIS present on both source and dest")
+
     preflight_result = {
         "source_os": source_os,
         "dest_os": dest_os,
         "source_version": source_ver,
         "dest_version": dest_ver,
+        "source_iis": source_iis.get("output", "").strip(),
     }
 
     # Read existing DNS TTL so we can restore it after cutover

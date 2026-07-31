@@ -361,6 +361,15 @@ def smoke_resources(request):
     )
     log(f"WPM smoke: SMB admin-share prereqs configured on dest {dest_instance_id}")
 
+    # Install IIS on dest — robocopy syncs IIS config/content but Windows features must be
+    # pre-installed. Real migrations require dest to match source feature set pre-cutover.
+    _ssm_run_ps(
+        dest_instance_id,
+        "Install-WindowsFeature -Name Web-Server -IncludeManagementTools -ErrorAction SilentlyContinue | Out-Null",
+        timeout=300,
+    )
+    log(f"WPM smoke: IIS installed on dest {dest_instance_id}")
+
     # Allocate and associate EIP to source
     eip = ec2.allocate_address(Domain="vpc")
     eip_id = eip["AllocationId"]
