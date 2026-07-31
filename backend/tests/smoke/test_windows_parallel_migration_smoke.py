@@ -345,13 +345,21 @@ def smoke_resources(request):
         log(f"WPM smoke: installing Nexplane agent on dest {dest_instance_id}")
         _install_nexplane_agent(dest_instance_id)
 
-    # Open SMB (port 445) on dest so robocopy admin-share can connect from source.
-    # Windows Firewall blocks inbound SMB by default on non-domain machines.
+    # Prepare dest for inbound robocopy admin-share (net use \\dest\C$):
+    # 1. Enable Windows Firewall SMB rule (blocks inbound 445 by default on non-domain machines)
+    # 2. Ensure Server service is running (hosts C$ admin share — may be stopped on EC2 AMIs)
+    # 3. Set LocalAccountTokenFilterPolicy so local admin accounts can access admin shares remotely
     _ssm_run_ps(
         dest_instance_id,
-        "netsh advfirewall firewall set rule group='File and Printer Sharing' new enable=Yes",
+        ";".join([
+            "netsh advfirewall firewall set rule group='File and Printer Sharing' new enable=Yes",
+            "Set-Service -Name LanmanServer -StartupType Automatic",
+            "Start-Service -Name LanmanServer -ErrorAction SilentlyContinue",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name LocalAccountTokenFilterPolicy -Value 1 -Type DWord -Force",
+        ]),
+        timeout=30,
     )
-    log(f"WPM smoke: SMB firewall rule enabled on dest {dest_instance_id}")
+    log(f"WPM smoke: SMB admin-share prereqs configured on dest {dest_instance_id}")
 
     # Allocate and associate EIP to source
     eip = ec2.allocate_address(Domain="vpc")
