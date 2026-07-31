@@ -598,6 +598,9 @@ def test_windows_parallel_migration_full_flow(smoke_resources):
             ],
             "decommission_after_hours": 0,
             "dry_run": False,
+            # Smoke: exclude large OS dirs to keep robocopy runtime under 10 min on t3.medium.
+            # A real migration would sync everything; here we verify the mechanism, not volume.
+            "sync_exclude": ["Users", "inetpub\\logs", "Windows.old", "Temp"],
         },
         title=f"[smoke] windows_parallel_migration {r['src_ver']}→{r['dst_ver']} EIP",
         asset_ids=[r["source_asset_id"], r["dest_asset_id"]],

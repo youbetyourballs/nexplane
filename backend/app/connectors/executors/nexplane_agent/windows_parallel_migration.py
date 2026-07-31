@@ -339,7 +339,14 @@ async def _phase5_health_check(dest_id: str, parameters: dict, execution_result:
     if iis_sites_json and iis_sites_json != "[]":
         check_result = await dispatch_agent_job(
             "win_run_ps",
-            {"command": "(Get-Website | Measure-Object).Count", "timeout": 15},
+            {
+                "command": (
+                    "Import-Module WebAdministration -ErrorAction SilentlyContinue; "
+                    "$c = (Get-Website -ErrorAction SilentlyContinue | Measure-Object).Count; "
+                    "if ($null -eq $c) { '0' } else { $c }"
+                ),
+                "timeout": 20,
+            },
             [dest_id],
             timeout_seconds=90,
         )
@@ -361,16 +368,23 @@ async def _phase5_health_check(dest_id: str, parameters: dict, execution_result:
         verify_result = await dispatch_agent_job(
             "win_run_ps",
             {
-                "command": f"if (Select-String -Path '{safe_path}' -Pattern '{safe_old}' -Quiet) {{ Write-Output 'FOUND' }} else {{ Write-Output 'CLEAN' }}",
+                "command": (
+                    f"if (-not (Test-Path '{safe_path}')) {{ Write-Output 'MISSING' }} "
+                    f"elseif (Select-String -Path '{safe_path}' -Pattern '{safe_old}' -Quiet -ErrorAction SilentlyContinue) {{ Write-Output 'FOUND' }} "
+                    f"else {{ Write-Output 'CLEAN' }}"
+                ),
                 "timeout": 15,
             },
             [dest_id],
             timeout_seconds=90,
         )
-        if verify_result.get("output", "").strip() == "FOUND":
+        check_out = verify_result.get("output", "").strip()
+        if check_out == "FOUND":
             raise RuntimeError(
                 f"health check failed: old hostname string '{old_value}' still present in {path}"
             )
+        if check_out == "MISSING":
+            logger.warning(f"[windows_parallel_migration] health check: {path} not found on dest — replacement could not be verified")
 
     return {"health_check_passed": True}
 

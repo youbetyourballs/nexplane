@@ -161,12 +161,24 @@ $refsJson = if ($refs.Count -eq 0) { '[]' } else { @($refs) | ConvertTo-Json -Co
 		return nil, fmt.Errorf("win_inventory: failed to parse result: %w\noutput: %s", err, out)
 	}
 
-	// Parse hostname_refs from JSON string into []map[string]any
-	if refsStr, ok := result["hostname_refs"].(string); ok {
+	// Normalise hostname_refs to []any regardless of PS serialisation quirks.
+	// PS may emit a bare object (single ref) or a JSON string instead of an inline array.
+	switch v := result["hostname_refs"].(type) {
+	case string:
+		// Embedded as a JSON string — parse it
 		var refs []any
-		if json.Unmarshal([]byte(refsStr), &refs) == nil {
+		if json.Unmarshal([]byte(v), &refs) == nil {
 			result["hostname_refs"] = refs
+		} else {
+			// Single object string e.g. `{"location":...}` — wrap it
+			var obj map[string]any
+			if json.Unmarshal([]byte(v), &obj) == nil {
+				result["hostname_refs"] = []any{obj}
+			}
 		}
+	case map[string]any:
+		// PS serialised single object inline — wrap in slice
+		result["hostname_refs"] = []any{v}
 	}
 
 	return result, nil
@@ -227,7 +239,7 @@ if ($LASTEXITCODE -ne 0) { throw "net use failed (exit $LASTEXITCODE): $netResul
 
 try {
     # Robocopy C:\ to dest C$
-    $rcArgs = @('C:\', $unc, '/MIR', '/COPYALL', '/R:3', '/W:5', '/NP', '/NFL', '/NDL', '/LOG:C:\nexplane-robocopy.log', '/XD', %s)
+    $rcArgs = @('C:\', $unc, '/MIR', '/COPY:DAT', '/R:2', '/W:3', '/NP', '/NFL', '/NDL', '/MT:8', '/LOG:C:\nexplane-robocopy.log', '/XD', %s)
     & robocopy @rcArgs
     $rc = $LASTEXITCODE
     # Robocopy exit codes: 0-7 clean success, 8-15 partial/warnings (locked files etc — acceptable on live system), 16+ fatal
