@@ -86,7 +86,7 @@ class RabbitMQUpgradeExecutor(AppUpgradeExecutor):
         )
         return result
 
-    async def rollback(self, asset_id: str, execution_result: dict, connector) -> dict:
+    async def rollback(self, asset_id: str, execution_result: dict, connector, parameters=None) -> dict:
         snapshot = execution_result.get("snapshot_result", {})
         strategy = snapshot.get("strategy")
         snapshot_path = snapshot.get("snapshot_path") or snapshot.get("local_path")
@@ -94,6 +94,11 @@ class RabbitMQUpgradeExecutor(AppUpgradeExecutor):
         if strategy == "skipped" or not snapshot_path:
             return {"status": "rollback_failed", "reason": "no snapshot available"}
 
+        params = parameters or {}
+        container_name = (
+            execution_result.get("upgrade_result", {}).get("container_name")
+            or params.get("rmq_container", "rabbitmq")
+        )
         logger.info("Rolling back RabbitMQ via local snapshot %s on %s", snapshot_path, asset_id)
         result = await dispatch_agent_job(
             command="app_restore_local_rabbitmq",
@@ -101,7 +106,13 @@ class RabbitMQUpgradeExecutor(AppUpgradeExecutor):
             asset_ids=[asset_id],
             timeout_seconds=300,
         )
-        return {"rolled_back": result.get("restored", False), "strategy": strategy, "agent_result": result}
+        return {
+            "rolled_back": result.get("restored", False),
+            "strategy": strategy,
+            "agent_result": result,
+            "warning": "container_swap_not_automated",
+            "manual_steps": f"docker stop {container_name}-v4; docker start {container_name}",
+        }
 
 
 _executor = RabbitMQUpgradeExecutor()
@@ -111,6 +122,7 @@ async def execute(parameters, asset_ids, connector):
     return await _executor.execute(parameters, asset_ids, connector)
 
 
-async def rollback(parameters, asset_ids, connector, execution_result):
+async def rollback(parameters, execution_result, connector):
+    asset_ids = execution_result.get("asset_ids") or parameters.get("target_asset_ids") or []
     asset_id = str(asset_ids[0]) if asset_ids else ""
-    return await _executor.rollback(asset_id, execution_result, connector)
+    return await _executor.rollback(asset_id, execution_result, connector, parameters=parameters)

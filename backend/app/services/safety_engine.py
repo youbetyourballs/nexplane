@@ -165,7 +165,6 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.elasticsearch_upgrade,
     ChangeType.opensearch_upgrade,
     ChangeType.kafka_zk_to_kraft_bridge,
-    ChangeType.kafka_kraft_cutover,
     ChangeType.rabbitmq_upgrade,
     ChangeType.java_runtime_upgrade,
     ChangeType.python_runtime_upgrade,

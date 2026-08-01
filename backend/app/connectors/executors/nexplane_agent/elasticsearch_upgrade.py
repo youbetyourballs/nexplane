@@ -147,6 +147,7 @@ _executor = ElasticsearchUpgradeExecutor()
 async def execute(parameters, asset_ids, connector):
     return await _executor.execute(parameters, asset_ids, connector)
 
-async def rollback(parameters, asset_ids, connector, execution_result):
+async def rollback(parameters, execution_result, connector):
+    asset_ids = execution_result.get("asset_ids") or parameters.get("target_asset_ids") or []
     asset_id = str(asset_ids[0]) if asset_ids else ""
     return await _executor.rollback(asset_id, execution_result, connector)

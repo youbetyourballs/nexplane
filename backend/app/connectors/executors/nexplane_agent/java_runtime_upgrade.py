@@ -80,7 +80,7 @@ class JavaRuntimeUpgradeExecutor(AppUpgradeExecutor):
         )
         return result
 
-    async def rollback(self, asset_id: str, execution_result: dict, connector) -> dict:
+    async def rollback(self, asset_id: str, execution_result: dict, connector, parameters=None) -> dict:
         snapshot = execution_result.get("snapshot_result", {})
         strategy = snapshot.get("strategy")
         snapshot_path = snapshot.get("snapshot_path") or snapshot.get("local_path")
@@ -88,13 +88,13 @@ class JavaRuntimeUpgradeExecutor(AppUpgradeExecutor):
         if strategy == "skipped" or not snapshot_path:
             return {"status": "rollback_failed", "reason": "no snapshot available"}
 
-        parameters = execution_result.get("parameters", {})
+        params = parameters or execution_result.get("parameters", {})
         logger.info("Rolling back Java runtime via local snapshot %s on %s", snapshot_path, asset_id)
         result = await dispatch_agent_job(
             command="app_restore_local_java",
             parameters={
-                "java_container": parameters.get("java_container", "java-app"),
-                "target_version": parameters.get("target_version", ""),
+                "java_container": params.get("java_container", "java-app"),
+                "target_version": params.get("target_version", ""),
                 "snapshot_path": snapshot_path,
             },
             asset_ids=[asset_id],
@@ -110,6 +110,7 @@ async def execute(parameters, asset_ids, connector):
     return await _executor.execute(parameters, asset_ids, connector)
 
 
-async def rollback(parameters, asset_ids, connector, execution_result):
+async def rollback(parameters, execution_result, connector):
+    asset_ids = execution_result.get("asset_ids") or parameters.get("target_asset_ids") or []
     asset_id = str(asset_ids[0]) if asset_ids else ""
-    return await _executor.rollback(asset_id, execution_result, connector)
+    return await _executor.rollback(asset_id, execution_result, connector, parameters=parameters)

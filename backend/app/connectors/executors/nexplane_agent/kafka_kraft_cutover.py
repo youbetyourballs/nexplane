@@ -53,7 +53,7 @@ async def execute(parameters, asset_ids, connector):
     return {"status": "completed", "cutover_result": result, "rollback_possible": False}
 
 
-async def rollback(parameters, asset_ids, connector, execution_result):
+async def rollback(parameters, execution_result, connector):
     raise IrreversibleOperationError(
         "Kafka ZK→KRaft cutover is irreversible. Once committed, ZooKeeper metadata cannot be recovered from KRaft state. "
         "Restore from a full system backup if needed."
