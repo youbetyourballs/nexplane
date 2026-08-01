@@ -3852,6 +3852,50 @@
       ]
     },
     {
+      "action_id": "kafka_zk_to_kraft_bridge",
+      "action_type": "change",
+      "applicable_asset_types": ["server"],
+      "blast_radius_hint": "kafka_unavailable_during_bridge_phase",
+      "description": "Phase 1 of ZK→KRaft migration. Adds KRaft controllers in dual-write mode alongside ZooKeeper. Fully reversible.",
+      "display_name": "Kafka ZooKeeper to KRaft Bridge",
+      "estimated_duration_seconds": 600,
+      "execution_tier": 4,
+      "executor": "nexplane_agent.kafka_zk_to_kraft_bridge",
+      "generic_action": "kafka_zk_to_kraft_bridge",
+      "parameters": [
+        {"name": "target_version", "required": true, "type": "string"},
+        {"name": "source_version", "required": false, "type": "string"},
+        {"name": "kafka_container", "required": false, "type": "string", "default": "kafka"},
+        {"name": "kafka_zk_host", "required": false, "type": "string", "default": "localhost"},
+        {"name": "kafka_zk_port", "required": false, "type": "integer", "default": 2181},
+        {"name": "kafka_port", "required": false, "type": "integer", "default": 9092},
+        {"name": "skip_snapshot", "required": false, "type": "boolean", "default": false},
+        {"name": "dry_run", "required": false, "type": "boolean", "default": false}
+      ],
+      "rollback_strategy": "full",
+      "safety_notes": ["Ensure all consumers are connected before starting bridge phase"]
+    },
+    {
+      "action_id": "kafka_kraft_cutover",
+      "action_type": "change",
+      "applicable_asset_types": ["server"],
+      "blast_radius_hint": "kafka_permanent_topology_change",
+      "description": "Phase 2 of ZK→KRaft migration. Permanently removes ZooKeeper. IRREVERSIBLE.",
+      "display_name": "Kafka KRaft Cutover (Irreversible)",
+      "estimated_duration_seconds": 300,
+      "execution_tier": 4,
+      "executor": "nexplane_agent.kafka_kraft_cutover",
+      "generic_action": "kafka_kraft_cutover",
+      "parameters": [
+        {"name": "kafka_container", "required": false, "type": "string", "default": "kafka"},
+        {"name": "kafka_port", "required": false, "type": "integer", "default": 9092},
+        {"name": "kafka_zk_container", "required": false, "type": "string", "default": "zookeeper"},
+        {"name": "dry_run", "required": false, "type": "boolean", "default": false}
+      ],
+      "rollback_strategy": "none",
+      "safety_notes": ["IRREVERSIBLE — complete Phase 1 first and verify all consumers before proceeding"]
+    },
+    {
       "action_id": "k8s_cluster_upgrade",
       "action_type": "change",
       "applicable_asset_types": [

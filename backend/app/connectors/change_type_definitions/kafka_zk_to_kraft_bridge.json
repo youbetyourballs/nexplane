@@ -1,0 +1,21 @@
+{
+  "change_type": "kafka_zk_to_kraft_bridge",
+  "display_name": "Kafka ZooKeeper to KRaft Bridge (Phase 1)",
+  "description": "Phase 1 of ZooKeeper→KRaft migration. Starts KRaft controllers alongside ZooKeeper in dual-write mode. Fully reversible — rollback stops KRaft controllers and returns to ZK-only mode.",
+  "rollback_capability": "full",
+  "executor": "nexplane_agent.kafka_zk_to_kraft_bridge",
+  "steps": [{"generic_action": "kafka_zk_to_kraft_bridge", "purpose": "execute", "required": true}],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "target_version":      {"type": "string",  "required": true},
+    "source_version":      {"type": "string",  "required": false},
+    "kafka_container":     {"type": "string",  "required": false, "default": "kafka"},
+    "kafka_zk_host":       {"type": "string",  "required": false, "default": "localhost"},
+    "kafka_zk_port":       {"type": "integer", "required": false, "default": 2181},
+    "kafka_port":          {"type": "integer", "required": false, "default": 9092},
+    "kafka_zk_container":  {"type": "string",  "required": false, "default": "zookeeper"},
+    "skip_snapshot":       {"type": "boolean", "required": false, "default": false},
+    "dry_run":             {"type": "boolean", "required": false, "default": false}
+  }
+}

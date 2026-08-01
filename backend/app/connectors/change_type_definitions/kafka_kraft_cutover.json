@@ -1,0 +1,16 @@
+{
+  "change_type": "kafka_kraft_cutover",
+  "display_name": "Kafka KRaft Cutover (Phase 2 — Irreversible)",
+  "description": "Phase 2 of ZooKeeper→KRaft migration. Permanently removes ZooKeeper dependency. IRREVERSIBLE — once committed, rollback is not possible. Requires Phase 1 (kafka_zk_to_kraft_bridge) to be completed first.",
+  "rollback_capability": "none",
+  "executor": "nexplane_agent.kafka_kraft_cutover",
+  "steps": [{"generic_action": "kafka_kraft_cutover", "purpose": "execute", "required": true}],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "kafka_container":     {"type": "string",  "required": false, "default": "kafka"},
+    "kafka_port":          {"type": "integer", "required": false, "default": 9092},
+    "kafka_zk_container":  {"type": "string",  "required": false, "default": "zookeeper"},
+    "dry_run":             {"type": "boolean", "required": false, "default": false}
+  }
+}
