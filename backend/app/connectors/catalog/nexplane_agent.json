@@ -4009,6 +4009,55 @@
         "Pre-upgrade EBS snapshot (EC2) or VSS shadow copy (on-prem) taken automatically before upgrade",
         "skip_snapshot=true is blocked on assets tagged environment: prod"
       ]
+    },
+    {
+      "action_id": "java_runtime_upgrade",
+      "action_type": "change",
+      "applicable_asset_types": ["server"],
+      "blast_radius_hint": "java_app_unavailable_during_upgrade",
+      "description": "Upgrades the Java runtime in a Docker container. Stops old container, starts new JVM container, verifies version.",
+      "display_name": "Java Runtime Upgrade",
+      "estimated_duration_seconds": 600,
+      "execution_tier": 4,
+      "executor": "nexplane_agent.java_runtime_upgrade",
+      "generic_action": "java_runtime_upgrade",
+      "parameters": [
+        {"name": "target_version",    "required": true,  "type": "string", "description": "Target Java major version, e.g. 17, 21"},
+        {"name": "java_container",    "required": false, "type": "string", "default": "java-app"},
+        {"name": "java_image",        "required": false, "type": "string", "description": "Docker image override; default: eclipse-temurin:{version}-jre"},
+        {"name": "app_jar",           "required": false, "type": "string"},
+        {"name": "app_args",          "required": false, "type": "string"},
+        {"name": "java_home_new",     "required": false, "type": "string", "default": "/usr/lib/jvm/java-17"},
+        {"name": "service_check_cmd", "required": false, "type": "string"},
+        {"name": "skip_snapshot",     "required": false, "type": "boolean", "default": false},
+        {"name": "dry_run",           "required": false, "type": "boolean", "default": false}
+      ],
+      "rollback_strategy": "full",
+      "safety_notes": ["Java 17 removes many deprecated APIs; run preflight service scan before upgrade"]
+    },
+    {
+      "action_id": "python_runtime_upgrade",
+      "action_type": "change",
+      "applicable_asset_types": ["server"],
+      "blast_radius_hint": "python_app_unavailable_during_upgrade",
+      "description": "Upgrades the Python runtime in a Docker container. Stops old container, starts python:X.Y-slim container, installs requirements.",
+      "display_name": "Python Runtime Upgrade",
+      "estimated_duration_seconds": 600,
+      "execution_tier": 4,
+      "executor": "nexplane_agent.python_runtime_upgrade",
+      "generic_action": "python_runtime_upgrade",
+      "parameters": [
+        {"name": "target_version",    "required": true,  "type": "string", "description": "Target Python version, e.g. 3.11, 3.12"},
+        {"name": "python_container",  "required": false, "type": "string", "default": "python-app"},
+        {"name": "python_image",      "required": false, "type": "string", "description": "Docker image override; default: python:{version}-slim"},
+        {"name": "app_dir",           "required": false, "type": "string", "default": "/app"},
+        {"name": "requirements_file", "required": false, "type": "string", "default": "requirements.txt"},
+        {"name": "start_cmd",         "required": false, "type": "string"},
+        {"name": "skip_snapshot",     "required": false, "type": "boolean", "default": false},
+        {"name": "dry_run",           "required": false, "type": "boolean", "default": false}
+      ],
+      "rollback_strategy": "full",
+      "safety_notes": ["Python 3.x syntax changes may require code migration; test with syntax checker before upgrade"]
     }
   ]
 }

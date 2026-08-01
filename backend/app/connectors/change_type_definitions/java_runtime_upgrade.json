@@ -1,0 +1,23 @@
+{
+  "change_type": "java_runtime_upgrade",
+  "display_name": "Java Runtime Upgrade",
+  "description": "Upgrade Java runtime in a Docker container (e.g. 11→17→21). Stops old container, starts new container with upgraded JVM image, verifies version, supports one-click rollback.",
+  "rollback_capability": "full",
+  "executor": "nexplane_agent.java_runtime_upgrade",
+  "steps": [
+    {"generic_action": "java_runtime_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "target_version":   {"type": "string",  "required": true},
+    "java_container":   {"type": "string",  "required": false, "default": "java-app"},
+    "java_image":       {"type": "string",  "required": false},
+    "app_jar":          {"type": "string",  "required": false},
+    "app_args":         {"type": "string",  "required": false},
+    "java_home_new":    {"type": "string",  "required": false, "default": "/usr/lib/jvm/java-17"},
+    "service_check_cmd":{"type": "string",  "required": false},
+    "skip_snapshot":    {"type": "boolean", "required": false, "default": false},
+    "dry_run":          {"type": "boolean", "required": false, "default": false}
+  }
+}

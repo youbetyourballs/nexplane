@@ -1,0 +1,22 @@
+{
+  "change_type": "python_runtime_upgrade",
+  "display_name": "Python Runtime Upgrade",
+  "description": "Upgrade Python runtime in a Docker container (e.g. 3.8→3.11→3.12). Stops old container, starts new python:X.Y-slim container, installs requirements, verifies version, supports one-click rollback.",
+  "rollback_capability": "full",
+  "executor": "nexplane_agent.python_runtime_upgrade",
+  "steps": [
+    {"generic_action": "python_runtime_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "target_version":     {"type": "string",  "required": true},
+    "python_container":   {"type": "string",  "required": false, "default": "python-app"},
+    "python_image":       {"type": "string",  "required": false},
+    "app_dir":            {"type": "string",  "required": false, "default": "/app"},
+    "requirements_file":  {"type": "string",  "required": false, "default": "requirements.txt"},
+    "start_cmd":          {"type": "string",  "required": false},
+    "skip_snapshot":      {"type": "boolean", "required": false, "default": false},
+    "dry_run":            {"type": "boolean", "required": false, "default": false}
+  }
+}
