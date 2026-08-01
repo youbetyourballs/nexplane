@@ -238,6 +238,11 @@ var commands = map[string]CommandFunc{
 	"app_upgrade_opensearch":         appupgrade.OpenSearchUpgradeExecute,
 	"app_snapshot_local_opensearch":  appupgrade.OpenSearchSnapshotLocalExecute,
 	"app_restore_local_opensearch":   appupgrade.OpenSearchRestoreLocalExecute,
+	// App upgrades (RabbitMQ)
+	"app_preflight_rabbitmq":      appupgrade.RabbitMQPreflightExecute,
+	"app_upgrade_rabbitmq":        appupgrade.RabbitMQUpgradeExecute,
+	"app_snapshot_local_rabbitmq": appupgrade.RabbitMQSnapshotLocalExecute,
+	"app_restore_local_rabbitmq":  appupgrade.RabbitMQRestoreLocalExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
