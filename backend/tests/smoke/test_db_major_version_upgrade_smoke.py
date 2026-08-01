@@ -103,9 +103,20 @@ def _cr_lifecycle(client: NexplaneClient, title: str, change_type: str,
 
 def _rollback_cr(client: NexplaneClient, cr_id: str, label: str,
                   timeout: int = DB_UPGRADE_TIMEOUT) -> dict:
-    """POST /rollback and poll until rolled_back."""
+    """POST /rollback and poll until rolled_back.
+
+    Handles FILO 409: if a later CR is blocking, rolls it back first then retries.
+    """
     base = client.base
     r = client.client.post(f"{base}/change-requests/{cr_id}/rollback")
+    if r.status_code == 409:
+        err = r.json()
+        if err.get("error") == "out_of_order_rollback":
+            blocking = err.get("blocking_crs", [])
+            log(f"[{label}] FILO 409 — rolling back {len(blocking)} blocking CR(s) first")
+            for blk_id in blocking:
+                _rollback_cr(client, blk_id, f"blocker:{blk_id[:8]}", timeout=timeout)
+            r = client.client.post(f"{base}/change-requests/{cr_id}/rollback")
     assert r.status_code in (200, 201, 202, 204), f"/rollback failed {r.status_code}: {r.text}"
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -146,6 +157,11 @@ class TestDbMajorVersionUpgradeSmoke:
         self.asset_id = self.creds.get("smoke_db_asset_id")
         if not self.asset_id:
             pytest.skip("smoke_db_asset_id not set in AWS connector credentials")
+        # Roll back any leftover applied CRs so the FILO stack starts clean.
+        base = self.client.base
+        r = self.client.client.post(f"{base}/assets/{self.asset_id}/rollback-all")
+        if r.status_code not in (200, 201, 202, 204, 404):
+            log(f"setup rollback-all returned {r.status_code}: {r.text[:200]}")
 
     # -----------------------------------------------------------------------
     # Phase DB_UPGRADE_POSTGRES
