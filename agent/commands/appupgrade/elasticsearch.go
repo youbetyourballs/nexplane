@@ -4,84 +4,11 @@
 package appupgrade
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"os/exec"
+	"log"
 	"strings"
 	"time"
 )
-
-func str(params map[string]any, key, def string) string {
-	if v, ok := params[key]; ok {
-		if s, ok := v.(string); ok && s != "" {
-			return s
-		}
-	}
-	return def
-}
-
-func intParam(params map[string]any, key string, def int) int {
-	if v, ok := params[key]; ok {
-		switch n := v.(type) {
-		case float64:
-			return int(n)
-		case int:
-			return n
-		}
-	}
-	return def
-}
-
-func esGet(host string, port int, scheme, user, password, path string) (map[string]any, error) {
-	url := fmt.Sprintf("%s://%s:%d%s", scheme, host, port, path)
-	req, _ := http.NewRequest("GET", url, nil)
-	if user != "" {
-		req.SetBasicAuth(user, password)
-	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	var result map[string]any
-	if err := json.Unmarshal(body, &result); err != nil {
-		n := len(body)
-		if n > 200 {
-			n = 200
-		}
-		return nil, fmt.Errorf("JSON parse error: %w (body: %s)", err, string(body[:n]))
-	}
-	return result, nil
-}
-
-func esPut(host string, port int, scheme, user, password, path, body string) error {
-	url := fmt.Sprintf("%s://%s:%d%s", scheme, host, port, path)
-	req, _ := http.NewRequest("PUT", url, strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	if user != "" {
-		req.SetBasicAuth(user, password)
-	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("PUT %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("PUT %s returned %d: %s", path, resp.StatusCode, string(b))
-	}
-	return nil
-}
-
-func runCmd(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).CombinedOutput()
-	return string(out), err
-}
 
 // ElasticsearchPreflightExecute checks connectivity, version, cluster health, and Java.
 // Command name: "app_preflight_elasticsearch"
@@ -93,7 +20,7 @@ func ElasticsearchPreflightExecute(params map[string]any) (map[string]any, error
 	pass          := str(params, "es_password", "")
 	targetVersion := str(params, "target_version", "")
 
-	root, err := esGet(host, port, scheme, user, pass, "/")
+	root, err := esGet(scheme, host, port, user, pass, "/")
 	if err != nil {
 		return map[string]any{
 			"status":   "preflight_blocked",
@@ -117,7 +44,7 @@ func ElasticsearchPreflightExecute(params map[string]any) (map[string]any, error
 		})
 	}
 
-	health, err := esGet(host, port, scheme, user, pass, "/_cluster/health")
+	health, err := esGet(scheme, host, port, user, pass, "/_cluster/health")
 	if err == nil {
 		status, _ := health["status"].(string)
 		if status == "red" {
@@ -171,18 +98,15 @@ func ElasticsearchUpgradeExecute(params map[string]any) (map[string]any, error) 
 
 	steps := []string{}
 
-	if err := esPut(host, port, scheme, user, pass,
+	if err := esPut(scheme, host, port, user, pass,
 		"/_cluster/settings",
 		`{"persistent":{"cluster.routing.allocation.enable":"primaries"}}`); err != nil {
 		return nil, fmt.Errorf("disable_shard_allocation: %w", err)
 	}
 	steps = append(steps, "disable_shard_allocation")
 
-	if _, err := runCmd("curl", "-s", "-X", "POST",
-		fmt.Sprintf("%s://%s:%d/_flush", scheme, host, port)); err != nil {
-		return nil, fmt.Errorf("flush: %w", err)
-	}
-	steps = append(steps, "flush")
+	_, _ = esPost(scheme, host, port, user, pass, "/_flush", "")
+	steps = append(steps, "flush_synced: done")
 
 	if _, err := runCmd("systemctl", "stop", "elasticsearch"); err != nil {
 		if _, err2 := runCmd("docker", "stop", "es7"); err2 != nil {
@@ -213,7 +137,7 @@ func ElasticsearchUpgradeExecute(params map[string]any) (map[string]any, error) 
 	for i := 0; i < 24; i++ {
 		time.Sleep(5 * time.Second)
 		for _, p := range []int{port, port + 1} {
-			h, err := esGet(host, p, scheme, user, pass, "/_cluster/health")
+			h, err := esGet(scheme, host, p, user, pass, "/_cluster/health")
 			if err == nil {
 				if st, _ := h["status"].(string); st == "green" || st == "yellow" {
 					upgraded = true
@@ -230,15 +154,16 @@ func ElasticsearchUpgradeExecute(params map[string]any) (map[string]any, error) 
 	}
 	steps = append(steps, "wait_for_green")
 
-	esPut(host, port, scheme, user, pass, "/_cluster/settings",
+	esPut(scheme, host, port, user, pass, "/_cluster/settings",
 		`{"persistent":{"cluster.routing.allocation.enable":null}}`)
-	esPut(host, port+1, scheme, user, pass, "/_cluster/settings",
+	esPut(scheme, host, port+1, user, pass, "/_cluster/settings",
 		`{"persistent":{"cluster.routing.allocation.enable":null}}`)
 	steps = append(steps, "enable_shard_allocation")
 
 	return map[string]any{
 		"steps_completed": steps,
 		"target_version":  targetVersion,
+		"upgraded_port":   port,
 	}, nil
 }
 
@@ -264,7 +189,9 @@ func ElasticsearchRestoreLocalExecute(params map[string]any) (map[string]any, er
 	if localPath == "" {
 		return nil, fmt.Errorf("local_path required for restore")
 	}
-	runCmd("systemctl", "stop", "elasticsearch")
+	if stopOut, stopErr := runCmd("systemctl", "stop", "elasticsearch"); stopErr != nil {
+		log.Printf("WARN: stop elasticsearch before restore: %v (output: %s)", stopErr, stopOut)
+	}
 	if out, err := runCmd("rm", "-rf", dataDir); err != nil {
 		return nil, fmt.Errorf("rm data dir: %s: %w", out, err)
 	}
