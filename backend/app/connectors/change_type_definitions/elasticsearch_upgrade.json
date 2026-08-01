@@ -1,0 +1,25 @@
+{
+  "change_type": "elasticsearch_upgrade",
+  "display_name": "Elasticsearch Major Version Upgrade",
+  "description": "Upgrade Elasticsearch from 7.x to 8.x with pre-upgrade snapshot and one-click rollback. Takes a snapshot before any package changes; rollback restores from that snapshot.",
+  "rollback_capability": "full",
+  "steps": [
+    {"generic_action": "elasticsearch_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "target_version":     {"type": "string",  "required": true},
+    "source_version":     {"type": "string",  "required": false},
+    "es_host":            {"type": "string",  "required": false, "default": "localhost"},
+    "es_port":            {"type": "integer", "required": false, "default": 9200},
+    "es_user":            {"type": "string",  "required": false, "default": "elastic"},
+    "es_password":        {"type": "string",  "required": false, "sensitive": true},
+    "es_scheme":          {"type": "string",  "required": false, "default": "http"},
+    "ec2_instance_id":    {"type": "string",  "required": false},
+    "snapshot_s3_bucket": {"type": "string",  "required": false},
+    "health_check_url":   {"type": "string",  "required": false},
+    "dry_run":            {"type": "boolean", "required": false, "default": false},
+    "skip_snapshot":      {"type": "boolean", "required": false, "default": false}
+  }
+}
