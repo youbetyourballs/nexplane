@@ -243,6 +243,11 @@ var commands = map[string]CommandFunc{
 	"app_upgrade_rabbitmq":        appupgrade.RabbitMQUpgradeExecute,
 	"app_snapshot_local_rabbitmq": appupgrade.RabbitMQSnapshotLocalExecute,
 	"app_restore_local_rabbitmq":  appupgrade.RabbitMQRestoreLocalExecute,
+	// App upgrades (Java runtime)
+	"app_preflight_java":      appupgrade.JavaPreflightExecute,
+	"app_upgrade_java":        appupgrade.JavaUpgradeExecute,
+	"app_snapshot_local_java": appupgrade.JavaSnapshotLocalExecute,
+	"app_restore_local_java":  appupgrade.JavaRestoreLocalExecute,
 	// App upgrades (Kafka ZK→KRaft bridge)
 	"app_preflight_kafka_bridge":      appupgrade.KafkaBridgePreflightExecute,
 	"app_upgrade_kafka_bridge":        appupgrade.KafkaBridgeExecute,
