@@ -232,6 +232,7 @@ var commands = map[string]CommandFunc{
 	"app_upgrade_elasticsearch":        appupgrade.ElasticsearchUpgradeExecute,
 	"app_snapshot_local_elasticsearch": appupgrade.ElasticsearchSnapshotLocalExecute,
 	"app_restore_local_elasticsearch":  appupgrade.ElasticsearchRestoreLocalExecute,
+	"app_verify_elasticsearch":         appupgrade.ElasticsearchVerifyExecute,
 	// App upgrades (OpenSearch)
 	"app_preflight_opensearch":       appupgrade.OpenSearchPreflightExecute,
 	"app_upgrade_opensearch":         appupgrade.OpenSearchUpgradeExecute,

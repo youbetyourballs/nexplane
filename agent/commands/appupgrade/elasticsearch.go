@@ -202,3 +202,37 @@ func ElasticsearchRestoreLocalExecute(params map[string]any) (map[string]any, er
 	runCmd("systemctl", "start", "elasticsearch")
 	return map[string]any{"restored": true, "local_path": localPath}, nil
 }
+
+// ElasticsearchVerifyExecute checks if an ES instance is running and returns version info.
+// Command name: app_verify_elasticsearch
+func ElasticsearchVerifyExecute(params map[string]any) (map[string]any, error) {
+	host   := str(params, "es_host", "localhost")
+	port   := intParam(params, "es_port", 9200)
+	scheme := str(params, "es_scheme", "http")
+	user   := str(params, "es_user", "")
+	pass   := str(params, "es_password", "")
+	target := str(params, "target_version", "")
+
+	for i := 0; i < 12; i++ {
+		info, err := esGet(host, port, scheme, user, pass, "/")
+		if err == nil {
+			version := ""
+			if v, ok := info["version"].(map[string]any); ok {
+				version, _ = v["number"].(string)
+			}
+			targetMajor := ""
+			if len(target) > 0 {
+				targetMajor = string(target[0])
+			}
+			healthy := targetMajor == "" || strings.HasPrefix(version, targetMajor)
+			return map[string]any{
+				"verify_status":   "passed",
+				"current_version": version,
+				"target_version":  target,
+				"healthy":         healthy,
+			}, nil
+		}
+		time.Sleep(5 * time.Second)
+	}
+	return map[string]any{"verify_status": "failed", "reason": "ES not reachable after 60s"}, nil
+}
