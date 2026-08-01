@@ -10,6 +10,27 @@ import (
 	"strings"
 )
 
+// stripVersionConstraints removes version specifiers (>=, <=, ==, ~=, !=, >) from pip freeze output.
+func stripVersionConstraints(req string) string {
+	lines := strings.Split(req, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			out = append(out, line)
+			continue
+		}
+		for _, sep := range []string{"==", ">=", "<=", "~=", "!=", ">"} {
+			if idx := strings.Index(line, sep); idx != -1 {
+				line = line[:idx]
+				break
+			}
+		}
+		out = append(out, strings.TrimSpace(line))
+	}
+	return strings.Join(out, "\n")
+}
+
 func parsePythonVersion(output string) string {
 	// "Python 3.8.12" → "3.8"
 	output = strings.TrimSpace(output)
@@ -132,21 +153,40 @@ func PythonUpgradeExecute(params map[string]any) (map[string]any, error) {
 
 	// 5. Install requirements in new container
 	if reqOut != "" {
-		// Write requirements to a temp file inside the container via stdin
-		pipInstallOut, pipErr := runCmd("bash", "-c",
-			fmt.Sprintf("echo %q | docker exec -i %s pip install -r /dev/stdin",
-				reqOut, newContainerName))
-		if pipErr != nil {
-			// Try without version constraints as fallback
-			_ = pipInstallOut
-			// Log warning but continue; pip may partially succeed
+		// Write requirements to a host temp file and docker cp into new container
+		const hostReqFile = "/tmp/nexplane_pip_req.txt"
+		if err := os.WriteFile(hostReqFile, []byte(reqOut), 0600); err != nil {
+			return nil, fmt.Errorf("write pip requirements temp file: %w", err)
 		}
+		if out, err := runCmd("docker", "cp", hostReqFile, newContainerName+":/tmp/requirements_freeze.txt"); err != nil {
+			return nil, fmt.Errorf("docker cp requirements: %s: %w", out, err)
+		}
+		pipInstallOut, pipErr := runCmd("docker", "exec", newContainerName,
+			"pip", "install", "-r", "/tmp/requirements_freeze.txt")
+		if pipErr != nil {
+			// Fallback: strip version constraints and retry
+			stripped := stripVersionConstraints(reqOut)
+			if err2 := os.WriteFile(hostReqFile, []byte(stripped), 0600); err2 != nil {
+				return nil, fmt.Errorf("pip install failed: %s: %w", pipInstallOut, pipErr)
+			}
+			if out2, err2 := runCmd("docker", "cp", hostReqFile, newContainerName+":/tmp/requirements_freeze.txt"); err2 != nil {
+				return nil, fmt.Errorf("pip install failed: %s: %w (fallback cp: %s)", pipInstallOut, pipErr, out2)
+			}
+			if out2, err2 := runCmd("docker", "exec", newContainerName,
+				"pip", "install", "-r", "/tmp/requirements_freeze.txt"); err2 != nil {
+				return nil, fmt.Errorf("pip install failed: %s: %w", out2, err2)
+			}
+		}
+		steps = append(steps, "installed_deps")
 	} else {
 		// Try installing from requirements file inside container
-		_, _ = runCmd("docker", "exec", newContainerName,
+		out, err := runCmd("docker", "exec", newContainerName,
 			"pip", "install", "-r", appDir+"/"+requirementsFile)
+		if err != nil {
+			return nil, fmt.Errorf("pip install failed: %s: %w", out, err)
+		}
+		steps = append(steps, "installed_deps")
 	}
-	steps = append(steps, "installed_deps")
 
 	// 6. Verify new version
 	verOut, err := runCmd("docker", "exec", newContainerName, "python3", "--version")
@@ -209,12 +249,12 @@ func PythonRestoreLocalExecute(params map[string]any) (map[string]any, error) {
 
 	newContainerName := fmt.Sprintf("%s-v%s", pythonContainer, targetVersion)
 
+	// Best-effort cleanup of new container — don't block old container restart on failure
 	if out, err := runCmd("docker", "stop", newContainerName); err != nil {
-		return nil, fmt.Errorf("stop new container: %s: %w", out, err)
+		fmt.Printf("warn: stop new container %s: %s: %v\n", newContainerName, out, err)
 	}
-
 	if out, err := runCmd("docker", "rm", newContainerName); err != nil {
-		return nil, fmt.Errorf("remove new container: %s: %w", out, err)
+		fmt.Printf("warn: rm new container %s: %s: %v\n", newContainerName, out, err)
 	}
 
 	if out, err := runCmd("docker", "start", pythonContainer); err != nil {
