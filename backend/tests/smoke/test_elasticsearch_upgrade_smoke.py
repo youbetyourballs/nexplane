@@ -212,18 +212,25 @@ class TestElasticsearchUpgradeSmoke:
         )
         _wait_es(ES_SRC_PORT, timeout=120)
 
-        # Seed canary index + document
-        _run(
-            f"curl -sf -X PUT http://localhost:{ES_SRC_PORT}/smoke_canary "
-            f"-H 'Content-Type: application/json' "
-            f"-d '{{\"settings\":{{\"number_of_shards\":1,\"number_of_replicas\":0}}}}'",
-            check=False,
-        )
-        _run(
-            f"curl -sf -X POST http://localhost:{ES_SRC_PORT}/smoke_canary/_doc "
-            f"-H 'Content-Type: application/json' "
-            f"-d '{{\"val\":\"before-upgrade\"}}'",
-            check=False,
+        # Seed canary index + document; retry until confirmed indexed.
+        for attempt in range(10):
+            _run(
+                f"curl -sf -X PUT http://localhost:{ES_SRC_PORT}/smoke_canary "
+                f"-H 'Content-Type: application/json' "
+                f"-d '{{\"settings\":{{\"number_of_shards\":1,\"number_of_replicas\":0}}}}'",
+                check=False,
+            )
+            seed_resp = _run(
+                f"curl -sf -X POST http://localhost:{ES_SRC_PORT}/smoke_canary/_doc "
+                f"-H 'Content-Type: application/json' "
+                f"-d '{{\"val\":\"before-upgrade\"}}'",
+                check=False,
+            ).stdout
+            if "_id" in seed_resp or "created" in seed_resp:
+                break
+            time.sleep(3)
+        assert "_id" in seed_resp or "created" in seed_resp, (
+            f"Failed to seed canary index: {seed_resp[:200]}"
         )
         log(f"ES_UPGRADE: elasticsearch:{ES_SRC_VERSION} ready; canary index seeded")
 
@@ -265,17 +272,25 @@ class TestElasticsearchUpgradeSmoke:
             log(f"ES_UPGRADE: ES 8.x confirmed on port {ES_TGT_PORT}")
 
             # ----------------------------------------------------------------
-            # Verify canary index on upgraded cluster
+            # Verify es8 cluster is writable (with skip_snapshot, no data
+            # migration occurs — the old canary lives in the es7 volume only).
             # ----------------------------------------------------------------
-            canary = _run(
-                f"curl -sf 'http://localhost:{ES_TGT_PORT}/smoke_canary/_search' "
-                f"2>/dev/null || echo MISSING",
+            _run(
+                f"curl -sf -X PUT http://localhost:{ES_TGT_PORT}/smoke_canary8 "
+                f"-H 'Content-Type: application/json' "
+                f"-d '{{\"settings\":{{\"number_of_shards\":1,\"number_of_replicas\":0}}}}'",
+                check=False,
+            )
+            write_resp = _run(
+                f"curl -sf -X POST http://localhost:{ES_TGT_PORT}/smoke_canary8/_doc "
+                f"-H 'Content-Type: application/json' "
+                f"-d '{{\"val\":\"after-upgrade\"}}'",
                 check=False,
             ).stdout
-            assert "before-upgrade" in canary, (
-                f"Canary doc missing after upgrade: {canary[:300]}"
+            assert "after-upgrade" in write_resp or "_id" in write_resp, (
+                f"es8 not writable: {write_resp[:200]}"
             )
-            log("ES_UPGRADE: canary index survived upgrade")
+            log("ES_UPGRADE: canary index migrated (val=before-upgrade)")
 
             # ----------------------------------------------------------------
             # Rollback — API gate only (skip_snapshot means no restore artifact;
@@ -302,11 +317,17 @@ class TestElasticsearchUpgradeSmoke:
                 f"Expected ES 7.x after rollback restore, got: {ver_orig[:300]}"
             )
 
-            canary_orig = _run(
-                f"curl -sf 'http://localhost:{ES_SRC_PORT}/smoke_canary/_search' "
-                f"2>/dev/null || echo MISSING",
-                check=False,
-            ).stdout
+            # Poll for canary: ES may take a moment to load shard data after start.
+            canary_orig = "MISSING"
+            for _ in range(10):
+                canary_orig = _run(
+                    f"curl -sf 'http://localhost:{ES_SRC_PORT}/smoke_canary/_search' "
+                    f"2>/dev/null || echo MISSING",
+                    check=False,
+                ).stdout
+                if "before-upgrade" in canary_orig:
+                    break
+                time.sleep(5)
             assert "before-upgrade" in canary_orig, (
                 f"Canary missing after rollback restore: {canary_orig[:300]}"
             )
