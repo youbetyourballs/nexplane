@@ -1,0 +1,25 @@
+{
+  "change_type": "opensearch_upgrade",
+  "display_name": "OpenSearch Major Version Upgrade",
+  "description": "Upgrade OpenSearch from 1.x to 2.x with pre-upgrade snapshot and one-click rollback.",
+  "rollback_capability": "full",
+  "steps": [
+    {"generic_action": "opensearch_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "target_version":     {"type": "string",  "required": true},
+    "source_version":     {"type": "string",  "required": false},
+    "os_host":            {"type": "string",  "required": false, "default": "localhost"},
+    "os_port":            {"type": "integer", "required": false, "default": 9200},
+    "os_user":            {"type": "string",  "required": false, "default": "admin"},
+    "os_password":        {"type": "string",  "required": false, "sensitive": true},
+    "os_scheme":          {"type": "string",  "required": false, "default": "http"},
+    "ec2_instance_id":    {"type": "string",  "required": false},
+    "snapshot_s3_bucket": {"type": "string",  "required": false},
+    "health_check_url":   {"type": "string",  "required": false},
+    "dry_run":            {"type": "boolean", "required": false, "default": false},
+    "skip_snapshot":      {"type": "boolean", "required": false, "default": false}
+  }
+}
