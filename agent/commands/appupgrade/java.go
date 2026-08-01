@@ -109,10 +109,9 @@ func JavaUpgradeExecute(params map[string]any) (map[string]any, error) {
 
 	steps := []string{}
 
-	// 1. Get current image
+	// 1. Get current image for audit trail in return value
 	currentImage, _ := runCmd("docker", "inspect", "--format={{.Config.Image}}", javaContainer)
 	currentImage = strings.TrimSpace(currentImage)
-	_ = currentImage
 
 	// 2. Stop old container
 	runCmd("docker", "stop", javaContainer)
@@ -153,6 +152,7 @@ func JavaUpgradeExecute(params map[string]any) (map[string]any, error) {
 		"status":           "completed",
 		"upgraded_version": detectedVersion,
 		"container_name":   newContainerName,
+		"previous_image":   currentImage,
 		"steps_completed":  steps,
 	}, nil
 }
