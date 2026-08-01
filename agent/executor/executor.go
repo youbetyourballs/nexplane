@@ -243,6 +243,15 @@ var commands = map[string]CommandFunc{
 	"app_upgrade_rabbitmq":        appupgrade.RabbitMQUpgradeExecute,
 	"app_snapshot_local_rabbitmq": appupgrade.RabbitMQSnapshotLocalExecute,
 	"app_restore_local_rabbitmq":  appupgrade.RabbitMQRestoreLocalExecute,
+	// App upgrades (Kafka ZK→KRaft bridge)
+	"app_preflight_kafka_bridge":      appupgrade.KafkaBridgePreflightExecute,
+	"app_upgrade_kafka_bridge":        appupgrade.KafkaBridgeExecute,
+	"app_snapshot_local_kafka_bridge": appupgrade.KafkaBridgeSnapshotLocalExecute,
+	"app_restore_local_kafka_bridge":  appupgrade.KafkaBridgeRestoreLocalExecute,
+	// App upgrades (Kafka KRaft cutover — irreversible)
+	"app_preflight_kafka_cutover": appupgrade.KafkaCutoverPreflightExecute,
+	"app_upgrade_kafka_cutover":   appupgrade.KafkaCutoverExecute,
+	"app_rollback_kafka_cutover":  appupgrade.KafkaCutoverRollbackAttemptExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
