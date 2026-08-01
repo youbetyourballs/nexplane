@@ -248,6 +248,11 @@ var commands = map[string]CommandFunc{
 	"app_upgrade_java":        appupgrade.JavaUpgradeExecute,
 	"app_snapshot_local_java": appupgrade.JavaSnapshotLocalExecute,
 	"app_restore_local_java":  appupgrade.JavaRestoreLocalExecute,
+	// App upgrades (Python runtime)
+	"app_preflight_python":      appupgrade.PythonPreflightExecute,
+	"app_upgrade_python":        appupgrade.PythonUpgradeExecute,
+	"app_snapshot_local_python": appupgrade.PythonSnapshotLocalExecute,
+	"app_restore_local_python":  appupgrade.PythonRestoreLocalExecute,
 	// App upgrades (Kafka ZK→KRaft bridge)
 	"app_preflight_kafka_bridge":      appupgrade.KafkaBridgePreflightExecute,
 	"app_upgrade_kafka_bridge":        appupgrade.KafkaBridgeExecute,
