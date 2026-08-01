@@ -3677,6 +3677,80 @@
       ]
     },
     {
+      "action_id": "elasticsearch_upgrade",
+      "action_type": "change",
+      "applicable_asset_types": [
+        "server"
+      ],
+      "blast_radius_hint": "elasticsearch_unavailable_during_upgrade",
+      "description": "Upgrades Elasticsearch from 7.x to 8.x with pre-upgrade snapshot and one-click rollback. Stops shard allocation, flushes, stops ES, installs new package or starts new Docker container, then re-enables allocation.",
+      "display_name": "Elasticsearch Major Version Upgrade",
+      "estimated_duration_seconds": 1800,
+      "execution_tier": 4,
+      "executor": "nexplane_agent.elasticsearch_upgrade",
+      "generic_action": "elasticsearch_upgrade",
+      "parameters": [
+        {
+          "name": "target_version",
+          "required": true,
+          "type": "string",
+          "description": "Target Elasticsearch version, e.g. 8.14.3"
+        },
+        {
+          "name": "source_version",
+          "required": false,
+          "type": "string",
+          "description": "Source Elasticsearch version (7.17.x)"
+        },
+        {
+          "name": "es_host",
+          "required": false,
+          "type": "string",
+          "default": "localhost"
+        },
+        {
+          "name": "es_port",
+          "required": false,
+          "type": "integer",
+          "default": 9200
+        },
+        {
+          "name": "es_scheme",
+          "required": false,
+          "type": "string",
+          "default": "http"
+        },
+        {
+          "name": "es_user",
+          "required": false,
+          "type": "string",
+          "default": "elastic"
+        },
+        {
+          "name": "es_password",
+          "required": false,
+          "type": "string",
+          "sensitive": true
+        },
+        {
+          "name": "skip_snapshot",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "rollback_strategy": "full",
+      "safety_notes": [
+        "Elasticsearch 7.x to 8.x upgrade changes security defaults; verify xpack.security settings post-upgrade"
+      ]
+    },
+    {
       "action_id": "k8s_cluster_upgrade",
       "action_type": "change",
       "applicable_asset_types": [

@@ -162,6 +162,7 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.db_major_version_upgrade,
     ChangeType.k8s_cluster_upgrade,
     ChangeType.windows_os_upgrade,
+    ChangeType.elasticsearch_upgrade,
     ChangeType.ad_dc_parallel_upgrade,
     ChangeType.linux_parallel_upgrade,
     ChangeType.windows_parallel_migration,
