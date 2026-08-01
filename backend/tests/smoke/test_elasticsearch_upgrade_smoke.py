@@ -206,8 +206,7 @@ class TestElasticsearchUpgradeSmoke:
             f"docker run -d --name es7 -p {ES_SRC_PORT}:9200 "
             f"-e discovery.type=single-node "
             f"-e xpack.security.enabled=false "
-            f"-e ES_JAVA_OPTS='-Xms256m -Xmx256m' "
-            f"--memory=512m "
+            f"-e 'ES_JAVA_OPTS=-Xms512m -Xmx512m' "
             f"elasticsearch:{ES_SRC_VERSION}",
             timeout=30,
         )

@@ -123,8 +123,7 @@ func ElasticsearchUpgradeExecute(params map[string]any) (map[string]any, error) 
 				"-p", fmt.Sprintf("%d:9200", port+1),
 				"-e", "discovery.type=single-node",
 				"-e", "xpack.security.enabled=false",
-				"-e", "ES_JAVA_OPTS=-Xms256m -Xmx256m",
-				"--memory=512m",
+				"-e", "ES_JAVA_OPTS=-Xms512m -Xmx512m",
 				fmt.Sprintf("elasticsearch:%s", targetVersion)); err3 != nil {
 				return nil, fmt.Errorf("upgrade_package: apt: %s; yum: %s; docker: %s", out, out2, out3)
 			}
@@ -165,7 +164,7 @@ func ElasticsearchUpgradeExecute(params map[string]any) (map[string]any, error) 
 	return map[string]any{
 		"steps_completed": steps,
 		"target_version":  targetVersion,
-		"upgraded_port":   port,
+		"upgraded_port":   port + 1,
 	}, nil
 }
 
