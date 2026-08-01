@@ -566,6 +566,14 @@ class ChangeType(str, enum.Enum):
     linux_parallel_upgrade = "linux_parallel_upgrade"
     # Database major version upgrades
     db_major_version_upgrade = "db_major_version_upgrade"
+    # Application version upgrades
+    elasticsearch_upgrade = "elasticsearch_upgrade"
+    opensearch_upgrade = "opensearch_upgrade"
+    kafka_zk_to_kraft_bridge = "kafka_zk_to_kraft_bridge"
+    kafka_kraft_cutover = "kafka_kraft_cutover"
+    rabbitmq_upgrade = "rabbitmq_upgrade"
+    java_runtime_upgrade = "java_runtime_upgrade"
+    python_runtime_upgrade = "python_runtime_upgrade"
     # Kubernetes cluster upgrades
     k8s_cluster_upgrade = "k8s_cluster_upgrade"
     # Windows OS upgrades
