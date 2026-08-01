@@ -14,7 +14,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-ROLLBACK_CAPABILITY = "none"
+ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "Kafka ZK→KRaft cutover permanently removes ZooKeeper metadata. Restore from a full system backup if needed."
 
 
 class IrreversibleOperationError(Exception):
