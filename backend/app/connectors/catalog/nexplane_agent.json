@@ -3751,6 +3751,80 @@
       ]
     },
     {
+      "action_id": "opensearch_upgrade",
+      "action_type": "change",
+      "applicable_asset_types": [
+        "server"
+      ],
+      "blast_radius_hint": "opensearch_unavailable_during_upgrade",
+      "description": "Upgrades OpenSearch from 1.x to 2.x with pre-upgrade snapshot and one-click rollback. Stops shard allocation, flushes, stops OpenSearch, installs new package or starts new Docker container, then re-enables allocation.",
+      "display_name": "OpenSearch Major Version Upgrade",
+      "estimated_duration_seconds": 1800,
+      "execution_tier": 4,
+      "executor": "nexplane_agent.opensearch_upgrade",
+      "generic_action": "opensearch_upgrade",
+      "parameters": [
+        {
+          "name": "target_version",
+          "required": true,
+          "type": "string",
+          "description": "Target OpenSearch version, e.g. 2.x"
+        },
+        {
+          "name": "source_version",
+          "required": false,
+          "type": "string",
+          "description": "Source OpenSearch version (1.x)"
+        },
+        {
+          "name": "os_host",
+          "required": false,
+          "type": "string",
+          "default": "localhost"
+        },
+        {
+          "name": "os_port",
+          "required": false,
+          "type": "integer",
+          "default": 9200
+        },
+        {
+          "name": "os_scheme",
+          "required": false,
+          "type": "string",
+          "default": "http"
+        },
+        {
+          "name": "os_user",
+          "required": false,
+          "type": "string",
+          "default": "admin"
+        },
+        {
+          "name": "os_password",
+          "required": false,
+          "type": "string",
+          "sensitive": true
+        },
+        {
+          "name": "skip_snapshot",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "rollback_strategy": "full",
+      "safety_notes": [
+        "OpenSearch 1.x to 2.x upgrade changes security defaults; verify security plugin settings post-upgrade"
+      ]
+    },
+    {
       "action_id": "k8s_cluster_upgrade",
       "action_type": "change",
       "applicable_asset_types": [
