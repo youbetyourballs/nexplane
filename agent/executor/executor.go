@@ -36,6 +36,7 @@ import (
 	"nexplane-agent/commands/authorizedkeys"
 	"nexplane-agent/commands/rsyncpush"
 	"nexplane-agent/commands/runcommand"
+	"nexplane-agent/commands/appupgrade"
 )
 
 // Result is the outcome of a command execution.
@@ -226,6 +227,11 @@ var commands = map[string]CommandFunc{
 	"rotate_db_creds":        credrotation.DBRotateExecute,
 	"rotate_api_key":         credrotation.APIKeyEnvExecute,
 	"rotate_jwt_signing_key": credrotation.JWTKeyRotateExecute,
+	// App upgrades (Elasticsearch)
+	"app_preflight_elasticsearch":      appupgrade.ElasticsearchPreflightExecute,
+	"app_upgrade_elasticsearch":        appupgrade.ElasticsearchUpgradeExecute,
+	"app_snapshot_local_elasticsearch": appupgrade.ElasticsearchSnapshotLocalExecute,
+	"app_restore_local_elasticsearch":  appupgrade.ElasticsearchRestoreLocalExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
