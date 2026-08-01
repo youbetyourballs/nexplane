@@ -16,7 +16,10 @@ import (
 
 func rmqGet(host string, port int, user, password, path string) (map[string]any, error) {
 	url := fmt.Sprintf("http://%s:%d%s", host, port, path)
-	req, _ := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("rmqGet: build request: %w", err)
+	}
 	req.SetBasicAuth(user, password)
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
@@ -38,7 +41,10 @@ func rmqGet(host string, port int, user, password, path string) (map[string]any,
 
 func rmqPost(host string, port int, user, password, path string, body []byte) error {
 	url := fmt.Sprintf("http://%s:%d%s", host, port, path)
-	req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("rmqPost: build request: %w", err)
+	}
 	req.SetBasicAuth(user, password)
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 30 * time.Second}
