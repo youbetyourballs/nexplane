@@ -90,7 +90,7 @@ async def _get_host_ip(asset_id: str) -> str:
     """Return primary private IP of the asset's host."""
     result = await dispatch_agent_job(
         "win_run_ps",
-        {"command": "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.*'} | Select-Object -First 1).IPAddress", "timeout": 10},
+        {"command": "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.*'} | Select-Object -First 1).IPAddress", "timeout": 60},
         [asset_id],
         timeout_seconds=90,
     )
@@ -285,9 +285,9 @@ async def _create_robocopy_account(dest_id: str) -> tuple[str, str]:
     )
     await dispatch_agent_job(
         "win_run_ps",
-        {"command": script, "timeout": 30},
+        {"command": script, "timeout": 60},
         [dest_id],
-        timeout_seconds=90,
+        timeout_seconds=120,
     )
     return username, password
 

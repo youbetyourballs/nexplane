@@ -294,6 +294,12 @@ func WinRunPsExecute(params map[string]interface{}) (map[string]interface{}, err
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
+		// On Windows, killing an elevated PowerShell process via context cancellation
+		// returns "TerminateProcess: Access is denied." — the process was killed but
+		// the OS rejects the kill confirmation. Treat it as a timeout error.
+		if ctx.Err() != nil && strings.Contains(err.Error(), "Access is denied") {
+			return nil, fmt.Errorf("win_run_ps timeout after %ds: %w", timeoutSecs, ctx.Err())
+		}
 		return nil, fmt.Errorf("win_run_ps error: %w\nstderr: %s", err, stderr.String())
 	}
 	return map[string]interface{}{"output": strings.TrimSpace(stdout.String())}, nil
