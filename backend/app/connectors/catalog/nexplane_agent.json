@@ -3869,6 +3869,7 @@
         {"name": "kafka_zk_host", "required": false, "type": "string", "default": "localhost"},
         {"name": "kafka_zk_port", "required": false, "type": "integer", "default": 2181},
         {"name": "kafka_port", "required": false, "type": "integer", "default": 9092},
+        {"name": "kafka_zk_container", "required": false, "type": "string", "default": "zookeeper"},
         {"name": "skip_snapshot", "required": false, "type": "boolean", "default": false},
         {"name": "dry_run", "required": false, "type": "boolean", "default": false}
       ],
