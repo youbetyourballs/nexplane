@@ -39,7 +39,7 @@ func runCmd(name string, args ...string) (string, error) {
 	return string(out), err
 }
 
-func esGet(scheme, host string, port int, user, password, path string) (map[string]any, error) {
+func esGet(host string, port int, scheme string, user, password, path string) (map[string]any, error) {
 	url := fmt.Sprintf("%s://%s:%d%s", scheme, host, port, path)
 	req, _ := http.NewRequest("GET", url, nil)
 	if user != "" {
@@ -63,7 +63,7 @@ func esGet(scheme, host string, port int, user, password, path string) (map[stri
 	return result, nil
 }
 
-func esPut(scheme, host string, port int, user, password, path, body string) error {
+func esPut(host string, port int, scheme string, user, password, path, body string) error {
 	url := fmt.Sprintf("%s://%s:%d%s", scheme, host, port, path)
 	req, _ := http.NewRequest("PUT", url, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -83,7 +83,7 @@ func esPut(scheme, host string, port int, user, password, path, body string) err
 	return nil
 }
 
-func esPost(scheme, host string, port int, user, password, path string, body string) (map[string]any, error) {
+func esPost(host string, port int, scheme string, user, password, path string, body string) (map[string]any, error) {
 	url := fmt.Sprintf("%s://%s:%d%s", scheme, host, port, path)
 	req, _ := http.NewRequest("POST", url, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

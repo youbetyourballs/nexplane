@@ -20,7 +20,7 @@ func ElasticsearchPreflightExecute(params map[string]any) (map[string]any, error
 	pass          := str(params, "es_password", "")
 	targetVersion := str(params, "target_version", "")
 
-	root, err := esGet(scheme, host, port, user, pass, "/")
+	root, err := esGet(host, port, scheme, user, pass, "/")
 	if err != nil {
 		return map[string]any{
 			"status":   "preflight_blocked",
@@ -44,7 +44,7 @@ func ElasticsearchPreflightExecute(params map[string]any) (map[string]any, error
 		})
 	}
 
-	health, err := esGet(scheme, host, port, user, pass, "/_cluster/health")
+	health, err := esGet(host, port, scheme, user, pass, "/_cluster/health")
 	if err == nil {
 		status, _ := health["status"].(string)
 		if status == "red" {
@@ -98,14 +98,14 @@ func ElasticsearchUpgradeExecute(params map[string]any) (map[string]any, error) 
 
 	steps := []string{}
 
-	if err := esPut(scheme, host, port, user, pass,
+	if err := esPut(host, port, scheme, user, pass,
 		"/_cluster/settings",
 		`{"persistent":{"cluster.routing.allocation.enable":"primaries"}}`); err != nil {
 		return nil, fmt.Errorf("disable_shard_allocation: %w", err)
 	}
 	steps = append(steps, "disable_shard_allocation")
 
-	_, _ = esPost(scheme, host, port, user, pass, "/_flush", "")
+	_, _ = esPost(host, port, scheme, user, pass, "/_flush", "")
 	steps = append(steps, "flush_synced: done")
 
 	if _, err := runCmd("systemctl", "stop", "elasticsearch"); err != nil {
@@ -137,7 +137,7 @@ func ElasticsearchUpgradeExecute(params map[string]any) (map[string]any, error) 
 	for i := 0; i < 24; i++ {
 		time.Sleep(5 * time.Second)
 		for _, p := range []int{port, port + 1} {
-			h, err := esGet(scheme, host, p, user, pass, "/_cluster/health")
+			h, err := esGet(host, p, scheme, user, pass, "/_cluster/health")
 			if err == nil {
 				if st, _ := h["status"].(string); st == "green" || st == "yellow" {
 					upgraded = true
@@ -154,9 +154,9 @@ func ElasticsearchUpgradeExecute(params map[string]any) (map[string]any, error) 
 	}
 	steps = append(steps, "wait_for_green")
 
-	esPut(scheme, host, port, user, pass, "/_cluster/settings",
+	esPut(host, port, scheme, user, pass, "/_cluster/settings",
 		`{"persistent":{"cluster.routing.allocation.enable":null}}`)
-	esPut(scheme, host, port+1, user, pass, "/_cluster/settings",
+	esPut(host, port+1, scheme, user, pass, "/_cluster/settings",
 		`{"persistent":{"cluster.routing.allocation.enable":null}}`)
 	steps = append(steps, "enable_shard_allocation")
 
