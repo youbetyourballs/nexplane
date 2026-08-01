@@ -1,0 +1,25 @@
+{
+  "change_type": "rabbitmq_upgrade",
+  "display_name": "RabbitMQ Major Version Upgrade",
+  "description": "Upgrade RabbitMQ from 3.x to 4.x with pre-upgrade definitions export and one-click rollback. Enables required feature flags, stops the 3.x container, starts a new 4.x container, then verifies quorum queue compatibility.",
+  "rollback_capability": "full",
+  "executor": "nexplane_agent.rabbitmq_upgrade",
+  "steps": [
+    {"generic_action": "rabbitmq_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "target_version":     {"type": "string",  "required": true},
+    "source_version":     {"type": "string",  "required": false},
+    "rmq_host":           {"type": "string",  "required": false, "default": "localhost"},
+    "rmq_port":           {"type": "integer", "required": false, "default": 15672},
+    "rmq_user":           {"type": "string",  "required": false, "default": "guest"},
+    "rmq_password":       {"type": "string",  "required": false, "sensitive": true},
+    "rmq_container":      {"type": "string",  "required": false, "default": "rabbitmq"},
+    "ec2_instance_id":    {"type": "string",  "required": false},
+    "snapshot_s3_bucket": {"type": "string",  "required": false},
+    "dry_run":            {"type": "boolean", "required": false, "default": false},
+    "skip_snapshot":      {"type": "boolean", "required": false, "default": false}
+  }
+}

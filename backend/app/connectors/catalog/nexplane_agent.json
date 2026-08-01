@@ -3825,6 +3825,33 @@
       ]
     },
     {
+      "action_id": "rabbitmq_upgrade",
+      "action_type": "change",
+      "applicable_asset_types": ["server"],
+      "blast_radius_hint": "rabbitmq_unavailable_during_upgrade",
+      "description": "Upgrades RabbitMQ from 3.x to 4.x. Enables feature flags, stops 3.x container, starts 4.x container, verifies quorum queue compatibility.",
+      "display_name": "RabbitMQ Major Version Upgrade",
+      "estimated_duration_seconds": 900,
+      "execution_tier": 4,
+      "executor": "nexplane_agent.rabbitmq_upgrade",
+      "generic_action": "rabbitmq_upgrade",
+      "parameters": [
+        {"name": "target_version", "required": true, "type": "string", "description": "Target RabbitMQ version, e.g. 4.0"},
+        {"name": "source_version", "required": false, "type": "string", "description": "Source RabbitMQ version (3.x)"},
+        {"name": "rmq_host", "required": false, "type": "string", "default": "localhost"},
+        {"name": "rmq_port", "required": false, "type": "integer", "default": 15672},
+        {"name": "rmq_user", "required": false, "type": "string", "default": "guest"},
+        {"name": "rmq_password", "required": false, "type": "string", "sensitive": true},
+        {"name": "rmq_container", "required": false, "type": "string", "default": "rabbitmq"},
+        {"name": "skip_snapshot", "required": false, "type": "boolean", "default": false},
+        {"name": "dry_run", "required": false, "type": "boolean", "default": false}
+      ],
+      "rollback_strategy": "full",
+      "safety_notes": [
+        "RabbitMQ 3.x to 4.x drops classic mirrored queues; ensure all queues are quorum or non-mirrored before upgrade"
+      ]
+    },
+    {
       "action_id": "k8s_cluster_upgrade",
       "action_type": "change",
       "applicable_asset_types": [
