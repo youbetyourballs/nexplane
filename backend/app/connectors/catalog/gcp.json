@@ -302,6 +302,19 @@
       ],
       "executor": "gcp.gcp_get_gke_kubeconfig",
       "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "gcp_account_baseline_monitoring",
+      "generic_action": "gcp_account_baseline_monitoring",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "GCP Account Baseline Monitoring",
+      "description": "Enables Cloud Audit Logs, Security Command Center, VPC Flow Logs, and Cloud DNS query logging. SCC requires org-level permissions; skipped with warning if unavailable.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [],
+      "executor": "gcp.gcp_account_baseline_monitoring",
+      "rollback_strategy": "executor",
+      "estimated_duration_seconds": 300
     }
   ]
 }
