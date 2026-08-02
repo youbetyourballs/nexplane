@@ -1,0 +1,28 @@
+{
+  "change_type": "ecs_task_def_deregister",
+  "display_name": "ECS Task Definition Deregister",
+  "steps": [
+    {"generic_action": "ecs_task_def_deregister", "purpose": "execute", "required": true}
+  ],
+  "description": "Deregister an ECS task definition revision, marking it INACTIVE. Irreversible — ECS has no re-register API.",
+  "risk_level_default": "medium",
+  "incident_response": false,
+  "parameters": {
+    "task_def_arn": {
+      "type": "string",
+      "required": true,
+      "label": "Task Definition ARN",
+      "description": "Full ARN of the task definition revision to deregister, e.g. arn:aws:ecs:us-east-1:123:task-definition/my-app:42"
+    },
+    "region": {
+      "type": "string",
+      "required": false,
+      "label": "AWS Region",
+      "description": "AWS region. Defaults to connector credential region."
+    }
+  },
+  "rollback": {
+    "strategy": "no_op",
+    "description": "Irreversible — ECS has no API to re-register a deregistered task definition."
+  }
+}

@@ -171,6 +171,7 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.ad_dc_parallel_upgrade,
     ChangeType.linux_parallel_upgrade,
     ChangeType.windows_parallel_migration,
+    ChangeType.ecs_rolling_deploy,
 }
 
 

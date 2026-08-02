@@ -1,0 +1,85 @@
+{
+  "change_type": "ecs_rolling_deploy",
+  "display_name": "ECS Rolling Deploy",
+  "steps": [
+    {"generic_action": "ecs_rolling_deploy", "purpose": "execute", "required": true}
+  ],
+  "description": "Register a new ECS task definition revision (image tag and/or env var changes), drive a rolling service update, poll stability and health gates, and auto-rollback to the previous task def revision if any gate fails.",
+  "risk_level_default": "medium",
+  "incident_response": false,
+  "parameters": {
+    "service_arn": {
+      "type": "string",
+      "required": true,
+      "label": "Service ARN",
+      "description": "ECS service ARN or name"
+    },
+    "cluster": {
+      "type": "string",
+      "required": true,
+      "label": "Cluster",
+      "description": "ECS cluster name or ARN"
+    },
+    "container_name": {
+      "type": "string",
+      "required": false,
+      "label": "Container Name",
+      "description": "Target container name. Required when image_tag is set and the task def has more than one container. Defaults to the first container."
+    },
+    "image_tag": {
+      "type": "string",
+      "required": false,
+      "label": "Image Tag",
+      "description": "Full image string to deploy, e.g. nginx:1.27. At least one of image_tag or env_var_overrides must be provided."
+    },
+    "env_var_overrides": {
+      "type": "array",
+      "required": false,
+      "label": "Env Var Overrides",
+      "description": "List of {key, old_value, new_value} objects. old_value is a safety guard — the executor raises if the current value does not match."
+    },
+    "target_group_arn": {
+      "type": "string",
+      "required": false,
+      "label": "Target Group ARN",
+      "description": "ALB/NLB target group ARN. If provided, all targets must be healthy before the deploy is declared successful."
+    },
+    "health_check_url": {
+      "type": "string",
+      "required": false,
+      "label": "Health Check URL",
+      "description": "HTTP endpoint to probe after stability. GET must return health_check_expected_status."
+    },
+    "health_check_expected_status": {
+      "type": "integer",
+      "required": false,
+      "label": "Health Check Expected Status",
+      "description": "Expected HTTP status from health_check_url (default 200).",
+      "default": 200
+    },
+    "stability_timeout_seconds": {
+      "type": "integer",
+      "required": false,
+      "label": "Stability Timeout (seconds)",
+      "description": "Max seconds to wait for ECS deployment stability (default 300).",
+      "default": 300
+    },
+    "health_timeout_seconds": {
+      "type": "integer",
+      "required": false,
+      "label": "Health Timeout (seconds)",
+      "description": "Max seconds per health gate — applied independently to ALB gate and HTTP probe gate (default 60).",
+      "default": 60
+    },
+    "region": {
+      "type": "string",
+      "required": false,
+      "label": "AWS Region",
+      "description": "AWS region. Defaults to connector credential region."
+    }
+  },
+  "rollback": {
+    "strategy": "reconstitution",
+    "description": "Call update_service with old_task_def_arn from execution_result to restore the previous task definition revision."
+  }
+}

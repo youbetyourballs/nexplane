@@ -2261,6 +2261,47 @@
       "estimated_duration_seconds": 30
     },
     {
+      "action_id": "ecs_rolling_deploy",
+      "generic_action": "ecs_rolling_deploy",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "ECS Rolling Deploy",
+      "description": "Register a new ECS task definition revision (image tag and/or env var changes), drive a rolling service update, poll stability and health gates, and auto-rollback to the previous task def revision if any gate fails.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "service_arn", "type": "string", "required": true},
+        {"name": "cluster", "type": "string", "required": true},
+        {"name": "container_name", "type": "string", "required": false},
+        {"name": "image_tag", "type": "string", "required": false},
+        {"name": "env_var_overrides", "type": "array", "required": false},
+        {"name": "target_group_arn", "type": "string", "required": false},
+        {"name": "health_check_url", "type": "string", "required": false},
+        {"name": "health_check_expected_status", "type": "integer", "required": false},
+        {"name": "stability_timeout_seconds", "type": "integer", "required": false},
+        {"name": "health_timeout_seconds", "type": "integer", "required": false},
+        {"name": "region", "type": "string", "required": false}
+      ],
+      "executor": "aws.ecs_rolling_deploy",
+      "rollback_strategy": "reconstitution",
+      "estimated_duration_seconds": 300
+    },
+    {
+      "action_id": "ecs_task_def_deregister",
+      "generic_action": "ecs_task_def_deregister",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "ECS Task Definition Deregister",
+      "description": "Deregister an ECS task definition revision, marking it INACTIVE. Irreversible — ECS has no re-register API.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "task_def_arn", "type": "string", "required": true},
+        {"name": "region", "type": "string", "required": false}
+      ],
+      "executor": "aws.ecs_task_def_deregister",
+      "rollback_strategy": "no_op",
+      "estimated_duration_seconds": 30
+    },
+    {
       "action_id": "update_ssm_parameter_value",
       "generic_action": "update_ssm_parameter_value",
       "action_type": "change",

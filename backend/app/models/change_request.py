@@ -592,6 +592,9 @@ class ChangeType(str, enum.Enum):
     # Reference scan and update
     scan_for_references = "scan_for_references"
     update_reference = "update_reference"
+    # ECS rolling deploy
+    ecs_rolling_deploy = "ecs_rolling_deploy"
+    ecs_task_def_deregister = "ecs_task_def_deregister"
 
 
 class RiskLevel(str, enum.Enum):
