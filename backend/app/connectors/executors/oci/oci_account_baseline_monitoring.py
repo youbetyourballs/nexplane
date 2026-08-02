@@ -27,7 +27,7 @@ OCI_PASSWORD_POLICY = dict(
 
 
 def _run(fn):
-    return asyncio.get_event_loop().run_in_executor(None, fn)
+    return asyncio.get_running_loop().run_in_executor(None, fn)
 
 
 # ── Phase 1: Preflight ────────────────────────────────────────────────────────
@@ -82,8 +82,13 @@ async def _snapshot(creds: dict, tenancy_id: str) -> dict:
         pp = auth_policy.password_policy
         pre["iam_pp"] = {
             "minimum_password_length": pp.minimum_password_length,
+            "is_uppercase_characters_required": pp.is_uppercase_characters_required,
+            "is_lowercase_characters_required": pp.is_lowercase_characters_required,
+            "is_numeric_characters_required": pp.is_numeric_characters_required,
+            "is_special_characters_required": pp.is_special_characters_required,
             "password_expires_after_days": pp.password_expires_after_days,
             "password_reuse_prevention": pp.password_reuse_prevention,
+            "is_username_containment_allowed": pp.is_username_containment_allowed,
         } if pp else None
 
         # List all compartments
@@ -202,7 +207,7 @@ async def _enable(creds: dict, tenancy_id: str, home_region: str, pre: dict, rol
                                 compartment_id=comp_id,
                                 display_name=log_group_name,
                                 description="Nexplane baseline flow logs",
-                            )).result()
+                            )).data
                             log_group_id = lg.id
                         logging_mgmt.create_log(log_group_id, oci.loggingmanagement.models.CreateLogDetails(
                             display_name=f"flowlog-{sn.id[-8:]}",
@@ -232,7 +237,14 @@ async def _enable(creds: dict, tenancy_id: str, home_region: str, pre: dict, rol
 
     # IAM password policy
     prev_pp = pre.get("iam_pp")
-    if prev_pp and prev_pp.get("minimum_password_length", 0) >= 14:
+    if (prev_pp and
+        prev_pp.get("minimum_password_length", 0) >= 14 and
+        prev_pp.get("is_uppercase_characters_required") == True and
+        prev_pp.get("is_lowercase_characters_required") == True and
+        prev_pp.get("is_numeric_characters_required") == True and
+        prev_pp.get("is_special_characters_required") == True and
+        prev_pp.get("password_expires_after_days", float('inf')) <= 90 and
+        prev_pp.get("password_reuse_prevention", 0) >= 24):
         results.append({"service": "iam_password_policy", "action": "skipped"})
     else:
         def _pp():
