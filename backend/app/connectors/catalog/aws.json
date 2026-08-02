@@ -2336,6 +2336,19 @@
       "executor": "aws.update_secrets_manager_secret_description",
       "rollback_strategy": "reconstitution",
       "estimated_duration_seconds": 10
+    },
+    {
+      "action_id": "aws_account_baseline_monitoring",
+      "generic_action": "aws_account_baseline_monitoring",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "AWS Account Baseline Monitoring",
+      "description": "Enables CloudTrail, GuardDuty, SecurityHub, AWS Config, S3 account-level public access block, and IAM password policy across all regions. Idempotent — skips controls already enabled.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [],
+      "executor": "aws.aws_account_baseline_monitoring",
+      "rollback_strategy": "executor",
+      "estimated_duration_seconds": 300
     }
   ]
 }
