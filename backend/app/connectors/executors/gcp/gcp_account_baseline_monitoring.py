@@ -185,25 +185,24 @@ async def _enable(creds: dict, project_id: str, org_id: str, pre: dict, rollback
     results.append({"service": "vpc_flow_logs", "action": "enabled" if count > 0 else "skipped", "subnets_enabled": count})
 
     # Cloud DNS logging
-    def _dns_logging():
-        dns = build("dns", "v1", credentials=credentials)
-        zones = dns.managedZones().list(project=project_id).execute().get("managedZones", [])
-        count = 0
-        for z in zones:
-            if z.get("visibility") != "private":
-                continue
-            if pre["dns_zones"].get(z["name"]):
-                continue
-            dns.managedZones().patch(
-                project=project_id, managedZone=z["name"],
-                body={"privateVisibilityConfig": {"enableLogging": True}},
-            ).execute()
-            count += 1
-        return count
-    count = await _run(_dns_logging)
-    if count > 0:
-        rollback_data["newly_enabled"].append({"service": "dns_logging", "project_id": project_id})
-    results.append({"service": "dns_logging", "action": "enabled" if count > 0 else "skipped", "zones_enabled": count})
+    # GCP DNS query logging is controlled by dns.policies resources linked to VPC networks,
+    # NOT by a field on the managedZone resource. Enabling it correctly requires enumerating
+    # all VPC networks and creating/patching DNS policies — this is out of scope for the
+    # per-zone approach here. Operators should enable DNS query logging via the GCP Console
+    # (Network Services > Cloud DNS > DNS policies) or a dedicated DNS policy CR.
+    rollback_data.setdefault("skipped_with_warning", []).append({
+        "service": "dns_logging",
+        "reason": "dns_logging_requires_dns_policy_api",
+        "note": (
+            "GCP DNS query logging requires creating dns.policies resources linked to VPC networks. "
+            "Enable via GCP Console (Network Services > Cloud DNS > DNS policies) or a dedicated DNS policy CR."
+        ),
+    })
+    results.append({
+        "service": "dns_logging",
+        "action": "skipped_with_warning",
+        "reason": "dns_logging_requires_dns_policy_api",
+    })
 
     return {"phase": "enable", "status": "ok", "results": results}
 
@@ -363,16 +362,10 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
                 await _run(_undo)
 
             elif svc == "dns_logging":
-                orig_zones = pre.get("dns_zones", {})
-                def _undo(zones=orig_zones):
-                    dns = build("dns", "v1", credentials=credentials)
-                    for zone_name, was_enabled in zones.items():
-                        if not was_enabled:
-                            dns.managedZones().patch(
-                                project=project_id, managedZone=zone_name,
-                                body={"privateVisibilityConfig": {"enableLogging": False}},
-                            ).execute()
-                await _run(_undo)
+                # DNS logging is now skipped_with_warning; nothing was enabled, nothing to roll back.
+                logger.info("GCP rollback: dns_logging was skipped_with_warning; no rollback action needed.")
+                undone.append({"service": svc, "rolled_back": True, "note": "nothing_to_undo"})
+                continue
 
             undone.append({"service": svc, "rolled_back": True})
         except Exception as e:
