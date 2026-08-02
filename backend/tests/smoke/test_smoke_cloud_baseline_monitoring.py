@@ -94,14 +94,38 @@ async def _plan_and_approve_cr_via_rest(token: str, cr_id: str) -> None:
         assert r.status_code == 200, f"POST /approve failed {r.status_code}: {r.text}"
 
 
-async def _rollback_cr_via_rest(token: str, cr_id: str) -> dict:
-    """Trigger rollback via REST and return the rollback result."""
+async def _rollback_cr_via_rest(token: str, cr_id: str, timeout: int = 180) -> dict:
+    """Trigger rollback via REST, poll until complete, return the rollback execution result."""
     jwt = await _get_jwt(token)
-    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=120) as client:
+    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
         headers = {"Authorization": f"Bearer {jwt}"}
         r = await client.post(f"/change-requests/{cr_id}/rollback", headers=headers)
         assert r.status_code == 200, f"POST /rollback failed {r.status_code}: {r.text}"
-        return r.json()
+
+    # Poll CR detail until status reaches a terminal rollback state
+    interval = 5
+    attempts = timeout // interval
+    for _ in range(attempts):
+        await asyncio.sleep(interval)
+        jwt = await _get_jwt(token)
+        async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
+            r = await client.get(
+                f"/change-requests/{cr_id}",
+                headers={"Authorization": f"Bearer {jwt}"},
+            )
+            assert r.status_code == 200
+            detail = r.json()
+        status = detail.get("status")
+        if status in ("rolled_back", "rollback_failed"):
+            runs = detail.get("execution_runs", [])
+            rollback_run = next(
+                (r for r in reversed(runs) if "rollback" in (r.get("workflow_id") or "")),
+                runs[-1] if runs else None,
+            )
+            raw = rollback_run.get("result", {}) if rollback_run else {}
+            steps = raw.get("execution", {}).get("steps", [])
+            return steps[0]["result"] if steps else raw
+    pytest.fail(f"Rollback for CR {cr_id} timed out after {timeout}s")
 
 
 async def _create_and_execute_baseline_cr(
