@@ -155,12 +155,15 @@ async def _enable(creds: dict, project_id: str, org_id: str, pre: dict, rollback
                     continue
                 compute.subnetworks().patch(
                     project=project_id, region=rname, subnetwork=sn["name"],
-                    body={"logConfig": {
-                        "enable": True,
-                        "aggregationInterval": "INTERVAL_5_SEC",
-                        "flowSampling": 0.5,
-                        "metadata": "INCLUDE_ALL_METADATA",
-                    }},
+                    body={
+                        "fingerprint": sn.get("fingerprint", ""),
+                        "logConfig": {
+                            "enable": True,
+                            "aggregationInterval": "INTERVAL_5_SEC",
+                            "flowSampling": 0.5,
+                            "metadata": "INCLUDE_ALL_METADATA",
+                        },
+                    },
                 ).execute()
                 enabled_count += 1
         return enabled_count
@@ -326,7 +329,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
                             if not was_enabled:
                                 compute.subnetworks().patch(
                                     project=project_id, region=rname, subnetwork=sn["name"],
-                                    body={"logConfig": {"enable": False}},
+                                    body={"fingerprint": sn.get("fingerprint", ""), "logConfig": {"enable": False}},
                                 ).execute()
                 await _run(_undo)
 

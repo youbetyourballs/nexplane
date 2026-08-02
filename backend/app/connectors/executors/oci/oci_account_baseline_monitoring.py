@@ -137,7 +137,7 @@ async def _enable(creds: dict, tenancy_id: str, home_region: str, pre: dict, rol
             oci.cloud_guard.models.UpdateConfigurationDetails(
                 status="ENABLED",
                 reporting_region=home_region,
-                self_manage_resources_config=oci.cloud_guard.models.SelfManageResourcesConfiguration(is_enabled=False),
+                self_manage_resources=False,
             ),
         )
         # Create tenancy-level target with all Oracle-managed detector recipes
