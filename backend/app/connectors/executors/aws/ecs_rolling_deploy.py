@@ -194,7 +194,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Phase 4: Stability poll
     try:
         stability_seconds = _poll_stability(ecs, cluster, service_arn, stability_timeout)
-    except TimeoutError as e:
+    except Exception as e:
         _do_rollback(ecs, cluster, service_arn, old_task_def_arn)
         return {
             "deployed": False,
@@ -211,14 +211,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         try:
             _check_alb_health(elb, target_group_arn, health_timeout)
             health_checks["alb"] = "passed"
-        except TimeoutError:
+        except Exception as e:
             _do_rollback(ecs, cluster, service_arn, old_task_def_arn)
             return {
                 "deployed": False,
                 "rolled_back": True,
                 "old_task_def_arn": old_task_def_arn,
                 "new_task_def_arn": new_task_def_arn,
-                "rollback_reason": f"ALB health timeout after {health_timeout}s",
+                "rollback_reason": f"ALB health timeout after {health_timeout}s: {e}",
                 "health_checks": health_checks,
             }
 
@@ -227,14 +227,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         try:
             _check_http_probe(health_check_url, expected_status, health_timeout)
             health_checks["http"] = "passed"
-        except TimeoutError:
+        except Exception as e:
             _do_rollback(ecs, cluster, service_arn, old_task_def_arn)
             return {
                 "deployed": False,
                 "rolled_back": True,
                 "old_task_def_arn": old_task_def_arn,
                 "new_task_def_arn": new_task_def_arn,
-                "rollback_reason": f"HTTP probe timeout after {health_timeout}s",
+                "rollback_reason": f"HTTP probe timeout after {health_timeout}s: {e}",
                 "health_checks": health_checks,
             }
 

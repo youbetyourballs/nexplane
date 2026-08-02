@@ -80,7 +80,7 @@ async def test_preflight_raises_if_no_changes_specified():
 
     with patch("boto3.client", return_value=mock_ecs):
         with pytest.raises(ValueError, match="image_tag or env_var_overrides"):
-            await execute(cr, _make_connector(), AsyncMock())
+            await execute(cr.parameters, [], _make_connector())
 
 
 @pytest.mark.asyncio
@@ -93,7 +93,7 @@ async def test_preflight_raises_if_service_not_found():
 
     with patch("boto3.client", return_value=mock_ecs):
         with pytest.raises(ValueError, match="not found"):
-            await execute(cr, _make_connector(), AsyncMock())
+            await execute(cr.parameters, [], _make_connector())
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ async def test_register_applies_image_tag():
     ]
 
     with patch("boto3.client", return_value=mock_ecs):
-        result = await execute(cr, _make_connector(), AsyncMock())
+        result = await execute(cr.parameters, [], _make_connector())
 
     assert result["deployed"] is True
     assert result["rolled_back"] is False
@@ -159,7 +159,7 @@ async def test_register_raises_if_multi_container_no_name():
 
     with patch("boto3.client", return_value=mock_ecs):
         with pytest.raises(ValueError, match="container_name is required"):
-            await execute(cr, _make_connector(), AsyncMock())
+            await execute(cr.parameters, [], _make_connector())
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +189,7 @@ async def test_register_applies_env_var_overrides():
     mock_ecs.update_service.return_value = {}
 
     with patch("boto3.client", return_value=mock_ecs):
-        result = await execute(cr, _make_connector(), AsyncMock())
+        result = await execute(cr.parameters, [], _make_connector())
 
     assert result["deployed"] is True
     reg_kwargs = mock_ecs.register_task_definition.call_args[1]
@@ -213,7 +213,7 @@ async def test_register_raises_on_env_var_old_value_mismatch():
 
     with patch("boto3.client", return_value=mock_ecs):
         with pytest.raises(ValueError, match="expected old_value"):
-            await execute(cr, _make_connector(), AsyncMock())
+            await execute(cr.parameters, [], _make_connector())
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +246,7 @@ async def test_stability_timeout_triggers_auto_rollback():
 
     with patch("boto3.client", return_value=mock_ecs), \
          patch("time.sleep"):   # skip actual sleeping
-        result = await execute(cr, _make_connector(), AsyncMock())
+        result = await execute(cr.parameters, [], _make_connector())
 
     assert result["rolled_back"] is True
     assert result["deployed"] is False
@@ -300,7 +300,7 @@ async def test_alb_health_timeout_triggers_auto_rollback():
 
     with patch("boto3.client", side_effect=boto_side_effect), \
          patch("time.sleep"):
-        result = await execute(cr, _make_connector(), AsyncMock())
+        result = await execute(cr.parameters, [], _make_connector())
 
     assert result["rolled_back"] is True
     assert "ALB health timeout" in result["rollback_reason"]
@@ -344,7 +344,7 @@ async def test_http_probe_wrong_status_triggers_auto_rollback():
     with patch("boto3.client", return_value=mock_ecs), \
          patch("time.sleep"), \
          patch("requests.get", return_value=mock_resp):
-        result = await execute(cr, _make_connector(), AsyncMock())
+        result = await execute(cr.parameters, [], _make_connector())
 
     assert result["rolled_back"] is True
     assert "HTTP probe timeout" in result["rollback_reason"]
@@ -394,7 +394,7 @@ async def test_all_health_gates_pass_returns_deployed_true():
 
     with patch("boto3.client", side_effect=boto_side_effect), \
          patch("requests.get", return_value=mock_resp):
-        result = await execute(cr, _make_connector(), AsyncMock())
+        result = await execute(cr.parameters, [], _make_connector())
 
     assert result["deployed"] is True
     assert result["rolled_back"] is False
