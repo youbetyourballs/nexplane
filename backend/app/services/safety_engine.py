@@ -172,7 +172,9 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.linux_parallel_upgrade,
     ChangeType.windows_parallel_migration,
     ChangeType.ecs_rolling_deploy,
-    ChangeType.ecs_task_def_deregister,
+    # NOTE: ecs_task_def_deregister is intentionally excluded — deregistering a task
+    # definition is irreversible (AWS has no re-register API), so it must not be
+    # treated as having an implicit rollback.
 }
 
 

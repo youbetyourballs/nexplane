@@ -31,6 +31,9 @@ from smoke_helpers import NexplaneClient, log, get_connector_creds_from_db
 BASE_URL           = os.environ.get("NEXPLANE_BASE_URL", "http://localhost:8000")
 EMAIL              = os.environ.get("NEXPLANE_EMAIL",    "admin@acme.example")
 PASSWORD           = os.environ.get("NEXPLANE_PASSWORD", "admin123")
+# AWS connector UUID in the platform DB: 666e237d-4e83-4c6c-b72e-6e32fbb5c895
+# get_connector_creds_from_db() looks up by connector_type string, not UUID —
+# use the type string so it works on both the EC2 runner path (env var) and in-container path.
 SMOKE_CONNECTOR_TYPE = "aws"
 SMOKE_ASSET_ID       = "1a7051be-7110-4a21-9cdf-b023231cdff8"
 
@@ -415,29 +418,32 @@ class TestEcsRollingDeploySmoke:
             # ---------------------------------------------------------------
             # Phase 3: ecs_task_def_deregister
             # ---------------------------------------------------------------
-            if bad_arn:
-                log(f"=== Phase 3: Deregister bad-image task def {bad_arn} ===")
-                cr3 = _cr_lifecycle(
-                    client,
-                    title="ECS smoke — phase 3 deregister",
-                    change_type="ecs_task_def_deregister",
-                    desired_outcome={
-                        "task_def_arn": bad_arn,
-                        "region": REGION,
-                    },
-                )
-                er3 = cr3.get("execution_result", {})
-                log(f"Phase 3 result: {er3}")
-                assert er3.get("deregistered") is True, f"expected deregistered=True, got {er3}"
-                td_status = _ecs().describe_task_definition(
-                    taskDefinition=bad_arn
-                )["taskDefinition"]["status"]
-                assert td_status == "INACTIVE", \
-                    f"Expected task def INACTIVE after deregister, got {td_status}"
-                registered_arns.remove(bad_arn)   # already deregistered
-                log("Phase 3 deregister assertions PASSED")
-            else:
-                log("Phase 3: skipped — bad_arn not available (auto-rollback happened before register)")
+            assert bad_arn is not None, \
+                "Phase 2 must have registered a task def ARN for Phase 3 to deregister"
+            log(f"=== Phase 3: Deregister bad-image task def {bad_arn} ===")
+            cr3 = _cr_lifecycle(
+                client,
+                title="ECS smoke — phase 3 deregister",
+                change_type="ecs_task_def_deregister",
+                desired_outcome={
+                    "task_def_arn": bad_arn,
+                    "region": REGION,
+                    # ecs_task_def_deregister is irreversible — no implicit rollback exists.
+                    # Rollback strategy here is reconstitution: if needed, re-register from
+                    # the original task definition family.
+                    "rollback_strategy": "reconstitution",
+                },
+            )
+            er3 = cr3.get("execution_result", {})
+            log(f"Phase 3 result: {er3}")
+            assert er3.get("deregistered") is True, f"expected deregistered=True, got {er3}"
+            td_status = _ecs().describe_task_definition(
+                taskDefinition=bad_arn
+            )["taskDefinition"]["status"]
+            assert td_status == "INACTIVE", \
+                f"Expected task def INACTIVE after deregister, got {td_status}"
+            registered_arns.remove(bad_arn)   # already deregistered
+            log("Phase 3 deregister assertions PASSED")
 
             log("=== ALL ECS ROLLING DEPLOY SMOKE PHASES PASSED ===")
 
