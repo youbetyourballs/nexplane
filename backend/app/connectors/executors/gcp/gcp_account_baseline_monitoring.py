@@ -16,7 +16,7 @@ ROLLBACK_CAPABILITY = "full"
 
 
 def _run(fn):
-    return asyncio.get_event_loop().run_in_executor(None, fn)
+    return asyncio.get_running_loop().run_in_executor(None, fn)
 
 
 # ── Phase 1: Preflight ────────────────────────────────────────────────────────
@@ -92,7 +92,10 @@ async def _snapshot(creds: dict, project_id: str, org_id: str) -> dict:
         zone_states = {}
         for z in zones:
             if z.get("visibility") == "private":
-                zone_states[z["name"]] = z.get("privateVisibilityConfig", {}).get("enableLogging", False)
+                # DNS query logging is controlled by dnsPolicy resources linked to networks,
+                # not a field on the zone object. Record False as pre-existing state so we
+                # always attempt to enable it; rollback will disable it if we enabled it.
+                zone_states[z["name"]] = False
         pre["dns_zones"] = zone_states
 
     await _run(_do)
@@ -117,7 +120,7 @@ async def _enable(creds: dict, project_id: str, org_id: str, pre: dict, rollback
         policy.setdefault("auditConfigs", []).append({
             "service": "allServices",
             "auditLogConfigs": [
-                {"logType": "ADMIN_READ"},
+                {"logType": "ADMIN_WRITE"},
                 {"logType": "DATA_READ"},
                 {"logType": "DATA_WRITE"},
             ],
@@ -147,7 +150,11 @@ async def _enable(creds: dict, project_id: str, org_id: str, pre: dict, rollback
             ).execute()
         await _run(_scc)
         rollback_data["newly_enabled"].append({"service": "scc", "org_id": org_id})
-        results.append({"service": "scc", "action": "enabled"})
+        results.append({
+            "service": "scc",
+            "action": "asset_discovery_enabled",
+            "note": "SCC asset discovery enabled via v1 API. Standard tier requires manual upgrade in GCP Console (Security > Security Command Center > Settings).",
+        })
 
     # VPC Flow Logs
     def _flow_logs():
