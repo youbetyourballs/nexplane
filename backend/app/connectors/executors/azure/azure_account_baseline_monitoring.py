@@ -34,7 +34,7 @@ async def _preflight(creds: dict) -> dict:
             credential = get_credential(creds)
             sub_id = creds["subscription_id"]
             tenant_id = creds["tenant_id"]
-            from azure.mgmt.resource import SubscriptionClient
+            from azure.mgmt.subscription import SubscriptionClient
             sub_client = SubscriptionClient(credential)
             sub = sub_client.subscriptions.get(sub_id)
             return sub_id, tenant_id, sub.display_name

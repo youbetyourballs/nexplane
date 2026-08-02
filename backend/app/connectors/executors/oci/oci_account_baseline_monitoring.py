@@ -134,10 +134,7 @@ async def _enable(creds: dict, tenancy_id: str, home_region: str, pre: dict, rol
             return "skipped"
         cloud_guard.update_configuration(
             tenancy_id,
-            oci.cloud_guard.models.UpdateConfigurationDetails(
-                status="ENABLED",
-                reporting_region=home_region,
-            ),
+            oci.cloud_guard.models.UpdateConfigurationDetails(status="ENABLED"),
         )
         # Create tenancy-level target with all Oracle-managed detector recipes
         recipes = oci.pagination.list_call_get_all_results(
