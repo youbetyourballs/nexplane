@@ -190,7 +190,7 @@ async def _enable(creds: dict, tenancy_id: str, home_region: str, pre: dict, rol
             config = get_oci_config(creds)
             config["region"] = region
             vnc = oci.core.VirtualNetworkClient(config)
-            logging_mgmt = oci.loggingmanagement.LoggingManagementClient(config)
+            logging_mgmt = oci.logging.LoggingManagementClient(config)
             for comp_id in compartments:
                 try:
                     subnets = oci.pagination.list_call_get_all_results(vnc.list_subnets, comp_id).data
@@ -200,18 +200,18 @@ async def _enable(creds: dict, tenancy_id: str, home_region: str, pre: dict, rol
                         if existing_groups:
                             log_group_id = existing_groups[0].id
                         else:
-                            lg = logging_mgmt.create_log_group(oci.loggingmanagement.models.CreateLogGroupDetails(
+                            lg = logging_mgmt.create_log_group(oci.logging.models.CreateLogGroupDetails(
                                 compartment_id=comp_id,
                                 display_name=log_group_name,
                                 description="Nexplane baseline flow logs",
                             )).data
                             log_group_id = lg.id
-                        logging_mgmt.create_log(log_group_id, oci.loggingmanagement.models.CreateLogDetails(
+                        logging_mgmt.create_log(log_group_id, oci.logging.models.CreateLogDetails(
                             display_name=f"flowlog-{sn.id[-8:]}",
                             log_type="SERVICE",
                             is_enabled=True,
-                            configuration=oci.loggingmanagement.models.Configuration(
-                                source=oci.loggingmanagement.models.OciService(
+                            configuration=oci.logging.models.Configuration(
+                                source=oci.logging.models.OciService(
                                     service="flowlogs", resource=sn.id, category="all",
                                 )
                             ),
@@ -434,7 +434,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
                     for region in regions:
                         rc = dict(config)
                         rc["region"] = region
-                        logging_mgmt = oci.loggingmanagement.LoggingManagementClient(rc)
+                        logging_mgmt = oci.logging.LoggingManagementClient(rc)
                         for comp_id in compartments:
                             try:
                                 groups = logging_mgmt.list_log_groups(

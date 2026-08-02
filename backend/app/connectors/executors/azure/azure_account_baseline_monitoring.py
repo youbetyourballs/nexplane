@@ -50,17 +50,19 @@ async def _snapshot(creds: dict, sub_id: str, tenant_id: str) -> dict:
     def _do():
         from ._client import get_credential
         credential = get_credential(creds)
-        from azure.mgmt.security import SecurityCenter
-        security = SecurityCenter(credential, sub_id)
-
-        defender_tiers = {}
-        for rt in DEFENDER_RESOURCE_TYPES:
-            try:
-                pricing = security.pricings.get(pricing_name=rt)
-                defender_tiers[rt] = pricing.pricing_tier
-            except Exception:
-                defender_tiers[rt] = "Free"
-        pre["defender_tiers"] = defender_tiers
+        try:
+            from azure.mgmt.security import SecurityCenter
+            security = SecurityCenter(credential, sub_id)
+            defender_tiers = {}
+            for rt in DEFENDER_RESOURCE_TYPES:
+                try:
+                    pricing = security.pricings.get(pricing_name=rt)
+                    defender_tiers[rt] = pricing.pricing_tier
+                except Exception:
+                    defender_tiers[rt] = "Free"
+            pre["defender_tiers"] = defender_tiers
+        except ImportError:
+            pre["defender_tiers"] = {}
 
         from azure.mgmt.monitor import MonitorManagementClient
         monitor = MonitorManagementClient(credential, sub_id)
@@ -96,8 +98,11 @@ async def _enable(creds: dict, sub_id: str, tenant_id: str, pre: dict, rollback_
     def _do():
         from ._client import get_credential
         credential = get_credential(creds)
-        from azure.mgmt.security import SecurityCenter
-        from azure.mgmt.security.models import Pricing
+        try:
+            from azure.mgmt.security import SecurityCenter
+            from azure.mgmt.security.models import Pricing
+        except ImportError:
+            return [], [], [{"service": "defender", "reason": "azure-mgmt-security package not installed"}]
         security = SecurityCenter(credential, sub_id)
 
         upgraded = []
@@ -132,8 +137,11 @@ async def _enable(creds: dict, sub_id: str, tenant_id: str, pre: dict, rollback_
         def _diag():
             from ._client import get_credential
             credential = get_credential(creds)
-            from azure.mgmt.loganalytics import LogAnalyticsManagementClient
-            from azure.mgmt.loganalytics.models import Workspace
+            try:
+                from azure.mgmt.loganalytics import LogAnalyticsManagementClient
+                from azure.mgmt.loganalytics.models import Workspace
+            except ImportError:
+                raise ImportError("azure-mgmt-loganalytics package not installed")
             from azure.mgmt.monitor import MonitorManagementClient
             from azure.mgmt.monitor.models import DiagnosticSettingsResource, LogSettings
 
@@ -162,10 +170,14 @@ async def _enable(creds: dict, sub_id: str, tenant_id: str, pre: dict, rollback_
             )
             return workspace_id
 
-        workspace_id = await _run(_diag)
-        rollback_data["newly_enabled"].append({"service": "diagnostic_settings", "workspace_id": workspace_id,
-                                                "rg": "nexplane-monitoring", "workspace_name": f"nexplane-logs-{sub_id}"})
-        results.append({"service": "diagnostic_settings", "action": "enabled"})
+        try:
+            workspace_id = await _run(_diag)
+            rollback_data["newly_enabled"].append({"service": "diagnostic_settings", "workspace_id": workspace_id,
+                                                    "rg": "nexplane-monitoring", "workspace_name": f"nexplane-logs-{sub_id}"})
+            results.append({"service": "diagnostic_settings", "action": "enabled"})
+        except ImportError as e:
+            rollback_data.setdefault("skipped_with_warning", []).append({"service": "diagnostic_settings", "reason": str(e)})
+            results.append({"service": "diagnostic_settings", "action": "skipped_with_warning", "reason": str(e)})
     else:
         results.append({"service": "diagnostic_settings", "action": "skipped"})
 
