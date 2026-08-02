@@ -172,6 +172,7 @@ _IMPLICIT_ROLLBACK_TYPES = {
     ChangeType.linux_parallel_upgrade,
     ChangeType.windows_parallel_migration,
     ChangeType.ecs_rolling_deploy,
+    ChangeType.ecs_task_def_deregister,
 }
 
 

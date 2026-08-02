@@ -164,8 +164,8 @@ def _do_rollback(ecs_client, cluster: str, service_arn: str, old_task_def_arn: s
     logger.info("Auto-rolled back ECS service %s to %s", service_arn, old_task_def_arn)
 
 
-async def execute(cr, connector, db) -> dict:
-    params = cr.parameters or {}
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    params = parameters or {}
     cluster = params["cluster"]
     service_arn = params["service_arn"]
     region = params.get("region")

@@ -16,8 +16,8 @@ ROLLBACK_CAPABILITY = "irreversible"
 ROLLBACK_REASON = "ECS has no API to re-register a deregistered task definition revision"
 
 
-async def execute(cr, connector, db) -> dict:
-    params = cr.parameters or {}
+async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    params = parameters or {}
     task_def_arn = params["task_def_arn"]
     region = params.get("region")
 
@@ -25,3 +25,11 @@ async def execute(cr, connector, db) -> dict:
     client.deregister_task_definition(taskDefinition=task_def_arn)
     logger.info("Deregistered ECS task definition %s", task_def_arn)
     return {"deregistered": True, "task_def_arn": task_def_arn}
+
+
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    """Irreversible — ECS provides no API to re-register a deregistered task definition."""
+    return {
+        "rolled_back": False,
+        "reason": ROLLBACK_REASON,
+    }
