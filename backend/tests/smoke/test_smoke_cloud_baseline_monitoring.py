@@ -176,7 +176,10 @@ async def _create_and_execute_baseline_cr(
             runs = detail.get("execution_runs", [])
             if runs:
                 latest = max(runs, key=lambda x: x.get("started_at") or "")
-                detail["execution_result"] = latest.get("result", {})
+                raw = latest.get("result", {})
+                # Executor result is nested: raw["execution"]["steps"][0]["result"]
+                steps = raw.get("execution", {}).get("steps", [])
+                detail["execution_result"] = steps[0]["result"] if steps else raw
             else:
                 detail["execution_result"] = {}
             return detail
