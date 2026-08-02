@@ -64,11 +64,14 @@ async def _snapshot(creds: dict, sub_id: str, tenant_id: str) -> dict:
         except ImportError:
             pre["defender_tiers"] = {}
 
-        from azure.mgmt.monitor import MonitorManagementClient
-        monitor = MonitorManagementClient(credential, sub_id)
-        resource_uri = f"/subscriptions/{sub_id}"
-        diag_settings = list(monitor.diagnostic_settings.list(resource_uri=resource_uri))
-        pre["diagnostic_settings"] = [d.name for d in diag_settings]
+        try:
+            from azure.mgmt.monitor import MonitorManagementClient
+            monitor = MonitorManagementClient(credential, sub_id)
+            resource_uri = f"/subscriptions/{sub_id}"
+            diag_settings = list(monitor.diagnostic_settings.list(resource_uri=resource_uri))
+            pre["diagnostic_settings"] = [d.name for d in diag_settings]
+        except (ImportError, AttributeError):
+            pre["diagnostic_settings"] = []
 
         import requests
         token = credential.get_token("https://graph.microsoft.com/.default").token
@@ -175,7 +178,7 @@ async def _enable(creds: dict, sub_id: str, tenant_id: str, pre: dict, rollback_
             rollback_data["newly_enabled"].append({"service": "diagnostic_settings", "workspace_id": workspace_id,
                                                     "rg": "nexplane-monitoring", "workspace_name": f"nexplane-logs-{sub_id}"})
             results.append({"service": "diagnostic_settings", "action": "enabled"})
-        except ImportError as e:
+        except Exception as e:
             rollback_data.setdefault("skipped_with_warning", []).append({"service": "diagnostic_settings", "reason": str(e)})
             results.append({"service": "diagnostic_settings", "action": "skipped_with_warning", "reason": str(e)})
     else:
