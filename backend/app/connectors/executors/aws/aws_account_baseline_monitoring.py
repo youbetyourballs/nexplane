@@ -11,6 +11,11 @@ import asyncio
 import json
 import logging
 
+from app.connectors.executors.aws.block_s3_public_access import (
+    apply_account_s3_public_access_block,
+    rollback_account_s3_public_access_block,
+)
+
 logger = logging.getLogger(__name__)
 
 ROLLBACK_CAPABILITY = "full"
@@ -153,13 +158,8 @@ async def _enable(connector, account_id: str, regions: list, pre: dict, rollback
     if prev_s3 and all(prev_s3.values()):
         results.append({"service": "s3_account_public_access_block", "action": "skipped"})
     else:
-        def _s3b(acct=account_id):
-            s3ctrl = _c(connector, "s3control", "us-east-1")
-            s3ctrl.put_public_access_block(AccountId=acct, PublicAccessBlockConfiguration={
-                "BlockPublicAcls": True, "IgnorePublicAcls": True,
-                "BlockPublicPolicy": True, "RestrictPublicBuckets": True,
-            })
-        await _run(_s3b)
+        s3ctrl = _c(connector, "s3control", "us-east-1")
+        await apply_account_s3_public_access_block(s3ctrl, account_id)
         rollback_data["newly_enabled"].append({"service": "s3_account_public_access_block", "account_id": account_id})
         results.append({"service": "s3_account_public_access_block", "action": "enabled"})
 
@@ -388,13 +388,8 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
             elif svc == "s3_account_public_access_block":
                 acct = item["account_id"]
                 prev = pre.get("s3_block")
-                def _undo_s3(a=acct, p=prev):
-                    s3ctrl = _c(connector, "s3control", "us-east-1")
-                    if p:
-                        s3ctrl.put_public_access_block(AccountId=a, PublicAccessBlockConfiguration=p)
-                    else:
-                        s3ctrl.delete_public_access_block(AccountId=a)
-                await _run(_undo_s3)
+                s3ctrl = _c(connector, "s3control", "us-east-1")
+                await rollback_account_s3_public_access_block(s3ctrl, acct, prev)
 
             elif svc == "iam_password_policy":
                 prev = pre.get("iam_pp")

@@ -43,3 +43,39 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     return {"rolled_back": True, "note": "rollback handled by paired catalog action: restore_s3_public_access"}
+
+
+# ── Account-level helpers (used by aws_account_baseline_monitoring) ───────────
+
+async def apply_account_s3_public_access_block(s3control_client, account_id: str) -> None:
+    """Enable all four account-level S3 public access block settings."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    def _do():
+        s3control_client.put_public_access_block(
+            AccountId=account_id,
+            PublicAccessBlockConfiguration={
+                "BlockPublicAcls": True,
+                "IgnorePublicAcls": True,
+                "BlockPublicPolicy": True,
+                "RestrictPublicBuckets": True,
+            },
+        )
+    await loop.run_in_executor(None, _do)
+
+
+async def rollback_account_s3_public_access_block(
+    s3control_client, account_id: str, previous_config
+) -> None:
+    """Restore or remove the account-level S3 public access block to its prior state."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    def _do():
+        if previous_config:
+            s3control_client.put_public_access_block(
+                AccountId=account_id,
+                PublicAccessBlockConfiguration=previous_config,
+            )
+        else:
+            s3control_client.delete_public_access_block(AccountId=account_id)
+    await loop.run_in_executor(None, _do)
