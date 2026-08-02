@@ -22,7 +22,7 @@ DEFENDER_RESOURCE_TYPES = [
 
 
 def _run(fn):
-    return asyncio.get_event_loop().run_in_executor(None, fn)
+    return asyncio.get_running_loop().run_in_executor(None, fn)
 
 
 # ── Phase 1: Preflight ────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ async def _enable(creds: dict, sub_id: str, tenant_id: str, pre: dict, rollback_
             from azure.mgmt.monitor.models import DiagnosticSettingsResource, LogSettings
 
             la = LogAnalyticsManagementClient(credential, sub_id)
-            workspace_name = f"nexplane-logs-{sub_id[:8]}"
+            workspace_name = f"nexplane-logs-{sub_id}"
             rg_name = "nexplane-monitoring"
             from azure.mgmt.resource import ResourceManagementClient
             rm = ResourceManagementClient(credential, sub_id)
@@ -152,7 +152,7 @@ async def _enable(creds: dict, sub_id: str, tenant_id: str, pre: dict, rollback_
 
         workspace_id = await _run(_diag)
         rollback_data["newly_enabled"].append({"service": "diagnostic_settings", "workspace_id": workspace_id,
-                                                "rg": "nexplane-monitoring", "workspace_name": f"nexplane-logs-{sub_id[:8]}"})
+                                                "rg": "nexplane-monitoring", "workspace_name": f"nexplane-logs-{sub_id}"})
         results.append({"service": "diagnostic_settings", "action": "enabled"})
     else:
         results.append({"service": "diagnostic_settings", "action": "skipped"})
