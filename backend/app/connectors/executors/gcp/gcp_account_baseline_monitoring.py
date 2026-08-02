@@ -62,17 +62,9 @@ async def _snapshot(creds: dict, project_id: str, org_id: str) -> dict:
         policy = rm.projects().getIamPolicy(resource=project_id, body={}).execute()
         pre["audit_configs"] = policy.get("auditConfigs", [])
 
-        # SCC — check if enabled
+        # SCC — we never enable SCC via API (Standard tier requires GCP Console activation).
+        # Always record False so rollback has nothing to undo.
         pre["scc_enabled"] = False
-        if org_id:
-            try:
-                scc = build("securitycenter", "v1", credentials=credentials)
-                settings = scc.organizations().getOrganizationSettings(
-                    name=f"organizations/{org_id}/organizationSettings"
-                ).execute()
-                pre["scc_enabled"] = settings.get("enableAssetDiscovery", False)
-            except Exception:
-                pre["scc_enabled"] = False
 
         # Collect subnet flow-log states per region
         compute = build("compute", "v1", credentials=credentials)
@@ -132,29 +124,22 @@ async def _enable(creds: dict, project_id: str, org_id: str, pre: dict, rollback
         rollback_data["newly_enabled"].append({"service": "audit_logs", "project_id": project_id})
     results.append({"service": "audit_logs", "action": action})
 
-    # SCC
-    if not org_id:
-        results.append({"service": "scc", "action": "skipped", "reason": "no_org_permissions"})
-        rollback_data.setdefault("skipped_with_warning", []).append(
-            {"service": "scc", "reason": "Service account lacks org-level permissions. Re-run with org admin credentials."}
-        )
-    elif pre.get("scc_enabled"):
-        results.append({"service": "scc", "action": "skipped"})
-    else:
-        def _scc():
-            scc = build("securitycenter", "v1", credentials=credentials)
-            scc.organizations().updateOrganizationSettings(
-                name=f"organizations/{org_id}/organizationSettings",
-                updateMask="enableAssetDiscovery",
-                body={"enableAssetDiscovery": True},
-            ).execute()
-        await _run(_scc)
-        rollback_data["newly_enabled"].append({"service": "scc", "org_id": org_id})
-        results.append({
-            "service": "scc",
-            "action": "asset_discovery_enabled",
-            "note": "SCC asset discovery enabled via v1 API. Standard tier requires manual upgrade in GCP Console (Security > Security Command Center > Settings).",
-        })
+    # SCC — Standard tier requires manual activation in GCP Console; cannot be enabled via API.
+    # We skip rather than partially enable to avoid misleading the operator.
+    rollback_data.setdefault("skipped_with_warning", []).append({
+        "service": "scc",
+        "reason": "scc_standard_tier_requires_gcp_console_activation",
+        "note": (
+            "SCC Standard tier must be activated in the GCP Console "
+            "(Security > Security Command Center > Settings). "
+            "No API call can subscribe an organization to Standard/Premium tier."
+        ),
+    })
+    results.append({
+        "service": "scc",
+        "action": "skipped_with_warning",
+        "reason": "scc_standard_tier_requires_gcp_console_activation",
+    })
 
     # VPC Flow Logs
     def _flow_logs():
@@ -226,17 +211,6 @@ async def _verify(creds: dict, newly_enabled: list) -> dict:
                     return any(ac["service"] == "allServices" for ac in policy.get("auditConfigs", []))
                 ok = await _run(_v)
                 checks.append({"service": "audit_logs", "ok": bool(ok)})
-
-            elif svc == "scc":
-                org_id = item["org_id"]
-                def _v(oid=org_id):
-                    scc = build("securitycenter", "v1", credentials=credentials)
-                    settings = scc.organizations().getOrganizationSettings(
-                        name=f"organizations/{oid}/organizationSettings"
-                    ).execute()
-                    return settings.get("enableAssetDiscovery", False)
-                ok = await _run(_v)
-                checks.append({"service": "scc", "ok": bool(ok)})
 
             elif svc in ("vpc_flow_logs", "dns_logging"):
                 checks.append({"service": svc, "ok": True, "note": "enabled — spot-check via GCP console"})
@@ -333,15 +307,10 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
                 await _run(_undo)
 
             elif svc == "scc":
-                org_id = item["org_id"]
-                def _undo(oid=org_id):
-                    scc = build("securitycenter", "v1", credentials=credentials)
-                    scc.organizations().updateOrganizationSettings(
-                        name=f"organizations/{oid}/organizationSettings",
-                        updateMask="enableAssetDiscovery",
-                        body={"enableAssetDiscovery": False},
-                    ).execute()
-                await _run(_undo)
+                # SCC was never enabled via API; nothing to roll back.
+                logger.info("GCP rollback: scc was skipped_with_warning; no rollback action needed.")
+                undone.append({"service": svc, "rolled_back": True, "note": "nothing_to_undo"})
+                continue
 
             elif svc == "vpc_flow_logs":
                 orig_states = pre.get("subnet_flow_logs", {})

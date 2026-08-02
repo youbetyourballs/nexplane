@@ -40,8 +40,7 @@ def _c(connector, service, region="us-east-1"):
 
 
 async def _run(fn):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, fn)
+    return await asyncio.get_running_loop().run_in_executor(None, fn)
 
 
 # ── Phase 1: Preflight ────────────────────────────────────────────────────────
@@ -176,57 +175,78 @@ async def _enable(connector, account_id: str, regions: list, pre: dict, rollback
         results.append({"service": "iam_password_policy", "action": "enabled"})
 
     # Per-region: GuardDuty, SecurityHub, Config
+    summary = rollback_data.setdefault("summary_failed", [])
     for region in regions:
         pre_r = pre["regions"].get(region, {})
 
         if pre_r.get("guardduty"):
             results.append({"service": f"guardduty:{region}", "action": "skipped"})
         else:
-            def _gd(r=region):
-                gd = _c(connector, "guardduty", r)
-                resp = gd.create_detector(Enable=True, FindingPublishingFrequency="FIFTEEN_MINUTES")
-                return resp["DetectorId"]
-            detector_id = await _run(_gd)
-            rollback_data["newly_enabled"].append({"service": "guardduty", "region": region, "detector_id": detector_id})
-            results.append({"service": f"guardduty:{region}", "action": "enabled"})
+            try:
+                def _gd(r=region):
+                    gd = _c(connector, "guardduty", r)
+                    resp = gd.create_detector(Enable=True, FindingPublishingFrequency="FIFTEEN_MINUTES")
+                    return resp["DetectorId"]
+                detector_id = await _run(_gd)
+                rollback_data["newly_enabled"].append({"service": "guardduty", "region": region, "detector_id": detector_id})
+                results.append({"service": f"guardduty:{region}", "action": "enabled"})
+            except Exception as e:
+                summary.append({"service": f"guardduty:{region}", "error": str(e)})
+                results.append({"service": f"guardduty:{region}", "action": "failed", "error": str(e)})
 
         if pre_r.get("securityhub"):
             results.append({"service": f"securityhub:{region}", "action": "skipped"})
         else:
-            def _sh(r=region):
-                sh = _c(connector, "securityhub", r)
-                sh.enable_security_hub(EnableDefaultStandards=False)
-                sh.batch_enable_standards(StandardsSubscriptionRequests=[{
-                    "StandardsArn": "arn:aws:securityhub:::ruleset/cis-aws-foundations-benchmark/v/1.2.0"
-                }])
-            await _run(_sh)
-            rollback_data["newly_enabled"].append({"service": "securityhub", "region": region})
-            results.append({"service": f"securityhub:{region}", "action": "enabled"})
+            try:
+                def _get_partition(r=region):
+                    if r.startswith("us-gov-"):
+                        return "aws-us-gov"
+                    elif r.startswith("cn-"):
+                        return "aws-cn"
+                    return "aws"
+                partition = _get_partition(region)
+                standards_arn = f"arn:{partition}:securityhub:{region}::ruleset/cis-aws-foundations-benchmark/v/1.2.0"
+                def _sh(r=region, arn=standards_arn):
+                    sh = _c(connector, "securityhub", r)
+                    sh.enable_security_hub(EnableDefaultStandards=False)
+                    sh.batch_enable_standards(StandardsSubscriptionRequests=[{
+                        "StandardsArn": arn
+                    }])
+                await _run(_sh)
+                rollback_data["newly_enabled"].append({"service": "securityhub", "region": region})
+                results.append({"service": f"securityhub:{region}", "action": "enabled"})
+            except Exception as e:
+                summary.append({"service": f"securityhub:{region}", "error": str(e)})
+                results.append({"service": f"securityhub:{region}", "action": "failed", "error": str(e)})
 
         if pre_r.get("config"):
             results.append({"service": f"config:{region}", "action": "skipped"})
         else:
             cfg_bucket = f"nexplane-config-{account_id}-{region}"
-            def _cfg(r=region, b=cfg_bucket, acct=account_id):
-                s3 = _c(connector, "s3", "us-east-1")
-                try:
-                    if r != "us-east-1":
-                        s3.create_bucket(Bucket=b, CreateBucketConfiguration={"LocationConstraint": r})
-                    else:
-                        s3.create_bucket(Bucket=b)
-                except Exception:
-                    pass
-                cfg = _c(connector, "config", r)
-                cfg.put_configuration_recorder(ConfigurationRecorder={
-                    "name": RECORDER_NAME,
-                    "roleARN": f"arn:aws:iam::{acct}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig",
-                    "recordingGroup": {"allSupported": True, "includeGlobalResourceTypes": r == "us-east-1"},
-                })
-                cfg.put_delivery_channel(DeliveryChannel={"name": CHANNEL_NAME, "s3BucketName": b})
-                cfg.start_configuration_recorder(ConfigurationRecorderName=RECORDER_NAME)
-            await _run(_cfg)
-            rollback_data["newly_enabled"].append({"service": "config", "region": region, "bucket": cfg_bucket})
-            results.append({"service": f"config:{region}", "action": "enabled"})
+            try:
+                def _cfg(r=region, b=cfg_bucket, acct=account_id):
+                    s3 = _c(connector, "s3", "us-east-1")
+                    try:
+                        if r != "us-east-1":
+                            s3.create_bucket(Bucket=b, CreateBucketConfiguration={"LocationConstraint": r})
+                        else:
+                            s3.create_bucket(Bucket=b)
+                    except Exception:
+                        pass
+                    cfg = _c(connector, "config", r)
+                    cfg.put_configuration_recorder(ConfigurationRecorder={
+                        "name": RECORDER_NAME,
+                        "roleARN": f"arn:aws:iam::{acct}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig",
+                        "recordingGroup": {"allSupported": True, "includeGlobalResourceTypes": r == "us-east-1"},
+                    })
+                    cfg.put_delivery_channel(DeliveryChannel={"name": CHANNEL_NAME, "s3BucketName": b})
+                    cfg.start_configuration_recorder(ConfigurationRecorderName=RECORDER_NAME)
+                await _run(_cfg)
+                rollback_data["newly_enabled"].append({"service": "config", "region": region, "bucket": cfg_bucket})
+                results.append({"service": f"config:{region}", "action": "enabled"})
+            except Exception as e:
+                summary.append({"service": f"config:{region}", "error": str(e)})
+                results.append({"service": f"config:{region}", "action": "failed", "error": str(e)})
 
     return {"phase": "enable", "status": "ok", "results": results}
 

@@ -104,17 +104,32 @@ async def _enable(creds: dict, sub_id: str, tenant_id: str, pre: dict, rollback_
         security = SecurityCenter(credential, sub_id)
 
         upgraded = []
+        already_enabled = []
+        skipped_with_warning = []
         for rt in DEFENDER_RESOURCE_TYPES:
-            if pre["defender_tiers"].get(rt) == "Standard":
-                continue
-            security.pricings.update(pricing_name=rt, pricing=Pricing(pricing_tier="Standard"))
-            upgraded.append(rt)
-        return upgraded
+            try:
+                existing = security.pricings.get(pricing_name=rt)
+                if existing.pricing_tier == "Standard":
+                    already_enabled.append(rt)
+                else:
+                    security.pricings.update(pricing_name=rt, pricing=Pricing(pricing_tier="Standard"))
+                    upgraded.append(rt)
+            except Exception as e:
+                skipped_with_warning.append({"service": f"defender:{rt}", "reason": str(e)[:100]})
+        return upgraded, already_enabled, skipped_with_warning
 
-    upgraded = await _run(_do)
+    upgraded, already_enabled_types, defender_warnings = await _run(_do)
     if upgraded:
         rollback_data["newly_enabled"].append({"service": "defender", "upgraded_types": upgraded})
-    results.append({"service": "defender", "action": "enabled" if upgraded else "skipped", "types": upgraded})
+    if defender_warnings:
+        rollback_data.setdefault("skipped_with_warning", []).extend(defender_warnings)
+    results.append({
+        "service": "defender",
+        "action": "enabled" if upgraded else "skipped",
+        "types": upgraded,
+        "already_enabled": already_enabled_types,
+        "skipped_with_warning": defender_warnings,
+    })
 
     if "nexplane-baseline" not in pre.get("diagnostic_settings", []):
         def _diag():
