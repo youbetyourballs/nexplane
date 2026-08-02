@@ -98,6 +98,19 @@
     {"action_id": "oci_delete_oke_node_pool", "action_type": "change", "display_name": "Delete OKE Node Pool", "description": "Delete a node pool with pre-state capture and drain advisory. Rollback recreates the pool from captured config.", "executor": "oci.oci_delete_oke_node_pool", "generic_action": "oci_delete_oke_node_pool", "rollback_action": "oci_delete_oke_node_pool", "rollback_connector_type": "oci", "applicable_asset_types": ["cloud_account"], "execution_tier": 3, "estimated_duration_seconds": 900, "parameters": [{"name": "node_pool_id", "type": "string", "required": true}]},
     {"action_id": "oci_scale_oke_node_pool", "action_type": "change", "display_name": "Scale OKE Node Pool", "description": "Change the node count of an existing node pool. Pre-state captured; rollback restores original count.", "executor": "oci.oci_scale_oke_node_pool", "generic_action": "oci_scale_oke_node_pool", "rollback_action": "oci_scale_oke_node_pool", "rollback_connector_type": "oci", "applicable_asset_types": ["cloud_account"], "execution_tier": 2, "estimated_duration_seconds": 600, "parameters": [{"name": "node_pool_id", "type": "string", "required": true}, {"name": "node_count", "type": "integer", "required": true}]},
     {"action_id": "oci_update_oke_node_pool", "action_type": "change", "display_name": "Update OKE Node Pool", "description": "Update node pool display name or node labels. Pre-state captured; rollback restores original config.", "executor": "oci.oci_update_oke_node_pool", "generic_action": "oci_update_oke_node_pool", "rollback_action": "oci_update_oke_node_pool", "rollback_connector_type": "oci", "applicable_asset_types": ["cloud_account"], "execution_tier": 2, "estimated_duration_seconds": 600, "parameters": [{"name": "node_pool_id", "type": "string", "required": true}, {"name": "name", "type": "string", "required": false}, {"name": "initial_node_labels", "type": "array", "required": false}]},
-    {"action_id": "oci_get_oke_kubeconfig", "action_type": "read", "display_name": "Get OKE Kubeconfig", "description": "Retrieve the kubeconfig YAML for an OKE cluster.", "executor": "oci.oci_get_oke_kubeconfig", "generic_action": "oci_get_oke_kubeconfig", "applicable_asset_types": ["cloud_account"], "execution_tier": 1, "estimated_duration_seconds": 10, "parameters": [{"name": "cluster_id", "type": "string", "required": true}]}
+    {"action_id": "oci_get_oke_kubeconfig", "action_type": "read", "display_name": "Get OKE Kubeconfig", "description": "Retrieve the kubeconfig YAML for an OKE cluster.", "executor": "oci.oci_get_oke_kubeconfig", "generic_action": "oci_get_oke_kubeconfig", "applicable_asset_types": ["cloud_account"], "execution_tier": 1, "estimated_duration_seconds": 10, "parameters": [{"name": "cluster_id", "type": "string", "required": true}]},
+    {
+      "action_id": "oci_account_baseline_monitoring",
+      "generic_action": "oci_account_baseline_monitoring",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "OCI Account Baseline Monitoring",
+      "description": "Enables Cloud Guard, sets Audit service retention to 365 days, enables VCN Flow Logs across all compartments and regions, and sets IAM password policy. VCN flow logs skipped with warning if no VCNs exist.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [],
+      "executor": "oci.oci_account_baseline_monitoring",
+      "rollback_strategy": "executor",
+      "estimated_duration_seconds": 300
+    }
   ]
 }
