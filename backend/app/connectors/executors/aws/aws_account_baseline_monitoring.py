@@ -72,8 +72,10 @@ async def _snapshot(connector, account_id: str, regions: list) -> dict:
         # CloudTrail
         ct = _c(connector, "cloudtrail", "us-east-1")
         trails = ct.describe_trails(includeShadowTrails=False).get("trailList", [])
+        # If our named trail already exists (from a prior run), treat it as pre-existing
+        # so the enable phase skips creation rather than failing with TrailAlreadyExistsException.
         pre["cloudtrail"] = next(
-            (t["TrailARN"] for t in trails if t.get("IsMultiRegionTrail") and t["Name"] != TRAIL_NAME), None
+            (t["TrailARN"] for t in trails if t.get("IsMultiRegionTrail")), None
         )
         # S3 account public access block
         s3ctrl = _c(connector, "s3control", "us-east-1")
