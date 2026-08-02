@@ -160,14 +160,30 @@ async def _create_and_execute_baseline_cr(
 
     interval = 10
     attempts = timeout // interval
+    jwt = await _get_jwt(token)
     for _ in range(attempts):
         await asyncio.sleep(interval)
-        detail = await get_change_request(token=token, cr_id=cr_id)
+        async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
+            r = await client.get(
+                f"/change-requests/{cr_id}",
+                headers={"Authorization": f"Bearer {jwt}"},
+            )
+            assert r.status_code == 200, f"GET /change-requests/{cr_id} failed: {r.text}"
+            detail = r.json()
         status = detail.get("status")
         if status == "completed":
+            # Merge execution_result from latest execution_run into detail
+            runs = detail.get("execution_runs", [])
+            if runs:
+                latest = max(runs, key=lambda x: x.get("started_at") or "")
+                detail["execution_result"] = latest.get("result", {})
+            else:
+                detail["execution_result"] = {}
             return detail
         if status in ("failed", "rollback_failed"):
-            pytest.fail(f"CR {cr_id} ({change_type}) reached terminal failure: {detail}")
+            runs = detail.get("execution_runs", [])
+            latest_result = runs[-1].get("result", {}) if runs else {}
+            pytest.fail(f"CR {cr_id} ({change_type}) reached terminal failure: {detail} | exec: {latest_result}")
     pytest.fail(f"CR {cr_id} ({change_type}) timed out after {timeout}s")
 
 
