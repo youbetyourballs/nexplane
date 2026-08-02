@@ -193,14 +193,6 @@ async def _enable(creds: dict, sub_id: str, tenant_id: str, pre: dict, rollback_
         })
     elif pre.get("security_defaults_enabled"):
         results.append({"service": "security_defaults", "action": "skipped"})
-    elif pre.get("security_defaults_enabled") is None:
-        # Could not read policy (likely missing Policy.Read.All permission) — skip rather than fail
-        rollback_data.setdefault("skipped_with_warning", []).append({
-            "service": "security_defaults",
-            "reason": "Could not read security defaults policy (Graph API 403 — missing Policy.Read.All permission)",
-        })
-        results.append({"service": "security_defaults", "action": "skipped_with_warning",
-                        "reason": "graph_api_403_missing_policy_read_all"})
     else:
         def _sd():
             from ._client import get_credential
