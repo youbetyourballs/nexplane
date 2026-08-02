@@ -31,16 +31,13 @@ async def _preflight(creds: dict) -> dict:
     try:
         def _do():
             from ._client import get_credential
-            credential = get_credential(creds)
+            get_credential(creds)  # validates credentials
             sub_id = creds["subscription_id"]
             tenant_id = creds["tenant_id"]
-            from azure.mgmt.subscription import SubscriptionClient
-            sub_client = SubscriptionClient(credential)
-            sub = sub_client.subscriptions.get(sub_id)
-            return sub_id, tenant_id, sub.display_name
-        sub_id, tenant_id, sub_name = await _run(_do)
+            return sub_id, tenant_id
+        sub_id, tenant_id = await _run(_do)
         return {"phase": "preflight", "status": "ok", "subscription_id": sub_id,
-                "tenant_id": tenant_id, "subscription_name": sub_name}
+                "tenant_id": tenant_id}
     except Exception as e:
         return {"phase": "preflight", "status": "failed", "error": str(e)}
 

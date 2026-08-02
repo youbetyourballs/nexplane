@@ -153,10 +153,15 @@ async def _enable(creds: dict, tenancy_id: str, home_region: str, pre: dict, rol
             target_detector_recipes=target_detector_recipes,
         ))
         return "enabled"
-    action = await _run(_cg)
-    if action == "enabled":
-        rollback_data["newly_enabled"].append({"service": "cloud_guard"})
-    results.append({"service": "cloud_guard", "action": action})
+    try:
+        action = await _run(_cg)
+        if action == "enabled":
+            rollback_data["newly_enabled"].append({"service": "cloud_guard"})
+        results.append({"service": "cloud_guard", "action": action})
+    except Exception as e:
+        logger.warning("OCI Cloud Guard enable failed: %s", e)
+        results.append({"service": "cloud_guard", "action": "failed", "error": str(e)})
+        rollback_data.setdefault("failed", []).append("cloud_guard")
 
     # Audit retention
     if pre.get("audit_retention_days", 0) >= 365:
@@ -352,7 +357,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     summary = {
         "already_enabled": already,
         "newly_enabled": newly,
-        "failed": [c["service"] for c in phase4.get("failed_checks", [])],
+        "failed": (
+            [r["service"] for r in phase3["results"] if r.get("action") == "failed"] +
+            [c["service"] for c in phase4.get("failed_checks", [])]
+        ),
         "skipped_with_warning": rollback_data.get("skipped_with_warning", []),
     }
     phases.append({"phase": "report", "status": "ok", "summary": summary})
