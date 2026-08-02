@@ -112,7 +112,7 @@ async def _enable(creds: dict, project_id: str, org_id: str, pre: dict, rollback
         policy.setdefault("auditConfigs", []).append({
             "service": "allServices",
             "auditLogConfigs": [
-                {"logType": "ADMIN_WRITE"},
+                {"logType": "ADMIN_READ"},
                 {"logType": "DATA_READ"},
                 {"logType": "DATA_WRITE"},
             ],

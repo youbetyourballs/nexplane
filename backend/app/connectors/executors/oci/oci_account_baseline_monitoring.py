@@ -21,8 +21,6 @@ OCI_PASSWORD_POLICY = dict(
     is_numeric_characters_required=True,
     is_special_characters_required=True,
     is_username_containment_allowed=False,
-    password_expires_after_days=90,
-    password_reuse_prevention=24,
 )
 
 
@@ -86,8 +84,6 @@ async def _snapshot(creds: dict, tenancy_id: str) -> dict:
             "is_lowercase_characters_required": pp.is_lowercase_characters_required,
             "is_numeric_characters_required": pp.is_numeric_characters_required,
             "is_special_characters_required": pp.is_special_characters_required,
-            "password_expires_after_days": pp.password_expires_after_days,
-            "password_reuse_prevention": pp.password_reuse_prevention,
             "is_username_containment_allowed": pp.is_username_containment_allowed,
         } if pp else None
 
@@ -242,9 +238,7 @@ async def _enable(creds: dict, tenancy_id: str, home_region: str, pre: dict, rol
         prev_pp.get("is_uppercase_characters_required") == True and
         prev_pp.get("is_lowercase_characters_required") == True and
         prev_pp.get("is_numeric_characters_required") == True and
-        prev_pp.get("is_special_characters_required") == True and
-        prev_pp.get("password_expires_after_days", float('inf')) <= 90 and
-        prev_pp.get("password_reuse_prevention", 0) >= 24):
+        prev_pp.get("is_special_characters_required") == True):
         results.append({"service": "iam_password_policy", "action": "skipped"})
     else:
         def _pp():
@@ -255,7 +249,7 @@ async def _enable(creds: dict, tenancy_id: str, home_region: str, pre: dict, rol
             identity.update_authentication_policy(
                 tenancy_id,
                 oci.identity.models.UpdateAuthenticationPolicyDetails(
-                    password_policy=oci.identity.models.UpdatePasswordPolicyDetails(**OCI_PASSWORD_POLICY)
+                    password_policy=oci.identity.models.PasswordPolicy(**OCI_PASSWORD_POLICY)
                 ),
             )
         await _run(_pp)
@@ -424,7 +418,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
                         identity.update_authentication_policy(
                             tenancy_id,
                             oci.identity.models.UpdateAuthenticationPolicyDetails(
-                                password_policy=oci.identity.models.UpdatePasswordPolicyDetails(**p)
+                                password_policy=oci.identity.models.PasswordPolicy(**p)
                             ),
                         )
                 await _run(_undo)
