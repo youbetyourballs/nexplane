@@ -174,8 +174,9 @@ async def _snapshot(dst_connector_type, dst_creds, dest_repo, src_tag, dest_tag_
 async def _transfer_acr_import(src_connector_type, src_creds, src_hostname,
                                 src_repo, src_tag, dst_creds, dest_repo) -> dict:
     """Use ACR import API — Azure pulls the image server-side, no Docker daemon needed."""
-    def _do():
-        import requests
+    import requests as _requests
+
+    def _do_post():
         from azure.identity import ClientSecretCredential
         from ._registry_client import get_auth_token
 
@@ -189,8 +190,16 @@ async def _transfer_acr_import(src_connector_type, src_creds, src_hostname,
         mgmt_token = aad_creds.get_token("https://management.azure.com/.default").token
         src_token = get_auth_token(src_connector_type, src_creds, src_repo)
 
-        # ECR token: Docker expects username "AWS"
-        src_username = "AWS" if src_connector_type == "aws" else "oauth2accesstoken"
+        # Username conventions differ by registry:
+        # ECR: "AWS", GCR: "oauth2accesstoken", OCIR: "<tenancy>/<user>", Azure: "token"
+        if src_connector_type == "aws":
+            src_username = "AWS"
+        elif src_connector_type == "gcp":
+            src_username = "oauth2accesstoken"
+        elif src_connector_type == "oci":
+            src_username = f"{src_creds.get('tenancy_namespace')}/{src_creds.get('username')}"
+        else:
+            src_username = "token"
         body = {
             "source": {
                 "registryUri": src_hostname,
@@ -203,29 +212,32 @@ async def _transfer_acr_import(src_connector_type, src_creds, src_hostname,
         url = (f"https://management.azure.com/subscriptions/{subscription_id}"
                f"/resourceGroups/{resource_group}/providers/Microsoft.ContainerRegistry"
                f"/registries/{registry_name}/importImage?api-version=2019-05-01")
-        r = requests.post(url, json=body,
-                          headers={"Authorization": f"Bearer {mgmt_token}"}, timeout=60)
-        if r.status_code == 200:
-            return "acr_import"
-        if r.status_code == 202:
-            import time
-            operation_url = r.headers.get("Location")
-            for _ in range(60):  # 5 min max (60 × 5s)
-                time.sleep(5)
-                poll = requests.get(operation_url,
-                                    headers={"Authorization": f"Bearer {mgmt_token}"}, timeout=30)
-                if poll.status_code == 200:
-                    return "acr_import"
-                status = poll.json().get("status", "")
-                if status == "Succeeded":
-                    return "acr_import"
-                if status == "Failed":
-                    raise RuntimeError(f"ACR import failed: {poll.json()}")
-            raise TimeoutError("ACR import timed out after 5 minutes")
-        r.raise_for_status()
+        r = _requests.post(url, json=body,
+                           headers={"Authorization": f"Bearer {mgmt_token}"}, timeout=60)
+        return r, mgmt_token
 
-    method = await _run(_do)
-    return {"phase": "transfer", "status": "ok", "method": method}
+    r, mgmt_token = await _run(_do_post)
+
+    if r.status_code == 200:
+        return {"phase": "transfer", "status": "ok", "method": "acr_import"}
+    if r.status_code == 202:
+        operation_url = r.headers.get("Location")
+        for _ in range(60):  # 5 min max (60 × 5s)
+            await asyncio.sleep(5)
+
+            def _do_poll(url=operation_url, tok=mgmt_token):
+                return _requests.get(url, headers={"Authorization": f"Bearer {tok}"}, timeout=30)
+
+            poll = await _run(_do_poll)
+            if poll.status_code == 200:
+                return {"phase": "transfer", "status": "ok", "method": "acr_import"}
+            status = poll.json().get("status", "")
+            if status == "Succeeded":
+                return {"phase": "transfer", "status": "ok", "method": "acr_import"}
+            if status == "Failed":
+                raise RuntimeError(f"ACR import failed: {poll.json()}")
+        raise TimeoutError("ACR import timed out after 5 minutes")
+    r.raise_for_status()
 
 
 async def _transfer_via_agent(asset_ids, src_connector_type, src_creds,
@@ -264,8 +276,8 @@ async def _transfer_via_agent(asset_ids, src_connector_type, src_creds,
     dst_pass = _docker_pass(dst_connector_type, dst_creds, dst_token)
 
     script = (
-        f"echo '{src_pass}' | docker login {src_hostname} -u {src_user} --password-stdin && "
-        f"echo '{dst_pass}' | docker login {dst_hostname} -u {dst_user} --password-stdin && "
+        f"echo \"$SRC_PASS\" | docker login {src_hostname} -u {src_user} --password-stdin && "
+        f"echo \"$DST_PASS\" | docker login {dst_hostname} -u {dst_user} --password-stdin && "
         f"docker pull {src_full} && "
         f"docker tag {src_full} {dst_full} && "
         f"docker push {dst_full} && "
@@ -275,7 +287,7 @@ async def _transfer_via_agent(asset_ids, src_connector_type, src_creds,
     from app.connectors.executors.nexplane_agent.app_upgrade_base import dispatch_agent_job
     result = await dispatch_agent_job(
         command="run_command",
-        parameters={"command": script, "timeout": 600},
+        parameters={"command": script, "timeout": 600, "env": {"SRC_PASS": src_pass, "DST_PASS": dst_pass}},
         asset_ids=asset_ids,
         timeout_seconds=660,
     )

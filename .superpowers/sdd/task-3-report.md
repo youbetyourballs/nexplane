@@ -1,32 +1,95 @@
-# Task 3 Report: Go Agent Commands
+# Task 3 Report: Container Image Transfer Executor
 
-**Status:** DONE
+## Status: DONE
 
-**Commit:** d5ffedf (bug fixes) — latest master
+## Commits
+- `35eb8e3` — feat(image-transfer): implement container_image_transfer executor with rollback
 
-**Build:** `go build ./...` from `~/nexplane/agent` on EC2 — clean, no errors.
+## Test Summary
+12/12 passed (`backend/tests/unit/test_container_image_transfer.py`)
 
-## Bug Fixes (2026-07-29)
+## Files Created/Modified
+- `backend/app/connectors/executors/container_image_transfer.py` — full executor: mock path, 5-phase pipeline, ACR import, agent docker transfer, rollback
+- `backend/tests/unit/test_container_image_transfer.py` — added 5 new tests (execute mock, preflight x2, rollback x2); total 12 tests
 
-**Commit:** d5ffedf — `fix: authorized_keys per-line dedup, rsync key path quoting`
+## Concerns
+None.
 
-### Bug 1: `add_authorized_key` dedup check (authorized_keys.go)
-Replaced `strings.Contains(string(existing), keyLine)` with a per-line loop that trims and compares for exact equality. The old check could false-positive if the new key was a substring of an existing longer key.
+---
 
-### Bug 2: `rsync_push` key path quoting (rsync_push.go)
-Wrapped `keyPath` in single quotes in the `-e` ssh format string: `ssh -i '%s' ...`. Prevents breakage when the temp dir path contains spaces.
+# (Previous occupant of this file: GCP Account Baseline Monitoring)
 
-## What was done
+## Status: DONE
 
-Created 3 new Go command packages and registered all 4 commands in the executor:
+## Commits
+- `ae63517` — feat(baseline): GCP account baseline monitoring executor + catalog
 
-- `agent/commands/runcommand/run_command.go` — `RunCommand`: executes shell commands via `sh -c` with configurable timeout (default 60s); returns `{output, exit_code}`
-- `agent/commands/authorizedkeys/authorized_keys.go` — `AddAuthorizedKey` / `RemoveAuthorizedKey`: reads homedir from `/etc/passwd`, creates `.ssh/` dir if needed, appends or removes a public key line; idempotent on add (returns `added: false` if already present)
-- `agent/commands/rsyncpush/rsync_push.go` — `Execute`: decodes base64 SSH key to temp file, runs rsync with `-az --checksum --stats`, parses stats output for `bytes_transferred` and `files_transferred`
-- `agent/executor/executor.go` — added imports for the 3 new packages and registered `run_command`, `rsync_push`, `add_authorized_key`, `remove_authorized_key` in the `commands` map
+## Test Summary
+4/4 passed in 0.23s (`tests/unit/test_gcp_account_baseline_monitoring.py`)
 
-## Notes
+## Files Created/Modified
+- `backend/app/connectors/executors/gcp/gcp_account_baseline_monitoring.py` — executor with 5 phases, ROLLBACK_CAPABILITY = "full", mock path, SCC org-level caveat, FILO rollback
+- `backend/app/connectors/change_type_definitions/gcp_account_baseline_monitoring.json` — change type definition
+- `backend/app/connectors/catalog/gcp.json` — appended gcp_account_baseline_monitoring action entry
+- `backend/tests/unit/test_gcp_account_baseline_monitoring.py` — 4 unit tests
 
-- Module path is `nexplane-agent` (not `github.com/nexplane/nexplane`)
-- `go build` must run from `~/nexplane/agent/` on EC2 where `go.mod` lives
-- No rollback entries added — these are primitives used by higher-level CRs that own their own rollback logic
+## Concerns
+None.
+
+---
+
+## Fix Pass — 2026-08-02
+
+### Commit
+`255aae6` — fix(baseline): correct GCP audit log type, SCC labeling, DNS snapshot field
+
+### Changes Made
+
+1. **Fix 1 — Audit log type (line ~120):** `ADMIN_READ` → `ADMIN_WRITE`. `ADMIN_READ` is not a valid GCP audit log type; `ADMIN_WRITE` is required to enable Admin Activity logging.
+
+2. **Fix 2 — SCC labeling:** `action: "enabled"` → `action: "asset_discovery_enabled"` with a note that Standard tier requires manual upgrade in GCP Console. The v1 API only supports `enableAssetDiscovery`; claiming "Standard tier enabled" was inaccurate.
+
+3. **Fix 3 — DNS snapshot field:** Replaced `z.get("privateVisibilityConfig", {}).get("enableLogging", False)` with `False` for all private zones. DNS query logging is controlled by `dnsPolicy` resources linked to networks, not a field on the zone object. Recording `False` as the pre-existing state is safe: the enable call is attempted for all zones, and rollback will disable any zones we enabled.
+
+4. **Fix 4 — asyncio deprecation:** `asyncio.get_event_loop().run_in_executor(...)` → `asyncio.get_running_loop().run_in_executor(...)`.
+
+### Test Results
+4 passed in 0.22s (`tests/unit/test_gcp_account_baseline_monitoring.py`)
+
+---
+
+## Fix Pass 2 — 2026-08-02
+
+### Commit
+`8604a87` — fix(baseline): skip GCP DNS logging with warning; correct API not available per-zone
+
+### Changes Made
+
+1. **Enable phase — DNS logging:** Removed the incorrect `managedZones().patch()` call with `{"privateVisibilityConfig": {"enableLogging": True}}` (field does not exist on zone resources). Replaced with a `skipped_with_warning` entry explaining that GCP DNS query logging requires creating `dns.policies` resources linked to VPC networks, which is out of scope for the per-zone approach. Operators should use the GCP Console or a dedicated DNS policy CR.
+
+2. **Rollback phase — DNS logging:** The `dns_logging` `elif` branch in rollback was also calling `managedZones().patch()` with the same invalid field. Replaced with a no-op handler (`nothing_to_undo`) since nothing is enabled, and `continue` to skip the `undone.append` at the end of the loop body.
+
+3. **No test changes needed:** All 4 existing unit tests passed without modification; none tested the live DNS enable path.
+
+### Test Results
+4 passed in 0.22s (`tests/unit/test_gcp_account_baseline_monitoring.py`)
+
+---
+
+## Fix Round 1 — container_image_transfer.py
+
+### Changes Made
+
+1. **Issue #1 (Critical) — Shell injection in `_transfer_via_agent`:** Replaced inline single-quoted passwords in the `echo '...' | docker login` commands with `$SRC_PASS` / `$DST_PASS` environment variable references. Passwords are now passed via the `env` dict in `dispatch_agent_job` parameters instead of being interpolated into the shell script string.
+
+2. **Issue #2 (Important) — Blocking `time.sleep` in ACR import polling:** Split `_transfer_acr_import`'s single `_do()` closure into two parts: `_do_post()` (runs in executor, makes the initial POST and returns the raw response + `mgmt_token`), and `_do_poll()` (per-iteration closure, runs in executor). The polling loop now lives in the async function body and uses `await asyncio.sleep(5)` between polls, eliminating thread-pool starvation.
+
+3. **Issue #3 (Important) — Wrong OCIR username for ACR import source:** Replaced the two-branch `"AWS" if aws else "oauth2accesstoken"` with a four-branch block: `aws→"AWS"`, `gcp→"oauth2accesstoken"`, `oci→"{tenancy_namespace}/{username}"`, else `"token"`.
+
+### Test Command
+```
+cd backend && python -m pytest tests/unit/test_container_image_transfer.py -v
+```
+
+### Test Output
+12/12 passed in 5.31s
