@@ -1165,6 +1165,23 @@
       ],
       "executor": "offboard_user.steps.verify_disabled",
       "estimated_duration_seconds": 30
+    },
+    {
+      "action_id": "privileged_account_audit",
+      "generic_action": "privileged_account_audit",
+      "action_type": "read",
+      "execution_tier": 1,
+      "display_name": "Privileged Account Audit",
+      "description": "Audits Domain Admins, Enterprise Admins, Schema Admins, and Administrators for stale, service, and disabled-but-privileged accounts. Generates proposed remediation CRs.",
+      "applicable_asset_types": ["domain_controller"],
+      "parameters": [
+        {"name": "stale_threshold_days", "type": "integer", "required": false, "default": 90},
+        {"name": "include_groups", "type": "array", "required": false},
+        {"name": "generate_remediations", "type": "boolean", "required": false, "default": true}
+      ],
+      "executor": "active_directory.privileged_account_audit",
+      "estimated_duration_seconds": 30,
+      "safety_notes": ["Read-only — does not modify any accounts"]
     }
   ]
 }

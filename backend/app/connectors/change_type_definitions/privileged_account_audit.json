@@ -1,0 +1,39 @@
+{
+  "change_type": "privileged_account_audit",
+  "display_name": "Privileged Account Audit",
+  "description": "Audits Domain Admins, Enterprise Admins, Schema Admins, and Administrators groups for stale accounts, service accounts with admin rights, and disabled accounts still holding privileged group membership. Generates proposed remediation CRs.",
+  "category": "security",
+  "parameters": [
+    {
+      "name": "stale_threshold_days",
+      "type": "integer",
+      "required": false,
+      "default": 90,
+      "description": "Number of days without logon before an account is considered stale"
+    },
+    {
+      "name": "include_groups",
+      "type": "array",
+      "required": false,
+      "description": "Which privileged groups to audit (default: all four)"
+    },
+    {
+      "name": "generate_remediations",
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "Whether to generate proposed remediation CRs for risky accounts"
+    }
+  ],
+  "steps": [
+    {
+      "generic_action": "privileged_account_audit",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": null,
+  "rollback_connector_type": null
+}
