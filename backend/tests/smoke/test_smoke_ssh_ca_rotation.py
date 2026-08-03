@@ -155,8 +155,8 @@ async def test_ssh_ca_rotation_live():
             "action_id": "ssh_ca_rotation",
             "params": {
                 "key_type": "ed25519",
-                "ca_key_path": "/etc/ssh/nexplane_ca_smoke",
-                "trusted_user_ca_keys_path": "/etc/ssh/trusted_user_ca_keys_smoke",
+                "ca_key_path": "/tmp/nexplane_ca_smoke",
+                "trusted_user_ca_keys_path": "/tmp/trusted_user_ca_keys_smoke",
             },
         },
     )
