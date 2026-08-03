@@ -14,6 +14,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = "Read-only audit — no changes were made to Active Directory"
 
 # Windows FILETIME epoch offset in 100-ns intervals
 _FILETIME_EPOCH_DIFF = 116444736000000000

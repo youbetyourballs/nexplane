@@ -78,7 +78,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     ca_comment = f"nexplane-ca-{timestamp}"
     gen_out = await _run_on_host(
         ca_host_asset_id,
-        f"rm -f {ca_key_path} {ca_key_path}.pub; ssh-keygen -t {key_type} -f {ca_key_path} -N '' -C '{ca_comment}' 2>&1; cat {ca_key_path}.pub",
+        f"rm -f {ca_key_path} {ca_key_path}.pub; ssh-keygen -t {key_type} -f {ca_key_path} -N '' -C '{ca_comment}' 2>/dev/null; cat {ca_key_path}.pub",
         timeout=90,
     )
     new_ca_pubkey = gen_out.strip()
