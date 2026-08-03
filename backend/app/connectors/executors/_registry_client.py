@@ -149,13 +149,15 @@ def delete_tag(connector_type: str, creds: dict, repo: str, tag: str) -> None:
     if connector_type in ("azure", "gcp", "oci"):
         import requests
         hostname = get_registry_hostname(connector_type, creds)
-        token = get_auth_token(connector_type, creds, repo)
-        auth_type = "Basic" if connector_type == "oci" else "Bearer"
         if connector_type == "oci":
             import base64
             namespace = creds["tenancy_namespace"]
             username = f"{namespace}/{creds['username']}"
             token = base64.b64encode(f"{username}:{creds['auth_token']}".encode()).decode()
+            auth_type = "Basic"
+        else:
+            token = get_auth_token(connector_type, creds, repo)
+            auth_type = "Bearer"
         digest = get_manifest_digest(connector_type, creds, repo, tag)
         if digest is None:
             return
@@ -181,18 +183,26 @@ def restore_tag_by_digest(connector_type: str, creds: dict, repo: str, tag: str,
             manifest = resp["images"][0]["imageManifest"]
             ecr.put_image(repositoryName=repo, imageManifest=manifest, imageTag=tag)
             return True
-        except Exception:
-            return False
+        except Exception as exc:
+            exc_name = type(exc).__name__
+            if exc_name == "ImageNotFoundException":
+                return False
+            response = getattr(exc, "response", None)
+            if response and response.get("Error", {}).get("Code") == "ImageNotFoundException":
+                return False
+            raise
     if connector_type in ("azure", "gcp", "oci"):
         import requests
         hostname = get_registry_hostname(connector_type, creds)
-        token = get_auth_token(connector_type, creds, repo)
-        auth_type = "Basic" if connector_type == "oci" else "Bearer"
         if connector_type == "oci":
             import base64
             namespace = creds["tenancy_namespace"]
             username = f"{namespace}/{creds['username']}"
             token = base64.b64encode(f"{username}:{creds['auth_token']}".encode()).decode()
+            auth_type = "Basic"
+        else:
+            token = get_auth_token(connector_type, creds, repo)
+            auth_type = "Bearer"
         r = requests.get(f"https://{hostname}/v2/{repo}/manifests/{digest}",
                          headers={"Authorization": f"{auth_type} {token}",
                                   "Accept": "application/vnd.docker.distribution.manifest.v2+json"},
@@ -206,5 +216,6 @@ def restore_tag_by_digest(connector_type: str, creds: dict, repo: str, tag: str,
                           headers={"Authorization": f"{auth_type} {token}",
                                    "Content-Type": content_type},
                           data=manifest_body, timeout=30)
-        return r2.status_code in (200, 201)
+        r2.raise_for_status()
+        return True
     raise ValueError(f"Unsupported connector_type: {connector_type}")
