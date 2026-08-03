@@ -203,7 +203,7 @@ async def list_catalog_actions(
 ) -> list[dict[str, Any]]:
     """
     List all catalog actions available for a connector type (e.g. "aws", "gcp", "okta",
-    "kubernetes", "nexplane_agent", "nexplane_agent_migration").
+    "kubernetes", "nexplane_agent", "nexplane_agent_migration", "container_registry").
 
     Use this to discover valid action_id values before creating a catalog_action CR.
     Returns action_id, display name, description, and parameter schema for each action.
