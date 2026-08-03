@@ -319,7 +319,10 @@ async def _verify(dst_connector_type, dst_creds, dest_repo, src_tag,
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    rd = execution_result.get("rollback_data", {})
+    # execution_result may arrive as the full workflow envelope {"execution": {...}, ...}
+    # or already unwrapped as the inner dict. Handle both.
+    inner = execution_result.get("execution", execution_result)
+    rd = inner.get("rollback_data", {})
     snap = rd.get("snapshot", {})
     dest_image = rd.get("dest_image")
     dst_connector_type = rd.get("dst_connector_type")
