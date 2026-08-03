@@ -3,6 +3,7 @@ package runcommand
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -21,6 +22,15 @@ func RunCommand(params map[string]any) (map[string]any, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	// Inherit the process environment and overlay caller-supplied variables.
+	cmd.Env = os.Environ()
+	if envMap, ok := params["env"].(map[string]any); ok {
+		for k, v := range envMap {
+			if sv, ok := v.(string); ok {
+				cmd.Env = append(cmd.Env, k+"="+sv)
+			}
+		}
+	}
 	out, err := cmd.CombinedOutput()
 	exitCode := 0
 	if err != nil {
