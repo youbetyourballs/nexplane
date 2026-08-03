@@ -2266,7 +2266,7 @@
         "Ensure dest_asset_id is running a strictly newer OS version than source_asset_id",
         "EBS snapshot is taken of source before cutover; on-prem hosts skip snapshot",
         "Decommission is scheduled after decommission_after_hours; set to 0 for manual decommission only",
-        "Rollback re-starts source and re-points traffic — irreversible once source is terminated"
+        "Rollback re-starts source and re-points traffic \u00e2\u20ac\u201d irreversible once source is terminated"
       ]
     },
     {
@@ -2331,9 +2331,9 @@
       "estimated_duration_seconds": 3600,
       "safety_notes": [
         "Ensure dest_asset_id is a Windows Server instance at a higher OS version than source_asset_id",
-        "Robocopy transfers data over SMB (port 445) — ensure security groups allow SMB between source and dest",
+        "Robocopy transfers data over SMB (port 445) \u00e2\u20ac\u201d ensure security groups allow SMB between source and dest",
         "Decommission is scheduled after decommission_after_hours; set to 0 for manual decommission only",
-        "Rollback re-points traffic to source — irreversible once source is terminated"
+        "Rollback re-points traffic to source \u00e2\u20ac\u201d irreversible once source is terminated"
       ]
     },
     {
@@ -3827,7 +3827,9 @@
     {
       "action_id": "rabbitmq_upgrade",
       "action_type": "change",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "blast_radius_hint": "rabbitmq_unavailable_during_upgrade",
       "description": "Upgrades RabbitMQ from 3.x to 4.x. Enables feature flags, stops 3.x container, starts 4.x container, verifies quorum queue compatibility.",
       "display_name": "RabbitMQ Major Version Upgrade",
@@ -3836,15 +3838,60 @@
       "executor": "nexplane_agent.rabbitmq_upgrade",
       "generic_action": "rabbitmq_upgrade",
       "parameters": [
-        {"name": "target_version", "required": true, "type": "string", "description": "Target RabbitMQ version, e.g. 4.0"},
-        {"name": "source_version", "required": false, "type": "string", "description": "Source RabbitMQ version (3.x)"},
-        {"name": "rmq_host", "required": false, "type": "string", "default": "localhost"},
-        {"name": "rmq_port", "required": false, "type": "integer", "default": 15672},
-        {"name": "rmq_user", "required": false, "type": "string", "default": "guest"},
-        {"name": "rmq_password", "required": false, "type": "string", "sensitive": true},
-        {"name": "rmq_container", "required": false, "type": "string", "default": "rabbitmq"},
-        {"name": "skip_snapshot", "required": false, "type": "boolean", "default": false},
-        {"name": "dry_run", "required": false, "type": "boolean", "default": false}
+        {
+          "name": "target_version",
+          "required": true,
+          "type": "string",
+          "description": "Target RabbitMQ version, e.g. 4.0"
+        },
+        {
+          "name": "source_version",
+          "required": false,
+          "type": "string",
+          "description": "Source RabbitMQ version (3.x)"
+        },
+        {
+          "name": "rmq_host",
+          "required": false,
+          "type": "string",
+          "default": "localhost"
+        },
+        {
+          "name": "rmq_port",
+          "required": false,
+          "type": "integer",
+          "default": 15672
+        },
+        {
+          "name": "rmq_user",
+          "required": false,
+          "type": "string",
+          "default": "guest"
+        },
+        {
+          "name": "rmq_password",
+          "required": false,
+          "type": "string",
+          "sensitive": true
+        },
+        {
+          "name": "rmq_container",
+          "required": false,
+          "type": "string",
+          "default": "rabbitmq"
+        },
+        {
+          "name": "skip_snapshot",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
       ],
       "rollback_strategy": "full",
       "safety_notes": [
@@ -3854,47 +3901,118 @@
     {
       "action_id": "kafka_zk_to_kraft_bridge",
       "action_type": "change",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "blast_radius_hint": "kafka_unavailable_during_bridge_phase",
-      "description": "Phase 1 of ZK→KRaft migration. Adds KRaft controllers in dual-write mode alongside ZooKeeper. Fully reversible.",
+      "description": "Phase 1 of ZK\u00e2\u2020\u2019KRaft migration. Adds KRaft controllers in dual-write mode alongside ZooKeeper. Fully reversible.",
       "display_name": "Kafka ZooKeeper to KRaft Bridge",
       "estimated_duration_seconds": 600,
       "execution_tier": 4,
       "executor": "nexplane_agent.kafka_zk_to_kraft_bridge",
       "generic_action": "kafka_zk_to_kraft_bridge",
       "parameters": [
-        {"name": "target_version", "required": true, "type": "string"},
-        {"name": "source_version", "required": false, "type": "string"},
-        {"name": "kafka_container", "required": false, "type": "string", "default": "kafka"},
-        {"name": "kafka_zk_host", "required": false, "type": "string", "default": "localhost"},
-        {"name": "kafka_zk_port", "required": false, "type": "integer", "default": 2181},
-        {"name": "kafka_port", "required": false, "type": "integer", "default": 9092},
-        {"name": "kafka_zk_container", "required": false, "type": "string", "default": "zookeeper"},
-        {"name": "skip_snapshot", "required": false, "type": "boolean", "default": false},
-        {"name": "dry_run", "required": false, "type": "boolean", "default": false}
+        {
+          "name": "target_version",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "source_version",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "kafka_container",
+          "required": false,
+          "type": "string",
+          "default": "kafka"
+        },
+        {
+          "name": "kafka_zk_host",
+          "required": false,
+          "type": "string",
+          "default": "localhost"
+        },
+        {
+          "name": "kafka_zk_port",
+          "required": false,
+          "type": "integer",
+          "default": 2181
+        },
+        {
+          "name": "kafka_port",
+          "required": false,
+          "type": "integer",
+          "default": 9092
+        },
+        {
+          "name": "kafka_zk_container",
+          "required": false,
+          "type": "string",
+          "default": "zookeeper"
+        },
+        {
+          "name": "skip_snapshot",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
       ],
       "rollback_strategy": "full",
-      "safety_notes": ["Ensure all consumers are connected before starting bridge phase"]
+      "safety_notes": [
+        "Ensure all consumers are connected before starting bridge phase"
+      ]
     },
     {
       "action_id": "kafka_kraft_cutover",
       "action_type": "change",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "blast_radius_hint": "kafka_permanent_topology_change",
-      "description": "Phase 2 of ZK→KRaft migration. Permanently removes ZooKeeper. IRREVERSIBLE.",
+      "description": "Phase 2 of ZK\u00e2\u2020\u2019KRaft migration. Permanently removes ZooKeeper. IRREVERSIBLE.",
       "display_name": "Kafka KRaft Cutover (Irreversible)",
       "estimated_duration_seconds": 300,
       "execution_tier": 4,
       "executor": "nexplane_agent.kafka_kraft_cutover",
       "generic_action": "kafka_kraft_cutover",
       "parameters": [
-        {"name": "kafka_container", "required": false, "type": "string", "default": "kafka"},
-        {"name": "kafka_port", "required": false, "type": "integer", "default": 9092},
-        {"name": "kafka_zk_container", "required": false, "type": "string", "default": "zookeeper"},
-        {"name": "dry_run", "required": false, "type": "boolean", "default": false}
+        {
+          "name": "kafka_container",
+          "required": false,
+          "type": "string",
+          "default": "kafka"
+        },
+        {
+          "name": "kafka_port",
+          "required": false,
+          "type": "integer",
+          "default": 9092
+        },
+        {
+          "name": "kafka_zk_container",
+          "required": false,
+          "type": "string",
+          "default": "zookeeper"
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
       ],
       "rollback_strategy": "none",
-      "safety_notes": ["IRREVERSIBLE — complete Phase 1 first and verify all consumers before proceeding"]
+      "safety_notes": [
+        "IRREVERSIBLE \u00e2\u20ac\u201d complete Phase 1 first and verify all consumers before proceeding"
+      ]
     },
     {
       "action_id": "k8s_cluster_upgrade",
@@ -3973,7 +4091,10 @@
           "name": "target_version",
           "required": true,
           "type": "string",
-          "enum": ["2019", "2022"],
+          "enum": [
+            "2019",
+            "2022"
+          ],
           "description": "Target Windows Server version. Supported: 2016\u21922019, 2019\u21922022."
         },
         {
@@ -4013,7 +4134,9 @@
     {
       "action_id": "java_runtime_upgrade",
       "action_type": "change",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "blast_radius_hint": "java_app_unavailable_during_upgrade",
       "description": "Upgrades the Java runtime in a Docker container. Stops old container, starts new JVM container, verifies version.",
       "display_name": "Java Runtime Upgrade",
@@ -4022,23 +4145,69 @@
       "executor": "nexplane_agent.java_runtime_upgrade",
       "generic_action": "java_runtime_upgrade",
       "parameters": [
-        {"name": "target_version",    "required": true,  "type": "string", "description": "Target Java major version, e.g. 17, 21"},
-        {"name": "java_container",    "required": false, "type": "string", "default": "java-app"},
-        {"name": "java_image",        "required": false, "type": "string", "description": "Docker image override; default: eclipse-temurin:{version}-jre"},
-        {"name": "app_jar",           "required": false, "type": "string"},
-        {"name": "app_args",          "required": false, "type": "string"},
-        {"name": "java_home_new",     "required": false, "type": "string", "default": "/usr/lib/jvm/java-17"},
-        {"name": "service_check_cmd", "required": false, "type": "string"},
-        {"name": "skip_snapshot",     "required": false, "type": "boolean", "default": false},
-        {"name": "dry_run",           "required": false, "type": "boolean", "default": false}
+        {
+          "name": "target_version",
+          "required": true,
+          "type": "string",
+          "description": "Target Java major version, e.g. 17, 21"
+        },
+        {
+          "name": "java_container",
+          "required": false,
+          "type": "string",
+          "default": "java-app"
+        },
+        {
+          "name": "java_image",
+          "required": false,
+          "type": "string",
+          "description": "Docker image override; default: eclipse-temurin:{version}-jre"
+        },
+        {
+          "name": "app_jar",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "app_args",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "java_home_new",
+          "required": false,
+          "type": "string",
+          "default": "/usr/lib/jvm/java-17"
+        },
+        {
+          "name": "service_check_cmd",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "skip_snapshot",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
       ],
       "rollback_strategy": "full",
-      "safety_notes": ["Java 17 removes many deprecated APIs; run preflight service scan before upgrade"]
+      "safety_notes": [
+        "Java 17 removes many deprecated APIs; run preflight service scan before upgrade"
+      ]
     },
     {
       "action_id": "python_runtime_upgrade",
       "action_type": "change",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "blast_radius_hint": "python_app_unavailable_during_upgrade",
       "description": "Upgrades the Python runtime in a Docker container. Stops old container, starts python:X.Y-slim container, installs requirements.",
       "display_name": "Python Runtime Upgrade",
@@ -4047,17 +4216,105 @@
       "executor": "nexplane_agent.python_runtime_upgrade",
       "generic_action": "python_runtime_upgrade",
       "parameters": [
-        {"name": "target_version",    "required": true,  "type": "string", "description": "Target Python version, e.g. 3.11, 3.12"},
-        {"name": "python_container",  "required": false, "type": "string", "default": "python-app"},
-        {"name": "python_image",      "required": false, "type": "string", "description": "Docker image override; default: python:{version}-slim"},
-        {"name": "app_dir",           "required": false, "type": "string", "default": "/app"},
-        {"name": "requirements_file", "required": false, "type": "string", "default": "requirements.txt"},
-        {"name": "start_cmd",         "required": false, "type": "string"},
-        {"name": "skip_snapshot",     "required": false, "type": "boolean", "default": false},
-        {"name": "dry_run",           "required": false, "type": "boolean", "default": false}
+        {
+          "name": "target_version",
+          "required": true,
+          "type": "string",
+          "description": "Target Python version, e.g. 3.11, 3.12"
+        },
+        {
+          "name": "python_container",
+          "required": false,
+          "type": "string",
+          "default": "python-app"
+        },
+        {
+          "name": "python_image",
+          "required": false,
+          "type": "string",
+          "description": "Docker image override; default: python:{version}-slim"
+        },
+        {
+          "name": "app_dir",
+          "required": false,
+          "type": "string",
+          "default": "/app"
+        },
+        {
+          "name": "requirements_file",
+          "required": false,
+          "type": "string",
+          "default": "requirements.txt"
+        },
+        {
+          "name": "start_cmd",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "skip_snapshot",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "type": "boolean",
+          "default": false
+        }
       ],
       "rollback_strategy": "full",
-      "safety_notes": ["Python 3.x syntax changes may require code migration; test with syntax checker before upgrade"]
+      "safety_notes": [
+        "Python 3.x syntax changes may require code migration; test with syntax checker before upgrade"
+      ]
+    },
+    {
+      "action_id": "ssh_ca_rotation",
+      "generic_action": "ssh_ca_rotation",
+      "action_type": "change",
+      "execution_tier": 5,
+      "display_name": "SSH CA Rotation",
+      "description": "Rotates the SSH Certificate Authority across a fleet of hosts. Distributes new CA alongside old, verifies acceptance, then removes the old CA. Full rollback available.",
+      "applicable_asset_types": [
+        "server"
+      ],
+      "rollback_action": "ssh_ca_rotation",
+      "rollback_connector_type": "nexplane_agent",
+      "rollback_capability": "full",
+      "rollback_strategy": "full",
+      "parameters": [
+        {
+          "name": "ca_host_asset_id",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "key_type",
+          "type": "string",
+          "required": false,
+          "default": "ed25519"
+        },
+        {
+          "name": "ca_key_path",
+          "type": "string",
+          "required": false,
+          "default": "/etc/ssh/nexplane_ca"
+        },
+        {
+          "name": "trusted_user_ca_keys_path",
+          "type": "string",
+          "required": false,
+          "default": "/etc/ssh/trusted_user_ca_keys"
+        }
+      ],
+      "executor": "nexplane_agent.ssh_ca_rotation",
+      "estimated_duration_seconds": 120,
+      "blast_radius_hint": "ssh_access_disruption",
+      "safety_notes": [
+        "Both old and new CA are trusted simultaneously during transition \u2014 no access disruption",
+        "Rollback restores previous TrustedUserCAKeys and reloads sshd"
+      ]
     }
   ]
 }

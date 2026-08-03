@@ -1,0 +1,77 @@
+{
+  "change_type": "ssh_ca_rotation",
+  "display_name": "SSH CA Rotation",
+  "description": "Rotates the SSH Certificate Authority used to sign host certificates. Generates a new CA keypair, distributes the new public key alongside the old, verifies acceptance, then removes the old CA. Full rollback restores the previous TrustedUserCAKeys on all hosts.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "ca_host_asset_id": {
+      "type": "string",
+      "required": false,
+      "label": "CA Host Asset ID",
+      "description": "Asset ID of the host that generates the new CA keypair. Defaults to the first target asset."
+    },
+    "key_type": {
+      "type": "string",
+      "required": false,
+      "label": "Key Type",
+      "description": "SSH key type for the new CA keypair.",
+      "default": "ed25519"
+    },
+    "ca_key_path": {
+      "type": "string",
+      "required": false,
+      "label": "CA Key Path",
+      "description": "Filesystem path (without extension) where the CA keypair is stored on the CA host.",
+      "default": "/etc/ssh/nexplane_ca"
+    },
+    "trusted_user_ca_keys_path": {
+      "type": "string",
+      "required": false,
+      "label": "TrustedUserCAKeys Path",
+      "description": "Path to the TrustedUserCAKeys file on each target host (referenced in sshd_config).",
+      "default": "/etc/ssh/trusted_user_ca_keys"
+    }
+  },
+  "rollback": {
+    "strategy": "full",
+    "description": "Restore the previous TrustedUserCAKeys content on all hosts from snapshot and reload sshd."
+  },
+  "steps": [
+    {
+      "step": "preflight",
+      "generic_action": "ssh_ca_rotation",
+      "description": "Verify agent connectivity on all target hosts; confirm ssh-keygen is available; read current TrustedUserCAKeys path from sshd_config"
+    },
+    {
+      "step": "snapshot",
+      "generic_action": "ssh_ca_rotation",
+      "description": "Read current TrustedUserCAKeys content from each host and store as pre-state for rollback"
+    },
+    {
+      "step": "generate",
+      "generic_action": "ssh_ca_rotation",
+      "description": "Generate new CA keypair on the designated CA host using ssh-keygen; record new public key and comment"
+    },
+    {
+      "step": "distribute",
+      "generic_action": "ssh_ca_rotation",
+      "description": "Append new CA public key to TrustedUserCAKeys on all hosts; both old and new CA are now trusted simultaneously"
+    },
+    {
+      "step": "verify",
+      "generic_action": "ssh_ca_rotation",
+      "description": "Confirm new CA public key appears in TrustedUserCAKeys on each host before revoking the old CA"
+    },
+    {
+      "step": "revoke",
+      "generic_action": "ssh_ca_rotation",
+      "description": "Remove old CA public key from TrustedUserCAKeys on all hosts and reload sshd"
+    },
+    {
+      "step": "report",
+      "generic_action": "ssh_ca_rotation",
+      "description": "Summarize hosts updated, old CA removed, and new CA fingerprint"
+    }
+  ]
+}
