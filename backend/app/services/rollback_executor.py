@@ -134,7 +134,7 @@ async def _executor_fallback(
         if _connector_type_from_result:
             _conn_types_to_try.append(_connector_type_from_result)
         _conn_types_to_try.extend(
-            t for t in ("active_directory", "nexplane_agent", "aws", "azure_ad", "okta")
+            t for t in ("container_registry", "active_directory", "nexplane_agent", "aws", "azure_ad", "okta")
             if t != _connector_type_from_result
         )
         for _conn_type in _conn_types_to_try:

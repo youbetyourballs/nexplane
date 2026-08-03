@@ -1,6 +1,17 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+def test_catalog_entry_loads():
+    import json, pathlib
+    p = pathlib.Path(__file__).parent.parent.parent / "app" / "connectors" / "catalog" / "container_registry.json"
+    assert p.exists(), f"Catalog file not found at {p}"
+    data = json.loads(p.read_text())
+    assert data["connector_type"] == "container_registry"
+    actions = {a["action_id"]: a for a in data.get("actions", [])}
+    assert "container_image_transfer" in actions
+    assert actions["container_image_transfer"]["executor"] == "container_registry.container_image_transfer"
+
+
 def test_change_type_enum_value():
     from app.models.change_request import ChangeType
     assert ChangeType.container_image_transfer.value == "container_image_transfer"

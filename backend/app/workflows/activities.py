@@ -197,6 +197,14 @@ async def activity_execute_change(
             from app.services.k8s_cluster_upgrade_executor import execute_k8s_cluster_upgrade
             _result = await execute_k8s_cluster_upgrade(_cr.id)
             return _result
+        elif _cr and _cr.change_type.value == "container_image_transfer":
+            from app.connectors.executors.container_image_transfer import execute as _transfer_execute
+            _result = await _transfer_execute(
+                parameters=_cr.desired_outcome or {},
+                asset_ids=[str(a) for a in (_cr.target_asset_ids or [])],
+                connector=None,
+            )
+            return _result
 
     step_results = []
     # Carries resolved values forward from steps like resolve_launch_config

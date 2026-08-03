@@ -1,0 +1,16 @@
+{
+  "connector_type": "container_registry",
+  "actions": [
+    {
+      "action_id": "container_image_transfer",
+      "display_name": "Container Image Transfer",
+      "description": "Transfer a container image from one cloud registry to another (ECR/OCIR/ACR/GCR) with full rollback.",
+      "executor": "container_registry.container_image_transfer",
+      "execution_tier": 1,
+      "rollback_action": "container_image_transfer",
+      "rollback_connector_type": "container_registry",
+      "rollback_capability": "full",
+      "read_only": false
+    }
+  ]
+}
