@@ -276,8 +276,8 @@ async def _transfer_via_agent(asset_ids, src_connector_type, src_creds,
     dst_pass = _docker_pass(dst_connector_type, dst_creds, dst_token)
 
     script = (
-        f"echo \"$SRC_PASS\" | docker login {src_hostname} -u {src_user} --password-stdin && "
-        f"echo \"$DST_PASS\" | docker login {dst_hostname} -u {dst_user} --password-stdin && "
+        f"echo \"$SRC_PASS\" | docker login {src_hostname} -u \"$SRC_USER\" --password-stdin && "
+        f"echo \"$DST_PASS\" | docker login {dst_hostname} -u \"$DST_USER\" --password-stdin && "
         f"docker pull {src_full} && "
         f"docker tag {src_full} {dst_full} && "
         f"docker push {dst_full} && "
@@ -287,12 +287,15 @@ async def _transfer_via_agent(asset_ids, src_connector_type, src_creds,
     from app.connectors.executors.nexplane_agent.app_upgrade_base import dispatch_agent_job
     result = await dispatch_agent_job(
         command="run_command",
-        parameters={"command": script, "timeout": 600, "env": {"SRC_PASS": src_pass, "DST_PASS": dst_pass}},
+        parameters={"command": script, "timeout": 600, "env": {
+            "SRC_PASS": src_pass, "DST_PASS": dst_pass,
+            "SRC_USER": src_user, "DST_USER": dst_user,
+        }},
         asset_ids=asset_ids,
         timeout_seconds=660,
     )
     if result.get("exit_code", 1) != 0:
-        raise RuntimeError(f"Agent docker transfer failed: {result.get('stderr', '')[:500]}")
+        raise RuntimeError(f"Agent docker transfer failed: {result.get('output', '')[:500]}")
     return {"phase": "transfer", "status": "ok", "method": "agent_docker"}
 
 

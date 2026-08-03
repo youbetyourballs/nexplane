@@ -176,8 +176,7 @@ async def _check_azure_acr_ready(connector_id: str) -> str | None:
             r = _requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=15)
             return r.status_code
 
-        loop = asyncio.get_event_loop()
-        status = await loop.run_in_executor(None, _do)
+        status = await asyncio.get_running_loop().run_in_executor(None, _do)
         if status != 200:
             return (
                 f"Azure subscription not accessible (HTTP {status}). "
