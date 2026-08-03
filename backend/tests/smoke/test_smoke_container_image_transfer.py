@@ -5,7 +5,7 @@
 Smoke test: Cross-Cloud Container Image Transfer
 
 Two phases:
-  AGENT_TRANSFER — ECR → OCIR via Nexplane agent docker pull/tag/push
+  AGENT_TRANSFER — ECR → ECR via Nexplane agent docker pull/tag/push
   ACR_IMPORT     — ECR → ACR via Azure ACR import API (server-side)
 
 Run on EC2 inside nexplane-backend-1:
@@ -13,9 +13,8 @@ Run on EC2 inside nexplane-backend-1:
 
 Prerequisites:
   1. API_TOKEN set to a valid nxp_... admin token.
-  2. AWS (ECR) and OCI (OCIR) connectors registered in the platform with full
-     credentials: AWS needs account_id + region; OCI needs tenancy_namespace +
-     username + auth_token + region.
+  2. AWS (ECR) connector registered in the platform with full credentials
+     (account_id + region). For ACR_IMPORT, Azure connector also needed.
   3. alpine:3.19 pushed to the source ECR repo: nexplane-smoke/alpine:3.19
   4. A Nexplane agent (server asset) registered and active in the platform.
      The test discovers it via GET /assets?asset_type=server filtered to those
@@ -309,13 +308,17 @@ async def _create_and_execute_transfer_cr(
 
 
 # ---------------------------------------------------------------------------
-# PHASE: AGENT_TRANSFER — ECR → OCIR via Nexplane agent docker pull/tag/push
+# PHASE: AGENT_TRANSFER — ECR → ECR via Nexplane agent docker pull/tag/push
 # ---------------------------------------------------------------------------
 
 @pytest.mark.smoke
 @pytest.mark.smoke_phase("AGENT_TRANSFER")
-async def test_agent_transfer_ecr_to_ocir():
-    """Transfer alpine:3.19 from ECR to OCIR via agent docker pull/tag/push.
+async def test_agent_transfer_ecr_to_ecr():
+    """Transfer alpine:3.19 from ECR to ECR via agent docker pull/tag/push.
+
+    Transfers between the same AWS account but different ECR repos via Nexplane
+    agent docker pull/tag/push. This exercises the full agent docker path with
+    a registry that is fully accessible from the platform VPC.
 
     Verifies:
     - CR completes successfully
