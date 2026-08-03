@@ -387,7 +387,7 @@ async def approve_change_request(
 
         if windows:
             # Only gate if there are maintenance windows configured
-            asset_ids = [uuid.UUID(aid) for aid in (cr.target_asset_ids or [])]
+            asset_ids = [uuid.UUID(str(aid)) for aid in (cr.target_asset_ids or []) if aid is not None and str(aid) != "None"]
             assets_result = await db.execute(
                 select(Asset).where(Asset.id.in_(asset_ids))
             )
@@ -517,6 +517,8 @@ async def execute_change_request(
     if _priority != "emergency":
         from app.services.maintenance_window_service import is_in_maintenance_window
         for _asset_id in (cr.target_asset_ids or []):
+            if _asset_id is None or str(_asset_id) == "None":
+                continue
             _asset = await db.get(Asset, uuid.UUID(str(_asset_id)))
             _tags = (_asset.tags or []) if _asset else []
             _blocking = await is_in_maintenance_window(db, _tags, enforcement="hard")

@@ -150,7 +150,7 @@ async def plan_cr(db: AsyncSession, cr: ChangeRequest) -> PlanResult:
     # Refresh to ensure change_plan is loaded for callers that didn't pre-load it.
     await db.refresh(cr, ["change_plan"])
 
-    asset_ids = [uuid.UUID(str(aid)) for aid in (cr.target_asset_ids or [])]
+    asset_ids = [uuid.UUID(str(aid)) for aid in (cr.target_asset_ids or []) if aid is not None and str(aid) != "None"]
     assets_result = await db.execute(
         select(Asset).options(selectinload(Asset.connector), selectinload(Asset.connectors)).where(Asset.id.in_(asset_ids))
     )

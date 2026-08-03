@@ -270,7 +270,7 @@ async def create_change_request(
             organization_id=user.organization_id,
             requester_id=user.id,
             change_type=change_type,
-            target_asset_ids=[asset_id],
+            target_asset_ids=[asset_id] if asset_id is not None else [],
             title=title,
             status=ChangeRequestStatus.draft,
             desired_outcome=parameters,
