@@ -448,6 +448,7 @@ class ChangeType(str, enum.Enum):
     decommission_legacy_process = "decommission_legacy_process"
     shift_traffic_weight = "shift_traffic_weight"
     containerize_application = "containerize_application"
+    container_image_transfer = "container_image_transfer"
     deploy_container_alongside = "deploy_container_alongside"
     provision_database_instance = "provision_database_instance"
     managed_db_snapshot = "managed_db_snapshot"
