@@ -165,6 +165,7 @@ class ChangeType(str, enum.Enum):
     capture_instance_state = "capture_instance_state"
     # Cloud account baseline monitoring
     aws_account_baseline_monitoring = "aws_account_baseline_monitoring"
+    aws_iam_role_baseline = "aws_iam_role_baseline"
     gcp_account_baseline_monitoring = "gcp_account_baseline_monitoring"
     azure_account_baseline_monitoring = "azure_account_baseline_monitoring"
     oci_account_baseline_monitoring = "oci_account_baseline_monitoring"

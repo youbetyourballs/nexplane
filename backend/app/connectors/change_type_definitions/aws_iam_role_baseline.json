@@ -1,0 +1,21 @@
+{
+  "change_type": "aws_iam_role_baseline",
+  "display_name": "AWS IAM Role Baseline",
+  "description": "Creates standard security IAM roles (NexplaneReadOnly, NexplaneSecurityAudit, NexplaneBreakGlass) if they do not already exist. Idempotent — safe to run on accounts where roles already exist.",
+  "category": "security",
+  "steps": [
+    {
+      "generic_action": "aws_iam_role_baseline",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "parameters": [
+    {"name": "role_name_prefix", "type": "string", "required": false, "default": "Nexplane"},
+    {"name": "skip_if_exists", "type": "boolean", "required": false, "default": true}
+  ],
+  "rollback_action": "aws_iam_role_baseline",
+  "rollback_connector_type": "aws"
+}

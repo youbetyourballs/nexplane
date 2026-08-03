@@ -2349,6 +2349,25 @@
       "executor": "aws.aws_account_baseline_monitoring",
       "rollback_strategy": "executor",
       "estimated_duration_seconds": 300
+    },
+    {
+      "action_id": "aws_iam_role_baseline",
+      "generic_action": "aws_iam_role_baseline",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "AWS IAM Role Baseline",
+      "description": "Creates standard security IAM roles (ReadOnly, SecurityAudit, BreakGlass) in the AWS account. Idempotent.",
+      "applicable_asset_types": ["cloud_account"],
+      "rollback_action": "aws_iam_role_baseline",
+      "rollback_connector_type": "aws",
+      "parameters": [
+        {"name": "role_name_prefix", "type": "string", "required": false, "default": "Nexplane"},
+        {"name": "skip_if_exists", "type": "boolean", "required": false, "default": true}
+      ],
+      "executor": "aws.iam_role_baseline",
+      "rollback_strategy": "executor",
+      "estimated_duration_seconds": 20,
+      "safety_notes": ["Idempotent — skips roles that already exist by default"]
     }
   ]
 }
