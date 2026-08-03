@@ -414,6 +414,15 @@ async def activity_execute_rollback(
             )
         elif _cr and _cr.change_type.value == "scan_for_references":
             return {"status": "no_op", "note": "scan_for_references has no rollback action"}
+        elif _cr and _cr.change_type.value == "container_image_transfer":
+            from app.connectors.executors.container_image_transfer import rollback as _transfer_rollback
+            # execution_result is the stored run.result; rollback_data is nested under "execution"
+            inner = execution_result.get("execution", execution_result)
+            return await _transfer_rollback(
+                parameters=_cr.desired_outcome or {},
+                execution_result=inner,
+                connector=None,
+            )
 
     rollback_results = []
 
