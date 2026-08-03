@@ -13,7 +13,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-ROLLBACK_CAPABILITY = "none"
+ROLLBACK_CAPABILITY = "irreversible"
 
 # Windows FILETIME epoch offset in 100-ns intervals
 _FILETIME_EPOCH_DIFF = 116444736000000000

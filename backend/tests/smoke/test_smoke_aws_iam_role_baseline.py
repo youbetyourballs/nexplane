@@ -114,30 +114,27 @@ async def _poll_cr(jwt: str, cr_id: str, token: str, timeout: int = 180) -> dict
     pytest.fail(f"CR {cr_id} timed out after {timeout}s")
 
 
-def _boto_iam(connector_id: str):
+async def _boto_iam(connector_id: str):
     """Return a boto3 IAM client using credentials from the platform connector."""
     import boto3
     from app.database import AsyncSessionLocal
     from app.models.connector_credential import ConnectorCredential
     from app.services.secret_backend_factory import get_secret_backend
-    import asyncio
     from sqlalchemy import select
     import uuid
 
-    async def _get_creds():
-        async with AsyncSessionLocal() as db:
-            r = await db.execute(
-                select(ConnectorCredential).where(
-                    ConnectorCredential.connector_id == uuid.UUID(connector_id)
-                ).limit(1)
-            )
-            cred = r.scalar_one_or_none()
-            if not cred:
-                return None
-            backend = get_secret_backend()
-            return backend.decrypt_json(cred.credentials_encrypted)
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(ConnectorCredential).where(
+                ConnectorCredential.connector_id == uuid.UUID(connector_id)
+            ).limit(1)
+        )
+        cred = r.scalar_one_or_none()
+        if not cred:
+            return None
+        backend = get_secret_backend()
+        creds = backend.decrypt_json(cred.credentials_encrypted)
 
-    creds = asyncio.get_event_loop().run_until_complete(_get_creds())
     if not creds:
         return None
 
@@ -203,7 +200,7 @@ async def test_iam_role_baseline_create():
     )
 
     # Verify roles exist via boto3
-    iam = _boto_iam(connector_id)
+    iam = await _boto_iam(connector_id)
     if iam:
         from botocore.exceptions import ClientError
         for role_name in _EXPECTED_ROLES:
@@ -264,7 +261,7 @@ async def test_iam_role_baseline_rollback():
         pytest.fail(f"Rollback timed out for CR {cr_id}")
 
     # Verify via boto3 that net-new roles were deleted
-    iam = _boto_iam(connector_id)
+    iam = await _boto_iam(connector_id)
     if iam:
         from botocore.exceptions import ClientError
 
