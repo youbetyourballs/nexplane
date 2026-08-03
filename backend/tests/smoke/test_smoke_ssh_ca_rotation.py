@@ -250,9 +250,17 @@ async def test_ssh_ca_rotation_rollback():
     raw = rollback_run.get("result", {}) if rollback_run else {}
     inner = raw.get("execution", raw)
 
-    assert inner.get("rolled_back") is True, (
-        f"Rollback result did not confirm rolled_back=True: {inner}"
-    )
-
-    hosts_restored = inner.get("hosts_restored", [])
+    # rolled_back may be at top level (direct executor return) or nested in rollback_steps
+    rollback_steps = inner.get("rollback_steps", [])
+    if rollback_steps:
+        step_result = rollback_steps[0].get("result", {})
+        assert step_result.get("rolled_back") is True, (
+            f"Rollback result did not confirm rolled_back=True: {inner}"
+        )
+        hosts_restored = step_result.get("hosts_restored", [])
+    else:
+        assert inner.get("rolled_back") is True, (
+            f"Rollback result did not confirm rolled_back=True: {inner}"
+        )
+        hosts_restored = inner.get("hosts_restored", [])
     print(f"\nSSH CA rollback complete: {len(hosts_restored)} host(s) restored")

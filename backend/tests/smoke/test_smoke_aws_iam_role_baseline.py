@@ -275,6 +275,10 @@ async def test_iam_role_baseline_rollback():
         )
         raw = rollback_run.get("result", {}) if rollback_run else {}
         inner = raw.get("execution", raw)
+        # deleted_roles may be at top level or nested in rollback_steps
+        rollback_steps = inner.get("rollback_steps", [])
+        if rollback_steps:
+            inner = rollback_steps[0].get("result", {})
         deleted_roles = inner.get("deleted_roles", [])
 
         for role_name in deleted_roles:
