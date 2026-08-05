@@ -1,0 +1,15 @@
+{
+  "change_type": "dns_zone_migrate",
+  "display_name": "DNS Zone Migration",
+  "steps": [
+    {
+      "generic_action": "dns_zone_migrate",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": null,
+  "rollback_connector_type": "aws"
+}
