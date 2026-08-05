@@ -2351,6 +2351,26 @@
       "estimated_duration_seconds": 300
     },
     {
+      "action_id": "aws_account_baseline_hardening",
+      "generic_action": "aws_account_baseline_hardening",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "AWS Account Baseline Hardening",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "enforce_password_policy", "type": "boolean", "required": false, "default": true},
+        {"name": "enforce_s3_block_public", "type": "boolean", "required": false, "default": true},
+        {"name": "enforce_root_mfa_check", "type": "boolean", "required": false, "default": true},
+        {"name": "enable_vpc_flow_logs", "type": "boolean", "required": false, "default": true},
+        {"name": "vpc_flow_logs_s3_arn", "type": "string", "required": false, "description": "S3 ARN for VPC flow logs. If omitted, uses same bucket as CloudTrail if present."}
+      ],
+      "executor": "aws.aws_account_baseline_hardening",
+      "rollback_action": null,
+      "estimated_duration_seconds": 120,
+      "blast_radius_hint": "account_policy",
+      "smoke_verified": false
+    },
+    {
       "action_id": "aws_iam_role_baseline",
       "generic_action": "aws_iam_role_baseline",
       "action_type": "change",
@@ -2368,6 +2388,27 @@
       "rollback_strategy": "executor",
       "estimated_duration_seconds": 20,
       "safety_notes": ["Idempotent — skips roles that already exist by default"]
+    },
+    {
+      "action_id": "dns_zone_migrate",
+      "generic_action": "dns_zone_migrate",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "DNS Zone Migration",
+      "applicable_asset_types": ["dns_zone"],
+      "parameters": [
+        {"name": "source_zone_id", "type": "string", "required": true, "description": "Route53 Hosted Zone ID of the source zone"},
+        {"name": "target_zone_id", "type": "string", "required": true, "description": "Route53 Hosted Zone ID of the target/destination zone"},
+        {"name": "registrar_connector_id", "type": "string", "required": false, "description": "Connector ID for the registrar (if managed separately)"},
+        {"name": "ttl_lower_value", "type": "integer", "required": false, "default": 60, "description": "TTL to set during migration (seconds)"},
+        {"name": "propagation_wait_seconds", "type": "integer", "required": false, "default": 120, "description": "Seconds to wait after TTL lowering before switching NS"},
+        {"name": "verify_resolvers", "type": "array", "items": {"type": "string"}, "required": false, "default": ["8.8.8.8", "1.1.1.1", "9.9.9.9"], "description": "DNS resolvers to verify NS switch from"}
+      ],
+      "executor": "aws.dns_zone_migrate",
+      "rollback_action": null,
+      "estimated_duration_seconds": 300,
+      "blast_radius_hint": "dns_change",
+      "smoke_verified": false
     }
   ]
 }

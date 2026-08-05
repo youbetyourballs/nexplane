@@ -304,6 +304,23 @@
       "estimated_duration_seconds": 30
     },
     {
+      "action_id": "enable_security_command_center",
+      "generic_action": "enable_security_command_center",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Enable Security Command Center",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "org_id", "type": "string", "required": true, "description": "GCP Organization ID (numeric, e.g. 123456789)"},
+        {"name": "tier", "type": "string", "required": false, "default": "STANDARD", "description": "SCC tier: STANDARD or PREMIUM"}
+      ],
+      "executor": "gcp.enable_security_command_center",
+      "rollback_action": null,
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "org_policy",
+      "smoke_verified": false
+    },
+    {
       "action_id": "gcp_account_baseline_monitoring",
       "generic_action": "gcp_account_baseline_monitoring",
       "action_type": "change",
