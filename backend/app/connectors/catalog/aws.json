@@ -2368,7 +2368,7 @@
       "rollback_action": null,
       "estimated_duration_seconds": 120,
       "blast_radius_hint": "account_policy",
-      "smoke_verified": false
+      "smoke_verified": true
     },
     {
       "action_id": "aws_iam_role_baseline",

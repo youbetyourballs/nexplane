@@ -35,12 +35,32 @@ def _env(key: str) -> str:
     return val
 
 
-def _r53_client():
+async def _get_aws_creds() -> dict:
+    from app.database import AsyncSessionLocal
+    from app.models.connector import Connector
+    from app.models.connector_credential import ConnectorCredential
+    from app.services.secret_backend_factory import get_secret_backend
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Connector).where(Connector.connector_type == "aws"))
+        connector = r.scalars().first()
+        if not connector:
+            pytest.skip("No AWS connector registered")
+        cr = await db.execute(
+            select(ConnectorCredential).where(ConnectorCredential.connector_id == connector.id)
+        )
+        cc = cr.scalars().first()
+        backend = get_secret_backend()
+        return backend.decrypt_json(cc.credentials_encrypted), str(connector.id)
+
+
+def _r53_client_from_creds(creds: dict):
     return boto3.client(
         "route53",
-        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-        region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+        aws_access_key_id=creds.get("access_key_id") or creds.get("aws_access_key_id"),
+        aws_secret_access_key=creds.get("secret_access_key") or creds.get("aws_secret_access_key"),
+        region_name=creds.get("region", "us-east-1"),
     )
 
 
@@ -140,7 +160,9 @@ def _delete_zone(r53, zone_id: str) -> None:
 @pytest.mark.smoke_phase("DNS_ZONE_MIGRATE")
 async def test_01_create_zones():
     token = _env("API_TOKEN")
-    r53 = _r53_client()
+    creds, connector_id = await _get_aws_creds()
+    r53 = _r53_client_from_creds(creds)
+    _STATE["connector_id"] = connector_id
     ts = int(time.time())
     source_name = f"nexplane-smoke-src-{ts}.internal."
     target_name = f"nexplane-smoke-tgt-{ts}.internal."
@@ -197,20 +219,13 @@ async def test_02_create_and_execute_cr():
     async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
         headers = {"Authorization": f"Bearer {jwt}"}
 
-        # Find AWS connector
-        r = await client.get("/connectors", params={"connector_type": "aws"}, headers=headers)
-        assert r.status_code == 200
-        connectors = r.json()
-        aws_connector = connectors[0] if connectors else None
-        assert aws_connector, "No AWS connector registered"
-
         r = await client.post(
             "/change-requests",
             json={
                 "title": "[smoke] DNS zone migration test",
                 "change_type": "dns_zone_migrate",
                 "desired_outcome": {"summary": "Migrate DNS zone from source to target hosted zone"},
-                "connector_id": aws_connector["id"],
+                "connector_id": _STATE.get("connector_id"),
                 "parameters": {
                     "source_zone_id": source_id,
                     "target_zone_id": target_id,
@@ -283,7 +298,8 @@ async def test_04_rollback():
 @pytest.mark.smoke
 @pytest.mark.smoke_phase("DNS_ZONE_MIGRATE")
 async def test_05_cleanup():
-    r53 = _r53_client()
+    creds, _ = await _get_aws_creds()
+    r53 = _r53_client_from_creds(creds)
     loop = asyncio.get_event_loop()
     for zone_id in (_STATE.get("source_id"), _STATE.get("target_id")):
         if zone_id:
