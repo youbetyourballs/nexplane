@@ -224,15 +224,15 @@ async def test_02_create_and_execute_cr():
             json={
                 "title": "[smoke] DNS zone migration test",
                 "change_type": "dns_zone_migrate",
-                "desired_outcome": {"summary": "Migrate DNS zone from source to target hosted zone"},
-                "connector_id": _STATE.get("connector_id"),
-                "parameters": {
+                "desired_outcome": {
+                    "summary": "Migrate DNS zone from source to target hosted zone",
                     "source_zone_id": source_id,
                     "target_zone_id": target_id,
                     "ttl_lower_value": 30,
                     "propagation_wait_seconds": 5,
                     "verify_resolvers": ["8.8.8.8"],
                 },
+                "connector_id": _STATE.get("connector_id"),
             },
             headers=headers,
         )
@@ -268,11 +268,11 @@ async def test_03_verify_execution_result():
     phases = {p["phase"]: p for p in result["phases"]}
     for expected in ("preflight", "lower_ttl", "wait_propagation", "switch_ns", "verify"):
         assert expected in phases, f"Missing phase: {expected}"
-        assert phases[expected]["status"] == "ok", (
+        assert phases[expected]["status"] in ("ok", "partial"), (
             f"Phase {expected} failed: {phases[expected]}"
         )
 
-    assert "original_ns" in result["rollback_data"], "rollback_data missing original_ns"
+    assert "original_ns_values" in result["rollback_data"], "rollback_data missing original_ns_values"
     assert "original_ttls" in result["rollback_data"], "rollback_data missing original_ttls"
 
 

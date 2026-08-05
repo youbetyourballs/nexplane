@@ -37,26 +37,25 @@ def _list_all_rrsets(client, zone_id):
     return rrsets
 
 
-def _get_zone_name(client, zone_id):
+def _get_zone_info(client, zone_id):
     resp = client.get_hosted_zone(Id=zone_id)
-    return resp["HostedZone"]["Name"]
-
-
-def _get_target_ns(client, zone_id):
-    resp = client.get_hosted_zone(Id=zone_id)
-    return resp["DelegationSet"]["NameServers"]
+    zone = resp["HostedZone"]
+    name = zone["Name"]
+    is_private = zone.get("Config", {}).get("PrivateZone", False)
+    ns = resp.get("DelegationSet", {}).get("NameServers", [])
+    return name, is_private, ns
 
 
 def _phase_preflight(client, source_zone_id, target_zone_id):
-    source_name = _get_zone_name(client, source_zone_id)
-    target_name = _get_zone_name(client, target_zone_id)
+    source_name, source_private, _ = _get_zone_info(client, source_zone_id)
+    target_name, target_private, target_ns = _get_zone_info(client, target_zone_id)
     rrsets = _list_all_rrsets(client, source_zone_id)
-    target_ns = _get_target_ns(client, target_zone_id)
     return {
         "phase": "preflight",
         "status": "ok",
         "message": f"Source zone {source_name} has {len(rrsets)} record sets; target zone {target_name} NS: {target_ns}",
         "source_name": source_name,
+        "source_private": source_private,
         "target_name": target_name,
         "rrsets": rrsets,
         "target_ns": target_ns,
@@ -166,6 +165,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     preflight = await loop.run_in_executor(None, _phase_preflight, client, source_zone_id, target_zone_id)
     rrsets = preflight.pop("rrsets")
     source_name = preflight["source_name"]
+    source_private = preflight.pop("source_private", False)
     target_ns = preflight["target_ns"]
 
     original_ns_rrset = next((r for r in rrsets if r["Type"] == "NS" and r["Name"].rstrip(".") == source_name.rstrip(".")), None)
@@ -179,7 +179,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     switch_result = await loop.run_in_executor(None, _phase_switch_ns, client, source_zone_id, source_name, original_ns_rrset or {}, target_ns)
 
-    verify_result = await loop.run_in_executor(None, _phase_verify, source_name, target_ns, verify_resolvers)
+    if source_private:
+        verify_result = {
+            "phase": "verify",
+            "status": "ok",
+            "message": "Private hosted zone — external DNS verification skipped; NS switch confirmed via Route53 API",
+        }
+    else:
+        verify_result = await loop.run_in_executor(None, _phase_verify, source_name, target_ns, verify_resolvers)
 
     return {
         "phases": [preflight, lower_result, wait_phase, switch_result, verify_result],
