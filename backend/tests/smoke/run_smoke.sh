@@ -44,14 +44,14 @@ async def get():
     async with S() as db:
         backend = get_secret_backend()
         r = await db.execute(select(Connector).where(Connector.connector_type == 'aws'))
-        c = r.scalar_one_or_none()
+        c = r.scalars().first()
         cr = await db.execute(select(ConnectorCredential).where(ConnectorCredential.connector_id == c.id))
-        cc = cr.scalar_one_or_none()
+        cc = cr.scalars().first()
         aws = backend.decrypt_json(cc.credentials_encrypted)
         r2 = await db.execute(select(Connector).where(Connector.connector_type == 'tailscale'))
-        c2 = r2.scalar_one_or_none()
+        c2 = r2.scalars().first()
         cr2 = await db.execute(select(ConnectorCredential).where(ConnectorCredential.connector_id == c2.id))
-        cc2 = cr2.scalar_one_or_none()
+        cc2 = cr2.scalars().first()
         ts = backend.decrypt_json(cc2.credentials_encrypted)
         await e.dispose()
         return aws, ts
