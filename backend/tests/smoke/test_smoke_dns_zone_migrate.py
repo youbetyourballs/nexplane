@@ -209,6 +209,7 @@ async def test_02_create_and_execute_cr():
             json={
                 "title": "[smoke] DNS zone migration test",
                 "change_type": "dns_zone_migrate",
+                "desired_outcome": "Migrate DNS zone from source to target hosted zone",
                 "connector_id": aws_connector["id"],
                 "parameters": {
                     "source_zone_id": source_id,

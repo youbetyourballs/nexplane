@@ -123,6 +123,7 @@ async def test_01_create_and_execute():
             json={
                 "title": "[smoke] AWS account baseline hardening",
                 "change_type": "aws_account_baseline_hardening",
+                "desired_outcome": "Enforce IAM password policy, S3 public block, and root MFA check",
                 "asset_id": _STATE["asset_id"],
                 "parameters": {
                     "enforce_password_policy": True,

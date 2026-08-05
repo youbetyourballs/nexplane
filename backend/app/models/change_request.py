@@ -165,6 +165,7 @@ class ChangeType(str, enum.Enum):
     capture_instance_state = "capture_instance_state"
     # Cloud account baseline monitoring
     aws_account_baseline_monitoring = "aws_account_baseline_monitoring"
+    aws_account_baseline_hardening = "aws_account_baseline_hardening"
     aws_iam_role_baseline = "aws_iam_role_baseline"
     gcp_account_baseline_monitoring = "gcp_account_baseline_monitoring"
     azure_account_baseline_monitoring = "azure_account_baseline_monitoring"
@@ -602,6 +603,10 @@ class ChangeType(str, enum.Enum):
     # ECS rolling deploy
     ecs_rolling_deploy = "ecs_rolling_deploy"
     ecs_task_def_deregister = "ecs_task_def_deregister"
+    # DNS zone migration
+    dns_zone_migrate = "dns_zone_migrate"
+    # GCP Security Command Center
+    enable_security_command_center = "enable_security_command_center"
 
 
 class RiskLevel(str, enum.Enum):
