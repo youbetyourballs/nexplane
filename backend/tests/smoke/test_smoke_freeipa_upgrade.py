@@ -115,8 +115,8 @@ def _launch_ipa(ec2, ssm, ami_id, aws_creds) -> tuple:
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
     # Wait for LDAP port 389
-    log(f"  Waiting for LDAP port 389 on {private_ip} (up to 8 min)")
-    deadline = time.time() + 480
+    log(f"  Waiting for LDAP port 389 on {private_ip} (up to 15 min)")
+    deadline = time.time() + 900
     while time.time() < deadline:
         time.sleep(15)
         try:
@@ -127,7 +127,7 @@ def _launch_ipa(ec2, ssm, ami_id, aws_creds) -> tuple:
         except OSError:
             pass
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"FreeIPA LDAP never reachable on {private_ip}:389 within 8 min")
+    pytest.fail(f"FreeIPA LDAP never reachable on {private_ip}:389 within 15 min")
 
 
 def _register_asset(private_ip, run_id) -> tuple:
