@@ -2390,6 +2390,52 @@
       "safety_notes": ["Idempotent — skips roles that already exist by default"]
     },
     {
+      "action_id": "route53_dnssec_enable",
+      "generic_action": "route53_dnssec_enable",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Enable Route53 DNSSEC Signing",
+      "description": "Enables DNSSEC signing on a Route53 public hosted zone using a KMS key (us-east-1, ECC_NIST_P256). Returns the DS record for registrar configuration. Idempotent — returns early if already SIGNING.",
+      "applicable_asset_types": ["cloud_account", "dns_zone"],
+      "rollback_action": "route53_dnssec_enable",
+      "rollback_connector_type": "aws",
+      "parameters": [
+        {"name": "zone_id", "type": "string", "required": true, "description": "Route53 hosted zone ID"},
+        {"name": "kms_key_id", "type": "string", "required": false, "default": "auto"},
+        {"name": "ksk_name", "type": "string", "required": false, "default": "nexplane-ksk"},
+        {"name": "key_signing_algorithm", "type": "string", "required": false, "default": "ECDSAP256SHA256"},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "aws.route53_dnssec",
+      "rollback_strategy": "executor",
+      "estimated_duration_seconds": 120,
+      "blast_radius_hint": "dns_zone",
+      "smoke_verified": false
+    },
+    {
+      "action_id": "aws_account_full_baseline",
+      "generic_action": "aws_account_full_baseline",
+      "action_type": "change",
+      "execution_tier": 2,
+      "display_name": "AWS Account Full Baseline",
+      "description": "Runs all three account baseline sub-executors in sequence: hardening (IAM password policy, S3 block public access, VPC flow logs), monitoring (CloudTrail, GuardDuty, SecurityHub, Config across all regions), and IAM role baseline (ReadOnly, SecurityAudit, BreakGlass roles). Rollback unwinds in FILO order.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "enforce_password_policy", "type": "boolean", "required": false, "default": true},
+        {"name": "enforce_s3_block_public", "type": "boolean", "required": false, "default": true},
+        {"name": "enforce_root_mfa_check", "type": "boolean", "required": false, "default": true},
+        {"name": "enable_vpc_flow_logs", "type": "boolean", "required": false, "default": true},
+        {"name": "vpc_flow_logs_s3_arn", "type": "string", "required": false},
+        {"name": "role_name_prefix", "type": "string", "required": false, "default": "Nexplane"},
+        {"name": "skip_if_exists", "type": "boolean", "required": false, "default": true}
+      ],
+      "executor": "aws.aws_account_full_baseline",
+      "rollback_strategy": "executor",
+      "estimated_duration_seconds": 480,
+      "blast_radius_hint": "account_policy",
+      "smoke_verified": false
+    },
+    {
       "action_id": "dns_zone_migrate",
       "generic_action": "dns_zone_migrate",
       "action_type": "change",

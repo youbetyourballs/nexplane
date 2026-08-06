@@ -1,0 +1,24 @@
+{
+  "change_type": "route53_dnssec_enable",
+  "display_name": "Enable Route53 DNSSEC Signing",
+  "description": "Enables DNSSEC signing on a Route53 public hosted zone. Creates or reuses a KMS key (us-east-1, ECC_NIST_P256), creates a Key Signing Key, enables signing, and extracts the DS record for registrar configuration.",
+  "category": "security",
+  "steps": [
+    {
+      "generic_action": "route53_dnssec_enable",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "parameters": [
+    {"name": "zone_id", "type": "string", "required": true, "description": "Route53 hosted zone ID (e.g. Z1234567890ABC)"},
+    {"name": "kms_key_id", "type": "string", "required": false, "default": "auto", "description": "KMS key ARN/ID in us-east-1. Use 'auto' to search for an existing nexplane-tagged key or create one."},
+    {"name": "ksk_name", "type": "string", "required": false, "default": "nexplane-ksk"},
+    {"name": "key_signing_algorithm", "type": "string", "required": false, "default": "ECDSAP256SHA256"},
+    {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+  ],
+  "rollback_action": "route53_dnssec_enable",
+  "rollback_connector_type": "aws"
+}
