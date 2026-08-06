@@ -1181,7 +1181,8 @@
       ],
       "executor": "active_directory.privileged_account_audit",
       "estimated_duration_seconds": 30,
-      "safety_notes": ["Read-only — does not modify any accounts"]
+      "safety_notes": ["Read-only — does not modify any accounts"],
+      "smoke_verified": true
     }
   ]
 }
