@@ -101,8 +101,12 @@ async def test_mgn_phase1_auth_and_discovery():
     mgn_asset = None
     mgn_server_id = None
     for asset in assets:
-        # Check tags, attributes, and metadata for mgn_source_server_id
-        tags = asset.get("tags") or {}
+        # tags may be a list of {key, value} dicts or a plain dict
+        raw_tags = asset.get("tags") or []
+        if isinstance(raw_tags, list):
+            tags = {t["key"]: t["value"] for t in raw_tags if isinstance(t, dict) and "key" in t}
+        else:
+            tags = raw_tags
         attributes = asset.get("attributes") or {}
         metadata = asset.get("metadata") or {}
         sid = (
@@ -134,8 +138,8 @@ async def test_mgn_phase1_auth_and_discovery():
 @pytest.mark.smoke_phase("MGN_REPLICATION")
 async def test_mgn_phase2_create_and_plan_cr():
     """Create backup_mgn_replication CR, plan, submit for approval, and approve."""
-    if not _STATE.get("connector_id"):
-        pytest.skip("Phase 1 did not complete — skipping")
+    if not _STATE.get("mgn_source_server_id"):
+        pytest.skip("Phase 1 did not complete or no MGN asset found — skipping")
 
     token = _STATE["api_token"]
     jwt = await _get_jwt(token)
