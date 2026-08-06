@@ -43,21 +43,17 @@ def _env(key: str) -> str:
 
 
 async def _get_api_token() -> str:
-    """Return an API token — from env var or first valid token in DB."""
-    env_tok = os.environ.get("API_TOKEN")
-    if env_tok:
-        return env_tok
+    """Mint a JWT directly from DB — works inside Docker without an API_TOKEN env var."""
     from app.database import AsyncSessionLocal
-    from app.models.api_token import ApiToken
+    from app.models.user import User
+    from app.services.auth_service import create_access_token
     from sqlalchemy import select
     async with AsyncSessionLocal() as db:
-        r = await db.execute(
-            select(ApiToken).where(ApiToken.revoked == False).limit(1)  # noqa: E712
-        )
-        tok = r.scalars().first()
-        if not tok:
-            pytest.skip("No API tokens in DB and API_TOKEN env var not set")
-        return tok.token
+        r = await db.execute(select(User).limit(1))
+        user = r.scalars().first()
+        if not user:
+            pytest.skip("No users in DB")
+        return create_access_token(subject=str(user.id))
 
 
 async def _get_aws_creds() -> tuple[dict, str]:

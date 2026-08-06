@@ -1172,23 +1172,61 @@ def _wait_ssm_ready_win(ssm_client, instance_id: str, timeout: int = 600) -> Non
 
 
 def get_or_create_smoke_ami(
-    cache_key: str,
-    setup_hash: str,
-    launch_fn,
+    cache_key: str | None = None,
+    setup_hash: str | None = None,
+    launch_fn=None,
     snapshot_name: str | None = None,
+    # Alternative interface used by service-mesh tests
+    ssm_key: str | None = None,
+    creds: dict | None = None,
+    build_instructions: str | None = None,
 ) -> str:
-    """Return a cached AMI ID, creating one via launch_fn if the cache is cold.
+    """Return a cached AMI ID.
 
-    launch_fn(aws_creds) must provision an EC2 instance, configure it, and return
-    (instance_id, ec2_client, aws_creds).  The instance is stopped, snapshotted,
-    and terminated here.
+    Two calling conventions:
 
-    cache_key  — path segment under /nexplane/smoke-amis/ (e.g. "keycloak/21.1")
-    setup_hash — short hash that changes when the setup script changes
+    1. launch_fn interface (stateful/identity tests):
+         get_or_create_smoke_ami(cache_key, setup_hash, launch_fn)
+         On cache miss: provisions via launch_fn, snapshots, stores in SSM.
+
+    2. ssm_key interface (service-mesh tests — AMIs must be pre-built):
+         get_or_create_smoke_ami(ssm_key=..., creds=..., build_instructions=...)
+         On cache miss: skips with build_instructions so a human can build the AMI.
     """
     import json
     import time as _t
 
+    # --- ssm_key interface ---
+    if ssm_key is not None:
+        _creds = creds or get_connector_creds_from_db("aws")
+        region = _creds.get("region", "us-east-1")
+        _ec2 = boto3.client(
+            "ec2",
+            aws_access_key_id=_creds.get("access_key_id") or _creds.get("aws_access_key_id"),
+            aws_secret_access_key=_creds.get("secret_access_key") or _creds.get("aws_secret_access_key"),
+            region_name=region,
+        )
+        _ssm = boto3.client(
+            "ssm",
+            aws_access_key_id=_creds.get("access_key_id") or _creds.get("aws_access_key_id"),
+            aws_secret_access_key=_creds.get("secret_access_key") or _creds.get("aws_secret_access_key"),
+            region_name=region,
+        )
+        try:
+            resp = _ssm.get_parameter(Name=ssm_key)
+            raw = resp["Parameter"]["Value"]
+            ami_id = json.loads(raw).get("ami_id") if raw.startswith("{") else raw
+            if ami_id:
+                images = _ec2.describe_images(ImageIds=[ami_id]).get("Images", [])
+                if images and images[0].get("State") == "available":
+                    return ami_id
+        except Exception:
+            pass
+        hint = f"\n  Build instructions: {build_instructions}" if build_instructions else ""
+        import pytest as _pytest
+        _pytest.skip(f"No smoke AMI at {ssm_key} — build and cache it first.{hint}")
+
+    # --- launch_fn interface ---
     aws_creds = get_connector_creds_from_db("aws")
     region = aws_creds.get("region", "us-east-1")
     _ec2 = boto3.client(
@@ -1208,7 +1246,6 @@ def get_or_create_smoke_ami(
     if cached:
         return cached
 
-    # Cache miss — provision, snapshot, terminate
     instance_id, ec2_client, _ = launch_fn(aws_creds)
     name = snapshot_name or f"nexplane-smoke-{cache_key.replace('/', '-')}-{setup_hash}"
 

@@ -4347,10 +4347,8 @@
       ]
     },
     {
-      "change_type": "redis_cluster_migration",
       "display_name": "Redis Cluster Migration",
       "description": "Migrates a Redis instance between modes (standalone to cluster) or performs an in-place version upgrade. RDB snapshot before any changes. Full rollback via RDB restore.",
-      "connector_type": "nexplane_agent",
       "parameters": [
         {
           "name": "migration_type",
@@ -4393,13 +4391,12 @@
         "RDB snapshot taken before any changes \u2014 full rollback available",
         "For standalone_to_cluster: cluster reset restores standalone mode from RDB",
         "For version_upgrade: previous binary reinstalled and RDB restored on rollback"
-      ]
+      ],
+      "action_id": "redis_cluster_migration"
     },
     {
-      "change_type": "cassandra_rolling_upgrade",
       "display_name": "Cassandra Rolling Upgrade",
       "description": "Upgrades a Cassandra cluster one node at a time. nodetool snapshot taken before upgrade. Partial rollback via snapshot restore on upgraded nodes.",
-      "connector_type": "nexplane_agent",
       "parameters": [
         {
           "name": "source_version",
@@ -4436,13 +4433,12 @@
         "nodetool snapshot taken on all nodes before upgrade begins",
         "One node at a time \u2014 cluster remains available during rolling upgrade",
         "Partial rollback: already-upgraded nodes may require snapshot restore"
-      ]
+      ],
+      "action_id": "cassandra_rolling_upgrade"
     },
     {
-      "change_type": "mongodb_rs_upgrade",
       "display_name": "MongoDB Replica Set Upgrade",
       "description": "Upgrades a MongoDB replica set through sequential FCV hops. mongodump snapshot before upgrade. setFCV is the point of no return.",
-      "connector_type": "nexplane_agent",
       "parameters": [
         {
           "name": "source_version",
@@ -4484,13 +4480,12 @@
         "mongodump archive taken before any changes",
         "setFeatureCompatibilityVersion is irreversible \u2014 rollback blocks clearly after FCV set",
         "Multi-hop upgrades (e.g. 5.0\u21927.0) executed automatically with FCV set at each hop"
-      ]
+      ],
+      "action_id": "mongodb_rs_upgrade"
     },
     {
-      "change_type": "cockroachdb_cluster_upgrade",
       "display_name": "CockroachDB Cluster Upgrade",
       "description": "Rolling binary upgrade for CockroachDB. Version finalization is a separate irreversible step controlled by auto_finalize flag.",
-      "connector_type": "nexplane_agent",
       "parameters": [
         {
           "name": "source_version",
@@ -4538,13 +4533,12 @@
         "Backup taken before rolling upgrade",
         "Binary rollback available before version finalization",
         "auto_finalize=false (default): operator must explicitly finalize to make upgrade irreversible"
-      ]
+      ],
+      "action_id": "cockroachdb_cluster_upgrade"
     },
     {
-      "change_type": "etcd_upgrade",
       "display_name": "etcd Cluster Upgrade",
       "description": "Rolling member upgrade for etcd. Snapshot before upgrade. Full rollback via etcdctl snapshot restore with data loss window surfaced to operator.",
-      "connector_type": "nexplane_agent",
       "parameters": [
         {
           "name": "source_version",
@@ -4586,13 +4580,12 @@
         "etcdctl snapshot save before any member is upgraded",
         "Full rollback via snapshot restore \u2014 data loss window clearly surfaced",
         "One member at a time \u2014 quorum maintained throughout"
-      ]
+      ],
+      "action_id": "etcd_upgrade"
     },
     {
-      "change_type": "minio_distributed_upgrade",
       "display_name": "MinIO Distributed Upgrade",
       "description": "Upgrades a MinIO distributed deployment via mc admin update. Full rollback by pinning to previous release tag.",
-      "connector_type": "nexplane_agent",
       "parameters": [
         {
           "name": "target_version",
@@ -4628,13 +4621,12 @@
         "Config exported before upgrade as backup",
         "Full rollback: mc admin update to previous release tag",
         "MinIO handles coordinated rolling restart internally"
-      ]
+      ],
+      "action_id": "minio_distributed_upgrade"
     },
     {
-      "change_type": "ceph_cluster_upgrade",
       "display_name": "Ceph Cluster Upgrade",
       "description": "Upgrades a Ceph cluster in strict daemon order: MGR \u2192 MON \u2192 OSD \u2192 RGW \u2192 MDS. noout set during upgrade. Ceph does not support downgrade.",
-      "connector_type": "nexplane_agent",
       "parameters": [
         {
           "name": "source_version",
@@ -4687,13 +4679,12 @@
         "noout set before upgrade to prevent rebalancing \u2014 unset in finally block even on failure",
         "Strict upgrade order enforced: MGR \u2192 MON \u2192 OSD \u2192 RGW \u2192 MDS",
         "Ceph does not support downgrade \u2014 rollback surfaces daemon state and manual recovery steps"
-      ]
+      ],
+      "action_id": "ceph_cluster_upgrade"
     },
     {
-      "change_type": "keycloak_upgrade",
       "display_name": "Keycloak Major Upgrade",
       "description": "Upgrades Keycloak in-place (WildFly\u2192Quarkus or Quarkus\u2192Quarkus). Exports realms before upgrade, imports on rollback. Full rollback via realm restore + old binary.",
-      "connector_type": "nexplane_agent",
       "parameters": [
         {
           "name": "source_version",
@@ -4765,13 +4756,12 @@
         "Realm export captured before upgrade \u2014 rollback restores from export",
         "WildFly\u2192Quarkus migration handled automatically when source \u2264 16 and target \u2265 17",
         "DB schema migration is idempotent; old binary restored on rollback"
-      ]
+      ],
+      "action_id": "keycloak_upgrade"
     },
     {
-      "change_type": "freeipa_upgrade",
       "display_name": "FreeIPA / RHIDM Upgrade",
       "description": "Upgrades FreeIPA (RHIDM) servers in replica-first order. ipa-backup taken before upgrade; rollback restores from backup. Partial rollback \u2014 changes after backup time are lost.",
-      "connector_type": "nexplane_agent",
       "parameters": [
         {
           "name": "source_version",
@@ -4815,13 +4805,12 @@
         "ipa-backup taken before upgrade on master and each replica",
         "Replicas upgraded before master \u2014 quorum maintained",
         "Partial rollback: ipa-backup restore wipes LDAP+Kerberos DBs; changes after backup time are lost"
-      ]
+      ],
+      "action_id": "freeipa_upgrade"
     },
     {
-      "change_type": "openldap_schema_migration",
       "display_name": "OpenLDAP Schema Migration",
       "description": "Applies an LDIF schema extension to a running OpenLDAP 2.5+ server. slapcat config backup taken first; rollback stops slapd, restores config DB from backup, restarts.",
-      "connector_type": "nexplane_agent",
       "parameters": [
         {
           "name": "schema_ldif_path",
@@ -4861,13 +4850,12 @@
         "slapcat config + data backup before apply",
         "Schema validated in temp dir via slapadd before live apply",
         "Rollback: stop slapd, restore config DB from slapcat export, start slapd"
-      ]
+      ],
+      "action_id": "openldap_schema_migration"
     },
     {
-      "change_type": "vault_cluster_upgrade",
       "display_name": "HashiCorp Vault Cluster Upgrade",
       "description": "Upgrades a Vault HA (Raft) cluster with zero-quorum-loss. Standbys upgraded first, then active stepped down. Raft snapshot taken before upgrade for rollback.",
-      "connector_type": "nexplane_agent",
       "parameters": [
         {
           "name": "nodes",
@@ -4910,7 +4898,8 @@
         "Raft snapshot saved before first node upgrade",
         "Standbys upgraded before active \u2014 quorum maintained throughout",
         "Rollback: raft snapshot restore on active node, rolling restart with old binary"
-      ]
+      ],
+      "action_id": "vault_cluster_upgrade"
     },
     {
       "display_name": "Istio Control Plane Upgrade",
