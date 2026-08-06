@@ -109,6 +109,9 @@ def _cloudtrail_client(creds: dict):
 
 
 async def _get_jwt(api_token: str) -> str:
+    # If already a JWT (from _get_api_token()), pass through directly
+    if api_token.startswith("eyJ"):
+        return api_token
     from app.database import AsyncSessionLocal
     from app.models.api_token import ApiToken
     from app.services.auth_service import create_access_token

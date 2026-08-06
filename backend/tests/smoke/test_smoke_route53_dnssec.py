@@ -86,6 +86,9 @@ def _r53_client_from_creds(creds: dict):
 
 
 async def _get_jwt(api_token: str) -> str:
+    # If already a JWT (from _get_api_token()), pass through directly
+    if api_token.startswith("eyJ"):
+        return api_token
     from app.database import AsyncSessionLocal
     from app.models.api_token import ApiToken
     from app.services.auth_service import create_access_token
@@ -173,7 +176,7 @@ async def test_01_create_zone():
     r53 = _r53_client_from_creds(creds)
 
     uid = uuid.uuid4().hex[:8]
-    zone_name = f"smoke-dnssec-{uid}.example.com."
+    zone_name = f"smoke-dnssec-{uid}.nexplane.ai."
     caller_ref = f"nexplane-smoke-dnssec-{uid}"
 
     loop = asyncio.get_event_loop()
