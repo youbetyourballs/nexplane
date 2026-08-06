@@ -3556,14 +3556,26 @@
       "display_name": "MGN Replication Status Check",
       "description": "Read AWS MGN source server replication state and lag. Returns replication_status (HEALTHY/STALLED/DISCONNECTED), lag_seconds, and lifecycle state. Read-only.",
       "parameters": [
-        {"name": "mgn_source_server_id", "type": "string", "required": true, "description": "MGN source server ID (s-...)"},
-        {"name": "aws_connector_id", "type": "string", "required": false, "description": "AWS connector ID to use for MGN API calls; defaults to connector credentials"}
+        {
+          "name": "mgn_source_server_id",
+          "type": "string",
+          "required": true,
+          "description": "MGN source server ID (s-...)"
+        },
+        {
+          "name": "aws_connector_id",
+          "type": "string",
+          "required": false,
+          "description": "AWS connector ID to use for MGN API calls; defaults to connector credentials"
+        }
       ],
       "execution_tier": 1,
       "rollback_action": null,
       "estimated_duration_seconds": 30,
       "blast_radius_hint": "read_only",
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "action_type": "change",
       "executor": "aws.backup_mgn_replication",
       "generic_action": "backup_mgn_replication",
@@ -4340,12 +4352,39 @@
       "description": "Migrates a Redis instance between modes (standalone to cluster) or performs an in-place version upgrade. RDB snapshot before any changes. Full rollback via RDB restore.",
       "connector_type": "nexplane_agent",
       "parameters": [
-        {"name": "migration_type", "type": "string", "required": true},
-        {"name": "target_version", "type": "string", "required": true},
-        {"name": "source_version", "type": "string", "required": false},
-        {"name": "cluster_nodes", "type": "array", "required": false, "default": []},
-        {"name": "rdb_backup_path", "type": "string", "required": false, "default": "/tmp/nexplane-redis-backup.rdb"},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "migration_type",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "source_version",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "cluster_nodes",
+          "type": "array",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "rdb_backup_path",
+          "type": "string",
+          "required": false,
+          "default": "/tmp/nexplane-redis-backup.rdb"
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "nexplane_agent.redis_cluster_migration",
       "estimated_duration_seconds": 600,
@@ -4362,11 +4401,33 @@
       "description": "Upgrades a Cassandra cluster one node at a time. nodetool snapshot taken before upgrade. Partial rollback via snapshot restore on upgraded nodes.",
       "connector_type": "nexplane_agent",
       "parameters": [
-        {"name": "source_version", "type": "string", "required": true},
-        {"name": "target_version", "type": "string", "required": true},
-        {"name": "nodes", "type": "array", "required": true},
-        {"name": "upgrade_delay_seconds", "type": "integer", "required": false, "default": 30},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "source_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "nodes",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "upgrade_delay_seconds",
+          "type": "integer",
+          "required": false,
+          "default": 30
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "nexplane_agent.cassandra_rolling_upgrade",
       "estimated_duration_seconds": 1800,
@@ -4383,12 +4444,38 @@
       "description": "Upgrades a MongoDB replica set through sequential FCV hops. mongodump snapshot before upgrade. setFCV is the point of no return.",
       "connector_type": "nexplane_agent",
       "parameters": [
-        {"name": "source_version", "type": "string", "required": true},
-        {"name": "target_version", "type": "string", "required": true},
-        {"name": "rs_members", "type": "array", "required": true},
-        {"name": "admin_user", "type": "string", "required": false, "default": "admin"},
-        {"name": "admin_password", "type": "string", "required": false},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "source_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "rs_members",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "admin_user",
+          "type": "string",
+          "required": false,
+          "default": "admin"
+        },
+        {
+          "name": "admin_password",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "nexplane_agent.mongodb_rs_upgrade",
       "estimated_duration_seconds": 3600,
@@ -4405,13 +4492,44 @@
       "description": "Rolling binary upgrade for CockroachDB. Version finalization is a separate irreversible step controlled by auto_finalize flag.",
       "connector_type": "nexplane_agent",
       "parameters": [
-        {"name": "source_version", "type": "string", "required": true},
-        {"name": "target_version", "type": "string", "required": true},
-        {"name": "nodes", "type": "array", "required": true},
-        {"name": "sql_user", "type": "string", "required": false, "default": "root"},
-        {"name": "sql_password", "type": "string", "required": false},
-        {"name": "auto_finalize", "type": "boolean", "required": false, "default": false},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "source_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "nodes",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "sql_user",
+          "type": "string",
+          "required": false,
+          "default": "root"
+        },
+        {
+          "name": "sql_password",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "auto_finalize",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "nexplane_agent.cockroachdb_cluster_upgrade",
       "estimated_duration_seconds": 1800,
@@ -4428,12 +4546,38 @@
       "description": "Rolling member upgrade for etcd. Snapshot before upgrade. Full rollback via etcdctl snapshot restore with data loss window surfaced to operator.",
       "connector_type": "nexplane_agent",
       "parameters": [
-        {"name": "source_version", "type": "string", "required": true},
-        {"name": "target_version", "type": "string", "required": true},
-        {"name": "members", "type": "array", "required": true},
-        {"name": "etcd_data_dir", "type": "string", "required": false, "default": "/var/lib/etcd"},
-        {"name": "snapshot_s3_bucket", "type": "string", "required": false},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "source_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "members",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "etcd_data_dir",
+          "type": "string",
+          "required": false,
+          "default": "/var/lib/etcd"
+        },
+        {
+          "name": "snapshot_s3_bucket",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "nexplane_agent.etcd_upgrade",
       "estimated_duration_seconds": 600,
@@ -4450,11 +4594,32 @@
       "description": "Upgrades a MinIO distributed deployment via mc admin update. Full rollback by pinning to previous release tag.",
       "connector_type": "nexplane_agent",
       "parameters": [
-        {"name": "target_version", "type": "string", "required": true},
-        {"name": "nodes", "type": "array", "required": true},
-        {"name": "access_key", "type": "string", "required": true},
-        {"name": "secret_key", "type": "string", "required": true},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "target_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "nodes",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "access_key",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "secret_key",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "nexplane_agent.minio_distributed_upgrade",
       "estimated_duration_seconds": 600,
@@ -4471,14 +4636,49 @@
       "description": "Upgrades a Ceph cluster in strict daemon order: MGR \u2192 MON \u2192 OSD \u2192 RGW \u2192 MDS. noout set during upgrade. Ceph does not support downgrade.",
       "connector_type": "nexplane_agent",
       "parameters": [
-        {"name": "source_version", "type": "string", "required": true},
-        {"name": "target_version", "type": "string", "required": true},
-        {"name": "mgr_hosts", "type": "array", "required": true},
-        {"name": "mon_hosts", "type": "array", "required": true},
-        {"name": "osd_hosts", "type": "array", "required": true},
-        {"name": "rgw_hosts", "type": "array", "required": false, "default": []},
-        {"name": "mds_hosts", "type": "array", "required": false, "default": []},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "source_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "mgr_hosts",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "mon_hosts",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "osd_hosts",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "rgw_hosts",
+          "type": "array",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "mds_hosts",
+          "type": "array",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "nexplane_agent.ceph_cluster_upgrade",
       "estimated_duration_seconds": 7200,
@@ -4495,17 +4695,66 @@
       "description": "Upgrades Keycloak in-place (WildFly\u2192Quarkus or Quarkus\u2192Quarkus). Exports realms before upgrade, imports on rollback. Full rollback via realm restore + old binary.",
       "connector_type": "nexplane_agent",
       "parameters": [
-        {"name": "source_version", "type": "string", "required": false},
-        {"name": "target_version", "type": "string", "required": true},
-        {"name": "keycloak_home", "type": "string", "required": false, "default": "/opt/keycloak"},
-        {"name": "db_vendor", "type": "string", "required": false, "default": "postgres"},
-        {"name": "db_host", "type": "string", "required": false, "default": "localhost"},
-        {"name": "db_name", "type": "string", "required": false},
-        {"name": "db_user", "type": "string", "required": false},
-        {"name": "db_password", "type": "string", "required": false},
-        {"name": "admin_user", "type": "string", "required": false, "default": "admin"},
-        {"name": "admin_password", "type": "string", "required": false},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "source_version",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "target_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "keycloak_home",
+          "type": "string",
+          "required": false,
+          "default": "/opt/keycloak"
+        },
+        {
+          "name": "db_vendor",
+          "type": "string",
+          "required": false,
+          "default": "postgres"
+        },
+        {
+          "name": "db_host",
+          "type": "string",
+          "required": false,
+          "default": "localhost"
+        },
+        {
+          "name": "db_name",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "db_user",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "db_password",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "admin_user",
+          "type": "string",
+          "required": false,
+          "default": "admin"
+        },
+        {
+          "name": "admin_password",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "nexplane_agent.keycloak_upgrade",
       "estimated_duration_seconds": 900,
@@ -4524,12 +4773,38 @@
       "description": "Upgrades FreeIPA (RHIDM) servers in replica-first order. ipa-backup taken before upgrade; rollback restores from backup. Partial rollback \u2014 changes after backup time are lost.",
       "connector_type": "nexplane_agent",
       "parameters": [
-        {"name": "source_version", "type": "string", "required": false},
-        {"name": "target_version", "type": "string", "required": true},
-        {"name": "master_host", "type": "string", "required": true},
-        {"name": "replica_hosts", "type": "array", "required": false, "default": []},
-        {"name": "ipa_admin_password", "type": "string", "required": false},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "source_version",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "target_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "master_host",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "replica_hosts",
+          "type": "array",
+          "required": false,
+          "default": []
+        },
+        {
+          "name": "ipa_admin_password",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "nexplane_agent.freeipa_upgrade",
       "estimated_duration_seconds": 1800,
@@ -4548,11 +4823,34 @@
       "description": "Applies an LDIF schema extension to a running OpenLDAP 2.5+ server. slapcat config backup taken first; rollback stops slapd, restores config DB from backup, restarts.",
       "connector_type": "nexplane_agent",
       "parameters": [
-        {"name": "schema_ldif_path", "type": "string", "required": true},
-        {"name": "schema_dn", "type": "string", "required": true},
-        {"name": "backup_path", "type": "string", "required": false, "default": "/tmp/nexplane-ldap-backup.ldif"},
-        {"name": "slapd_config_dir", "type": "string", "required": false, "default": "/etc/ldap/slapd.d"},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "schema_ldif_path",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "schema_dn",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "backup_path",
+          "type": "string",
+          "required": false,
+          "default": "/tmp/nexplane-ldap-backup.ldif"
+        },
+        {
+          "name": "slapd_config_dir",
+          "type": "string",
+          "required": false,
+          "default": "/etc/ldap/slapd.d"
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "nexplane_agent.openldap_schema_migration",
       "estimated_duration_seconds": 120,
@@ -4571,12 +4869,37 @@
       "description": "Upgrades a Vault HA (Raft) cluster with zero-quorum-loss. Standbys upgraded first, then active stepped down. Raft snapshot taken before upgrade for rollback.",
       "connector_type": "nexplane_agent",
       "parameters": [
-        {"name": "nodes", "type": "array", "required": true},
-        {"name": "vault_token", "type": "string", "required": false},
-        {"name": "source_version", "type": "string", "required": false},
-        {"name": "target_version", "type": "string", "required": true},
-        {"name": "snapshot_s3_bucket", "type": "string", "required": false},
-        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+        {
+          "name": "nodes",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "vault_token",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "source_version",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "target_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "snapshot_s3_bucket",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
       ],
       "executor": "nexplane_agent.vault_cluster_upgrade",
       "estimated_duration_seconds": 600,
@@ -4588,6 +4911,286 @@
         "Standbys upgraded before active \u2014 quorum maintained throughout",
         "Rollback: raft snapshot restore on active node, rolling restart with old binary"
       ]
+    },
+    {
+      "display_name": "Istio Control Plane Upgrade",
+      "description": "Upgrade the Istio service mesh control plane. Canary strategy installs new revision alongside old, migrates namespaces, then removes old revision. Rollback is full until old revision is removed.",
+      "parameters": [
+        {
+          "required": true,
+          "type": "string",
+          "name": "source_version"
+        },
+        {
+          "required": true,
+          "type": "string",
+          "name": "target_version"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "upgrade_strategy",
+          "default": "canary"
+        },
+        {
+          "required": false,
+          "type": "array",
+          "name": "namespaces"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "kubeconfig_path"
+        },
+        {
+          "required": false,
+          "type": "boolean",
+          "name": "dry_run"
+        }
+      ],
+      "execution_tier": 3,
+      "estimated_duration_seconds": 900,
+      "applicable_asset_types": [
+        "server",
+        "k8s_node"
+      ],
+      "action_type": "change",
+      "executor": "nexplane_agent.istio_control_plane_upgrade",
+      "generic_action": "istio_control_plane_upgrade",
+      "action_id": "istio_control_plane_upgrade",
+      "smoke_verified": false
+    },
+    {
+      "display_name": "Kong API Gateway Upgrade",
+      "description": "Upgrade Kong API Gateway. Takes deck snapshot + DB backup before upgrade. Runs kong migrations. Full rollback restores from snapshot.",
+      "parameters": [
+        {
+          "required": true,
+          "type": "string",
+          "name": "source_version"
+        },
+        {
+          "required": true,
+          "type": "string",
+          "name": "target_version"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "kong_host",
+          "default": "localhost"
+        },
+        {
+          "required": false,
+          "type": "integer",
+          "name": "kong_admin_port",
+          "default": 8001
+        },
+        {
+          "required": false,
+          "type": "integer",
+          "name": "kong_proxy_port",
+          "default": 8000
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "db_mode",
+          "default": "postgres"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "db_host"
+        },
+        {
+          "required": false,
+          "type": "integer",
+          "name": "db_port"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "db_name"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "db_user"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "db_password"
+        },
+        {
+          "required": false,
+          "type": "boolean",
+          "name": "dry_run"
+        }
+      ],
+      "execution_tier": 3,
+      "estimated_duration_seconds": 300,
+      "applicable_asset_types": [
+        "server"
+      ],
+      "action_type": "change",
+      "executor": "nexplane_agent.kong_upgrade",
+      "generic_action": "kong_upgrade",
+      "action_id": "kong_upgrade",
+      "smoke_verified": false
+    },
+    {
+      "display_name": "cert-manager Upgrade",
+      "description": "Upgrade cert-manager CRDs and Deployment. CRD upgrade is partially irreversible; Deployment rollback is always safe.",
+      "parameters": [
+        {
+          "required": true,
+          "type": "string",
+          "name": "source_version"
+        },
+        {
+          "required": true,
+          "type": "string",
+          "name": "target_version"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "namespace",
+          "default": "cert-manager"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "kubeconfig_path"
+        },
+        {
+          "required": false,
+          "type": "boolean",
+          "name": "dry_run"
+        }
+      ],
+      "execution_tier": 3,
+      "estimated_duration_seconds": 300,
+      "applicable_asset_types": [
+        "server",
+        "k8s_node"
+      ],
+      "action_type": "change",
+      "executor": "nexplane_agent.cert_manager_upgrade",
+      "generic_action": "cert_manager_upgrade",
+      "action_id": "cert_manager_upgrade",
+      "smoke_verified": false
+    },
+    {
+      "display_name": "GitLab Major Version Upgrade",
+      "description": "Upgrade GitLab through sequential major version hops. Computes hop chain, takes per-hop backup, waits for background migrations. Partial rollback from most recent hop backup.",
+      "parameters": [
+        {
+          "required": true,
+          "type": "string",
+          "name": "source_version"
+        },
+        {
+          "required": true,
+          "type": "string",
+          "name": "target_version"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "gitlab_host"
+        },
+        {
+          "required": true,
+          "type": "string",
+          "name": "gitlab_admin_token"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "gitlab_package_type",
+          "default": "omnibus"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "backup_s3_bucket"
+        },
+        {
+          "required": false,
+          "type": "boolean",
+          "name": "dry_run"
+        }
+      ],
+      "execution_tier": 3,
+      "estimated_duration_seconds": 3600,
+      "applicable_asset_types": [
+        "server"
+      ],
+      "action_type": "change",
+      "executor": "nexplane_agent.gitlab_upgrade",
+      "generic_action": "gitlab_upgrade",
+      "action_id": "gitlab_upgrade",
+      "smoke_verified": false
+    },
+    {
+      "display_name": "Jenkins Upgrade",
+      "description": "Upgrade Jenkins WAR file. Enters quiet mode, waits for idle executors, replaces WAR, verifies version. Full rollback from WAR + JENKINS_HOME backup.",
+      "parameters": [
+        {
+          "required": true,
+          "type": "string",
+          "name": "source_version"
+        },
+        {
+          "required": true,
+          "type": "string",
+          "name": "target_version"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "jenkins_home",
+          "default": "/var/lib/jenkins"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "jenkins_war_path"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "jenkins_admin_url"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "jenkins_admin_user"
+        },
+        {
+          "required": false,
+          "type": "string",
+          "name": "jenkins_admin_password"
+        },
+        {
+          "required": false,
+          "type": "boolean",
+          "name": "dry_run"
+        }
+      ],
+      "execution_tier": 3,
+      "estimated_duration_seconds": 300,
+      "applicable_asset_types": [
+        "server"
+      ],
+      "action_type": "change",
+      "executor": "nexplane_agent.jenkins_upgrade",
+      "generic_action": "jenkins_upgrade",
+      "action_id": "jenkins_upgrade",
+      "smoke_verified": false
     }
   ]
 }

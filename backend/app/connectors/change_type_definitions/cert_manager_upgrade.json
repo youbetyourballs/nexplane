@@ -1,0 +1,18 @@
+{
+  "change_type": "cert_manager_upgrade",
+  "display_name": "cert-manager Upgrade",
+  "description": "Upgrade cert-manager in a Kubernetes cluster. CRDs are upgraded first (server-side apply), then the Deployment. CRDs cannot be cleanly downgraded; Deployment rollback is always safe. ROLLBACK_CAPABILITY=partial.",
+  "rollback_capability": "partial",
+  "steps": [
+    {"generic_action": "cert_manager_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "source_version":  { "type": "string",  "required": true,  "description": "e.g. '1.13'" },
+    "target_version":  { "type": "string",  "required": true,  "description": "e.g. '1.15'" },
+    "namespace":       { "type": "string",  "required": false, "default": "cert-manager" },
+    "kubeconfig_path": { "type": "string",  "required": false, "default": "~/.kube/config" },
+    "dry_run":         { "type": "boolean", "required": false, "default": false }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "change_type": "kong_upgrade",
+  "display_name": "Kong API Gateway Upgrade",
+  "description": "Upgrade Kong API Gateway to a new version. Takes a deck snapshot and DB backup before upgrade. Supports postgres and db-less modes. Full rollback restores from deck dump and package downgrade.",
+  "rollback_capability": "full",
+  "steps": [
+    {"generic_action": "kong_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "source_version":  { "type": "string",  "required": true },
+    "target_version":  { "type": "string",  "required": true },
+    "kong_host":       { "type": "string",  "required": false, "default": "localhost" },
+    "kong_admin_port": { "type": "integer", "required": false, "default": 8001 },
+    "kong_proxy_port": { "type": "integer", "required": false, "default": 8000 },
+    "db_mode":         { "type": "string",  "required": false, "enum": ["postgres", "dbless"], "default": "postgres" },
+    "db_host":         { "type": "string",  "required": false, "default": "localhost" },
+    "db_port":         { "type": "integer", "required": false, "default": 5432 },
+    "db_name":         { "type": "string",  "required": false },
+    "db_user":         { "type": "string",  "required": false },
+    "db_password":     { "type": "string",  "required": false, "sensitive": true },
+    "dry_run":         { "type": "boolean", "required": false, "default": false }
+  }
+}

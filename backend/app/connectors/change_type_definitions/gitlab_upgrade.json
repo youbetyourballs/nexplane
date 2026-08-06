@@ -1,0 +1,20 @@
+{
+  "change_type": "gitlab_upgrade",
+  "display_name": "GitLab Major Version Upgrade",
+  "description": "Upgrade GitLab through sequential major version hops. Cannot skip major versions — executor computes and validates the full hop chain. Background migrations are waited between each hop. ROLLBACK_CAPABILITY=partial (background migrations are irreversible; rollback restores from per-hop backup).",
+  "rollback_capability": "partial",
+  "steps": [
+    {"generic_action": "gitlab_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "source_version":        { "type": "string",  "required": true,  "description": "e.g. '15.11'" },
+    "target_version":        { "type": "string",  "required": true,  "description": "e.g. '17.2'" },
+    "gitlab_host":           { "type": "string",  "required": false, "default": "localhost" },
+    "gitlab_admin_token":    { "type": "string",  "required": true,  "sensitive": true },
+    "gitlab_package_type":   { "type": "string",  "required": false, "enum": ["omnibus", "helm"], "default": "omnibus" },
+    "backup_s3_bucket":      { "type": "string",  "required": false },
+    "dry_run":               { "type": "boolean", "required": false, "default": false }
+  }
+}

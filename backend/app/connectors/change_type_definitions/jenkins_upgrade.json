@@ -1,0 +1,21 @@
+{
+  "change_type": "jenkins_upgrade",
+  "display_name": "Jenkins Upgrade",
+  "description": "Upgrade Jenkins by replacing the WAR file. Enters quiet mode, waits for idle executors, stops Jenkins, replaces WAR, starts Jenkins. Full rollback from WAR and JENKINS_HOME backup.",
+  "rollback_capability": "full",
+  "steps": [
+    {"generic_action": "jenkins_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "source_version":        { "type": "string",  "required": true },
+    "target_version":        { "type": "string",  "required": true },
+    "jenkins_home":          { "type": "string",  "required": false, "default": "/var/lib/jenkins" },
+    "jenkins_war_path":      { "type": "string",  "required": false, "default": "/usr/share/jenkins/jenkins.war" },
+    "jenkins_admin_url":     { "type": "string",  "required": false, "default": "http://localhost:8080" },
+    "jenkins_admin_user":    { "type": "string",  "required": false },
+    "jenkins_admin_password":{ "type": "string",  "required": false, "sensitive": true },
+    "dry_run":               { "type": "boolean", "required": false, "default": false }
+  }
+}

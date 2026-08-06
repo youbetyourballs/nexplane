@@ -625,6 +625,12 @@ class ChangeType(str, enum.Enum):
     freeipa_upgrade = "freeipa_upgrade"
     openldap_schema_migration = "openldap_schema_migration"
     vault_cluster_upgrade = "vault_cluster_upgrade"
+    # Service mesh and CI/CD upgrades
+    istio_control_plane_upgrade = "istio_control_plane_upgrade"
+    kong_upgrade = "kong_upgrade"
+    cert_manager_upgrade = "cert_manager_upgrade"
+    gitlab_upgrade = "gitlab_upgrade"
+    jenkins_upgrade = "jenkins_upgrade"
 
 
 class RiskLevel(str, enum.Enum):

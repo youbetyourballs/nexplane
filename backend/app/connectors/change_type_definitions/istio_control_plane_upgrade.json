@@ -1,0 +1,19 @@
+{
+  "change_type": "istio_control_plane_upgrade",
+  "display_name": "Istio Control Plane Upgrade",
+  "description": "Upgrade the Istio service mesh control plane using canary or in-place strategy. Canary installs the new revision alongside the old, migrates namespaces one by one, then removes the old revision.",
+  "rollback_capability": "full",
+  "steps": [
+    {"generic_action": "istio_control_plane_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["agent_reachable", "asset_exists", "no_concurrent_changes"],
+  "verification_methods": ["output_check"],
+  "parameters": {
+    "source_version":    { "type": "string",  "required": true,  "description": "Current Istio minor version, e.g. '1.20'" },
+    "target_version":    { "type": "string",  "required": true,  "description": "Target Istio minor version, e.g. '1.21'" },
+    "upgrade_strategy":  { "type": "string",  "required": false, "enum": ["canary", "in_place"], "default": "canary" },
+    "namespaces":        { "type": "array",   "required": false, "description": "Namespaces to migrate; default: all with istio-injection=enabled" },
+    "kubeconfig_path":   { "type": "string",  "required": false, "default": "~/.kube/config" },
+    "dry_run":           { "type": "boolean", "required": false, "default": false }
+  }
+}
