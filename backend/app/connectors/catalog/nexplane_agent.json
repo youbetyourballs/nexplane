@@ -4488,6 +4488,106 @@
         "Strict upgrade order enforced: MGR \u2192 MON \u2192 OSD \u2192 RGW \u2192 MDS",
         "Ceph does not support downgrade \u2014 rollback surfaces daemon state and manual recovery steps"
       ]
+    },
+    {
+      "change_type": "keycloak_upgrade",
+      "display_name": "Keycloak Major Upgrade",
+      "description": "Upgrades Keycloak in-place (WildFly\u2192Quarkus or Quarkus\u2192Quarkus). Exports realms before upgrade, imports on rollback. Full rollback via realm restore + old binary.",
+      "connector_type": "nexplane_agent",
+      "parameters": [
+        {"name": "source_version", "type": "string", "required": false},
+        {"name": "target_version", "type": "string", "required": true},
+        {"name": "keycloak_home", "type": "string", "required": false, "default": "/opt/keycloak"},
+        {"name": "db_vendor", "type": "string", "required": false, "default": "postgres"},
+        {"name": "db_host", "type": "string", "required": false, "default": "localhost"},
+        {"name": "db_name", "type": "string", "required": false},
+        {"name": "db_user", "type": "string", "required": false},
+        {"name": "db_password", "type": "string", "required": false},
+        {"name": "admin_user", "type": "string", "required": false, "default": "admin"},
+        {"name": "admin_password", "type": "string", "required": false},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent.keycloak_upgrade",
+      "estimated_duration_seconds": 900,
+      "blast_radius_hint": "keycloak_downtime_during_upgrade",
+      "rollback_strategy": "executor",
+      "smoke_verified": false,
+      "safety_notes": [
+        "Realm export captured before upgrade \u2014 rollback restores from export",
+        "WildFly\u2192Quarkus migration handled automatically when source \u2264 16 and target \u2265 17",
+        "DB schema migration is idempotent; old binary restored on rollback"
+      ]
+    },
+    {
+      "change_type": "freeipa_upgrade",
+      "display_name": "FreeIPA / RHIDM Upgrade",
+      "description": "Upgrades FreeIPA (RHIDM) servers in replica-first order. ipa-backup taken before upgrade; rollback restores from backup. Partial rollback \u2014 changes after backup time are lost.",
+      "connector_type": "nexplane_agent",
+      "parameters": [
+        {"name": "source_version", "type": "string", "required": false},
+        {"name": "target_version", "type": "string", "required": true},
+        {"name": "master_host", "type": "string", "required": true},
+        {"name": "replica_hosts", "type": "array", "required": false, "default": []},
+        {"name": "ipa_admin_password", "type": "string", "required": false},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent.freeipa_upgrade",
+      "estimated_duration_seconds": 1800,
+      "blast_radius_hint": "freeipa_kerberos_ldap_unavailable_during_upgrade",
+      "rollback_strategy": "executor",
+      "smoke_verified": false,
+      "safety_notes": [
+        "ipa-backup taken before upgrade on master and each replica",
+        "Replicas upgraded before master \u2014 quorum maintained",
+        "Partial rollback: ipa-backup restore wipes LDAP+Kerberos DBs; changes after backup time are lost"
+      ]
+    },
+    {
+      "change_type": "openldap_schema_migration",
+      "display_name": "OpenLDAP Schema Migration",
+      "description": "Applies an LDIF schema extension to a running OpenLDAP 2.5+ server. slapcat config backup taken first; rollback stops slapd, restores config DB from backup, restarts.",
+      "connector_type": "nexplane_agent",
+      "parameters": [
+        {"name": "schema_ldif_path", "type": "string", "required": true},
+        {"name": "schema_dn", "type": "string", "required": true},
+        {"name": "backup_path", "type": "string", "required": false, "default": "/tmp/nexplane-ldap-backup.ldif"},
+        {"name": "slapd_config_dir", "type": "string", "required": false, "default": "/etc/ldap/slapd.d"},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent.openldap_schema_migration",
+      "estimated_duration_seconds": 120,
+      "blast_radius_hint": "slapd_brief_restart_on_rollback",
+      "rollback_strategy": "executor",
+      "smoke_verified": false,
+      "safety_notes": [
+        "slapcat config + data backup before apply",
+        "Schema validated in temp dir via slapadd before live apply",
+        "Rollback: stop slapd, restore config DB from slapcat export, start slapd"
+      ]
+    },
+    {
+      "change_type": "vault_cluster_upgrade",
+      "display_name": "HashiCorp Vault Cluster Upgrade",
+      "description": "Upgrades a Vault HA (Raft) cluster with zero-quorum-loss. Standbys upgraded first, then active stepped down. Raft snapshot taken before upgrade for rollback.",
+      "connector_type": "nexplane_agent",
+      "parameters": [
+        {"name": "nodes", "type": "array", "required": true},
+        {"name": "vault_token", "type": "string", "required": false},
+        {"name": "source_version", "type": "string", "required": false},
+        {"name": "target_version", "type": "string", "required": true},
+        {"name": "snapshot_s3_bucket", "type": "string", "required": false},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent.vault_cluster_upgrade",
+      "estimated_duration_seconds": 600,
+      "blast_radius_hint": "vault_leadership_change_during_stepdown",
+      "rollback_strategy": "executor",
+      "smoke_verified": false,
+      "safety_notes": [
+        "Raft snapshot saved before first node upgrade",
+        "Standbys upgraded before active \u2014 quorum maintained throughout",
+        "Rollback: raft snapshot restore on active node, rolling restart with old binary"
+      ]
     }
   ]
 }

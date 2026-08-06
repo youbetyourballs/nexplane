@@ -620,6 +620,11 @@ class ChangeType(str, enum.Enum):
     etcd_upgrade = "etcd_upgrade"
     minio_distributed_upgrade = "minio_distributed_upgrade"
     ceph_cluster_upgrade = "ceph_cluster_upgrade"
+    # Identity/auth infrastructure upgrades
+    keycloak_upgrade = "keycloak_upgrade"
+    freeipa_upgrade = "freeipa_upgrade"
+    openldap_schema_migration = "openldap_schema_migration"
+    vault_cluster_upgrade = "vault_cluster_upgrade"
 
 
 class RiskLevel(str, enum.Enum):
