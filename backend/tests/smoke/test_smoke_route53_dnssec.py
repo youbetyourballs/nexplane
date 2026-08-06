@@ -42,6 +42,24 @@ def _env(key: str) -> str:
     return val
 
 
+async def _get_api_token() -> str:
+    """Return an API token — from env var or first valid token in DB."""
+    env_tok = os.environ.get("API_TOKEN")
+    if env_tok:
+        return env_tok
+    from app.database import AsyncSessionLocal
+    from app.models.api_token import ApiToken
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(ApiToken).where(ApiToken.revoked == False).limit(1)  # noqa: E712
+        )
+        tok = r.scalars().first()
+        if not tok:
+            pytest.skip("No API tokens in DB and API_TOKEN env var not set")
+        return tok.token
+
+
 async def _get_aws_creds() -> tuple[dict, str]:
     from app.database import AsyncSessionLocal
     from app.models.connector import Connector
@@ -154,7 +172,7 @@ def _delete_zone_records(r53, zone_id: str) -> None:
 @pytest.mark.smoke_phase("ROUTE53_DNSSEC")
 async def test_01_create_zone():
     """Create a public hosted zone for smoke testing DNSSEC."""
-    token = _env("API_TOKEN")
+    token = await _get_api_token()
     creds, connector_id = await _get_aws_creds()
     r53 = _r53_client_from_creds(creds)
 
@@ -192,7 +210,7 @@ async def test_01_create_zone():
 @pytest.mark.smoke_phase("ROUTE53_DNSSEC")
 async def test_02_execute_cr():
     """Run route53_dnssec_enable CR through full lifecycle."""
-    token = _STATE.get("token", _env("API_TOKEN"))
+    token = _STATE.get("token") or await _get_api_token()
     zone_id = _STATE.get("zone_id")
     connector_id = _STATE.get("connector_id")
     assert zone_id, "test_01 must run first"
@@ -288,7 +306,7 @@ async def test_03_verify_dnssec_signing():
 @pytest.mark.smoke_phase("ROUTE53_DNSSEC")
 async def test_04_rollback():
     """Roll back the CR — disables DNSSEC, deletes KSK, schedules KMS key deletion."""
-    token = _STATE.get("token", _env("API_TOKEN"))
+    token = _STATE.get("token") or await _get_api_token()
     cr_id = _STATE.get("cr_id")
     assert cr_id, "test_02 must run first"
 

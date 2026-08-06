@@ -56,6 +56,24 @@ def _env(key: str) -> str:
     return val
 
 
+async def _get_api_token() -> str:
+    """Return an API token — from env var or first valid token in DB."""
+    env_tok = os.environ.get("API_TOKEN")
+    if env_tok:
+        return env_tok
+    from app.database import AsyncSessionLocal
+    from app.models.api_token import ApiToken
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(ApiToken).where(ApiToken.revoked == False).limit(1)  # noqa: E712
+        )
+        tok = r.scalars().first()
+        if not tok:
+            pytest.skip("No API tokens in DB and API_TOKEN env var not set")
+        return tok.token
+
+
 async def _get_aws_creds() -> tuple[dict, str]:
     from app.database import AsyncSessionLocal
     from app.models.connector import Connector
@@ -164,7 +182,7 @@ def _extract_exec_result(detail: dict) -> dict:
 @pytest.mark.smoke_phase("AWS_ACCOUNT_FULL_BASELINE")
 async def test_01_setup():
     """Verify AWS connector is registered and credentials are accessible."""
-    token = _env("API_TOKEN")
+    token = await _get_api_token()
     creds, connector_id = await _get_aws_creds()
 
     _STATE["token"] = token
@@ -196,7 +214,7 @@ async def test_01_setup():
 @pytest.mark.smoke_phase("AWS_ACCOUNT_FULL_BASELINE")
 async def test_02_execute_cr():
     """Run aws_account_full_baseline CR through full lifecycle."""
-    token = _STATE.get("token", _env("API_TOKEN"))
+    token = _STATE.get("token") or await _get_api_token()
     connector_id = _STATE.get("connector_id")
     assert connector_id, "test_01 must run first"
 
@@ -308,7 +326,7 @@ async def test_03_verify_steps_completed():
 @pytest.mark.smoke_phase("AWS_ACCOUNT_FULL_BASELINE")
 async def test_04_rollback():
     """Roll back — FILO: iam_role_baseline → monitoring → hardening."""
-    token = _STATE.get("token", _env("API_TOKEN"))
+    token = _STATE.get("token") or await _get_api_token()
     cr_id = _STATE.get("cr_id")
     assert cr_id, "test_02 must run first"
 

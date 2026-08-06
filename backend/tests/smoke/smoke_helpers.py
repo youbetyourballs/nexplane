@@ -1169,3 +1169,71 @@ def _wait_ssm_ready_win(ssm_client, instance_id: str, timeout: int = 600) -> Non
             pass
         time.sleep(10)
     raise TimeoutError(f"SSM not ready for {instance_id} after {timeout}s")
+
+
+def get_or_create_smoke_ami(
+    cache_key: str,
+    setup_hash: str,
+    launch_fn,
+    snapshot_name: str | None = None,
+) -> str:
+    """Return a cached AMI ID, creating one via launch_fn if the cache is cold.
+
+    launch_fn(aws_creds) must provision an EC2 instance, configure it, and return
+    (instance_id, ec2_client, aws_creds).  The instance is stopped, snapshotted,
+    and terminated here.
+
+    cache_key  — path segment under /nexplane/smoke-amis/ (e.g. "keycloak/21.1")
+    setup_hash — short hash that changes when the setup script changes
+    """
+    import json
+    import time as _t
+
+    aws_creds = get_connector_creds_from_db("aws")
+    region = aws_creds.get("region", "us-east-1")
+    _ec2 = boto3.client(
+        "ec2",
+        aws_access_key_id=aws_creds.get("access_key_id") or aws_creds.get("aws_access_key_id"),
+        aws_secret_access_key=aws_creds.get("secret_access_key") or aws_creds.get("aws_secret_access_key"),
+        region_name=region,
+    )
+    _ssm = boto3.client(
+        "ssm",
+        aws_access_key_id=aws_creds.get("access_key_id") or aws_creds.get("aws_access_key_id"),
+        aws_secret_access_key=aws_creds.get("secret_access_key") or aws_creds.get("aws_secret_access_key"),
+        region_name=region,
+    )
+
+    cached = _check_smoke_ami_cache(_ssm, _ec2, cache_key, setup_hash)
+    if cached:
+        return cached
+
+    # Cache miss — provision, snapshot, terminate
+    instance_id, ec2_client, _ = launch_fn(aws_creds)
+    name = snapshot_name or f"nexplane-smoke-{cache_key.replace('/', '-')}-{setup_hash}"
+
+    ec2_client.stop_instances(InstanceIds=[instance_id])
+    ec2_client.get_waiter("instance_stopped").wait(InstanceIds=[instance_id])
+
+    ami_resp = ec2_client.create_image(InstanceId=instance_id, Name=name, NoReboot=True)
+    ami_id = ami_resp["ImageId"]
+
+    deadline = _t.time() + 600
+    while _t.time() < deadline:
+        images = ec2_client.describe_images(ImageIds=[ami_id]).get("Images", [])
+        if images and images[0].get("State") == "available":
+            break
+        _t.sleep(15)
+    else:
+        raise TimeoutError(f"AMI {ami_id} not available after 10 min")
+
+    ec2_client.terminate_instances(InstanceIds=[instance_id])
+
+    param_name = f"/nexplane/smoke-amis/{cache_key}/{setup_hash}"
+    _ssm.put_parameter(
+        Name=param_name,
+        Value=json.dumps({"ami_id": ami_id, "name": name}),
+        Type="String",
+        Overwrite=True,
+    )
+    return ami_id
