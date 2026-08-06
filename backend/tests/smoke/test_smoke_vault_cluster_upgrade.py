@@ -109,11 +109,30 @@ def _launch_vault(ec2, ssm, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id")
 
+    import base64
+    # Generate self-signed TLS certs and start Vault (AMI has empty cert files)
+    user_data = base64.b64encode(b"""#!/bin/bash
+openssl req -x509 -newkey rsa:2048 -keyout /opt/vault/tls/tls.key \
+    -out /opt/vault/tls/tls.crt -days 30 -nodes \
+    -subj '/CN=vault-smoke' 2>/dev/null
+chown vault:vault /opt/vault/tls/tls.key /opt/vault/tls/tls.crt
+chmod 640 /opt/vault/tls/tls.key /opt/vault/tls/tls.crt
+nohup vault server -config=/etc/vault.d/vault.hcl > /var/log/vault.log 2>&1 &
+sleep 5
+VAULT_SKIP_VERIFY=true VAULT_ADDR=https://127.0.0.1:8200 vault operator init \
+    -key-shares=1 -key-threshold=1 -format=json > /tmp/vault-init.json 2>/dev/null || true
+UNSEAL_KEY=$(python3 -c "import json; d=json.load(open('/tmp/vault-init.json')); print(d['unseal_keys_b64'][0])" 2>/dev/null)
+ROOT_TOKEN=$(python3 -c "import json; d=json.load(open('/tmp/vault-init.json')); print(d['root_token'])" 2>/dev/null)
+[ -n "$UNSEAL_KEY" ] && VAULT_SKIP_VERIFY=true VAULT_ADDR=https://127.0.0.1:8200 vault operator unseal "$UNSEAL_KEY" || true
+echo "ROOT_TOKEN=$ROOT_TOKEN" > /tmp/vault-root-token.txt
+""").decode()
+
     kwargs = dict(
         ImageId=ami_id,
         InstanceType="t3.small",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData=user_data,
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-vault-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-vault-cluster-upgrade"},

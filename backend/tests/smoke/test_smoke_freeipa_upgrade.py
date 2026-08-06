@@ -91,11 +91,22 @@ def _launch_ipa(ec2, ssm, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id")
 
+    import base64
+    # Start dirsrv directly (ipactl health-checks cause it to shut back down)
+    user_data = base64.b64encode(b"""#!/bin/bash
+# Get the LDAP instance name (e.g. SMOKE-TEST) from the slapd dir
+INSTANCE=$(ls /etc/dirsrv/ | grep slapd- | head -1 | sed 's/slapd-//')
+if [ -n "$INSTANCE" ]; then
+    systemctl start dirsrv@${INSTANCE} || true
+fi
+""").decode()
+
     kwargs = dict(
         ImageId=ami_id,
         InstanceType="t3.medium",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData=user_data,
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-freeipa-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-freeipa-upgrade"},
