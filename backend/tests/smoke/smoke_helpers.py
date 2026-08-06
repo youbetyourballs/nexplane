@@ -1193,6 +1193,7 @@ def get_or_create_smoke_ami(
          get_or_create_smoke_ami(ssm_key=..., creds=..., build_instructions=...)
          On cache miss: skips with build_instructions so a human can build the AMI.
     """
+    import boto3
     import json
     import time as _t
 
