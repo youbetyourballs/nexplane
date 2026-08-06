@@ -1,0 +1,50 @@
+{
+  "change_type": "minio_distributed_upgrade",
+  "display_name": "MinIO Distributed Upgrade",
+  "description": "Upgrades a MinIO distributed deployment using mc admin update. MinIO handles its own coordinated rolling restart. Full rollback by pinning back to previous release tag.",
+  "risk_level_default": "medium",
+  "incident_response": false,
+  "parameters": {
+    "target_version": {
+      "type": "string",
+      "required": true,
+      "label": "Target Version",
+      "description": "MinIO release tag (e.g. RELEASE.2024-01-01T00-00-00Z)"
+    },
+    "nodes": {
+      "type": "array",
+      "required": true,
+      "label": "MinIO Nodes",
+      "description": "List of {host, api_port, console_port}"
+    },
+    "access_key": {
+      "type": "string",
+      "required": true,
+      "label": "Access Key",
+      "description": "MinIO admin access key"
+    },
+    "secret_key": {
+      "type": "string",
+      "required": true,
+      "label": "Secret Key",
+      "description": "MinIO admin secret key"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight checks only — no changes applied",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "full",
+    "description": "mc admin update pinned to previous version tag. MinIO explicitly supports rollback to any previous release. If erasure format changed on a major release, healing is required after rollback."
+  },
+  "steps": [
+    {"step": "preflight", "generic_action": "minio_distributed_upgrade", "description": "mc admin info: all nodes healthy, erasure sets intact, no healing in progress"},
+    {"step": "config_export", "generic_action": "minio_distributed_upgrade", "description": "mc admin config export — configuration backup"},
+    {"step": "upgrade", "generic_action": "minio_distributed_upgrade", "description": "mc admin update — MinIO downloads and rolls new binary to all nodes"},
+    {"step": "verify", "generic_action": "minio_distributed_upgrade", "description": "mc admin info: all nodes on target version, all drives online"}
+  ]
+}

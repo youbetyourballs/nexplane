@@ -1,0 +1,57 @@
+{
+  "change_type": "redis_cluster_migration",
+  "display_name": "Redis Cluster Migration",
+  "description": "Migrates a Redis instance between modes (standalone to cluster) or performs an in-place version upgrade. Takes an RDB snapshot before any changes. Full rollback via RDB restore.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "migration_type": {
+      "type": "string",
+      "required": true,
+      "label": "Migration Type",
+      "description": "standalone_to_cluster | version_upgrade"
+    },
+    "target_version": {
+      "type": "string",
+      "required": true,
+      "label": "Target Version",
+      "description": "Target Redis version (e.g. 7.2)"
+    },
+    "source_version": {
+      "type": "string",
+      "required": false,
+      "label": "Source Version",
+      "description": "Current Redis version (e.g. 6.2). Required for version_upgrade."
+    },
+    "cluster_nodes": {
+      "type": "array",
+      "required": false,
+      "label": "Cluster Nodes",
+      "description": "List of {host, port} for cluster nodes (standalone_to_cluster only)"
+    },
+    "rdb_backup_path": {
+      "type": "string",
+      "required": false,
+      "label": "RDB Backup Path",
+      "description": "Path to store RDB snapshot (default: /tmp/nexplane-redis-backup.rdb)",
+      "default": "/tmp/nexplane-redis-backup.rdb"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight checks only — no changes applied",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "full",
+    "description": "RDB snapshot restore. For version_upgrade: reinstall previous binary and restore RDB. For standalone_to_cluster: cluster reset and RDB restore to standalone mode."
+  },
+  "steps": [
+    {"step": "preflight", "generic_action": "redis_cluster_migration", "description": "Detect Redis mode (standalone/sentinel/cluster), validate target version, check replication lag"},
+    {"step": "snapshot", "generic_action": "redis_cluster_migration", "description": "BGSAVE and download RDB to backup path"},
+    {"step": "migrate", "generic_action": "redis_cluster_migration", "description": "In-place version upgrade or standalone-to-cluster promotion"},
+    {"step": "verify", "generic_action": "redis_cluster_migration", "description": "CLUSTER INFO (cluster_state=ok, all slots assigned) or standalone PING"}
+  ]
+}

@@ -4333,6 +4333,161 @@
         "Both old and new CA are trusted simultaneously during transition \u2014 no access disruption",
         "Rollback restores previous TrustedUserCAKeys and reloads sshd"
       ]
+    },
+    {
+      "change_type": "redis_cluster_migration",
+      "display_name": "Redis Cluster Migration",
+      "description": "Migrates a Redis instance between modes (standalone to cluster) or performs an in-place version upgrade. RDB snapshot before any changes. Full rollback via RDB restore.",
+      "connector_type": "nexplane_agent",
+      "parameters": [
+        {"name": "migration_type", "type": "string", "required": true},
+        {"name": "target_version", "type": "string", "required": true},
+        {"name": "source_version", "type": "string", "required": false},
+        {"name": "cluster_nodes", "type": "array", "required": false, "default": []},
+        {"name": "rdb_backup_path", "type": "string", "required": false, "default": "/tmp/nexplane-redis-backup.rdb"},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent.redis_cluster_migration",
+      "estimated_duration_seconds": 600,
+      "blast_radius_hint": "redis_data_unavailability",
+      "safety_notes": [
+        "RDB snapshot taken before any changes \u2014 full rollback available",
+        "For standalone_to_cluster: cluster reset restores standalone mode from RDB",
+        "For version_upgrade: previous binary reinstalled and RDB restored on rollback"
+      ]
+    },
+    {
+      "change_type": "cassandra_rolling_upgrade",
+      "display_name": "Cassandra Rolling Upgrade",
+      "description": "Upgrades a Cassandra cluster one node at a time. nodetool snapshot taken before upgrade. Partial rollback via snapshot restore on upgraded nodes.",
+      "connector_type": "nexplane_agent",
+      "parameters": [
+        {"name": "source_version", "type": "string", "required": true},
+        {"name": "target_version", "type": "string", "required": true},
+        {"name": "nodes", "type": "array", "required": true},
+        {"name": "upgrade_delay_seconds", "type": "integer", "required": false, "default": 30},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent.cassandra_rolling_upgrade",
+      "estimated_duration_seconds": 1800,
+      "blast_radius_hint": "cassandra_node_unavailability",
+      "safety_notes": [
+        "nodetool snapshot taken on all nodes before upgrade begins",
+        "One node at a time \u2014 cluster remains available during rolling upgrade",
+        "Partial rollback: already-upgraded nodes may require snapshot restore"
+      ]
+    },
+    {
+      "change_type": "mongodb_rs_upgrade",
+      "display_name": "MongoDB Replica Set Upgrade",
+      "description": "Upgrades a MongoDB replica set through sequential FCV hops. mongodump snapshot before upgrade. setFCV is the point of no return.",
+      "connector_type": "nexplane_agent",
+      "parameters": [
+        {"name": "source_version", "type": "string", "required": true},
+        {"name": "target_version", "type": "string", "required": true},
+        {"name": "rs_members", "type": "array", "required": true},
+        {"name": "admin_user", "type": "string", "required": false, "default": "admin"},
+        {"name": "admin_password", "type": "string", "required": false},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent.mongodb_rs_upgrade",
+      "estimated_duration_seconds": 3600,
+      "blast_radius_hint": "mongodb_primary_election",
+      "safety_notes": [
+        "mongodump archive taken before any changes",
+        "setFeatureCompatibilityVersion is irreversible \u2014 rollback blocks clearly after FCV set",
+        "Multi-hop upgrades (e.g. 5.0\u21927.0) executed automatically with FCV set at each hop"
+      ]
+    },
+    {
+      "change_type": "cockroachdb_cluster_upgrade",
+      "display_name": "CockroachDB Cluster Upgrade",
+      "description": "Rolling binary upgrade for CockroachDB. Version finalization is a separate irreversible step controlled by auto_finalize flag.",
+      "connector_type": "nexplane_agent",
+      "parameters": [
+        {"name": "source_version", "type": "string", "required": true},
+        {"name": "target_version", "type": "string", "required": true},
+        {"name": "nodes", "type": "array", "required": true},
+        {"name": "sql_user", "type": "string", "required": false, "default": "root"},
+        {"name": "sql_password", "type": "string", "required": false},
+        {"name": "auto_finalize", "type": "boolean", "required": false, "default": false},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent.cockroachdb_cluster_upgrade",
+      "estimated_duration_seconds": 1800,
+      "blast_radius_hint": "cockroachdb_node_drain",
+      "safety_notes": [
+        "Backup taken before rolling upgrade",
+        "Binary rollback available before version finalization",
+        "auto_finalize=false (default): operator must explicitly finalize to make upgrade irreversible"
+      ]
+    },
+    {
+      "change_type": "etcd_upgrade",
+      "display_name": "etcd Cluster Upgrade",
+      "description": "Rolling member upgrade for etcd. Snapshot before upgrade. Full rollback via etcdctl snapshot restore with data loss window surfaced to operator.",
+      "connector_type": "nexplane_agent",
+      "parameters": [
+        {"name": "source_version", "type": "string", "required": true},
+        {"name": "target_version", "type": "string", "required": true},
+        {"name": "members", "type": "array", "required": true},
+        {"name": "etcd_data_dir", "type": "string", "required": false, "default": "/var/lib/etcd"},
+        {"name": "snapshot_s3_bucket", "type": "string", "required": false},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent.etcd_upgrade",
+      "estimated_duration_seconds": 600,
+      "blast_radius_hint": "etcd_member_unavailability",
+      "safety_notes": [
+        "etcdctl snapshot save before any member is upgraded",
+        "Full rollback via snapshot restore \u2014 data loss window clearly surfaced",
+        "One member at a time \u2014 quorum maintained throughout"
+      ]
+    },
+    {
+      "change_type": "minio_distributed_upgrade",
+      "display_name": "MinIO Distributed Upgrade",
+      "description": "Upgrades a MinIO distributed deployment via mc admin update. Full rollback by pinning to previous release tag.",
+      "connector_type": "nexplane_agent",
+      "parameters": [
+        {"name": "target_version", "type": "string", "required": true},
+        {"name": "nodes", "type": "array", "required": true},
+        {"name": "access_key", "type": "string", "required": true},
+        {"name": "secret_key", "type": "string", "required": true},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent.minio_distributed_upgrade",
+      "estimated_duration_seconds": 600,
+      "blast_radius_hint": "minio_temporary_unavailability",
+      "safety_notes": [
+        "Config exported before upgrade as backup",
+        "Full rollback: mc admin update to previous release tag",
+        "MinIO handles coordinated rolling restart internally"
+      ]
+    },
+    {
+      "change_type": "ceph_cluster_upgrade",
+      "display_name": "Ceph Cluster Upgrade",
+      "description": "Upgrades a Ceph cluster in strict daemon order: MGR \u2192 MON \u2192 OSD \u2192 RGW \u2192 MDS. noout set during upgrade. Ceph does not support downgrade.",
+      "connector_type": "nexplane_agent",
+      "parameters": [
+        {"name": "source_version", "type": "string", "required": true},
+        {"name": "target_version", "type": "string", "required": true},
+        {"name": "mgr_hosts", "type": "array", "required": true},
+        {"name": "mon_hosts", "type": "array", "required": true},
+        {"name": "osd_hosts", "type": "array", "required": true},
+        {"name": "rgw_hosts", "type": "array", "required": false, "default": []},
+        {"name": "mds_hosts", "type": "array", "required": false, "default": []},
+        {"name": "dry_run", "type": "boolean", "required": false, "default": false}
+      ],
+      "executor": "nexplane_agent.ceph_cluster_upgrade",
+      "estimated_duration_seconds": 7200,
+      "blast_radius_hint": "ceph_osd_unavailability",
+      "safety_notes": [
+        "noout set before upgrade to prevent rebalancing \u2014 unset in finally block even on failure",
+        "Strict upgrade order enforced: MGR \u2192 MON \u2192 OSD \u2192 RGW \u2192 MDS",
+        "Ceph does not support downgrade \u2014 rollback surfaces daemon state and manual recovery steps"
+      ]
     }
   ]
 }

@@ -610,6 +610,14 @@ class ChangeType(str, enum.Enum):
     dns_zone_migrate = "dns_zone_migrate"
     # GCP Security Command Center
     enable_security_command_center = "enable_security_command_center"
+    # Stateful datastore upgrades
+    redis_cluster_migration = "redis_cluster_migration"
+    cassandra_rolling_upgrade = "cassandra_rolling_upgrade"
+    mongodb_rs_upgrade = "mongodb_rs_upgrade"
+    cockroachdb_cluster_upgrade = "cockroachdb_cluster_upgrade"
+    etcd_upgrade = "etcd_upgrade"
+    minio_distributed_upgrade = "minio_distributed_upgrade"
+    ceph_cluster_upgrade = "ceph_cluster_upgrade"
 
 
 class RiskLevel(str, enum.Enum):

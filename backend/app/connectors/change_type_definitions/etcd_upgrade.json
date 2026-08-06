@@ -1,0 +1,57 @@
+{
+  "change_type": "etcd_upgrade",
+  "display_name": "etcd Cluster Upgrade",
+  "description": "Upgrades an etcd cluster one member at a time: stop, replace binary, start, verify member health. Snapshot taken before upgrade. Full rollback via etcdctl snapshot restore (data loss window = writes since snapshot).",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "source_version": {
+      "type": "string",
+      "required": true,
+      "label": "Source Version",
+      "description": "Current etcd version (e.g. 3.4)"
+    },
+    "target_version": {
+      "type": "string",
+      "required": true,
+      "label": "Target Version",
+      "description": "Target etcd version (e.g. 3.5). Must be +1 minor."
+    },
+    "members": {
+      "type": "array",
+      "required": true,
+      "label": "etcd Members",
+      "description": "List of {name, peer_url, client_url}"
+    },
+    "etcd_data_dir": {
+      "type": "string",
+      "required": false,
+      "label": "etcd Data Directory",
+      "description": "Path to etcd data directory (default: /var/lib/etcd)",
+      "default": "/var/lib/etcd"
+    },
+    "snapshot_s3_bucket": {
+      "type": "string",
+      "required": false,
+      "label": "Snapshot S3 Bucket",
+      "description": "Optional S3 bucket to upload snapshot for durable offsite storage"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight checks only — no changes applied",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "full",
+    "description": "etcdctl snapshot restore on all members. Canonical etcd rollback path. Data loss window: all writes after snapshot creation are lost. Rollback surfaces this data loss window clearly."
+  },
+  "steps": [
+    {"step": "preflight", "generic_action": "etcd_upgrade", "description": "etcdctl endpoint health --cluster, version path +1 minor, quorum check"},
+    {"step": "snapshot", "generic_action": "etcd_upgrade", "description": "etcdctl snapshot save, optionally upload to S3"},
+    {"step": "rolling_upgrade", "generic_action": "etcd_upgrade", "description": "Per member: stop etcd, replace binary, start, verify member rejoins cluster"},
+    {"step": "verify", "generic_action": "etcd_upgrade", "description": "etcdctl endpoint status --cluster: all members healthy, version matches target"}
+  ]
+}

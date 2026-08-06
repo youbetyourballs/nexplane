@@ -1,0 +1,52 @@
+{
+  "change_type": "cassandra_rolling_upgrade",
+  "display_name": "Cassandra Rolling Upgrade",
+  "description": "Upgrades a Cassandra cluster one node at a time: drain, stop, upgrade package, start, verify UN. nodetool snapshot taken before upgrade. Partial rollback — upgraded nodes may require snapshot restore.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "source_version": {
+      "type": "string",
+      "required": true,
+      "label": "Source Version",
+      "description": "Current Cassandra version (e.g. 4.0)"
+    },
+    "target_version": {
+      "type": "string",
+      "required": true,
+      "label": "Target Version",
+      "description": "Target Cassandra version (e.g. 4.1)"
+    },
+    "nodes": {
+      "type": "array",
+      "required": true,
+      "label": "Cluster Nodes",
+      "description": "List of {host, port, dc} for all cluster nodes"
+    },
+    "upgrade_delay_seconds": {
+      "type": "integer",
+      "required": false,
+      "label": "Delay Between Node Upgrades (s)",
+      "description": "Seconds to wait between upgrading each node (default: 30)",
+      "default": 30
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight checks only — no changes applied",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "partial",
+    "description": "Per-node snapshot restore via nodetool refresh. Nodes not yet upgraded remain on old version. Cassandra SSTable format may prevent clean binary downgrade on upgraded nodes — snapshot restore is the safe path."
+  },
+  "steps": [
+    {"step": "preflight", "generic_action": "cassandra_rolling_upgrade", "description": "nodetool status (all UN), version validation, gossip compatibility check"},
+    {"step": "snapshot", "generic_action": "cassandra_rolling_upgrade", "description": "nodetool snapshot on all nodes, record snapshot tag"},
+    {"step": "rolling_upgrade", "generic_action": "cassandra_rolling_upgrade", "description": "Per-node: drain → stop → upgrade package → start → verify UN"},
+    {"step": "upgradesstables", "generic_action": "cassandra_rolling_upgrade", "description": "nodetool upgradesstables on all upgraded nodes"},
+    {"step": "verify", "generic_action": "cassandra_rolling_upgrade", "description": "nodetool status all UN, version matches target on all nodes"}
+  ]
+}

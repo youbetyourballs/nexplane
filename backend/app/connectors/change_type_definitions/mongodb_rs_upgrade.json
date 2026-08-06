@@ -1,0 +1,57 @@
+{
+  "change_type": "mongodb_rs_upgrade",
+  "display_name": "MongoDB Replica Set Upgrade",
+  "description": "Upgrades a MongoDB replica set through sequential FCV hops. Upgrades secondaries first, then steps down and upgrades the primary. setFeatureCompatibilityVersion is the point of no return.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "source_version": {
+      "type": "string",
+      "required": true,
+      "label": "Source Version",
+      "description": "Current MongoDB version (e.g. 6.0). Supported: 4.4, 5.0, 6.0, 7.0"
+    },
+    "target_version": {
+      "type": "string",
+      "required": true,
+      "label": "Target Version",
+      "description": "Target MongoDB version (e.g. 7.0). Multi-hop upgrades executed automatically."
+    },
+    "rs_members": {
+      "type": "array",
+      "required": true,
+      "label": "RS Members",
+      "description": "List of {host, port, priority}. High priority = primary."
+    },
+    "admin_user": {
+      "type": "string",
+      "required": false,
+      "label": "Admin User",
+      "description": "MongoDB admin username (default: admin)",
+      "default": "admin"
+    },
+    "admin_password": {
+      "type": "string",
+      "required": false,
+      "label": "Admin Password",
+      "description": "MongoDB admin password"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight checks only — no changes applied",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "partial",
+    "description": "Before setFeatureCompatibilityVersion: restore mongodump archive and reinstall old binaries. After FCV set: irreversible per MongoDB docs. Rollback surfaces this clearly."
+  },
+  "steps": [
+    {"step": "preflight", "generic_action": "mongodb_rs_upgrade", "description": "rs.status() all members healthy, compute FCV hop chain"},
+    {"step": "snapshot", "generic_action": "mongodb_rs_upgrade", "description": "mongodump --archive on primary"},
+    {"step": "rolling_upgrade", "generic_action": "mongodb_rs_upgrade", "description": "Per FCV hop: upgrade secondaries → stepdown primary → upgrade old primary → wait election → setFCV (POINT OF NO RETURN)"},
+    {"step": "verify", "generic_action": "mongodb_rs_upgrade", "description": "getParameter featureCompatibilityVersion matches target on all members"}
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "change_type": "ceph_cluster_upgrade",
+  "display_name": "Ceph Cluster Upgrade",
+  "description": "Upgrades a Ceph cluster following strict daemon order: MGR → MON → OSD → RGW → MDS. Sets noout before upgrade to prevent rebalancing. Ceph does not support downgrade — rollback surfaces daemon state for operator.",
+  "risk_level_default": "critical",
+  "incident_response": false,
+  "parameters": {
+    "source_version": {
+      "type": "string",
+      "required": true,
+      "label": "Source Version",
+      "description": "Current Ceph version (e.g. 18.2 for Reef)"
+    },
+    "target_version": {
+      "type": "string",
+      "required": true,
+      "label": "Target Version",
+      "description": "Target Ceph version (e.g. 19.2 for Squid). Must be +1 release."
+    },
+    "mgr_hosts": {
+      "type": "array",
+      "required": true,
+      "label": "MGR Hosts",
+      "description": "List of {host} for Ceph manager daemons"
+    },
+    "mon_hosts": {
+      "type": "array",
+      "required": true,
+      "label": "MON Hosts",
+      "description": "List of {host} for Ceph monitor daemons"
+    },
+    "osd_hosts": {
+      "type": "array",
+      "required": true,
+      "label": "OSD Hosts",
+      "description": "List of {host} for Ceph OSD daemons"
+    },
+    "rgw_hosts": {
+      "type": "array",
+      "required": false,
+      "label": "RGW Hosts",
+      "description": "Optional list of {host} for Ceph RADOS Gateway daemons"
+    },
+    "mds_hosts": {
+      "type": "array",
+      "required": false,
+      "label": "MDS Hosts",
+      "description": "Optional list of {host} for Ceph Metadata Server daemons (CephFS)"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight checks only — no changes applied",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "partial",
+    "description": "Ceph does not support version downgrade. Rollback surfaces which daemons are on new vs old version. Operators must use RBD snapshots or CephFS snapshots for data recovery if cluster is unhealthy."
+  },
+  "steps": [
+    {"step": "preflight", "generic_action": "ceph_cluster_upgrade", "description": "ceph -s (HEALTH_OK), ceph versions (all same version), +1 release validation"},
+    {"step": "set_noout", "generic_action": "ceph_cluster_upgrade", "description": "ceph osd set noout — prevent rebalancing during upgrade"},
+    {"step": "upgrade_mgrs", "generic_action": "ceph_cluster_upgrade", "description": "Per MGR host: stop, upgrade package, start, verify ceph mgr stat"},
+    {"step": "upgrade_mons", "generic_action": "ceph_cluster_upgrade", "description": "Per MON host: stop, upgrade package, start, verify quorum"},
+    {"step": "upgrade_osds", "generic_action": "ceph_cluster_upgrade", "description": "Per OSD host: stop all OSDs, upgrade package, start, wait ok-to-stop"},
+    {"step": "upgrade_rgw_mds", "generic_action": "ceph_cluster_upgrade", "description": "Optional: upgrade RGW and MDS daemons if present"},
+    {"step": "unset_noout", "generic_action": "ceph_cluster_upgrade", "description": "ceph osd unset noout — re-enable rebalancing"},
+    {"step": "verify", "generic_action": "ceph_cluster_upgrade", "description": "ceph -s HEALTH_OK, ceph versions all on target"}
+  ]
+}

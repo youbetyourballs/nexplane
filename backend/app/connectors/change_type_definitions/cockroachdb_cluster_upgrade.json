@@ -1,0 +1,65 @@
+{
+  "change_type": "cockroachdb_cluster_upgrade",
+  "display_name": "CockroachDB Cluster Upgrade",
+  "description": "Upgrades a CockroachDB cluster by replacing the binary on each node in a rolling fashion. Version finalization (SET CLUSTER SETTING version) is a separate irreversible step controlled by auto_finalize.",
+  "risk_level_default": "high",
+  "incident_response": false,
+  "parameters": {
+    "source_version": {
+      "type": "string",
+      "required": true,
+      "label": "Source Version",
+      "description": "Current CockroachDB version (e.g. 23.1)"
+    },
+    "target_version": {
+      "type": "string",
+      "required": true,
+      "label": "Target Version",
+      "description": "Target CockroachDB version (e.g. 23.2). Must be +1 minor."
+    },
+    "nodes": {
+      "type": "array",
+      "required": true,
+      "label": "Cluster Nodes",
+      "description": "List of {host, http_port, sql_port}"
+    },
+    "sql_user": {
+      "type": "string",
+      "required": false,
+      "label": "SQL User",
+      "description": "Cluster admin SQL user (default: root)",
+      "default": "root"
+    },
+    "sql_password": {
+      "type": "string",
+      "required": false,
+      "label": "SQL Password",
+      "description": "Cluster admin SQL password"
+    },
+    "auto_finalize": {
+      "type": "boolean",
+      "required": false,
+      "label": "Auto-Finalize Version",
+      "description": "If true, SET CLUSTER SETTING version is executed automatically after binary upgrade. Irreversible. Default: false — operator must explicitly finalize.",
+      "default": false
+    },
+    "dry_run": {
+      "type": "boolean",
+      "required": false,
+      "label": "Dry Run",
+      "description": "Run preflight checks only — no changes applied",
+      "default": false
+    }
+  },
+  "rollback": {
+    "strategy": "partial",
+    "description": "Before version finalization: reinstall old binary on each node in reverse order. After finalization: irreversible — restore from backup."
+  },
+  "steps": [
+    {"step": "preflight", "generic_action": "cockroachdb_cluster_upgrade", "description": "SHOW CLUSTER SETTING version, +1 minor validation, all nodes healthy via /_admin/v1/health"},
+    {"step": "backup", "generic_action": "cockroachdb_cluster_upgrade", "description": "BACKUP or cockroach dump to backup location"},
+    {"step": "rolling_upgrade", "generic_action": "cockroachdb_cluster_upgrade", "description": "Per node: drain → replace binary → restart → wait rejoin"},
+    {"step": "finalize", "generic_action": "cockroachdb_cluster_upgrade", "description": "SET CLUSTER SETTING version (only if auto_finalize=true — IRREVERSIBLE)"},
+    {"step": "verify", "generic_action": "cockroachdb_cluster_upgrade", "description": "SHOW CLUSTER SETTING version matches target, all nodes healthy"}
+  ]
+}
