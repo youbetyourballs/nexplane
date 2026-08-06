@@ -1,0 +1,26 @@
+{
+  "change_type": "aws_account_full_baseline",
+  "display_name": "AWS Account Full Baseline",
+  "description": "Runs all three account baseline sub-executors in sequence: hardening (IAM password policy, S3 public access block, VPC flow logs), monitoring (CloudTrail, GuardDuty, SecurityHub, Config across all regions), and IAM role baseline (NexplaneReadOnly, NexplaneSecurityAudit, NexplaneBreakGlass). Rollback unwinds in FILO order.",
+  "category": "security",
+  "steps": [
+    {
+      "generic_action": "aws_account_full_baseline",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "parameters": [
+    {"name": "enforce_password_policy", "type": "boolean", "required": false, "default": true},
+    {"name": "enforce_s3_block_public", "type": "boolean", "required": false, "default": true},
+    {"name": "enforce_root_mfa_check", "type": "boolean", "required": false, "default": true},
+    {"name": "enable_vpc_flow_logs", "type": "boolean", "required": false, "default": true},
+    {"name": "vpc_flow_logs_s3_arn", "type": "string", "required": false, "description": "S3 ARN for VPC flow logs. If omitted, uses same bucket as CloudTrail if present."},
+    {"name": "role_name_prefix", "type": "string", "required": false, "default": "Nexplane"},
+    {"name": "skip_if_exists", "type": "boolean", "required": false, "default": true}
+  ],
+  "rollback_action": "aws_account_full_baseline",
+  "rollback_connector_type": "aws"
+}
