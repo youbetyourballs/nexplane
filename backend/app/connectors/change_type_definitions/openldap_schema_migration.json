@@ -1,0 +1,20 @@
+{
+  "change_type": "openldap_schema_migration",
+  "display_name": "OpenLDAP Schema Migration",
+  "description": "Add or modify an OpenLDAP schema via ldapadd/ldapmodify. Runs slapcat backup before applying. Tests schema in temp config dir before production apply. Rollback restores slapcat config export (data DB untouched).",
+  "rollback_capability": "full",
+  "steps": [
+    {"generic_action": "openldap_schema_migration", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "agent_reachable"],
+  "verification_methods": ["output_check"],
+  "rollback_action": "openldap_schema_migration",
+  "rollback_connector_type": "nexplane_agent",
+  "parameters": {
+    "schema_ldif_path":  { "type": "string",  "required": true },
+    "schema_dn":         { "type": "string",  "required": true },
+    "backup_path":       { "type": "string",  "required": false, "default": "/tmp/nexplane-ldap-backup.ldif" },
+    "slapd_config_dir":  { "type": "string",  "required": false, "default": "/etc/ldap/slapd.d" },
+    "dry_run":           { "type": "boolean", "required": false, "default": false }
+  }
+}

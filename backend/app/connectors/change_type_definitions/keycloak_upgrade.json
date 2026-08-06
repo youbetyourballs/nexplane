@@ -1,0 +1,28 @@
+{
+  "change_type": "keycloak_upgrade",
+  "display_name": "Keycloak Major Upgrade",
+  "description": "Upgrade Keycloak to a new major version. Supports WildFly-to-Quarkus migration (v16→v17+) and Quarkus in-place upgrade (v17+). Exports realms and dumps DB before upgrade; rolls back by restoring old binary and DB dump.",
+  "rollback_capability": "full",
+  "steps": [
+    {"generic_action": "keycloak_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "agent_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "keycloak_upgrade",
+  "rollback_connector_type": "nexplane_agent",
+  "parameters": {
+    "source_version":     { "type": "string",  "required": true },
+    "target_version":     { "type": "string",  "required": true },
+    "keycloak_home":      { "type": "string",  "required": false, "default": "/opt/keycloak" },
+    "db_vendor":          { "type": "string",  "required": false, "default": "postgres", "enum": ["postgres", "mysql", "h2"] },
+    "db_host":            { "type": "string",  "required": false, "default": "localhost" },
+    "db_port":            { "type": "integer", "required": false },
+    "db_name":            { "type": "string",  "required": false },
+    "db_user":            { "type": "string",  "required": false },
+    "db_password":        { "type": "string",  "required": false, "sensitive": true },
+    "admin_user":         { "type": "string",  "required": false, "default": "admin" },
+    "admin_password":     { "type": "string",  "required": false, "sensitive": true },
+    "realms_to_export":   { "type": "array",   "required": false },
+    "dry_run":            { "type": "boolean", "required": false, "default": false }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "change_type": "freeipa_upgrade",
+  "display_name": "FreeIPA / RHIDM Upgrade",
+  "description": "Upgrade FreeIPA server (and optional replicas) to a new version. Runs ipa-backup before upgrade. Replicas upgraded before master per IPA topology rules. Rollback restores from ipa-backup (data loss window surfaced).",
+  "rollback_capability": "partial",
+  "steps": [
+    {"generic_action": "freeipa_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "agent_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "freeipa_upgrade",
+  "rollback_connector_type": "nexplane_agent",
+  "parameters": {
+    "source_version":      { "type": "string",  "required": true },
+    "target_version":      { "type": "string",  "required": true },
+    "master_host":         { "type": "string",  "required": true },
+    "replica_hosts":       { "type": "array",   "required": false, "default": [] },
+    "ipa_admin_password":  { "type": "string",  "required": true, "sensitive": true },
+    "dry_run":             { "type": "boolean", "required": false, "default": false }
+  }
+}

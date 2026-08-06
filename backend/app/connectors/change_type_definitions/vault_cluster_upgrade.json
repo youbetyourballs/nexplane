@@ -1,0 +1,21 @@
+{
+  "change_type": "vault_cluster_upgrade",
+  "display_name": "HashiCorp Vault Cluster Upgrade",
+  "description": "Rolling upgrade of a Vault Raft cluster. Standbys upgraded first, then active node stepped down and upgraded last. Raft snapshot taken before upgrade. Rollback restores snapshot on active node and performs rolling restart with old binary.",
+  "rollback_capability": "full",
+  "steps": [
+    {"generic_action": "vault_cluster_upgrade", "purpose": "execute", "required": true}
+  ],
+  "preflight_checks": ["connector_reachable", "agent_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": "vault_cluster_upgrade",
+  "rollback_connector_type": "nexplane_agent",
+  "parameters": {
+    "source_version":      { "type": "string",  "required": true },
+    "target_version":      { "type": "string",  "required": true },
+    "nodes":               { "type": "array",   "required": true,  "description": "List of {host, api_port} for all Raft members" },
+    "vault_token":         { "type": "string",  "required": true,  "sensitive": true },
+    "snapshot_s3_bucket":  { "type": "string",  "required": false },
+    "dry_run":             { "type": "boolean", "required": false, "default": false }
+  }
+}
