@@ -107,6 +107,7 @@ class ChangeType(str, enum.Enum):
     # Credential rotation
     rotate_db_credentials = "rotate_db_credentials"
     rotate_ssh_keys = "rotate_ssh_keys"
+    ssh_ca_rotation = "ssh_ca_rotation"
     rotate_api_key = "rotate_api_key"
     rotate_service_account = "rotate_service_account"
     # IaC orchestration
@@ -156,6 +157,7 @@ class ChangeType(str, enum.Enum):
     server_snapshot = "server_snapshot"
     server_capture = "server_capture"
     restore_server = "restore_server"
+    backup_mgn_replication = "backup_mgn_replication"
     # Compliance
     enforce_cis_benchmark = "enforce_cis_benchmark"
     collect_evidence = "collect_evidence"
@@ -509,6 +511,7 @@ class ChangeType(str, enum.Enum):
     ad_gpo_deploy = "ad_gpo_deploy"
     ad_pso_manage = "ad_pso_manage"
     ad_stale_computer_cleanup = "ad_stale_computer_cleanup"
+    privileged_account_audit = "privileged_account_audit"
     # AD DNS management
     list_dns_records = "list_dns_records"
     create_dns_record = "create_dns_record"

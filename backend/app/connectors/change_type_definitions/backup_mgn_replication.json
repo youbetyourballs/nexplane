@@ -1,0 +1,15 @@
+{
+  "change_type": "backup_mgn_replication",
+  "display_name": "AWS MGN Replication Status Check",
+  "steps": [
+    {
+      "generic_action": "backup_mgn_replication",
+      "purpose": "execute",
+      "required": true
+    }
+  ],
+  "preflight_checks": ["connector_reachable"],
+  "verification_methods": ["api_check"],
+  "rollback_action": null,
+  "rollback_connector_type": "aws"
+}

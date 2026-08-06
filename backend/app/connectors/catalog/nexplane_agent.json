@@ -3553,6 +3553,24 @@
       "action_id": "restore_server"
     },
     {
+      "display_name": "MGN Replication Status Check",
+      "description": "Read AWS MGN source server replication state and lag. Returns replication_status (HEALTHY/STALLED/DISCONNECTED), lag_seconds, and lifecycle state. Read-only.",
+      "parameters": [
+        {"name": "mgn_source_server_id", "type": "string", "required": true, "description": "MGN source server ID (s-...)"},
+        {"name": "aws_connector_id", "type": "string", "required": false, "description": "AWS connector ID to use for MGN API calls; defaults to connector credentials"}
+      ],
+      "execution_tier": 1,
+      "rollback_action": null,
+      "estimated_duration_seconds": 30,
+      "blast_radius_hint": "read_only",
+      "applicable_asset_types": ["server"],
+      "action_type": "change",
+      "executor": "aws.backup_mgn_replication",
+      "generic_action": "backup_mgn_replication",
+      "action_id": "backup_mgn_replication",
+      "smoke_verified": false
+    },
+    {
       "display_name": "Scan Host for References",
       "description": "Search files on an agent-monitored host for references to a migrating resource (env files, config files, systemd units, docker-compose files).",
       "parameters": [

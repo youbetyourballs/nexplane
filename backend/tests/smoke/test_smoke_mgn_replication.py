@@ -148,7 +148,7 @@ async def test_mgn_phase2_create_and_plan_cr():
                 "title": "[smoke] MGN replication verification",
                 "connector_id": _STATE["connector_id"],
                 "change_type": "backup_mgn_replication",
-                "parameters": {"mgn_source_server_id": _STATE["mgn_source_server_id"]},
+                "desired_outcome": {"mgn_source_server_id": _STATE["mgn_source_server_id"]},
             },
             headers=headers,
         )
