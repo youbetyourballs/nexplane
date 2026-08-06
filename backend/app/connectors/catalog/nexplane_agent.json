@@ -4392,7 +4392,10 @@
         "For standalone_to_cluster: cluster reset restores standalone mode from RDB",
         "For version_upgrade: previous binary reinstalled and RDB restored on rollback"
       ],
-      "action_id": "redis_cluster_migration"
+      "action_id": "redis_cluster_migration",
+      "applicable_asset_types": [
+        "server"
+      ]
     },
     {
       "display_name": "Cassandra Rolling Upgrade",
@@ -4434,7 +4437,10 @@
         "One node at a time \u2014 cluster remains available during rolling upgrade",
         "Partial rollback: already-upgraded nodes may require snapshot restore"
       ],
-      "action_id": "cassandra_rolling_upgrade"
+      "action_id": "cassandra_rolling_upgrade",
+      "applicable_asset_types": [
+        "server"
+      ]
     },
     {
       "display_name": "MongoDB Replica Set Upgrade",
@@ -4481,7 +4487,10 @@
         "setFeatureCompatibilityVersion is irreversible \u2014 rollback blocks clearly after FCV set",
         "Multi-hop upgrades (e.g. 5.0\u21927.0) executed automatically with FCV set at each hop"
       ],
-      "action_id": "mongodb_rs_upgrade"
+      "action_id": "mongodb_rs_upgrade",
+      "applicable_asset_types": [
+        "server"
+      ]
     },
     {
       "display_name": "CockroachDB Cluster Upgrade",
@@ -4534,7 +4543,10 @@
         "Binary rollback available before version finalization",
         "auto_finalize=false (default): operator must explicitly finalize to make upgrade irreversible"
       ],
-      "action_id": "cockroachdb_cluster_upgrade"
+      "action_id": "cockroachdb_cluster_upgrade",
+      "applicable_asset_types": [
+        "server"
+      ]
     },
     {
       "display_name": "etcd Cluster Upgrade",
@@ -4581,7 +4593,10 @@
         "Full rollback via snapshot restore \u2014 data loss window clearly surfaced",
         "One member at a time \u2014 quorum maintained throughout"
       ],
-      "action_id": "etcd_upgrade"
+      "action_id": "etcd_upgrade",
+      "applicable_asset_types": [
+        "server"
+      ]
     },
     {
       "display_name": "MinIO Distributed Upgrade",
@@ -4622,7 +4637,10 @@
         "Full rollback: mc admin update to previous release tag",
         "MinIO handles coordinated rolling restart internally"
       ],
-      "action_id": "minio_distributed_upgrade"
+      "action_id": "minio_distributed_upgrade",
+      "applicable_asset_types": [
+        "server"
+      ]
     },
     {
       "display_name": "Ceph Cluster Upgrade",
@@ -4680,7 +4698,10 @@
         "Strict upgrade order enforced: MGR \u2192 MON \u2192 OSD \u2192 RGW \u2192 MDS",
         "Ceph does not support downgrade \u2014 rollback surfaces daemon state and manual recovery steps"
       ],
-      "action_id": "ceph_cluster_upgrade"
+      "action_id": "ceph_cluster_upgrade",
+      "applicable_asset_types": [
+        "server"
+      ]
     },
     {
       "display_name": "Keycloak Major Upgrade",
@@ -4757,7 +4778,10 @@
         "WildFly\u2192Quarkus migration handled automatically when source \u2264 16 and target \u2265 17",
         "DB schema migration is idempotent; old binary restored on rollback"
       ],
-      "action_id": "keycloak_upgrade"
+      "action_id": "keycloak_upgrade",
+      "applicable_asset_types": [
+        "server"
+      ]
     },
     {
       "display_name": "FreeIPA / RHIDM Upgrade",
@@ -4806,7 +4830,10 @@
         "Replicas upgraded before master \u2014 quorum maintained",
         "Partial rollback: ipa-backup restore wipes LDAP+Kerberos DBs; changes after backup time are lost"
       ],
-      "action_id": "freeipa_upgrade"
+      "action_id": "freeipa_upgrade",
+      "applicable_asset_types": [
+        "server"
+      ]
     },
     {
       "display_name": "OpenLDAP Schema Migration",
@@ -4851,7 +4878,10 @@
         "Schema validated in temp dir via slapadd before live apply",
         "Rollback: stop slapd, restore config DB from slapcat export, start slapd"
       ],
-      "action_id": "openldap_schema_migration"
+      "action_id": "openldap_schema_migration",
+      "applicable_asset_types": [
+        "server"
+      ]
     },
     {
       "display_name": "HashiCorp Vault Cluster Upgrade",
@@ -4899,7 +4929,10 @@
         "Standbys upgraded before active \u2014 quorum maintained throughout",
         "Rollback: raft snapshot restore on active node, rolling restart with old binary"
       ],
-      "action_id": "vault_cluster_upgrade"
+      "action_id": "vault_cluster_upgrade",
+      "applicable_asset_types": [
+        "server"
+      ]
     },
     {
       "display_name": "Istio Control Plane Upgrade",
