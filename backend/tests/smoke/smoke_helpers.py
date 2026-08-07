@@ -1379,6 +1379,21 @@ sleep 3
 echo "Agent started"
 """
 
+    # Wait for SSM agent to register (can take 30-60s after instance running)
+    ssm_deadline = _time_mod.time() + 120
+    while _time_mod.time() < ssm_deadline:
+        try:
+            ssm_info = ssm.describe_instance_information(
+                Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+            )
+            if ssm_info.get("InstanceInformationList"):
+                break
+        except Exception:
+            pass
+        _time_mod.sleep(5)
+    else:
+        log(f"  Warning: SSM not ready for {instance_id} after 120s, trying anyway")
+
     resp = ssm.send_command(
         InstanceIds=[instance_id],
         DocumentName="AWS-RunShellScript",

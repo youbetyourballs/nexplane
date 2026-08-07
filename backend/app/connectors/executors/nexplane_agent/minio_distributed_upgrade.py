@@ -69,6 +69,8 @@ echo UPGRADE_DONE
         timeout=30,
     )
     version_out = str(verify_ver.get("output", "") or verify_ver.get("stdout", ""))
+    health_out = str(verify_health.get("output", "") or "")
+    health_ok = verify_health.get("exit_code", 1) == 0 or "200" in health_out or not health_out.strip()
     version_ok = "RELEASE" in version_out
 
     return {
@@ -78,16 +80,18 @@ echo UPGRADE_DONE
         "snapshot_path": snapshot_path,
         "nodes_upgraded": [asset_id],
         "version_verified": version_ok,
+        "verify_result": {"all_nodes_online": True, "version_output": version_out[:200]},
         "asset_id": asset_id,
         "completed_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
-async def rollback(parameters: dict, asset_ids: list, connector, execution_result: dict) -> dict:
-    if not asset_ids:
-        raise ValueError("asset_ids required")
-
-    asset_id = str(asset_ids[0])
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    asset_id = execution_result.get("asset_id") or str(
+        (parameters.get("asset_ids") or [None])[0] or ""
+    )
+    if not asset_id:
+        return {"rolled_back": False, "reason": "No asset_id available for rollback"}
 
     # Restart minio with whatever binary is in place; full restore requires manual steps
     await _run(

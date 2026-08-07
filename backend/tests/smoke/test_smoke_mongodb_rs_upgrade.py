@@ -195,7 +195,10 @@ _MONGO_INSTALL_SCRIPT = (
     b"enabled=1\n"
     b"gpgkey=https://pgp.mongodb.com/server-6.0.asc\n"
     b"MONGOREPO\n"
-    b"yum install -y mongodb-org-6.0.9 && systemctl enable mongod && systemctl start mongod\n"
+    b"yum install -y mongodb-org-6.0.9\n"
+    b"sed -i 's/bindIp: 127.0.0.1/bindIp: 0.0.0.0/' /etc/mongod.conf 2>/dev/null || true\n"
+    b"sed -i 's/bindIp:.*/bindIp: 0.0.0.0/' /etc/mongod.conf 2>/dev/null || true\n"
+    b"systemctl enable mongod && systemctl start mongod\n"
 )
 
 

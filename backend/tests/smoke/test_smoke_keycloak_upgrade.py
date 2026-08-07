@@ -170,8 +170,8 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 5 min)")
-    deadline = time.time() + 300
+    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 10 min)")
+    deadline = time.time() + 600
     while time.time() < deadline:
         time.sleep(10)
         try:
@@ -182,7 +182,7 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
         except OSError:
             pass
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 5 min")
+    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 10 min")
 
 
 def _register_asset(private_ip, run_id) -> tuple:

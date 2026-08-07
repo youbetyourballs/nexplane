@@ -84,11 +84,12 @@ echo UPGRADE_DONE
     }
 
 
-async def rollback(parameters: dict, asset_ids: list, connector, execution_result: dict) -> dict:
-    if not asset_ids:
-        raise ValueError("asset_ids required")
-
-    asset_id = str(asset_ids[0])
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    asset_id = execution_result.get("asset_id") or str(
+        (parameters.get("asset_ids") or [None])[0] or ""
+    )
+    if not asset_id:
+        return {"rolled_back": False, "reason": "No asset_id available for rollback"}
     source_version = parameters.get("source_version", "23.1")
 
     # Download old binary and replace
