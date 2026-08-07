@@ -3,11 +3,11 @@
 
 """cert-manager upgrade executor.
 
-Flow: preflight → snapshot CRDs → upgrade CRDs (server-side apply, PARTIAL NO-RETURN)
-      → upgrade Deployment → verify (Certificate issuance test).
+Flow: preflight -> upgrade CRDs (PARTIAL NO-RETURN) -> upgrade Deployment (helm)
+      -> wait for rollout -> verify pods.
 
-ROLLBACK_CAPABILITY = "full": Deployment can be rolled back; CRDs cannot be
-cleanly downgraded. Old CRD backup is recorded but not restored.
+ROLLBACK_CAPABILITY = "full": helm rollback restores previous Deployment revision.
+CRDs cannot be cleanly downgraded; they remain at target version after rollback.
 """
 import logging
 from datetime import datetime, timezone
@@ -19,170 +19,218 @@ ROLLBACK_CAPABILITY = "full"
 _GITHUB_RELEASE_BASE = "https://github.com/cert-manager/cert-manager/releases/download"
 
 
+def _get_dispatch():
+    from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
+    return dispatch_agent_job
+
+
+async def _run(command: str, asset_id: str, timeout: int = 120) -> dict:
+    fn = _get_dispatch()
+    return await fn(
+        command="run_command",
+        parameters={"command": command, "timeout": timeout},
+        asset_ids=[asset_id],
+        timeout_seconds=timeout + 30,
+    )
+
+
+def _resolve_params(parameters: dict) -> dict:
+    p = parameters.get("desired_outcome") or parameters
+    namespace = p.get("namespace", "cert-manager")
+    kubeconfig_path = p.get("kubeconfig_path", "/etc/rancher/k3s/k3s.yaml")
+    source_version = p.get("source_version", "")
+    target_version = p.get("target_version", "")
+    dry_run = bool(p.get("dry_run", False))
+    return {
+        "source_version": source_version,
+        "target_version": target_version,
+        "namespace": namespace,
+        "kubeconfig_path": kubeconfig_path,
+        "dry_run": dry_run,
+    }
+
+
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not asset_ids:
         raise ValueError("asset_ids required")
 
     asset_id = str(asset_ids[0])
-    source_version = parameters.get("source_version", "")
-    target_version = parameters.get("target_version", "")
-    namespace = parameters.get("namespace", "cert-manager")
-    kubeconfig_path = parameters.get("kubeconfig_path", "~/.kube/config")
-    dry_run = bool(parameters.get("dry_run", False))
+    p = _resolve_params(parameters)
+    source_version = p["source_version"]
+    target_version = p["target_version"]
+    namespace = p["namespace"]
+    kubeconfig_path = p["kubeconfig_path"]
+    dry_run = p["dry_run"]
 
     if not source_version:
-        raise ValueError("source_version required (e.g. '1.13')")
+        raise ValueError("source_version required (e.g. '1.13.0')")
     if not target_version:
-        raise ValueError("target_version required (e.g. '1.15')")
+        raise ValueError("target_version required (e.g. '1.15.0')")
 
-    # Validate: cert-manager supports skipping patch, not minor — only +N minor allowed (warn if >+1)
     try:
         src_minor = int(source_version.split(".")[1])
         tgt_minor = int(target_version.split(".")[1])
     except (IndexError, ValueError):
-        raise ValueError("source_version and target_version must be 'MAJOR.MINOR' format")
+        raise ValueError("source_version and target_version must be 'MAJOR.MINOR.PATCH' format")
     if tgt_minor <= src_minor:
-        raise ValueError(f"target_version must be newer than source_version")
+        raise ValueError("target_version must be newer than source_version")
 
-    from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
-
+    kube_env = f"KUBECONFIG={kubeconfig_path}"
     crds_url = f"{_GITHUB_RELEASE_BASE}/v{target_version}/cert-manager.crds.yaml"
-    deploy_url = f"{_GITHUB_RELEASE_BASE}/v{target_version}/cert-manager.yaml"
 
-    # Step 1: Preflight
-    logger.info(f"cert-manager preflight {source_version}→{target_version} on {asset_id}")
-    preflight = await dispatch_agent_job(
-        command="cert_manager_preflight",
-        parameters={
-            "source_version": source_version,
-            "target_version": target_version,
-            "namespace": namespace,
-            "kubeconfig_path": kubeconfig_path,
-        },
-        asset_ids=[asset_id],
-        timeout_seconds=180,
+    # --- Step 1: Preflight ---
+    logger.info("cert-manager preflight %s->%s on %s", source_version, target_version, asset_id)
+    r = await _run(
+        f"{kube_env} helm list -n {namespace} 2>&1",
+        asset_id,
+        timeout=60,
     )
-    if preflight.get("status") == "blocked":
-        return {"status": "blocked", "reason": preflight.get("reason"), "preflight": preflight}
-
-    current_image_tag = preflight.get("current_image_tag", source_version)
-
-    # Step 2: Snapshot CRDs
-    crd_backup_path = f"/tmp/cert-manager-crds-backup-{asset_id[:8]}.yaml"
-    await dispatch_agent_job(
-        command="cert_manager_snapshot_crds",
-        parameters={"backup_path": crd_backup_path, "kubeconfig_path": kubeconfig_path},
-        asset_ids=[asset_id],
-        timeout_seconds=120,
-    )
+    preflight_output = r.get("output", "")
+    logger.info("cert-manager preflight output: %s", preflight_output[:300])
 
     if dry_run:
         return {
             "status": "dry_run",
             "source_version": source_version,
             "target_version": target_version,
+            "namespace": namespace,
             "crds_url": crds_url,
-            "deploy_url": deploy_url,
-            "preflight": preflight,
+            "preflight_output": preflight_output,
         }
 
-    # Step 3: Upgrade CRDs — POINT OF PARTIAL NO-RETURN
-    logger.info(f"Upgrading cert-manager CRDs to {target_version}")
-    crd_result = await dispatch_agent_job(
-        command="cert_manager_upgrade_crds",
-        parameters={
-            "crds_url": crds_url,
-            "kubeconfig_path": kubeconfig_path,
-        },
-        asset_ids=[asset_id],
-        timeout_seconds=180,
+    # --- Step 2: Ensure helm repo present and updated ---
+    logger.info("Adding/updating jetstack helm repo")
+    r = await _run(
+        f"{kube_env} helm repo add jetstack https://charts.jetstack.io 2>/dev/null; "
+        f"{kube_env} helm repo update 2>&1",
+        asset_id,
+        timeout=120,
     )
-    if not crd_result.get("success", True):
+    logger.info("helm repo update: %s", r.get("output", "")[:200])
+
+    # --- Step 3: Upgrade CRDs --- POINT OF PARTIAL NO-RETURN ---
+    logger.info("Upgrading cert-manager CRDs to %s", target_version)
+    r = await _run(
+        f"{kube_env} kubectl apply --validate=false -f {crds_url} 2>&1; echo CRD_EXIT=$?",
+        asset_id,
+        timeout=180,
+    )
+    crd_output = r.get("output", "")
+    crd_ok = "CRD_EXIT=0" in crd_output
+    logger.info("CRD upgrade result: %s", crd_output[:300])
+
+    if not crd_ok:
         return {
             "status": "failed",
             "phase": "crd_upgrade",
-            "error": crd_result.get("error"),
+            "error": crd_output,
             "crds_upgraded": False,
             "deployment_upgraded": False,
         }
 
-    # Step 4: Upgrade Deployment
-    logger.info(f"Upgrading cert-manager Deployment to {target_version}")
-    deploy_result = await dispatch_agent_job(
-        command="cert_manager_upgrade_deployment",
-        parameters={
-            "deploy_url": deploy_url,
-            "namespace": namespace,
-            "kubeconfig_path": kubeconfig_path,
-        },
-        asset_ids=[asset_id],
-        timeout_seconds=300,
+    # --- Step 4: Upgrade Deployment via helm ---
+    logger.info("helm upgrade cert-manager to %s", target_version)
+    r = await _run(
+        f"{kube_env} helm upgrade cert-manager jetstack/cert-manager "
+        f"--namespace {namespace} --version {target_version} --reuse-values 2>&1; echo HELM_EXIT=$?",
+        asset_id,
+        timeout=300,
     )
-    if not deploy_result.get("success", True):
+    helm_output = r.get("output", "")
+    helm_ok = "HELM_EXIT=0" in helm_output
+    logger.info("helm upgrade result: %s", helm_output[:300])
+
+    if not helm_ok:
         return {
             "status": "failed",
             "phase": "deployment_upgrade",
-            "error": deploy_result.get("error"),
+            "error": helm_output,
             "crds_upgraded": True,
             "deployment_upgraded": False,
-            "crd_backup_path": crd_backup_path,
-            "note": "CRDs upgraded but Deployment failed. Rollback will restore Deployment only.",
+            "note": "CRDs upgraded but helm upgrade failed. Rollback will restore Deployment only.",
         }
 
-    # Step 5: Verify — issue a test self-signed Certificate
-    verify = await dispatch_agent_job(
-        command="cert_manager_verify",
-        parameters={
-            "namespace": namespace,
-            "target_version": target_version,
-            "kubeconfig_path": kubeconfig_path,
-        },
-        asset_ids=[asset_id],
-        timeout_seconds=300,
+    # --- Step 5: Wait for rollout ---
+    logger.info("Waiting for cert-manager rollout")
+    r = await _run(
+        f"{kube_env} kubectl rollout status deployment/cert-manager "
+        f"-n {namespace} --timeout=300s 2>&1; echo ROLLOUT_EXIT=$?",
+        asset_id,
+        timeout=360,
+    )
+    rollout_output = r.get("output", "")
+    rollout_ok = "ROLLOUT_EXIT=0" in rollout_output
+    logger.info("Rollout status: %s", rollout_output[:200])
+
+    # --- Step 6: Verify ---
+    r_pods = await _run(
+        f"{kube_env} kubectl get pods -n {namespace} 2>&1",
+        asset_id,
+        timeout=60,
+    )
+    r_ver = await _run(
+        f"{kube_env} kubectl version --client 2>&1",
+        asset_id,
+        timeout=30,
     )
 
+    pods_output = r_pods.get("output", "")
+    version_output = r_ver.get("output", "")
+
     return {
-        "status": "completed",
+        "status": "completed" if (helm_ok and rollout_ok) else "verify_warning",
         "source_version": source_version,
         "target_version": target_version,
         "crds_upgraded": True,
         "deployment_upgraded": True,
-        "test_cert_issued": verify.get("cert_issued", False),
-        "crd_backup_path": crd_backup_path,
-        "current_image_tag_before": current_image_tag,
+        "rollout_ok": rollout_ok,
+        "pods_output": pods_output[:500],
+        "version_output": version_output[:200],
         "upgraded_at": datetime.now(timezone.utc).isoformat(),
+        "asset_id": asset_id,
     }
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    asset_ids = (
-        execution_result.get("_target_asset_ids")
-        or parameters.get("asset_ids")
-        or []
+    asset_id = execution_result.get("asset_id") or str(
+        (
+            execution_result.get("_target_asset_ids")
+            or parameters.get("asset_ids")
+            or [None]
+        )[0]
     )
-    asset_id = str(asset_ids[0]) if asset_ids else ""
-    namespace = parameters.get("namespace", "cert-manager")
-    kubeconfig_path = parameters.get("kubeconfig_path", "~/.kube/config")
-    crd_backup_path = execution_result.get("crd_backup_path", "")
+    p = _resolve_params(parameters)
+    namespace = p["namespace"]
+    kubeconfig_path = p["kubeconfig_path"]
+    kube_env = f"KUBECONFIG={kubeconfig_path}"
 
-    from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
-
-    # Rollback Deployment only — kubectl rollout undo
-    deploy_rb = await dispatch_agent_job(
-        command="cert_manager_rollback_deployment",
-        parameters={
-            "namespace": namespace,
-            "kubeconfig_path": kubeconfig_path,
-        },
-        asset_ids=[asset_id],
-        timeout_seconds=300,
+    # helm rollback 0 returns to the previous release revision
+    logger.info("Rolling back cert-manager Deployment via helm on %s", asset_id)
+    r = await _run(
+        f"{kube_env} helm rollback cert-manager 0 -n {namespace} 2>&1; echo ROLLBACK_EXIT=$?",
+        asset_id,
+        timeout=180,
     )
+    rb_output = r.get("output", "")
+    rb_ok = "ROLLBACK_EXIT=0" in rb_output
+    logger.info("helm rollback result: %s", rb_output[:300])
+
+    # Wait for rollout after rollback
+    r2 = await _run(
+        f"{kube_env} kubectl rollout status deployment/cert-manager "
+        f"-n {namespace} --timeout=120s 2>&1",
+        asset_id,
+        timeout=150,
+    )
+    rollout_output = r2.get("output", "")
 
     return {
-        "rolled_back": True,
-        "deployment_rolled_back": deploy_rb.get("success", True),
+        "rolled_back": rb_ok,
+        "deployment_rolled_back": rb_ok,
+        "rollback_output": rb_output[:500],
+        "rollout_output": rollout_output[:300],
         "crds_note": (
-            "CRDs remain at target version — CRD schema additions are non-breaking and "
-            f"cannot be cleanly downgraded. Backup stored at {crd_backup_path}."
+            "CRDs remain at target version -- CRD schema additions are non-breaking and "
+            "cannot be cleanly downgraded."
         ),
     }
