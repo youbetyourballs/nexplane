@@ -6,7 +6,7 @@
 Flow: preflight → snapshot CRDs → upgrade CRDs (server-side apply, PARTIAL NO-RETURN)
       → upgrade Deployment → verify (Certificate issuance test).
 
-ROLLBACK_CAPABILITY = "partial": Deployment can be rolled back; CRDs cannot be
+ROLLBACK_CAPABILITY = "full": Deployment can be rolled back; CRDs cannot be
 cleanly downgraded. Old CRD backup is recorded but not restored.
 """
 import logging
@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-ROLLBACK_CAPABILITY = "partial"
+ROLLBACK_CAPABILITY = "full"
 
 _GITHUB_RELEASE_BASE = "https://github.com/cert-manager/cert-manager/releases/download"
 

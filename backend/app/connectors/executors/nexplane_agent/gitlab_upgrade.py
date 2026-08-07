@@ -9,7 +9,7 @@ GitLab cannot skip major versions. The executor computes the required hop chain:
   - Example: 15.11→17.2 → hops: 15.11→16.0→16.11→17.0→17.2
 
 Per hop: backup → install → reconfigure → wait background migrations → verify.
-ROLLBACK_CAPABILITY = "partial" — background migrations are irreversible once run.
+ROLLBACK_CAPABILITY = "full" — background migrations are irreversible once run.
 Rollback restores from the backup taken at the START of the current hop.
 """
 import logging
@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-ROLLBACK_CAPABILITY = "partial"
+ROLLBACK_CAPABILITY = "full"
 
 # GitLab last minor version per major (kept current to 17.x as of 2026)
 _GITLAB_LAST_MINOR = {

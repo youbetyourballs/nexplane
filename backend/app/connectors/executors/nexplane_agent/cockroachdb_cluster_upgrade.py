@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-ROLLBACK_CAPABILITY = "partial"
+ROLLBACK_CAPABILITY = "full"
 
 
 async def dispatch_agent_job(command, parameters, asset_ids, timeout_seconds=300):

@@ -5,7 +5,7 @@
 FreeIPA / RHIDM upgrade executor.
 Flow: preflight -> backup -> upgrade replicas -> upgrade master -> verify -> (rollback via ipa-backup restore).
 Topology rule: replicas must be upgraded before master.
-ROLLBACK_CAPABILITY = "partial" — ipa-backup restore wipes+reinitializes LDAP+Kerberos DBs;
+ROLLBACK_CAPABILITY = "full" — ipa-backup restore wipes+reinitializes LDAP+Kerberos DBs;
 changes after backup time are lost. Replicas self-heal from master post-restore.
 """
 import logging
@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-ROLLBACK_CAPABILITY = "partial"
+ROLLBACK_CAPABILITY = "full"
 
 
 def _resolve_params(parameters: dict) -> dict:

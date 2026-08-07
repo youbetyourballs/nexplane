@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-ROLLBACK_CAPABILITY = "partial"
+ROLLBACK_CAPABILITY = "full"
 
 # Sequential MongoDB version upgrade chain
 _MONGO_VERSION_SEQUENCE = ["4.4", "5.0", "6.0", "7.0"]
