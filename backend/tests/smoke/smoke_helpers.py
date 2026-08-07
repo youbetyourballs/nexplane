@@ -1253,8 +1253,24 @@ def get_or_create_smoke_ami(
     ec2_client.stop_instances(InstanceIds=[instance_id])
     ec2_client.get_waiter("instance_stopped").wait(InstanceIds=[instance_id])
 
-    ami_resp = ec2_client.create_image(InstanceId=instance_id, Name=name, NoReboot=True)
-    ami_id = ami_resp["ImageId"]
+    try:
+        ami_resp = ec2_client.create_image(InstanceId=instance_id, Name=name, NoReboot=True)
+        ami_id = ami_resp["ImageId"]
+    except Exception as e:
+        if "InvalidAMIName.Duplicate" in str(e) or "already in use" in str(e).lower():
+            existing = ec2_client.describe_images(
+                Filters=[{"Name": "name", "Values": [name]},
+                         {"Name": "state", "Values": ["available", "pending"]}]
+            ).get("Images", [])
+            if existing:
+                ami_id = existing[0]["ImageId"]
+                log(f"  AMI name duplicate — reusing existing {ami_id}")
+                ec2_client.terminate_instances(InstanceIds=[instance_id])
+                param_name = f"/nexplane/smoke-amis/{cache_key}/{setup_hash}"
+                _ssm.put_parameter(Name=param_name, Value=json.dumps({"ami_id": ami_id, "name": name}),
+                                   Type="String", Overwrite=True)
+                return ami_id
+        raise
 
     deadline = _t.time() + 600
     while _t.time() < deadline:

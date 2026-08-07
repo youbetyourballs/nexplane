@@ -134,7 +134,12 @@ def _launch_mongodb_from_ami(ec2, ami_id, aws_creds) -> tuple:
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     import base64
-    user_data = base64.b64encode(b"#!/bin/bash\nsystemctl start mongod || true\n").decode()
+    user_data = base64.b64encode(
+        b"#!/bin/bash\n"
+        b"sed -i 's/bindIp: 127.0.0.1/bindIp: 0.0.0.0/' /etc/mongod.conf 2>/dev/null || true\n"
+        b"sed -i 's/bindIp:.*/bindIp: 0.0.0.0/' /etc/mongod.conf 2>/dev/null || true\n"
+        b"systemctl start mongod || true\n"
+    ).decode()
 
     kwargs = dict(
         ImageId=ami_id,
