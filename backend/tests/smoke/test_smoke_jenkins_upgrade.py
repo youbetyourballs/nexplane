@@ -27,7 +27,13 @@ import boto3
 import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
-from smoke_helpers import NexplaneClient, log, get_connector_creds_from_db, get_or_create_smoke_ami
+from smoke_helpers import (
+    NexplaneClient,
+    log,
+    get_connector_creds_from_db,
+    get_or_create_smoke_ami,
+    install_nexplane_agent_on_instance,
+)
 
 BASE_URL  = os.environ.get("NEXPLANE_BASE_URL", "http://localhost:8000")
 EMAIL     = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
@@ -261,6 +267,10 @@ def test_phase1_provision():
     _state["connector_id"] = conn_id
     _state["asset_id"]     = asset_id
     log(f"  Registered connector {conn_id}, asset {asset_id}")
+
+    log("  Installing nexplane agent on smoke instance")
+    install_nexplane_agent_on_instance(instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=300)
+
     log("[PHASE 1: provision] PASSED")
 
 

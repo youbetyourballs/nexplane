@@ -99,12 +99,14 @@ sleep 15; echo UPGRADE_DONE
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    asset_ids = (
-        execution_result.get("_target_asset_ids")
-        or parameters.get("asset_ids")
-        or []
-    )
-    asset_id = str(asset_ids[0]) if asset_ids else ""
+    asset_id = execution_result.get("asset_id") or ""
+    if not asset_id:
+        asset_ids = (
+            execution_result.get("_target_asset_ids")
+            or parameters.get("asset_ids")
+            or []
+        )
+        asset_id = str(asset_ids[0]) if asset_ids else ""
     p = parameters.get("desired_outcome") or parameters
     jenkins_war_path = p.get("jenkins_war_path", "/usr/share/jenkins/jenkins.war")
     backup_path = execution_result.get("backup_path", f"{jenkins_war_path}.bak")

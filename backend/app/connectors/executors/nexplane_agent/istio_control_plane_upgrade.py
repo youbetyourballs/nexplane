@@ -38,7 +38,8 @@ async def _run(command: str, asset_id: str, timeout: int = 120) -> dict:
     )
 
 
-_PATH_PREFIX = "export PATH=$PATH:/usr/local/bin:/snap/bin && "
+_ISTIOCTL = "/usr/local/bin/istioctl"
+_KUBECTL = "/usr/local/bin/k3s kubectl"
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
@@ -70,13 +71,13 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # Step 1: Preflight - capture current version
     logger.info("Istio upgrade preflight: %s->%s on %s", source_version, target_version, asset_id)
-    r = await _run(_PATH_PREFIX + f"KUBECONFIG={kc} istioctl version 2>&1", asset_id, timeout=60)
+    r = await _run(f"KUBECONFIG={kc} {_ISTIOCTL} version 2>&1", asset_id, timeout=60)
     preflight_output = r.get("output", "")
     logger.info("Preflight output: %s", preflight_output[:300])
 
     if dry_run:
         r2 = await _run(
-            _PATH_PREFIX + f"KUBECONFIG={kc} istioctl upgrade --set profile=minimal -y --dry-run 2>&1",
+            f"KUBECONFIG={kc} {_ISTIOCTL} upgrade --set profile=minimal -y --dry-run 2>&1",
             asset_id, timeout=120,
         )
         return {
@@ -90,7 +91,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Step 2: Upgrade
     logger.info("Running istioctl upgrade on %s", asset_id)
     r = await _run(
-        _PATH_PREFIX + f"KUBECONFIG={kc} istioctl upgrade --set profile=minimal -y 2>&1; echo ISTIO_UPGRADE_EXIT=$?",
+        f"KUBECONFIG={kc} {_ISTIOCTL} upgrade --set profile=minimal -y 2>&1; echo ISTIO_UPGRADE_EXIT=$?",
         asset_id, timeout=600,
     )
     upgrade_output = r.get("output", "")
@@ -106,7 +107,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Step 3: Wait for rollout
     logger.info("Waiting for istiod rollout on %s", asset_id)
     r = await _run(
-        _PATH_PREFIX + f"KUBECONFIG={kc} kubectl rollout status deployment/istiod -n istio-system --timeout=300s 2>&1; echo ROLLOUT_EXIT=$?",
+        f"KUBECONFIG={kc} {_KUBECTL} rollout status deployment/istiod -n istio-system --timeout=300s 2>&1; echo ROLLOUT_EXIT=$?",
         asset_id, timeout=360,
     )
     rollout_output = r.get("output", "")
@@ -114,7 +115,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         logger.warning("Rollout wait non-zero: %s", rollout_output[:300])
 
     # Step 4: Verify - check target version present
-    r = await _run(_PATH_PREFIX + f"KUBECONFIG={kc} istioctl version 2>&1", asset_id, timeout=60)
+    r = await _run(f"KUBECONFIG={kc} {_ISTIOCTL} version 2>&1", asset_id, timeout=60)
     verify_output = r.get("output", "")
     version_ok = target_version in verify_output
 
@@ -160,7 +161,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
 
     # Step 2: Install old version
     r = await _run(
-        _PATH_PREFIX + f"KUBECONFIG={p['kubeconfig_path']} ./istio-{source_version}.0/bin/istioctl install --set profile=minimal -y 2>&1; echo ROLLBACK_EXIT=$?",
+        f"KUBECONFIG={p['kubeconfig_path']} ./istio-{source_version}.0/bin/istioctl install --set profile=minimal -y 2>&1; echo ROLLBACK_EXIT=$?",
         asset_id, timeout=600,
     )
     rollback_output = r.get("output", "")
