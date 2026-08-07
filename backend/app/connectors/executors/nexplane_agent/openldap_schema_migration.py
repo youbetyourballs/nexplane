@@ -89,17 +89,15 @@ echo SCHEMA_DONE
 """.strip()
     await _run(schema_cmd, asset_id, timeout=120)
 
-    # Phase 4: Verify — check if the schema DN is present in config
-    p = _resolve_params(parameters)
-    schema_dn = p.get("schema_dn", "cn=testapp,cn=schema,cn=config") if "schema_dn" in (parameters.get("desired_outcome") or parameters) else "cn=testapp,cn=schema,cn=config"
+    # Phase 4: Verify — search directly for the schema DN
     schema_dn = (parameters.get("desired_outcome") or parameters).get("schema_dn", "cn=testapp,cn=schema,cn=config")
     verify = await _run(
-        f'ldapsearch -Y EXTERNAL -H ldapi:/// -b "cn=schema,cn=config" 2>&1 | head -40; echo VERIFY_DONE',
+        f'ldapsearch -Y EXTERNAL -H ldapi:/// -b "{schema_dn}" -s base 2>&1; echo VERIFY_DONE',
         asset_id,
         timeout=60,
     )
     verify_out = str(verify.get("output", "") or "")
-    schema_present = schema_dn in verify_out or "testapp" in verify_out.lower()
+    schema_present = (schema_dn in verify_out or "objectClass: olcSchemaConfig" in verify_out) and "VERIFY_DONE" in verify_out
 
     return {
         "status": "completed",

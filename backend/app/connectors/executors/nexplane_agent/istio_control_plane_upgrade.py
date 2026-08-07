@@ -91,7 +91,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Step 1: Preflight - capture current version
     logger.info("Istio upgrade preflight: %s->%s on %s", source_version, target_version, asset_id)
     r = await _run(
-        f"export KUBECONFIG={kc}; {istioctl} version 2>&1 || {_ISTIOCTL} version 2>&1 || echo 'no-istio-running'",
+        f"KUBECONFIG={kc} {istioctl} version 2>&1 || KUBECONFIG={kc} {_ISTIOCTL} version 2>&1 || echo 'no-istio-running'",
         asset_id, timeout=60,
     )
     preflight_output = r.get("output", "")
@@ -99,7 +99,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     if dry_run:
         r2 = await _run(
-            f"export KUBECONFIG={kc}; {istioctl} upgrade --set profile=minimal -y --dry-run 2>&1",
+            f"KUBECONFIG={kc} {istioctl} upgrade --set profile=minimal -y --dry-run 2>&1",
             asset_id, timeout=120,
         )
         return {
@@ -114,7 +114,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Step 2: Upgrade
     logger.info("Running istioctl upgrade on %s", asset_id)
     r = await _run(
-        f"export KUBECONFIG={kc}; {istioctl} upgrade --set profile=minimal -y 2>&1; echo ISTIO_UPGRADE_EXIT=$?",
+        f"KUBECONFIG={kc} {istioctl} upgrade --set profile=minimal -y 2>&1; echo ISTIO_UPGRADE_EXIT=$?",
         asset_id, timeout=600,
     )
     upgrade_output = r.get("output", "")
@@ -139,7 +139,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         logger.warning("Rollout wait non-zero: %s", rollout_output[:300])
 
     # Step 4: Verify - check target version present
-    r = await _run(f"export KUBECONFIG={kc}; {istioctl} version 2>&1", asset_id, timeout=60)
+    r = await _run(f"KUBECONFIG={kc} {istioctl} version 2>&1", asset_id, timeout=60)
     verify_output = r.get("output", "")
     version_ok = target_version in verify_output
 
@@ -191,7 +191,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
 
     # Step 2: Install old version
     r = await _run(
-        f"export KUBECONFIG={kc}; ./istio-{source_version}.0/bin/istioctl install --set profile=minimal -y 2>&1; echo ROLLBACK_EXIT=$?",
+        f"KUBECONFIG={kc} ./istio-{source_version}.0/bin/istioctl install --set profile=minimal -y 2>&1; echo ROLLBACK_EXIT=$?",
         asset_id, timeout=600,
     )
     rollback_output = r.get("output", "")

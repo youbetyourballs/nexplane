@@ -79,6 +79,24 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     helm = f"/usr/local/bin/helm --kubeconfig={kubeconfig_path}"
     crds_url = f"{_GITHUB_RELEASE_BASE}/v{target_version}/cert-manager.crds.yaml"
 
+    # --- Step 0: Wait for k3s kubeconfig (k3s service may still be starting) ---
+    r = await _run(
+        f"for i in $(seq 1 36); do "
+        f"[ -f {kubeconfig_path} ] && echo KUBECONFIG_OK && break; "
+        f"sleep 5; done; "
+        f"[ -f {kubeconfig_path} ] || echo KUBECONFIG_MISSING",
+        asset_id, timeout=200,
+    )
+    if "KUBECONFIG_MISSING" in r.get("output", "") or "KUBECONFIG_OK" not in r.get("output", ""):
+        return {
+            "status": "failed",
+            "phase": "preflight",
+            "error": f"k3s kubeconfig not found at {kubeconfig_path} after 180s",
+            "crds_upgraded": False,
+            "deployment_upgraded": False,
+            "asset_id": asset_id,
+        }
+
     # --- Step 1: Preflight ---
     logger.info("cert-manager preflight %s->%s on %s", source_version, target_version, asset_id)
     r = await _run(

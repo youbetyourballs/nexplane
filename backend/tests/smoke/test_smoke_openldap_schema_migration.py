@@ -41,7 +41,7 @@ PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 
 _LDAP_AMI_SSM_KEY  = "/nexplane/smoke-amis/openldap/2.5"
 _SSM_PROFILE       = "nexplane-smoke-ssm"
-_TEST_SCHEMA_LDIF  = "/tmp/nexplane-testapp.ldif"
+_TEST_SCHEMA_LDIF  = "/etc/openldap/schema/nexplane-testapp.ldif"
 _TEST_SCHEMA_DN    = "cn=testapp,cn=schema,cn=config"
 
 CR_TIMEOUT    = 300
@@ -108,8 +108,10 @@ def _build_openldap_ami(aws_creds) -> tuple:
         b"ldapadd -Y EXTERNAL -H ldapi:/// -f /tmp/base.ldif 2>/dev/null || true\n"
         b"printf 'dn: cn=testapp,cn=schema,cn=config\\nobjectClass: olcSchemaConfig\\ncn: testapp\\n"
         b"olcAttributeTypes: ( 1.3.6.1.4.1.99999.1.1 NAME \\x27smokeAttr\\x27 EQUALITY caseIgnoreMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )\\n"
-        b"olcObjectClasses: ( 1.3.6.1.4.1.99999.2.1 NAME \\x27smokeApp\\x27 SUP top AUXILIARY MAY ( smokeAttr ) )\\n' "
-        b"> /tmp/nexplane-testapp.ldif\n"
+        b"olcObjectClasses: ( 1.3.6.1.4.1.99999.2.1 NAME \\x27smokeApp\\x27 SUP top AUXILIARY MAY ( smokeAttr ) )\\n\\n' "
+        b"> /etc/openldap/schema/nexplane-testapp.ldif\n"
+        b"# Also write to /tmp for backwards compat\n"
+        b"cp /etc/openldap/schema/nexplane-testapp.ldif /tmp/nexplane-testapp.ldif 2>/dev/null || true\n"
     )
     user_data = base64.b64encode(_user_data_script).decode()
 
@@ -160,11 +162,24 @@ def _launch_ldap(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
+    # Write the test schema LDIF to a persistent path on each launch.
+    # /tmp is cleared on boot on Amazon Linux via systemd-tmpfiles, so we use /etc/openldap/schema/.
+    _user_data = base64.b64encode(
+        b"#!/bin/bash\n"
+        b"# Ensure test schema LDIF is present at persistent path\n"
+        b"printf 'dn: cn=testapp,cn=schema,cn=config\\nobjectClass: olcSchemaConfig\\ncn: testapp\\n"
+        b"olcAttributeTypes: ( 1.3.6.1.4.1.99999.1.1 NAME \\x27smokeAttr\\x27 EQUALITY caseIgnoreMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )\\n"
+        b"olcObjectClasses: ( 1.3.6.1.4.1.99999.2.1 NAME \\x27smokeApp\\x27 SUP top AUXILIARY MAY ( smokeAttr ) )\\n\\n' "
+        b"> /etc/openldap/schema/nexplane-testapp.ldif\n"
+        b"cp /etc/openldap/schema/nexplane-testapp.ldif /tmp/nexplane-testapp.ldif 2>/dev/null || true\n"
+    ).decode()
+
     kwargs = dict(
         ImageId=ami_id,
         InstanceType="t3.small",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData=_user_data,
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-openldap"},
             {"Key": "nexplane-purpose", "Value": "smoke-openldap-schema-migration"},
