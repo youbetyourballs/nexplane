@@ -99,13 +99,16 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     snapshot_path = "/tmp/nexplane-mongo-dump"
 
     # Attempt mongorestore from dump
-    await _run(
-        f"systemctl stop mongod 2>/dev/null || true; sleep 2; "
-        f"systemctl start mongod 2>/dev/null || true; sleep 5; "
-        f"mongorestore --drop {snapshot_path} 2>&1 || true",
-        asset_id,
-        timeout=300,
-    )
+    try:
+        await _run(
+            f"systemctl stop mongod 2>/dev/null || true; sleep 2; "
+            f"systemctl start mongod 2>/dev/null || true; sleep 5; "
+            f"mongorestore --drop {snapshot_path} 2>&1 || true",
+            asset_id,
+            timeout=300,
+        )
+    except Exception as exc:
+        logger.warning("MongoDB rollback _run raised: %s", exc)
 
     return {
         "rolled_back": True,

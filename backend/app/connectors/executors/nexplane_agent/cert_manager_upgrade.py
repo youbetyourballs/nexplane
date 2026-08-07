@@ -224,6 +224,21 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     kubectl = f"/usr/local/bin/k3s kubectl --kubeconfig={kubeconfig_path}"
     helm = f"/usr/local/bin/helm --kubeconfig={kubeconfig_path}"
 
+    # Wait for kubeconfig (k3s may still be starting if execute failed early)
+    r_kc = await _run(
+        f"for i in $(seq 1 18); do "
+        f"[ -f {kubeconfig_path} ] && echo KUBECONFIG_OK && break; "
+        f"sleep 5; done; "
+        f"[ -f {kubeconfig_path} ] || echo KUBECONFIG_MISSING",
+        asset_id, timeout=100,
+    )
+    if "KUBECONFIG_OK" not in r_kc.get("output", ""):
+        return {
+            "rolled_back": False,
+            "reason": f"k3s kubeconfig not found at {kubeconfig_path} — rollback skipped",
+            "crds_note": "CRDs remain at target version",
+        }
+
     # helm rollback 0 returns to the previous release revision
     logger.info("Rolling back cert-manager Deployment via helm on %s", asset_id)
     r = await _run(

@@ -104,7 +104,7 @@ chmod +x "$VAULT_INSTALL"
 # Ensure /usr/local/bin is in PATH and symlink if needed
 ln -sf "$VAULT_INSTALL" /usr/bin/vault 2>/dev/null || true
 # Restart vault
-systemctl start vault 2>/dev/null || nohup "$VAULT_INSTALL" server -config=/etc/vault.d/vault.hcl >> /var/log/vault.log 2>&1 &
+systemctl start vault --no-block 2>/dev/null || nohup "$VAULT_INSTALL" server -config=/etc/vault.d/vault.hcl >> /var/log/vault.log 2>&1 &
 sleep 8
 rm -rf "$TMP"
 echo "Installed version: $($VAULT_INSTALL version 2>/dev/null)"
@@ -185,7 +185,7 @@ if [ -n "$SRC_VER" ]; then
     sleep 2
     cp "$TMP/vault" "$VAULT_BIN"
     chmod +x "$VAULT_BIN"
-    systemctl start vault 2>/dev/null || nohup vault server -config=/etc/vault.d/vault.hcl >> /var/log/vault.log 2>&1 &
+    systemctl start vault --no-block 2>/dev/null || nohup vault server -config=/etc/vault.d/vault.hcl >> /var/log/vault.log 2>&1 &
     sleep 6
     rm -rf "$TMP"
 fi
