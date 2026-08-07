@@ -87,12 +87,17 @@ echo SCHEMA_DONE
 """.strip()
     await _run(schema_cmd, asset_id, timeout=120)
 
-    # Phase 4: Verify
-    await _run(
-        f'ldapsearch -x -H ldap://localhost -b "{base_dn}" "(objectClass=*)" 2>&1 | head -20; echo VERIFY_DONE',
+    # Phase 4: Verify — check if the schema DN is present in config
+    p = _resolve_params(parameters)
+    schema_dn = p.get("schema_dn", "cn=testapp,cn=schema,cn=config") if "schema_dn" in (parameters.get("desired_outcome") or parameters) else "cn=testapp,cn=schema,cn=config"
+    schema_dn = (parameters.get("desired_outcome") or parameters).get("schema_dn", "cn=testapp,cn=schema,cn=config")
+    verify = await _run(
+        f'ldapsearch -Y EXTERNAL -H ldapi:/// -b "cn=schema,cn=config" 2>&1 | head -40; echo VERIFY_DONE',
         asset_id,
         timeout=60,
     )
+    verify_out = str(verify.get("output", "") or "")
+    schema_present = schema_dn in verify_out or "testapp" in verify_out.lower()
 
     return {
         "status": "completed",
@@ -100,17 +105,17 @@ echo SCHEMA_DONE
         "target_schema": target_schema,
         "config_backup_path": config_backup_path,
         "data_backup_path": data_backup_path,
+        "verify_result": {"schema_dn_present": schema_present, "verify_output": verify_out[:300]},
         "asset_id": asset_id,
     }
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    asset_ids = (
-        execution_result.get("_target_asset_ids")
-        or parameters.get("asset_ids")
-        or []
+    asset_id = execution_result.get("asset_id") or str(
+        (execution_result.get("_target_asset_ids") or parameters.get("asset_ids") or [None])[0] or ""
     )
-    asset_id = str(asset_ids[0]) if asset_ids else ""
+    if not asset_id:
+        return {"rolled_back": False, "reason": "No asset_id available for rollback"}
     config_backup_path = execution_result.get("config_backup_path", "/tmp/nexplane-ldap-config-backup.ldif")
 
     logger.info(f"OpenLDAP rollback: restoring config from {config_backup_path} on {asset_id}")

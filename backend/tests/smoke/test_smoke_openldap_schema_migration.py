@@ -309,8 +309,8 @@ def test_phase2_apply_schema():
             "schema_dn":        _TEST_SCHEMA_DN,
             "slapd_config_dir": "/etc/ldap/slapd.d",
         },
-        "connector_id": conn_id,
-        "asset_ids":    [asset_id],
+        "connector_id":     conn_id,
+        "target_asset_ids": [asset_id],
     })
     cr_id = cr["id"]
     _state["cr_id"] = cr_id
