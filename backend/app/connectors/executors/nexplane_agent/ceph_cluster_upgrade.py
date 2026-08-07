@@ -6,13 +6,13 @@ Ceph cluster upgrade executor.
 Uses run_command exclusively via the nexplane agent.
 Flow: preflight -> backup (osd/pg dump) -> cephadm upgrade -> verify.
 Downgrade not supported by Ceph. Rollback is a no-op with a data_loss_warning.
-ROLLBACK_CAPABILITY = "partial"
+ROLLBACK_CAPABILITY = "irreversible"
 """
 import logging
 
 logger = logging.getLogger(__name__)
 
-ROLLBACK_CAPABILITY = "partial"
+ROLLBACK_CAPABILITY = "irreversible"
 
 
 async def _run(command: str, asset_id: str, timeout: int = 120) -> dict:

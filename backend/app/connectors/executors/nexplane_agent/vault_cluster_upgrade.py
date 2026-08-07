@@ -78,7 +78,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 TARGET_VER=%(ver)s
 ARCH=linux_amd64
 # Normalize to full semver (1.16 -> 1.16.0)
-if echo "$TARGET_VER" | grep -qE '^[0-9]+\.[0-9]+$'; then
+if echo "$TARGET_VER" | grep -qE '^[0-9]+[.][0-9]+$'; then
     FULL_VER="${TARGET_VER}.0"
 else
     FULL_VER="$TARGET_VER"
@@ -102,7 +102,7 @@ sleep 6
 rm -rf "$TMP"
 echo UPGRADE_DONE
 """ % {"ver": target_v}
-    r = await _run(upgrade_script, asset_id, timeout=300)
+    r = await _run(upgrade_script, asset_id, timeout=600)
     upgrade_output = r.get("output", "")
     upgrade_ok = "UPGRADE_DONE" in upgrade_output and "DOWNLOAD_FAILED" not in upgrade_output
 
@@ -162,7 +162,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
 SRC_VER=%(src)s
 if [ -n "$SRC_VER" ]; then
     ARCH=linux_amd64
-    if echo "$SRC_VER" | grep -qE '^[0-9]+\.[0-9]+$'; then
+    if echo "$SRC_VER" | grep -qE '^[0-9]+[.][0-9]+$'; then
         FULL_VER="${SRC_VER}.0"
     else
         FULL_VER="$SRC_VER"
