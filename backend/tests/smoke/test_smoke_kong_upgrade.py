@@ -1,4 +1,4 @@
-﻿# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 """Smoke test: Kong API Gateway Upgrade
@@ -10,7 +10,7 @@ Phases:
   3. rollback    -- trigger rollback, assert rolled_back
   4. teardown    -- terminate instance, deregister connector/asset
 
-AMI cache key: /nexplane/smoke-amis/kong/3.4
+AMI cache key: /nexplane/smoke-amis/kong/kong-34
 Run:
     docker exec nexplane-backend-1 python -m pytest \
         /app/tests/smoke/test_smoke_kong_upgrade.py -v -s
@@ -27,7 +27,7 @@ import boto3
 import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
-from smoke_helpers import NexplaneClient, log, get_connector_creds_from_db, get_or_create_smoke_ami
+from smoke_helpers import NexplaneClient, log, get_connector_creds_from_db, get_or_create_smoke_ami, install_nexplane_agent_on_instance
 
 BASE_URL  = os.environ.get("NEXPLANE_BASE_URL", "http://localhost:8000")
 EMAIL     = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
@@ -36,9 +36,10 @@ PASSWORD  = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 SOURCE_VERSION = "3.4"
 TARGET_VERSION = "3.7"
 _SSM_PROFILE   = "nexplane-smoke-ssm"
+_AMI_SSM_KEY   = "kong/kong-34"
 
 CR_TIMEOUT    = 1800
-POLL_INTERVAL = 15
+POLL_INTERVAL = 20
 
 _state = {
     "connector_id":      None,
@@ -72,34 +73,39 @@ def _boto3_client(service, creds):
     )
 
 
-_KONG_USER_DATA = (
-    b"#!/bin/bash\n"
-    b"amazon-linux-extras install postgresql14 -y\n"
-    b"yum install -y postgresql-server\n"
-    b"postgresql-setup initdb\n"
-    b"systemctl enable postgresql && systemctl start postgresql\n"
-    b"sudo -u postgres psql -c \"CREATE USER kong WITH PASSWORD 'kong';\"\n"
-    b"sudo -u postgres psql -c \"CREATE DATABASE kong OWNER kong;\"\n"
-    b"curl -sfL https://packages.konghq.com/public/gateway-34/rpm/amzn/2/x86_64/kong-3.4.2.1.aws.amd64.rpm"
-    b" -o /tmp/kong.rpm\n"
-    b"yum install -y /tmp/kong.rpm\n"
-    b"cp /etc/kong/kong.conf.default /etc/kong/kong.conf\n"
-    b"sed -i 's/#database = off/database = postgres/' /etc/kong/kong.conf\n"
-    b"sed -i 's/#pg_host = 127.0.0.1/pg_host = 127.0.0.1/' /etc/kong/kong.conf\n"
-    b"sed -i 's/#pg_user = kong/pg_user = kong/' /etc/kong/kong.conf\n"
-    b"sed -i 's/#pg_password =/pg_password = kong/' /etc/kong/kong.conf\n"
-    b"sed -i 's/#pg_database = kong/pg_database = kong/' /etc/kong/kong.conf\n"
-    b"kong migrations bootstrap\n"
-    b"systemctl enable kong && systemctl start kong\n"
-)
-
-
-def _launch_kong_ami(aws_creds) -> tuple:
+def _build_kong_ami(aws_creds) -> tuple:
     ec2       = _boto3_client("ec2", aws_creds)
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id")
 
-    user_data = base64.b64encode(_KONG_USER_DATA).decode()
+    user_data_script = (
+        b"#!/bin/bash\n"
+        b"# PostgreSQL 14\n"
+        b"amazon-linux-extras install postgresql14 -y\n"
+        b"yum install -y postgresql-server\n"
+        b"postgresql-setup initdb\n"
+        b"# Allow password auth\n"
+        b"sed -i 's/ident$/md5/g; s/peer$/md5/g' /var/lib/pgsql/data/pg_hba.conf\n"
+        b"systemctl enable postgresql && systemctl start postgresql\n"
+        b"sudo -u postgres psql -c \"CREATE USER kong WITH PASSWORD 'kong';\"\n"
+        b"sudo -u postgres psql -c \"CREATE DATABASE kong OWNER kong;\"\n"
+        b"# Kong 3.4 from package\n"
+        b"yum install -y yum-utils\n"
+        b"yum-config-manager --add-repo https://download.konghq.com/gateway-34-rhel-9.repo 2>/dev/null || true\n"
+        b"# Fallback: direct rpm\n"
+        b"curl -sfL \"https://packages.konghq.com/public/gateway-34/rpm/el/8/x86_64/kong-enterprise-edition-3.4.3.4.rhel8.amd64.rpm\" -o /tmp/kong.rpm 2>/dev/null || \\\n"
+        b"curl -sfL \"https://packages.konghq.com/public/gateway-34/rpm/amzn/2/x86_64/kong-3.4.2.1.aws.amd64.rpm\" -o /tmp/kong.rpm\n"
+        b"yum install -y /tmp/kong.rpm\n"
+        b"cp /etc/kong/kong.conf.default /etc/kong/kong.conf\n"
+        b"sed -i 's|#database = off|database = postgres|' /etc/kong/kong.conf\n"
+        b"sed -i 's|#pg_host = 127.0.0.1|pg_host = 127.0.0.1|' /etc/kong/kong.conf\n"
+        b"sed -i 's|#pg_user = kong|pg_user = kong|' /etc/kong/kong.conf\n"
+        b"sed -i 's|#pg_password =|pg_password = kong|' /etc/kong/kong.conf\n"
+        b"sed -i 's|#pg_database = kong|pg_database = kong|' /etc/kong/kong.conf\n"
+        b"kong migrations bootstrap 2>&1\n"
+        b"systemctl enable kong && systemctl start kong || kong start\n"
+    )
+    user_data = base64.b64encode(user_data_script).decode()
 
     kwargs = dict(
         ImageId="ami-0c101f26f147fa7fd",
@@ -119,13 +125,13 @@ def _launch_kong_ami(aws_creds) -> tuple:
 
     resp        = ec2.run_instances(**kwargs)
     instance_id = resp["Instances"][0]["InstanceId"]
-    log(f"  Launched Kong instance {instance_id}")
+    log(f"  Launched Kong build instance {instance_id}")
 
     ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Kong admin port 8001 on {private_ip} (up to 600s)")
+    log(f"  Waiting for Kong admin port 8001 on {private_ip} (up to 10 min)")
     deadline = time.time() + 600
     while time.time() < deadline:
         time.sleep(15)
@@ -162,6 +168,7 @@ def _exec_result(cr: dict) -> dict:
 
 
 def _rollback_result(cr: dict) -> dict:
+    """Extract rollback result from the rolled_back execution run."""
     runs = cr.get("execution_runs") or []
     for run in runs:
         if run.get("status") in ("rolled_back", "rollback_failed"):
@@ -181,15 +188,14 @@ def test_phase1_provision():
         pytest.skip("No AWS connector creds in platform DB")
 
     ami_id = get_or_create_smoke_ami(
-        cache_key="/nexplane/smoke-amis/kong/3.4",
-        setup_hash="34",
-        launch_fn=_launch_kong_ami,
+        cache_key=_AMI_SSM_KEY,
+        setup_hash="kong-34",
+        launch_fn=_build_kong_ami,
         snapshot_name="nexplane-smoke-kong-3.4",
     )
     log(f"  Using Kong AMI: {ami_id}")
 
-    ec2 = _boto3_client("ec2", aws_creds)
-
+    ec2       = _boto3_client("ec2", aws_creds)
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id")
 
@@ -258,6 +264,10 @@ def test_phase1_provision():
     _state["connector_id"] = conn_id
     _state["asset_id"]     = asset_id
     log(f"  Registered connector {conn_id}, asset {asset_id}")
+
+    log("  Installing nexplane agent on smoke instance")
+    install_nexplane_agent_on_instance(instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=300)
+
     log("[PHASE 1: provision] PASSED")
 
 
@@ -269,10 +279,9 @@ def test_phase2_upgrade():
     if not _state.get("connector_id"):
         pytest.skip("Phase 1 did not complete")
 
-    conn_id    = _state["connector_id"]
-    asset_id   = _state["asset_id"]
-    private_ip = _state["private_ip"]
-    run_id     = uuid.uuid4().hex[:6]
+    conn_id  = _state["connector_id"]
+    asset_id = _state["asset_id"]
+    run_id   = uuid.uuid4().hex[:6]
 
     cr = _api("post", "/change-requests", json={
         "title":       f"smoke-kong-upgrade-{run_id}",
@@ -280,7 +289,6 @@ def test_phase2_upgrade():
         "desired_outcome": {
             "source_version": SOURCE_VERSION,
             "target_version": TARGET_VERSION,
-            "kong_host":      private_ip,
             "db_mode":        "postgres",
             "db_host":        "localhost",
             "db_port":        5432,
