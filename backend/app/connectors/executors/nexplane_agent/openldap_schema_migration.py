@@ -77,10 +77,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     )
 
     # Phase 3: Schema migration — import LDIF if provided
+    # cn=config schema changes require EXTERNAL SASL auth via ldapi:///
     ldif = schema_ldif_path or "/tmp/nexplane-testapp.ldif"
     schema_cmd = f"""
 LDIF={ldif}
 if [ -f "$LDIF" ]; then
+    ldapadd -Y EXTERNAL -H ldapi:/// -f "$LDIF" 2>&1 || \
     ldapadd -x -H ldap://localhost -D "{bind_dn}" -w "{bind_password}" -f "$LDIF" 2>&1 || true
 fi
 echo SCHEMA_DONE

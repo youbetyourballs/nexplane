@@ -13,6 +13,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 ROLLBACK_CAPABILITY = "irreversible"
+ROLLBACK_REASON = (
+    "Ceph does not support version downgrade. No actual rollback is performed — "
+    "manual intervention required: check cluster health with 'ceph -s', "
+    "restore from RBD/CephFS snapshots if needed."
+)
 
 
 async def _run(command: str, asset_id: str, timeout: int = 120) -> dict:

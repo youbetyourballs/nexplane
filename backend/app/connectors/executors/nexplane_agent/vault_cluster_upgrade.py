@@ -72,12 +72,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     logger.info("Vault snapshot: %s", snapshot_path)
 
     # --- Phase 3: Upgrade vault binary ---
-    # HashiCorp releases use full semver: vault_1.16.0_linux_amd64.zip
-    # Try X.Y.0 first (most common), then bare X.Y as fallback
+    # HashiCorp releases use full semver: vault_2.1.0_linux_amd64.zip
+    # Install to /usr/local/bin/vault to avoid package-manager-owned binary conflicts
     upgrade_script = """
 TARGET_VER=%(ver)s
 ARCH=linux_amd64
-# Normalize to full semver (1.16 -> 1.16.0)
+# Normalize to full semver (2.1 -> 2.1.0)
 if echo "$TARGET_VER" | grep -qE '^[0-9]+[.][0-9]+$'; then
     FULL_VER="${TARGET_VER}.0"
 else
@@ -86,20 +86,28 @@ fi
 BASE_URL="https://releases.hashicorp.com/vault/${FULL_VER}"
 ZIP="vault_${FULL_VER}_${ARCH}.zip"
 TMP=$(mktemp -d)
-curl -sf -L -o "$TMP/vault.zip" "${BASE_URL}/${ZIP}" 2>&1 || {
-    echo "DOWNLOAD_FAILED url=${BASE_URL}/${ZIP}"
+echo "Downloading vault ${FULL_VER} from ${BASE_URL}/${ZIP}"
+curl -sf -L --max-time 120 -o "$TMP/vault.zip" "${BASE_URL}/${ZIP}" 2>&1
+CURL_EXIT=$?
+if [ $CURL_EXIT -ne 0 ]; then
+    echo "DOWNLOAD_FAILED url=${BASE_URL}/${ZIP} exit=${CURL_EXIT}"
     rm -rf "$TMP"
     exit 0
-}
+fi
 unzip -o "$TMP/vault.zip" -d "$TMP/" 2>&1
-VAULT_BIN=$(which vault 2>/dev/null || echo /usr/local/bin/vault)
-systemctl stop vault 2>/dev/null || true
-sleep 2
-cp "$TMP/vault" "$VAULT_BIN"
-chmod +x "$VAULT_BIN"
-systemctl start vault 2>/dev/null || nohup vault server -config=/etc/vault.d/vault.hcl >> /var/log/vault.log 2>&1 &
-sleep 6
+# Always install to /usr/local/bin/vault (avoid package-manager-owned paths)
+VAULT_INSTALL=/usr/local/bin/vault
+systemctl stop vault 2>/dev/null || pkill vault 2>/dev/null || true
+sleep 3
+cp "$TMP/vault" "$VAULT_INSTALL"
+chmod +x "$VAULT_INSTALL"
+# Ensure /usr/local/bin is in PATH and symlink if needed
+ln -sf "$VAULT_INSTALL" /usr/bin/vault 2>/dev/null || true
+# Restart vault
+systemctl start vault 2>/dev/null || nohup "$VAULT_INSTALL" server -config=/etc/vault.d/vault.hcl >> /var/log/vault.log 2>&1 &
+sleep 8
 rm -rf "$TMP"
+echo "Installed version: $($VAULT_INSTALL version 2>/dev/null)"
 echo UPGRADE_DONE
 """ % {"ver": target_v}
     r = await _run(upgrade_script, asset_id, timeout=600)
@@ -119,9 +127,10 @@ echo UNSEAL_DONE
         await _run(unseal_script, asset_id, timeout=30)
 
     # --- Phase 4: Verify ---
-    r = await _run(env + " vault version 2>&1", asset_id, timeout=30)
+    r = await _run("/usr/local/bin/vault version 2>&1", asset_id, timeout=30)
     version_output = r.get("output", "")
     version_ok = target_v in version_output
+    logger.info("Vault version check: %s -> version_ok=%s", version_output[:100], version_ok)
 
     r2 = await _run(env + " vault status 2>&1 || true", asset_id, timeout=30)
     health_output = r2.get("output", "")

@@ -51,6 +51,8 @@ _state = {
     "provisioned_by_us": False,
     "cr_id":             None,
     "vault_token":       None,
+    "source_version":    None,
+    "target_version":    None,
 }
 
 _client: NexplaneClient = None
@@ -111,15 +113,32 @@ def _launch_vault(ec2, ssm, ami_id, aws_creds) -> tuple:
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     import base64
-    # Generate self-signed TLS certs and start Vault (AMI has empty cert files)
+    # Generate TLS certs, wipe any prior vault state, init fresh so we get a known token.
+    # Also detect and export the installed vault version for dynamic upgrade target selection.
     user_data = base64.b64encode(b"""#!/bin/bash
+# TLS certs
+mkdir -p /opt/vault/tls
 openssl req -x509 -newkey rsa:2048 -keyout /opt/vault/tls/tls.key \
     -out /opt/vault/tls/tls.crt -days 30 -nodes \
     -subj '/CN=vault-smoke' 2>/dev/null
-chown vault:vault /opt/vault/tls/tls.key /opt/vault/tls/tls.crt
-chmod 640 /opt/vault/tls/tls.key /opt/vault/tls/tls.crt
-nohup vault server -config=/etc/vault.d/vault.hcl > /var/log/vault.log 2>&1 &
-sleep 5
+chown vault:vault /opt/vault/tls/tls.key /opt/vault/tls/tls.crt 2>/dev/null || true
+chmod 640 /opt/vault/tls/tls.key /opt/vault/tls/tls.crt 2>/dev/null || true
+# Stop vault and wipe any existing state to ensure clean init
+systemctl stop vault 2>/dev/null || pkill vault 2>/dev/null || true
+sleep 2
+rm -rf /opt/vault/data/* 2>/dev/null || true
+rm -rf /var/lib/vault/* 2>/dev/null || true
+# Start vault
+systemctl start vault 2>/dev/null || nohup vault server -config=/etc/vault.d/vault.hcl > /var/log/vault.log 2>&1 &
+sleep 8
+# Record vault binary version before init
+VAULT_BIN=$(which vault 2>/dev/null || echo /usr/local/bin/vault)
+VAULT_VER=$("$VAULT_BIN" version 2>/dev/null | grep -oE '[0-9]+[.][0-9]+[.][0-9]+' | head -1)
+VAULT_MINOR=$(echo "$VAULT_VER" | grep -oE '^[0-9]+[.][0-9]+')
+echo "VAULT_VERSION=$VAULT_VER" > /tmp/vault-version.txt
+echo "VAULT_MINOR=$VAULT_MINOR" >> /tmp/vault-version.txt
+echo "VAULT_BIN=$VAULT_BIN" >> /tmp/vault-version.txt
+# Init
 VAULT_SKIP_VERIFY=true VAULT_ADDR=https://127.0.0.1:8200 vault operator init \
     -key-shares=1 -key-threshold=1 -format=json > /tmp/vault-init.json 2>/dev/null || true
 UNSEAL_KEY=$(python3 -c "import json; d=json.load(open('/tmp/vault-init.json')); print(d['unseal_keys_b64'][0])" 2>/dev/null)
@@ -249,31 +268,52 @@ def test_phase1_provision():
     log("  Installing nexplane agent on smoke instance")
     install_nexplane_agent_on_instance(instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=300)
 
-    # Read the real vault root token generated during init (written to /tmp/vault-root-token.txt)
-    vault_token = None
+    # Read vault root token and detected version via SSM
     ssm_c = _boto3_client("ssm", aws_creds)
-    for _ in range(18):  # up to 3 min
-        time.sleep(10)
+
+    def _ssm_read(instance_id, cmd):
         try:
             resp = ssm_c.send_command(
                 InstanceIds=[instance_id],
                 DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["cat /tmp/vault-root-token.txt 2>/dev/null | grep ROOT_TOKEN | cut -d= -f2"]},
+                Parameters={"commands": [cmd]},
             )
             cmd_id = resp["Command"]["CommandId"]
             time.sleep(8)
             out = ssm_c.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
-            token_line = out.get("StandardOutputContent", "").strip()
-            if token_line:
-                vault_token = token_line
-                log(f"  Read vault root token via SSM (len={len(vault_token)})")
-                break
+            return out.get("StandardOutputContent", "").strip()
         except Exception:
-            pass
+            return ""
+
+    vault_token = None
+    vault_minor = None
+    for _ in range(30):  # up to ~7.5 min (30 × 15s)
+        time.sleep(15)
+        token_line = _ssm_read(instance_id, "cat /tmp/vault-root-token.txt 2>/dev/null | grep ROOT_TOKEN | cut -d= -f2")
+        if token_line and token_line != "ALREADY_INITIALIZED":
+            vault_token = token_line
+            log(f"  Read vault root token via SSM (len={len(vault_token)})")
+        minor_line = _ssm_read(instance_id, "grep VAULT_MINOR /tmp/vault-version.txt 2>/dev/null | cut -d= -f2")
+        if minor_line:
+            vault_minor = minor_line
+            log(f"  Detected vault minor version: {vault_minor}")
+        if vault_token and vault_minor:
+            break
+
     if not vault_token:
         log("  Warning: could not read vault root token via SSM, using fallback", ok=False)
         vault_token = _VAULT_ROOT_TOKEN
     _state["vault_token"] = vault_token
+
+    # Derive source/target from detected version (e.g., 2.0 -> 2.1)
+    if vault_minor:
+        try:
+            major, minor_int = vault_minor.split(".")
+            _state["source_version"] = vault_minor
+            _state["target_version"] = f"{major}.{int(minor_int) + 1}"
+            log(f"  Vault upgrade plan: {_state['source_version']} -> {_state['target_version']}")
+        except Exception:
+            pass
 
     log("[PHASE 1: provision] PASSED")
 
@@ -291,12 +331,16 @@ def test_phase2_upgrade():
     private_ip = _state["private_ip"]
     run_id     = uuid.uuid4().hex[:6]
 
+    source_version = _state.get("source_version") or _SOURCE_VERSION
+    target_version = _state.get("target_version") or _TARGET_VERSION
+    log(f"  Vault upgrade: {source_version} -> {target_version}")
+
     cr = _api("post", "/change-requests", json={
         "title":       f"smoke-vault-upgrade-{run_id}",
         "change_type": "vault_cluster_upgrade",
         "desired_outcome": {
-            "source_version": _SOURCE_VERSION,
-            "target_version": _TARGET_VERSION,
+            "source_version": source_version,
+            "target_version": target_version,
             "nodes": [
                 {"host": private_ip, "api_port": _VAULT_API_PORT}
             ],

@@ -75,15 +75,14 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if tgt_minor <= src_minor:
         raise ValueError("target_version must be newer than source_version")
 
-    kubectl = "/usr/local/bin/k3s kubectl"
-    helm = "/usr/local/bin/helm"
-    kube_env = f"export KUBECONFIG={kubeconfig_path}"
+    kubectl = f"/usr/local/bin/k3s kubectl --kubeconfig={kubeconfig_path}"
+    helm = f"/usr/local/bin/helm --kubeconfig={kubeconfig_path}"
     crds_url = f"{_GITHUB_RELEASE_BASE}/v{target_version}/cert-manager.crds.yaml"
 
     # --- Step 1: Preflight ---
     logger.info("cert-manager preflight %s->%s on %s", source_version, target_version, asset_id)
     r = await _run(
-        f"{kube_env}; {helm} list -n {namespace} 2>&1",
+        f"{helm} list -n {namespace} 2>&1",
         asset_id,
         timeout=60,
     )
@@ -103,8 +102,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # --- Step 2: Ensure helm repo present and updated ---
     logger.info("Adding/updating jetstack helm repo")
     r = await _run(
-        f"{kube_env}; {helm} repo add jetstack https://charts.jetstack.io 2>/dev/null; "
-        f"{kube_env}; {helm} repo update 2>&1",
+        f"{helm} repo add jetstack https://charts.jetstack.io 2>/dev/null; "
+        f"{helm} repo update 2>&1",
         asset_id,
         timeout=120,
     )
@@ -113,7 +112,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # --- Step 3: Upgrade CRDs --- POINT OF PARTIAL NO-RETURN ---
     logger.info("Upgrading cert-manager CRDs to %s", target_version)
     r = await _run(
-        f"{kube_env}; {kubectl} apply --validate=false -f {crds_url} 2>&1; echo CRD_EXIT=$?",
+        f"{kubectl} apply --validate=false -f {crds_url} 2>&1; echo CRD_EXIT=$?",
         asset_id,
         timeout=180,
     )
@@ -133,7 +132,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # --- Step 4: Upgrade Deployment via helm ---
     logger.info("helm upgrade cert-manager to %s", target_version)
     r = await _run(
-        f"{kube_env}; {helm} upgrade cert-manager jetstack/cert-manager "
+        f"{helm} upgrade cert-manager jetstack/cert-manager "
         f"--namespace {namespace} --version {target_version} --reuse-values 2>&1; echo HELM_EXIT=$?",
         asset_id,
         timeout=300,
@@ -155,7 +154,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # --- Step 5: Wait for rollout ---
     logger.info("Waiting for cert-manager rollout")
     r = await _run(
-        f"{kube_env}; {kubectl} rollout status deployment/cert-manager "
+        f"{kubectl} rollout status deployment/cert-manager "
         f"-n {namespace} --timeout=300s 2>&1; echo ROLLOUT_EXIT=$?",
         asset_id,
         timeout=360,
@@ -166,12 +165,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # --- Step 6: Verify ---
     r_pods = await _run(
-        f"{kube_env}; {kubectl} get pods -n {namespace} 2>&1",
+        f"{kubectl} get pods -n {namespace} 2>&1",
         asset_id,
         timeout=60,
     )
     r_ver = await _run(
-        f"{kube_env}; {kubectl} version --client 2>&1",
+        f"{kubectl} version --client 2>&1",
         asset_id,
         timeout=30,
     )
@@ -204,14 +203,13 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     p = _resolve_params(parameters)
     namespace = p["namespace"]
     kubeconfig_path = p["kubeconfig_path"]
-    kubectl = "/usr/local/bin/k3s kubectl"
-    helm = "/usr/local/bin/helm"
-    kube_env = f"export KUBECONFIG={kubeconfig_path}"
+    kubectl = f"/usr/local/bin/k3s kubectl --kubeconfig={kubeconfig_path}"
+    helm = f"/usr/local/bin/helm --kubeconfig={kubeconfig_path}"
 
     # helm rollback 0 returns to the previous release revision
     logger.info("Rolling back cert-manager Deployment via helm on %s", asset_id)
     r = await _run(
-        f"{kube_env}; {helm} rollback cert-manager 0 -n {namespace} 2>&1; echo ROLLBACK_EXIT=$?",
+        f"{helm} rollback cert-manager 0 -n {namespace} 2>&1; echo ROLLBACK_EXIT=$?",
         asset_id,
         timeout=180,
     )
@@ -221,7 +219,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
 
     # Wait for rollout after rollback
     r2 = await _run(
-        f"{kube_env}; {kubectl} rollout status deployment/cert-manager "
+        f"{kubectl} rollout status deployment/cert-manager "
         f"-n {namespace} --timeout=120s 2>&1",
         asset_id,
         timeout=150,
