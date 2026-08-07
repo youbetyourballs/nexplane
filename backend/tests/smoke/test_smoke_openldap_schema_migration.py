@@ -264,7 +264,7 @@ def test_phase1_provision():
     ec2 = _boto3_client("ec2", aws_creds)
 
     ami_id = get_or_create_smoke_ami(
-        cache_key=_LDAP_AMI_SSM_KEY,
+        cache_key="openldap/2.5",
         setup_hash="openldap-2.5",
         launch_fn=_build_openldap_ami,
         snapshot_name="nexplane-smoke-openldap-2.5",

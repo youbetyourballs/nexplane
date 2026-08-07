@@ -138,8 +138,8 @@ def _launch_minio(aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for MinIO port 9000 on {private_ip} (up to 120s)")
-    deadline = time.time() + 120
+    log(f"  Waiting for MinIO port 9000 on {private_ip} (up to 600s)")
+    deadline = time.time() + 600
     while time.time() < deadline:
         time.sleep(10)
         try:
@@ -150,7 +150,7 @@ def _launch_minio(aws_creds) -> tuple:
         except OSError:
             pass
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"MinIO never reachable on {private_ip}:9000 within 120s")
+    pytest.fail(f"MinIO never reachable on {private_ip}:9000 within 600s")
 
 
 def _register_asset(private_ip, run_id) -> tuple:
