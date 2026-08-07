@@ -4395,7 +4395,8 @@
       "action_id": "redis_cluster_migration",
       "applicable_asset_types": [
         "server"
-      ]
+      ],
+      "generic_action": "redis_cluster_migration"
     },
     {
       "display_name": "Cassandra Rolling Upgrade",
@@ -4440,7 +4441,8 @@
       "action_id": "cassandra_rolling_upgrade",
       "applicable_asset_types": [
         "server"
-      ]
+      ],
+      "generic_action": "cassandra_rolling_upgrade"
     },
     {
       "display_name": "MongoDB Replica Set Upgrade",
@@ -4490,7 +4492,8 @@
       "action_id": "mongodb_rs_upgrade",
       "applicable_asset_types": [
         "server"
-      ]
+      ],
+      "generic_action": "mongodb_rs_upgrade"
     },
     {
       "display_name": "CockroachDB Cluster Upgrade",
@@ -4546,7 +4549,8 @@
       "action_id": "cockroachdb_cluster_upgrade",
       "applicable_asset_types": [
         "server"
-      ]
+      ],
+      "generic_action": "cockroachdb_cluster_upgrade"
     },
     {
       "display_name": "etcd Cluster Upgrade",
@@ -4596,7 +4600,8 @@
       "action_id": "etcd_upgrade",
       "applicable_asset_types": [
         "server"
-      ]
+      ],
+      "generic_action": "etcd_upgrade"
     },
     {
       "display_name": "MinIO Distributed Upgrade",
@@ -4640,7 +4645,8 @@
       "action_id": "minio_distributed_upgrade",
       "applicable_asset_types": [
         "server"
-      ]
+      ],
+      "generic_action": "minio_distributed_upgrade"
     },
     {
       "display_name": "Ceph Cluster Upgrade",
@@ -4701,7 +4707,8 @@
       "action_id": "ceph_cluster_upgrade",
       "applicable_asset_types": [
         "server"
-      ]
+      ],
+      "generic_action": "ceph_cluster_upgrade"
     },
     {
       "display_name": "Keycloak Major Upgrade",
@@ -4781,7 +4788,8 @@
       "action_id": "keycloak_upgrade",
       "applicable_asset_types": [
         "server"
-      ]
+      ],
+      "generic_action": "keycloak_upgrade"
     },
     {
       "display_name": "FreeIPA / RHIDM Upgrade",
@@ -4833,7 +4841,8 @@
       "action_id": "freeipa_upgrade",
       "applicable_asset_types": [
         "server"
-      ]
+      ],
+      "generic_action": "freeipa_upgrade"
     },
     {
       "display_name": "OpenLDAP Schema Migration",
@@ -4881,7 +4890,8 @@
       "action_id": "openldap_schema_migration",
       "applicable_asset_types": [
         "server"
-      ]
+      ],
+      "generic_action": "openldap_schema_migration"
     },
     {
       "display_name": "HashiCorp Vault Cluster Upgrade",
@@ -4932,7 +4942,8 @@
       "action_id": "vault_cluster_upgrade",
       "applicable_asset_types": [
         "server"
-      ]
+      ],
+      "generic_action": "vault_cluster_upgrade"
     },
     {
       "display_name": "Istio Control Plane Upgrade",
