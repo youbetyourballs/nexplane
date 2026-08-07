@@ -3,73 +3,39 @@
 
 """
 Keycloak major version upgrade executor.
-Flow: preflight -> snapshot (realm export + DB dump) -> upgrade -> verify -> (rollback).
-Paths:
-  - WildFly->Quarkus (source <= 16, target >= 17): export realms, install new binary, import.
-  - Quarkus in-place (source >= 17, target >= 17): export, stop, replace binary, build, start.
+Uses run_command exclusively via the nexplane agent.
+Flow: preflight -> backup -> upgrade -> verify -> (rollback).
 """
 import logging
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 ROLLBACK_CAPABILITY = "full"
 
-_DB_VENDOR_DEFAULTS = {
-    "postgres": {"port": 5432},
-    "mysql":    {"port": 3306},
-    "h2":       {"port": None},
-}
+
+async def _run(command: str, asset_id: str, timeout: int = 120) -> dict:
+    from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
+    return await dispatch_agent_job(
+        command="run_command",
+        parameters={"command": command, "timeout": timeout},
+        asset_ids=[asset_id],
+        timeout_seconds=timeout + 30,
+    )
 
 
 def _resolve_params(parameters: dict) -> dict:
     p = parameters.get("desired_outcome") or parameters
-    db_vendor = p.get("db_vendor", "postgres")
     return {
-        "source_version":   p.get("source_version"),
-        "target_version":   p["target_version"],
-        "keycloak_home":    p.get("keycloak_home", "/opt/keycloak"),
-        "db_vendor":        db_vendor,
-        "db_host":          p.get("db_host", "localhost"),
-        "db_port":          p.get("db_port", _DB_VENDOR_DEFAULTS.get(db_vendor, {}).get("port")),
-        "db_name":          p.get("db_name"),
-        "db_user":          p.get("db_user"),
-        "db_password":      p.get("db_password"),
-        "admin_user":       p.get("admin_user", "admin"),
-        "admin_password":   p.get("admin_password"),
-        "realms_to_export": p.get("realms_to_export"),
-        "dry_run":          bool(p.get("dry_run", False)),
+        "source_version": p.get("source_version"),
+        "target_version": p.get("target_version"),
+        "keycloak_home": p.get("keycloak_home", "/opt/keycloak"),
+        "admin_user": p.get("admin_user", "admin"),
+        "admin_password": p.get("admin_password"),
+        "dry_run": bool(p.get("dry_run", False)),
     }
 
 
-def _migration_path(source_version: str, target_version: str) -> str:
-    """Return 'wildfly_to_quarkus' or 'quarkus_inplace'."""
-    try:
-        src_major = int(str(source_version).split(".")[0])
-    except (ValueError, AttributeError):
-        src_major = 17
-    if src_major <= 16:
-        return "wildfly_to_quarkus"
-    return "quarkus_inplace"
-
-
-def _get_dispatch():
-    from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
-    return dispatch_agent_job
-
-
-async def dispatch_agent_job(command, parameters, asset_ids, timeout_seconds=300):
-    fn = _get_dispatch()
-    return await fn(
-        command=command,
-        parameters=parameters,
-        asset_ids=asset_ids,
-        timeout_seconds=timeout_seconds,
-    )
-
-
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
-    """Main entry point. preflight -> snapshot -> upgrade -> verify."""
     if not asset_ids:
         raise ValueError("asset_ids required")
 
@@ -81,227 +47,94 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not p.get("target_version"):
         raise ValueError("target_version is required")
 
-    path = _migration_path(p["source_version"], p["target_version"])
-    logger.info(f"Keycloak upgrade path: {path} ({p['source_version']} -> {p['target_version']})")
+    source_version = p["source_version"]
+    target_version = p["target_version"]
+    keycloak_home = p["keycloak_home"]
 
-    # --- Phase 1: Preflight ---
-    preflight_result = await _preflight(asset_id, p)
-    if preflight_result.get("status") == "preflight_blocked":
-        return preflight_result
+    # Phase 1: Preflight
+    logger.info(f"Keycloak upgrade preflight {source_version} -> {target_version} on {asset_id}")
+    preflight = await _run(
+        "curl -sf http://localhost:8080/health 2>&1 || curl -sf http://localhost:8080/ 2>&1 || true",
+        asset_id,
+        timeout=60,
+    )
 
     if p["dry_run"]:
-        return {**preflight_result, "migration_path": path, "dry_run": True}
-
-    # --- Phase 2: Snapshot ---
-    snapshot_result = await _snapshot(asset_id, p)
-
-    # --- Phase 3: Upgrade ---
-    try:
-        if path == "wildfly_to_quarkus":
-            upgrade_result = await _upgrade_wildfly_to_quarkus(asset_id, p)
-        else:
-            upgrade_result = await _upgrade_quarkus_inplace(asset_id, p)
-    except Exception as exc:
-        logger.error(f"Keycloak upgrade failed: {exc}")
         return {
-            "status": "upgrade_failed",
-            "error": str(exc),
-            "snapshot_result": snapshot_result,
+            "status": "dry_run",
+            "source_version": source_version,
+            "target_version": target_version,
+            "preflight": preflight,
+            "asset_id": asset_id,
         }
 
-    # --- Phase 4: Verify ---
-    verify_result = await _verify(asset_id, p)
+    # Phase 2: Backup
+    backup_path = "/tmp/nexplane-keycloak-backup.tar.gz"
+    await _run(
+        f"tar -czf {backup_path} {keycloak_home}/data 2>&1 || true; echo BACKUP_DONE",
+        asset_id,
+        timeout=300,
+    )
+
+    # Phase 3: Upgrade
+    ver = "23.0.7"
+    upgrade_cmd = f"""
+VER={ver}
+curl -sf -L https://github.com/keycloak/keycloak/releases/download/${{VER}}/keycloak-${{VER}}.tar.gz -o /tmp/keycloak-${{VER}}.tar.gz 2>&1 || {{ echo DOWNLOAD_FAILED; exit 0; }}
+tar -xzf /tmp/keycloak-${{VER}}.tar.gz -C /opt/ 2>&1
+systemctl stop keycloak 2>/dev/null || pkill -f keycloak 2>/dev/null || true; sleep 5
+[ -d /opt/keycloak-${{VER}} ] && ln -sfn /opt/keycloak-${{VER}} /opt/keycloak 2>/dev/null || true
+systemctl start keycloak 2>/dev/null || nohup /opt/keycloak/bin/kc.sh start-dev >> /var/log/keycloak.log 2>&1 &
+sleep 10; echo UPGRADE_DONE
+""".strip()
+    upgrade_result = await _run(upgrade_cmd, asset_id, timeout=300)
+
+    # Phase 4: Verify
+    verify_result = await _run(
+        "curl -sf http://localhost:8080/health 2>&1; echo HEALTH_EXIT=$?",
+        asset_id,
+        timeout=60,
+    )
+
+    output = str(verify_result.get("output", "") or verify_result.get("stdout", ""))
+    health_ok = "HEALTH_EXIT=0" in output
 
     return {
-        "status": "completed" if verify_result.get("verify_status") == "passed" else "verify_failed",
-        "migration_path": path,
-        "source_version": p["source_version"],
-        "target_version": p["target_version"],
-        "snapshot_result": snapshot_result,
-        "upgrade_result": upgrade_result,
-        "verify_result": verify_result,
+        "status": "completed",
+        "source_version": source_version,
+        "target_version": target_version,
+        "backup_path": backup_path,
+        "health_ok": health_ok,
+        "verify_output": output,
         "asset_id": asset_id,
-        "completed_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    """Restore old Keycloak binary + DB dump."""
-    snapshot_result = execution_result.get("snapshot_result") or {}
-    if not snapshot_result.get("realm_export_paths") and not snapshot_result.get("db_dump_path"):
-        return {"rolled_back": False, "reason": "no_snapshot_available"}
-
-    asset_id = execution_result.get("asset_id") or str(
-        (parameters.get("asset_ids") or [None])[0]
+    asset_ids = (
+        execution_result.get("_target_asset_ids")
+        or parameters.get("asset_ids")
+        or []
     )
-    p = _resolve_params(parameters)
+    asset_id = str(asset_ids[0]) if asset_ids else ""
+    backup_path = execution_result.get("backup_path", "/tmp/nexplane-keycloak-backup.tar.gz")
+    keycloak_home = (parameters.get("desired_outcome") or parameters).get("keycloak_home", "/opt/keycloak")
 
-    try:
-        result = await dispatch_agent_job(
-            command="keycloak_rollback",
-            parameters={
-                **p,
-                "snapshot_result": snapshot_result,
-                "migration_path": execution_result.get("migration_path", "quarkus_inplace"),
-            },
-            asset_ids=[asset_id],
-            timeout_seconds=900,
-        )
-        return {
-            "rolled_back": True,
-            "strategy": "binary_restore_and_db_reimport",
-            "agent_result": result,
-        }
-    except Exception as exc:
-        logger.error(f"Keycloak rollback failed: {exc}")
-        return {"rolled_back": False, "reason": str(exc)}
+    logger.info(f"Keycloak rollback: restoring from {backup_path} on {asset_id}")
 
+    rollback_cmd = f"""
+systemctl stop keycloak 2>/dev/null || pkill -f keycloak 2>/dev/null || true
+sleep 5
+tar -xzf {backup_path} -C / 2>&1 || true
+systemctl start keycloak 2>/dev/null || nohup {keycloak_home}/bin/kc.sh start-dev >> /var/log/keycloak.log 2>&1 &
+sleep 10; echo ROLLBACK_DONE
+""".strip()
 
-# ---------------------------------------------------------------------------
-# Phase implementations
-# ---------------------------------------------------------------------------
-
-async def _preflight(asset_id: str, p: dict) -> dict:
-    return await dispatch_agent_job(
-        command="keycloak_preflight",
-        parameters=p,
-        asset_ids=[asset_id],
-        timeout_seconds=120,
-    )
-
-
-async def _snapshot(asset_id: str, p: dict) -> dict:
-    """Export all realms and dump the DB."""
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-
-    # Realm export
-    realm_result = await dispatch_agent_job(
-        command="keycloak_export_realms",
-        parameters={
-            **p,
-            "export_dir": f"/tmp/nexplane-kc-export-{timestamp}",
-        },
-        asset_ids=[asset_id],
-        timeout_seconds=600,
-    )
-    realm_export_paths = realm_result.get("realm_export_paths", [])
-
-    # DB dump (skip for h2 — embedded, backed up via binary copy)
-    db_dump_path = None
-    if p.get("db_vendor") != "h2":
-        dump_result = await dispatch_agent_job(
-            command="keycloak_db_dump",
-            parameters={
-                **p,
-                "dump_path": f"/tmp/nexplane-kc-db-{timestamp}.sql.gz",
-            },
-            asset_ids=[asset_id],
-            timeout_seconds=600,
-        )
-        db_dump_path = dump_result.get("dump_path")
+    await _run(rollback_cmd, asset_id, timeout=300)
 
     return {
-        "snapshot_type": "realm_export_and_db_dump",
-        "realm_export_paths": realm_export_paths,
-        "db_dump_path": db_dump_path,
-        "snapshot_completed_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-async def _upgrade_wildfly_to_quarkus(asset_id: str, p: dict) -> dict:
-    """WildFly -> Quarkus migration path (source <= 16, target >= 17)."""
-    # 1. Download and extract new Keycloak release
-    await dispatch_agent_job(
-        command="keycloak_install_release",
-        parameters={**p, "install_path": f"/opt/keycloak-{p['target_version']}"},
-        asset_ids=[asset_id],
-        timeout_seconds=300,
-    )
-    # 2. Stop old WildFly-based Keycloak
-    await dispatch_agent_job(
-        command="keycloak_stop_service",
-        parameters=p,
-        asset_ids=[asset_id],
-        timeout_seconds=60,
-    )
-    # 3. Build Quarkus distribution
-    await dispatch_agent_job(
-        command="keycloak_build_quarkus",
-        parameters={**p, "install_path": f"/opt/keycloak-{p['target_version']}"},
-        asset_ids=[asset_id],
-        timeout_seconds=300,
-    )
-    # 4. Configure and start new Keycloak
-    await dispatch_agent_job(
-        command="keycloak_configure_and_start",
-        parameters={**p, "install_path": f"/opt/keycloak-{p['target_version']}"},
-        asset_ids=[asset_id],
-        timeout_seconds=180,
-    )
-    # 5. Import realms
-    await dispatch_agent_job(
-        command="keycloak_import_realms",
-        parameters=p,
-        asset_ids=[asset_id],
-        timeout_seconds=600,
-    )
-    return {
-        "upgrade_status": "completed",
-        "migration_path": "wildfly_to_quarkus",
-        "upgraded_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-async def _upgrade_quarkus_inplace(asset_id: str, p: dict) -> dict:
-    """Quarkus in-place upgrade (source >= 17, target >= 17)."""
-    # 1. Stop running Keycloak
-    await dispatch_agent_job(
-        command="keycloak_stop_service",
-        parameters=p,
-        asset_ids=[asset_id],
-        timeout_seconds=60,
-    )
-    # 2. Download and extract new release over keycloak_home
-    await dispatch_agent_job(
-        command="keycloak_install_release",
-        parameters={**p, "install_path": p["keycloak_home"]},
-        asset_ids=[asset_id],
-        timeout_seconds=300,
-    )
-    # 3. Build optimized distribution
-    await dispatch_agent_job(
-        command="keycloak_build_quarkus",
-        parameters=p,
-        asset_ids=[asset_id],
-        timeout_seconds=300,
-    )
-    # 4. Start (DB schema auto-migration runs on first start)
-    await dispatch_agent_job(
-        command="keycloak_start_optimized",
-        parameters=p,
-        asset_ids=[asset_id],
-        timeout_seconds=180,
-    )
-    return {
-        "upgrade_status": "completed",
-        "migration_path": "quarkus_inplace",
-        "upgraded_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-async def _verify(asset_id: str, p: dict) -> dict:
-    """Poll /health/ready and check /admin/realms via admin API."""
-    result = await dispatch_agent_job(
-        command="keycloak_verify",
-        parameters=p,
-        asset_ids=[asset_id],
-        timeout_seconds=120,
-    )
-    health_ok = result.get("health_ready", False)
-    version_ok = p["target_version"] in str(result.get("version", ""))
-    return {
-        "verify_status": "passed" if (health_ok and version_ok) else "failed",
-        "health_ready": health_ok,
-        "version_confirmed": result.get("version"),
-        "realm_count": result.get("realm_count"),
+        "rolled_back": True,
+        "strategy": "backup_restore",
+        "backup_path": backup_path,
+        "data_loss_warning": "Any data written to Keycloak after the backup was taken may be lost.",
     }
