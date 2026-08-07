@@ -293,10 +293,10 @@ def test_phase1_provision():
         if token_line and token_line != "ALREADY_INITIALIZED":
             vault_token = token_line
             log(f"  Read vault root token via SSM (len={len(vault_token)})")
-        minor_line = _ssm_read(instance_id, "grep VAULT_MINOR /tmp/vault-version.txt 2>/dev/null | cut -d= -f2")
-        if minor_line:
-            vault_minor = minor_line
-            log(f"  Detected vault minor version: {vault_minor}")
+        version_line = _ssm_read(instance_id, "grep VAULT_VERSION /tmp/vault-version.txt 2>/dev/null | cut -d= -f2")
+        if version_line:
+            vault_minor = version_line
+            log(f"  Detected vault full version: {vault_minor}")
         if vault_token and vault_minor:
             break
 
@@ -305,12 +305,18 @@ def test_phase1_provision():
         vault_token = _VAULT_ROOT_TOKEN
     _state["vault_token"] = vault_token
 
-    # Derive source/target from detected version (e.g., 2.0 -> 2.1)
+    # Derive source/target by bumping patch: 2.0.1 -> 2.0.2
     if vault_minor:
         try:
-            major, minor_int = vault_minor.split(".")
-            _state["source_version"] = vault_minor
-            _state["target_version"] = f"{major}.{int(minor_int) + 1}"
+            parts = vault_minor.split(".")
+            if len(parts) == 3:
+                major, minor, patch = parts
+                _state["source_version"] = vault_minor
+                _state["target_version"] = f"{major}.{minor}.{int(patch) + 1}"
+            else:
+                major, minor_int = parts[0], parts[1]
+                _state["source_version"] = vault_minor
+                _state["target_version"] = f"{major}.{minor_int}.1"
             log(f"  Vault upgrade plan: {_state['source_version']} -> {_state['target_version']}")
         except Exception:
             pass

@@ -245,6 +245,7 @@ def _launch_certmgr(ec2, aws_creds, ami_id) -> tuple:
         InstanceType="t3.large",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData="#!/bin/bash\nsystemctl enable k3s 2>/dev/null || true\nsystemctl start k3s 2>/dev/null || true\n",
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-certmgr-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-certmgr-upgrade"},
@@ -263,9 +264,6 @@ def _launch_certmgr(ec2, aws_creds, ami_id) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
     log(f"  Instance private IP: {private_ip}")
-
-    # Give k3s a moment to finish starting from AMI
-    time.sleep(30)
 
     return instance_id, private_ip
 

@@ -95,12 +95,24 @@ if [ $CURL_EXIT -ne 0 ]; then
     exit 0
 fi
 unzip -o "$TMP/vault.zip" -d "$TMP/" 2>&1
+UNZIP_EXIT=$?
+# Locate the extracted binary (handles both root and subdirectory zip layouts)
+VAULT_BIN=$(find "$TMP" -name vault -type f 2>/dev/null | head -1)
+if [ $UNZIP_EXIT -ne 0 ] || [ -z "$VAULT_BIN" ]; then
+    echo "INSTALL_FAILED: vault binary not found in zip after unzip (exit=$UNZIP_EXIT)"
+    rm -rf "$TMP"
+    exit 0
+fi
 # Always install to /usr/local/bin/vault (avoid package-manager-owned paths)
 VAULT_INSTALL=/usr/local/bin/vault
 systemctl stop vault 2>/dev/null || pkill vault 2>/dev/null || true
 sleep 3
-cp "$TMP/vault" "$VAULT_INSTALL"
+cp "$VAULT_BIN" "$VAULT_INSTALL"
 chmod +x "$VAULT_INSTALL"
+if [ ! -x "$VAULT_INSTALL" ]; then
+    echo "INSTALL_FAILED: binary not executable at $VAULT_INSTALL after copy"
+    exit 0
+fi
 # Ensure /usr/local/bin is in PATH and symlink if needed
 ln -sf "$VAULT_INSTALL" /usr/bin/vault 2>/dev/null || true
 # Restart vault
@@ -112,11 +124,18 @@ echo UPGRADE_DONE
 """ % {"ver": target_v}
     r = await _run(upgrade_script, asset_id, timeout=600)
     upgrade_output = r.get("output", "")
-    upgrade_ok = "UPGRADE_DONE" in upgrade_output and "DOWNLOAD_FAILED" not in upgrade_output
+    upgrade_ok = "UPGRADE_DONE" in upgrade_output and "DOWNLOAD_FAILED" not in upgrade_output and "INSTALL_FAILED" not in upgrade_output
 
-    if upgrade_ok:
-        # Re-unseal if init file present
-        unseal_script = """
+    if not upgrade_ok:
+        return {
+            "status": "failed",
+            "phase": "binary_install",
+            "error": upgrade_output[:500],
+            "asset_id": asset_id,
+        }
+
+    # Re-unseal if init file present
+    unseal_script = """
 F=/tmp/vault-init.json
 if [ -f "$F" ]; then
     UK=$(python3 -c "import json; d=json.load(open('$F')); print(d['unseal_keys_b64'][0])" 2>/dev/null)
@@ -124,7 +143,7 @@ if [ -f "$F" ]; then
 fi
 echo UNSEAL_DONE
 """
-        await _run(unseal_script, asset_id, timeout=30)
+    await _run(unseal_script, asset_id, timeout=30)
 
     # --- Phase 4: Verify ---
     r = await _run("/usr/local/bin/vault version 2>&1", asset_id, timeout=30)
@@ -180,10 +199,12 @@ if [ -n "$SRC_VER" ]; then
     TMP=$(mktemp -d)
     curl -sf -L -o "$TMP/vault.zip" "$URL" 2>&1 || { echo "DOWNLOAD_FAILED url=$URL"; rm -rf "$TMP"; exit 0; }
     unzip -o "$TMP/vault.zip" -d "$TMP/" 2>&1
-    VAULT_BIN=$(which vault 2>/dev/null || echo /usr/local/bin/vault)
+    EXTRACTED=$(find "$TMP" -name vault -type f 2>/dev/null | head -1)
+    if [ -z "$EXTRACTED" ]; then echo "DOWNLOAD_FAILED: vault binary not in zip"; rm -rf "$TMP"; exit 0; fi
+    VAULT_BIN=/usr/local/bin/vault
     systemctl stop vault 2>/dev/null || true
     sleep 2
-    cp "$TMP/vault" "$VAULT_BIN"
+    cp "$EXTRACTED" "$VAULT_BIN"
     chmod +x "$VAULT_BIN"
     systemctl start vault --no-block 2>/dev/null || nohup vault server -config=/etc/vault.d/vault.hcl >> /var/log/vault.log 2>&1 &
     sleep 6

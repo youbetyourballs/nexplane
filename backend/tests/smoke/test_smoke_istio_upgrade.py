@@ -239,6 +239,7 @@ def _launch_from_ami(ec2, aws_creds, ami_id) -> tuple:
         InstanceType="t3.xlarge",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData="#!/bin/bash\nsystemctl enable k3s 2>/dev/null || true\nsystemctl start k3s 2>/dev/null || true\n",
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-istio-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-istio-upgrade"},
