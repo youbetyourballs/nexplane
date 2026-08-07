@@ -72,18 +72,18 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # Phase 3: Upgrade
     upgrade_cmd = """
-ceph orch upgrade start --image quay.io/ceph/ceph:v19.2 2>&1 || \
-cephadm shell -- ceph orch upgrade start --image quay.io/ceph/ceph:v19.2 2>&1 || \
+timeout 60 ceph orch upgrade start --image quay.io/ceph/ceph:v19.2 2>&1 || \
+timeout 60 cephadm shell -- ceph orch upgrade start --image quay.io/ceph/ceph:v19.2 2>&1 || \
 { echo "UPGRADE_STARTED_OR_FAILED"; true; }
-for i in $(seq 1 60); do
-  STATUS=$(ceph orch upgrade status 2>&1)
+for i in $(seq 1 30); do
+  STATUS=$(timeout 20 ceph orch upgrade status 2>&1 || echo "STATUS_TIMEOUT")
   echo "[$i] $STATUS"
-  echo "$STATUS" | grep -q "Idle" && { echo UPGRADE_DONE; break; }
-  sleep 10
+  echo "$STATUS" | grep -qE "Idle|no upgrade" && { echo UPGRADE_DONE; break; }
+  sleep 15
 done
 echo UPGRADE_DONE
 """.strip()
-    await _run(upgrade_cmd, asset_id, timeout=660)
+    await _run(upgrade_cmd, asset_id, timeout=1200)
 
     # Phase 4: Verify
     verify_result = await _run(

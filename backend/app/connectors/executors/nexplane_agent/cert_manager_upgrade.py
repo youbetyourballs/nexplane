@@ -81,17 +81,17 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # --- Step 0: Wait for k3s kubeconfig (k3s service may still be starting) ---
     r = await _run(
-        f"for i in $(seq 1 60); do "
+        f"for i in $(seq 1 120); do "
         f"[ -f {kubeconfig_path} ] && echo KUBECONFIG_OK && break; "
         f"sleep 5; done; "
         f"[ -f {kubeconfig_path} ] || echo KUBECONFIG_MISSING",
-        asset_id, timeout=330,
+        asset_id, timeout=630,
     )
     if "KUBECONFIG_MISSING" in r.get("output", "") or "KUBECONFIG_OK" not in r.get("output", ""):
         return {
             "status": "failed",
             "phase": "preflight",
-            "error": f"k3s kubeconfig not found at {kubeconfig_path} after 300s",
+            "error": f"k3s kubeconfig not found at {kubeconfig_path} after 600s",
             "crds_upgraded": False,
             "deployment_upgraded": False,
             "asset_id": asset_id,
