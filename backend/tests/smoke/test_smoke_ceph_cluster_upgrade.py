@@ -1,241 +1,420 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
-"""
-Smoke test: Ceph Cluster Upgrade
+"""Smoke test: Ceph Cluster Upgrade
 
-Two phases:
-  UPGRADE  — Ceph 18.2 (Reef) → 19.2 (Squid) upgrade via Nexplane agent
-  ROLLBACK — verify rollback surfaces daemon state and irreversibility
+Phases:
+  1. provision   — launch single-node Ceph Reef (18.2) EC2 from cached AMI, install agent
+  2. upgrade     — CR lifecycle: ceph_cluster_upgrade 18.2 → 19.2, assert daemons upgraded
+  3. rollback    — trigger rollback, assert irreversibility surfaced correctly
+  4. teardown    — terminate instance, deregister connector/asset
 
-Run on EC2 inside nexplane-backend-1:
-    API_TOKEN=<nxp_...> pytest tests/smoke/test_smoke_ceph_cluster_upgrade.py -v -s
-
-Prerequisites:
-  1. API_TOKEN set to a valid nxp_... admin token.
-  2. AMI cached at /nexplane/smoke-amis/ceph/18.2 (3-node Ceph Reef cluster).
-  3. A Nexplane agent registered on the Ceph admin host.
-  4. CEPH_MGR_HOSTS, CEPH_MON_HOSTS, CEPH_OSD_HOSTS env vars:
-     JSON arrays of {host} for each daemon type.
+AMI cache key: /nexplane/smoke-amis/ceph/18.2
+Run:
+    docker exec nexplane-backend-1 python -m pytest \\
+        /app/tests/smoke/test_smoke_ceph_cluster_upgrade.py -v -s
 """
 
-import asyncio
-import hashlib
-import json
+import base64
 import os
+import sys
+import socket
+import time
+import uuid
 
-import httpx
+import boto3
 import pytest
 
-pytestmark = pytest.mark.asyncio(loop_scope="session")
+sys.path.insert(0, os.path.dirname(__file__))
+from smoke_helpers import (
+    NexplaneClient,
+    log,
+    get_connector_creds_from_db,
+    install_nexplane_agent_on_instance,
+    get_or_create_smoke_ami,
+)
 
-_BASE_URL = "http://localhost:8000"
-_SOURCE_VERSION = "18.2"
-_TARGET_VERSION = "19.2"
-_AMI_SSM_PATH = "/nexplane/smoke-amis/ceph/18.2"
-_DEFAULT_HOSTS = [{"host": "127.0.0.1"}]
+BASE_URL = os.environ.get("NEXPLANE_BASE_URL", "http://localhost:8000")
+EMAIL    = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
+PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 
+_CEPH_AMI_SSM_KEY   = "/nexplane/smoke-amis/ceph/18.2"
+_CEPH_DASHBOARD_PWD = "SmokeC3ph1!"
+_SSM_PROFILE        = "nexplane-smoke-ssm"
+_SOURCE_VERSION     = "18.2"
+_TARGET_VERSION     = "19.2"
 
-def _env(key: str) -> str:
-    val = os.environ.get(key)
-    if not val:
-        pytest.skip(f"Env var {key} not set — skipping ceph smoke")
-    return val
+CR_TIMEOUT    = 2700
+POLL_INTERVAL = 30
 
+_state = {
+    "connector_id":      None,
+    "asset_id":          None,
+    "instance_id":       None,
+    "private_ip":        None,
+    "provisioned_by_us": False,
+    "cr_id":             None,
+}
 
-def _host_list(env_key: str) -> list:
-    raw = os.environ.get(env_key)
-    if raw:
-        return json.loads(raw)
-    return _DEFAULT_HOSTS
-
-
-async def _get_jwt(api_token: str) -> str:
-    from app.database import AsyncSessionLocal
-    from app.models.api_token import ApiToken
-    from app.services.auth_service import create_access_token
-    from sqlalchemy import select
-
-    token_hash = hashlib.sha256(api_token.encode()).hexdigest()
-    async with AsyncSessionLocal() as db:
-        r = await db.execute(
-            select(ApiToken).where(
-                ApiToken.token_hash == token_hash,
-                ApiToken.revoked == False,  # noqa: E712
-            )
-        )
-        tok = r.scalar_one()
-        return create_access_token(subject=str(tok.user_id))
+_client: NexplaneClient = None
 
 
-async def _find_agent_asset_id(jwt: str) -> str:
-    from app.database import AsyncSessionLocal
-    from app.models.agent import AgentRegistration
-    from app.models.asset import Asset, AssetType
-    from sqlalchemy import select
-    from datetime import datetime, timezone, timedelta
-
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    async with AsyncSessionLocal() as db:
-        r = await db.execute(
-            select(AgentRegistration)
-            .where(AgentRegistration.last_seen > cutoff)
-            .order_by(AgentRegistration.last_seen.desc())
-            .limit(20)
-        )
-        registrations = r.scalars().all()
-        for reg in registrations:
-            asset = await db.get(Asset, reg.asset_id)
-            if asset and asset.asset_type == AssetType.server:
-                meta = asset.asset_metadata or {}
-                if meta.get("tags", {}).get("smoke_role") == "ceph":
-                    return str(asset.id)
-        for reg in registrations:
-            asset = await db.get(Asset, reg.asset_id)
-            if asset and asset.asset_type == AssetType.server:
-                return str(asset.id)
-
-    pytest.skip("No server asset with active AgentRegistration found for Ceph smoke")
+def _get_client() -> NexplaneClient:
+    global _client
+    if _client is None:
+        _client = NexplaneClient(BASE_URL, EMAIL, PASSWORD)
+    return _client
 
 
-async def _plan_and_approve_cr(jwt: str, cr_id: str) -> None:
-    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=60) as client:
-        headers = {"Authorization": f"Bearer {jwt}"}
-        r = await client.post(f"/change-requests/{cr_id}/plan", headers=headers)
-        assert r.status_code == 200, f"POST /plan failed: {r.text}"
-        r = await client.post(f"/change-requests/{cr_id}/submit-for-approval", headers=headers)
-        assert r.status_code == 200, f"POST /submit-for-approval failed: {r.text}"
-        r = await client.post(
-            f"/change-requests/{cr_id}/approve",
-            json={"decision": "approved", "comment": "ceph smoke self-approval"},
-            headers=headers,
-        )
-        assert r.status_code == 200, f"POST /approve failed: {r.text}"
+def _api(method, path, **kwargs):
+    return getattr(_get_client(), method)(path, **kwargs)
 
 
-async def _wait_cr_terminal(jwt: str, cr_id: str, timeout: int = 7200) -> dict:
-    interval = 30
-    detail = {}
-    for _ in range(timeout // interval):
-        await asyncio.sleep(interval)
-        async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
-            r = await client.get(
-                f"/change-requests/{cr_id}",
-                headers={"Authorization": f"Bearer {jwt}"},
-            )
-            assert r.status_code == 200
-            detail = r.json()
-        status = detail.get("status")
-        if status in ("completed", "failed", "rolled_back", "rollback_failed"):
-            return detail
-    pytest.fail(f"CR {cr_id} timed out after {timeout}s, last status: {detail.get('status')}")
-
-
-async def _rollback_cr(jwt: str, cr_id: str, timeout: int = 300) -> dict:
-    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
-        r = await client.post(
-            f"/change-requests/{cr_id}/rollback",
-            headers={"Authorization": f"Bearer {jwt}"},
-        )
-        assert r.status_code == 200, f"POST /rollback failed: {r.text}"
-
-    # Ceph rollback is synchronous (surfaces state immediately, no async ops)
-    await asyncio.sleep(5)
-    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
-        r = await client.get(
-            f"/change-requests/{cr_id}",
-            headers={"Authorization": f"Bearer {jwt}"},
-        )
-        detail = r.json()
-
-    runs = detail.get("execution_runs", [])
-    rollback_run = next(
-        (run for run in reversed(runs) if "rollback" in (run.get("workflow_id") or "")),
-        runs[-1] if runs else None,
+def _boto3_client(service, creds):
+    return boto3.client(
+        service,
+        aws_access_key_id=creds.get("access_key_id") or creds.get("aws_access_key_id"),
+        aws_secret_access_key=creds.get("secret_access_key") or creds.get("aws_secret_access_key"),
+        region_name=creds.get("region", "us-east-1"),
     )
-    raw = rollback_run.get("result", {}) if rollback_run else {}
-    inner = raw.get("execution", raw)
-    steps = inner.get("steps", [])
-    return steps[0]["result"] if steps else inner
 
 
-# ---------------------------------------------------------------------------
-# PHASE: UPGRADE — Ceph 18.2 (Reef) → 19.2 (Squid)
-# ---------------------------------------------------------------------------
+def _get_al2_ami(ec2) -> str:
+    """Resolve the latest Amazon Linux 2 AMI in the current region."""
+    resp = ec2.describe_images(
+        Owners=["amazon"],
+        Filters=[
+            {"Name": "name",         "Values": ["amzn2-ami-hvm-2.0.*-x86_64-gp2"]},
+            {"Name": "state",        "Values": ["available"]},
+            {"Name": "architecture", "Values": ["x86_64"]},
+        ],
+    )
+    images = sorted(resp["Images"], key=lambda x: x["CreationDate"], reverse=True)
+    if not images:
+        pytest.fail("No Amazon Linux 2 AMI found in region")
+    return images[0]["ImageId"]
 
-@pytest.mark.smoke
-@pytest.mark.smoke_phase("UPGRADE")
-async def test_ceph_cluster_upgrade():
-    """Upgrade Ceph cluster 18.2 → 19.2 (Reef → Squid).
 
-    Verifies:
-    - CR reaches completed or verify_failed status (health may still be HEALTH_WARN post-upgrade)
-    - All daemon types appear in daemons_upgraded
-    - noout_unset == True
-    - Rollback surfaces irreversibility (rolled_back == False, strategy == partial_rollback)
-    - Rollback surfaces manual_steps and daemons_on_target_version
+# user_data installs Ceph Reef (18.2) single-node via cephadm
+_CEPH_USER_DATA_RAW = (
+    b"#!/bin/bash\n"
+    b"# Install Ceph Reef on AL2\n"
+    b"yum install -y python3 python3-pip\n"
+    b"# Add Ceph repo\n"
+    b"cat > /etc/yum.repos.d/ceph.repo << 'CEPHEPO'\n"
+    b"[ceph]\n"
+    b"name=Ceph packages for x86_64\n"
+    b"baseurl=https://download.ceph.com/rpm-reef/el8/x86_64/\n"
+    b"enabled=1\n"
+    b"priority=2\n"
+    b"gpgcheck=1\n"
+    b"gpgkey=https://download.ceph.com/keys/release.asc\n"
+    b"CEPHEPO\n"
+    b"yum install -y ceph ceph-mon ceph-mgr ceph-osd 2>/dev/null || true\n"
+    b"# Bootstrap single-node ceph cluster with cephadm\n"
+    b"curl -sfL https://download.ceph.com/rpm-reef/el8/noarch/cephadm"
+    b" -o /usr/local/bin/cephadm && chmod +x /usr/local/bin/cephadm\n"
+    b"cephadm bootstrap --mon-ip 127.0.0.1"
+    b" --initial-dashboard-user admin"
+    b" --initial-dashboard-password SmokeC3ph1!"
+    b" --skip-monitoring-stack --skip-firewalld"
+    b" 2>&1 | tee /var/log/cephadm-bootstrap.log\n"
+)
+
+
+def _launch_ceph(aws_creds) -> tuple:
+    """Launch a single-node Ceph Reef (18.2) instance for AMI snapshotting.
+
+    Returns (instance_id, ec2_client, private_ip) per get_or_create_smoke_ami contract.
     """
-    token = _env("API_TOKEN")
-    from app.mcp_tools.change_requests import create_change_request, execute_change_request
+    ec2       = _boto3_client("ec2", aws_creds)
+    subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    user_data = base64.b64encode(_CEPH_USER_DATA_RAW).decode()
 
-    jwt = await _get_jwt(token)
-    asset_id = await _find_agent_asset_id(jwt)
+    kwargs = dict(
+        ImageId=_get_al2_ami(ec2),
+        InstanceType="t3.large",
+        MinCount=1, MaxCount=1,
+        IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData=user_data,
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name",             "Value": "nexplane-smoke-ceph-upgrade"},
+            {"Key": "nexplane-purpose", "Value": "smoke-ceph-upgrade"},
+        ]}],
+    )
+    if subnet_id:
+        kwargs["SubnetId"] = subnet_id
+    if sg_id:
+        kwargs["SecurityGroupIds"] = [sg_id]
 
-    cr = await create_change_request(
-        token=token,
-        change_type="ceph_cluster_upgrade",
-        asset_id=asset_id,
-        title=f"[smoke] Ceph {_SOURCE_VERSION} (Reef) → {_TARGET_VERSION} (Squid)",
-        parameters={
+    resp        = ec2.run_instances(**kwargs)
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"  Launched Ceph instance {instance_id}")
+
+    ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+    desc       = ec2.describe_instances(InstanceIds=[instance_id])
+    private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
+
+    # Wait up to 15 min for Ceph dashboard on port 8443
+    log(f"  Waiting for Ceph dashboard port 8443 on {private_ip} (up to 15 min)")
+    deadline = time.time() + 900
+    reached  = False
+    while time.time() < deadline:
+        time.sleep(15)
+        try:
+            s = socket.create_connection((private_ip, 8443), timeout=5)
+            s.close()
+            log(f"  Ceph dashboard port 8443 open on {private_ip}")
+            reached = True
+            break
+        except OSError:
+            pass
+
+    if not reached:
+        # Bootstrap may still be running — fall back to a 120s grace period
+        log("  Port 8443 not reachable; waiting 120s grace period for bootstrap")
+        time.sleep(120)
+
+    return instance_id, ec2, private_ip
+
+
+def _register_asset(private_ip, run_id) -> tuple:
+    connector = _api("post", "/connectors", json={
+        "name":           f"smoke-ceph-upgrade-{run_id}",
+        "connector_type": "nexplane_agent",
+    })
+    conn_id = connector["id"]
+    _api("put", f"/connectors/{conn_id}/credentials", json={"credentials": {}})
+
+    asset = _api("post", "/assets", json={
+        "name":         f"smoke-ceph-upgrade-{run_id}",
+        "asset_type":   "server",
+        "criticality":  "medium",
+        "environment":  "staging",
+        "hostname":     private_ip,
+        "connector_id": conn_id,
+        "metadata":     {"role": "ceph_admin", "ip": private_ip},
+    })
+    asset_id = asset["id"]
+    _api("post", f"/assets/{asset_id}/connectors", json={"connector_id": conn_id})
+    return conn_id, asset_id
+
+
+def _poll_cr(cr_id, timeout_s=CR_TIMEOUT):
+    terminal = ("completed", "failed", "rolled_back", "rollback_failed")
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        cr = _api("get", f"/change-requests/{cr_id}")
+        if cr["status"] in terminal:
+            return cr
+        time.sleep(POLL_INTERVAL)
+    raise TimeoutError(f"CR {cr_id} did not reach terminal within {timeout_s}s")
+
+
+def _exec_result(cr: dict) -> dict:
+    runs = cr.get("execution_runs") or []
+    if runs:
+        raw   = runs[0].get("result") or {}
+        steps = raw.get("execution", {}).get("steps", [])
+        if steps:
+            return steps[0].get("result") or {}
+    return cr.get("execution_result") or {}
+
+
+def _rollback_result(cr: dict) -> dict:
+    runs = cr.get("execution_runs") or []
+    for run in runs:
+        if run.get("status") in ("rolled_back", "rollback_failed"):
+            r = run.get("result") or {}
+            if "rolled_back" in r or "data_loss_warning" in r:
+                return r
+    return cr.get("rollback_result") or {}
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: provision
+# ---------------------------------------------------------------------------
+
+def test_phase1_provision():
+    aws_creds = get_connector_creds_from_db("aws")
+    if not aws_creds:
+        pytest.skip("No AWS connector creds in platform DB")
+
+    ami_id = get_or_create_smoke_ami(
+        cache_key="ceph",
+        setup_hash="18.2",
+        launch_fn=_launch_ceph,
+        snapshot_name="nexplane-smoke-ceph-reef-18.2",
+    )
+    log(f"  Using Ceph AMI: {ami_id}")
+
+    ec2       = _boto3_client("ec2", aws_creds)
+    subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id")
+
+    kwargs = dict(
+        ImageId=ami_id,
+        InstanceType="t3.large",
+        MinCount=1, MaxCount=1,
+        IamInstanceProfile={"Name": _SSM_PROFILE},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name",             "Value": "nexplane-smoke-ceph-upgrade"},
+            {"Key": "nexplane-purpose", "Value": "smoke-ceph-upgrade"},
+        ]}],
+    )
+    if subnet_id:
+        kwargs["SubnetId"] = subnet_id
+    if sg_id:
+        kwargs["SecurityGroupIds"] = [sg_id]
+
+    resp        = ec2.run_instances(**kwargs)
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"  Launched Ceph instance {instance_id} from AMI {ami_id}")
+
+    ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+    desc       = ec2.describe_instances(InstanceIds=[instance_id])
+    private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
+
+    run_id            = uuid.uuid4().hex[:6]
+    conn_id, asset_id = _register_asset(private_ip, run_id)
+
+    _state.update({
+        "connector_id":      conn_id,
+        "asset_id":          asset_id,
+        "instance_id":       instance_id,
+        "private_ip":        private_ip,
+        "provisioned_by_us": True,
+    })
+
+    log("  Installing nexplane agent on smoke instance")
+    install_nexplane_agent_on_instance(instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=300)
+
+    log("[PHASE 1: provision] PASSED")
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: upgrade CR lifecycle
+# ---------------------------------------------------------------------------
+
+def test_phase2_upgrade():
+    if not _state.get("connector_id"):
+        pytest.skip("Phase 1 did not complete")
+
+    conn_id    = _state["connector_id"]
+    asset_id   = _state["asset_id"]
+    private_ip = _state["private_ip"]
+    run_id     = uuid.uuid4().hex[:6]
+
+    # Single-node cluster: all daemon roles live on the same host
+    single_node = [{"host": private_ip}]
+
+    cr = _api("post", "/change-requests", json={
+        "title":       f"smoke-ceph-upgrade-{run_id}",
+        "change_type": "ceph_cluster_upgrade",
+        "desired_outcome": {
             "source_version": _SOURCE_VERSION,
             "target_version": _TARGET_VERSION,
-            "mgr_hosts": _host_list("CEPH_MGR_HOSTS"),
-            "mon_hosts": _host_list("CEPH_MON_HOSTS"),
-            "osd_hosts": _host_list("CEPH_OSD_HOSTS"),
-            "rgw_hosts": json.loads(os.environ.get("CEPH_RGW_HOSTS", "[]")),
-            "mds_hosts": json.loads(os.environ.get("CEPH_MDS_HOSTS", "[]")),
-            "dry_run": False,
+            "mgr_hosts":      single_node,
+            "mon_hosts":      single_node,
+            "osd_hosts":      single_node,
+            "rgw_hosts":      [],
+            "mds_hosts":      [],
+            "dry_run":        False,
         },
-    )
-    assert "id" in cr, f"create_change_request failed: {cr}"
+        "connector_id":     conn_id,
+        "target_asset_ids": [asset_id],
+    })
     cr_id = cr["id"]
+    _state["cr_id"] = cr_id
+    log(f"  Created CR {cr_id}")
 
-    jwt = await _get_jwt(token)
-    await _plan_and_approve_cr(jwt=jwt, cr_id=cr_id)
+    _api("post", f"/change-requests/{cr_id}/plan")
+    _api("post", f"/change-requests/{cr_id}/submit-for-approval")
+    _api("post", f"/change-requests/{cr_id}/approve",
+         json={"decision": "approved", "comment": "ceph upgrade smoke self-approval"})
+    _api("post", f"/change-requests/{cr_id}/execute")
+    log(f"  Executing CR {cr_id} (timeout {CR_TIMEOUT}s — Ceph upgrades are slow)")
 
-    executed = await execute_change_request(token=token, cr_id=cr_id)
-    assert "error" not in executed, f"execute_change_request failed: {executed}"
-
-    jwt = await _get_jwt(token)
-    detail = await _wait_cr_terminal(jwt, cr_id, timeout=7200)
+    cr = _poll_cr(cr_id)
     # Ceph may finish with verify_failed if cluster is still settling (HEALTH_WARN is acceptable)
-    assert detail["status"] in ("completed", "verify_failed"), (
-        f"CR reached unexpected status: {detail.get('status')} | {detail}"
+    assert cr["status"] in ("completed", "verify_failed"), (
+        f"CR reached {cr['status']} — expected completed or verify_failed"
     )
 
-    runs = detail.get("execution_runs", [])
-    latest = max(runs, key=lambda x: x.get("started_at") or "")
-    raw = latest.get("result", {})
-    inner = raw.get("execution", raw)
-    steps = inner.get("steps", [])
-    exec_result = steps[0]["result"] if steps else inner
-
-    daemons_upgraded = exec_result.get("daemons_upgraded", [])
+    result           = _exec_result(cr)
+    daemons_upgraded = result.get("daemons_upgraded", [])
     assert any("mgr:" in d for d in daemons_upgraded), f"No MGR daemons upgraded: {daemons_upgraded}"
     assert any("mon:" in d for d in daemons_upgraded), f"No MON daemons upgraded: {daemons_upgraded}"
     assert any("osd:" in d for d in daemons_upgraded), f"No OSD daemons upgraded: {daemons_upgraded}"
-    assert exec_result.get("noout_unset") is True, f"noout_unset should be True: {exec_result}"
+    assert result.get("noout_unset") is True, f"noout_unset should be True: {result}"
 
-    # Rollback: Ceph surfaces irreversibility
-    jwt = await _get_jwt(token)
-    rb = await _rollback_cr(jwt=jwt, cr_id=cr_id)
-    assert rb.get("rolled_back") is False, (
-        f"Ceph rollback should surface irreversibility (rolled_back=False): {rb}"
+    log(f"  Ceph upgraded: daemons={daemons_upgraded}, noout_unset=True")
+    log("[PHASE 2: upgrade] PASSED")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: rollback
+# ---------------------------------------------------------------------------
+
+def test_phase3_rollback():
+    cr_id = _state.get("cr_id")
+    if not cr_id:
+        pytest.skip("Phase 2 did not complete — no CR to roll back")
+
+    _api("post", f"/change-requests/{cr_id}/rollback")
+    log(f"  Rollback triggered for CR {cr_id}")
+
+    cr = _poll_cr(cr_id, timeout_s=600)
+    assert cr["status"] in ("rolled_back", "rollback_failed", "completed"), (
+        f"Rollback CR reached unexpected status: {cr['status']}"
     )
-    assert rb.get("strategy") == "partial_rollback", f"Wrong rollback strategy: {rb}"
-    assert rb.get("daemons_on_target_version"), f"daemons_on_target_version should be surfaced: {rb}"
-    assert rb.get("manual_steps"), f"manual_steps should be surfaced: {rb}"
-    reason = rb.get("reason", "")
+
+    result = _rollback_result(cr)
+    # Ceph downgrade is not supported — executor surfaces irreversibility
+    assert result.get("rolled_back") is False, (
+        f"Ceph rollback should surface irreversibility (rolled_back=False): {result}"
+    )
+    assert result.get("strategy") == "partial_rollback", f"Wrong rollback strategy: {result}"
+    assert result.get("daemons_on_target_version"), (
+        f"daemons_on_target_version should be surfaced: {result}"
+    )
+    assert result.get("manual_steps"), f"manual_steps should be surfaced: {result}"
+    reason = result.get("reason", "")
     assert "downgrade" in reason.lower() or "not support" in reason.lower(), (
-        f"Reason should explain Ceph downgrade limitation: {rb}"
+        f"Reason should explain Ceph downgrade limitation: {result}"
     )
+    log("[PHASE 3: rollback] PASSED")
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: teardown
+# ---------------------------------------------------------------------------
+
+def test_phase4_teardown():
+    if not _state.get("provisioned_by_us"):
+        log("[PHASE 4: teardown] SKIPPED")
+        return
+
+    aws_creds   = get_connector_creds_from_db("aws")
+    asset_id    = _state.get("asset_id")
+    conn_id     = _state.get("connector_id")
+    instance_id = _state.get("instance_id")
+
+    for res_id, path in [(asset_id, f"/assets/{asset_id}"), (conn_id, f"/connectors/{conn_id}")]:
+        if res_id:
+            try:
+                _api("delete", path)
+                log(f"  Deleted {path}")
+            except Exception as exc:
+                log(f"  Warning: {exc}", ok=False)
+
+    if instance_id and aws_creds:
+        try:
+            ec2 = _boto3_client("ec2", aws_creds)
+            ec2.terminate_instances(InstanceIds=[instance_id])
+            log(f"  Terminated instance {instance_id}")
+        except Exception as exc:
+            log(f"  Warning: could not terminate: {exc}", ok=False)
+
+    log("[PHASE 4: teardown] PASSED")
