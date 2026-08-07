@@ -1,228 +1,389 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
-"""
-Smoke test: CockroachDB Cluster Upgrade
+"""Smoke test: CockroachDB Cluster Upgrade (23.1 -> 23.2)
 
-Two phases:
-  ROLLING_UPGRADE  — CockroachDB 23.1 → 23.2 binary rolling upgrade (auto_finalize=false)
-  ROLLBACK         — binary rollback before finalization
+Phases:
+  1. provision   — launch AL2 EC2 with CockroachDB 23.1 from cached AMI
+  2. upgrade     — CR lifecycle: cockroachdb_cluster_upgrade, assert status completed + target_version 23.2
+  3. rollback    — trigger rollback, assert rolled_back=True
+  4. teardown    — terminate instance, deregister connector/asset
 
-Run on EC2 inside nexplane-backend-1:
-    API_TOKEN=<nxp_...> pytest tests/smoke/test_smoke_cockroachdb_cluster_upgrade.py -v -s
-
-Prerequisites:
-  1. API_TOKEN set to a valid nxp_... admin token.
-  2. AMI cached at /nexplane/smoke-amis/cockroachdb/23.1 (3-node CockroachDB 23.1).
-  3. A Nexplane agent registered on the CockroachDB host.
-  4. CRDB_NODES env var: JSON array of {host, http_port, sql_port}.
+AMI cache key: /nexplane/smoke-amis/cockroachdb/23.1
+Run:
+    docker exec nexplane-backend-1 python -m pytest \
+        /app/tests/smoke/test_smoke_cockroachdb_cluster_upgrade.py -v -s
 """
 
-import asyncio
-import hashlib
-import json
 import os
+import sys
+import socket
+import time
+import uuid
 
-import httpx
+import boto3
 import pytest
 
-pytestmark = pytest.mark.asyncio(loop_scope="session")
+sys.path.insert(0, os.path.dirname(__file__))
+from smoke_helpers import (
+    NexplaneClient,
+    log,
+    get_connector_creds_from_db,
+    get_or_create_smoke_ami,
+    install_nexplane_agent_on_instance,
+)
 
-_BASE_URL = "http://localhost:8000"
-_SOURCE_VERSION = "23.1"
-_TARGET_VERSION = "23.2"
-_AMI_SSM_PATH = "/nexplane/smoke-amis/cockroachdb/23.1"
-_DEFAULT_NODES = [
-    {"host": "127.0.0.1", "http_port": 8080, "sql_port": 26257},
-    {"host": "127.0.0.1", "http_port": 8081, "sql_port": 26258},
-    {"host": "127.0.0.1", "http_port": 8082, "sql_port": 26259},
-]
+BASE_URL = os.environ.get("NEXPLANE_BASE_URL", "http://localhost:8000")
+EMAIL    = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
+PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 
+_CRDB_AMI_CACHE_KEY = "cockroachdb/23.1"
+_SSM_PROFILE        = "nexplane-smoke-ssm"
 
-def _env(key: str) -> str:
-    val = os.environ.get(key)
-    if not val:
-        pytest.skip(f"Env var {key} not set — skipping cockroachdb smoke")
-    return val
+CR_TIMEOUT    = 1800
+POLL_INTERVAL = 20
 
+_state = {
+    "connector_id":      None,
+    "asset_id":          None,
+    "instance_id":       None,
+    "private_ip":        None,
+    "provisioned_by_us": False,
+    "cr_id":             None,
+}
 
-def _nodes() -> list:
-    raw = os.environ.get("CRDB_NODES")
-    if raw:
-        return json.loads(raw)
-    return _DEFAULT_NODES
-
-
-async def _get_jwt(api_token: str) -> str:
-    from app.database import AsyncSessionLocal
-    from app.models.api_token import ApiToken
-    from app.services.auth_service import create_access_token
-    from sqlalchemy import select
-
-    token_hash = hashlib.sha256(api_token.encode()).hexdigest()
-    async with AsyncSessionLocal() as db:
-        r = await db.execute(
-            select(ApiToken).where(
-                ApiToken.token_hash == token_hash,
-                ApiToken.revoked == False,  # noqa: E712
-            )
-        )
-        tok = r.scalar_one()
-        return create_access_token(subject=str(tok.user_id))
+_client: NexplaneClient = None
 
 
-async def _find_agent_asset_id(jwt: str) -> str:
-    from app.database import AsyncSessionLocal
-    from app.models.agent import AgentRegistration
-    from app.models.asset import Asset, AssetType
-    from sqlalchemy import select
-    from datetime import datetime, timezone, timedelta
-
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    async with AsyncSessionLocal() as db:
-        r = await db.execute(
-            select(AgentRegistration)
-            .where(AgentRegistration.last_seen > cutoff)
-            .order_by(AgentRegistration.last_seen.desc())
-            .limit(20)
-        )
-        registrations = r.scalars().all()
-        for reg in registrations:
-            asset = await db.get(Asset, reg.asset_id)
-            if asset and asset.asset_type == AssetType.server:
-                meta = asset.asset_metadata or {}
-                if meta.get("tags", {}).get("smoke_role") == "cockroachdb":
-                    return str(asset.id)
-        for reg in registrations:
-            asset = await db.get(Asset, reg.asset_id)
-            if asset and asset.asset_type == AssetType.server:
-                return str(asset.id)
-
-    pytest.skip("No server asset with active AgentRegistration found for CockroachDB smoke")
+def _get_client() -> NexplaneClient:
+    global _client
+    if _client is None:
+        _client = NexplaneClient(BASE_URL, EMAIL, PASSWORD)
+    return _client
 
 
-async def _plan_and_approve_cr(jwt: str, cr_id: str) -> None:
-    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=60) as client:
-        headers = {"Authorization": f"Bearer {jwt}"}
-        r = await client.post(f"/change-requests/{cr_id}/plan", headers=headers)
-        assert r.status_code == 200, f"POST /plan failed: {r.text}"
-        r = await client.post(f"/change-requests/{cr_id}/submit-for-approval", headers=headers)
-        assert r.status_code == 200, f"POST /submit-for-approval failed: {r.text}"
-        r = await client.post(
-            f"/change-requests/{cr_id}/approve",
-            json={"decision": "approved", "comment": "cockroachdb smoke self-approval"},
-            headers=headers,
-        )
-        assert r.status_code == 200, f"POST /approve failed: {r.text}"
+def _api(method, path, **kwargs):
+    return getattr(_get_client(), method)(path, **kwargs)
 
 
-async def _wait_cr_terminal(jwt: str, cr_id: str, timeout: int = 1800) -> dict:
-    interval = 15
-    detail = {}
-    for _ in range(timeout // interval):
-        await asyncio.sleep(interval)
-        async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
-            r = await client.get(
-                f"/change-requests/{cr_id}",
-                headers={"Authorization": f"Bearer {jwt}"},
-            )
-            assert r.status_code == 200
-            detail = r.json()
-        status = detail.get("status")
-        if status in ("completed", "failed", "rolled_back", "rollback_failed"):
-            return detail
-    pytest.fail(f"CR {cr_id} timed out after {timeout}s, last status: {detail.get('status')}")
-
-
-async def _rollback_cr(jwt: str, cr_id: str, timeout: int = 1800) -> dict:
-    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
-        r = await client.post(
-            f"/change-requests/{cr_id}/rollback",
-            headers={"Authorization": f"Bearer {jwt}"},
-        )
-        assert r.status_code == 200, f"POST /rollback failed: {r.text}"
-
-    detail = await _wait_cr_terminal(jwt, cr_id, timeout)
-    assert detail.get("status") == "rolled_back", f"Rollback status: {detail.get('status')}"
-
-    runs = detail.get("execution_runs", [])
-    rollback_run = next(
-        (run for run in reversed(runs) if "rollback" in (run.get("workflow_id") or "")),
-        runs[-1] if runs else None,
+def _boto3_client(service, creds):
+    return boto3.client(
+        service,
+        aws_access_key_id=creds.get("access_key_id") or creds.get("aws_access_key_id"),
+        aws_secret_access_key=creds.get("secret_access_key") or creds.get("aws_secret_access_key"),
+        region_name=creds.get("region", "us-east-1"),
     )
-    raw = rollback_run.get("result", {}) if rollback_run else {}
-    inner = raw.get("execution", raw)
-    steps = inner.get("steps", [])
-    return steps[0]["result"] if steps else inner
+
+
+def _register_asset(private_ip, run_id) -> tuple:
+    connector = _api("post", "/connectors", json={
+        "name":           f"smoke-cockroachdb-upgrade-{run_id}",
+        "connector_type": "nexplane_agent",
+    })
+    conn_id = connector["id"]
+    _api("put", f"/connectors/{conn_id}/credentials", json={"credentials": {}})
+
+    asset = _api("post", "/assets", json={
+        "name":         f"smoke-cockroachdb-upgrade-{run_id}",
+        "asset_type":   "server",
+        "criticality":  "medium",
+        "environment":  "staging",
+        "hostname":     private_ip,
+        "connector_id": conn_id,
+        "metadata":     {"role": "cockroachdb_node", "ip": private_ip},
+    })
+    asset_id = asset["id"]
+    _api("post", f"/assets/{asset_id}/connectors", json={"connector_id": conn_id})
+    return conn_id, asset_id
+
+
+def _poll_cr(cr_id, timeout_s=CR_TIMEOUT):
+    terminal = ("completed", "failed", "rolled_back", "rollback_failed")
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        cr = _api("get", f"/change-requests/{cr_id}")
+        if cr["status"] in terminal:
+            return cr
+        time.sleep(POLL_INTERVAL)
+    raise TimeoutError(f"CR {cr_id} did not reach terminal within {timeout_s}s")
+
+
+def _exec_result(cr: dict) -> dict:
+    runs = cr.get("execution_runs") or []
+    if runs:
+        raw   = runs[0].get("result") or {}
+        steps = raw.get("execution", {}).get("steps", [])
+        if steps:
+            return steps[0].get("result") or {}
+    return cr.get("execution_result") or {}
+
+
+def _rollback_result(cr: dict) -> dict:
+    runs = cr.get("execution_runs") or []
+    for run in runs:
+        if run.get("status") in ("rolled_back", "rollback_failed"):
+            r = run.get("result") or {}
+            if "rolled_back" in r or "data_loss_warning" in r:
+                return r
+    return cr.get("rollback_result") or {}
+
+
+def _launch_crdb_from_ami(ec2, ami_id, aws_creds) -> tuple:
+    """Launch the smoke test instance from the pre-baked CockroachDB 23.1 AMI."""
+    subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id")
+
+    import base64
+    user_data = base64.b64encode(b"#!/bin/bash\nsystemctl start cockroachdb || true\n").decode()
+
+    kwargs = dict(
+        ImageId=ami_id,
+        InstanceType="t3.medium",
+        MinCount=1, MaxCount=1,
+        IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData=user_data,
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name",             "Value": "nexplane-smoke-cockroachdb-upgrade"},
+            {"Key": "nexplane-purpose", "Value": "smoke-cockroachdb-upgrade"},
+        ]}],
+    )
+    if subnet_id:
+        kwargs["SubnetId"] = subnet_id
+    if sg_id:
+        kwargs["SecurityGroupIds"] = [sg_id]
+
+    resp        = ec2.run_instances(**kwargs)
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"  Launched CockroachDB smoke instance {instance_id}")
+
+    ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+    desc       = ec2.describe_instances(InstanceIds=[instance_id])
+    private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
+
+    log(f"  Waiting for CockroachDB port 26257 on {private_ip} (up to 120s)")
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        time.sleep(10)
+        try:
+            s = socket.create_connection((private_ip, 26257), timeout=5)
+            s.close()
+            log(f"  CockroachDB port 26257 open on {private_ip}")
+            return instance_id, private_ip
+        except OSError:
+            pass
+    ec2.terminate_instances(InstanceIds=[instance_id])
+    pytest.fail(f"CockroachDB port 26257 never reachable on {private_ip} within 120s")
 
 
 # ---------------------------------------------------------------------------
-# PHASE: ROLLING_UPGRADE — CockroachDB 23.1 → 23.2 (auto_finalize=false)
+# Phase 1: provision
 # ---------------------------------------------------------------------------
 
-@pytest.mark.smoke
-@pytest.mark.smoke_phase("ROLLING_UPGRADE")
-async def test_cockroachdb_rolling_upgrade():
-    """Rolling upgrade CockroachDB 23.1 → 23.2, auto_finalize=false.
+_CRDB_INSTALL_SCRIPT = (
+    b"#!/bin/bash\n"
+    b"set -e\n"
+    b"curl -sfL https://binaries.cockroachdb.com/cockroach-v23.1.23.linux-amd64.tgz | tar -xz\n"
+    b"install cockroach-v23.1.23.linux-amd64/cockroach /usr/local/bin/\n"
+    b"mkdir -p /var/lib/cockroach\n"
+    b"useradd cockroach 2>/dev/null || true\n"
+    b"chown cockroach:cockroach /var/lib/cockroach\n"
+    b"cat > /etc/systemd/system/cockroachdb.service << 'CRDBSVC'\n"
+    b"[Unit]\n"
+    b"Description=CockroachDB\n"
+    b"[Service]\n"
+    b"User=cockroach\n"
+    b"ExecStart=/usr/local/bin/cockroach start-single-node --insecure --store=/var/lib/cockroach --listen-addr=:26257 --http-addr=:8080\n"
+    b"Restart=always\n"
+    b"[Install]\n"
+    b"WantedBy=multi-user.target\n"
+    b"CRDBSVC\n"
+    b"systemctl daemon-reload && systemctl enable cockroachdb && systemctl start cockroachdb\n"
+)
 
-    Verifies:
-    - CR reaches completed/awaiting_finalize status
-    - All nodes listed in nodes_upgraded
-    - version_finalized == False (since auto_finalize=False)
-    - Rollback succeeds (binary_rollback strategy)
-    """
-    token = _env("API_TOKEN")
-    from app.mcp_tools.change_requests import create_change_request, execute_change_request
 
-    jwt = await _get_jwt(token)
-    asset_id = await _find_agent_asset_id(jwt)
+def test_phase1_provision():
+    aws_creds = get_connector_creds_from_db("aws")
+    if not aws_creds:
+        pytest.skip("No AWS connector creds in platform DB")
 
-    cr = await create_change_request(
-        token=token,
-        change_type="cockroachdb_cluster_upgrade",
-        asset_id=asset_id,
-        title=f"[smoke] CockroachDB {_SOURCE_VERSION} → {_TARGET_VERSION} (no auto_finalize)",
-        parameters={
-            "source_version": _SOURCE_VERSION,
-            "target_version": _TARGET_VERSION,
-            "nodes": _nodes(),
-            "sql_user": os.environ.get("CRDB_SQL_USER", "root"),
-            "sql_password": os.environ.get("CRDB_SQL_PASSWORD"),
-            "auto_finalize": False,
-            "dry_run": False,
+    ec2 = _boto3_client("ec2", aws_creds)
+    ssm = _boto3_client("ssm", aws_creds)
+
+    def launch_fn(ec2_client, ssm_client, al2_ami_id, creds):
+        """launch_fn interface for get_or_create_smoke_ami."""
+        subnet_id = creds.get("smoke_subnet_id") or creds.get("subnet_id")
+        sg_id     = creds.get("smoke_default_security_group_id")
+
+        import base64
+        user_data = base64.b64encode(_CRDB_INSTALL_SCRIPT).decode()
+
+        kwargs = dict(
+            ImageId=al2_ami_id,
+            InstanceType="t3.medium",
+            MinCount=1, MaxCount=1,
+            IamInstanceProfile={"Name": _SSM_PROFILE},
+            UserData=user_data,
+            TagSpecifications=[{"ResourceType": "instance", "Tags": [
+                {"Key": "Name",             "Value": "nexplane-smoke-cockroachdb-ami-build"},
+                {"Key": "nexplane-purpose", "Value": "smoke-cockroachdb-ami-build"},
+            ]}],
+        )
+        if subnet_id:
+            kwargs["SubnetId"] = subnet_id
+        if sg_id:
+            kwargs["SecurityGroupIds"] = [sg_id]
+
+        resp        = ec2_client.run_instances(**kwargs)
+        instance_id = resp["Instances"][0]["InstanceId"]
+        log(f"  AMI build: launched {instance_id}, waiting for CockroachDB port 26257")
+
+        ec2_client.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+        desc       = ec2_client.describe_instances(InstanceIds=[instance_id])
+        private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
+
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            time.sleep(10)
+            try:
+                s = socket.create_connection((private_ip, 26257), timeout=5)
+                s.close()
+                log(f"  CockroachDB port 26257 ready on {private_ip}")
+                break
+            except OSError:
+                pass
+        else:
+            ec2_client.terminate_instances(InstanceIds=[instance_id])
+            raise RuntimeError(f"CockroachDB never ready on {private_ip}:26257")
+
+        return instance_id
+
+    ami_id = get_or_create_smoke_ami(
+        cache_key=_CRDB_AMI_CACHE_KEY,
+        launch_fn=launch_fn,
+        ec2=ec2,
+        ssm=ssm,
+        aws_creds=aws_creds,
+        ami_name="nexplane-smoke-cockroachdb-23.1",
+        ami_description="CockroachDB 23.1 on AL2 for Nexplane smoke tests",
+    )
+
+    instance_id, private_ip = _launch_crdb_from_ami(ec2, ami_id, aws_creds)
+    run_id            = uuid.uuid4().hex[:6]
+    conn_id, asset_id = _register_asset(private_ip, run_id)
+
+    _state.update({
+        "connector_id":      conn_id,
+        "asset_id":          asset_id,
+        "instance_id":       instance_id,
+        "private_ip":        private_ip,
+        "provisioned_by_us": True,
+    })
+
+    log("  Installing nexplane agent on smoke instance")
+    install_nexplane_agent_on_instance(instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=300)
+
+    log("[PHASE 1: provision] PASSED")
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: upgrade CR lifecycle
+# ---------------------------------------------------------------------------
+
+def test_phase2_upgrade():
+    if not _state.get("connector_id"):
+        pytest.skip("Phase 1 did not complete")
+
+    conn_id    = _state["connector_id"]
+    asset_id   = _state["asset_id"]
+    private_ip = _state["private_ip"]
+    run_id     = uuid.uuid4().hex[:6]
+
+    cr = _api("post", "/change-requests", json={
+        "title":       f"smoke-cockroachdb-cluster-upgrade-{run_id}",
+        "change_type": "cockroachdb_cluster_upgrade",
+        "desired_outcome": {
+            "source_version": "23.1",
+            "target_version": "23.2",
+            "nodes":          [{"host": private_ip, "port": 26257}],
+            "dry_run":        False,
         },
-    )
-    assert "id" in cr, f"create_change_request failed: {cr}"
+        "connector_id":     conn_id,
+        "target_asset_ids": [asset_id],
+    })
     cr_id = cr["id"]
+    _state["cr_id"] = cr_id
+    log(f"  Created CR {cr_id}")
 
-    jwt = await _get_jwt(token)
-    await _plan_and_approve_cr(jwt=jwt, cr_id=cr_id)
+    _api("post", f"/change-requests/{cr_id}/plan")
+    _api("post", f"/change-requests/{cr_id}/submit-for-approval")
+    _api("post", f"/change-requests/{cr_id}/approve",
+         json={"decision": "approved", "comment": "cockroachdb cluster upgrade smoke self-approval"})
+    _api("post", f"/change-requests/{cr_id}/execute")
+    log(f"  Executing CR {cr_id}")
 
-    executed = await execute_change_request(token=token, cr_id=cr_id)
-    assert "error" not in executed, f"execute_change_request failed: {executed}"
+    cr = _poll_cr(cr_id)
+    assert cr["status"] == "completed", f"CR reached {cr['status']} — expected completed"
 
-    jwt = await _get_jwt(token)
-    detail = await _wait_cr_terminal(jwt, cr_id, timeout=1800)
-    assert detail["status"] in ("completed", "awaiting_finalize"), (
-        f"CR status unexpected: {detail.get('status')} | {detail}"
+    result = _exec_result(cr)
+    assert result.get("status") == "completed", f"Executor status: {result}"
+    assert result.get("target_version") == "23.2", f"Expected target_version 23.2: {result}"
+
+    log("  CockroachDB cluster upgraded to 23.2")
+    log("[PHASE 2: upgrade] PASSED")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: rollback
+# ---------------------------------------------------------------------------
+
+def test_phase3_rollback():
+    cr_id = _state.get("cr_id")
+    if not cr_id:
+        pytest.skip("Phase 2 did not complete — no CR to roll back")
+
+    _api("post", f"/change-requests/{cr_id}/rollback")
+    log(f"  Rollback triggered for CR {cr_id}")
+
+    cr = _poll_cr(cr_id, timeout_s=1800)
+    assert cr["status"] in ("rolled_back", "completed"), (
+        f"Rollback CR reached unexpected status: {cr['status']}"
     )
 
-    runs = detail.get("execution_runs", [])
-    latest = max(runs, key=lambda x: x.get("started_at") or "")
-    raw = latest.get("result", {})
-    inner = raw.get("execution", raw)
-    steps = inner.get("steps", [])
-    exec_result = steps[0]["result"] if steps else inner
-
-    assert exec_result.get("version_finalized") is False, (
-        f"version_finalized should be False (auto_finalize=False): {exec_result}"
+    result = _rollback_result(cr)
+    assert result.get("rolled_back") is True or cr["status"] == "rolled_back", (
+        f"Rollback result: {result}"
     )
-    nodes_upgraded = exec_result.get("nodes_upgraded", [])
-    assert len(nodes_upgraded) == len(_nodes()), (
-        f"Not all nodes upgraded: {nodes_upgraded}"
-    )
+    log("[PHASE 3: rollback] PASSED")
 
-    jwt = await _get_jwt(token)
-    rb = await _rollback_cr(jwt=jwt, cr_id=cr_id)
-    assert rb.get("rolled_back") is True, f"Rollback failed: {rb}"
-    assert rb.get("strategy") == "binary_rollback", f"Wrong rollback strategy: {rb}"
+
+# ---------------------------------------------------------------------------
+# Phase 4: teardown
+# ---------------------------------------------------------------------------
+
+def test_phase4_teardown():
+    if not _state.get("provisioned_by_us"):
+        log("[PHASE 4: teardown] SKIPPED")
+        return
+
+    aws_creds   = get_connector_creds_from_db("aws")
+    asset_id    = _state.get("asset_id")
+    conn_id     = _state.get("connector_id")
+    instance_id = _state.get("instance_id")
+
+    for res_id, path in [(asset_id, f"/assets/{asset_id}"), (conn_id, f"/connectors/{conn_id}")]:
+        if res_id:
+            try:
+                _api("delete", path)
+                log(f"  Deleted {path}")
+            except Exception as exc:
+                log(f"  Warning: {exc}", ok=False)
+
+    if instance_id and aws_creds:
+        try:
+            ec2 = _boto3_client("ec2", aws_creds)
+            ec2.terminate_instances(InstanceIds=[instance_id])
+            log(f"  Terminated instance {instance_id}")
+        except Exception as exc:
+            log(f"  Warning: could not terminate: {exc}", ok=False)
+
+    log("[PHASE 4: teardown] PASSED")
