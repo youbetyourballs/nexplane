@@ -3,18 +3,18 @@
 
 """Smoke test: GitLab Major Version Upgrade
 
-Single-hop smoke: 15.11 → 16.0 (cheapest valid hop to verify CR lifecycle).
-Full multi-hop (15→17) is slow (~45 min); single-hop is sufficient.
+Single-hop smoke: 15.11 -> 16.0 (cheapest valid hop to verify CR lifecycle).
+Full multi-hop (15->17) is slow (~45 min); single-hop is sufficient.
 
 AMI cache key: /nexplane/smoke-amis/gitlab/15.11
 Instance type: t3.xlarge (GitLab needs 4GB+ RAM)
 
 Phases:
-  1. setup     — get_or_create_smoke_ami for GitLab 15.11; launch t3.xlarge; register
-  2. upgrade   — gitlab_upgrade CR lifecycle (15.11→16.0)
-  3. verify    — GET /api/v4/version == 16.0; GET /api/v4/projects returns 200
-  4. rollback  — restore from backup; verify 15.11
-  5. teardown  — terminate instance; deregister
+  1. setup     -- get_or_create_smoke_ami for GitLab 15.11; launch t3.xlarge; register
+  2. upgrade   -- gitlab_upgrade CR lifecycle (15.11->16.0)
+  3. verify    -- GET /api/v4/version == 16.0; GET /api/v4/projects returns 200
+  4. rollback  -- restore from backup; verify 15.11
+  5. teardown  -- terminate instance; deregister
 
 Run:
     docker exec nexplane-backend-1 python -m pytest \
@@ -24,6 +24,7 @@ Run:
 import os
 import sys
 import time
+import uuid
 import pytest
 import boto3
 
@@ -40,7 +41,7 @@ TARGET_VERSION = "16.0"
 INSTANCE_TYPE = "t3.xlarge"
 GITLAB_ADMIN_TOKEN = os.environ.get("GITLAB_SMOKE_TOKEN", "smoke-admin-token")
 
-CR_TIMEOUT = 1800  # 30 min — backup + upgrade + background migrations
+CR_TIMEOUT = 1800  # 30 min -- backup + upgrade + background migrations
 POLL_INTERVAL = 15
 
 _state = {
@@ -67,16 +68,34 @@ def _api(method, path, **kwargs):
     return getattr(_get_client(), method)(path, **kwargs)
 
 
-def _poll_cr(cr_id, terminal_statuses=("completed", "failed", "blocked"), timeout=CR_TIMEOUT):
+def _poll_cr(cr_id, terminal_statuses=("completed", "failed", "blocked", "rolled_back", "rollback_failed"), timeout=CR_TIMEOUT):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        r = _api("get", f"/api/v1/change-requests/{cr_id}")
-        assert r.status_code == 200
-        data = r.json()
-        if data.get("status") in terminal_statuses:
-            return data
+        cr = _api("get", f"/change-requests/{cr_id}")
+        if cr["status"] in terminal_statuses:
+            return cr
         time.sleep(POLL_INTERVAL)
     raise TimeoutError(f"CR {cr_id} timed out after {timeout}s")
+
+
+def _exec_result(cr: dict) -> dict:
+    runs = cr.get("execution_runs") or []
+    if runs:
+        raw = runs[0].get("result") or {}
+        steps = raw.get("execution", {}).get("steps", [])
+        if steps:
+            return steps[0].get("result") or {}
+    return cr.get("execution_result") or {}
+
+
+def _rollback_result(cr: dict) -> dict:
+    runs = cr.get("execution_runs") or []
+    for run in runs:
+        if run.get("status") in ("rolled_back", "rollback_failed"):
+            r = run.get("result") or {}
+            if "rolled_back" in r or "data_loss_warning" in r:
+                return r
+    return cr.get("rollback_result") or {}
 
 
 def test_phase1_provision_gitlab():
@@ -121,23 +140,25 @@ def test_phase1_provision_gitlab():
     # Wait for GitLab to be fully up (gitlab-ctl status)
     time.sleep(120)
 
-    r = _api("post", "/api/v1/connectors", json={
+    run_id = uuid.uuid4().hex[:6]
+    connector = _api("post", "/connectors", json={
+        "name": f"smoke-gitlab-{run_id}",
         "connector_type": "nexplane_agent",
-        "display_name": f"smoke-gitlab-{instance_id[:8]}",
-        "credentials": {},
     })
-    assert r.status_code in (200, 201)
-    connector_id = r.json()["id"]
+    connector_id = connector["id"]
+    _api("put", f"/connectors/{connector_id}/credentials", json={"credentials": {}})
     _state["connector_id"] = connector_id
 
-    r = _api("post", "/api/v1/assets", json={
-        "connector_id": connector_id,
+    asset = _api("post", "/assets", json={
+        "name": f"smoke-gitlab-{run_id}",
         "asset_type": "server",
-        "display_name": f"smoke-gitlab-{instance_id[:8]}",
-        "asset_metadata": {"instance_id": instance_id, "ip": ip},
+        "criticality": "medium",
+        "environment": "staging",
+        "hostname": ip,
+        "connector_id": connector_id,
+        "metadata": {"instance_id": instance_id, "ip": ip},
     })
-    assert r.status_code in (200, 201)
-    _state["asset_id"] = r.json()["id"]
+    _state["asset_id"] = asset["id"]
     log(f"Asset: {_state['asset_id']}")
 
 
@@ -147,7 +168,7 @@ def test_phase2_create_and_approve_cr():
 
     payload = {
         "change_type": "gitlab_upgrade",
-        "title": f"Smoke: GitLab {SOURCE_VERSION}→{TARGET_VERSION}",
+        "title": f"Smoke: GitLab {SOURCE_VERSION}->{TARGET_VERSION}",
         "target_asset_ids": [_state["asset_id"]],
         "desired_outcome": {
             "source_version": SOURCE_VERSION,
@@ -158,12 +179,15 @@ def test_phase2_create_and_approve_cr():
             "dry_run": False,
         },
     }
-    r = _api("post", "/api/v1/change-requests", json=payload)
-    assert r.status_code in (200, 201), f"CR create failed: {r.text}"
-    _state["cr_id"] = r.json()["id"]
-    _api("post", f"/api/v1/change-requests/{_state['cr_id']}/plan")
-    _api("post", f"/api/v1/change-requests/{_state['cr_id']}/approve")
-    log(f"CR {_state['cr_id']} approved")
+    cr = _api("post", "/change-requests", json=payload)
+    cr_id = cr["id"]
+    _state["cr_id"] = cr_id
+    _api("post", f"/change-requests/{cr_id}/plan")
+    _api("post", f"/change-requests/{cr_id}/submit-for-approval")
+    _api("post", f"/change-requests/{cr_id}/approve",
+         json={"decision": "approved", "comment": "gitlab upgrade smoke self-approval"})
+    _api("post", f"/change-requests/{cr_id}/execute")
+    log(f"CR {cr_id} approved and executing")
 
 
 def test_phase2_wait_execution():
@@ -171,28 +195,27 @@ def test_phase2_wait_execution():
         pytest.skip()
     cr = _poll_cr(_state["cr_id"])
     assert cr["status"] == "completed", f"CR failed: {cr}"
-    _state["execution_result"] = cr.get("execution_result", {})
+    _state["execution_result"] = _exec_result(cr)
 
 
 def test_phase3_verify():
     if not _state["execution_result"]:
-        pytest.skip("No execution_result — phase 2 did not complete")
+        pytest.skip("No execution_result -- phase 2 did not complete")
     result = _state["execution_result"]
     assert result.get("status") == "completed"
     assert result.get("final_version", "").startswith("16.0"), \
         f"Expected 16.0.x, got {result.get('final_version')}"
-    assert result.get("hops_completed") == [f"{SOURCE_VERSION}→{TARGET_VERSION}"]
+    assert result.get("hops_completed") == [f"{SOURCE_VERSION}->{TARGET_VERSION}"]
     log(f"GitLab {TARGET_VERSION} verified; hops={result.get('hops_completed')}")
 
 
 def test_phase4_rollback():
     if not _state["cr_id"]:
         pytest.skip()
-    r = _api("post", f"/api/v1/change-requests/{_state['cr_id']}/rollback")
-    assert r.status_code == 200
+    _api("post", f"/change-requests/{_state['cr_id']}/rollback")
     cr = _poll_cr(_state["cr_id"], terminal_statuses=("rolled_back", "rollback_failed"), timeout=1800)
     assert cr["status"] == "rolled_back", f"Rollback failed: {cr}"
-    rb = cr.get("rollback_result", {})
+    rb = _rollback_result(cr)
     assert rb.get("rolled_back") is True
     log("GitLab rollback to 15.11 verified")
 
@@ -210,6 +233,14 @@ def test_phase5_teardown():
         ec2.terminate_instances(InstanceIds=[_state["instance_id"]])
         log(f"Terminated {_state['instance_id']}")
     if _state["asset_id"]:
-        _api("delete", f"/api/v1/assets/{_state['asset_id']}")
+        try:
+            _api("delete", f"/assets/{_state['asset_id']}")
+            log(f"Deleted asset {_state['asset_id']}")
+        except Exception as exc:
+            log(f"Warning: {exc}", ok=False)
     if _state["connector_id"]:
-        _api("delete", f"/api/v1/connectors/{_state['connector_id']}")
+        try:
+            _api("delete", f"/connectors/{_state['connector_id']}")
+            log(f"Deleted connector {_state['connector_id']}")
+        except Exception as exc:
+            log(f"Warning: {exc}", ok=False)

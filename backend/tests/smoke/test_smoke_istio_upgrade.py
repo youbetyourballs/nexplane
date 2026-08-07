@@ -4,11 +4,11 @@
 """Smoke test: Istio Control Plane Upgrade
 
 Phases:
-  1. setup       — reuse EKS cluster from k8s_cluster_upgrade smoke; install Istio 1.20
-  2. run_upgrade — istio_control_plane_upgrade CR lifecycle (canary 1.20→1.21)
-  3. verify      — istioctl proxy-status all 1.21
-  4. rollback    — rollback before old revision removed; verify 1.20 sidecars
-  5. teardown    — istioctl uninstall --purge
+  1. setup       -- reuse EKS cluster from k8s_cluster_upgrade smoke; install Istio 1.20
+  2. run_upgrade -- istio_control_plane_upgrade CR lifecycle (canary 1.20->1.21)
+  3. verify      -- istioctl proxy-status all 1.21
+  4. rollback    -- rollback before old revision removed; verify 1.20 sidecars
+  5. teardown    -- istioctl uninstall --purge
 
 Run:
     docker exec nexplane-backend-1 python -m pytest \
@@ -65,21 +65,38 @@ def _api(method, path, **kwargs):
     return getattr(_get_client(), method)(path, **kwargs)
 
 
-def _poll_cr(cr_id: str, terminal_statuses=("completed", "failed", "blocked"), timeout=CR_TIMEOUT):
+def _poll_cr(cr_id: str, terminal_statuses=("completed", "failed", "blocked", "rolled_back", "rollback_failed"), timeout=CR_TIMEOUT):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        r = _api("get", f"/api/v1/change-requests/{cr_id}")
-        assert r.status_code == 200, f"CR poll failed: {r.text}"
-        data = r.json()
-        status = data.get("status")
-        if status in terminal_statuses:
-            return data
+        cr = _api("get", f"/change-requests/{cr_id}")
+        if cr["status"] in terminal_statuses:
+            return cr
         time.sleep(POLL_INTERVAL)
     raise TimeoutError(f"CR {cr_id} did not reach terminal status within {timeout}s")
 
 
+def _exec_result(cr: dict) -> dict:
+    runs = cr.get("execution_runs") or []
+    if runs:
+        raw = runs[0].get("result") or {}
+        steps = raw.get("execution", {}).get("steps", [])
+        if steps:
+            return steps[0].get("result") or {}
+    return cr.get("execution_result") or {}
+
+
+def _rollback_result(cr: dict) -> dict:
+    runs = cr.get("execution_runs") or []
+    for run in runs:
+        if run.get("status") in ("rolled_back", "rollback_failed"):
+            r = run.get("result") or {}
+            if "rolled_back" in r or "data_loss_warning" in r:
+                return r
+    return cr.get("rollback_result") or {}
+
+
 # ---------------------------------------------------------------------------
-# Phase 1: Setup — resolve EKS agent asset
+# Phase 1: Setup -- resolve EKS agent asset
 # ---------------------------------------------------------------------------
 
 def test_phase1_resolve_eks_agent():
@@ -96,30 +113,30 @@ def test_phase1_resolve_eks_agent():
         resp = ssm.get_parameter(Name=_EKS_AGENT_ASSET_SSM_KEY)
         asset_id = resp["Parameter"]["Value"]
     except ssm.exceptions.ParameterNotFound:
-        pytest.skip("No EKS smoke cluster asset in SSM — run k8s_cluster_upgrade smoke first")
+        pytest.skip("No EKS smoke cluster asset in SSM -- run k8s_cluster_upgrade smoke first")
 
     _state["asset_id"] = asset_id
     log(f"Using EKS agent asset: {asset_id}")
 
     # Verify asset is reachable via platform
-    r = _api("get", f"/api/v1/assets/{asset_id}")
-    assert r.status_code == 200, f"Asset not found: {r.text}"
+    asset = _api("get", f"/assets/{asset_id}")
+    assert asset.get("id"), f"Asset not found: {asset}"
     log("EKS agent asset reachable")
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: CR lifecycle — canary upgrade 1.20 → 1.21
+# Phase 2: CR lifecycle -- canary upgrade 1.20 -> 1.21
 # ---------------------------------------------------------------------------
 
 def test_phase2_create_and_approve_cr():
     if not _state["asset_id"]:
-        pytest.skip("No asset_id — phase 1 failed")
+        pytest.skip("No asset_id -- phase 1 failed")
 
     # Create CR
     payload = {
         "change_type": "istio_control_plane_upgrade",
-        "title": f"Smoke: Istio {SOURCE_VERSION}→{TARGET_VERSION}",
-        "asset_ids": [_state["asset_id"]],
+        "title": f"Smoke: Istio {SOURCE_VERSION}->{TARGET_VERSION}",
+        "target_asset_ids": [_state["asset_id"]],
         "desired_outcome": {
             "source_version": SOURCE_VERSION,
             "target_version": TARGET_VERSION,
@@ -128,20 +145,22 @@ def test_phase2_create_and_approve_cr():
             "dry_run": False,
         },
     }
-    r = _api("post", "/api/v1/change-requests", json=payload)
-    assert r.status_code in (200, 201), f"CR create failed: {r.text}"
-    cr_id = r.json()["id"]
+    cr = _api("post", "/change-requests", json=payload)
+    cr_id = cr["id"]
     _state["cr_id"] = cr_id
     log(f"CR created: {cr_id}")
 
     # Plan
-    r = _api("post", f"/api/v1/change-requests/{cr_id}/plan")
-    assert r.status_code == 200, f"Plan failed: {r.text}"
+    _api("post", f"/change-requests/{cr_id}/plan")
 
-    # Approve
-    r = _api("post", f"/api/v1/change-requests/{cr_id}/approve")
-    assert r.status_code == 200, f"Approve failed: {r.text}"
-    log("CR approved, executing...")
+    # Submit for approval and approve
+    _api("post", f"/change-requests/{cr_id}/submit-for-approval")
+    _api("post", f"/change-requests/{cr_id}/approve",
+         json={"decision": "approved", "comment": "istio upgrade smoke self-approval"})
+
+    # Execute
+    _api("post", f"/change-requests/{cr_id}/execute")
+    log("CR approved and executing...")
 
 
 def test_phase2_wait_for_execution():
@@ -150,7 +169,7 @@ def test_phase2_wait_for_execution():
 
     cr = _poll_cr(_state["cr_id"], timeout=CR_TIMEOUT)
     assert cr["status"] == "completed", f"CR did not complete: {cr}"
-    _state["execution_result"] = cr.get("execution_result", {})
+    _state["execution_result"] = _exec_result(cr)
     log(f"CR completed. Result: {_state['execution_result']}")
 
 
@@ -168,7 +187,7 @@ def test_phase3_verify_proxy_status():
     namespaces_migrated = result.get("namespaces_migrated", [])
     assert TEST_NAMESPACE in namespaces_migrated, \
         f"Test namespace {TEST_NAMESPACE} not in migrated: {namespaces_migrated}"
-    log("Proxy status verified — all sidecars on target version")
+    log("Proxy status verified -- all sidecars on target version")
 
 
 # ---------------------------------------------------------------------------
@@ -179,15 +198,14 @@ def test_phase4_rollback():
     if not _state["cr_id"]:
         pytest.skip("No cr_id")
 
-    r = _api("post", f"/api/v1/change-requests/{_state['cr_id']}/rollback")
-    assert r.status_code == 200, f"Rollback initiation failed: {r.text}"
+    _api("post", f"/change-requests/{_state['cr_id']}/rollback")
 
     cr = _poll_cr(_state["cr_id"], terminal_statuses=("rolled_back", "rollback_failed"), timeout=CR_TIMEOUT)
     assert cr["status"] == "rolled_back", f"Rollback failed: {cr}"
 
-    rollback_result = cr.get("rollback_result", {})
-    assert rollback_result.get("rolled_back") is True
-    log("Rollback completed — sidecars restored to source version")
+    rb = _rollback_result(cr)
+    assert rb.get("rolled_back") is True
+    log("Rollback completed -- sidecars restored to source version")
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +214,6 @@ def test_phase4_rollback():
 
 def test_phase5_teardown():
     """Teardown: dispatch istioctl uninstall --purge via agent job (out of band)."""
-    # Teardown is best-effort — failures logged but don't fail the test
+    # Teardown is best-effort -- failures logged but don't fail the test
     log("Teardown: Istio will be uninstalled by next k8s_cluster_upgrade smoke run or manual cleanup")
     log("Run on agent: istioctl uninstall --purge -y && kubectl delete namespace istio-smoke-test")

@@ -4,11 +4,11 @@
 """Smoke test: cert-manager Upgrade
 
 Phases:
-  1. setup       — reuse EKS cluster; install cert-manager 1.13 via Helm
-  2. run_upgrade — cert_manager_upgrade CR lifecycle (1.13→1.15)
-  3. verify      — Deployment running; test Certificate CR issued (Ready=True)
-  4. rollback    — Deployment rolled back; CRDs remain at 1.15 (expected)
-  5. teardown    — helm uninstall cert-manager; delete test Certificate
+  1. setup       -- reuse EKS cluster; install cert-manager 1.13 via Helm
+  2. run_upgrade -- cert_manager_upgrade CR lifecycle (1.13->1.15)
+  3. verify      -- Deployment running; test Certificate CR issued (Ready=True)
+  4. rollback    -- Deployment rolled back; CRDs remain at 1.15 (expected)
+  5. teardown    -- helm uninstall cert-manager; delete test Certificate
 
 Run:
     docker exec nexplane-backend-1 python -m pytest \
@@ -54,16 +54,34 @@ def _api(method, path, **kwargs):
     return getattr(_get_client(), method)(path, **kwargs)
 
 
-def _poll_cr(cr_id, terminal_statuses=("completed", "failed", "blocked"), timeout=CR_TIMEOUT):
+def _poll_cr(cr_id, terminal_statuses=("completed", "failed", "blocked", "rolled_back", "rollback_failed"), timeout=CR_TIMEOUT):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        r = _api("get", f"/api/v1/change-requests/{cr_id}")
-        assert r.status_code == 200
-        data = r.json()
-        if data.get("status") in terminal_statuses:
-            return data
+        cr = _api("get", f"/change-requests/{cr_id}")
+        if cr["status"] in terminal_statuses:
+            return cr
         time.sleep(POLL_INTERVAL)
     raise TimeoutError(f"CR {cr_id} timed out")
+
+
+def _exec_result(cr: dict) -> dict:
+    runs = cr.get("execution_runs") or []
+    if runs:
+        raw = runs[0].get("result") or {}
+        steps = raw.get("execution", {}).get("steps", [])
+        if steps:
+            return steps[0].get("result") or {}
+    return cr.get("execution_result") or {}
+
+
+def _rollback_result(cr: dict) -> dict:
+    runs = cr.get("execution_runs") or []
+    for run in runs:
+        if run.get("status") in ("rolled_back", "rollback_failed"):
+            r = run.get("result") or {}
+            if "rolled_back" in r or "data_loss_warning" in r:
+                return r
+    return cr.get("rollback_result") or {}
 
 
 def test_phase1_resolve_eks_agent():
@@ -78,7 +96,7 @@ def test_phase1_resolve_eks_agent():
         resp = ssm.get_parameter(Name=_EKS_AGENT_ASSET_SSM_KEY)
         _state["asset_id"] = resp["Parameter"]["Value"]
     except ssm.exceptions.ParameterNotFound:
-        pytest.skip("No EKS smoke cluster — run k8s_cluster_upgrade smoke first")
+        pytest.skip("No EKS smoke cluster -- run k8s_cluster_upgrade smoke first")
     log(f"Using EKS agent asset: {_state['asset_id']}")
 
 
@@ -88,8 +106,8 @@ def test_phase2_create_and_approve_cr():
 
     payload = {
         "change_type": "cert_manager_upgrade",
-        "title": f"Smoke: cert-manager {SOURCE_VERSION}→{TARGET_VERSION}",
-        "asset_ids": [_state["asset_id"]],
+        "title": f"Smoke: cert-manager {SOURCE_VERSION}->{TARGET_VERSION}",
+        "target_asset_ids": [_state["asset_id"]],
         "desired_outcome": {
             "source_version": SOURCE_VERSION,
             "target_version": TARGET_VERSION,
@@ -97,12 +115,15 @@ def test_phase2_create_and_approve_cr():
             "dry_run": False,
         },
     }
-    r = _api("post", "/api/v1/change-requests", json=payload)
-    assert r.status_code in (200, 201), f"CR create failed: {r.text}"
-    _state["cr_id"] = r.json()["id"]
-    _api("post", f"/api/v1/change-requests/{_state['cr_id']}/plan")
-    _api("post", f"/api/v1/change-requests/{_state['cr_id']}/approve")
-    log(f"CR {_state['cr_id']} approved")
+    cr = _api("post", "/change-requests", json=payload)
+    cr_id = cr["id"]
+    _state["cr_id"] = cr_id
+    _api("post", f"/change-requests/{cr_id}/plan")
+    _api("post", f"/change-requests/{cr_id}/submit-for-approval")
+    _api("post", f"/change-requests/{cr_id}/approve",
+         json={"decision": "approved", "comment": "cert-manager upgrade smoke self-approval"})
+    _api("post", f"/change-requests/{cr_id}/execute")
+    log(f"CR {cr_id} approved and executing")
 
 
 def test_phase2_wait_execution():
@@ -110,7 +131,7 @@ def test_phase2_wait_execution():
         pytest.skip()
     cr = _poll_cr(_state["cr_id"])
     assert cr["status"] == "completed", f"CR failed: {cr}"
-    _state["execution_result"] = cr.get("execution_result", {})
+    _state["execution_result"] = _exec_result(cr)
 
 
 def test_phase3_verify():
@@ -126,13 +147,12 @@ def test_phase3_verify():
 def test_phase4_rollback():
     if not _state["cr_id"]:
         pytest.skip()
-    r = _api("post", f"/api/v1/change-requests/{_state['cr_id']}/rollback")
-    assert r.status_code == 200
+    _api("post", f"/change-requests/{_state['cr_id']}/rollback")
     cr = _poll_cr(_state["cr_id"], terminal_statuses=("rolled_back", "rollback_failed"))
     assert cr["status"] == "rolled_back"
-    rb = cr.get("rollback_result", {})
+    rb = _rollback_result(cr)
     assert rb.get("deployment_rolled_back") is True
-    # CRDs remain at target — expected
+    # CRDs remain at target -- expected
     assert rb.get("crds_note"), "Expected crds_note explaining CRDs remain at target"
     log("cert-manager rollback: Deployment rolled back; CRDs remain at 1.15 (expected)")
 
