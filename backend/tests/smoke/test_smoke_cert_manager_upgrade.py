@@ -158,7 +158,7 @@ def _build_k3s_certmgr_ami(ec2, ssm, aws_creds) -> str:
 
     log("  No cached AMI -- launching fresh k3s+cert-manager instance")
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
         ImageId=_BASE_AMI,
@@ -238,7 +238,7 @@ def _build_k3s_certmgr_ami(ec2, ssm, aws_creds) -> str:
 
 def _launch_certmgr(ec2, aws_creds, ami_id) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
         ImageId=ami_id,

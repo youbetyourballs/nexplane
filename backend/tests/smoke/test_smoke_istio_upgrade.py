@@ -144,7 +144,7 @@ def _build_k3s_istio_ami(ec2, ssm, aws_creds) -> tuple:
     # Launch fresh instance with user-data that installs k3s + Istio
     log("  No cached AMI -- launching fresh instance to build k3s + Istio 1.20")
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
         ImageId=_BASE_AMI,
@@ -232,7 +232,7 @@ def _build_k3s_istio_ami(ec2, ssm, aws_creds) -> tuple:
 def _launch_from_ami(ec2, aws_creds, ami_id) -> tuple:
     """Launch a new instance from a cached AMI."""
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
         ImageId=ami_id,
