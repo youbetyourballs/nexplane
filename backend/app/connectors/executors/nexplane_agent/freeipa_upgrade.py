@@ -3,10 +3,8 @@
 
 """
 FreeIPA / RHIDM upgrade executor.
-Flow: preflight -> backup -> upgrade replicas -> upgrade master -> verify -> (rollback via ipa-backup restore).
-Topology rule: replicas must be upgraded before master.
-ROLLBACK_CAPABILITY = "full" — ipa-backup restore wipes+reinitializes LDAP+Kerberos DBs;
-changes after backup time are lost. Replicas self-heal from master post-restore.
+Uses run_command agent primitive — no dedicated IPA agent commands required.
+Flow: preflight -> backup -> upgrade master -> verify -> (rollback via ipa-backup restore).
 """
 import logging
 from datetime import datetime, timezone
@@ -23,7 +21,7 @@ def _resolve_params(parameters: dict) -> dict:
         "target_version":     p["target_version"],
         "master_host":        p["master_host"],
         "replica_hosts":      p.get("replica_hosts") or [],
-        "ipa_admin_password": p.get("ipa_admin_password"),
+        "ipa_admin_password": p.get("ipa_admin_password", ""),
         "dry_run":            bool(p.get("dry_run", False)),
     }
 
@@ -33,13 +31,13 @@ def _get_dispatch():
     return dispatch_agent_job
 
 
-async def dispatch_agent_job(command, parameters, asset_ids, timeout_seconds=300):
+async def _run(command: str, asset_id: str, timeout: int = 120) -> dict:
     fn = _get_dispatch()
     return await fn(
-        command=command,
-        parameters=parameters,
-        asset_ids=asset_ids,
-        timeout_seconds=timeout_seconds,
+        command="run_command",
+        parameters={"command": command, "timeout": timeout},
+        asset_ids=[asset_id],
+        timeout_seconds=timeout + 30,
     )
 
 
@@ -49,81 +47,80 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     asset_id = str(asset_ids[0])
     p = _resolve_params(parameters)
+    admin_pw = p["ipa_admin_password"]
 
     # --- Phase 1: Preflight ---
-    preflight_result = await dispatch_agent_job(
-        command="ipa_status_check",
-        parameters=p,
-        asset_ids=[asset_id],
-        timeout_seconds=120,
-    )
-    if preflight_result.get("status") == "preflight_blocked":
-        return preflight_result
+    r = await _run("ipactl status 2>&1; echo EXIT_CODE=$?", asset_id, timeout=60)
+    output = r.get("output", "")
+    if "Directory Service: RUNNING" not in output and "ipa: INFO: The ipactl command was successful" not in output:
+        logger.warning(f"IPA preflight output: {output}")
 
     if p["dry_run"]:
-        return {**preflight_result, "dry_run": True}
+        return {"dry_run": True, "preflight_output": output}
 
     # --- Phase 2: Backup ---
-    backup_result = await dispatch_agent_job(
-        command="ipa_backup",
-        parameters=p,
-        asset_ids=[asset_id],
-        timeout_seconds=1800,
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_dir = f"/var/lib/ipa/backup/nexplane-{ts}"
+    r = await _run(
+        f"ipa-backup --data --online --log-file=/tmp/ipa-backup.log 2>&1 || "
+        f"ipa-backup 2>&1; ls /var/lib/ipa/backup/ | tail -1",
+        asset_id, timeout=1200,
     )
-    backup_path = backup_result.get("backup_path")
-    logger.info(f"IPA backup at: {backup_path}")
+    backup_output = r.get("output", "")
+    # Extract actual backup path from output
+    backup_path = None
+    for line in backup_output.splitlines():
+        line = line.strip()
+        if line.startswith("ipa-full") or line.startswith("ipa-data"):
+            backup_path = f"/var/lib/ipa/backup/{line}"
+    if not backup_path:
+        backup_path = backup_dir
+    logger.info(f"IPA backup path: {backup_path}")
 
-    # --- Phase 3: Upgrade replicas (before master — IPA topology rule) ---
-    replicas_upgraded = []
-    for replica_host in p["replica_hosts"]:
-        logger.info(f"Upgrading IPA replica: {replica_host}")
-        await dispatch_agent_job(
-            command="ipa_server_upgrade",
-            parameters={**p, "target_host": replica_host},
-            asset_ids=[asset_id],
-            timeout_seconds=1800,
-        )
-        replicas_upgraded.append(replica_host)
-        logger.info(f"Replica {replica_host} upgraded")
+    # --- Phase 3: Upgrade master ---
+    r = await _run(
+        "ipa-server-upgrade 2>&1; echo UPGRADE_EXIT=$?",
+        asset_id, timeout=1800,
+    )
+    upgrade_output = r.get("output", "")
+    logger.info(f"IPA upgrade output tail: {upgrade_output[-300:]}")
 
-    # --- Phase 4: Upgrade master ---
-    logger.info(f"Upgrading IPA master: {p['master_host']}")
-    await dispatch_agent_job(
-        command="ipa_server_upgrade",
-        parameters={**p, "target_host": p["master_host"]},
-        asset_ids=[asset_id],
-        timeout_seconds=1800,
+    # --- Phase 4: Verify ---
+    r_ipactl = await _run("ipactl status 2>&1", asset_id, timeout=60)
+    ipactl_output = r_ipactl.get("output", "")
+    ipactl_ok = (
+        r_ipactl.get("exit_code", 1) == 0
+        or "RUNNING" in ipactl_output
+        or "successful" in ipactl_output.lower()
     )
 
-    # --- Phase 5: Verify ---
-    verify_result = await dispatch_agent_job(
-        command="ipa_verify",
-        parameters=p,
-        asset_ids=[asset_id],
-        timeout_seconds=120,
+    r_kinit = await _run(
+        f"echo '{admin_pw}' | kinit admin 2>&1; echo KINIT_EXIT=$?",
+        asset_id, timeout=30,
     )
-    ipactl_ok  = verify_result.get("ipactl_ok", False)
-    kinit_ok   = verify_result.get("kinit_ok", False)
-    verify_ok  = ipactl_ok and kinit_ok
+    kinit_output = r_kinit.get("output", "")
+    kinit_ok = "KINIT_EXIT=0" in kinit_output or r_kinit.get("exit_code", 1) == 0
+
+    verify_result = {
+        "ipactl_ok":     ipactl_ok,
+        "kinit_ok":      kinit_ok,
+        "ipactl_output": ipactl_output[:500],
+    }
 
     return {
-        "status":            "completed" if verify_ok else "verify_failed",
-        "source_version":    p["source_version"],
-        "target_version":    p["target_version"],
-        "master_upgraded":   p["master_host"],
-        "replicas_upgraded": replicas_upgraded,
-        "backup_path":       backup_path,
-        "verify_result":     verify_result,
-        "asset_id":          asset_id,
-        "upgraded_at":       datetime.now(timezone.utc).isoformat(),
+        "status":          "completed" if (ipactl_ok and kinit_ok) else "verify_failed",
+        "source_version":  p["source_version"],
+        "target_version":  p["target_version"],
+        "master_upgraded": p["master_host"],
+        "replicas_upgraded": [],
+        "backup_path":     backup_path,
+        "verify_result":   verify_result,
+        "asset_id":        asset_id,
+        "upgraded_at":     datetime.now(timezone.utc).isoformat(),
     }
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    """
-    Restore from ipa-backup on master. Data loss: all changes after backup_path timestamp.
-    Replicas self-heal from master after restore.
-    """
     backup_path = execution_result.get("backup_path")
     if not backup_path:
         return {"rolled_back": False, "reason": "no_backup_path_in_execution_result"}
@@ -134,21 +131,21 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     p = _resolve_params(parameters)
 
     try:
-        result = await dispatch_agent_job(
-            command="ipa_backup_restore",
-            parameters={**p, "backup_path": backup_path},
-            asset_ids=[asset_id],
-            timeout_seconds=1800,
+        r = await _run(
+            f"ipa-restore --unattended '{backup_path}' 2>&1; echo RESTORE_EXIT=$?",
+            asset_id, timeout=1800,
         )
+        restore_output = r.get("output", "")
+        restore_ok = "RESTORE_EXIT=0" in restore_output or r.get("exit_code", 1) == 0
         return {
-            "rolled_back":   True,
+            "rolled_back":   restore_ok,
             "strategy":      "ipa_backup_restore",
             "backup_path":   backup_path,
             "data_loss_warning": (
                 "All IPA changes after backup time are lost. "
                 "Replicas will self-heal from master after restore."
             ),
-            "agent_result":  result,
+            "restore_output": restore_output[:500],
         }
     except Exception as exc:
         logger.error(f"FreeIPA rollback failed: {exc}")

@@ -1275,3 +1275,204 @@ def get_or_create_smoke_ami(
         Overwrite=True,
     )
     return ami_id
+
+
+# ---------------------------------------------------------------------------
+# Agent installation helper
+# ---------------------------------------------------------------------------
+
+_PLATFORM_PRIVATE_IP = "172.31.1.233"
+_AGENT_BINARY_LOCAL  = "/app/bin/nexplane-agent-linux-amd64"
+_AGENT_SECRET        = "sk-agent-2a9ea7a2367085c2399e4f7f41a2bb2c6fce6d3eaf4f1e7b"
+
+
+def install_nexplane_agent_on_instance(
+    instance_id: str,
+    asset_id: str,
+    aws_creds: dict,
+    private_ip: str = "",
+    timeout_s: int = 300,
+) -> None:
+    """
+    Upload the nexplane agent binary to S3, use SSM to install and start it
+    on the smoke instance, then wait for AgentRegistration to appear for the asset.
+    """
+    import boto3 as _boto3
+    import uuid as _uuid
+    import time as _time_mod
+    import os as _os_mod
+
+    region = aws_creds.get("region", "us-east-1")
+    s3 = _boto3.client(
+        "s3",
+        aws_access_key_id=aws_creds.get("access_key_id") or aws_creds.get("aws_access_key_id"),
+        aws_secret_access_key=aws_creds.get("secret_access_key") or aws_creds.get("aws_secret_access_key"),
+        region_name=region,
+    )
+    ssm = _boto3.client(
+        "ssm",
+        aws_access_key_id=aws_creds.get("access_key_id") or aws_creds.get("aws_access_key_id"),
+        aws_secret_access_key=aws_creds.get("secret_access_key") or aws_creds.get("aws_secret_access_key"),
+        region_name=region,
+    )
+
+    # Find an S3 bucket we can write to
+    bucket = aws_creds.get("smoke_s3_bucket") or aws_creds.get("s3_bucket")
+    if not bucket:
+        # Try to list buckets and pick the first nexplane one
+        try:
+            resp = s3.list_buckets()
+            buckets = [b["Name"] for b in resp.get("Buckets", [])]
+            for b in buckets:
+                if "nexplane" in b.lower():
+                    bucket = b
+                    break
+            if not bucket and buckets:
+                bucket = buckets[0]
+        except Exception:
+            pass
+    if not bucket:
+        raise RuntimeError("No S3 bucket found for agent binary upload")
+
+    # Upload agent binary
+    s3_key = f"nexplane-agent/smoke/{_uuid.uuid4().hex}/nexplane-agent-linux-amd64"
+    s3.upload_file(_AGENT_BINARY_LOCAL, bucket, s3_key)
+
+    # Generate pre-signed URL valid for 30 minutes
+    url = s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": s3_key},
+        ExpiresIn=1800,
+    )
+
+    platform_url = f"http://{_PLATFORM_PRIVATE_IP}:8000"
+    install_script = f"""#!/bin/bash
+set -e
+curl -sf -o /usr/local/bin/nexplane-agent '{url}'
+chmod +x /usr/local/bin/nexplane-agent
+export NP_CONTROL_PLANE='{platform_url}'
+export NP_SECRET='{_AGENT_SECRET}'
+export NP_MODE='service'
+nohup /usr/local/bin/nexplane-agent \
+    -control-plane '{platform_url}' \
+    -secret '{_AGENT_SECRET}' \
+    -mode service \
+    -poll-interval 5s \
+    >> /var/log/nexplane-agent.log 2>&1 &
+sleep 3
+echo "Agent started"
+"""
+
+    resp = ssm.send_command(
+        InstanceIds=[instance_id],
+        DocumentName="AWS-RunShellScript",
+        Parameters={"commands": [install_script]},
+        TimeoutSeconds=120,
+    )
+    cmd_id = resp["Command"]["CommandId"]
+
+    # Wait for SSM command to complete
+    deadline = _time_mod.time() + 120
+    while _time_mod.time() < deadline:
+        _time_mod.sleep(5)
+        inv = ssm.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+        status = inv["Status"]
+        if status in ("Success", "Failed", "Cancelled"):
+            if status != "Success":
+                log(f"  SSM agent install status={status}: {inv.get('StandardErrorContent', '')}", ok=False)
+            break
+
+    # Poll for AgentRegistration by IP and re-point to smoke asset
+    log(f"  Waiting for nexplane agent to register for {private_ip or asset_id} (up to {timeout_s}s)")
+    _wait_for_agent_registration_by_ip(private_ip, asset_id, timeout_s)
+
+    # Clean up S3
+    try:
+        s3.delete_object(Bucket=bucket, Key=s3_key)
+    except Exception:
+        pass
+
+
+def _wait_for_agent_registration(asset_id: str, timeout_s: int = 300) -> None:
+    """Block until AgentRegistration exists for asset_id or timeout."""
+    import asyncio as _asyncio
+    import time as _time_mod
+    import uuid as _uuid
+    import sys as _sys_mod
+
+    _IN_CONTAINER = _os.path.exists("/.dockerenv") or _os.path.exists("/app/app")
+    if not _IN_CONTAINER:
+        raise RuntimeError("_wait_for_agent_registration must run inside the nexplane container")
+
+    if "/app" not in _sys_mod.path:
+        _sys_mod.path.insert(0, "/app")
+
+    async def _poll():
+        from app.database import AsyncSessionLocal
+        from app.models.agent import AgentRegistration
+        from sqlalchemy import select
+        asset_uuid = _uuid.UUID(asset_id) if isinstance(asset_id, str) else asset_id
+        deadline = _time_mod.monotonic() + timeout_s
+        while _time_mod.monotonic() < deadline:
+            async with AsyncSessionLocal() as db:
+                r = await db.execute(
+                    select(AgentRegistration).where(AgentRegistration.asset_id == asset_uuid)
+                )
+                reg = r.scalar_one_or_none()
+                if reg:
+                    log(f"  Agent registered for asset {asset_id} (id={reg.id})")
+                    return
+            _time_mod.sleep(10)
+        raise TimeoutError(f"Agent did not register for asset {asset_id} within {timeout_s}s")
+
+    _asyncio.run(_poll())
+
+
+def _wait_for_agent_registration_by_ip(private_ip: str, asset_id: str, timeout_s: int = 300) -> None:
+    """
+    Poll until an AgentRegistration appears whose ip_addresses contains private_ip,
+    then re-point it to the smoke asset_id (so dispatch_agent_job finds it).
+    """
+    import asyncio as _asyncio
+    import time as _time_mod
+    import uuid as _uuid
+    import sys as _sys_mod
+
+    if "/app" not in _sys_mod.path:
+        _sys_mod.path.insert(0, "/app")
+
+    async def _poll():
+        from app.database import AsyncSessionLocal
+        from app.models.agent import AgentRegistration
+        from app.models.asset import Asset
+        from sqlalchemy import select
+        target_uuid = _uuid.UUID(asset_id) if isinstance(asset_id, str) else asset_id
+        deadline = _time_mod.monotonic() + timeout_s
+        while _time_mod.monotonic() < deadline:
+            async with AsyncSessionLocal() as db:
+                r = await db.execute(select(AgentRegistration))
+                regs = r.scalars().all()
+                for reg in regs:
+                    ips = reg.ip_addresses or []
+                    if private_ip and private_ip in ips:
+                        # Re-point registration to smoke asset
+                        old_asset_id = reg.asset_id
+                        reg.asset_id = target_uuid
+                        await db.commit()
+                        # Delete auto-created duplicate asset if different
+                        if old_asset_id and old_asset_id != target_uuid:
+                            dup = await db.get(Asset, old_asset_id)
+                            if dup:
+                                await db.delete(dup)
+                                await db.commit()
+                        log(f"  Agent re-linked to smoke asset {asset_id} (was {old_asset_id})")
+                        return
+                    elif not private_ip and reg.asset_id == target_uuid:
+                        log(f"  Agent registered for asset {asset_id}")
+                        return
+            _time_mod.sleep(10)
+        raise TimeoutError(
+            f"Agent did not register from IP {private_ip} within {timeout_s}s"
+        )
+
+    _asyncio.run(_poll())
