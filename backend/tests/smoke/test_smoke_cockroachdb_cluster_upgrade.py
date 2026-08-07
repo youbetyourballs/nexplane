@@ -131,7 +131,7 @@ def _rollback_result(cr: dict) -> dict:
 def _launch_crdb_from_ami(ec2, ami_id, aws_creds) -> tuple:
     """Launch the smoke test instance from the pre-baked CockroachDB 23.1 AMI."""
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     import base64
     user_data = base64.b64encode(b"#!/bin/bash\nsystemctl start cockroachdb || true\n").decode()
@@ -216,7 +216,7 @@ def test_phase1_provision():
         import base64
         ec2_client = _boto3_client("ec2", aws_creds)
         subnet_id  = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-        sg_id      = aws_creds.get("smoke_default_security_group_id")
+        sg_id      = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
         # Resolve latest AL2 AMI in the target region
         al2_resp = ec2_client.describe_images(

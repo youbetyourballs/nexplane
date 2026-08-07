@@ -114,7 +114,7 @@ def _build_openldap_ami(aws_creds) -> tuple:
     user_data = base64.b64encode(_user_data_script).decode()
 
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
         ImageId="ami-0c101f26f147fa7fd",
@@ -158,7 +158,7 @@ def _build_openldap_ami(aws_creds) -> tuple:
 
 def _launch_ldap(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
         ImageId=ami_id,

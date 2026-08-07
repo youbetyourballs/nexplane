@@ -107,7 +107,7 @@ def _get_vault_ami(ec2, ssm) -> str:
 
 def _launch_vault(ec2, ssm, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     import base64
     # Generate self-signed TLS certs and start Vault (AMI has empty cert files)

@@ -103,7 +103,7 @@ systemctl daemon-reload && systemctl enable keycloak && systemctl start keycloak
 """).decode()
 
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id = aws_creds.get("smoke_default_security_group_id")
+    sg_id = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
     kwargs = dict(
         ImageId="ami-0c101f26f147fa7fd",
         InstanceType="t3.medium",
@@ -145,7 +145,7 @@ systemctl daemon-reload && systemctl enable keycloak && systemctl start keycloak
 
 def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
         ImageId=ami_id,

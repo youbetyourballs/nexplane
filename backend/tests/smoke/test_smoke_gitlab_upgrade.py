@@ -96,7 +96,7 @@ def _build_gitlab_ami(aws_creds) -> tuple:
     ec2 = _boto3_client("ec2", aws_creds)
 
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
         ImageId="ami-0c101f26f147fa7fd",
@@ -142,7 +142,7 @@ def _build_gitlab_ami(aws_creds) -> tuple:
 def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
     """Launch a GitLab instance from a pre-built AMI. Returns (instance_id, private_ip)."""
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
         ImageId=ami_id,

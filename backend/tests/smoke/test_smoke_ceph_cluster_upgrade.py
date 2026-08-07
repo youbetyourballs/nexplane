@@ -129,7 +129,7 @@ def _launch_ceph(aws_creds) -> tuple:
     """
     ec2       = _boto3_client("ec2", aws_creds)
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
     user_data = base64.b64encode(_CEPH_USER_DATA_RAW).decode()
 
     kwargs = dict(
@@ -251,7 +251,7 @@ def test_phase1_provision():
 
     ec2       = _boto3_client("ec2", aws_creds)
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
         ImageId=ami_id,

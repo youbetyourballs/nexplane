@@ -105,7 +105,7 @@ def _launch_etcd(aws_creds: dict):
     """Provision a t3.small AL2 instance with etcd 3.4 installed and running."""
     ec2       = _boto3_client("ec2", aws_creds)
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     # Resolve latest Amazon Linux 2 AMI
     resp = ec2.describe_images(

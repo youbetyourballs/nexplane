@@ -114,7 +114,7 @@ def _launch_cassandra(aws_creds) -> tuple:
     user_data = base64.b64encode("\n".join(install_lines).encode()).decode()
 
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
-    sg_id     = aws_creds.get("smoke_default_security_group_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
         ImageId=al2_ami,
