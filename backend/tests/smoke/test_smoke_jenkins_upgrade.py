@@ -144,7 +144,7 @@ def test_phase2_create_and_approve_cr():
     payload = {
         "change_type": "jenkins_upgrade",
         "title": f"Smoke: Jenkins {SOURCE_VERSION}→{TARGET_VERSION}",
-        "asset_ids": [_state["asset_id"]],
+        "target_asset_ids": [_state["asset_id"]],
         "desired_outcome": {
             "source_version": SOURCE_VERSION,
             "target_version": TARGET_VERSION,

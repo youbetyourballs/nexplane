@@ -260,8 +260,8 @@ def test_phase2_upgrade():
             ],
             "vault_token": _VAULT_ROOT_TOKEN,
         },
-        "connector_id": conn_id,
-        "asset_ids":    [asset_id],
+        "connector_id":    conn_id,
+        "target_asset_ids": [asset_id],
     })
     cr_id = cr["id"]
     _state["cr_id"] = cr_id
