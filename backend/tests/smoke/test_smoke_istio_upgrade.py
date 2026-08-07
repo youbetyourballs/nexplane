@@ -125,9 +125,7 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 istioctl install --set profile=minimal -y
 kubectl rollout status deployment/istiod -n istio-system --timeout=300s
 
-# Prepare for AMI snapshot: stop k3s, delete kubeconfig so next boot starts clean
-systemctl stop k3s || true
-rm -f /etc/rancher/k3s/k3s.yaml
+# Ensure k3s starts on next boot (for launches from AMI)
 systemctl enable k3s
 
 echo ISTIO_READY
