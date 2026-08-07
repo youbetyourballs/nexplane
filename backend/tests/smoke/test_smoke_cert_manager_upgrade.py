@@ -139,6 +139,11 @@ helm install cert-manager jetstack/cert-manager \
 # Wait for cert-manager ready
 kubectl rollout status deployment/cert-manager -n cert-manager --timeout=300s
 
+# Prepare for AMI snapshot: stop k3s, delete kubeconfig so next boot starts clean
+systemctl stop k3s || true
+rm -f /etc/rancher/k3s/k3s.yaml
+systemctl enable k3s
+
 echo CERTMGR_READY
 """).decode()
 
@@ -245,7 +250,7 @@ def _launch_certmgr(ec2, aws_creds, ami_id) -> tuple:
         InstanceType="t3.large",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
-        UserData="#!/bin/bash\nsystemctl enable k3s 2>/dev/null || true\nsystemctl start k3s 2>/dev/null || true\n",
+        UserData="#!/bin/bash\nrm -f /etc/rancher/k3s/k3s.yaml 2>/dev/null || true\nsystemctl enable k3s 2>/dev/null || true\nsystemctl restart k3s 2>/dev/null || systemctl start k3s 2>/dev/null || true\n",
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-certmgr-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-certmgr-upgrade"},

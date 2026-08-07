@@ -69,7 +69,25 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             f"Istio only supports +1 minor upgrades; got {source_version}->{target_version}"
         )
 
-    # Step 0: Download target istioctl binary
+    # Step 0a: Wait for k3s kubeconfig (k3s service may still be starting from AMI)
+    r = await _run(
+        f"for i in $(seq 1 60); do "
+        f"[ -f {kc} ] && echo KUBECONFIG_OK && break; "
+        f"sleep 5; done; "
+        f"[ -f {kc} ] || echo KUBECONFIG_MISSING",
+        asset_id, timeout=330,
+    )
+    if "KUBECONFIG_MISSING" in r.get("output", "") or "KUBECONFIG_OK" not in r.get("output", ""):
+        return {
+            "status": "failed",
+            "phase": "preflight",
+            "error": f"k3s kubeconfig not found at {kc} after 300s",
+            "source_version": source_version,
+            "target_version": target_version,
+            "asset_id": asset_id,
+        }
+
+    # Step 0b: Download target istioctl binary
     logger.info("Downloading istioctl %s on %s", target_version, asset_id)
     r = await _run(
         f"curl -sfL https://istio.io/downloadIstio | ISTIO_VERSION={target_version}.0 TARGET_ARCH=x86_64 sh - 2>&1; "

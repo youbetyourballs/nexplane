@@ -124,6 +124,12 @@ cp /root/istio-1.20.3/bin/istioctl /usr/local/bin/istioctl
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 istioctl install --set profile=minimal -y
 kubectl rollout status deployment/istiod -n istio-system --timeout=300s
+
+# Prepare for AMI snapshot: stop k3s, delete kubeconfig so next boot starts clean
+systemctl stop k3s || true
+rm -f /etc/rancher/k3s/k3s.yaml
+systemctl enable k3s
+
 echo ISTIO_READY
 """).decode()
 
@@ -239,7 +245,7 @@ def _launch_from_ami(ec2, aws_creds, ami_id) -> tuple:
         InstanceType="t3.xlarge",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
-        UserData="#!/bin/bash\nsystemctl enable k3s 2>/dev/null || true\nsystemctl start k3s 2>/dev/null || true\n",
+        UserData="#!/bin/bash\nrm -f /etc/rancher/k3s/k3s.yaml 2>/dev/null || true\nsystemctl enable k3s 2>/dev/null || true\nsystemctl restart k3s 2>/dev/null || systemctl start k3s 2>/dev/null || true\n",
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-istio-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-istio-upgrade"},
