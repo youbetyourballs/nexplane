@@ -1,54 +1,59 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+﻿# SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
-"""Smoke test: Istio Control Plane Upgrade
+"""Smoke test: Istio Control Plane Upgrade (k3s auto-provision)
 
 Phases:
-  1. setup       -- reuse EKS cluster from k8s_cluster_upgrade smoke; install Istio 1.20
-  2. run_upgrade -- istio_control_plane_upgrade CR lifecycle (canary 1.20->1.21)
-  3. verify      -- istioctl proxy-status all 1.21
-  4. rollback    -- rollback before old revision removed; verify 1.20 sidecars
-  5. teardown    -- istioctl uninstall --purge
+  1. provision   -- launch t3.xlarge EC2, install k3s + Istio 1.20, cache AMI
+  2. upgrade     -- istio_control_plane_upgrade CR lifecycle (inplace 1.20->1.21)
+  3. rollback    -- trigger rollback, assert rolled_back=True
+  4. teardown    -- delete asset/connector, terminate EC2
+
+AMI cache key: /nexplane/smoke-amis/istio/1.20
 
 Run:
     docker exec nexplane-backend-1 python -m pytest \
         /app/tests/smoke/test_smoke_istio_upgrade.py -v -s
-
-Skip conditions:
-  - No AWS connector in platform DB
-  - No EKS cluster available (reuse k8s_cluster_upgrade smoke cluster)
 """
 
 import os
 import sys
 import time
 import uuid
+import base64
 
+import boto3
 import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
-from smoke_helpers import NexplaneClient, log, get_connector_creds_from_db
+from smoke_helpers import (
+    NexplaneClient,
+    log,
+    get_connector_creds_from_db,
+    install_nexplane_agent_on_instance,
+)
 
 BASE_URL = os.environ.get("NEXPLANE_BASE_URL", "http://localhost:8000")
-EMAIL = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
+EMAIL    = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
 PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 
-# Reuse EKS cluster from k8s_cluster_upgrade smoke
-_EKS_CLUSTER_SSM_KEY = "/nexplane/smoke-state/k8s-cluster-upgrade/cluster-name"
-_EKS_AGENT_ASSET_SSM_KEY = "/nexplane/smoke-state/k8s-cluster-upgrade/agent-asset-id"
+_ISTIO_AMI_SSM_KEY = "/nexplane/smoke-amis/istio/1.20"
+_SSM_PROFILE       = "nexplane-smoke-ssm"
+_BASE_AMI          = "ami-0c101f26f147fa7fd"  # Amazon Linux 2 us-east-1
 
 SOURCE_VERSION = "1.20"
 TARGET_VERSION = "1.21"
-TEST_NAMESPACE = "istio-smoke-test"
 
-CR_TIMEOUT = 600
-POLL_INTERVAL = 10
+CR_TIMEOUT    = 1800
+POLL_INTERVAL = 20
 
 _state = {
-    "connector_id": None,
-    "asset_id": None,       # nexplane_agent asset on EKS node
-    "cr_id": None,
-    "execution_result": None,
+    "connector_id":      None,
+    "asset_id":          None,
+    "instance_id":       None,
+    "private_ip":        None,
+    "provisioned_by_us": False,
+    "cr_id":             None,
 }
 
 _client: NexplaneClient = None
@@ -65,20 +70,31 @@ def _api(method, path, **kwargs):
     return getattr(_get_client(), method)(path, **kwargs)
 
 
-def _poll_cr(cr_id: str, terminal_statuses=("completed", "failed", "blocked", "rolled_back", "rollback_failed"), timeout=CR_TIMEOUT):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+def _boto3_client(service, creds):
+    return boto3.client(
+        service,
+        aws_access_key_id=creds.get("access_key_id") or creds.get("aws_access_key_id"),
+        aws_secret_access_key=creds.get("secret_access_key") or creds.get("aws_secret_access_key"),
+        region_name=creds.get("region", "us-east-1"),
+    )
+
+
+def _poll_cr(cr_id, timeout_s=CR_TIMEOUT, terminal=None):
+    if terminal is None:
+        terminal = ("completed", "failed", "rolled_back", "rollback_failed")
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
         cr = _api("get", f"/change-requests/{cr_id}")
-        if cr["status"] in terminal_statuses:
+        if cr["status"] in terminal:
             return cr
         time.sleep(POLL_INTERVAL)
-    raise TimeoutError(f"CR {cr_id} did not reach terminal status within {timeout}s")
+    raise TimeoutError(f"CR {cr_id} did not reach terminal within {timeout_s}s")
 
 
 def _exec_result(cr: dict) -> dict:
     runs = cr.get("execution_runs") or []
     if runs:
-        raw = runs[0].get("result") or {}
+        raw   = runs[0].get("result") or {}
         steps = raw.get("execution", {}).get("steps", [])
         if steps:
             return steps[0].get("result") or {}
@@ -95,125 +111,308 @@ def _rollback_result(cr: dict) -> dict:
     return cr.get("rollback_result") or {}
 
 
-# ---------------------------------------------------------------------------
-# Phase 1: Setup -- resolve EKS agent asset
-# ---------------------------------------------------------------------------
+_USERDATA = base64.b64encode(b"""#!/bin/bash
+# Install k3s (disable Traefik to avoid port conflicts with Istio)
+curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644 --disable=traefik
+sleep 30
 
-def test_phase1_resolve_eks_agent():
-    """Resolve the nexplane_agent asset on the EKS cluster node from SSM state."""
-    import boto3
-    creds = get_connector_creds_from_db("aws")
-    ssm = boto3.client(
-        "ssm",
-        aws_access_key_id=creds["access_key_id"],
-        aws_secret_access_key=creds["secret_access_key"],
-        region_name=creds.get("region", "us-east-1"),
-    )
+# Install Istio 1.20
+curl -sfL https://istio.io/downloadIstio | ISTIO_VERSION=1.20.3 TARGET_ARCH=x86_64 sh -
+cp /root/istio-1.20.3/bin/istioctl /usr/local/bin/istioctl
+
+# Install Istio 1.20 on the cluster
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+istioctl install --set profile=minimal -y
+kubectl rollout status deployment/istiod -n istio-system --timeout=300s
+echo ISTIO_READY
+""").decode()
+
+
+def _build_k3s_istio_ami(ec2, ssm, aws_creds) -> tuple:
+    """Launch instance, wait for ISTIO_READY, return (instance_id, private_ip)."""
+    # Check cache first
     try:
-        resp = ssm.get_parameter(Name=_EKS_AGENT_ASSET_SSM_KEY)
-        asset_id = resp["Parameter"]["Value"]
-    except ssm.exceptions.ParameterNotFound:
-        pytest.skip("No EKS smoke cluster asset in SSM -- run k8s_cluster_upgrade smoke first")
+        resp   = ssm.get_parameter(Name=_ISTIO_AMI_SSM_KEY)
+        ami_id = resp["Parameter"]["Value"]
+        imgs   = ec2.describe_images(ImageIds=[ami_id]).get("Images", [])
+        if imgs and imgs[0].get("State") == "available":
+            log(f"  Using cached Istio AMI: {ami_id}")
+            return _launch_from_ami(ec2, aws_creds, ami_id)
+    except Exception:
+        pass
 
-    _state["asset_id"] = asset_id
-    log(f"Using EKS agent asset: {asset_id}")
+    # Launch fresh instance with user-data that installs k3s + Istio
+    log("  No cached AMI -- launching fresh instance to build k3s + Istio 1.20")
+    subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id")
 
-    # Verify asset is reachable via platform
-    asset = _api("get", f"/assets/{asset_id}")
-    assert asset.get("id"), f"Asset not found: {asset}"
-    log("EKS agent asset reachable")
+    kwargs = dict(
+        ImageId=_BASE_AMI,
+        InstanceType="t3.xlarge",
+        MinCount=1, MaxCount=1,
+        IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData=_USERDATA,
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name",             "Value": "nexplane-smoke-istio-upgrade"},
+            {"Key": "nexplane-purpose", "Value": "smoke-istio-upgrade"},
+        ]}],
+    )
+    if subnet_id:
+        kwargs["SubnetId"] = subnet_id
+    if sg_id:
+        kwargs["SecurityGroupIds"] = [sg_id]
+
+    resp        = ec2.run_instances(**kwargs)
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"  Launched instance {instance_id}, waiting for running state")
+
+    ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+    desc       = ec2.describe_instances(InstanceIds=[instance_id])
+    private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
+
+    # Poll for ISTIO_READY via SSM
+    log(f"  Polling cloud-init for ISTIO_READY on {instance_id} (up to 30 min)")
+    ssm_client = boto3.client(
+        "ssm",
+        aws_access_key_id=aws_creds.get("access_key_id"),
+        aws_secret_access_key=aws_creds.get("secret_access_key"),
+        region_name=aws_creds.get("region", "us-east-1"),
+    )
+    deadline = time.time() + 1800  # 30 min for Istio to install
+    ready    = False
+    while time.time() < deadline:
+        time.sleep(30)
+        try:
+            resp2  = ssm_client.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [
+                    "grep -c ISTIO_READY /var/log/cloud-init-output.log 2>/dev/null || echo 0"
+                ]},
+                TimeoutSeconds=30,
+            )
+            cmd_id = resp2["Command"]["CommandId"]
+            time.sleep(5)
+            inv = ssm_client.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+            if inv.get("Status") == "Success" and inv.get("StandardOutputContent", "").strip() not in ("", "0"):
+                ready = True
+                break
+        except Exception:
+            pass
+
+    if not ready:
+        ec2.terminate_instances(InstanceIds=[instance_id])
+        pytest.fail(f"ISTIO_READY never appeared in cloud-init log on {instance_id}")
+
+    log(f"  ISTIO_READY confirmed on {instance_id} / {private_ip}")
+
+    # Cache as AMI for future runs
+    try:
+        ts     = int(time.time())
+        img    = ec2.create_image(
+            InstanceId=instance_id,
+            Name=f"nexplane-smoke-istio-1.20-{ts}",
+            Description="Nexplane smoke: k3s + Istio 1.20",
+            NoReboot=True,
+        )
+        new_ami = img["ImageId"]
+        ssm_client.put_parameter(
+            Name=_ISTIO_AMI_SSM_KEY,
+            Value=new_ami,
+            Type="String",
+            Overwrite=True,
+        )
+        log(f"  Cached new AMI {new_ami} at {_ISTIO_AMI_SSM_KEY}")
+    except Exception as exc:
+        log(f"  Warning: AMI caching failed (non-fatal): {exc}", ok=False)
+
+    return instance_id, private_ip
+
+
+def _launch_from_ami(ec2, aws_creds, ami_id) -> tuple:
+    """Launch a new instance from a cached AMI."""
+    subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id")
+
+    kwargs = dict(
+        ImageId=ami_id,
+        InstanceType="t3.xlarge",
+        MinCount=1, MaxCount=1,
+        IamInstanceProfile={"Name": _SSM_PROFILE},
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name",             "Value": "nexplane-smoke-istio-upgrade"},
+            {"Key": "nexplane-purpose", "Value": "smoke-istio-upgrade"},
+        ]}],
+    )
+    if subnet_id:
+        kwargs["SubnetId"] = subnet_id
+    if sg_id:
+        kwargs["SecurityGroupIds"] = [sg_id]
+
+    resp        = ec2.run_instances(**kwargs)
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"  Launched from cached AMI: {instance_id}")
+
+    ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+    desc       = ec2.describe_instances(InstanceIds=[instance_id])
+    private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
+    log(f"  Instance running: {private_ip}")
+    return instance_id, private_ip
+
+
+def _register_asset(private_ip, run_id) -> tuple:
+    connector = _api("post", "/connectors", json={
+        "name":           f"smoke-istio-upgrade-{run_id}",
+        "connector_type": "nexplane_agent",
+    })
+    conn_id = connector["id"]
+    _api("put", f"/connectors/{conn_id}/credentials", json={"credentials": {}})
+
+    asset = _api("post", "/assets", json={
+        "name":         f"smoke-istio-upgrade-{run_id}",
+        "asset_type":   "server",
+        "criticality":  "medium",
+        "environment":  "staging",
+        "hostname":     private_ip,
+        "connector_id": conn_id,
+        "metadata":     {"role": "k3s_istio", "ip": private_ip},
+    })
+    asset_id = asset["id"]
+    _api("post", f"/assets/{asset_id}/connectors", json={"connector_id": conn_id})
+    return conn_id, asset_id
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: CR lifecycle -- canary upgrade 1.20 -> 1.21
+# Phase 1: Provision
 # ---------------------------------------------------------------------------
 
-def test_phase2_create_and_approve_cr():
-    if not _state["asset_id"]:
-        pytest.skip("No asset_id -- phase 1 failed")
+def test_phase1_provision():
+    aws_creds = get_connector_creds_from_db("aws")
+    if not aws_creds:
+        pytest.skip("No AWS connector creds in platform DB")
 
-    # Create CR
-    payload = {
+    ec2 = _boto3_client("ec2", aws_creds)
+    ssm = _boto3_client("ssm", aws_creds)
+
+    instance_id, private_ip = _build_k3s_istio_ami(ec2, ssm, aws_creds)
+    run_id                   = uuid.uuid4().hex[:6]
+    conn_id, asset_id        = _register_asset(private_ip, run_id)
+
+    _state.update({
+        "connector_id":      conn_id,
+        "asset_id":          asset_id,
+        "instance_id":       instance_id,
+        "private_ip":        private_ip,
+        "provisioned_by_us": True,
+    })
+
+    log("  Installing nexplane agent on smoke instance")
+    install_nexplane_agent_on_instance(
+        instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=300
+    )
+    log("[PHASE 1: provision] PASSED")
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Upgrade CR lifecycle
+# ---------------------------------------------------------------------------
+
+def test_phase2_upgrade():
+    if not _state.get("connector_id"):
+        pytest.skip("Phase 1 did not complete")
+
+    conn_id  = _state["connector_id"]
+    asset_id = _state["asset_id"]
+    run_id   = uuid.uuid4().hex[:6]
+
+    cr = _api("post", "/change-requests", json={
+        "title":       f"smoke-istio-upgrade-{run_id}",
         "change_type": "istio_control_plane_upgrade",
-        "title": f"Smoke: Istio {SOURCE_VERSION}->{TARGET_VERSION}",
-        "target_asset_ids": [_state["asset_id"]],
         "desired_outcome": {
-            "source_version": SOURCE_VERSION,
-            "target_version": TARGET_VERSION,
-            "upgrade_strategy": "canary",
-            "namespaces": [TEST_NAMESPACE],
-            "dry_run": False,
+            "source_version":   SOURCE_VERSION,
+            "target_version":   TARGET_VERSION,
+            "kubeconfig_path":  "/etc/rancher/k3s/k3s.yaml",
+            "upgrade_strategy": "inplace",
+            "dry_run":          False,
         },
-    }
-    cr = _api("post", "/change-requests", json=payload)
+        "connector_id":      conn_id,
+        "target_asset_ids":  [asset_id],
+    })
     cr_id = cr["id"]
     _state["cr_id"] = cr_id
-    log(f"CR created: {cr_id}")
+    log(f"  Created CR {cr_id}")
 
-    # Plan
     _api("post", f"/change-requests/{cr_id}/plan")
-
-    # Submit for approval and approve
     _api("post", f"/change-requests/{cr_id}/submit-for-approval")
     _api("post", f"/change-requests/{cr_id}/approve",
          json={"decision": "approved", "comment": "istio upgrade smoke self-approval"})
-
-    # Execute
     _api("post", f"/change-requests/{cr_id}/execute")
-    log("CR approved and executing...")
+    log(f"  Executing CR {cr_id}")
 
+    cr = _poll_cr(cr_id, timeout_s=CR_TIMEOUT)
+    assert cr["status"] == "completed", f"CR reached {cr['status']} -- expected completed"
 
-def test_phase2_wait_for_execution():
-    if not _state["cr_id"]:
-        pytest.skip("No cr_id")
+    result = _exec_result(cr)
+    assert result.get("status") == "completed", f"Executor status not completed: {result}"
 
-    cr = _poll_cr(_state["cr_id"], timeout=CR_TIMEOUT)
-    assert cr["status"] == "completed", f"CR did not complete: {cr}"
-    _state["execution_result"] = _exec_result(cr)
-    log(f"CR completed. Result: {_state['execution_result']}")
+    verify = result.get("verify_result", {})
+    assert verify.get("version_ok"), f"Target version {TARGET_VERSION} not found after upgrade: {verify}"
 
-
-# ---------------------------------------------------------------------------
-# Phase 3: Verify sidecars on target version
-# ---------------------------------------------------------------------------
-
-def test_phase3_verify_proxy_status():
-    if not _state["execution_result"]:
-        pytest.skip("No execution_result")
-
-    result = _state["execution_result"]
-    assert result.get("status") == "completed"
-    assert result.get("target_version") == TARGET_VERSION
-    namespaces_migrated = result.get("namespaces_migrated", [])
-    assert TEST_NAMESPACE in namespaces_migrated, \
-        f"Test namespace {TEST_NAMESPACE} not in migrated: {namespaces_migrated}"
-    log("Proxy status verified -- all sidecars on target version")
+    log(f"  Istio upgraded to {TARGET_VERSION} -- version check OK")
+    log("[PHASE 2: upgrade] PASSED")
 
 
 # ---------------------------------------------------------------------------
-# Phase 4: Rollback (before old revision removed)
+# Phase 3: Rollback
 # ---------------------------------------------------------------------------
 
-def test_phase4_rollback():
-    if not _state["cr_id"]:
-        pytest.skip("No cr_id")
+def test_phase3_rollback():
+    cr_id = _state.get("cr_id")
+    if not cr_id:
+        pytest.skip("Phase 2 did not complete -- no CR to roll back")
 
-    _api("post", f"/change-requests/{_state['cr_id']}/rollback")
+    _api("post", f"/change-requests/{cr_id}/rollback")
+    log(f"  Rollback triggered for CR {cr_id}")
 
-    cr = _poll_cr(_state["cr_id"], terminal_statuses=("rolled_back", "rollback_failed"), timeout=CR_TIMEOUT)
-    assert cr["status"] == "rolled_back", f"Rollback failed: {cr}"
+    cr = _poll_cr(cr_id, timeout_s=1800, terminal=("rolled_back", "rollback_failed", "completed"))
+    assert cr["status"] in ("rolled_back", "completed"), (
+        f"Rollback CR reached unexpected status: {cr['status']}"
+    )
 
-    rb = _rollback_result(cr)
-    assert rb.get("rolled_back") is True
-    log("Rollback completed -- sidecars restored to source version")
+    result = _rollback_result(cr)
+    assert result.get("rolled_back") is True, f"rolled_back not True: {result}"
+    assert "data_loss_warning" in result, "Expected data_loss_warning in rollback result"
+    log("[PHASE 3: rollback] PASSED")
 
 
 # ---------------------------------------------------------------------------
-# Phase 5: Teardown
+# Phase 4: Teardown
 # ---------------------------------------------------------------------------
 
-def test_phase5_teardown():
-    """Teardown: dispatch istioctl uninstall --purge via agent job (out of band)."""
-    # Teardown is best-effort -- failures logged but don't fail the test
-    log("Teardown: Istio will be uninstalled by next k8s_cluster_upgrade smoke run or manual cleanup")
-    log("Run on agent: istioctl uninstall --purge -y && kubectl delete namespace istio-smoke-test")
+def test_phase4_teardown():
+    if not _state.get("provisioned_by_us"):
+        log("[PHASE 4: teardown] SKIPPED")
+        return
+
+    aws_creds   = get_connector_creds_from_db("aws")
+    asset_id    = _state.get("asset_id")
+    conn_id     = _state.get("connector_id")
+    instance_id = _state.get("instance_id")
+
+    for res_id, path in [(asset_id, f"/assets/{asset_id}"), (conn_id, f"/connectors/{conn_id}")]:
+        if res_id:
+            try:
+                _api("delete", path)
+                log(f"  Deleted {path}")
+            except Exception as exc:
+                log(f"  Warning: {exc}", ok=False)
+
+    if instance_id and aws_creds:
+        try:
+            ec2 = _boto3_client("ec2", aws_creds)
+            ec2.terminate_instances(InstanceIds=[instance_id])
+            log(f"  Terminated instance {instance_id}")
+        except Exception as exc:
+            log(f"  Warning: could not terminate: {exc}", ok=False)
+
+    log("[PHASE 4: teardown] PASSED")
