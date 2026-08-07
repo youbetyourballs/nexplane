@@ -81,13 +81,31 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     ldif = schema_ldif_path or "/tmp/nexplane-testapp.ldif"
     schema_cmd = f"""
 LDIF={ldif}
-if [ -f "$LDIF" ]; then
-    ldapadd -Y EXTERNAL -H ldapi:/// -f "$LDIF" 2>&1 || \
-    ldapadd -x -H ldap://localhost -D "{bind_dn}" -w "{bind_password}" -f "$LDIF" 2>&1 || true
+if [ ! -f "$LDIF" ]; then
+    echo "SCHEMA_ERROR: LDIF not found at $LDIF"
+    exit 1
+fi
+if ldapadd -Y EXTERNAL -H ldapi:/// -f "$LDIF" 2>&1; then
+    echo SCHEMA_OK_SASL
+elif ldapadd -x -H ldap://localhost -D "{bind_dn}" -w "{bind_password}" -f "$LDIF" 2>&1; then
+    echo SCHEMA_OK_SIMPLE
+else
+    echo SCHEMA_ERROR_BOTH_FAILED
+    exit 1
 fi
 echo SCHEMA_DONE
 """.strip()
-    await _run(schema_cmd, asset_id, timeout=120)
+    schema_r = await _run(schema_cmd, asset_id, timeout=120)
+    schema_out = str(schema_r.get("output", "") or "")
+    if "SCHEMA_DONE" not in schema_out:
+        return {
+            "status": "failed",
+            "phase": "schema_apply",
+            "source_schema": source_schema,
+            "target_schema": target_schema,
+            "schema_output": schema_out[:500],
+            "asset_id": asset_id,
+        }
 
     # Phase 4: Verify — search directly for the schema DN
     schema_dn = (parameters.get("desired_outcome") or parameters).get("schema_dn", "cn=testapp,cn=schema,cn=config")
