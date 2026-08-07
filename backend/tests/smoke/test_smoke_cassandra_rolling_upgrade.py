@@ -108,6 +108,11 @@ def _launch_cassandra(aws_creds) -> tuple:
         "useradd -r cassandra 2>/dev/null || true",
         "mkdir -p /var/lib/cassandra /var/log/cassandra",
         "chown -R cassandra:cassandra /var/lib/cassandra /var/log/cassandra /opt/cassandra",
+        # Bind Cassandra to all interfaces so the smoke runner can reach port 9042
+        "PRIV_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)",
+        "sed -i \"s/listen_address: localhost/listen_address: ${PRIV_IP}/\" /opt/cassandra/conf/cassandra.yaml",
+        "sed -i \"s/rpc_address: localhost/rpc_address: 0.0.0.0/\" /opt/cassandra/conf/cassandra.yaml",
+        "echo \"broadcast_rpc_address: ${PRIV_IP}\" >> /opt/cassandra/conf/cassandra.yaml",
         r"printf '[Unit]\nDescription=Cassandra\n[Service]\nUser=cassandra\nExecStart=/opt/cassandra/bin/cassandra -f\nRestart=always\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/cassandra.service",
         "systemctl daemon-reload && systemctl enable cassandra && systemctl start cassandra",
     ]

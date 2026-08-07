@@ -197,11 +197,23 @@ def test_phase1_provision():
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
+    import base64 as _b64
+    _boot_ud = _b64.b64encode(
+        b"#!/bin/bash\n"
+        b"# Open Kong admin API to all interfaces (default is 127.0.0.1:8001)\n"
+        b"grep -q '^admin_listen' /etc/kong/kong.conf 2>/dev/null || "
+        b"echo 'admin_listen = 0.0.0.0:8001' >> /etc/kong/kong.conf\n"
+        b"sed -i 's|^admin_listen.*|admin_listen = 0.0.0.0:8001|' /etc/kong/kong.conf 2>/dev/null || true\n"
+        b"sed -i 's|#admin_listen.*|admin_listen = 0.0.0.0:8001|' /etc/kong/kong.conf 2>/dev/null || true\n"
+        b"systemctl restart kong 2>/dev/null || kong restart 2>/dev/null || kong start 2>/dev/null || true\n"
+    ).decode()
+
     kwargs = dict(
         ImageId=ami_id,
         InstanceType="t3.medium",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData=_boot_ud,
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-kong-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-kong-upgrade"},
