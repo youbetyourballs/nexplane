@@ -1,13 +1,13 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+﻿# SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 """Smoke test: Keycloak Major Upgrade
 
 Phases:
-  1. provision   — launch Keycloak 21.1 EC2 from cached AMI (or build and cache)
-  2. upgrade     — CR lifecycle: keycloak_upgrade 21.1->24.0, verify /health/ready + master realm
-  3. rollback    — trigger rollback, verify old version responds
-  4. teardown    — terminate instance, deregister connector/asset
+  1. provision   -- launch Keycloak 21.1 EC2 from cached AMI (or build and cache)
+  2. upgrade     -- CR lifecycle: keycloak_upgrade 21.1->24.0, verify /health/ready + master realm
+  3. rollback    -- trigger rollback, verify old version responds
+  4. teardown    -- terminate instance, deregister connector/asset
 
 AMI cache key: /nexplane/smoke-amis/keycloak/21.1
 Run:
@@ -20,12 +20,16 @@ import sys
 import socket
 import time
 import uuid
+import base64
 
 import boto3
 import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
-from smoke_helpers import NexplaneClient, log, get_connector_creds_from_db
+from smoke_helpers import (
+    NexplaneClient, log, get_connector_creds_from_db,
+    get_or_create_smoke_ami, install_nexplane_agent_on_instance,
+)
 
 BASE_URL  = os.environ.get("NEXPLANE_BASE_URL", "http://localhost:8000")
 EMAIL     = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
@@ -74,24 +78,72 @@ def _boto3_client(service, creds):
     )
 
 
-def _get_or_build_ami(ec2, ssm) -> str:
-    """Return cached Keycloak 21.1 AMI, or skip with instructions to build one."""
-    try:
-        resp = ssm.get_parameter(Name=_KC_AMI_SSM_KEY)
-        ami_id = resp["Parameter"]["Value"]
-        imgs = ec2.describe_images(ImageIds=[ami_id]).get("Images", [])
-        if imgs and imgs[0].get("State") == "available":
-            log(f"  Using cached Keycloak AMI: {ami_id}")
-            return ami_id
-    except Exception:
-        pass
-    pytest.skip(
-        f"No usable Keycloak 21.1 AMI cached at {_KC_AMI_SSM_KEY}. "
-        "Build a Keycloak 21.1 + Postgres EC2, snapshot it, and store AMI ID in SSM."
+def _build_keycloak_ami(aws_creds) -> tuple:
+    import time as _t
+    ec2 = boto3.client(
+        "ec2",
+        aws_access_key_id=aws_creds.get("access_key_id") or aws_creds.get("aws_access_key_id"),
+        aws_secret_access_key=aws_creds.get("secret_access_key") or aws_creds.get("aws_secret_access_key"),
+        region_name=aws_creds.get("region", "us-east-1"),
     )
 
+    user_data = base64.b64encode(b"""#!/bin/bash
+# Install Java 17
+yum install -y java-17-amazon-corretto-headless
+# Download Keycloak 21.1.2
+curl -sfL https://github.com/keycloak/keycloak/releases/download/21.1.2/keycloak-21.1.2.tar.gz -o /tmp/keycloak.tar.gz
+tar -xz -C /opt/ -f /tmp/keycloak.tar.gz
+ln -sfn /opt/keycloak-21.1.2 /opt/keycloak
+useradd -r keycloak 2>/dev/null || true
+chown -R keycloak:keycloak /opt/keycloak
+# Build Keycloak
+/opt/keycloak/bin/kc.sh build
+printf '[Unit]\nDescription=Keycloak\n[Service]\nUser=keycloak\nEnvironment=KEYCLOAK_ADMIN=admin\nEnvironment=KEYCLOAK_ADMIN_PASSWORD=SmokeKc1234!\nExecStart=/opt/keycloak/bin/kc.sh start-dev --http-port=8080\nRestart=always\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/keycloak.service
+systemctl daemon-reload && systemctl enable keycloak && systemctl start keycloak
+""").decode()
 
-def _launch_kc(ec2, ssm, ami_id, aws_creds) -> tuple:
+    subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
+    sg_id = aws_creds.get("smoke_default_security_group_id")
+    kwargs = dict(
+        ImageId="ami-0c101f26f147fa7fd",
+        InstanceType="t3.medium",
+        MinCount=1, MaxCount=1,
+        IamInstanceProfile={"Name": "nexplane-smoke-ssm"},
+        UserData=user_data,
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name",             "Value": "nexplane-smoke-keycloak-build"},
+            {"Key": "nexplane-purpose", "Value": "smoke-ami-build"},
+        ]}],
+    )
+    if subnet_id:
+        kwargs["SubnetId"] = subnet_id
+    if sg_id:
+        kwargs["SecurityGroupIds"] = [sg_id]
+
+    resp = ec2.run_instances(**kwargs)
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"  Launched Keycloak AMI build instance {instance_id}")
+
+    ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+    desc = ec2.describe_instances(InstanceIds=[instance_id])
+    private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
+
+    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 10 min)")
+    deadline = _t.time() + 600
+    while _t.time() < deadline:
+        _t.sleep(15)
+        try:
+            s = socket.create_connection((private_ip, 8080), timeout=5)
+            s.close()
+            log(f"  Keycloak port 8080 open on {private_ip}")
+            break
+        except OSError:
+            pass
+
+    return instance_id, ec2, None
+
+
+def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id")
 
@@ -101,8 +153,8 @@ def _launch_kc(ec2, ssm, ami_id, aws_creds) -> tuple:
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
-            {"Key": "Name",              "Value": "nexplane-smoke-keycloak-upgrade"},
-            {"Key": "nexplane-purpose",  "Value": "smoke-keycloak-upgrade"},
+            {"Key": "Name",             "Value": "nexplane-smoke-keycloak-upgrade"},
+            {"Key": "nexplane-purpose", "Value": "smoke-keycloak-upgrade"},
         ]}],
     )
     if subnet_id:
@@ -118,7 +170,6 @@ def _launch_kc(ec2, ssm, ami_id, aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    # Wait for Keycloak HTTP port 8080
     log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 5 min)")
     deadline = time.time() + 300
     while time.time() < deadline:
@@ -177,6 +228,17 @@ def _exec_result(cr: dict) -> dict:
     return cr.get("execution_result") or {}
 
 
+def _rollback_result(cr: dict) -> dict:
+    """Extract rollback result from the rolled_back execution run."""
+    runs = cr.get("execution_runs") or []
+    for run in runs:
+        if run.get("status") in ("rolled_back", "rollback_failed"):
+            r = run.get("result") or {}
+            if "rolled_back" in r or "strategy" in r:
+                return r
+    return cr.get("rollback_result") or {}
+
+
 # ---------------------------------------------------------------------------
 # Phase 1: provision
 # ---------------------------------------------------------------------------
@@ -186,11 +248,15 @@ def test_phase1_provision():
     if not aws_creds:
         pytest.skip("No AWS connector creds in platform DB")
 
-    ec2    = _boto3_client("ec2",  aws_creds)
-    ssm    = _boto3_client("ssm",  aws_creds)
-    ami_id = _get_or_build_ami(ec2, ssm)
+    ami_id = get_or_create_smoke_ami(
+        cache_key="keycloak/21.1",
+        setup_hash="keycloak-21.1",
+        launch_fn=_build_keycloak_ami,
+        snapshot_name="nexplane-smoke-keycloak-21.1",
+    )
 
-    instance_id, private_ip = _launch_kc(ec2, ssm, ami_id, aws_creds)
+    ec2                      = _boto3_client("ec2", aws_creds)
+    instance_id, private_ip  = _launch_kc(ec2, ami_id, aws_creds)
     run_id                   = uuid.uuid4().hex[:6]
     conn_id, asset_id        = _register_asset(private_ip, run_id)
 
@@ -201,6 +267,10 @@ def test_phase1_provision():
         "private_ip":        private_ip,
         "provisioned_by_us": True,
     })
+
+    log("  Installing nexplane agent on smoke instance")
+    install_nexplane_agent_on_instance(instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=300)
+
     log("[PHASE 1: provision] PASSED")
 
 
@@ -247,7 +317,7 @@ def test_phase2_upgrade():
     log(f"  Executing CR {cr_id}")
 
     cr = _poll_cr(cr_id)
-    assert cr["status"] == "completed", f"CR reached {cr['status']} — expected completed"
+    assert cr["status"] == "completed", f"CR reached {cr['status']} -- expected completed"
 
     result = _exec_result(cr)
     assert result.get("status") == "completed", f"Executor status unexpected: {result}"
@@ -270,7 +340,7 @@ def test_phase2_upgrade():
 def test_phase3_rollback():
     cr_id = _state.get("cr_id")
     if not cr_id:
-        pytest.skip("Phase 2 did not complete — no CR to roll back")
+        pytest.skip("Phase 2 did not complete -- no CR to roll back")
 
     _api("post", f"/change-requests/{cr_id}/rollback")
     log(f"  Rollback triggered for CR {cr_id}")
@@ -280,7 +350,7 @@ def test_phase3_rollback():
         f"Rollback CR reached unexpected status: {cr['status']}"
     )
 
-    result = _exec_result(cr)
+    result = _rollback_result(cr)
     assert result.get("rolled_back") is True or cr["status"] == "rolled_back", (
         f"Rollback result unexpected: {result}"
     )
