@@ -10,7 +10,7 @@ Phases:
   3. rollback    -- trigger rollback, assert rolled_back
   4. teardown    -- terminate instance, deregister connector/asset
 
-AMI cache key: /nexplane/smoke-amis/jenkins/2.426
+AMI cache key: /nexplane/smoke-amis/jenkins/2.426/jenkins-2426
 Run:
     docker exec nexplane-backend-1 python -m pytest \
         /app/tests/smoke/test_smoke_jenkins_upgrade.py -v -s
@@ -38,6 +38,7 @@ TARGET_VERSION = "2.452"
 JENKINS_USER   = os.environ.get("JENKINS_SMOKE_USER", "admin")
 JENKINS_PASS   = os.environ.get("JENKINS_SMOKE_PASSWORD", "admin")
 _SSM_PROFILE   = "nexplane-smoke-ssm"
+_AMI_SSM_KEY   = "jenkins/2.426"
 
 CR_TIMEOUT    = 1800
 POLL_INTERVAL = 15
@@ -81,23 +82,21 @@ _JENKINS_USER_DATA = (
     b"curl -sfL https://updates.jenkins.io/download/war/2.426/jenkins.war"
     b" -o /usr/share/jenkins/jenkins.war\n"
     b"useradd -r -d /var/lib/jenkins jenkins 2>/dev/null || true\n"
-    b"chown -R jenkins:jenkins /var/lib/jenkins\n"
-    b"cat > /etc/systemd/system/jenkins.service << 'SVCEOF'\n"
-    b"[Unit]\n"
-    b"Description=Jenkins\n"
-    b"[Service]\n"
-    b"User=jenkins\n"
-    b'Environment="JENKINS_HOME=/var/lib/jenkins"\n'
+    b"chown -R jenkins:jenkins /var/lib/jenkins /usr/share/jenkins\n"
+    b"printf '[Unit]\nDescription=Jenkins\n[Service]\nUser=jenkins\n"
+    b"Environment=JENKINS_HOME=/var/lib/jenkins\n"
     b"ExecStart=/usr/bin/java -jar /usr/share/jenkins/jenkins.war --httpPort=8080\n"
-    b"Restart=always\n"
-    b"[Install]\n"
-    b"WantedBy=multi-user.target\n"
-    b"SVCEOF\n"
+    b"Restart=always\n[Install]\nWantedBy=multi-user.target\n'"
+    b" > /etc/systemd/system/jenkins.service\n"
     b"systemctl daemon-reload && systemctl enable jenkins && systemctl start jenkins\n"
 )
 
 
-def _launch_jenkins_ami(aws_creds) -> tuple:
+def _build_jenkins_ami(aws_creds) -> tuple:
+    """Launch a fresh Jenkins 2.426 instance, wait for port 8080, return (instance_id, ec2_client, None).
+
+    get_or_create_smoke_ami will stop, snapshot, and terminate after this returns.
+    """
     ec2       = _boto3_client("ec2", aws_creds)
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id")
@@ -122,13 +121,13 @@ def _launch_jenkins_ami(aws_creds) -> tuple:
 
     resp        = ec2.run_instances(**kwargs)
     instance_id = resp["Instances"][0]["InstanceId"]
-    log(f"  Launched Jenkins instance {instance_id}")
+    log(f"  Launched Jenkins build instance {instance_id}")
 
     ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Jenkins port 8080 on {private_ip} (up to 600s)")
+    log(f"  Waiting for Jenkins port 8080 on {private_ip} (up to 10 min)")
     deadline = time.time() + 600
     while time.time() < deadline:
         time.sleep(15)
@@ -140,7 +139,7 @@ def _launch_jenkins_ami(aws_creds) -> tuple:
         except OSError:
             pass
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"Jenkins never reachable on {private_ip}:8080 within 600s")
+    pytest.fail(f"Jenkins never reachable on {private_ip}:8080 within 10 min")
 
 
 def _poll_cr(cr_id, timeout_s=CR_TIMEOUT):
@@ -184,10 +183,10 @@ def test_phase1_provision():
         pytest.skip("No AWS connector creds in platform DB")
 
     ami_id = get_or_create_smoke_ami(
-        cache_key="/nexplane/smoke-amis/jenkins/2.426",
-        setup_hash="2426",
-        launch_fn=_launch_jenkins_ami,
-        snapshot_name="nexplane-smoke-jenkins-2.426",
+        cache_key=_AMI_SSM_KEY,
+        setup_hash="jenkins-2426",
+        launch_fn=_build_jenkins_ami,
+        snapshot_name="nexplane-smoke-jenkins-2426",
     )
     log(f"  Using Jenkins AMI: {ami_id}")
 
