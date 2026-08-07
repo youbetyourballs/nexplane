@@ -75,7 +75,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if tgt_minor <= src_minor:
         raise ValueError("target_version must be newer than source_version")
 
-    kube_env = f"KUBECONFIG={kubeconfig_path}"
+    kube_env = f"export PATH=$PATH:/usr/local/bin:/snap/bin && KUBECONFIG={kubeconfig_path}"
     crds_url = f"{_GITHUB_RELEASE_BASE}/v{target_version}/cert-manager.crds.yaml"
 
     # --- Step 1: Preflight ---
@@ -202,7 +202,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     p = _resolve_params(parameters)
     namespace = p["namespace"]
     kubeconfig_path = p["kubeconfig_path"]
-    kube_env = f"KUBECONFIG={kubeconfig_path}"
+    kube_env = f"export PATH=$PATH:/usr/local/bin:/snap/bin && KUBECONFIG={kubeconfig_path}"
 
     # helm rollback 0 returns to the previous release revision
     logger.info("Rolling back cert-manager Deployment via helm on %s", asset_id)
