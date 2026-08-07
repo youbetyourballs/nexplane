@@ -207,14 +207,31 @@ def test_phase1_provision():
         pytest.skip("No AWS connector creds in platform DB")
 
     ec2 = _boto3_client("ec2", aws_creds)
-    ssm = _boto3_client("ssm", aws_creds)
 
-    def launch_fn(ec2_client, ssm_client, al2_ami_id, creds):
-        """launch_fn interface for get_or_create_smoke_ami."""
-        subnet_id = creds.get("smoke_subnet_id") or creds.get("subnet_id")
-        sg_id     = creds.get("smoke_default_security_group_id")
+    def launch_fn(aws_creds):
+        """launch_fn interface for get_or_create_smoke_ami.
 
+        Accepts aws_creds as its sole argument; returns (instance_id, ec2_client, None).
+        """
         import base64
+        ec2_client = _boto3_client("ec2", aws_creds)
+        subnet_id  = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
+        sg_id      = aws_creds.get("smoke_default_security_group_id")
+
+        # Resolve latest AL2 AMI in the target region
+        al2_resp = ec2_client.describe_images(
+            Owners=["amazon"],
+            Filters=[
+                {"Name": "name",         "Values": ["amzn2-ami-hvm-2.0.*-x86_64-gp2"]},
+                {"Name": "state",        "Values": ["available"]},
+                {"Name": "architecture", "Values": ["x86_64"]},
+            ],
+        )
+        al2_images = sorted(al2_resp["Images"], key=lambda i: i["CreationDate"], reverse=True)
+        if not al2_images:
+            raise RuntimeError("No AL2 AMI found in region")
+        al2_ami_id = al2_images[0]["ImageId"]
+
         user_data = base64.b64encode(_CRDB_INSTALL_SCRIPT).decode()
 
         kwargs = dict(
@@ -255,16 +272,13 @@ def test_phase1_provision():
             ec2_client.terminate_instances(InstanceIds=[instance_id])
             raise RuntimeError(f"CockroachDB never ready on {private_ip}:26257")
 
-        return instance_id
+        return instance_id, ec2_client, None
 
     ami_id = get_or_create_smoke_ami(
         cache_key=_CRDB_AMI_CACHE_KEY,
+        setup_hash="23.1",
         launch_fn=launch_fn,
-        ec2=ec2,
-        ssm=ssm,
-        aws_creds=aws_creds,
-        ami_name="nexplane-smoke-cockroachdb-23.1",
-        ami_description="CockroachDB 23.1 on AL2 for Nexplane smoke tests",
+        snapshot_name="nexplane-smoke-cockroachdb-23.1",
     )
 
     instance_id, private_ip = _launch_crdb_from_ami(ec2, ami_id, aws_creds)
