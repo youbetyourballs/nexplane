@@ -25,7 +25,7 @@ import boto3
 import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
-from smoke_helpers import NexplaneClient, log, get_connector_creds_from_db
+from smoke_helpers import NexplaneClient, log, get_connector_creds_from_db, install_nexplane_agent_on_instance
 
 BASE_URL = os.environ.get("NEXPLANE_BASE_URL", "http://localhost:8000")
 EMAIL    = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
@@ -209,6 +209,17 @@ def _exec_result(cr: dict) -> dict:
     return cr.get("execution_result") or {}
 
 
+def _rollback_result(cr: dict) -> dict:
+    """Extract rollback result from the rolled_back execution run."""
+    runs = cr.get("execution_runs") or []
+    for run in runs:
+        if run.get("status") in ("rolled_back", "rollback_failed"):
+            r = run.get("result") or {}
+            if "rolled_back" in r or "data_loss_warning" in r:
+                return r
+    return cr.get("rollback_result") or {}
+
+
 # ---------------------------------------------------------------------------
 # Phase 1: provision
 # ---------------------------------------------------------------------------
@@ -233,6 +244,10 @@ def test_phase1_provision():
         "private_ip":        private_ip,
         "provisioned_by_us": True,
     })
+
+    log("  Installing nexplane agent on smoke instance")
+    install_nexplane_agent_on_instance(instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=300)
+
     log("[PHASE 1: provision] PASSED")
 
 
@@ -306,7 +321,7 @@ def test_phase3_rollback():
         f"Rollback reached unexpected status: {cr['status']}"
     )
 
-    result = _exec_result(cr)
+    result = _rollback_result(cr)
     assert result.get("rolled_back") is True or cr["status"] == "rolled_back", (
         f"Rollback result: {result}"
     )
