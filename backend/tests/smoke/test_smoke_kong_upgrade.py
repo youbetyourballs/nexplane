@@ -89,12 +89,10 @@ def _build_kong_ami(aws_creds) -> tuple:
         b"systemctl enable postgresql && systemctl start postgresql\n"
         b"sudo -u postgres psql -c \"CREATE USER kong WITH PASSWORD 'kong';\"\n"
         b"sudo -u postgres psql -c \"CREATE DATABASE kong OWNER kong;\"\n"
-        b"# Kong 3.4 from package\n"
-        b"yum install -y yum-utils\n"
-        b"yum-config-manager --add-repo https://download.konghq.com/gateway-34-rhel-9.repo 2>/dev/null || true\n"
-        b"# Fallback: direct rpm\n"
-        b"curl -sfL \"https://packages.konghq.com/public/gateway-34/rpm/el/8/x86_64/kong-enterprise-edition-3.4.3.4.rhel8.amd64.rpm\" -o /tmp/kong.rpm 2>/dev/null || \\\n"
-        b"curl -sfL \"https://packages.konghq.com/public/gateway-34/rpm/amzn/2/x86_64/kong-3.4.2.1.aws.amd64.rpm\" -o /tmp/kong.rpm\n"
+        b"# Install Kong 3.4 via direct package (AL2 compatible)\n"
+        b"KONG_VER=3.4.2\n"
+        b"curl -sfL \"https://packages.konghq.com/public/gateway-34/rpm/amzn/2/x86_64/kong-${KONG_VER}.aws.amd64.rpm\" -o /tmp/kong.rpm 2>&1 || \\\n"
+        b"curl -sfL \"https://packages.konghq.com/public/gateway-34/rpm/el/8/x86_64/kong-${KONG_VER}.el8.amd64.rpm\" -o /tmp/kong.rpm 2>&1\n"
         b"yum install -y /tmp/kong.rpm\n"
         b"cp /etc/kong/kong.conf.default /etc/kong/kong.conf\n"
         b"sed -i 's|#database = off|database = postgres|' /etc/kong/kong.conf\n"
@@ -132,7 +130,7 @@ def _build_kong_ami(aws_creds) -> tuple:
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
     log(f"  Waiting for Kong admin port 8001 on {private_ip} (up to 10 min)")
-    deadline = time.time() + 600
+    deadline = time.time() + 900
     while time.time() < deadline:
         time.sleep(15)
         try:
@@ -227,7 +225,7 @@ def test_phase1_provision():
     log(f"  Kong instance at {private_ip}")
 
     log(f"  Waiting for Kong admin port 8001 on {private_ip}")
-    deadline = time.time() + 600
+    deadline = time.time() + 900
     while time.time() < deadline:
         time.sleep(15)
         try:

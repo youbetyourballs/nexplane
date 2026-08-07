@@ -89,6 +89,7 @@ _JENKINS_USER_DATA = (
     b"Restart=always\n[Install]\nWantedBy=multi-user.target\n'"
     b" > /etc/systemd/system/jenkins.service\n"
     b"systemctl daemon-reload && systemctl enable jenkins && systemctl start jenkins\n"
+    b"java -version 2>&1 || yum install -y java-11-amazon-corretto-headless\n"
 )
 
 
@@ -128,7 +129,7 @@ def _build_jenkins_ami(aws_creds) -> tuple:
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
     log(f"  Waiting for Jenkins port 8080 on {private_ip} (up to 10 min)")
-    deadline = time.time() + 600
+    deadline = time.time() + 1200
     while time.time() < deadline:
         time.sleep(15)
         try:
@@ -223,7 +224,7 @@ def test_phase1_provision():
     log(f"  Jenkins instance at {private_ip}")
 
     log(f"  Waiting for Jenkins port 8080 on {private_ip}")
-    deadline = time.time() + 600
+    deadline = time.time() + 1200
     while time.time() < deadline:
         time.sleep(15)
         try:

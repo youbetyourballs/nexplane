@@ -92,6 +92,9 @@ def _launch_redis(aws_creds) -> tuple:
     user_data_script = (
         "#!/bin/bash\n"
         "amazon-linux-extras install redis6 -y\n"
+        "# Bind to all interfaces so the smoke runner can reach it\n"
+        "sed -i 's/^bind 127.0.0.1.*/bind 0.0.0.0/' /etc/redis/redis.conf\n"
+        "sed -i 's/^protected-mode yes/protected-mode no/' /etc/redis/redis.conf\n"
         "systemctl enable redis\n"
         "systemctl start redis\n"
         "for i in $(seq 1 30); do\n"
@@ -128,7 +131,7 @@ def _launch_redis(aws_creds) -> tuple:
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
     log(f"  Waiting for Redis port {_REDIS_PORT} on {private_ip} (up to 10 min)")
-    deadline = time.time() + 600
+    deadline = time.time() + 900
     while time.time() < deadline:
         time.sleep(10)
         try:
@@ -176,7 +179,7 @@ def _launch_from_ami(ami_id, aws_creds) -> tuple:
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
     log(f"  Waiting for Redis port {_REDIS_PORT} on {private_ip} (up to 10 min)")
-    deadline = time.time() + 600
+    deadline = time.time() + 900
     while time.time() < deadline:
         time.sleep(10)
         try:
