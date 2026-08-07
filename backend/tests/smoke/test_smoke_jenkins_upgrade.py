@@ -21,6 +21,7 @@ Run:
 import os
 import sys
 import time
+import uuid
 import pytest
 import boto3
 
@@ -65,16 +66,25 @@ def _api(method, path, **kwargs):
     return getattr(_get_client(), method)(path, **kwargs)
 
 
-def _poll_cr(cr_id, terminal_statuses=("completed", "failed", "blocked"), timeout=CR_TIMEOUT):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        r = _api("get", f"/api/v1/change-requests/{cr_id}")
-        assert r.status_code == 200
-        data = r.json()
-        if data.get("status") in terminal_statuses:
-            return data
+def _poll_cr(cr_id, timeout_s=CR_TIMEOUT):
+    terminal = ("completed", "failed", "rolled_back", "rollback_failed")
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        cr = _api("get", f"/change-requests/{cr_id}")
+        if cr["status"] in terminal:
+            return cr
         time.sleep(POLL_INTERVAL)
-    raise TimeoutError(f"CR {cr_id} timed out after {timeout}s")
+    raise TimeoutError(f"CR {cr_id} did not reach terminal within {timeout_s}s")
+
+
+def _rollback_result(cr: dict) -> dict:
+    runs = cr.get("execution_runs") or []
+    for run in runs:
+        if run.get("status") in ("rolled_back", "rollback_failed"):
+            r = run.get("result") or {}
+            if "rolled_back" in r or "data_loss_warning" in r:
+                return r
+    return cr.get("rollback_result") or {}
 
 
 def test_phase1_provision_jenkins():
@@ -118,22 +128,26 @@ def test_phase1_provision_jenkins():
     # Wait for Jenkins to start
     time.sleep(60)
 
-    r = _api("post", "/api/v1/connectors", json={
+    run_id = uuid.uuid4().hex[:6]
+    connector = _api("post", "/connectors", json={
+        "name": f"smoke-jenkins-{run_id}",
         "connector_type": "nexplane_agent",
-        "display_name": f"smoke-jenkins-{instance_id[:8]}",
-        "credentials": {},
     })
-    assert r.status_code in (200, 201)
-    _state["connector_id"] = r.json()["id"]
+    assert connector.get("id"), f"Connector create failed: {connector}"
+    _api("put", f"/connectors/{connector['id']}/credentials", json={"credentials": {}})
+    _state["connector_id"] = connector["id"]
 
-    r = _api("post", "/api/v1/assets", json={
-        "connector_id": _state["connector_id"],
+    asset = _api("post", "/assets", json={
+        "name": f"smoke-jenkins-{run_id}",
         "asset_type": "server",
-        "display_name": f"smoke-jenkins-{instance_id[:8]}",
-        "asset_metadata": {"instance_id": instance_id, "ip": ip},
+        "criticality": "medium",
+        "environment": "staging",
+        "hostname": ip,
+        "connector_id": _state["connector_id"],
+        "metadata": {"instance_id": instance_id, "ip": ip},
     })
-    assert r.status_code in (200, 201)
-    _state["asset_id"] = r.json()["id"]
+    assert asset.get("id"), f"Asset create failed: {asset}"
+    _state["asset_id"] = asset["id"]
     log(f"Asset: {_state['asset_id']}")
 
 
@@ -156,17 +170,20 @@ def test_phase2_create_and_approve_cr():
             "dry_run": False,
         },
     }
-    r = _api("post", "/api/v1/change-requests", json=payload)
-    assert r.status_code in (200, 201), f"CR create failed: {r.text}"
-    _state["cr_id"] = r.json()["id"]
-    _api("post", f"/api/v1/change-requests/{_state['cr_id']}/plan")
-    _api("post", f"/api/v1/change-requests/{_state['cr_id']}/approve")
+    cr = _api("post", "/change-requests", json=payload)
+    assert cr.get("id"), f"CR create failed: {cr}"
+    _state["cr_id"] = cr["id"]
+    _api("post", f"/change-requests/{_state['cr_id']}/plan")
+    _api("post", f"/change-requests/{_state['cr_id']}/submit-for-approval")
+    _api("post", f"/change-requests/{_state['cr_id']}/approve",
+         json={"decision": "approved", "comment": "jenkins upgrade smoke self-approval"})
     log(f"CR {_state['cr_id']} approved")
 
 
 def test_phase2_wait_execution():
     if not _state["cr_id"]:
         pytest.skip()
+    _api("post", f"/change-requests/{_state['cr_id']}/execute")
     cr = _poll_cr(_state["cr_id"])
     assert cr["status"] == "completed", f"CR failed: {cr}"
     _state["execution_result"] = cr.get("execution_result", {})
@@ -184,11 +201,10 @@ def test_phase3_verify():
 def test_phase4_rollback():
     if not _state["cr_id"]:
         pytest.skip()
-    r = _api("post", f"/api/v1/change-requests/{_state['cr_id']}/rollback")
-    assert r.status_code == 200
-    cr = _poll_cr(_state["cr_id"], terminal_statuses=("rolled_back", "rollback_failed"))
+    _api("post", f"/change-requests/{_state['cr_id']}/rollback")
+    cr = _poll_cr(_state["cr_id"])
     assert cr["status"] == "rolled_back", f"Rollback failed: {cr}"
-    rb = cr.get("rollback_result", {})
+    rb = _rollback_result(cr)
     assert rb.get("rolled_back") is True
     log("Jenkins rollback to 2.426 verified")
 
@@ -206,6 +222,6 @@ def test_phase5_teardown():
         ec2.terminate_instances(InstanceIds=[_state["instance_id"]])
         log(f"Terminated {_state['instance_id']}")
     if _state["asset_id"]:
-        _api("delete", f"/api/v1/assets/{_state['asset_id']}")
+        _api("delete", f"/assets/{_state['asset_id']}")
     if _state["connector_id"]:
-        _api("delete", f"/api/v1/connectors/{_state['connector_id']}")
+        _api("delete", f"/connectors/{_state['connector_id']}")
