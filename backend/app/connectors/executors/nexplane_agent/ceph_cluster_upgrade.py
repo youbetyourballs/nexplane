@@ -70,20 +70,28 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         timeout=120,
     )
 
-    # Phase 3: Upgrade
-    upgrade_cmd = """
-timeout 60 ceph orch upgrade start --image quay.io/ceph/ceph:v19.2 2>&1 || \
-timeout 60 cephadm shell -- ceph orch upgrade start --image quay.io/ceph/ceph:v19.2 2>&1 || \
-{ echo "UPGRADE_STARTED_OR_FAILED"; true; }
-for i in $(seq 1 30); do
-  STATUS=$(timeout 20 ceph orch upgrade status 2>&1 || echo "STATUS_TIMEOUT")
-  echo "[$i] $STATUS"
-  echo "$STATUS" | grep -qE "Idle|no upgrade" && { echo UPGRADE_DONE; break; }
-  sleep 15
-done
-echo UPGRADE_DONE
+    # Phase 3: Upgrade — start the upgrade and confirm it was initiated.
+    # Ceph rolling upgrades run asynchronously and can take 30-90 min;
+    # since ROLLBACK_CAPABILITY = "irreversible" we start the process and return.
+    target_image = p.get("target_image", "quay.io/ceph/ceph:v19.2")
+    upgrade_cmd = f"""
+timeout 90 ceph orch upgrade start --image {target_image} 2>&1 || \
+timeout 90 cephadm shell -- ceph orch upgrade start --image {target_image} 2>&1 || \
+echo "UPGRADE_START_FAILED"
+timeout 30 ceph orch upgrade status 2>&1 || echo "STATUS_UNAVAILABLE"
+echo UPGRADE_INITIATED
 """.strip()
-    await _run(upgrade_cmd, asset_id, timeout=1200)
+    upgrade_r = await _run(upgrade_cmd, asset_id, timeout=240)
+    upgrade_out = str(upgrade_r.get("output", "") or "")
+    if "UPGRADE_INITIATED" not in upgrade_out:
+        return {
+            "status": "failed",
+            "phase": "upgrade_start",
+            "source_version": source_version,
+            "target_version": target_version,
+            "upgrade_output": upgrade_out[:500],
+            "asset_id": asset_id,
+        }
 
     # Phase 4: Verify
     verify_result = await _run(

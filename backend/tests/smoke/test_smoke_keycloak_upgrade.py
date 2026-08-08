@@ -106,7 +106,7 @@ systemctl daemon-reload && systemctl enable keycloak && systemctl start keycloak
     sg_id = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
     kwargs = dict(
         ImageId="ami-0c101f26f147fa7fd",
-        InstanceType="t3.medium",
+        InstanceType="t3.large",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": "nexplane-smoke-ssm"},
         UserData=user_data,
@@ -128,8 +128,8 @@ systemctl daemon-reload && systemctl enable keycloak && systemctl start keycloak
     desc = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 10 min)")
-    deadline = _t.time() + 600
+    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 20 min)")
+    deadline = _t.time() + 1200
     while _t.time() < deadline:
         _t.sleep(15)
         try:
@@ -149,7 +149,7 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
 
     kwargs = dict(
         ImageId=ami_id,
-        InstanceType="t3.medium",
+        InstanceType="t3.large",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
         TagSpecifications=[{"ResourceType": "instance", "Tags": [

@@ -139,6 +139,12 @@ helm install cert-manager jetstack/cert-manager \
 # Wait for cert-manager ready
 kubectl rollout status deployment/cert-manager -n cert-manager --timeout=300s
 
+# Delete admission webhooks before snapshot — cert-manager webhooks block k3s API server
+# on AMI reboot, causing a deadlock where kubeconfig is never written. cert-manager
+# re-registers webhooks automatically after it starts on the smoke instance.
+kubectl delete validatingwebhookconfiguration cert-manager-webhook 2>/dev/null || true
+kubectl delete mutatingwebhookconfiguration cert-manager-webhook 2>/dev/null || true
+
 # Prepare for AMI snapshot: stop k3s, delete kubeconfig so next boot starts clean
 systemctl stop k3s || true
 rm -f /etc/rancher/k3s/k3s.yaml
