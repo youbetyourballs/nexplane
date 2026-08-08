@@ -145,6 +145,12 @@ kubectl rollout status deployment/cert-manager -n cert-manager --timeout=300s
 kubectl delete validatingwebhookconfiguration cert-manager-webhook 2>/dev/null || true
 kubectl delete mutatingwebhookconfiguration cert-manager-webhook 2>/dev/null || true
 
+# Clear any pending Helm operations before snapshot - helm install in flight at snapshot
+# time leaves the release in "pending-install" state, blocking future helm upgrade.
+helm -n cert-manager rollback cert-manager 0 2>/dev/null || true
+kubectl -n cert-manager delete secret -l owner=helm,status=pending-install 2>/dev/null || true
+kubectl -n cert-manager delete secret -l owner=helm,status=pending-upgrade 2>/dev/null || true
+
 # Prepare for AMI snapshot: stop k3s, delete kubeconfig so next boot starts clean
 systemctl stop k3s || true
 rm -f /etc/rancher/k3s/k3s.yaml

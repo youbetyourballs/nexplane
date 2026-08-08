@@ -96,9 +96,10 @@ tar -xz -C /opt/ -f /tmp/keycloak.tar.gz
 ln -sfn /opt/keycloak-21.1.2 /opt/keycloak
 useradd -r keycloak 2>/dev/null || true
 chown -R keycloak:keycloak /opt/keycloak
-# Build Keycloak
-/opt/keycloak/bin/kc.sh build
-printf '[Unit]\nDescription=Keycloak\n[Service]\nUser=keycloak\nEnvironment=KEYCLOAK_ADMIN=admin\nEnvironment=KEYCLOAK_ADMIN_PASSWORD=SmokeKc1234!\nExecStart=/opt/keycloak/bin/kc.sh start-dev --http-port=8080\nRestart=always\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/keycloak.service
+# Build optimized Keycloak artifact (avoids 30-min Quarkus re-augmentation on every start-dev boot)
+KC_HTTP_ENABLED=true KC_HOSTNAME_STRICT=false /opt/keycloak/bin/kc.sh build
+# Use start --optimized so the pre-built artifact is used on every boot (2-5 min vs 30+ min)
+printf '[Unit]\nDescription=Keycloak\n[Service]\nUser=keycloak\nEnvironment=KEYCLOAK_ADMIN=admin\nEnvironment=KEYCLOAK_ADMIN_PASSWORD=SmokeKc1234!\nExecStart=/opt/keycloak/bin/kc.sh start --optimized --http-port=8080 --http-enabled=true --hostname-strict=false\nRestart=always\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/keycloak.service
 systemctl daemon-reload && systemctl enable keycloak && systemctl start keycloak
 """).decode()
 
@@ -128,8 +129,8 @@ systemctl daemon-reload && systemctl enable keycloak && systemctl start keycloak
     desc = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 20 min)")
-    deadline = _t.time() + 1200
+    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 10 min)")
+    deadline = _t.time() + 600
     while _t.time() < deadline:
         _t.sleep(15)
         try:
@@ -147,11 +148,17 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
+    launch_user_data = base64.b64encode(b"""#!/bin/bash
+# Wipe H2 data directory so Keycloak starts fresh (AMI may have stale H2 DB from build run)
+rm -rf /opt/keycloak/data/h2 2>/dev/null || true
+""").decode()
+
     kwargs = dict(
         ImageId=ami_id,
         InstanceType="t3.large",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData=launch_user_data,
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-keycloak-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-keycloak-upgrade"},
@@ -170,8 +177,8 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 30 min)")
-    deadline = time.time() + 1800
+    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 10 min)")
+    deadline = time.time() + 600
     while time.time() < deadline:
         time.sleep(15)
         try:
@@ -182,7 +189,7 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
         except OSError:
             pass
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 30 min")
+    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 10 min")
 
 
 def _register_asset(private_ip, run_id) -> tuple:
