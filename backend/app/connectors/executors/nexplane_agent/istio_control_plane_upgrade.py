@@ -90,12 +90,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Step 0b: Download target istioctl binary
     logger.info("Downloading istioctl %s on %s", target_version, asset_id)
     r = await _run(
-        f"curl -sfL https://istio.io/downloadIstio | ISTIO_VERSION={target_version}.0 TARGET_ARCH=x86_64 sh - 2>&1; "
+        f"cd /tmp && curl -sfL https://istio.io/downloadIstio | ISTIO_VERSION={target_version}.0 TARGET_ARCH=x86_64 sh - 2>&1; "
         f"echo DOWNLOAD_EXIT=$?",
         asset_id, timeout=300,
     )
     download_output = r.get("output", "")
-    istioctl = f"./istio-{target_version}.0/bin/istioctl"
+    istioctl = f"/tmp/istio-{target_version}.0/bin/istioctl"
     if "DOWNLOAD_EXIT=0" not in download_output:
         return {
             "status": "failed",
@@ -202,14 +202,14 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
 
     # Step 1: Download old istio binary
     r = await _run(
-        f"curl -sfL https://istio.io/downloadIstio | ISTIO_VERSION={source_version}.0 TARGET_ARCH=x86_64 sh - 2>&1",
+        f"cd /tmp && curl -sfL https://istio.io/downloadIstio | ISTIO_VERSION={source_version}.0 TARGET_ARCH=x86_64 sh - 2>&1",
         asset_id, timeout=300,
     )
     download_output = r.get("output", "")
 
     # Step 2: Install old version
     r = await _run(
-        f"KUBECONFIG={kc} ./istio-{source_version}.0/bin/istioctl install --set profile=minimal -y 2>&1; echo ROLLBACK_EXIT=$?",
+        f"KUBECONFIG={kc} /tmp/istio-{source_version}.0/bin/istioctl install --set profile=minimal -y 2>&1; echo ROLLBACK_EXIT=$?",
         asset_id, timeout=600,
     )
     rollback_output = r.get("output", "")

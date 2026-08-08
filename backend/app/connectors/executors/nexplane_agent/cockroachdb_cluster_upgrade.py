@@ -30,8 +30,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         raise ValueError("asset_ids required")
 
     asset_id = str(asset_ids[0])
-    source_version = parameters.get("source_version", "23.1")
-    target_version = parameters.get("target_version", "23.2")
+    p = parameters.get("desired_outcome") or parameters
+    source_version = p.get("source_version", "23.1")
+    target_version = p.get("target_version", "23.2")
     snapshot_path = "/tmp/nexplane-crdb-backup"
 
     # 1. Preflight
@@ -54,7 +55,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     upgrade_cmd = r"""
 VER=23.2.22
 URL="https://binaries.cockroachdb.com/cockroach-v${VER}.linux-amd64.tgz"
-curl -sf -L -o /tmp/cockroach-${VER}.tgz "$URL" || { echo DOWNLOAD_FAILED; exit 0; }
+curl -sf -L -o /tmp/cockroach-${VER}.tgz "$URL" || { echo DOWNLOAD_FAILED; exit 1; }
 tar -xzf /tmp/cockroach-${VER}.tgz -C /tmp/
 CRDB_BIN=$(which cockroach 2>/dev/null || echo /usr/local/bin/cockroach)
 systemctl stop cockroach 2>/dev/null || true; sleep 3
@@ -86,17 +87,22 @@ echo UPGRADE_DONE
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     asset_id = execution_result.get("asset_id") or str(
-        (parameters.get("asset_ids") or [None])[0] or ""
+        (
+            execution_result.get("_target_asset_ids")
+            or parameters.get("asset_ids")
+            or [None]
+        )[0] or ""
     )
     if not asset_id:
         return {"rolled_back": False, "reason": "No asset_id available for rollback"}
-    source_version = parameters.get("source_version", "23.1")
+    p = parameters.get("desired_outcome") or parameters
+    source_version = p.get("source_version", "23.1")
 
     # Download old binary and replace
     rollback_cmd = rf"""
 VER=23.1.26
 URL="https://binaries.cockroachdb.com/cockroach-v${{VER}}.linux-amd64.tgz"
-curl -sf -L -o /tmp/cockroach-rollback.tgz "$URL" || {{ echo DOWNLOAD_FAILED; exit 0; }}
+curl -sf -L -o /tmp/cockroach-rollback.tgz "$URL" || {{ echo DOWNLOAD_FAILED; exit 1; }}
 tar -xzf /tmp/cockroach-rollback.tgz -C /tmp/
 CRDB_BIN=$(which cockroach 2>/dev/null || echo /usr/local/bin/cockroach)
 systemctl stop cockroach 2>/dev/null || true; sleep 3

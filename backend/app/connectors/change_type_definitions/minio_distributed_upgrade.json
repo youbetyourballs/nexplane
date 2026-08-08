@@ -42,9 +42,6 @@
     "description": "mc admin update pinned to previous version tag. MinIO explicitly supports rollback to any previous release. If erasure format changed on a major release, healing is required after rollback."
   },
   "steps": [
-    {"step": "preflight", "generic_action": "minio_distributed_upgrade", "description": "mc admin info: all nodes healthy, erasure sets intact, no healing in progress"},
-    {"step": "config_export", "generic_action": "minio_distributed_upgrade", "description": "mc admin config export — configuration backup"},
-    {"step": "upgrade", "generic_action": "minio_distributed_upgrade", "description": "mc admin update — MinIO downloads and rolls new binary to all nodes"},
-    {"step": "verify", "generic_action": "minio_distributed_upgrade", "description": "mc admin info: all nodes on target version, all drives online"}
+    {"generic_action": "minio_distributed_upgrade", "purpose": "execute", "required": true}
   ]
 }

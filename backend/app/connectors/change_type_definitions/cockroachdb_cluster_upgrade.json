@@ -56,10 +56,6 @@
     "description": "Before version finalization: reinstall old binary on each node in reverse order. After finalization: irreversible — restore from backup."
   },
   "steps": [
-    {"step": "preflight", "generic_action": "cockroachdb_cluster_upgrade", "description": "SHOW CLUSTER SETTING version, +1 minor validation, all nodes healthy via /_admin/v1/health"},
-    {"step": "backup", "generic_action": "cockroachdb_cluster_upgrade", "description": "BACKUP or cockroach dump to backup location"},
-    {"step": "rolling_upgrade", "generic_action": "cockroachdb_cluster_upgrade", "description": "Per node: drain → replace binary → restart → wait rejoin"},
-    {"step": "finalize", "generic_action": "cockroachdb_cluster_upgrade", "description": "SET CLUSTER SETTING version (only if auto_finalize=true — IRREVERSIBLE)"},
-    {"step": "verify", "generic_action": "cockroachdb_cluster_upgrade", "description": "SHOW CLUSTER SETTING version matches target, all nodes healthy"}
+    {"generic_action": "cockroachdb_cluster_upgrade", "purpose": "execute", "required": true}
   ]
 }

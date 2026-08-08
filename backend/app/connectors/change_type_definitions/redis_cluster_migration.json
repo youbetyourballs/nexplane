@@ -49,9 +49,6 @@
     "description": "RDB snapshot restore. For version_upgrade: reinstall previous binary and restore RDB. For standalone_to_cluster: cluster reset and RDB restore to standalone mode."
   },
   "steps": [
-    {"step": "preflight", "generic_action": "redis_cluster_migration", "description": "Detect Redis mode (standalone/sentinel/cluster), validate target version, check replication lag"},
-    {"step": "snapshot", "generic_action": "redis_cluster_migration", "description": "BGSAVE and download RDB to backup path"},
-    {"step": "migrate", "generic_action": "redis_cluster_migration", "description": "In-place version upgrade or standalone-to-cluster promotion"},
-    {"step": "verify", "generic_action": "redis_cluster_migration", "description": "CLUSTER INFO (cluster_state=ok, all slots assigned) or standalone PING"}
+    {"generic_action": "redis_cluster_migration", "purpose": "execute", "required": true}
   ]
 }

@@ -30,8 +30,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         raise ValueError("asset_ids required")
 
     asset_id = str(asset_ids[0])
-    source_version = parameters.get("source_version", "2023.9")
-    target_version = parameters.get("target_version", "2024.1")
+    p = parameters.get("desired_outcome") or parameters
+    source_version = p.get("source_version", "2023.9")
+    target_version = p.get("target_version", "2024.1")
     snapshot_path = "/tmp/nexplane-minio-backup"
 
     # 1. Preflight

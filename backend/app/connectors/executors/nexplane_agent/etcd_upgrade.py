@@ -30,10 +30,11 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         raise ValueError("asset_ids required")
 
     asset_id = str(asset_ids[0])
-    source_version = parameters.get("source_version")
-    target_version = parameters.get("target_version")
-    etcd_data_dir = parameters.get("etcd_data_dir", "/var/lib/etcd")
-    dry_run = bool(parameters.get("dry_run", False))
+    p = parameters.get("desired_outcome") or parameters
+    source_version = p.get("source_version")
+    target_version = p.get("target_version")
+    etcd_data_dir = p.get("etcd_data_dir", "/var/lib/etcd")
+    dry_run = bool(p.get("dry_run", False))
 
     if not target_version:
         raise ValueError("target_version required")

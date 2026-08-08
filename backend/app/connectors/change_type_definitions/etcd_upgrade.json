@@ -19,9 +19,9 @@
     },
     "members": {
       "type": "array",
-      "required": true,
+      "required": false,
       "label": "etcd Members",
-      "description": "List of {name, peer_url, client_url}"
+      "description": "List of {name, peer_url, client_url}. Optional for single-node deployments."
     },
     "etcd_data_dir": {
       "type": "string",
@@ -49,9 +49,6 @@
     "description": "etcdctl snapshot restore on all members. Canonical etcd rollback path. Data loss window: all writes after snapshot creation are lost. Rollback surfaces this data loss window clearly."
   },
   "steps": [
-    {"step": "preflight", "generic_action": "etcd_upgrade", "description": "etcdctl endpoint health --cluster, version path +1 minor, quorum check"},
-    {"step": "snapshot", "generic_action": "etcd_upgrade", "description": "etcdctl snapshot save, optionally upload to S3"},
-    {"step": "rolling_upgrade", "generic_action": "etcd_upgrade", "description": "Per member: stop etcd, replace binary, start, verify member rejoins cluster"},
-    {"step": "verify", "generic_action": "etcd_upgrade", "description": "etcdctl endpoint status --cluster: all members healthy, version matches target"}
+    {"generic_action": "etcd_upgrade", "purpose": "execute", "required": true}
   ]
 }

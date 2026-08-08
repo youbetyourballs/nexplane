@@ -151,7 +151,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     logger.info("helm upgrade cert-manager to %s", target_version)
     r = await _run(
         f"{helm} upgrade cert-manager jetstack/cert-manager "
-        f"--namespace {namespace} --version {target_version} --reuse-values 2>&1; echo HELM_EXIT=$?",
+        f"--namespace {namespace} --version {target_version} --reset-values --set installCRDs=false 2>&1; echo HELM_EXIT=$?",
         asset_id,
         timeout=300,
     )
