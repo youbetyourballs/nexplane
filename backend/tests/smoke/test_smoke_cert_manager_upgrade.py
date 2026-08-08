@@ -151,6 +151,7 @@ rm -f /etc/rancher/k3s/k3s.yaml
 systemctl enable k3s
 
 echo CERTMGR_READY
+touch /tmp/nexplane-certmgr-ready
 """).decode()
 
 
@@ -209,12 +210,13 @@ def _build_k3s_certmgr_ami(ec2, ssm, aws_creds) -> str:
             cmd = ssm_ec2.send_command(
                 InstanceIds=[instance_id],
                 DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["grep -c CERTMGR_READY /var/log/cloud-init-output.log 2>/dev/null || echo 0"]},
+                Parameters={"commands": ["test -f /tmp/nexplane-certmgr-ready && echo CERTMGR_READY || echo NOT_READY"]},
+                TimeoutSeconds=30,
             )
             cmd_id = cmd["Command"]["CommandId"]
-            time.sleep(5)
+            time.sleep(10)
             result = ssm_ec2.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
-            if result.get("StandardOutputContent", "").strip() not in ("", "0"):
+            if result.get("Status") == "Success" and "CERTMGR_READY" in result.get("StandardOutputContent", ""):
                 log("  CERTMGR_READY sentinel found")
                 ready = True
                 break
