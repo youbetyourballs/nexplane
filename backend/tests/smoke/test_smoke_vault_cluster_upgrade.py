@@ -305,18 +305,14 @@ def test_phase1_provision():
         vault_token = _VAULT_ROOT_TOKEN
     _state["vault_token"] = vault_token
 
-    # Derive source/target by bumping patch: 2.0.1 -> 2.0.2
+    # Derive source/target by bumping minor version: 1.15.x -> 1.16.0
     if vault_minor:
         try:
             parts = vault_minor.split(".")
-            if len(parts) == 3:
-                major, minor, patch = parts
-                _state["source_version"] = vault_minor
-                _state["target_version"] = f"{major}.{minor}.{int(patch) + 1}"
-            else:
-                major, minor_int = parts[0], parts[1]
-                _state["source_version"] = vault_minor
-                _state["target_version"] = f"{major}.{minor_int}.1"
+            major = parts[0]
+            minor_int = int(parts[1]) if len(parts) >= 2 else 0
+            _state["source_version"] = vault_minor
+            _state["target_version"] = f"{major}.{minor_int + 1}.0"
             log(f"  Vault upgrade plan: {_state['source_version']} -> {_state['target_version']}")
         except Exception:
             pass

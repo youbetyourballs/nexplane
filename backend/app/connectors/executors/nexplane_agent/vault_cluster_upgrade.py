@@ -131,6 +131,7 @@ echo UPGRADE_DONE
             "status": "failed",
             "phase": "binary_install",
             "error": upgrade_output[:500],
+            "snapshot_path": snapshot_path,
             "asset_id": asset_id,
         }
 
@@ -175,7 +176,14 @@ echo UNSEAL_DONE
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     snapshot_path = execution_result.get("snapshot_path")
     if not snapshot_path:
-        return {"rolled_back": False, "reason": "no snapshot_path in execution_result"}
+        return {
+            "rolled_back": False,
+            "reason": "no snapshot_path in execution_result",
+            "data_loss_warning": (
+                "Vault snapshot was not captured before upgrade. "
+                "Binary may be in a partially upgraded state. Restore from external backup."
+            ),
+        }
 
     asset_id = execution_result.get("asset_id") or str(
         (parameters.get("asset_ids") or [None])[0]
