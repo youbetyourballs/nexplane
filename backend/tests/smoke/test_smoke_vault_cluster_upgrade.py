@@ -305,17 +305,39 @@ def test_phase1_provision():
         vault_token = _VAULT_ROOT_TOKEN
     _state["vault_token"] = vault_token
 
-    # Derive source/target by bumping minor version: 1.15.x -> 1.16.0
+    # Derive source/target: find next available release on releases.hashicorp.com
     if vault_minor:
         try:
+            import urllib.request, re as _re
             parts = vault_minor.split(".")
             major = parts[0]
             minor_int = int(parts[1]) if len(parts) >= 2 else 0
             _state["source_version"] = vault_minor
-            _state["target_version"] = f"{major}.{minor_int + 1}.0"
-            log(f"  Vault upgrade plan: {_state['source_version']} -> {_state['target_version']}")
-        except Exception:
-            pass
+            # Try to find the first .0 of the next minor that exists
+            target = None
+            with urllib.request.urlopen("https://releases.hashicorp.com/vault/", timeout=10) as resp:
+                content = resp.read().decode()
+            for bump in range(1, 5):
+                candidate = f"{major}.{minor_int + bump}.0"
+                if f"vault/{candidate}/" in content:
+                    target = candidate
+                    break
+            if not target:
+                # Fall back to latest patch of same minor if no newer minor exists
+                patches = [int(m) for m in _re.findall(rf"vault/{major}\.{minor_int}\.(\d+)/", content)]
+                if patches:
+                    latest_patch = max(patches)
+                    if latest_patch > int(parts[2]) if len(parts) >= 3 else 0:
+                        target = f"{major}.{minor_int}.{latest_patch}"
+            if target:
+                _state["target_version"] = target
+                log(f"  Vault upgrade plan: {_state['source_version']} -> {target}")
+            else:
+                log(f"  WARNING: No newer vault version found for {vault_minor}, using fallback {_TARGET_VERSION}")
+                _state["target_version"] = _TARGET_VERSION
+        except Exception as e:
+            log(f"  WARNING: version lookup failed ({e}), using fallback {_TARGET_VERSION}")
+            _state["target_version"] = _TARGET_VERSION
 
     log("[PHASE 1: provision] PASSED")
 

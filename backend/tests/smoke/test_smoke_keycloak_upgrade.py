@@ -149,8 +149,11 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     launch_user_data = base64.b64encode(b"""#!/bin/bash
-# Wipe H2 data directory so Keycloak starts fresh (AMI may have stale H2 DB from build run)
-rm -rf /opt/keycloak/data/h2 2>/dev/null || true
+# Stop keycloak (may already be running from AMI boot), then restart cleanly
+# Do NOT wipe H2 -- AMI H2 has admin credentials ready; wiping forces schema reinit which is slow
+systemctl stop keycloak 2>/dev/null || true
+sleep 3
+systemctl start keycloak
 """).decode()
 
     kwargs = dict(
@@ -177,8 +180,8 @@ rm -rf /opt/keycloak/data/h2 2>/dev/null || true
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 10 min)")
-    deadline = time.time() + 600
+    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 15 min)")
+    deadline = time.time() + 900
     while time.time() < deadline:
         time.sleep(15)
         try:
@@ -189,7 +192,7 @@ rm -rf /opt/keycloak/data/h2 2>/dev/null || true
         except OSError:
             pass
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 10 min")
+    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 15 min")
 
 
 def _register_asset(private_ip, run_id) -> tuple:

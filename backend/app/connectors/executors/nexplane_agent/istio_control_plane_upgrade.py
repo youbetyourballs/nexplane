@@ -71,17 +71,18 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # Step 0a: Wait for k3s kubeconfig (k3s service may still be starting from AMI)
     r = await _run(
-        f"for i in $(seq 1 60); do "
+        f"for i in $(seq 1 120); do "
         f"[ -f {kc} ] && echo KUBECONFIG_OK && break; "
+        f"[ $i -eq 24 ] && systemctl status k3s 2>&1 | head -5 && systemctl start k3s 2>/dev/null || true; "
         f"sleep 5; done; "
         f"[ -f {kc} ] || echo KUBECONFIG_MISSING",
-        asset_id, timeout=330,
+        asset_id, timeout=630,
     )
     if "KUBECONFIG_MISSING" in r.get("output", "") or "KUBECONFIG_OK" not in r.get("output", ""):
         return {
             "status": "failed",
             "phase": "preflight",
-            "error": f"k3s kubeconfig not found at {kc} after 300s",
+            "error": f"k3s kubeconfig not found at {kc} after 600s",
             "source_version": source_version,
             "target_version": target_version,
             "asset_id": asset_id,
