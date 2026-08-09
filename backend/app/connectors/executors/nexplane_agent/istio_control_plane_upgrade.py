@@ -71,18 +71,19 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     # Step 0a: Wait for k3s kubeconfig (k3s service may still be starting from AMI)
     r = await _run(
-        f"for i in $(seq 1 120); do "
+        f"for i in $(seq 1 180); do "
         f"[ -f {kc} ] && echo KUBECONFIG_OK && break; "
-        f"[ $i -eq 24 ] && systemctl status k3s 2>&1 | head -5 && systemctl start k3s 2>/dev/null || true; "
+        f"if [ $i -eq 12 ]; then systemctl reset-failed k3s 2>/dev/null; systemctl status k3s 2>&1 | tail -3; systemctl start k3s 2>/dev/null || true; fi; "
+        f"if [ $i -eq 60 ]; then systemctl reset-failed k3s 2>/dev/null; systemctl restart k3s 2>/dev/null || true; fi; "
         f"sleep 5; done; "
         f"[ -f {kc} ] || echo KUBECONFIG_MISSING",
-        asset_id, timeout=630,
+        asset_id, timeout=930,
     )
     if "KUBECONFIG_MISSING" in r.get("output", "") or "KUBECONFIG_OK" not in r.get("output", ""):
         return {
             "status": "failed",
             "phase": "preflight",
-            "error": f"k3s kubeconfig not found at {kc} after 600s",
+            "error": f"k3s kubeconfig not found at {kc} after 900s",
             "source_version": source_version,
             "target_version": target_version,
             "asset_id": asset_id,
@@ -200,6 +201,24 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         return {"rolled_back": False, "reason": "source_version missing - cannot determine binary to reinstall"}
 
     logger.info("Istio rollback: reinstalling %s on %s", source_version, asset_id)
+
+    # Step 0: Wait for k3s kubeconfig (may need recovery after failed upgrade)
+    r = await _run(
+        f"for i in $(seq 1 60); do "
+        f"[ -f {kc} ] && echo KUBECONFIG_OK && break; "
+        f"if [ $i -eq 6 ]; then systemctl reset-failed k3s 2>/dev/null; systemctl start k3s 2>/dev/null || true; fi; "
+        f"sleep 5; done; "
+        f"[ -f {kc} ] || echo KUBECONFIG_MISSING",
+        asset_id, timeout=330,
+    )
+    if "KUBECONFIG_MISSING" in r.get("output", ""):
+        return {
+            "rolled_back": False,
+            "reason": f"k3s kubeconfig not found at {kc} - k3s may have crashed during upgrade",
+            "data_loss_warning": (
+                "k3s API server is unreachable. Restore from external backup or re-provision."
+            ),
+        }
 
     # Step 1: Download old istio binary
     r = await _run(

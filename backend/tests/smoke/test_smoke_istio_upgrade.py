@@ -243,7 +243,7 @@ def _launch_from_ami(ec2, aws_creds, ami_id) -> tuple:
         InstanceType="t3.xlarge",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
-        UserData="#!/bin/bash\nrm -f /etc/rancher/k3s/k3s.yaml 2>/dev/null || true\nrm -rf /var/lib/rancher/k3s/server/tls 2>/dev/null || true\nsystemctl daemon-reload 2>/dev/null || true\nsystemctl enable k3s 2>/dev/null || true\nsystemctl stop k3s 2>/dev/null || true\nsleep 2\nsystemctl start k3s 2>/dev/null || true\n",
+        UserData="#!/bin/bash\nsystemctl stop k3s 2>/dev/null || true\nsystemctl reset-failed k3s 2>/dev/null || true\nrm -f /etc/rancher/k3s/k3s.yaml 2>/dev/null || true\nrm -rf /var/lib/rancher/k3s/server/tls 2>/dev/null || true\nrm -rf /var/lib/rancher/k3s/server/cred 2>/dev/null || true\nsystemctl enable k3s 2>/dev/null || true\nsystemctl start k3s\n",
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-istio-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-istio-upgrade"},
