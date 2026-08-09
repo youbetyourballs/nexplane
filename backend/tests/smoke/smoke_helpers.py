@@ -1477,6 +1477,7 @@ def _wait_for_agent_registration_by_ip(private_ip: str, asset_id: str, timeout_s
         from app.models.agent import AgentRegistration
         from app.models.asset import Asset
         from sqlalchemy import select
+        from datetime import datetime, timezone, timedelta
         target_uuid = _uuid.UUID(asset_id) if isinstance(asset_id, str) else asset_id
         deadline = _time_mod.monotonic() + timeout_s
         while _time_mod.monotonic() < deadline:
@@ -1486,6 +1487,16 @@ def _wait_for_agent_registration_by_ip(private_ip: str, asset_id: str, timeout_s
                 for reg in regs:
                     ips = reg.ip_addresses or []
                     if private_ip and private_ip in ips:
+                        # Only accept fresh registrations to avoid stale IP reuse from
+                        # previously terminated instances. A stale registration would
+                        # leave target_uuid orphaned once the real agent registers.
+                        last_seen = reg.last_seen
+                        if last_seen and last_seen.tzinfo is None:
+                            last_seen = last_seen.replace(tzinfo=timezone.utc)
+                        age_s = (datetime.now(timezone.utc) - last_seen).total_seconds() if last_seen else 9999
+                        if age_s > 120:
+                            # Stale — keep polling for the real fresh agent
+                            continue
                         # Re-point registration to smoke asset
                         old_asset_id = reg.asset_id
                         reg.asset_id = target_uuid
