@@ -43,10 +43,6 @@
     "description": "Per-node snapshot restore via nodetool refresh. Nodes not yet upgraded remain on old version. Cassandra SSTable format may prevent clean binary downgrade on upgraded nodes — snapshot restore is the safe path."
   },
   "steps": [
-    {"step": "preflight", "generic_action": "cassandra_rolling_upgrade", "description": "nodetool status (all UN), version validation, gossip compatibility check"},
-    {"step": "snapshot", "generic_action": "cassandra_rolling_upgrade", "description": "nodetool snapshot on all nodes, record snapshot tag"},
-    {"step": "rolling_upgrade", "generic_action": "cassandra_rolling_upgrade", "description": "Per-node: drain → stop → upgrade package → start → verify UN"},
-    {"step": "upgradesstables", "generic_action": "cassandra_rolling_upgrade", "description": "nodetool upgradesstables on all upgraded nodes"},
-    {"step": "verify", "generic_action": "cassandra_rolling_upgrade", "description": "nodetool status all UN, version matches target on all nodes"}
+    {"generic_action": "cassandra_rolling_upgrade", "purpose": "execute", "required": true}
   ]
 }

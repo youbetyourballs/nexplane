@@ -60,13 +60,6 @@
     "description": "Ceph does not support version downgrade. Rollback surfaces which daemons are on new vs old version. Operators must use RBD snapshots or CephFS snapshots for data recovery if cluster is unhealthy."
   },
   "steps": [
-    {"step": "preflight", "generic_action": "ceph_cluster_upgrade", "description": "ceph -s (HEALTH_OK), ceph versions (all same version), +1 release validation"},
-    {"step": "set_noout", "generic_action": "ceph_cluster_upgrade", "description": "ceph osd set noout — prevent rebalancing during upgrade"},
-    {"step": "upgrade_mgrs", "generic_action": "ceph_cluster_upgrade", "description": "Per MGR host: stop, upgrade package, start, verify ceph mgr stat"},
-    {"step": "upgrade_mons", "generic_action": "ceph_cluster_upgrade", "description": "Per MON host: stop, upgrade package, start, verify quorum"},
-    {"step": "upgrade_osds", "generic_action": "ceph_cluster_upgrade", "description": "Per OSD host: stop all OSDs, upgrade package, start, wait ok-to-stop"},
-    {"step": "upgrade_rgw_mds", "generic_action": "ceph_cluster_upgrade", "description": "Optional: upgrade RGW and MDS daemons if present"},
-    {"step": "unset_noout", "generic_action": "ceph_cluster_upgrade", "description": "ceph osd unset noout — re-enable rebalancing"},
-    {"step": "verify", "generic_action": "ceph_cluster_upgrade", "description": "ceph -s HEALTH_OK, ceph versions all on target"}
+    {"generic_action": "ceph_cluster_upgrade", "purpose": "execute", "required": true}
   ]
 }
