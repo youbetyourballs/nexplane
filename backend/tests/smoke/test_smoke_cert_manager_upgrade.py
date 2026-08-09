@@ -264,7 +264,7 @@ def _launch_certmgr(ec2, aws_creds, ami_id) -> tuple:
         InstanceType="t3.large",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
-        UserData="#!/bin/bash\n# k3s starts via systemd on boot (enabled in AMI, kubeconfig deleted before snapshot)\necho INSTANCE_BOOT_OK\n",
+        UserData="#!/bin/bash\nsystemctl stop k3s 2>/dev/null || true\nsystemctl reset-failed k3s 2>/dev/null || true\nsystemctl start k3s\necho INSTANCE_BOOT_OK\n",
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-certmgr-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-certmgr-upgrade"},
