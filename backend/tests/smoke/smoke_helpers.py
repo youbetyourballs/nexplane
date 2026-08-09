@@ -1310,21 +1310,14 @@ def install_nexplane_agent_on_instance(
     timeout_s: int = 300,
 ) -> None:
     """
-    Upload the nexplane agent binary to S3, use SSM to install and start it
-    on the smoke instance, then wait for AgentRegistration to appear for the asset.
+    Use SSM to install and start the nexplane agent on the smoke instance,
+    downloading the binary directly from the platform's /downloads endpoint
+    (same VPC, port 8000). Then wait for AgentRegistration to appear.
     """
     import boto3 as _boto3
-    import uuid as _uuid
     import time as _time_mod
-    import os as _os_mod
 
     region = aws_creds.get("region", "us-east-1")
-    s3 = _boto3.client(
-        "s3",
-        aws_access_key_id=aws_creds.get("access_key_id") or aws_creds.get("aws_access_key_id"),
-        aws_secret_access_key=aws_creds.get("secret_access_key") or aws_creds.get("aws_secret_access_key"),
-        region_name=region,
-    )
     ssm = _boto3.client(
         "ssm",
         aws_access_key_id=aws_creds.get("access_key_id") or aws_creds.get("aws_access_key_id"),
@@ -1332,47 +1325,15 @@ def install_nexplane_agent_on_instance(
         region_name=region,
     )
 
-    # Find an S3 bucket we can write to
-    bucket = aws_creds.get("smoke_s3_bucket") or aws_creds.get("s3_bucket")
-    if not bucket:
-        # Try to list buckets and pick the first nexplane one
-        try:
-            resp = s3.list_buckets()
-            buckets = [b["Name"] for b in resp.get("Buckets", [])]
-            for b in buckets:
-                if "nexplane" in b.lower():
-                    bucket = b
-                    break
-            if not bucket and buckets:
-                bucket = buckets[0]
-        except Exception:
-            pass
-    if not bucket:
-        raise RuntimeError("No S3 bucket found for agent binary upload")
-
-    # Upload agent binary
-    s3_key = f"nexplane-agent/smoke/{_uuid.uuid4().hex}/nexplane-agent-linux-amd64"
-    s3.upload_file(_AGENT_BINARY_LOCAL, bucket, s3_key)
-
-    # Generate pre-signed URL valid for 30 minutes
-    url = s3.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": bucket, "Key": s3_key},
-        ExpiresIn=1800,
-    )
-
     platform_url = f"http://{_PLATFORM_PRIVATE_IP}:8000"
+    binary_url = f"{platform_url}/downloads/nexplane-agent-linux-amd64"
     install_script = f"""#!/bin/bash
 set -e
-curl -sf -o /usr/local/bin/nexplane-agent '{url}'
+curl -sf -o /usr/local/bin/nexplane-agent '{binary_url}'
 chmod +x /usr/local/bin/nexplane-agent
-export NP_CONTROL_PLANE='{platform_url}'
-export NP_SECRET='{_AGENT_SECRET}'
-export NP_MODE='service'
 nohup /usr/local/bin/nexplane-agent \
     -control-plane '{platform_url}' \
     -secret '{_AGENT_SECRET}' \
-    -mode service \
     -poll-interval 5s \
     >> /var/log/nexplane-agent.log 2>&1 &
 sleep 3
@@ -1416,12 +1377,6 @@ echo "Agent started"
     # Poll for AgentRegistration by IP and re-point to smoke asset
     log(f"  Waiting for nexplane agent to register for {private_ip or asset_id} (up to {timeout_s}s)")
     _wait_for_agent_registration_by_ip(private_ip, asset_id, timeout_s)
-
-    # Clean up S3
-    try:
-        s3.delete_object(Bucket=bucket, Key=s3_key)
-    except Exception:
-        pass
 
 
 def _wait_for_agent_registration(asset_id: str, timeout_s: int = 300) -> None:
