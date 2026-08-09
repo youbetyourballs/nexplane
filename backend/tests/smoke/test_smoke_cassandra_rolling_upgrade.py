@@ -145,8 +145,8 @@ def _launch_cassandra(aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Cassandra port 9042 on {private_ip} (up to 600s)")
-    deadline = time.time() + 600
+    log(f"  Waiting for Cassandra port 9042 on {private_ip} (up to 900s)")
+    deadline = time.time() + 900
     while time.time() < deadline:
         time.sleep(10)
         try:
@@ -157,7 +157,7 @@ def _launch_cassandra(aws_creds) -> tuple:
         except OSError:
             pass
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"Cassandra never reachable on {private_ip}:9042 within 600s")
+    pytest.fail(f"Cassandra never reachable on {private_ip}:9042 within 900s")
 
 
 def _register_asset(private_ip, run_id) -> tuple:

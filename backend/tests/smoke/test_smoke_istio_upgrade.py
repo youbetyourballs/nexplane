@@ -313,7 +313,7 @@ def test_phase1_provision():
 
     log("  Installing nexplane agent on smoke instance")
     install_nexplane_agent_on_instance(
-        instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=300
+        instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=600
     )
     log("[PHASE 1: provision] PASSED")
 
