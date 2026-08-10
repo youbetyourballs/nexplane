@@ -147,12 +147,13 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     launch_user_data = base64.b64encode(b"""#!/bin/bash
-# Stop keycloak (may already be running from AMI boot), then restart cleanly
-# reset-failed required: systemctl start is silent no-op on a unit in failed state
-# Do NOT wipe H2 -- AMI H2 has admin credentials ready; wiping forces schema reinit which is slow
+# AMI snapshot may contain H2 lock files from the build run.
+# H2 treats a stale .lck file as an in-use database and refuses to start.
+# Stop keycloak, wipe H2 data (forces clean re-init ~3-5 min), restart.
 systemctl stop keycloak 2>/dev/null || true
 sleep 5
 systemctl reset-failed keycloak 2>/dev/null || true
+rm -rf /opt/keycloak/data/h2 2>/dev/null || true
 systemctl start keycloak
 """).decode()
 
