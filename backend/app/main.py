@@ -231,7 +231,11 @@ app.add_middleware(
 )
 app.add_middleware(SetupGuardMiddleware)
 
-_downloads_dir = pathlib.Path("/opt/nexplane-downloads")
+# Prefer /app/bin/ (bind-mounted from host, survives restarts) if it has
+# a version file; fall back to the image-baked /opt/nexplane-downloads/.
+_downloads_dir = pathlib.Path("/app/bin")
+if not (_downloads_dir / "version").exists():
+    _downloads_dir = pathlib.Path("/opt/nexplane-downloads")
 if _downloads_dir.exists():
     app.mount("/downloads", StaticFiles(directory=str(_downloads_dir), html=False), name="downloads")
 
