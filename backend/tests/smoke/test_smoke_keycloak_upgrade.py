@@ -88,7 +88,8 @@ def _build_keycloak_ami(aws_creds) -> tuple:
     )
 
     user_data = base64.b64encode(b"""#!/bin/bash
-# Install Java 17
+# Install Java 17 (corretto17 must be enabled in amazon-linux-extras first)
+amazon-linux-extras enable corretto17 -y
 yum install -y java-17-amazon-corretto-headless
 # Download Keycloak 21.1.2
 curl -sfL https://github.com/keycloak/keycloak/releases/download/21.1.2/keycloak-21.1.2.tar.gz -o /tmp/keycloak.tar.gz

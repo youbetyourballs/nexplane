@@ -173,13 +173,15 @@ def _launch_cassandra_from_ami(ec2, ami_id, aws_creds) -> tuple:
     # Clear cluster state: AMI data dirs reference the BUILD instance IP/hostname.
     # Starting Cassandra with stale system.local / peers data causes it to fail
     # to join a ring on the new instance. Wiping data forces a clean single-node start.
-    # Single-node cluster: no token collision or gossip conflict, so preserving the
-    # existing data dir is safe and avoids the 30+ min re-initialization from scratch.
-    # Just remove any stale PID file and restart.
+    # Wipe commitlog and hints only — these may be dirty from the AMI snapshot
+    # (EC2 stop_instances may SIGKILL cassandra before it flushes WAL).
+    # SSTables are consistent from the clean build run; removing the commitlog
+    # forces Cassandra to skip replay and start cleanly in 2-5 min.
     launch_user_data = base64.b64encode(b"""#!/bin/bash
 systemctl stop cassandra 2>/dev/null || true
 sleep 5
-rm -f /var/run/cassandra/cassandra.pid 2>/dev/null || true
+rm -rf /var/lib/cassandra/commitlog/* 2>/dev/null || true
+rm -rf /var/lib/cassandra/hints/* 2>/dev/null || true
 systemctl reset-failed cassandra 2>/dev/null || true
 systemctl start cassandra
 """).decode()
