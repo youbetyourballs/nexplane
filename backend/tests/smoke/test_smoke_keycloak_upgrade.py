@@ -88,9 +88,8 @@ def _build_keycloak_ami(aws_creds) -> tuple:
     )
 
     user_data = base64.b64encode(b"""#!/bin/bash
-# Install Java 17 (corretto17 must be enabled in amazon-linux-extras first)
-amazon-linux-extras enable corretto17 -y
-yum install -y java-17-amazon-corretto-headless
+# Install Java 17 -- AL2023 ships Corretto 17 in default repos (no amazon-linux-extras)
+yum install -y java-17-amazon-corretto-headless 2>/dev/null || yum install -y java-17-openjdk-headless
 # Download Keycloak 21.1.2
 curl -sfL https://github.com/keycloak/keycloak/releases/download/21.1.2/keycloak-21.1.2.tar.gz -o /tmp/keycloak.tar.gz
 tar -xz -C /opt/ -f /tmp/keycloak.tar.gz
@@ -136,11 +135,11 @@ systemctl daemon-reload && systemctl enable keycloak && systemctl start keycloak
             s = socket.create_connection((private_ip, 8080), timeout=5)
             s.close()
             log(f"  Keycloak port 8080 open on {private_ip}")
-            break
+            return instance_id, ec2, None
         except OSError:
             pass
-
-    return instance_id, ec2, None
+    ec2.terminate_instances(InstanceIds=[instance_id])
+    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 30 min (AMI build) — Java install or JVM startup failed")
 
 
 def _launch_kc(ec2, ami_id, aws_creds) -> tuple:

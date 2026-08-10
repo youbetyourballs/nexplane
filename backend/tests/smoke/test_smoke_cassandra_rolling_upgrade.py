@@ -151,11 +151,11 @@ def _build_cassandra_ami(aws_creds) -> tuple:
             s = socket.create_connection((private_ip, 9042), timeout=5)
             s.close()
             log(f"  Cassandra port 9042 open on {private_ip}")
-            break
+            return instance_id, ec2, None
         except OSError:
             pass
-
-    return instance_id, ec2, None
+    ec2.terminate_instances(InstanceIds=[instance_id])
+    pytest.fail(f"Cassandra port 9042 never reachable on {private_ip} within 20 min (AMI build) — Java install or Cassandra startup failed")
 
 
 def _launch_cassandra_from_ami(ec2, ami_id, aws_creds) -> tuple:
@@ -169,19 +169,16 @@ def _launch_cassandra_from_ami(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
-    # listen_address is 0.0.0.0 (set at AMI build), so no IP fixup needed on boot.
-    # Clear cluster state: AMI data dirs reference the BUILD instance IP/hostname.
-    # Starting Cassandra with stale system.local / peers data causes it to fail
-    # to join a ring on the new instance. Wiping data forces a clean single-node start.
-    # Wipe commitlog and hints only — these may be dirty from the AMI snapshot
-    # (EC2 stop_instances may SIGKILL cassandra before it flushes WAL).
-    # SSTables are consistent from the clean build run; removing the commitlog
-    # forces Cassandra to skip replay and start cleanly in 2-5 min.
+    # Wipe ALL Cassandra data on launch.
+    # AMI data dirs contain system.local/peers with the BUILD instance's IP.
+    # On a new instance with a different IP, Cassandra tries to rejoin a ring that
+    # no longer exists. The only reliable fix is a full data wipe so Cassandra
+    # bootstraps as a fresh single-node cluster (takes ~3 min, not 30).
     launch_user_data = base64.b64encode(b"""#!/bin/bash
 systemctl stop cassandra 2>/dev/null || true
 sleep 5
-rm -rf /var/lib/cassandra/commitlog/* 2>/dev/null || true
-rm -rf /var/lib/cassandra/hints/* 2>/dev/null || true
+rm -rf /var/lib/cassandra/data /var/lib/cassandra/commitlog /var/lib/cassandra/hints /var/lib/cassandra/saved_caches 2>/dev/null || true
+mkdir -p /var/lib/cassandra && chown -R cassandra:cassandra /var/lib/cassandra 2>/dev/null || true
 systemctl reset-failed cassandra 2>/dev/null || true
 systemctl start cassandra
 """).decode()

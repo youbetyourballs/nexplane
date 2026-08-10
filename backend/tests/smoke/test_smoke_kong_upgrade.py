@@ -80,10 +80,9 @@ def _build_kong_ami(aws_creds) -> tuple:
 
     user_data_script = (
         b"#!/bin/bash\n"
-        b"# PostgreSQL 14\n"
-        b"amazon-linux-extras install postgresql14 -y\n"
-        b"yum install -y postgresql-server\n"
-        b"postgresql-setup initdb\n"
+        b"# PostgreSQL — AL2023 default repos (no amazon-linux-extras; yum aliases to dnf)\n"
+        b"yum install -y postgresql-server postgresql\n"
+        b"postgresql-setup --initdb\n"
         b"# Allow password auth\n"
         b"sed -i 's/ident$/md5/g; s/peer$/md5/g' /var/lib/pgsql/data/pg_hba.conf\n"
         b"systemctl enable postgresql && systemctl start postgresql\n"
