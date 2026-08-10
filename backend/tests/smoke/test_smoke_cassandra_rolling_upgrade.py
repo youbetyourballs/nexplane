@@ -176,8 +176,14 @@ def _launch_cassandra_from_ami(ec2, ami_id, aws_creds) -> tuple:
     launch_user_data = base64.b64encode(b"""#!/bin/bash
 systemctl stop cassandra 2>/dev/null || true
 sleep 3
+# Wipe stale cluster state from AMI build (references old instance IP/hostname).
+# Cassandra auto-creates the dirs on start but as root; pre-create them as the
+# cassandra user so the process (User=cassandra in systemd unit) can write to them.
 rm -rf /var/lib/cassandra/data /var/lib/cassandra/commitlog \
        /var/lib/cassandra/saved_caches /var/lib/cassandra/hints
+mkdir -p /var/lib/cassandra/data /var/lib/cassandra/commitlog \
+         /var/lib/cassandra/saved_caches /var/lib/cassandra/hints
+chown -R cassandra:cassandra /var/lib/cassandra
 systemctl reset-failed cassandra 2>/dev/null || true
 systemctl start cassandra
 """).decode()

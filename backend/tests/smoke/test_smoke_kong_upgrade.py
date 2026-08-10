@@ -101,6 +101,10 @@ def _build_kong_ami(aws_creds) -> tuple:
         b"sed -i 's|#pg_password =|pg_password = kong|' /etc/kong/kong.conf\n"
         b"sed -i 's|#pg_database = kong|pg_database = kong|' /etc/kong/kong.conf\n"
         b"kong migrations bootstrap 2>&1\n"
+        # Open admin API to all interfaces so the build waiter can connect from the VPC.
+        # Default is 127.0.0.1:8001 which is unreachable from outside the instance.
+        b"sed -i 's|#admin_listen = 0.0.0.0:8001.*|admin_listen = 0.0.0.0:8001|' /etc/kong/kong.conf || true\n"
+        b"grep -q '^admin_listen' /etc/kong/kong.conf || echo 'admin_listen = 0.0.0.0:8001' >> /etc/kong/kong.conf\n"
         b"systemctl enable kong && systemctl start kong || kong start\n"
     )
     user_data = base64.b64encode(user_data_script).decode()
