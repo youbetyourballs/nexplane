@@ -1326,10 +1326,21 @@ def install_nexplane_agent_on_instance(
     )
 
     platform_url = f"http://{_PLATFORM_PRIVATE_IP}:8000"
-    binary_url = f"{platform_url}/downloads/nexplane-agent-linux-amd64"
     install_script = f"""#!/bin/bash
 set -e
-curl -sf -o /usr/local/bin/nexplane-agent '{binary_url}'
+# Stop any existing agent (AMI may have old systemd service or nohup process)
+systemctl stop nexplane-agent 2>/dev/null || true
+systemctl disable nexplane-agent 2>/dev/null || true
+pkill -f nexplane-agent 2>/dev/null || true
+sleep 2
+# Fetch current server version and download the versioned binary directly.
+# The unversioned binary has Version="dev" which triggers an update loop on startup
+# (dev != 0.4.x → downloads versioned binary → syscall.Exec → sometimes fails).
+# Downloading the versioned binary directly sets Version="0.4.x" so the update
+# check passes immediately (same version) and the agent goes straight to registration.
+AGENT_VERSION=$(curl -sf '{platform_url}/downloads/version')
+curl -sf -o /usr/local/bin/nexplane-agent \
+    "{platform_url}/downloads/nexplane-agent-linux-amd64-${{AGENT_VERSION}}"
 chmod +x /usr/local/bin/nexplane-agent
 nohup /usr/local/bin/nexplane-agent \
     -control-plane '{platform_url}' \
@@ -1337,7 +1348,7 @@ nohup /usr/local/bin/nexplane-agent \
     -poll-interval 5s \
     >> /var/log/nexplane-agent.log 2>&1 &
 sleep 3
-echo "Agent started"
+echo "Agent started: version=${{AGENT_VERSION}}"
 """
 
     # Wait for SSM agent to register (can take 30-60s after instance running)

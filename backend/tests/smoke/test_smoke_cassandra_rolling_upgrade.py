@@ -75,10 +75,11 @@ def _boto3_client(service, creds):
     )
 
 
-def _launch_cassandra(aws_creds) -> tuple:
-    """Launch a fresh AL2 instance, install Cassandra 4.0, wait for port 9042.
+def _build_cassandra_ami(aws_creds) -> tuple:
+    """Build a Cassandra 4.0 AMI from scratch. Called once by get_or_create_smoke_ami.
 
-    Returns (instance_id, ec2_client, private_ip) matching get_or_create_smoke_ami launch_fn interface.
+    Installs Cassandra 4.0.13 on AL2, waits for port 9042, returns (instance_id, ec2, None)
+    for get_or_create_smoke_ami to snapshot and cache.
     """
     import base64
 
@@ -97,7 +98,6 @@ def _launch_cassandra(aws_creds) -> tuple:
         pytest.fail("No AL2 AMI found")
     al2_ami = images[0]["ImageId"]
 
-    # Build the systemd unit inline to avoid shell heredoc quoting issues
     install_lines = [
         "#!/bin/bash",
         "set -e",
@@ -108,11 +108,9 @@ def _launch_cassandra(aws_creds) -> tuple:
         "useradd -r cassandra 2>/dev/null || true",
         "mkdir -p /var/lib/cassandra /var/log/cassandra",
         "chown -R cassandra:cassandra /var/lib/cassandra /var/log/cassandra /opt/cassandra",
-        # Bind Cassandra to all interfaces so the smoke runner can reach port 9042
-        "PRIV_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)",
-        "sed -i \"s/listen_address: localhost/listen_address: ${PRIV_IP}/\" /opt/cassandra/conf/cassandra.yaml",
-        "sed -i \"s/rpc_address: localhost/rpc_address: 0.0.0.0/\" /opt/cassandra/conf/cassandra.yaml",
-        "echo \"broadcast_rpc_address: ${PRIV_IP}\" >> /opt/cassandra/conf/cassandra.yaml",
+        # listen_address must be 0.0.0.0 so it works on any IP after AMI boot
+        "sed -i 's/listen_address: localhost/listen_address: 0.0.0.0/' /opt/cassandra/conf/cassandra.yaml",
+        "sed -i 's/rpc_address: localhost/rpc_address: 0.0.0.0/' /opt/cassandra/conf/cassandra.yaml",
         r"printf '[Unit]\nDescription=Cassandra\n[Service]\nUser=cassandra\nExecStart=/opt/cassandra/bin/cassandra -f\nRestart=always\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/cassandra.service",
         "systemctl daemon-reload && systemctl enable cassandra && systemctl start cassandra",
     ]
@@ -128,6 +126,64 @@ def _launch_cassandra(aws_creds) -> tuple:
         IamInstanceProfile={"Name": _SSM_PROFILE},
         UserData=user_data,
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
+            {"Key": "Name",             "Value": "nexplane-smoke-cassandra-build"},
+            {"Key": "nexplane-purpose", "Value": "smoke-ami-build"},
+        ]}],
+    )
+    if subnet_id:
+        kwargs["SubnetId"] = subnet_id
+    if sg_id:
+        kwargs["SecurityGroupIds"] = [sg_id]
+
+    resp        = ec2.run_instances(**kwargs)
+    instance_id = resp["Instances"][0]["InstanceId"]
+    log(f"  Launched Cassandra AMI build instance {instance_id}")
+
+    ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+    desc       = ec2.describe_instances(InstanceIds=[instance_id])
+    private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
+
+    log(f"  Waiting for Cassandra port 9042 on {private_ip} (up to 20 min — fresh install)")
+    deadline = time.time() + 1200
+    while time.time() < deadline:
+        time.sleep(10)
+        try:
+            s = socket.create_connection((private_ip, 9042), timeout=5)
+            s.close()
+            log(f"  Cassandra port 9042 open on {private_ip}")
+            break
+        except OSError:
+            pass
+
+    return instance_id, ec2, None
+
+
+def _launch_cassandra_from_ami(ec2, ami_id, aws_creds) -> tuple:
+    """Boot a fresh instance from the cached Cassandra AMI.
+
+    Cassandra is already installed; just start the service and wait for port 9042.
+    Returns (instance_id, private_ip).
+    """
+    import base64
+
+    subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
+    sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
+
+    # listen_address is 0.0.0.0 (set at AMI build), so no IP fixup needed on boot.
+    launch_user_data = base64.b64encode(b"""#!/bin/bash
+systemctl stop cassandra 2>/dev/null || true
+sleep 3
+systemctl reset-failed cassandra 2>/dev/null || true
+systemctl start cassandra
+""").decode()
+
+    kwargs = dict(
+        ImageId=ami_id,
+        InstanceType="t3.medium",
+        MinCount=1, MaxCount=1,
+        IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData=launch_user_data,
+        TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-cassandra-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-cassandra-upgrade"},
         ]}],
@@ -139,25 +195,25 @@ def _launch_cassandra(aws_creds) -> tuple:
 
     resp        = ec2.run_instances(**kwargs)
     instance_id = resp["Instances"][0]["InstanceId"]
-    log(f"  Launched Cassandra instance {instance_id}")
+    log(f"  Launched Cassandra instance {instance_id} from AMI {ami_id}")
 
     ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Cassandra port 9042 on {private_ip} (up to 900s)")
-    deadline = time.time() + 900
+    log(f"  Waiting for Cassandra port 9042 on {private_ip} (up to 10 min — booting from AMI)")
+    deadline = time.time() + 600
     while time.time() < deadline:
         time.sleep(10)
         try:
             s = socket.create_connection((private_ip, 9042), timeout=5)
             s.close()
             log(f"  Cassandra port 9042 open on {private_ip}")
-            return instance_id, ec2, private_ip
+            return instance_id, private_ip
         except OSError:
             pass
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"Cassandra never reachable on {private_ip}:9042 within 900s")
+    pytest.fail(f"Cassandra never reachable on {private_ip}:9042 within 10 min (launch from AMI)")
 
 
 def _register_asset(private_ip, run_id) -> tuple:
@@ -225,13 +281,14 @@ def test_phase1_provision():
     ami_id = get_or_create_smoke_ami(
         cache_key=_CASSANDRA_AMI_KEY,
         setup_hash="4.0",
-        launch_fn=lambda creds: _launch_cassandra(creds),
+        launch_fn=_build_cassandra_ami,
         snapshot_name="nexplane-smoke-cassandra-4.0",
     )
     log(f"  Using Cassandra AMI: {ami_id}")
 
     # Launch a live instance from the cached AMI for this smoke run
-    instance_id, _ec2, private_ip = _launch_cassandra(aws_creds)
+    ec2            = _boto3_client("ec2", aws_creds)
+    instance_id, private_ip = _launch_cassandra_from_ami(ec2, ami_id, aws_creds)
     run_id            = uuid.uuid4().hex[:6]
     conn_id, asset_id = _register_asset(private_ip, run_id)
 
