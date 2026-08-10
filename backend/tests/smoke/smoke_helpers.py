@@ -1328,27 +1328,33 @@ def install_nexplane_agent_on_instance(
     platform_url = f"http://{_PLATFORM_PRIVATE_IP}:8000"
     install_script = f"""#!/bin/bash
 set -e
-# Stop any existing agent (AMI may have old systemd service or nohup process)
+# Fully stop and remove any existing agent (AMI may have old systemd service).
+# systemctl stop alone is not enough — if the unit is in failed state, start
+# is a no-op; reset-failed clears that. Removing the unit file prevents
+# systemd from restarting the old binary after we overwrite it.
 systemctl stop nexplane-agent 2>/dev/null || true
 systemctl disable nexplane-agent 2>/dev/null || true
-pkill -f nexplane-agent 2>/dev/null || true
+systemctl reset-failed nexplane-agent 2>/dev/null || true
+rm -f /etc/systemd/system/nexplane-agent.service
+systemctl daemon-reload 2>/dev/null || true
+pkill -9 -f nexplane-agent 2>/dev/null || true
 sleep 2
-# Fetch current server version and download the versioned binary directly.
-# The unversioned binary has Version="dev" which triggers an update loop on startup
-# (dev != 0.4.x → downloads versioned binary → syscall.Exec → sometimes fails).
-# Downloading the versioned binary directly sets Version="0.4.x" so the update
-# check passes immediately (same version) and the agent goes straight to registration.
+
+# Download the versioned binary directly (not the unversioned one which has
+# Version="dev" and triggers an update-loop on first boot).
 AGENT_VERSION=$(curl -sf '{platform_url}/downloads/version')
 curl -sf -o /usr/local/bin/nexplane-agent \
     "{platform_url}/downloads/nexplane-agent-linux-amd64-${{AGENT_VERSION}}"
 chmod +x /usr/local/bin/nexplane-agent
-nohup /usr/local/bin/nexplane-agent \
-    -control-plane '{platform_url}' \
-    -secret '{_AGENT_SECRET}' \
-    -poll-interval 5s \
-    >> /var/log/nexplane-agent.log 2>&1 &
+
+# Use the install subcommand to create a proper systemd service.
+# This writes /etc/systemd/system/nexplane-agent.service with Restart=always
+# and the correct credentials, then starts the unit.
+/usr/local/bin/nexplane-agent install \
+    --control-plane '{platform_url}' \
+    --secret '{_AGENT_SECRET}'
 sleep 3
-echo "Agent started: version=${{AGENT_VERSION}}"
+echo "Agent installed and started: version=${{AGENT_VERSION}}"
 """
 
     # Wait for SSM agent to register (can take 30-60s after instance running)

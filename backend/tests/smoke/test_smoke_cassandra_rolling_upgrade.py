@@ -170,9 +170,14 @@ def _launch_cassandra_from_ami(ec2, ami_id, aws_creds) -> tuple:
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     # listen_address is 0.0.0.0 (set at AMI build), so no IP fixup needed on boot.
+    # Clear cluster state: AMI data dirs reference the BUILD instance IP/hostname.
+    # Starting Cassandra with stale system.local / peers data causes it to fail
+    # to join a ring on the new instance. Wiping data forces a clean single-node start.
     launch_user_data = base64.b64encode(b"""#!/bin/bash
 systemctl stop cassandra 2>/dev/null || true
 sleep 3
+rm -rf /var/lib/cassandra/data /var/lib/cassandra/commitlog \
+       /var/lib/cassandra/saved_caches /var/lib/cassandra/hints
 systemctl reset-failed cassandra 2>/dev/null || true
 systemctl start cassandra
 """).decode()
