@@ -80,16 +80,17 @@ def _build_kong_ami(aws_creds) -> tuple:
 
     user_data_script = (
         b"#!/bin/bash\n"
-        b"# PostgreSQL — AL2023 default repos (no amazon-linux-extras; yum aliases to dnf)\n"
-        b"yum install -y postgresql-server postgresql\n"
-        b"postgresql-setup --initdb\n"
+        b"# PostgreSQL 14 via amazon-linux-extras (AL2)\n"
+        b"amazon-linux-extras install postgresql14 -y\n"
+        b"yum install -y postgresql-server\n"
+        b"postgresql-setup initdb\n"
         b"# Allow password auth\n"
         b"sed -i 's/ident$/md5/g; s/peer$/md5/g' /var/lib/pgsql/data/pg_hba.conf\n"
         b"systemctl enable postgresql && systemctl start postgresql\n"
         b"for i in $(seq 1 30); do sudo -u postgres psql -c '\\q' 2>/dev/null && break; sleep 2; done\n"
         b"sudo -u postgres psql -c \"CREATE USER kong WITH PASSWORD 'kong';\"\n"
         b"sudo -u postgres psql -c \"CREATE DATABASE kong OWNER kong;\"\n"
-        b"# Install Kong 3.4 via official yum repo (direct RPM URLs were deprecated)\n"
+        b"# Install Kong 3.4 via official yum repo\n"
         b"curl -sfL 'https://packages.konghq.com/public/gateway-34/config.rpm.txt' -o /etc/yum.repos.d/kong-gateway-34.repo\n"
         b"rpm --import https://packages.konghq.com/public/gateway-34/gpg.6B5D054B0707DE3B.key 2>/dev/null || true\n"
         b"yum install -y kong --nogpgcheck 2>&1\n"
@@ -100,16 +101,28 @@ def _build_kong_ami(aws_creds) -> tuple:
         b"sed -i 's|#pg_password =|pg_password = kong|' /etc/kong/kong.conf\n"
         b"sed -i 's|#pg_database = kong|pg_database = kong|' /etc/kong/kong.conf\n"
         b"kong migrations bootstrap 2>&1\n"
-        # Open admin API to all interfaces so the build waiter can connect from the VPC.
-        # Default is 127.0.0.1:8001 which is unreachable from outside the instance.
         b"sed -i 's|#admin_listen = 0.0.0.0:8001.*|admin_listen = 0.0.0.0:8001|' /etc/kong/kong.conf || true\n"
         b"grep -q '^admin_listen' /etc/kong/kong.conf || echo 'admin_listen = 0.0.0.0:8001' >> /etc/kong/kong.conf\n"
         b"systemctl enable kong && systemctl start kong || kong start\n"
     )
     user_data = base64.b64encode(user_data_script).decode()
 
+    # Use latest AL2 AMI -- has amazon-linux-extras for postgresql14
+    resp_ami = ec2.describe_images(
+        Owners=["amazon"],
+        Filters=[
+            {"Name": "name",                "Values": ["amzn2-ami-hvm-2.0.*-x86_64-gp2"]},
+            {"Name": "state",               "Values": ["available"]},
+            {"Name": "virtualization-type", "Values": ["hvm"]},
+        ],
+    )
+    al2_images = sorted(resp_ami["Images"], key=lambda x: x["CreationDate"], reverse=True)
+    if not al2_images:
+        pytest.fail("No AL2 AMI found for Kong build")
+    al2_ami = al2_images[0]["ImageId"]
+
     kwargs = dict(
-        ImageId="ami-0c101f26f147fa7fd",
+        ImageId=al2_ami,
         InstanceType="t3.medium",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
@@ -132,7 +145,7 @@ def _build_kong_ami(aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Kong admin port 8001 on {private_ip} (up to 30 min — AMI build: yum + download + kong bootstrap)")
+    log(f"  Waiting for Kong admin port 8001 on {private_ip} (up to 30 min - AMI build: yum + download + kong bootstrap)")
     deadline = time.time() + 1800
     while time.time() < deadline:
         time.sleep(15)

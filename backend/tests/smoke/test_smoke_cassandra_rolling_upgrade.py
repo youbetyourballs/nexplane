@@ -98,23 +98,20 @@ def _build_cassandra_ami(aws_creds) -> tuple:
         pytest.fail("No AL2 AMI found")
     al2_ami = images[0]["ImageId"]
 
-    install_lines = [
-        "#!/bin/bash",
-        "set -e",
-        "amazon-linux-extras install java-openjdk11 -y",
-        "CVER=4.0.13",
-        "curl -sfL https://archive.apache.org/dist/cassandra/${CVER}/apache-cassandra-${CVER}-bin.tar.gz | tar -xz -C /opt/",
-        "ln -sfn /opt/apache-cassandra-${CVER} /opt/cassandra",
-        "useradd -r cassandra 2>/dev/null || true",
-        "mkdir -p /var/lib/cassandra /var/log/cassandra",
-        "chown -R cassandra:cassandra /var/lib/cassandra /var/log/cassandra /opt/cassandra",
-        # listen_address must be 0.0.0.0 so it works on any IP after AMI boot
-        "sed -i 's/listen_address: localhost/listen_address: 0.0.0.0/' /opt/cassandra/conf/cassandra.yaml",
-        "sed -i 's/rpc_address: localhost/rpc_address: 0.0.0.0/' /opt/cassandra/conf/cassandra.yaml",
-        r"printf '[Unit]\nDescription=Cassandra\n[Service]\nUser=cassandra\nExecStart=/opt/cassandra/bin/cassandra -f\nRestart=always\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/cassandra.service",
-        "systemctl daemon-reload && systemctl enable cassandra && systemctl start cassandra",
-    ]
-    user_data = base64.b64encode("\n".join(install_lines).encode()).decode()
+    # Docker approach: avoids tarball download + OS java install issues.
+    # cassandra:4.0 bundles its own JVM; listens on 0.0.0.0 by default in Docker.
+    user_data = base64.b64encode(b"""#!/bin/bash
+amazon-linux-extras install docker -y
+systemctl enable docker && systemctl start docker
+until docker info 2>/dev/null; do sleep 2; done
+docker pull cassandra:4.0
+docker run -d \
+  --name cassandra \
+  --restart always \
+  -p 9042:9042 \
+  -e CASSANDRA_CLUSTER_NAME=smoke \
+  cassandra:4.0
+""").decode()
 
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
@@ -169,18 +166,17 @@ def _launch_cassandra_from_ami(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
-    # Wipe ALL Cassandra data on launch.
-    # AMI data dirs contain system.local/peers with the BUILD instance's IP.
-    # On a new instance with a different IP, Cassandra tries to rejoin a ring that
-    # no longer exists. The only reliable fix is a full data wipe so Cassandra
-    # bootstraps as a fresh single-node cluster (takes ~3 min, not 30).
+    # Fresh container from the Docker image baked into the AMI.
+    # No stale cluster data -- Docker volume is ephemeral per container.
     launch_user_data = base64.b64encode(b"""#!/bin/bash
-systemctl stop cassandra 2>/dev/null || true
-sleep 5
-rm -rf /var/lib/cassandra/data /var/lib/cassandra/commitlog /var/lib/cassandra/hints /var/lib/cassandra/saved_caches 2>/dev/null || true
-mkdir -p /var/lib/cassandra && chown -R cassandra:cassandra /var/lib/cassandra 2>/dev/null || true
-systemctl reset-failed cassandra 2>/dev/null || true
-systemctl start cassandra
+docker stop cassandra 2>/dev/null || true
+docker rm cassandra 2>/dev/null || true
+docker run -d \
+  --name cassandra \
+  --restart always \
+  -p 9042:9042 \
+  -e CASSANDRA_CLUSTER_NAME=smoke \
+  cassandra:4.0
 """).decode()
 
     kwargs = dict(

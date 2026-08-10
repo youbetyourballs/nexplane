@@ -87,24 +87,41 @@ def _build_keycloak_ami(aws_creds) -> tuple:
         region_name=aws_creds.get("region", "us-east-1"),
     )
 
+    # Use latest AL2 AMI -- has amazon-linux-extras (needed for Docker install)
+    resp = ec2.describe_images(
+        Owners=["amazon"],
+        Filters=[
+            {"Name": "name",                "Values": ["amzn2-ami-hvm-2.0.*-x86_64-gp2"]},
+            {"Name": "state",               "Values": ["available"]},
+            {"Name": "virtualization-type", "Values": ["hvm"]},
+        ],
+    )
+    images = sorted(resp["Images"], key=lambda x: x["CreationDate"], reverse=True)
+    if not images:
+        pytest.fail("No AL2 AMI found for Keycloak build")
+    al2_ami = images[0]["ImageId"]
+
+    # Docker approach: avoids all OS-level Java/JVM install issues across AMI versions.
+    # keycloak:21.1 image bundles its own JVM; no host java needed.
     user_data = base64.b64encode(b"""#!/bin/bash
-# Install Java 17 -- AL2023 ships Corretto 17 in default repos (no amazon-linux-extras)
-yum install -y java-17-amazon-corretto-headless 2>/dev/null || yum install -y java-17-openjdk-headless
-# Download Keycloak 21.1.2
-curl -sfL https://github.com/keycloak/keycloak/releases/download/21.1.2/keycloak-21.1.2.tar.gz -o /tmp/keycloak.tar.gz
-tar -xz -C /opt/ -f /tmp/keycloak.tar.gz
-ln -sfn /opt/keycloak-21.1.2 /opt/keycloak
-useradd -r keycloak 2>/dev/null || true
-chown -R keycloak:keycloak /opt/keycloak
-# Use start-dev: no pre-build step, H2 embedded, starts in 2-5 min -- ideal for smoke tests
-printf '[Unit]\nDescription=Keycloak\n[Service]\nUser=keycloak\nEnvironment=KEYCLOAK_ADMIN=admin\nEnvironment=KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234!\nExecStart=/opt/keycloak/bin/kc.sh start-dev --http-port=8080\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/keycloak.service
-systemctl daemon-reload && systemctl enable keycloak && systemctl start keycloak
+amazon-linux-extras install docker -y
+systemctl enable docker && systemctl start docker
+until docker info 2>/dev/null; do sleep 2; done
+docker pull quay.io/keycloak/keycloak:21.1
+docker run -d \
+  --name keycloak \
+  --restart always \
+  -p 8080:8080 \
+  -e KEYCLOAK_ADMIN=admin \
+  -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \
+  quay.io/keycloak/keycloak:21.1 \
+  start-dev
 """).decode()
 
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
     kwargs = dict(
-        ImageId="ami-0c101f26f147fa7fd",
+        ImageId=al2_ami,
         InstanceType="t3.large",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": "nexplane-smoke-ssm"},
@@ -146,15 +163,19 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
+    # Start a fresh keycloak container from the Docker image baked into the AMI.
+    # No H2 lock file issues -- fresh container = fresh embedded DB every time.
     launch_user_data = base64.b64encode(b"""#!/bin/bash
-# AMI snapshot may contain H2 lock files from the build run.
-# H2 treats a stale .lck file as an in-use database and refuses to start.
-# Stop keycloak, wipe H2 data (forces clean re-init ~3-5 min), restart.
-systemctl stop keycloak 2>/dev/null || true
-sleep 5
-systemctl reset-failed keycloak 2>/dev/null || true
-rm -rf /opt/keycloak/data/h2 2>/dev/null || true
-systemctl start keycloak
+docker stop keycloak 2>/dev/null || true
+docker rm keycloak 2>/dev/null || true
+docker run -d \
+  --name keycloak \
+  --restart always \
+  -p 8080:8080 \
+  -e KEYCLOAK_ADMIN=admin \
+  -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \
+  quay.io/keycloak/keycloak:21.1 \
+  start-dev
 """).decode()
 
     kwargs = dict(
