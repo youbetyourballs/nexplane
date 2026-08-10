@@ -87,6 +87,7 @@ def _build_kong_ami(aws_creds) -> tuple:
         b"# Allow password auth\n"
         b"sed -i 's/ident$/md5/g; s/peer$/md5/g' /var/lib/pgsql/data/pg_hba.conf\n"
         b"systemctl enable postgresql && systemctl start postgresql\n"
+        b"for i in $(seq 1 30); do sudo -u postgres psql -c '\\q' 2>/dev/null && break; sleep 2; done\n"
         b"sudo -u postgres psql -c \"CREATE USER kong WITH PASSWORD 'kong';\"\n"
         b"sudo -u postgres psql -c \"CREATE DATABASE kong OWNER kong;\"\n"
         b"# Install Kong 3.4 via direct package (AL2 compatible)\n"

@@ -243,7 +243,24 @@ def _launch_from_ami(ec2, aws_creds, ami_id) -> tuple:
         InstanceType="t3.xlarge",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
-        UserData="#!/bin/bash\nsystemctl stop k3s 2>/dev/null || true\nsystemctl reset-failed k3s 2>/dev/null || true\nrm -f /etc/rancher/k3s/k3s.yaml 2>/dev/null || true\nrm -rf /var/lib/rancher/k3s/server/tls 2>/dev/null || true\nrm -rf /var/lib/rancher/k3s/server/cred 2>/dev/null || true\nsystemctl enable k3s 2>/dev/null || true\nsystemctl start k3s\n",
+        # Don't wipe TLS — k3s always includes 127.0.0.1 as a SAN.
+        # Patch kubeconfig server URL to 127.0.0.1 so kubectl works regardless of
+        # instance IP, avoiding the 15+ min PKI regen that wiping server/tls triggers.
+        UserData=(
+            "#!/bin/bash\n"
+            "systemctl stop k3s 2>/dev/null || true\n"
+            "sleep 3\n"
+            "systemctl reset-failed k3s 2>/dev/null || true\n"
+            "systemctl enable k3s 2>/dev/null || true\n"
+            "systemctl start k3s\n"
+            "for i in $(seq 1 60); do\n"
+            "  if [ -f /etc/rancher/k3s/k3s.yaml ]; then\n"
+            "    sed -i 's|server: https://.*:6443|server: https://127.0.0.1:6443|' /etc/rancher/k3s/k3s.yaml\n"
+            "    break\n"
+            "  fi\n"
+            "  sleep 5\n"
+            "done\n"
+        ),
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-istio-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-istio-upgrade"},
