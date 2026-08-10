@@ -133,8 +133,8 @@ def _build_kong_ami(aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Kong admin port 8001 on {private_ip} (up to 10 min)")
-    deadline = time.time() + 900
+    log(f"  Waiting for Kong admin port 8001 on {private_ip} (up to 30 min — AMI build: yum + download + kong bootstrap)")
+    deadline = time.time() + 1800
     while time.time() < deadline:
         time.sleep(15)
         try:
@@ -253,7 +253,7 @@ def test_phase1_provision():
             pass
     else:
         ec2.terminate_instances(InstanceIds=[instance_id])
-        pytest.fail(f"Kong admin API never reachable on {private_ip}:8001 within 600s")
+        pytest.fail(f"Kong admin API never reachable on {private_ip}:8001 within 30 min")
 
     run_id    = uuid.uuid4().hex[:6]
     connector = _api("post", "/connectors", json={

@@ -107,15 +107,19 @@ echo SCHEMA_DONE
             "asset_id": asset_id,
         }
 
-    # Phase 4: Verify — search directly for the schema DN
+    # Phase 4: Verify — search children of cn=schema,cn=config for the schema cn.
+    # OpenLDAP stores schema entries with numeric prefixes: cn={N}testapp rather than
+    # cn=testapp, so an exact-base search would never match. Use subtree + cn= filter instead.
     schema_dn = (parameters.get("desired_outcome") or parameters).get("schema_dn", "cn=testapp,cn=schema,cn=config")
+    # Extract the cn value from the full DN (e.g. "testapp" from "cn=testapp,cn=schema,cn=config")
+    schema_cn = schema_dn.split(",")[0].split("=", 1)[-1] if "=" in schema_dn.split(",")[0] else schema_dn
     verify = await _run(
-        f'ldapsearch -Y EXTERNAL -H ldapi:/// -b "{schema_dn}" -s base 2>&1; echo VERIFY_DONE',
+        f'ldapsearch -Y EXTERNAL -H ldapi:/// -b "cn=schema,cn=config" -s one "(cn=*{schema_cn})" cn 2>&1; echo VERIFY_DONE',
         asset_id,
         timeout=60,
     )
     verify_out = str(verify.get("output", "") or "")
-    schema_present = (schema_dn in verify_out or "objectClass: olcSchemaConfig" in verify_out) and "VERIFY_DONE" in verify_out
+    schema_present = schema_cn in verify_out and "VERIFY_DONE" in verify_out
 
     return {
         "status": "completed",
