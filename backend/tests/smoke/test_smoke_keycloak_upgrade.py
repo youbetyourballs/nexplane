@@ -180,8 +180,8 @@ systemctl start keycloak
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 15 min)")
-    deadline = time.time() + 900
+    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 30 min — start-dev JVM startup is slow even from AMI)")
+    deadline = time.time() + 1800
     while time.time() < deadline:
         time.sleep(15)
         try:
@@ -192,7 +192,7 @@ systemctl start keycloak
         except OSError:
             pass
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 15 min (launch)")
+    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 30 min (launch)")
 
 
 def _register_asset(private_ip, run_id) -> tuple:
