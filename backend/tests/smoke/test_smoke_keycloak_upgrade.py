@@ -388,9 +388,8 @@ def test_phase1_provision():
 
     ami_id = get_or_create_smoke_ami(
         cache_key="keycloak/21.1",
-        setup_hash="keycloak-21.1-ssm-launch-diag",
+        setup_hash="keycloak-21.1-v1",
         launch_fn=_build_keycloak_ami,
-        snapshot_name="nexplane-smoke-keycloak-21.1",
     )
 
     ec2                      = _boto3_client("ec2", aws_creds)
