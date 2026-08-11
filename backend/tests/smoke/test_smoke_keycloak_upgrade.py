@@ -101,13 +101,43 @@ def _build_keycloak_ami(aws_creds) -> tuple:
         pytest.fail("No AL2 AMI found for Keycloak build")
     al2_ami = images[0]["ImageId"]
 
-    # Docker approach: avoids all OS-level Java/JVM install issues across AMI versions.
-    # keycloak:21.1 image bundles its own JVM; no host java needed.
+    # Production mode: run kc.sh build during AMI construction so the Quarkus
+    # augmentation is cached. On subsequent launches, start --optimized brings
+    # the server up in <2 min vs 60+ min for start-dev cold JVM init.
+    # H2 embedded DB is fine for smoke (ephemeral, no persistence needed).
     user_data = base64.b64encode(b"""#!/bin/bash
 amazon-linux-extras install docker -y
 systemctl enable docker && systemctl start docker
 until docker info 2>/dev/null; do sleep 2; done
 docker pull quay.io/keycloak/keycloak:21.1
+# Build the optimized server image (Quarkus augmentation — bakes the classpath)
+docker run --rm \
+  --name keycloak-build \
+  -e KEYCLOAK_ADMIN=admin \
+  -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \
+  -e KC_DB=dev-file \
+  -e KC_HTTP_ENABLED=true \
+  -e KC_HOSTNAME_STRICT=false \
+  quay.io/keycloak/keycloak:21.1 \
+  build --db=dev-file 2>/dev/null || \
+docker run --rm \
+  --name keycloak-build \
+  -e KEYCLOAK_ADMIN=admin \
+  -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \
+  quay.io/keycloak/keycloak:21.1 \
+  build 2>/dev/null || true
+# Run in optimized production mode (fast startup from pre-built augmentation)
+docker run -d \
+  --name keycloak \
+  --restart always \
+  -p 8080:8080 \
+  -e KEYCLOAK_ADMIN=admin \
+  -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \
+  -e KC_DB=dev-file \
+  -e KC_HTTP_ENABLED=true \
+  -e KC_HOSTNAME_STRICT=false \
+  quay.io/keycloak/keycloak:21.1 \
+  start --optimized 2>/dev/null || \
 docker run -d \
   --name keycloak \
   --restart always \
@@ -144,8 +174,8 @@ docker run -d \
     desc = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 30 min — cold install: java yum + download + JVM init)")
-    deadline = _t.time() + 1800
+    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 45 min — docker pull + kc.sh build + first start)")
+    deadline = _t.time() + 2700
     while _t.time() < deadline:
         _t.sleep(15)
         try:
@@ -163,9 +193,9 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
-    # The AMI already has the keycloak container registered with --restart always.
-    # Just ensure Docker is running — the container will auto-start, avoiding a
-    # full cold JVM init that would exceed the 30-minute timeout.
+    # AMI has keycloak container registered with --restart always running in
+    # production (--optimized) mode. Just start Docker; the container auto-starts
+    # with the pre-built Quarkus augmentation — should be up in <5 min.
     launch_user_data = base64.b64encode(b"""#!/bin/bash
 systemctl start docker 2>/dev/null || true
 """).decode()
@@ -194,10 +224,10 @@ systemctl start docker 2>/dev/null || true
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 50 min — start-dev JVM startup is slow even from AMI)")
-    deadline = time.time() + 3000
+    log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 15 min — optimized mode from pre-built AMI)")
+    deadline = time.time() + 900
     while time.time() < deadline:
-        time.sleep(15)
+        time.sleep(10)
         try:
             s = socket.create_connection((private_ip, 8080), timeout=5)
             s.close()
@@ -206,7 +236,7 @@ systemctl start docker 2>/dev/null || true
         except OSError:
             pass
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 50 min (launch)")
+    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 15 min (launch)")
 
 
 def _register_asset(private_ip, run_id) -> tuple:
@@ -274,7 +304,7 @@ def test_phase1_provision():
 
     ami_id = get_or_create_smoke_ami(
         cache_key="keycloak/21.1",
-        setup_hash="keycloak-21.1",
+        setup_hash="keycloak-21.1-prod-mode",
         launch_fn=_build_keycloak_ami,
         snapshot_name="nexplane-smoke-keycloak-21.1",
     )
