@@ -110,7 +110,7 @@ amazon-linux-extras install docker -y
 systemctl enable docker && systemctl start docker
 until docker info 2>/dev/null; do sleep 2; done
 docker pull quay.io/keycloak/keycloak:21.1
-# Build the optimized server image (Quarkus augmentation — bakes the classpath)
+# Build the optimized server image (Quarkus augmentation - bakes the classpath)
 docker run --rm \
   --name keycloak-build \
   -e KEYCLOAK_ADMIN=admin \
