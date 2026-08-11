@@ -4443,7 +4443,7 @@
         "server"
       ],
       "generic_action": "cassandra_rolling_upgrade",
-      "smoke_verified": false,
+      "smoke_verified": true,
       "output_fields": {
         "status": "completed | dry_run",
         "snapshot_tag": "nodetool snapshot tag (timestamp-based) used as rollback reference",
@@ -5093,7 +5093,7 @@
       "executor": "nexplane_agent.kong_upgrade",
       "generic_action": "kong_upgrade",
       "action_id": "kong_upgrade",
-      "smoke_verified": false,
+      "smoke_verified": true,
       "output_fields": {
         "status": "completed | dry_run",
         "source_version": "version before upgrade",
