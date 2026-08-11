@@ -110,7 +110,7 @@ async def get_asset_provenance(
         rollback_available = False
         rollback_strategy = None
         if plan:
-            rp = (plan.plan_data or {}).get("rollback_plan", {})
+            rp = plan.rollback_plan or {}
             rollback_available = bool(rp.get("automatic", False) or rp.get("steps"))
             rollback_strategy = rp.get("strategy")
 
@@ -210,7 +210,7 @@ async def search_crs_by_parameter(
         plan = plans_by_cr.get(cr.id)
         rp = {}
         if plan:
-            rp = (plan.plan_data or {}).get("rollback_plan", {})
+            rp = plan.rollback_plan or {}
 
         last_verified = None
         if cr.verification_checks:
