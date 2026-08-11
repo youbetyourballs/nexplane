@@ -170,11 +170,41 @@ docker run -d \
             s = socket.create_connection((private_ip, 8080), timeout=5)
             s.close()
             log(f"  Keycloak port 8080 open on {private_ip}")
-            return instance_id, ec2, None
+            break
         except OSError:
             pass
-    ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 30 min (AMI build) — Java install or JVM startup failed")
+    else:
+        ec2.terminate_instances(InstanceIds=[instance_id])
+        pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 45 min (AMI build) — docker pull or kc.sh build failed")
+
+    # Stop and remove the keycloak container before AMI snapshot so the AMI
+    # has clean Docker state (no --restart always container to fight user_data).
+    # Use SSM to run the stop/rm inside the instance.
+    import boto3 as _boto3
+    _ssm = _boto3.client(
+        "ssm",
+        aws_access_key_id=aws_creds.get("access_key_id") or aws_creds.get("aws_access_key_id"),
+        aws_secret_access_key=aws_creds.get("secret_access_key") or aws_creds.get("aws_secret_access_key"),
+        region_name=aws_creds.get("region", "us-east-1"),
+    )
+    log(f"  Stopping keycloak container on {instance_id} via SSM before snapshot")
+    try:
+        cmd_resp = _ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": ["docker stop keycloak 2>/dev/null || true", "docker rm keycloak 2>/dev/null || true"]},
+        )
+        cmd_id = cmd_resp["Command"]["CommandId"]
+        _t.sleep(15)
+        _ssm.get_waiter("command_executed").wait(
+            CommandId=cmd_id, InstanceId=instance_id,
+            WaiterConfig={"Delay": 5, "MaxAttempts": 24},
+        )
+        log(f"  Keycloak container stopped and removed")
+    except Exception as _e:
+        log(f"  SSM stop skipped ({_e}) — proceeding anyway")
+
+    return instance_id, ec2, None
 
 
 def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
@@ -307,7 +337,7 @@ def test_phase1_provision():
 
     ami_id = get_or_create_smoke_ami(
         cache_key="keycloak/21.1",
-        setup_hash="keycloak-21.1-tar-reload",
+        setup_hash="keycloak-21.1-clean-docker-state",
         launch_fn=_build_keycloak_ami,
         snapshot_name="nexplane-smoke-keycloak-21.1",
     )
