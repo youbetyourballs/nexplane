@@ -216,7 +216,8 @@ def test_phase1_provision():
     import base64 as _b64
     _boot_ud = _b64.b64encode(
         b"#!/bin/bash\n"
-        b"# Open Kong admin API to all interfaces (default is 127.0.0.1:8001)\n"
+        b"# Wait for PostgreSQL (auto-started via systemd enable, but may not be ready yet)\n"
+        b"for i in $(seq 1 30); do sudo -u postgres psql -c '\\q' 2>/dev/null && break; sleep 5; done\n"
         b"grep -q '^admin_listen' /etc/kong/kong.conf 2>/dev/null || "
         b"echo 'admin_listen = 0.0.0.0:8001' >> /etc/kong/kong.conf\n"
         b"sed -i 's|^admin_listen.*|admin_listen = 0.0.0.0:8001|' /etc/kong/kong.conf 2>/dev/null || true\n"

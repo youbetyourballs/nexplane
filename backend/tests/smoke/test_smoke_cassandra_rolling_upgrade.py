@@ -167,8 +167,10 @@ def _launch_cassandra_from_ami(ec2, ami_id, aws_creds) -> tuple:
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     # Fresh container from the Docker image baked into the AMI.
-    # No stale cluster data -- Docker volume is ephemeral per container.
+    # Wait for Docker daemon (user_data runs before systemd services are fully up).
     launch_user_data = base64.b64encode(b"""#!/bin/bash
+systemctl start docker 2>/dev/null || true
+until docker info 2>/dev/null; do sleep 2; done
 docker stop cassandra 2>/dev/null || true
 docker rm cassandra 2>/dev/null || true
 docker run -d \

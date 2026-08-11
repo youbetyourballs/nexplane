@@ -164,8 +164,10 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     # Start a fresh keycloak container from the Docker image baked into the AMI.
-    # No H2 lock file issues -- fresh container = fresh embedded DB every time.
+    # Wait for Docker daemon (user_data runs before systemd services are fully up).
     launch_user_data = base64.b64encode(b"""#!/bin/bash
+systemctl start docker 2>/dev/null || true
+until docker info 2>/dev/null; do sleep 2; done
 docker stop keycloak 2>/dev/null || true
 docker rm keycloak 2>/dev/null || true
 docker run -d \
