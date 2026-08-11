@@ -76,12 +76,22 @@ sleep 5; echo UPGRADE_DONE
 """.strip()
     await _run(upgrade_cmd, asset_id, timeout=300)
 
-    # Phase 4: Verify
+    # Phase 4: Verify — check version and route count via admin API
     verify_result = await _run(
         "curl -sf http://localhost:8001/ 2>&1 | grep -i version; echo VERIFY_DONE",
         asset_id,
         timeout=60,
     )
+    routes_result = await _run(
+        "curl -sf http://localhost:8001/routes 2>&1 | python3 -c \"import sys,json; d=json.load(sys.stdin); print(len(d.get('data',[])))\" 2>/dev/null || echo 0",
+        asset_id,
+        timeout=30,
+    )
+    routes_out = str(routes_result.get("output", "") or routes_result.get("stdout", "")).strip()
+    try:
+        routes_count = int(routes_out.splitlines()[-1]) if routes_out else 0
+    except (ValueError, IndexError):
+        routes_count = 0
 
     return {
         "status": "completed",
@@ -89,6 +99,7 @@ sleep 5; echo UPGRADE_DONE
         "target_version": target_version,
         "backup_path": backup_path,
         "verify_output": str(verify_result.get("output", "") or verify_result.get("stdout", "")),
+        "routes_count": routes_count,
         "asset_id": asset_id,
     }
 

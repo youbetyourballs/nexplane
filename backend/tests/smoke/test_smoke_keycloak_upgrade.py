@@ -163,21 +163,11 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
-    # Start a fresh keycloak container from the Docker image baked into the AMI.
-    # Wait for Docker daemon (user_data runs before systemd services are fully up).
+    # The AMI already has the keycloak container registered with --restart always.
+    # Just ensure Docker is running — the container will auto-start, avoiding a
+    # full cold JVM init that would exceed the 30-minute timeout.
     launch_user_data = base64.b64encode(b"""#!/bin/bash
 systemctl start docker 2>/dev/null || true
-until docker info 2>/dev/null; do sleep 2; done
-docker stop keycloak 2>/dev/null || true
-docker rm keycloak 2>/dev/null || true
-docker run -d \
-  --name keycloak \
-  --restart always \
-  -p 8080:8080 \
-  -e KEYCLOAK_ADMIN=admin \
-  -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \
-  quay.io/keycloak/keycloak:21.1 \
-  start-dev
 """).decode()
 
     kwargs = dict(

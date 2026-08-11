@@ -29,16 +29,18 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         raise ValueError("asset_ids required")
 
     asset_id = str(asset_ids[0])
-    source_version = parameters.get("source_version", "4.0")
-    target_version = parameters.get("target_version", "4.1")
+    p = parameters.get("desired_outcome") or parameters
+    source_version = p.get("source_version", "4.0")
+    target_version = p.get("target_version", "4.1")
 
     # 1. Preflight
     preflight = await _run("nodetool status 2>&1 || true", asset_id, timeout=60)
     logger.info("Cassandra preflight: %s", preflight)
 
-    # 2. Snapshot
+    # 2. Snapshot — tag with timestamp for rollback reference
+    snapshot_tag = f"nexplane_smoke_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     snapshot = await _run(
-        "nodetool snapshot nexplane_smoke 2>&1; echo SNAP_EXIT=$?",
+        f"nodetool snapshot -t {snapshot_tag} 2>&1; echo SNAP_EXIT=$?",
         asset_id,
         timeout=120,
     )
@@ -61,22 +63,27 @@ echo UPGRADE_DONE
     logger.info("Cassandra upgrade: %s", upgrade)
 
     # 4. Verify
-    verify_version = await _run("nodetool version 2>&1", asset_id, timeout=60)
-    verify_status = await _run("nodetool status 2>&1", asset_id, timeout=60)
+    verify_version = await _run("nodetool version 2>&1 || true", asset_id, timeout=60)
+    verify_status = await _run("nodetool status 2>&1 || true", asset_id, timeout=60)
 
     version_out = str(verify_version.get("output", "") or verify_version.get("stdout", ""))
     status_out = str(verify_status.get("output", "") or verify_status.get("stdout", ""))
     version_ok = "4.1" in version_out
-    all_nodes_healthy = "UN" in status_out
+    all_nodes_ok = "UN" in status_out
 
     return {
         "status": "completed",
         "source_version": source_version,
         "target_version": target_version,
         "snapshot_path": snapshot_path,
+        "snapshot_tag": snapshot_tag,
         "nodes_upgraded": [asset_id],
-        "all_nodes_healthy": all_nodes_healthy,
-        "version_verified": version_ok,
+        "verify_result": {
+            "all_nodes_ok": all_nodes_ok,
+            "version_ok": version_ok,
+            "version_output": version_out[:500],
+            "status_output": status_out[:500],
+        },
         "asset_id": asset_id,
         "completed_at": datetime.now(timezone.utc).isoformat(),
     }
