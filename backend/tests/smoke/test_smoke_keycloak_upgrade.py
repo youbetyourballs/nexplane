@@ -207,30 +207,40 @@ docker run -d \
     return instance_id, ec2, None
 
 
+def _ssm_run(ssm_client, instance_id: str, commands: list, label: str = "") -> str:
+    """Run shell commands on instance via SSM and return stdout."""
+    try:
+        r = ssm_client.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": commands},
+        )
+        cmd_id = r["Command"]["CommandId"]
+        for _ in range(30):
+            time.sleep(5)
+            out = ssm_client.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+            if out["Status"] in ("Success", "Failed", "TimedOut", "Cancelled"):
+                return out.get("StandardOutputContent", "") + out.get("StandardErrorContent", "")
+    except Exception as e:
+        return f"SSM error: {e}"
+    return "SSM timeout"
+
+
 def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
+    import boto3 as _boto3
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
+    _ssm = _boto3.client(
+        "ssm",
+        aws_access_key_id=aws_creds.get("access_key_id") or aws_creds.get("aws_access_key_id"),
+        aws_secret_access_key=aws_creds.get("secret_access_key") or aws_creds.get("aws_secret_access_key"),
+        region_name=aws_creds.get("region", "us-east-1"),
+    )
 
-    # Reload image from tar (guarantees image is present regardless of overlay2
-    # page-cache state at snapshot time), then start a fresh container.
+    # Minimal user_data: just ensure docker is up. We'll start keycloak via SSM
+    # so we can capture diagnostics if it fails.
     launch_user_data = base64.b64encode(b"""#!/bin/bash
 systemctl start docker 2>/dev/null || true
-until docker info 2>/dev/null; do sleep 2; done
-# Reload built image from tar to ensure overlay2 layers are consistent
-docker load -i /opt/nexplane-keycloak-21.1-built.tar 2>/dev/null || true
-docker stop keycloak 2>/dev/null || true
-docker rm keycloak 2>/dev/null || true
-docker run -d \
-  --name keycloak \
-  --restart always \
-  -p 8080:8080 \
-  -e KEYCLOAK_ADMIN=admin \
-  -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \
-  -e KC_DB=dev-file \
-  -e KC_HTTP_ENABLED=true \
-  -e KC_HOSTNAME_STRICT=false \
-  nexplane-keycloak:21.1-built \
-  start --optimized
 """).decode()
 
     kwargs = dict(
@@ -257,6 +267,43 @@ docker run -d \
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
+    # Wait for SSM agent to be ready (it starts quickly on AL2 AMIs)
+    log(f"  Waiting for SSM agent on {instance_id}")
+    time.sleep(30)
+    for _ in range(20):
+        info = _ssm.describe_instance_information(
+            Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
+        ).get("InstanceInformationList", [])
+        if info:
+            break
+        time.sleep(10)
+
+    # Run diagnostics and start keycloak via SSM
+    log(f"  Diagnosing Docker state on {instance_id}")
+    diag = _ssm_run(_ssm, instance_id, [
+        "echo '=== docker info ==='",
+        "docker info 2>&1 | head -5 || echo DOCKER_NOT_RUNNING",
+        "echo '=== images ==='",
+        "docker images 2>&1",
+        "echo '=== tar exists ==='",
+        "ls -lh /opt/nexplane-keycloak-21.1-built.tar 2>&1 || echo TAR_MISSING",
+    ])
+    log(f"  Diagnostics:\n{diag[:1500]}")
+
+    # Load image from tar then start keycloak
+    log(f"  Starting keycloak via SSM on {instance_id}")
+    start_out = _ssm_run(_ssm, instance_id, [
+        "docker load -i /opt/nexplane-keycloak-21.1-built.tar 2>&1 || echo LOAD_FAILED",
+        "echo '=== loaded images ==='",
+        "docker images 2>&1",
+        "docker rm -f keycloak 2>/dev/null || true",
+        "docker run -d --name keycloak -p 8080:8080 "
+        "-e KEYCLOAK_ADMIN=admin -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! "
+        "-e KC_DB=dev-file -e KC_HTTP_ENABLED=true -e KC_HOSTNAME_STRICT=false "
+        "nexplane-keycloak:21.1-built start --optimized 2>&1 && echo RUN_OK || echo RUN_FAILED",
+    ])
+    log(f"  SSM start output:\n{start_out[:1500]}")
+
     log(f"  Waiting for Keycloak port 8080 on {private_ip} (up to 15 min — optimized mode from pre-built AMI)")
     deadline = time.time() + 900
     while time.time() < deadline:
@@ -268,6 +315,10 @@ docker run -d \
             return instance_id, private_ip
         except OSError:
             pass
+
+    # Capture container logs before giving up
+    kc_logs = _ssm_run(_ssm, instance_id, ["docker logs keycloak 2>&1 | tail -30 || echo NO_CONTAINER"])
+    log(f"  Keycloak container logs:\n{kc_logs[:2000]}")
     ec2.terminate_instances(InstanceIds=[instance_id])
     pytest.fail(f"Keycloak port 8080 never reachable on {private_ip} within 15 min (launch)")
 
@@ -337,7 +388,7 @@ def test_phase1_provision():
 
     ami_id = get_or_create_smoke_ami(
         cache_key="keycloak/21.1",
-        setup_hash="keycloak-21.1-clean-docker-state",
+        setup_hash="keycloak-21.1-ssm-launch-diag",
         launch_fn=_build_keycloak_ami,
         snapshot_name="nexplane-smoke-keycloak-21.1",
     )
