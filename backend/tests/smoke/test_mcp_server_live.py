@@ -255,13 +255,13 @@ _smoke_state: dict = {
 
 def _get_api_token(client: NexplaneClient, base_url: str) -> str:
     """Create or retrieve a long-lived API token for MCP auth during the smoke run."""
-    result = client.post("/api/v1/tokens", json={
+    result = client.post("/tokens", json={
         "name": "mcp-smoke-test",
     })
     # The tokens endpoint returns 'raw_token'
     raw = result.get("raw_token") or result.get("token", "")
     if not raw:
-        fail(f"POST /api/v1/tokens did not return a token field: {result}")
+        fail(f"POST /tokens did not return a token field: {result}")
     return raw
 
 
@@ -693,7 +693,7 @@ def phase_mcp_cr_roundtrip(client: NexplaneClient, base_url: str) -> None:
         approver_client = NexplaneClient(base_url, "", "")
         approver_client.client.headers["Authorization"] = f"Bearer {approver_bearer}"
         try:
-            tok_result = approver_client.post("/api/v1/tokens", json={
+            tok_result = approver_client.post("/tokens", json={
                 "name": "mcp-smoke-approver-token",
             })
             approver_api_token = tok_result.get("raw_token") or tok_result.get("token", "")
