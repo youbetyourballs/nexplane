@@ -312,9 +312,24 @@ def test_phase2_upgrade():
     if not _state.get("connector_id"):
         pytest.skip("Phase 1 did not complete")
 
-    conn_id  = _state["connector_id"]
-    asset_id = _state["asset_id"]
-    run_id   = uuid.uuid4().hex[:6]
+    conn_id    = _state["connector_id"]
+    asset_id   = _state["asset_id"]
+    private_ip = _state["private_ip"]
+    run_id     = uuid.uuid4().hex[:6]
+
+    # Seed a service + route so routes_count >= 1 survives upgrade verification
+    import requests as _req
+    admin_base = f"http://{private_ip}:8001"
+    try:
+        _req.post(f"{admin_base}/services", json={
+            "name": "smoke-svc", "url": "http://httpbin.org"
+        }, timeout=10)
+        _req.post(f"{admin_base}/services/smoke-svc/routes", json={
+            "name": "smoke-route", "paths": ["/smoke"]
+        }, timeout=10)
+        log("  Seeded Kong service + route before upgrade")
+    except Exception as exc:
+        log(f"  Warning: could not seed Kong route ({exc}) — routes_count may be 0")
 
     cr = _api("post", "/change-requests", json={
         "title":       f"smoke-kong-upgrade-{run_id}",

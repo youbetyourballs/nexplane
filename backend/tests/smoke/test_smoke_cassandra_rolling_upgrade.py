@@ -166,19 +166,10 @@ def _launch_cassandra_from_ami(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
-    # Fresh container from the Docker image baked into the AMI.
-    # Wait for Docker daemon (user_data runs before systemd services are fully up).
+    # AMI has cassandra container registered with --restart always.
+    # Just start Docker — the container auto-starts, avoiding a cold JVM init.
     launch_user_data = base64.b64encode(b"""#!/bin/bash
 systemctl start docker 2>/dev/null || true
-until docker info 2>/dev/null; do sleep 2; done
-docker stop cassandra 2>/dev/null || true
-docker rm cassandra 2>/dev/null || true
-docker run -d \
-  --name cassandra \
-  --restart always \
-  -p 9042:9042 \
-  -e CASSANDRA_CLUSTER_NAME=smoke \
-  cassandra:4.0
 """).decode()
 
     kwargs = dict(
