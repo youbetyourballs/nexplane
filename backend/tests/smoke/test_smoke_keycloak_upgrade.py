@@ -177,15 +177,25 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
-    # AMI has keycloak container using nexplane-keycloak:21.1-built + dev-file.
-    # Delete stale H2 lock files left by the AMI snapshot before restarting;
-    # otherwise H2 refuses to start and Docker enters exponential backoff.
+    # AMI has nexplane-keycloak:21.1-built image. Remove the stale container
+    # (which carries H2 lock files in its writable layer from the AMI snapshot)
+    # and start a fresh one so start --optimized gets a clean H2 state.
     launch_user_data = base64.b64encode(b"""#!/bin/bash
 systemctl start docker 2>/dev/null || true
 until docker info 2>/dev/null; do sleep 2; done
-# Remove stale H2 lock files from AMI snapshot
-docker exec keycloak find /opt/keycloak/data/h2 -name "*.lock" -delete 2>/dev/null || true
-docker restart keycloak 2>/dev/null || true
+docker stop keycloak 2>/dev/null || true
+docker rm keycloak 2>/dev/null || true
+docker run -d \
+  --name keycloak \
+  --restart always \
+  -p 8080:8080 \
+  -e KEYCLOAK_ADMIN=admin \
+  -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \
+  -e KC_DB=dev-file \
+  -e KC_HTTP_ENABLED=true \
+  -e KC_HOSTNAME_STRICT=false \
+  nexplane-keycloak:21.1-built \
+  start --optimized
 """).decode()
 
     kwargs = dict(
@@ -292,7 +302,7 @@ def test_phase1_provision():
 
     ami_id = get_or_create_smoke_ami(
         cache_key="keycloak/21.1",
-        setup_hash="keycloak-21.1-devfile-lock-clear",
+        setup_hash="keycloak-21.1-fresh-container",
         launch_fn=_build_keycloak_ami,
         snapshot_name="nexplane-smoke-keycloak-21.1",
     )
