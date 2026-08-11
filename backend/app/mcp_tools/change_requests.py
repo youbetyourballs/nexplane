@@ -224,7 +224,13 @@ async def get_change_request_plan(token: str, cr_id: str) -> dict[str, Any]:
 
         return {
             "cr_id": str(cr.id),
-            "plan": plan.plan_data if plan else None,
+            "plan": {
+                "generated_steps": plan.generated_steps,
+                "preflight_checks": plan.preflight_checks,
+                "blast_radius": plan.blast_radius,
+                "rollback_plan": plan.rollback_plan,
+                "verification_plan": plan.verification_plan,
+            } if plan else None,
             "generated_by": str(plan.generated_by) if plan else None,
             "asset_context": ctx,
         }
@@ -645,7 +651,10 @@ async def explain_change_request(token: str, cr_id: str) -> dict[str, Any]:
             .order_by(ChangePlan.created_at.desc()).limit(1)
         )
         plan = plan_result.scalar_one_or_none()
-        plan_data = plan.plan_data if plan else {}
+        plan_data = {
+            "blast_radius": plan.blast_radius,
+            "rollback_plan": plan.rollback_plan,
+        } if plan else {}
 
         approvers = [
             {
