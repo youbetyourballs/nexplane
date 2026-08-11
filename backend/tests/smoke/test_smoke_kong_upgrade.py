@@ -78,36 +78,30 @@ def _build_kong_ami(aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
-    user_data_script = (
-        b"#!/bin/bash\n"
-        b"# PostgreSQL 14 via amazon-linux-extras (AL2)\n"
-        b"amazon-linux-extras install postgresql14 -y\n"
-        b"yum install -y postgresql-server\n"
-        b"postgresql-setup initdb\n"
-        b"# Allow password auth\n"
-        b"sed -i 's/ident$/md5/g; s/peer$/md5/g' /var/lib/pgsql/data/pg_hba.conf\n"
-        b"systemctl enable postgresql && systemctl start postgresql\n"
-        b"for i in $(seq 1 30); do sudo -u postgres psql -c '\\q' 2>/dev/null && break; sleep 2; done\n"
-        b"sudo -u postgres psql -c \"CREATE USER kong WITH PASSWORD 'kong';\"\n"
-        b"sudo -u postgres psql -c \"CREATE DATABASE kong OWNER kong;\"\n"
-        b"# Install Kong 3.4 via official yum repo\n"
-        b"curl -sfL 'https://packages.konghq.com/public/gateway-34/config.rpm.txt' -o /etc/yum.repos.d/kong-gateway-34.repo\n"
-        b"rpm --import https://packages.konghq.com/public/gateway-34/gpg.6B5D054B0707DE3B.key 2>/dev/null || true\n"
-        b"yum install -y kong --nogpgcheck 2>&1\n"
-        b"cp /etc/kong/kong.conf.default /etc/kong/kong.conf\n"
-        b"sed -i 's|#database = off|database = postgres|' /etc/kong/kong.conf\n"
-        b"sed -i 's|#pg_host = 127.0.0.1|pg_host = 127.0.0.1|' /etc/kong/kong.conf\n"
-        b"sed -i 's|#pg_user = kong|pg_user = kong|' /etc/kong/kong.conf\n"
-        b"sed -i 's|#pg_password =|pg_password = kong|' /etc/kong/kong.conf\n"
-        b"sed -i 's|#pg_database = kong|pg_database = kong|' /etc/kong/kong.conf\n"
-        b"kong migrations bootstrap 2>&1\n"
-        b"sed -i 's|#admin_listen = 0.0.0.0:8001.*|admin_listen = 0.0.0.0:8001|' /etc/kong/kong.conf || true\n"
-        b"grep -q '^admin_listen' /etc/kong/kong.conf || echo 'admin_listen = 0.0.0.0:8001' >> /etc/kong/kong.conf\n"
-        b"systemctl enable kong && systemctl start kong || kong start\n"
-    )
-    user_data = base64.b64encode(user_data_script).decode()
+    # Docker approach: postgres:13 + kong:3.4 containers, avoids all RPM/OS issues.
+    # kong:3.4 image bundles its own runtime; admin API exposed on 0.0.0.0:8001.
+    user_data = base64.b64encode(b"""#!/bin/bash
+amazon-linux-extras install docker -y
+systemctl enable docker && systemctl start docker
+until docker info 2>/dev/null; do sleep 2; done
+docker network create kong-net
+docker run -d --name kong-db --network kong-net \
+  -e POSTGRES_DB=kong -e POSTGRES_USER=kong -e POSTGRES_PASSWORD=kong \
+  postgres:13
+until docker exec kong-db pg_isready -U kong 2>/dev/null; do sleep 3; done
+docker run --rm --network kong-net \
+  -e KONG_DATABASE=postgres -e KONG_PG_HOST=kong-db \
+  -e KONG_PG_USER=kong -e KONG_PG_PASSWORD=kong \
+  kong:3.4 kong migrations bootstrap
+docker run -d --name kong --network kong-net \
+  -p 8001:8001 -p 8000:8000 \
+  -e KONG_DATABASE=postgres -e KONG_PG_HOST=kong-db \
+  -e KONG_PG_USER=kong -e KONG_PG_PASSWORD=kong \
+  -e KONG_ADMIN_LISTEN=0.0.0.0:8001 \
+  kong:3.4
+""").decode()
 
-    # Use latest AL2 AMI -- has amazon-linux-extras for postgresql14
+    # Use latest AL2 AMI -- has amazon-linux-extras for docker install
     resp_ami = ec2.describe_images(
         Owners=["amazon"],
         Filters=[
@@ -214,16 +208,28 @@ def test_phase1_provision():
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     import base64 as _b64
-    _boot_ud = _b64.b64encode(
-        b"#!/bin/bash\n"
-        b"# Wait for PostgreSQL (auto-started via systemd enable, but may not be ready yet)\n"
-        b"for i in $(seq 1 30); do sudo -u postgres psql -c '\\q' 2>/dev/null && break; sleep 5; done\n"
-        b"grep -q '^admin_listen' /etc/kong/kong.conf 2>/dev/null || "
-        b"echo 'admin_listen = 0.0.0.0:8001' >> /etc/kong/kong.conf\n"
-        b"sed -i 's|^admin_listen.*|admin_listen = 0.0.0.0:8001|' /etc/kong/kong.conf 2>/dev/null || true\n"
-        b"sed -i 's|#admin_listen.*|admin_listen = 0.0.0.0:8001|' /etc/kong/kong.conf 2>/dev/null || true\n"
-        b"systemctl restart kong 2>/dev/null || kong restart 2>/dev/null || kong start 2>/dev/null || true\n"
-    ).decode()
+    _boot_ud = _b64.b64encode(b"""#!/bin/bash
+systemctl start docker 2>/dev/null || true
+until docker info 2>/dev/null; do sleep 2; done
+docker stop kong kong-db 2>/dev/null || true
+docker rm kong kong-db 2>/dev/null || true
+docker network rm kong-net 2>/dev/null || true
+docker network create kong-net
+docker run -d --name kong-db --network kong-net \
+  -e POSTGRES_DB=kong -e POSTGRES_USER=kong -e POSTGRES_PASSWORD=kong \
+  postgres:13
+until docker exec kong-db pg_isready -U kong 2>/dev/null; do sleep 3; done
+docker run --rm --network kong-net \
+  -e KONG_DATABASE=postgres -e KONG_PG_HOST=kong-db \
+  -e KONG_PG_USER=kong -e KONG_PG_PASSWORD=kong \
+  kong:3.4 kong migrations bootstrap
+docker run -d --name kong --network kong-net \
+  -p 8001:8001 -p 8000:8000 \
+  -e KONG_DATABASE=postgres -e KONG_PG_HOST=kong-db \
+  -e KONG_PG_USER=kong -e KONG_PG_PASSWORD=kong \
+  -e KONG_ADMIN_LISTEN=0.0.0.0:8001 \
+  kong:3.4
+""").decode()
 
     kwargs = dict(
         ImageId=ami_id,
