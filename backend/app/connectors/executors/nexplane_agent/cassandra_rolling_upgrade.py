@@ -68,7 +68,13 @@ docker stop cassandra 2>/dev/null || true
 docker rm cassandra 2>/dev/null || true
 docker pull {target_image} 2>&1
 docker run -d --name cassandra -p 9042:9042 {target_image} 2>&1
-sleep 20
+# wait up to 3 min for cassandra to join the ring
+for i in $(seq 1 18); do
+  sleep 10
+  STATUS=$(docker exec cassandra nodetool status 2>/dev/null || true)
+  echo "$STATUS" | grep -q 'UN' && echo CASSANDRA_READY && break
+  echo "waiting for cassandra ($i/18)..."
+done
 echo UPGRADE_DONE
 """.strip()
     else:
