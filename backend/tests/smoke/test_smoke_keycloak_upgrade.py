@@ -101,32 +101,31 @@ def _build_keycloak_ami(aws_creds) -> tuple:
         pytest.fail("No AL2 AMI found for Keycloak build")
     al2_ami = images[0]["ImageId"]
 
-    # Production mode: run kc.sh build in a named container, docker commit the
-    # Quarkus augmentation artifacts into a local image, then run --optimized.
-    # On AMI launch the container restarts from the committed image - fast startup.
+    # Production mode with dev-mem DB: no lock files (H2 file lock causes failures
+    # on AMI launch), no persistence needed for smoke. kc.sh build baked into a
+    # committed image so start --optimized is fast on every boot.
     user_data = base64.b64encode(b"""#!/bin/bash
 amazon-linux-extras install docker -y
 systemctl enable docker && systemctl start docker
 until docker info 2>/dev/null; do sleep 2; done
 docker pull quay.io/keycloak/keycloak:21.1
-# Run kc.sh build in a named (non-rm) container so artifacts stay in its layer
+# Build Quarkus augmentation in a named container, commit to local image
 docker run --name keycloak-builder \
-  -e KC_DB=dev-file \
+  -e KC_DB=dev-mem \
   -e KC_HTTP_ENABLED=true \
   -e KC_HOSTNAME_STRICT=false \
   quay.io/keycloak/keycloak:21.1 \
-  build --db=dev-file
-# Commit the built layer into a local image so --restart always uses it
+  build --db=dev-mem
 docker commit keycloak-builder nexplane-keycloak:21.1-built
 docker rm keycloak-builder
-# Run from the pre-built image - start --optimized is fast (<2 min)
+# Run from committed image - dev-mem has no lock files, fast startup
 docker run -d \
   --name keycloak \
   --restart always \
   -p 8080:8080 \
   -e KEYCLOAK_ADMIN=admin \
   -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \
-  -e KC_DB=dev-file \
+  -e KC_DB=dev-mem \
   -e KC_HTTP_ENABLED=true \
   -e KC_HOSTNAME_STRICT=false \
   nexplane-keycloak:21.1-built \
@@ -178,11 +177,13 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
-    # AMI has keycloak container registered with --restart always running in
-    # production (--optimized) mode. Just start Docker; the container auto-starts
-    # with the pre-built Quarkus augmentation — should be up in <5 min.
+    # AMI has keycloak container using nexplane-keycloak:21.1-built + dev-mem.
+    # Restart the container explicitly to clear any stale in-memory state from
+    # the AMI snapshot; dev-mem reinitializes cleanly on each restart.
     launch_user_data = base64.b64encode(b"""#!/bin/bash
 systemctl start docker 2>/dev/null || true
+until docker info 2>/dev/null; do sleep 2; done
+docker restart keycloak 2>/dev/null || true
 """).decode()
 
     kwargs = dict(
@@ -289,7 +290,7 @@ def test_phase1_provision():
 
     ami_id = get_or_create_smoke_ami(
         cache_key="keycloak/21.1",
-        setup_hash="keycloak-21.1-committed-image",
+        setup_hash="keycloak-21.1-devmem-committed",
         launch_fn=_build_keycloak_ami,
         snapshot_name="nexplane-smoke-keycloak-21.1",
     )
