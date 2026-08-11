@@ -4442,7 +4442,21 @@
       "applicable_asset_types": [
         "server"
       ],
-      "generic_action": "cassandra_rolling_upgrade"
+      "generic_action": "cassandra_rolling_upgrade",
+      "smoke_verified": false,
+      "output_fields": {
+        "status": "completed | dry_run",
+        "snapshot_tag": "nodetool snapshot tag (timestamp-based) used as rollback reference",
+        "verify_result": {
+          "all_nodes_ok": "true if all nodes report UN (Up/Normal) after upgrade",
+          "version_ok": "true if nodetool version reports target_version",
+          "version_output": "raw nodetool version output (truncated)",
+          "status_output": "raw nodetool status output (truncated)"
+        },
+        "nodes_upgraded": "list of asset_ids upgraded",
+        "source_version": "version before upgrade",
+        "target_version": "version after upgrade"
+      }
     },
     {
       "display_name": "MongoDB Replica Set Upgrade",
@@ -4789,7 +4803,15 @@
       "applicable_asset_types": [
         "server"
       ],
-      "generic_action": "keycloak_upgrade"
+      "generic_action": "keycloak_upgrade",
+      "output_fields": {
+        "status": "completed | dry_run",
+        "source_version": "version before upgrade",
+        "target_version": "version after upgrade",
+        "backup_path": "path to tar.gz backup of keycloak home directory on the target host",
+        "health_ok": "true if Keycloak health endpoint responded with exit 0 after upgrade",
+        "verify_output": "raw curl output from Keycloak health check"
+      }
     },
     {
       "display_name": "FreeIPA / RHIDM Upgrade",
@@ -5071,7 +5093,15 @@
       "executor": "nexplane_agent.kong_upgrade",
       "generic_action": "kong_upgrade",
       "action_id": "kong_upgrade",
-      "smoke_verified": false
+      "smoke_verified": false,
+      "output_fields": {
+        "status": "completed | dry_run",
+        "source_version": "version before upgrade",
+        "target_version": "version after upgrade",
+        "backup_path": "path to pg_dump backup file on the target host",
+        "routes_count": "number of Kong routes present after upgrade (must be >= 1 to pass verification)",
+        "verify_output": "raw curl output from Kong admin API version check"
+      }
     },
     {
       "display_name": "cert-manager Upgrade",
