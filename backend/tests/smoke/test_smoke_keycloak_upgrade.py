@@ -102,8 +102,9 @@ def _build_keycloak_ami(aws_creds) -> tuple:
     al2_ami = images[0]["ImageId"]
 
     # Production mode with dev-file DB. kc.sh build bakes Quarkus augmentation
-    # into a committed image so start --optimized is fast. H2 lock files are
-    # cleared in the launch user_data so AMI boots don't hit stale locks.
+    # into a committed image. Save image as tar to /opt so the EBS snapshot
+    # captures it on disk (avoids overlay2 page-cache flush race at snapshot time).
+    # Launch user_data reloads from tar to guarantee image is present.
     user_data = base64.b64encode(b"""#!/bin/bash
 amazon-linux-extras install docker -y
 systemctl enable docker && systemctl start docker
@@ -118,7 +119,10 @@ docker run --name keycloak-builder \
   build --db=dev-file
 docker commit keycloak-builder nexplane-keycloak:21.1-built
 docker rm keycloak-builder
-# Run from committed image; start --optimized uses pre-built Quarkus artifacts
+# Export image to tar so it survives EBS snapshot (avoids overlay2 cache race)
+docker save nexplane-keycloak:21.1-built -o /opt/nexplane-keycloak-21.1-built.tar
+sync
+# Start keycloak to validate image and for AMI snapshot health check
 docker run -d \
   --name keycloak \
   --restart always \
@@ -177,12 +181,13 @@ def _launch_kc(ec2, ami_id, aws_creds) -> tuple:
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
-    # AMI has nexplane-keycloak:21.1-built image. Remove the stale container
-    # (which carries H2 lock files in its writable layer from the AMI snapshot)
-    # and start a fresh one so start --optimized gets a clean H2 state.
+    # Reload image from tar (guarantees image is present regardless of overlay2
+    # page-cache state at snapshot time), then start a fresh container.
     launch_user_data = base64.b64encode(b"""#!/bin/bash
 systemctl start docker 2>/dev/null || true
 until docker info 2>/dev/null; do sleep 2; done
+# Reload built image from tar to ensure overlay2 layers are consistent
+docker load -i /opt/nexplane-keycloak-21.1-built.tar 2>/dev/null || true
 docker stop keycloak 2>/dev/null || true
 docker rm keycloak 2>/dev/null || true
 docker run -d \
@@ -302,7 +307,7 @@ def test_phase1_provision():
 
     ami_id = get_or_create_smoke_ami(
         cache_key="keycloak/21.1",
-        setup_hash="keycloak-21.1-fresh-container",
+        setup_hash="keycloak-21.1-tar-reload",
         launch_fn=_build_keycloak_ami,
         snapshot_name="nexplane-smoke-keycloak-21.1",
     )
