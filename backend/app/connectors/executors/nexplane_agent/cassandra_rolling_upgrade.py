@@ -121,11 +121,14 @@ echo UPGRADE_DONE
     }
 
 
-async def rollback(parameters: dict, asset_ids: list, connector, execution_result: dict) -> dict:
-    if not asset_ids:
-        raise ValueError("asset_ids required")
+async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
+    asset_id = str(
+        execution_result.get("asset_id")
+        or (execution_result.get("_target_asset_ids") or [""])[0]
+    )
+    if not asset_id:
+        raise ValueError("asset_id not found in execution_result")
 
-    asset_id = str(asset_ids[0])
     source_version = execution_result.get("source_version", "4.0")
     in_docker = execution_result.get("in_docker", False)
 

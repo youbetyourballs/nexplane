@@ -133,12 +133,7 @@ sleep 5; echo UPGRADE_DONE
 
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    asset_ids = (
-        execution_result.get("_target_asset_ids")
-        or parameters.get("asset_ids")
-        or []
-    )
-    asset_id = str(asset_ids[0]) if asset_ids else ""
+    asset_id = str(execution_result.get("asset_id") or "")
     backup_path = execution_result.get("backup_path", "/tmp/nexplane-kong-backup.sql")
     source_version = execution_result.get("source_version", "")
     in_docker = execution_result.get("in_docker", False)
