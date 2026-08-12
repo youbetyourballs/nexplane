@@ -124,8 +124,30 @@ jobs:
                 }
               }')"
 
-  build-ami:
+  ui-smoke-gate:
     needs: build-and-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pytest
+
+      - name: Run catalog smoke gate tests
+        run: |
+          # Verify that all mutating commercial CR types exposed in this release
+          # have smoke_verified=true and pass the catalog load gate.
+          # This is a required condition of the release process.
+          cd backend
+          python -m pytest app/tests/test_catalog_service_smoke_gate.py -v
+
+  build-ami:
+    needs: [build-and-release, ui-smoke-gate]
     runs-on: ubuntu-latest
     outputs:
       ami_id: ${{ steps.packer.outputs.ami_id }}
