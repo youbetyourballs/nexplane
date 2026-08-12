@@ -124,8 +124,31 @@ jobs:
                 }
               }')"
 
-  build-ami:
+  ui-smoke-gate:
     needs: build-and-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pytest
+
+      - name: Run catalog smoke gate tests
+        run: |
+          # Verify that all mutating commercial CR types exposed in this release
+          # have smoke_verified=true and pass the catalog load gate.
+          # --noconftest avoids loading the full app stack (DB, SQLAlchemy, etc.)
+          # that the backend conftest.py pulls in — these tests are self-contained.
+          cd backend
+          python -m pytest app/tests/test_catalog_service_smoke_gate.py -v --noconftest
+
+  build-ami:
+    needs: [build-and-release, ui-smoke-gate]
     runs-on: ubuntu-latest
     outputs:
       ami_id: ${{ steps.packer.outputs.ami_id }}
@@ -138,6 +161,8 @@ jobs:
           version: "1.11.0"
 
       - name: Packer init
+        env:
+          PACKER_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: packer init packer/nexplane-ami.pkr.hcl
 
       - name: Build AMI
