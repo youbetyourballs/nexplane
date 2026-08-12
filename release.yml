@@ -2,4 +2,4 @@
 severity: recommended        # recommended | security | critical
 min_compatible_version: 1.0.0
 changelog_url: https://docs.nexplane.ai/changelog/1.2.0
-notes: "Feature release: expanded AMI smoke test suite (14 phases) covering all seeded accounts, frontend routes, demo/non-demo mode, MCP protocol, and systemd resilience; auto-selects SSH key-pair or password auth by IP type"
+notes: "Feature release: keycloak_upgrade, cassandra_rolling_upgrade, and kong_upgrade CR types smoke-verified (4/4 executor phases + MCP 21/21 phases on live EC2); Docker-mode keycloak upgrade executor; AMI cache snapshot consistency fix"
