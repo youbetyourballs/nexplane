@@ -4793,7 +4793,7 @@
       "estimated_duration_seconds": 900,
       "blast_radius_hint": "keycloak_downtime_during_upgrade",
       "rollback_strategy": "executor",
-      "smoke_verified": false,
+      "smoke_verified": true,
       "safety_notes": [
         "Realm export captured before upgrade \u2014 rollback restores from export",
         "WildFly\u2192Quarkus migration handled automatically when source \u2264 16 and target \u2265 17",
