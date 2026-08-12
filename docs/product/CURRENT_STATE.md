@@ -1,6 +1,6 @@
 # Current State
 
-_Snapshot date: 2026-06-05. Derived from repo at `F:\Nexplane\nexplane` (branch `master`)._
+_Snapshot date: 2026-08-11. Derived from repo at `F:\Nexplane\nexplane` (branch `master`). Latest release: v1.2.20._
 
 ## Executive Summary
 
@@ -128,7 +128,9 @@ Most of this work appears to have already landed on `master` (the corresponding 
 
 Based on the last ~100 commits and the May/June 2026 spec series:
 
-1. **MDM connector groundwork (June 2026).** `c710ee0` MDM SP1 plan, Jamf + MicroMDM catalogs + enum values, macOS CR-type migrations, macOS agent parity work (defaults, santa, profiles, lock_local_user, patch).
+1. **v1.2.20 release (August 2026).** Three new CR types fully smoke-verified (all 4 executor phases + 14/14 MCP workflow smoke tests on live EC2): `keycloak_upgrade` (Docker-mode major version upgrade with health check on port 9000/8080 and realm-count verification), `cassandra_rolling_upgrade`, and `kong_upgrade`. AMI cache snapshot consistency fix (removed hardcoded `snapshot_name` from `get_or_create_smoke_ami` to prevent stale-AMI reuse). Release pipeline publishes to `releases.nexplane.ai` on each tag.
+
+2. **MDM connector groundwork (June 2026).** `c710ee0` MDM SP1 plan, Jamf + MicroMDM catalogs + enum values, macOS CR-type migrations, macOS agent parity work (defaults, santa, profiles, lock_local_user, patch).
 2. **macOS agent shipping (late May–early June).** Darwin os_type, arm64 build support, eBPF darwin shims via pf and BSM audit_control, launchctl bootstrap retries.
 3. **eBPF policy autogen (late May).** Network + LSM synthesizer plugins, audit-mode soak → enforce promotion executors, EBPF_POLICY smoke phase, safety-engine rollback set update.
 4. **Project rollback (late May).** New `project_rollbacks` table + model + service + REST endpoints + UI drawer + startup-resume + on_cr_failed hook + PROJECT_ROLLBACK smoke phase.
@@ -169,7 +171,7 @@ Top 10 recommendations, in priority order, with rationale:
 2. **Catalog–executor parity CI guard.** Lint that every action in `backend/app/connectors/catalog/*.json` has a registered executor function and a matching `change_type_definitions/*.json` entry. Drift is currently caught only by smoke tests.
 3. **Finish MDM SP1 executors (Jamf, MicroMDM, macOS enrollment orchestration).** Catalogs and CR types have landed but the executors and end-to-end profile-install + santa-sync rollback are not done; this is the active workstream.
 4. **Production deployment story.** Ship a documented prod compose / Helm chart that enforces non-default SECRET_KEY, switches frontend to `Dockerfile.prod` (nginx-spa), removes the host-bound 0.0.0.0:8000 default (currently in compose), and pins agent S3 URLs by environment.
-5. **Connector smoke parity for the late-May additions** (`opnsense`, `step_ca`, `bind_dns`, `freeipa`, `keycloak`, `teleport`, `gitlab`, `gitea`, `jfrog`, `snyk`, `wazuh`, `falco`, `splunk`, `elastic`, `datadog`). Per the project's smoke-test-driven-development principle, these are not "done" until each has a passing live phase including rollback.
+5. **Connector smoke parity for remaining additions** (`opnsense`, `step_ca`, `bind_dns`, `freeipa`, `teleport`, `gitlab`, `gitea`, `jfrog`, `snyk`, `wazuh`, `falco`, `splunk`, `elastic`, `datadog`). `keycloak`, `cassandra`, and `kong` CR types are now smoke-verified as of v1.2.20. Per the project's smoke-test-driven-development principle, remaining connectors are not "done" until each has a passing live phase including rollback.
 6. **OCI smoke parity with AWS/Azure/GCP.** The executor tree is in place; sub-project 6 (smoke) needs completion to bring the fourth cloud to first-class status.
 7. **Multi-tenant admin surface.** Org CRUD, user invite, per-org connector scoping (the design exists in `2026-05-03-multi-account-connector-scoping-design.md`). Required before any external pilot.
 8. **CR manifest typed schemas + planner validation.** The manifest exists but planner output is still string-typed CR types validated post-hoc. Generate Pydantic models per CR type from the manifest and validate AI proposals against them before insert.
