@@ -113,8 +113,11 @@ echo UPGRADE_DONE
             asset_id, timeout=150,
         )
 
+        # KC 22+: management port 9000; fall back to 8080 for older versions
         verify_result = await _run(
-            "curl -sf http://localhost:8080/health/ready 2>&1; echo HEALTH_EXIT=$?",
+            "curl -sf http://localhost:9000/health/ready 2>&1; HC9=$?; "
+            "curl -sf http://localhost:8080/health/ready 2>&1; HC8=$?; "
+            "echo HEALTH_EXIT=$(( HC9 == 0 ? 0 : HC8 ))",
             asset_id, timeout=30,
         )
         verify_out = _out(verify_result)
