@@ -70,3 +70,17 @@ def test_core_mutating_loads_without_smoke_verified(tmp_path):
     svc = ActionCatalogService(tmp_path)
     loaded = [a["action_id"] for a in svc._catalog.get("aws_test", [])]
     assert "tag_resource" in loaded
+
+
+def test_v1_2_20_cr_types_load_from_real_catalog():
+    """keycloak_upgrade, cassandra_rolling_upgrade, and kong_upgrade must pass the
+    smoke gate and be present in the live catalog (smoke_verified=true was set when
+    all 4 executor phases + 14/14 MCP build smoke phases passed for v1.2.20)."""
+    import pathlib
+    catalog_dir = pathlib.Path(__file__).parent.parent / "connectors" / "catalog"
+    svc = ActionCatalogService(catalog_dir)
+    all_actions = {a["action_id"] for actions in svc._catalog.values() for a in actions}
+    for action_id in ("keycloak_upgrade", "cassandra_rolling_upgrade", "kong_upgrade"):
+        assert action_id in all_actions, (
+            f"{action_id} not present in loaded catalog — smoke_verified may be false or entry missing"
+        )
