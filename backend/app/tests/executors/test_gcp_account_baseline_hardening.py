@@ -11,7 +11,6 @@ def connector():
     return c
 
 
-@pytest.mark.asyncio
 async def test_execute_runs_all_phases(connector):
     with patch("app.connectors.executors.gcp.gcp_account_baseline_hardening._preflight",
                new=AsyncMock(return_value={"phase": "preflight", "status": "ok", "project_id": "test-proj"})):
@@ -30,7 +29,6 @@ async def test_execute_runs_all_phases(connector):
     assert "applied" in result
 
 
-@pytest.mark.asyncio
 async def test_rollback_restores_policies(connector):
     execution_result = {
         "rollback_data": {
