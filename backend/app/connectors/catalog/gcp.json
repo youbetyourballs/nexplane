@@ -332,6 +332,24 @@
       "executor": "gcp.gcp_account_baseline_monitoring",
       "rollback_strategy": "executor",
       "estimated_duration_seconds": 300
+    },
+    {
+      "action_id": "gcp_cloud_dns_dnssec_enable",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Enable Cloud DNS DNSSEC",
+      "description": "Enable DNSSEC signing on a GCP Cloud DNS managed zone. GCP auto-manages KSK and ZSK. Rollback: disable signing.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "zone_name", "type": "string", "required": true, "description": "Cloud DNS managed zone name (e.g. 'example-com')"},
+        {"name": "dry_run", "type": "boolean", "required": false, "description": "If true, validate only — do not enable DNSSEC"}
+      ],
+      "executor": "gcp.gcp_cloud_dns_dnssec_enable",
+      "rollback_action": "gcp_cloud_dns_dnssec_enable",
+      "estimated_duration_seconds": 120,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
