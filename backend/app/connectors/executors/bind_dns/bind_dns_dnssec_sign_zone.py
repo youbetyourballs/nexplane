@@ -17,6 +17,7 @@ Rollback: update named.conf back to the original zone file and rndc reload.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -52,19 +53,21 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         raise RuntimeError(f"Failed to create key directory: {r.get('output')}")
 
     # 2. Generate KSK
-    ksk_cmd = f"cd {key_dir} && dnssec-keygen -a ECDSAP256SHA256 -b 256 -n ZONE -f KSK {zone}"
+    ksk_cmd = f"cd {key_dir} && dnssec-keygen -a ECDSAP256SHA256 -n ZONE -f KSK {zone}"
     r = await dispatch_agent_job(ksk_cmd, connector)
     if r.get("status") != "success":
         raise RuntimeError(f"dnssec-keygen KSK failed: {r.get('output')}")
-    ksk_name = r.get("output", "").strip().splitlines()[-1].strip()
+    raw_ksk_name = r.get("output", "").strip().splitlines()[-1].strip()
+    ksk_name = re.sub(r"[^A-Za-z0-9._+\-]", "", raw_ksk_name)
     logger.info("bind_dns_dnssec_sign_zone: KSK generated: %s", ksk_name)
 
     # 3. Generate ZSK
-    zsk_cmd = f"cd {key_dir} && dnssec-keygen -a ECDSAP256SHA256 -b 256 -n ZONE {zone}"
+    zsk_cmd = f"cd {key_dir} && dnssec-keygen -a ECDSAP256SHA256 -n ZONE {zone}"
     r = await dispatch_agent_job(zsk_cmd, connector)
     if r.get("status") != "success":
         raise RuntimeError(f"dnssec-keygen ZSK failed: {r.get('output')}")
-    zsk_name = r.get("output", "").strip().splitlines()[-1].strip()
+    raw_zsk_name = r.get("output", "").strip().splitlines()[-1].strip()
+    zsk_name = re.sub(r"[^A-Za-z0-9._+\-]", "", raw_zsk_name)
     logger.info("bind_dns_dnssec_sign_zone: ZSK generated: %s", zsk_name)
 
     # 4. Sign the zone
