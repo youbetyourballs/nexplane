@@ -13,7 +13,10 @@ from app.connectors.executors.bind_dns.bind_dns_dnssec_sign_zone import execute,
 
 
 @pytest.mark.smoke
-@pytest.mark.skipif(not os.getenv("SMOKE_BIND_ZONE"), reason="SMOKE_BIND_ZONE not set")
+@pytest.mark.skipif(
+    not os.getenv("SMOKE_BIND_ZONE") or not os.getenv("SMOKE_BIND_ZONE_FILE"),
+    reason="SMOKE_BIND_ZONE and SMOKE_BIND_ZONE_FILE not set"
+)
 async def test_bind_dns_dnssec_sign_and_rollback(live_bind_connector):
     params = {
         "zone": os.environ["SMOKE_BIND_ZONE"],
