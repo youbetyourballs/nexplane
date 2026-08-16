@@ -14,7 +14,6 @@ def connector():
     return c
 
 
-@pytest.mark.asyncio
 async def test_execute_runs_phases(connector):
     with patch("app.connectors.executors.oci.oci_account_baseline_hardening._preflight",
                new=AsyncMock(return_value={"phase": "preflight", "status": "ok",
