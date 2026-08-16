@@ -303,6 +303,23 @@
       "blast_radius_hint": "new_resource",
       "smoke_verified": false,
       "read_only": false
+    },
+    {
+      "action_id": "azure_account_baseline_hardening",
+      "generic_action": "azure_account_baseline_hardening",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Azure Account Baseline Hardening",
+      "description": "Assign the CIS Azure Foundations Benchmark policy initiative to the subscription. Rollback: delete the policy assignment.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [],
+      "executor": "azure.azure_account_baseline_hardening",
+      "rollback_strategy": "executor",
+      "rollback_action": "azure_account_baseline_hardening",
+      "estimated_duration_seconds": 60,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
