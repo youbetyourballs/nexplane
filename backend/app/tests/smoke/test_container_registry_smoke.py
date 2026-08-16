@@ -31,10 +31,11 @@ async def test_gcp_artifact_registry_create_and_rollback(live_gcp_connector):
     assert result["status"] == "created"
     assert result["repository_name"]
 
-    # Idempotency
+    # Idempotency check
     result2 = await gar_execute(params, [], live_gcp_connector)
     assert result2["already_exists"] is True
 
+    # Rollback the FIRST result (which created the resource)
     rb = await gar_rollback(params, result, live_gcp_connector)
     assert rb["rolled_back"] is True
 
@@ -57,8 +58,10 @@ async def test_azure_acr_create_and_rollback(live_azure_connector):
     assert result["status"] == "created"
     assert result["login_server"]
 
+    # Idempotency check
     result2 = await acr_execute(params, [], live_azure_connector)
     assert result2["already_exists"] is True
 
+    # Rollback the FIRST result (which created the resource)
     rb = await acr_rollback(params, result, live_azure_connector)
     assert rb["rolled_back"] is True
