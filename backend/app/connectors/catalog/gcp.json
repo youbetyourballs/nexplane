@@ -394,6 +394,23 @@
       "estimated_duration_seconds": 30,
       "smoke_verified": false,
       "read_only": false
+    },
+    {
+      "action_id": "gcp_account_baseline_hardening",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "GCP Account Baseline Hardening",
+      "description": "Enforce four org-level policies: requireOsLogin, disableSerialPortAccess, publicAccessPrevention, disableServiceAccountKeyCreation. Rollback: restore prior policy state.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [],
+      "executor": "gcp.gcp_account_baseline_hardening",
+      "rollback_action": "gcp_account_baseline_hardening",
+      "rollback_strategy": "executor",
+      "generic_action": "gcp_account_baseline_hardening",
+      "estimated_duration_seconds": 60,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
