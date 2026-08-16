@@ -114,3 +114,26 @@ async def live_azure_connector():
         pytest.skip("Azure credentials not fully configured (AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_SUBSCRIPTION_ID)")
 
     return connector
+
+
+@pytest_asyncio.fixture
+async def live_aws_connector():
+    """Load live AWS connector credentials from environment or database.
+
+    Requires: SMOKE_AWS_ACCESS_KEY_ID, SMOKE_AWS_SECRET_ACCESS_KEY, SMOKE_AWS_REGION
+    env vars, or a live connector record in the database.
+    """
+    if not os.getenv("SMOKE_AWS_ACCESS_KEY_ID"):
+        pytest.skip("SMOKE_AWS_ACCESS_KEY_ID not set — live AWS connector unavailable")
+    if not os.getenv("SMOKE_AWS_SECRET_ACCESS_KEY"):
+        pytest.skip("SMOKE_AWS_SECRET_ACCESS_KEY not set — live AWS connector unavailable")
+    if not os.getenv("SMOKE_AWS_REGION"):
+        pytest.skip("SMOKE_AWS_REGION not set — live AWS connector unavailable")
+
+    connector = MagicMock()
+    connector.credentials = {
+        "aws_access_key_id": os.getenv("SMOKE_AWS_ACCESS_KEY_ID"),
+        "aws_secret_access_key": os.getenv("SMOKE_AWS_SECRET_ACCESS_KEY"),
+        "region": os.getenv("SMOKE_AWS_REGION"),
+    }
+    return connector
