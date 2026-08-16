@@ -18,7 +18,6 @@ def connector():
     return c
 
 
-@pytest.mark.asyncio
 async def test_creates_registry(connector):
     mock_registry = MagicMock()
     mock_registry.name = "myregistry"
@@ -36,7 +35,6 @@ async def test_creates_registry(connector):
     assert result["login_server"] == "myregistry.azurecr.io"
 
 
-@pytest.mark.asyncio
 async def test_already_exists_returns_no_op(connector):
     mock_existing = MagicMock()
     mock_existing.name = "myregistry"
@@ -60,7 +58,6 @@ async def test_already_exists_returns_no_op(connector):
     assert result["already_exists"] is True
 
 
-@pytest.mark.asyncio
 async def test_rollback_deletes_registry(connector):
     execution_result = {
         "registry_name": "myregistry",
