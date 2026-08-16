@@ -3,15 +3,16 @@
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
+pytestmark = pytest.mark.filterwarnings("ignore:coroutine .* was never awaited")
+
 
 @pytest.fixture
 def connector():
     c = MagicMock()
-    c.credentials = {"aws_access_key_id": "k", "aws_secret_access_key": "s", "region_name": "us-east-1"}
+    c.credentials = {"access_key_id": "k", "secret_access_key": "s", "region": "us-east-1"}
     return c
 
 
-@pytest.mark.asyncio
 async def test_upgrade_and_partial_rollback(connector):
     call_count = [0]
 
@@ -26,7 +27,9 @@ async def test_upgrade_and_partial_rollback(connector):
             return {}  # modify
         return {"DBClusters": [{"EngineVersion": "5.0.0", "Status": "available"}]}
 
-    with patch("app.connectors.executors.aws.documentdb_upgrade._run", side_effect=fake_run):
+    fake_docdb = MagicMock()
+    with patch("app.connectors.executors.aws.documentdb_upgrade._run", side_effect=fake_run), \
+         patch("app.connectors.executors.aws.documentdb_upgrade.get_boto3_client", return_value=fake_docdb):
         from app.connectors.executors.aws.documentdb_upgrade import execute
         result = await execute(
             {"db_cluster_identifier": "my-docdb", "target_version": "5.0.0"},
