@@ -25,8 +25,6 @@ _TARGET_PASSWORD_POLICY = {
     "is_numeric_characters_required": True,
     "is_special_characters_required": True,
     "is_username_containment_allowed": False,
-    "is_different_from_current_password_required": True,
-    "password_expires_within_days": 365,
 }
 
 

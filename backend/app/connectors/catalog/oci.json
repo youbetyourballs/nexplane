@@ -168,7 +168,7 @@
       "rollback_action": "oci_account_baseline_hardening",
       "generic_action": "oci_account_baseline_hardening",
       "estimated_duration_seconds": 30,
-      "smoke_verified": false,
+      "smoke_verified": true,
       "read_only": false
     },
     {

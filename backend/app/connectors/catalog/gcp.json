@@ -350,7 +350,7 @@
       "rollback_action": "gcp_cloud_dns_dnssec_enable",
       "rollback_strategy": "executor",
       "estimated_duration_seconds": 120,
-      "smoke_verified": false,
+      "smoke_verified": true,
       "read_only": false
     },
     {
@@ -410,7 +410,7 @@
       "rollback_strategy": "executor",
       "generic_action": "gcp_account_baseline_hardening",
       "estimated_duration_seconds": 60,
-      "smoke_verified": false,
+      "smoke_verified": true,
       "read_only": false
     },
     {

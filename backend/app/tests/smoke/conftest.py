@@ -2,8 +2,15 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 """Smoke test fixtures for live infrastructure connectors.
 
-These fixtures load live connector credentials from the database
-and are only available when SMOKE_* env vars are set.
+Credentials are loaded from the platform database. Each fixture skips
+unless the corresponding SMOKE_*_CONNECTOR_ID env var is set or the
+default connector ID is used.
+
+Default connector IDs match the live platform deployment:
+  AWS:   666e237d-bfcf-43a5-ae24-f1a0b4f2c5cc
+  GCP:   c91d563c-6098-493d-8706-215397705e64
+  Azure: 356cc5eb-ad59-4eda-8014-2f4fddb7f768
+  OCI:   0b3cf029-5ca0-4794-b982-6f494aaca372
 """
 
 import os
@@ -11,129 +18,91 @@ import pytest
 import pytest_asyncio
 from unittest.mock import MagicMock
 
+_DEFAULT_AWS_ID = "666e237d-bfcf-43a5-ae24-f1a0b4f2c5cc"
+_DEFAULT_GCP_ID = "c91d563c-6098-493d-8706-215397705e64"
+_DEFAULT_AZURE_ID = "356cc5eb-ad59-4eda-8014-2f4fddb7f768"
+_DEFAULT_OCI_ID = "0b3cf029-5ca0-4794-b982-6f494aaca372"
 
-@pytest_asyncio.fixture
-async def live_gcp_connector():
-    """Load live GCP connector credentials from environment or database.
 
-    Requires: SMOKE_GCP_PROJECT_ID and SMOKE_GCP_SERVICE_ACCOUNT_JSON env vars,
-    or a live connector record in the database.
-    """
-    # Check for required credential env vars
-    if not os.getenv("SMOKE_GCP_PROJECT_ID"):
-        pytest.skip("SMOKE_GCP_PROJECT_ID not set — live GCP connector unavailable")
-    if not os.getenv("SMOKE_GCP_SERVICE_ACCOUNT_JSON"):
-        pytest.skip("SMOKE_GCP_SERVICE_ACCOUNT_JSON not set — live GCP connector unavailable")
+def _load_creds_sync(connector_id: str) -> dict:
+    """Load connector credentials synchronously via psycopg2 + secret backend."""
+    import json
+    import os as _os
+    import psycopg2
+    from app.services.secret_backend_factory import get_secret_backend
 
-    # For smoke tests, we expect credentials to be passed via env vars or database
-    # This fixture returns a mock connector with credentials loaded
+    db_url = _os.getenv("DATABASE_URL", "")
+    # Convert async URL to sync
+    sync_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    conn = psycopg2.connect(sync_url)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT credentials_encrypted FROM connector_credentials WHERE connector_id = %s",
+            (connector_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {}
+        return get_secret_backend().decrypt_json(row[0]) or {}
+    finally:
+        conn.close()
+
+
+@pytest.fixture
+def live_aws_connector():
+    connector_id = os.getenv("SMOKE_AWS_CONNECTOR_ID", _DEFAULT_AWS_ID)
+    creds = _load_creds_sync(connector_id)
+    if not creds.get("access_key_id") or not creds.get("secret_access_key"):
+        pytest.skip("AWS connector credentials not found in database")
     connector = MagicMock()
-
-    # In live smoke, this would fetch from database or use env vars
-    # For now, return a connector object that has the expected interface
-    service_account_json = os.getenv("SMOKE_GCP_SERVICE_ACCOUNT_JSON")
-    connector.credentials = {
-        "service_account_key_json": service_account_json,
-        "project_id": os.getenv("SMOKE_GCP_PROJECT_ID"),
-    }
+    connector.credentials = creds
     return connector
 
 
-@pytest_asyncio.fixture
-async def live_oci_connector():
-    """Load live OCI connector credentials from environment or database.
-
-    Requires: SMOKE_OCI_CONFIG_FILE, SMOKE_OCI_TENANCY_ID, SMOKE_OCI_USER_ID,
-    SMOKE_OCI_FINGERPRINT, SMOKE_OCI_KEY_FILE env vars, or a live connector record.
-    """
-    # Check for required credential env vars
-    if not os.getenv("SMOKE_OCI_USER_OCID"):
-        pytest.skip("SMOKE_OCI_USER_OCID not set — live OCI connector unavailable")
-
+@pytest.fixture
+def live_gcp_connector():
+    connector_id = os.getenv("SMOKE_GCP_CONNECTOR_ID", _DEFAULT_GCP_ID)
+    creds = _load_creds_sync(connector_id)
+    if not creds.get("service_account_key_json") or not creds.get("project_id"):
+        pytest.skip("GCP connector credentials not found in database")
     connector = MagicMock()
-
-    # OCI credentials can come from config file or environment
-    connector.credentials = {
-        "config_file_path": os.getenv("SMOKE_OCI_CONFIG_FILE"),
-        "tenancy_id": os.getenv("SMOKE_OCI_TENANCY_ID"),
-        "user_id": os.getenv("SMOKE_OCI_USER_ID"),
-        "fingerprint": os.getenv("SMOKE_OCI_FINGERPRINT"),
-        "key_file_path": os.getenv("SMOKE_OCI_KEY_FILE"),
-    }
+    connector.credentials = creds
     return connector
 
 
-@pytest_asyncio.fixture
-async def live_bind_connector():
-    """Load live BIND connector credentials from environment or database.
+@pytest.fixture
+def live_azure_connector():
+    connector_id = os.getenv("SMOKE_AZURE_CONNECTOR_ID", _DEFAULT_AZURE_ID)
+    creds = _load_creds_sync(connector_id)
+    if not creds.get("tenant_id") or not creds.get("client_id") or not creds.get("client_secret"):
+        pytest.skip("Azure connector credentials not found in database")
+    connector = MagicMock()
+    connector.credentials = creds
+    return connector
 
-    Requires: SMOKE_BIND_HOST, SMOKE_BIND_USERNAME, SMOKE_BIND_PRIVATE_KEY_PATH
-    env vars, or a live connector record.
-    """
-    # Check for required credential env vars
+
+@pytest.fixture
+def live_oci_connector():
+    connector_id = os.getenv("SMOKE_OCI_CONNECTOR_ID", _DEFAULT_OCI_ID)
+    creds = _load_creds_sync(connector_id)
+    if not creds.get("tenancy") or not creds.get("user") or not creds.get("private_key"):
+        pytest.skip("OCI connector credentials not found in database")
+    connector = MagicMock()
+    connector.credentials = creds
+    return connector
+
+
+@pytest.fixture
+def live_bind_connector():
     if not os.getenv("SMOKE_BIND_HOST"):
         pytest.skip("SMOKE_BIND_HOST not set — live BIND connector unavailable")
-
     connector = MagicMock()
-
-    # BIND connector uses SSH credentials
     connector.credentials = {
         "host": os.getenv("SMOKE_BIND_HOST"),
         "username": os.getenv("SMOKE_BIND_USERNAME", "root"),
-        "private_key_path": os.getenv("SMOKE_BIND_PRIVATE_KEY_PATH", "~/.ssh/id_ed25519"),
+        "private_key": os.getenv("SMOKE_BIND_PRIVATE_KEY", ""),
         "port": int(os.getenv("SMOKE_BIND_PORT", "22")),
-    }
-    return connector
-
-
-@pytest_asyncio.fixture
-async def live_azure_connector():
-    """Load live Azure connector credentials from environment or database.
-
-    Requires: SMOKE_AKS_CLUSTER (to indicate Azure is configured), plus the platform
-    must have Azure credentials set up. The actual credentials (tenant_id, client_id,
-    client_secret, subscription_id) are loaded from env vars or platform database.
-    """
-    # Check for required env vars
-    if not os.getenv("SMOKE_AKS_CLUSTER"):
-        pytest.skip("SMOKE_AKS_CLUSTER not set — live Azure connector unavailable")
-
-    connector = MagicMock()
-
-    # Azure credentials: expect these to be set in the environment
-    # In practice, these come from platform database or CI env vars
-    connector.credentials = {
-        "tenant_id": os.getenv("AZURE_TENANT_ID", ""),
-        "client_id": os.getenv("AZURE_CLIENT_ID", ""),
-        "client_secret": os.getenv("AZURE_CLIENT_SECRET", ""),
-        "subscription_id": os.getenv("AZURE_SUBSCRIPTION_ID", ""),
-    }
-
-    # Validate that credentials are available
-    if not all(connector.credentials.values()):
-        pytest.skip("Azure credentials not fully configured (AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_SUBSCRIPTION_ID)")
-
-    return connector
-
-
-@pytest_asyncio.fixture
-async def live_aws_connector():
-    """Load live AWS connector credentials from environment or database.
-
-    Requires: SMOKE_AWS_ACCESS_KEY_ID, SMOKE_AWS_SECRET_ACCESS_KEY, SMOKE_AWS_REGION
-    env vars, or a live connector record in the database.
-    """
-    if not os.getenv("SMOKE_AWS_ACCESS_KEY_ID"):
-        pytest.skip("SMOKE_AWS_ACCESS_KEY_ID not set — live AWS connector unavailable")
-    if not os.getenv("SMOKE_AWS_SECRET_ACCESS_KEY"):
-        pytest.skip("SMOKE_AWS_SECRET_ACCESS_KEY not set — live AWS connector unavailable")
-    if not os.getenv("SMOKE_AWS_REGION"):
-        pytest.skip("SMOKE_AWS_REGION not set — live AWS connector unavailable")
-
-    connector = MagicMock()
-    connector.credentials = {
-        "aws_access_key_id": os.getenv("SMOKE_AWS_ACCESS_KEY_ID"),
-        "aws_secret_access_key": os.getenv("SMOKE_AWS_SECRET_ACCESS_KEY"),
-        "region": os.getenv("SMOKE_AWS_REGION"),
     }
     return connector

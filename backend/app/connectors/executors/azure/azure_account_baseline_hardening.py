@@ -5,7 +5,7 @@
 
 Assigns the CIS Azure Foundations Benchmark policy initiative
 (/providers/Microsoft.Authorization/policySetDefinitions/1a5aa27d-2fae-49da-9c7e-70e94cca8eda)
-to the subscription scope.
+to the subscription scope using the Azure ARM REST API directly.
 
 Rollback: delete the policy assignment.
 """
@@ -23,24 +23,52 @@ _CIS_INITIATIVE_ID = (
     "1a5aa27d-2fae-49da-9c7e-70e94cca8eda"
 )
 _ASSIGNMENT_NAME = "nexplane-cis-baseline"
+_API_VERSION = "2022-06-01"
+_ARM_BASE = "https://management.azure.com"
 
 
 async def _run(fn):
     return await asyncio.get_running_loop().run_in_executor(None, fn)
 
 
-def _get_policy_client(creds: dict):
+def _get_token(creds: dict) -> str:
     from azure.identity import ClientSecretCredential
-    from azure.mgmt.resource.policy import PolicyClient
     credential = ClientSecretCredential(
         creds["tenant_id"], creds["client_id"], creds["client_secret"]
     )
-    return PolicyClient(credential, creds["subscription_id"])
+    token = credential.get_token("https://management.azure.com/.default")
+    return token.token
+
+
+def _arm_get(token: str, url: str) -> dict:
+    import requests
+    resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _arm_put(token: str, url: str, body: dict) -> dict:
+    import requests
+    resp = requests.put(
+        url,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json=body,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _arm_delete(token: str, url: str) -> None:
+    import requests
+    resp = requests.delete(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    if resp.status_code not in (200, 204, 404):
+        resp.raise_for_status()
 
 
 async def _preflight(creds: dict) -> dict:
     def _do():
-        _get_policy_client(creds)  # validates credentials
+        _get_token(creds)  # validates credentials
         return creds["subscription_id"]
 
     sub_id = await _run(_do)
@@ -49,10 +77,14 @@ async def _preflight(creds: dict) -> dict:
 
 async def _snapshot(creds: dict, sub_id: str) -> dict:
     def _do():
-        client = _get_policy_client(creds)
+        token = _get_token(creds)
         scope = f"/subscriptions/{sub_id}"
-        assignments = list(client.policy_assignments.list_for_scope(scope=scope))
-        existing = [a.name for a in assignments if a.name == _ASSIGNMENT_NAME]
+        url = (
+            f"{_ARM_BASE}{scope}/providers/Microsoft.Authorization/policyAssignments"
+            f"?api-version={_API_VERSION}"
+        )
+        data = _arm_get(token, url)
+        existing = [a["name"] for a in data.get("value", []) if a["name"] == _ASSIGNMENT_NAME]
         return existing
 
     existing = await _run(_do)
@@ -71,18 +103,20 @@ async def _enable(creds: dict, sub_id: str, pre: dict) -> dict:
         }
 
     def _assign():
-        from azure.mgmt.resource.policy.models import PolicyAssignment
-        client = _get_policy_client(creds)
+        token = _get_token(creds)
         scope = f"/subscriptions/{sub_id}"
-        client.policy_assignments.create(
-            scope=scope,
-            policy_assignment_name=_ASSIGNMENT_NAME,
-            parameters=PolicyAssignment(
-                display_name="Nexplane CIS Azure Foundations Baseline",
-                policy_definition_id=_CIS_INITIATIVE_ID,
-                enforcement_mode="Default",
-            ),
+        url = (
+            f"{_ARM_BASE}{scope}/providers/Microsoft.Authorization/policyAssignments"
+            f"/{_ASSIGNMENT_NAME}?api-version={_API_VERSION}"
         )
+        body = {
+            "properties": {
+                "displayName": "Nexplane CIS Azure Foundations Baseline",
+                "policyDefinitionId": _CIS_INITIATIVE_ID,
+                "enforcementMode": "Default",
+            }
+        }
+        _arm_put(token, url, body)
 
     await _run(_assign)
     rollback_data["assignment_names"].append(_ASSIGNMENT_NAME)
@@ -100,12 +134,18 @@ async def _verify(creds: dict, sub_id: str, applied: list) -> dict:
         return {"phase": "verify", "status": "ok", "failures": []}
 
     def _do():
-        client = _get_policy_client(creds)
+        token = _get_token(creds)
         scope = f"/subscriptions/{sub_id}"
-        assignments = list(client.policy_assignments.list_for_scope(scope=scope))
-        names = [a.name for a in assignments]
-        failures = [name for name in applied if name not in names]
-        return failures
+        url = (
+            f"{_ARM_BASE}{scope}/providers/Microsoft.Authorization/policyAssignments"
+            f"/{_ASSIGNMENT_NAME}?api-version={_API_VERSION}"
+        )
+        import requests
+        resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        if resp.status_code == 404:
+            return applied  # all applied names are failures
+        resp.raise_for_status()
+        return []
 
     failures = await _run(_do)
     return {"phase": "verify", "status": "failed" if failures else "ok", "failures": failures}
@@ -144,13 +184,13 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     deleted = []
     for name in reversed(assignment_names):
         def _delete(n=name):
-            from azure.core.exceptions import ResourceNotFoundError
-            client = _get_policy_client(creds)
+            token = _get_token(creds)
             scope = f"/subscriptions/{sub_id}"
-            try:
-                client.policy_assignments.delete(scope=scope, policy_assignment_name=n)
-            except ResourceNotFoundError:
-                pass
+            url = (
+                f"{_ARM_BASE}{scope}/providers/Microsoft.Authorization/policyAssignments"
+                f"/{n}?api-version={_API_VERSION}"
+            )
+            _arm_delete(token, url)
 
         await _run(_delete)
         deleted.append(name)

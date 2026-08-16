@@ -46,6 +46,7 @@ google-cloud-securitycenter>=1.23.0
 google-cloud-monitoring>=2.18.0
 google-cloud-container>=2.40.0
 google-cloud-artifact-registry>=1.11.0
+google-cloud-org-policy>=1.7.0
 msal>=1.28.0
 hvac>=2.1.0
 PyGithub>=2.1.0

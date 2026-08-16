@@ -48,7 +48,7 @@ async def _snapshot(creds: dict, project_id: str) -> dict:
         from google.api_core.exceptions import NotFound
         from app.connectors.executors.gcp._client import get_credentials
         credentials = get_credentials(creds)
-        client = orgpolicy_v2.OrgPoliciesClient(credentials=credentials)
+        client = orgpolicy_v2.OrgPolicyClient(credentials=credentials)
         results = {}
         for constraint in HARDENING_CONSTRAINTS:
             name = f"projects/{project_id}/policies/{constraint}"
@@ -84,7 +84,7 @@ async def _enable(creds: dict, project_id: str, pre: dict) -> dict:
             from google.cloud import orgpolicy_v2
             from app.connectors.executors.gcp._client import get_credentials
             credentials = get_credentials(creds)
-            client = orgpolicy_v2.OrgPoliciesClient(credentials=credentials)
+            client = orgpolicy_v2.OrgPolicyClient(credentials=credentials)
             policy = orgpolicy_v2.Policy(
                 name=f"projects/{project_id}/policies/{c}",
                 spec=orgpolicy_v2.PolicySpec(
@@ -111,7 +111,7 @@ async def _verify(creds: dict, project_id: str, applied: list) -> dict:
         from google.cloud import orgpolicy_v2
         from app.connectors.executors.gcp._client import get_credentials
         credentials = get_credentials(creds)
-        client = orgpolicy_v2.OrgPoliciesClient(credentials=credentials)
+        client = orgpolicy_v2.OrgPolicyClient(credentials=credentials)
         failures = []
         for constraint in applied:
             name = f"projects/{project_id}/policies/{constraint}"
@@ -174,7 +174,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
             from google.api_core.exceptions import NotFound
             from app.connectors.executors.gcp._client import get_credentials
             credentials = get_credentials(creds)
-            client = orgpolicy_v2.OrgPoliciesClient(credentials=credentials)
+            client = orgpolicy_v2.OrgPolicyClient(credentials=credentials)
             name = f"projects/{project_id}/policies/{c}"
             if not p.get("exists"):
                 try:
