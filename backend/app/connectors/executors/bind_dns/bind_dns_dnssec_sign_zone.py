@@ -24,6 +24,17 @@ logger = logging.getLogger(__name__)
 
 ROLLBACK_CAPABILITY = "full"
 
+_SAFE_PATH = re.compile(r'^[/A-Za-z0-9._\-]+$')
+_SAFE_ZONE = re.compile(r'^[A-Za-z0-9.\-]+\.?$')
+
+
+def _validate_params(zone, zone_file_path, key_directory, named_conf_path):
+    if not _SAFE_ZONE.match(zone):
+        raise ValueError(f"zone contains invalid characters: {zone!r}")
+    for name, path in [("zone_file_path", zone_file_path), ("key_directory", key_directory), ("named_conf_path", named_conf_path)]:
+        if not _SAFE_PATH.match(path):
+            raise ValueError(f"{name} contains invalid characters: {path!r}")
+
 
 async def dispatch_agent_job(command: str, connector, timeout_seconds: int = 120) -> dict:
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job as _dispatch
@@ -42,6 +53,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     key_dir = parameters.get("key_directory", "/var/named/keys")
     named_conf = parameters.get("named_conf_path", "/etc/named.conf")
     dry_run = parameters.get("dry_run", False)
+    _validate_params(zone, zone_file, key_dir, named_conf)
     signed_zone_file = zone_file + ".signed"
 
     if dry_run:

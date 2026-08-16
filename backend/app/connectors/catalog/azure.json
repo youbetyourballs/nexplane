@@ -234,6 +234,7 @@
       ],
       "executor": "azure.aks_cluster_upgrade",
       "rollback_strategy": "executor",
+      "rollback_action": "aks_cluster_upgrade",
       "estimated_duration_seconds": 900,
       "smoke_verified": false,
       "read_only": false
@@ -255,6 +256,7 @@
       ],
       "executor": "azure.aks_node_pool_upgrade",
       "rollback_strategy": "executor",
+      "rollback_action": "aks_node_pool_upgrade",
       "estimated_duration_seconds": 1200,
       "smoke_verified": false,
       "read_only": false

@@ -335,6 +335,7 @@
     },
     {
       "action_id": "gcp_cloud_dns_dnssec_enable",
+      "generic_action": "gcp_cloud_dns_dnssec_enable",
       "action_type": "change",
       "domain": "core",
       "execution_tier": 2,

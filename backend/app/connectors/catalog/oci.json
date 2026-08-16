@@ -147,6 +147,9 @@
         {"name": "dry_run", "type": "boolean", "required": false, "description": "If true, validate only — do not enable DNSSEC"}
       ],
       "executor": "oci.oci_dns_dnssec_enable",
+      "generic_action": "oci_dns_dnssec_enable",
+      "rollback_strategy": "executor",
+      "rollback_action": "oci_dns_dnssec_enable",
       "estimated_duration_seconds": 120,
       "smoke_verified": false,
       "read_only": false

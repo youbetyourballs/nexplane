@@ -112,6 +112,9 @@
         {"name": "dry_run", "type": "boolean", "required": false, "description": "If true, validate only — do not sign"}
       ],
       "executor": "bind_dns.bind_dns_dnssec_sign_zone",
+      "generic_action": "bind_dns_dnssec_sign_zone",
+      "rollback_strategy": "executor",
+      "rollback_action": "bind_dns_dnssec_sign_zone",
       "estimated_duration_seconds": 60,
       "smoke_verified": false,
       "read_only": false
