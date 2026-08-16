@@ -52,7 +52,7 @@ async def _snapshot(creds: dict, sub_id: str) -> dict:
         client = _get_policy_client(creds)
         scope = f"/subscriptions/{sub_id}"
         assignments = list(client.policy_assignments.list_for_scope(scope=scope))
-        existing = [a.name for a in assignments if _ASSIGNMENT_NAME in (a.name or "")]
+        existing = [a.name for a in assignments if a.name == _ASSIGNMENT_NAME]
         return existing
 
     existing = await _run(_do)

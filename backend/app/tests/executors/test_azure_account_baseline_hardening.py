@@ -14,7 +14,6 @@ def connector():
     return c
 
 
-@pytest.mark.asyncio
 async def test_execute_runs_phases(connector):
     with patch("app.connectors.executors.azure.azure_account_baseline_hardening._preflight",
                new=AsyncMock(return_value={"phase": "preflight", "status": "ok", "subscription_id": "sub1"})):
@@ -33,7 +32,6 @@ async def test_execute_runs_phases(connector):
     assert "applied" in result
 
 
-@pytest.mark.asyncio
 async def test_rollback_deletes_assignments(connector):
     execution_result = {
         "subscription_id": "sub1",
