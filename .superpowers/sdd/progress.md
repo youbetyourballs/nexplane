@@ -16,3 +16,5 @@ Base commit: be87e68
 - Plan A Task 3 (BIND DNS DNSSEC): complete (commits a5c4754..d2d7985, review clean after fixes — Important: shell injection sanitization added for key names, -b 256 dropped from ECDSAP256SHA256; Minor: dispatch import path difference, no explicit rollback_action: null in catalog, operator params not sanitized)
 - Plan A Task 4 (DNSSEC smoke tests): complete (commits d2d7985..f9cf0d0, review clean after fixes — BIND double-env skipif, conftest credential guards; Minor: MagicMock fixture placeholder noted)
 - Plan B Task 1 (AKS cluster upgrade): complete (commits f9cf0d0..fc6f8ae, review clean after fixes — Critical: rollback_strategy+generic_action added to catalog, dead ManagedCluster import removed; Important: _parse_minor raises ValueError, async mock fixed; Minor: no blast_radius_hint, resource_group absent from already_at_version result)
+- Plan B Task 2 (AKS node pool upgrade): complete (commits fc6f8ae..376db62, review clean — Minor: poller.wait() removed proactively (would fail live smoke), dead AgentPool import removed; no rollback unit test)
+- Plan B Task 3 (AKS smoke tests): complete (commits 376db62..0cf14c6, review clean)

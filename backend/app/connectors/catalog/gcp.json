@@ -367,6 +367,7 @@
         {"name": "image", "type": "string", "required": true, "description": "Container image to deploy (e.g. 'gcr.io/my-project/my-app:v2')"}
       ],
       "executor": "gcp.cloud_run_deploy",
+      "rollback_action": "cloud_run_deploy",
       "rollback_strategy": "executor",
       "estimated_duration_seconds": 120,
       "smoke_verified": false,

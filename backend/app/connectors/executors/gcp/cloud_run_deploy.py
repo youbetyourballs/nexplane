@@ -108,6 +108,9 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     region = execution_result["region"]
     previous_image = execution_result["previous_image"]
 
+    if not previous_image:
+        return {"rolled_back": False, "reason": "No previous image recorded in execution result — rollback not possible"}
+
     def _get_project_id():
         from app.connectors.executors.gcp._client import get_project_id
         return get_project_id(creds)

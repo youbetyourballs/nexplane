@@ -1,4 +1,40 @@
-# Task 3: BIND DNS DNSSEC executor (cross-cloud DNSSEC parity project)
+# Task 3: AKS Smoke Tests (AKS parity project)
+
+## Status: ✅ COMPLETE
+
+## Commits
+- `0cf14c6` — test: add AKS cluster and node pool upgrade smoke tests
+
+## Summary
+Created smoke test file for AKS cluster and node pool upgrades with proper fixture pattern, env var gating, and correct rollback assertions.
+
+## Files Created/Modified
+1. **backend/app/tests/smoke/test_aks_upgrade_smoke.py** (new)
+   - Two async tests with `@pytest.mark.smoke` and `@pytest.mark.skipif` gating
+   - `test_aks_cluster_upgrade`: verifies control plane upgrade and asserts irreversible rollback (rolled_back=False)
+   - `test_aks_node_pool_upgrade_and_rollback`: verifies node pool upgrade with full rollback (rolled_back=True)
+   - Consumes SMOKE_AKS_RESOURCE_GROUP, SMOKE_AKS_CLUSTER, SMOKE_AKS_TARGET_VERSION, SMOKE_AKS_NODE_POOL env vars
+
+2. **backend/app/tests/smoke/conftest.py** (modified)
+   - Added `live_azure_connector` fixture following existing pattern (GCP, OCI, BIND)
+   - Loads Azure credentials from AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_SUBSCRIPTION_ID env vars
+   - Skips tests if SMOKE_AKS_CLUSTER not set or credentials incomplete
+
+## Design Decisions
+- Followed conftest fixture pattern already established for GCP, OCI, BIND
+- Used asyncio_mode auto (no @pytest.mark.asyncio needed)
+- Correctly asserts `rolled_back=False` + `"irreversible" in reason.lower()` for cluster upgrade (matches executor contract)
+- Node pool rollback only attempted if upgrade actually occurred (status="upgraded")
+- Did NOT set `smoke_verified=true` per task requirements (gating on live smoke passing first)
+
+## Concerns
+None. Tests follow established patterns and align with executor contracts.
+
+---
+
+## HISTORICAL ENTRIES BELOW
+
+# Task 3: BIND DNS DNSSEC executor (cross-cloud DNSSEC parity project) — 2026-07-02
 
 ## Status: DONE
 

@@ -20,9 +20,10 @@ async def test_deploy_captures_previous_image(connector):
     call_count = [0]
     async def fake_run(fn):
         call_count[0] += 1
+        # Call order: 1=get_project_id, 2=get_service, 3=update_service
         if call_count[0] == 2:
-            return mock_service  # get service
-        return MagicMock()  # for get_project_id and update_service
+            return mock_service  # call 2: get_service returns the service with v1 image
+        return MagicMock()  # calls 1 & 3: get_project_id and update_service
 
     with patch("app.connectors.executors.gcp.cloud_run_deploy._run", side_effect=fake_run):
         with patch("app.connectors.executors.gcp.cloud_run_deploy._wait_ready", new=AsyncMock(return_value="https://app-xyz.run.app")):
