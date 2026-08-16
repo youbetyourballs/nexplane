@@ -237,6 +237,27 @@
       "estimated_duration_seconds": 900,
       "smoke_verified": false,
       "read_only": false
+    },
+    {
+      "action_id": "aks_node_pool_upgrade",
+      "generic_action": "aks_node_pool_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade AKS Node Pool",
+      "description": "Upgrade an AKS agent pool to a specific Kubernetes version. Requires cluster control plane to already be at target version. Full rollback supported — node pool can be downgraded to previous version.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "resource_group", "type": "string", "required": true, "description": "Azure resource group"},
+        {"name": "cluster_name", "type": "string", "required": true, "description": "AKS cluster name"},
+        {"name": "node_pool_name", "type": "string", "required": true, "description": "Node pool (agent pool) name"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target Kubernetes version for the node pool"}
+      ],
+      "executor": "azure.aks_node_pool_upgrade",
+      "rollback_strategy": "executor",
+      "estimated_duration_seconds": 1200,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
