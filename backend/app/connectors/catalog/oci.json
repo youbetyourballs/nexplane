@@ -167,6 +167,46 @@
       "estimated_duration_seconds": 30,
       "smoke_verified": false,
       "read_only": false
+    },
+    {
+      "action_id": "oci_adb_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade OCI Autonomous Database Version",
+      "description": "Upgrade an OCI Autonomous Database to a new database version. Rollback: partial — version downgrades not supported.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "adb_id", "type": "string", "required": true, "description": "Autonomous Database OCID"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target DB version (e.g. '21c')"}
+      ],
+      "executor": "oci.oci_adb_upgrade",
+      "rollback_strategy": "executor",
+      "rollback_action": "oci_adb_upgrade",
+      "generic_action": "oci_adb_upgrade",
+      "estimated_duration_seconds": 1200,
+      "smoke_verified": false,
+      "read_only": false
+    },
+    {
+      "action_id": "oci_cache_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade OCI Cache (Redis) Cluster Version",
+      "description": "Upgrade an OCI Redis cluster to a new software version. Rollback: partial — downgrades not supported.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "cluster_id", "type": "string", "required": true, "description": "OCI Redis cluster OCID"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target software version (e.g. 'REDIS_7_0')"}
+      ],
+      "executor": "oci.oci_cache_upgrade",
+      "rollback_strategy": "executor",
+      "rollback_action": "oci_cache_upgrade",
+      "generic_action": "oci_cache_upgrade",
+      "estimated_duration_seconds": 1200,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
