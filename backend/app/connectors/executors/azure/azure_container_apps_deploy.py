@@ -94,6 +94,9 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     app_name = execution_result["app_name"]
     previous_image = execution_result["previous_image"]
 
+    if not previous_image:
+        return {"rolled_back": False, "reason": "No previous image recorded — rollback not possible"}
+
     def _restore():
         from azure.mgmt.appcontainers.models import ContainerApp, Template, Container
         client = _get_client(creds)
