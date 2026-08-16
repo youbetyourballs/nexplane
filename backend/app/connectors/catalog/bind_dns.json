@@ -95,6 +95,26 @@
       "estimated_duration_seconds": 300,
       "blast_radius_hint": "dns_change",
       "smoke_verified": false
+    },
+    {
+      "action_id": "bind_dns_dnssec_sign_zone",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Sign BIND Zone with DNSSEC",
+      "description": "Generate KSK and ZSK with dnssec-keygen, sign the zone with dnssec-signzone, update named.conf, and reload BIND. Rollback: restore original zone file pointer and reload.",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {"name": "zone", "type": "string", "required": true, "description": "DNS zone name (e.g. 'example.com.')"},
+        {"name": "zone_file_path", "type": "string", "required": true, "description": "Absolute path to the zone file on the DNS server (e.g. '/var/named/example.com.zone')"},
+        {"name": "key_directory", "type": "string", "required": false, "description": "Directory for DNSSEC keys (default: '/var/named/keys')"},
+        {"name": "named_conf_path", "type": "string", "required": false, "description": "Path to named.conf (default: '/etc/named.conf')"},
+        {"name": "dry_run", "type": "boolean", "required": false, "description": "If true, validate only — do not sign"}
+      ],
+      "executor": "bind_dns.bind_dns_dnssec_sign_zone",
+      "estimated_duration_seconds": 60,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
