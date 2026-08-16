@@ -279,6 +279,30 @@
       "estimated_duration_seconds": 180,
       "smoke_verified": false,
       "read_only": false
+    },
+    {
+      "action_id": "azure_acr_create",
+      "generic_action": "azure_acr_create",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Create Azure Container Registry",
+      "description": "Create a new Azure Container Registry. Rollback: delete the registry. Safe to roll back only if no images have been pushed.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "resource_group", "type": "string", "required": true, "description": "Azure resource group"},
+        {"name": "registry_name", "type": "string", "required": true, "description": "Registry name (must be globally unique, 5-50 alphanumeric chars)"},
+        {"name": "location", "type": "string", "required": true, "description": "Azure region (e.g. 'eastus')"},
+        {"name": "sku", "type": "string", "required": false, "description": "SKU: Basic (default), Standard, or Premium"},
+        {"name": "admin_enabled", "type": "boolean", "required": false, "description": "Enable admin user (default: false)"}
+      ],
+      "executor": "azure.azure_acr_create",
+      "rollback_strategy": "executor",
+      "rollback_action": "azure_acr_create",
+      "estimated_duration_seconds": 60,
+      "blast_radius_hint": "new_resource",
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
