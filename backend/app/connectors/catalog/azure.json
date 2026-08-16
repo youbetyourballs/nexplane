@@ -217,6 +217,24 @@
       "executor": "azure.azure_account_baseline_monitoring",
       "rollback_strategy": "executor",
       "estimated_duration_seconds": 300
+    },
+    {
+      "action_id": "aks_cluster_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade AKS Cluster",
+      "description": "Upgrade AKS managed control plane to the next minor Kubernetes version (+1 minor only). Control plane upgrade is irreversible. Node pools can be upgraded separately with aks_node_pool_upgrade.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "resource_group", "type": "string", "required": true, "description": "Azure resource group containing the AKS cluster"},
+        {"name": "cluster_name", "type": "string", "required": true, "description": "AKS cluster name"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target Kubernetes version (e.g. '1.28.5'). Must be exactly one minor version higher than current."}
+      ],
+      "executor": "azure.aks_cluster_upgrade",
+      "estimated_duration_seconds": 900,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
