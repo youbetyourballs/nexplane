@@ -411,6 +411,47 @@
       "estimated_duration_seconds": 60,
       "smoke_verified": false,
       "read_only": false
+    },
+    {
+      "action_id": "memorystore_redis_upgrade",
+      "generic_action": "memorystore_redis_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade Memorystore Redis Version",
+      "description": "Upgrade a GCP Memorystore Redis instance to a new Redis version (e.g. REDIS_7_0). Rollback: partial — downgrades not supported.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "instance_name", "type": "string", "required": true, "description": "Memorystore Redis instance short name"},
+        {"name": "location", "type": "string", "required": true, "description": "GCP region (e.g. 'us-central1')"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target Redis version string (e.g. 'REDIS_7_0')"}
+      ],
+      "executor": "gcp.memorystore_redis_upgrade",
+      "rollback_action": "memorystore_redis_upgrade",
+      "rollback_strategy": "executor",
+      "estimated_duration_seconds": 1200,
+      "smoke_verified": false,
+      "read_only": false
+    },
+    {
+      "action_id": "cloud_sql_upgrade",
+      "generic_action": "cloud_sql_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade Cloud SQL Version",
+      "description": "Upgrade a Cloud SQL instance to a new database version (e.g. POSTGRES_15, MYSQL_8_0). Rollback: partial — version downgrades not supported.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "instance_name", "type": "string", "required": true, "description": "Cloud SQL instance name"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target database version string (e.g. 'POSTGRES_15', 'MYSQL_8_0')"}
+      ],
+      "executor": "gcp.cloud_sql_upgrade",
+      "rollback_action": "cloud_sql_upgrade",
+      "rollback_strategy": "executor",
+      "estimated_duration_seconds": 1800,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
