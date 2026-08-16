@@ -351,6 +351,26 @@
       "estimated_duration_seconds": 120,
       "smoke_verified": false,
       "read_only": false
+    },
+    {
+      "action_id": "cloud_run_deploy",
+      "generic_action": "cloud_run_deploy",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Deploy Cloud Run Service",
+      "description": "Deploy a new container image to a GCP Cloud Run service. Creates a new revision and routes traffic to it. Rollback: deploy previous image as a new revision.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "service_name", "type": "string", "required": true, "description": "Cloud Run service name"},
+        {"name": "region", "type": "string", "required": true, "description": "GCP region (e.g. 'us-central1')"},
+        {"name": "image", "type": "string", "required": true, "description": "Container image to deploy (e.g. 'gcr.io/my-project/my-app:v2')"}
+      ],
+      "executor": "gcp.cloud_run_deploy",
+      "rollback_strategy": "executor",
+      "estimated_duration_seconds": 120,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
