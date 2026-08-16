@@ -2475,6 +2475,48 @@
       "estimated_duration_seconds": 1200,
       "read_only": false,
       "smoke_verified": false
+    },
+    {
+      "action_id": "rds_postgres_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade RDS PostgreSQL Version",
+      "description": "Upgrade an RDS PostgreSQL instance to a new engine version. AllowMajorVersionUpgrade is always enabled. Rollback: partial — restore from automated snapshot.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "db_instance_identifier", "type": "string", "required": true, "description": "RDS instance identifier"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target PostgreSQL version (e.g. '15.4')"},
+        {"name": "apply_immediately", "type": "boolean", "required": false, "description": "Apply immediately (default: true); false defers to next maintenance window"}
+      ],
+      "executor": "aws.rds_postgres_upgrade",
+      "rollback_strategy": "executor",
+      "rollback_action": "rds_postgres_upgrade",
+      "generic_action": "rds_postgres_upgrade",
+      "estimated_duration_seconds": 1800,
+      "read_only": false,
+      "smoke_verified": false
+    },
+    {
+      "action_id": "rds_mysql_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade RDS MySQL Version",
+      "description": "Upgrade an RDS MySQL instance to a new engine version. AllowMajorVersionUpgrade is always enabled. Rollback: partial — restore from automated snapshot.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "db_instance_identifier", "type": "string", "required": true, "description": "RDS MySQL instance identifier"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target MySQL version (e.g. '8.0.35')"},
+        {"name": "apply_immediately", "type": "boolean", "required": false, "description": "Apply immediately (default: true)"}
+      ],
+      "executor": "aws.rds_mysql_upgrade",
+      "rollback_strategy": "executor",
+      "rollback_action": "rds_mysql_upgrade",
+      "generic_action": "rds_mysql_upgrade",
+      "estimated_duration_seconds": 1800,
+      "read_only": false,
+      "smoke_verified": false
     }
   ]
 }
