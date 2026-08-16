@@ -150,6 +150,23 @@
       "estimated_duration_seconds": 120,
       "smoke_verified": false,
       "read_only": false
+    },
+    {
+      "action_id": "oci_account_baseline_hardening",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "OCI Account Baseline Hardening",
+      "description": "Enforce OCI tenancy password policy: 14-char minimum, complexity requirements, 365-day expiry. Rollback: restore prior password policy.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [],
+      "executor": "oci.oci_account_baseline_hardening",
+      "rollback_strategy": "executor",
+      "rollback_action": "oci_account_baseline_hardening",
+      "generic_action": "oci_account_baseline_hardening",
+      "estimated_duration_seconds": 30,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
