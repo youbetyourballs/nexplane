@@ -347,6 +347,7 @@
       ],
       "executor": "gcp.gcp_cloud_dns_dnssec_enable",
       "rollback_action": "gcp_cloud_dns_dnssec_enable",
+      "rollback_strategy": "executor",
       "estimated_duration_seconds": 120,
       "smoke_verified": false,
       "read_only": false

@@ -35,14 +35,17 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         project_id = get_project_id(creds)
         dns = build("dns", "v1", credentials=credentials)
         zone = dns.managedZones().get(project=project_id, managedZone=zone_name).execute()
-        return zone, project_id, credentials
+        return zone, project_id
 
-    zone, project_id, credentials = await _run(_get_zone)
+    zone, project_id = await _run(_get_zone)
     current_state = zone.get("dnssecConfig", {}).get("state", "off")
 
     if current_state == "on":
         def _get_keys():
             from googleapiclient.discovery import build
+            from app.connectors.executors.gcp._client import get_credentials, get_project_id
+            credentials = get_credentials(creds)
+            project_id = get_project_id(creds)
             dns = build("dns", "v1", credentials=credentials)
             return dns.dnsKeys().list(project=project_id, managedZone=zone_name).execute()
         keys_resp = await _run(_get_keys)
@@ -61,6 +64,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     def _patch_enable():
         from googleapiclient.discovery import build
+        from app.connectors.executors.gcp._client import get_credentials, get_project_id
+        credentials = get_credentials(creds)
+        project_id = get_project_id(creds)
         dns = build("dns", "v1", credentials=credentials)
         return dns.managedZones().patch(
             project=project_id,
@@ -79,6 +85,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
         def _poll():
             from googleapiclient.discovery import build
+            from app.connectors.executors.gcp._client import get_credentials, get_project_id
+            credentials = get_credentials(creds)
+            project_id = get_project_id(creds)
             dns = build("dns", "v1", credentials=credentials)
             z = dns.managedZones().get(project=project_id, managedZone=zone_name).execute()
             keys = dns.dnsKeys().list(project=project_id, managedZone=zone_name).execute()

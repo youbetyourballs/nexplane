@@ -21,7 +21,6 @@ async def test_already_enabled_returns_no_op(connector):
             return (
                 {"dnssecConfig": {"state": "on"}, "name": "example.com."},
                 "test-proj",
-                None,
             )
         if len(call_log) == 2:  # get_keys
             return {
@@ -46,7 +45,6 @@ async def test_enables_dnssec(connector):
             return (
                 {"dnssecConfig": {"state": "off"}, "name": "example.com."},
                 "test-proj",
-                None,
             )
         if len(call_log) == 2:  # patch_enable
             return {}
