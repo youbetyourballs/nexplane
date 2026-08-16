@@ -372,6 +372,28 @@
       "estimated_duration_seconds": 120,
       "smoke_verified": false,
       "read_only": false
+    },
+    {
+      "action_id": "gcp_artifact_registry_create",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Create Artifact Registry Repository",
+      "description": "Create a GCP Artifact Registry repository (Docker, Maven, npm, etc.). Rollback: delete the repository. Safe to roll back only if no images have been pushed.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "location", "type": "string", "required": true, "description": "GCP region (e.g. 'us-central1') or multi-region (e.g. 'us')"},
+        {"name": "repository_id", "type": "string", "required": true, "description": "Repository name (e.g. 'my-docker-repo')"},
+        {"name": "format", "type": "string", "required": false, "description": "Repository format: DOCKER (default), MAVEN, NPM, PYTHON, GO, APT, YUM"},
+        {"name": "description", "type": "string", "required": false, "description": "Human-readable description"}
+      ],
+      "executor": "gcp.gcp_artifact_registry_create",
+      "rollback_action": "gcp_artifact_registry_create",
+      "rollback_strategy": "executor",
+      "generic_action": "gcp_artifact_registry_create",
+      "estimated_duration_seconds": 30,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
