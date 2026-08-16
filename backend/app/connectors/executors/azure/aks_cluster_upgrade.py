@@ -103,10 +103,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         client = _get_aks_client(creds)
         existing = client.managed_clusters.get(resource_group, cluster_name)
         existing.kubernetes_version = target_version
-        poller = client.managed_clusters.begin_create_or_update(
+        client.managed_clusters.begin_create_or_update(
             resource_group, cluster_name, existing
         )
-        poller.wait(timeout=60)  # Wait for operation to be accepted, not for completion
 
     await _run(_upgrade)
     logger.info("aks_cluster_upgrade: upgrade to %s initiated for %s", target_version, cluster_name)

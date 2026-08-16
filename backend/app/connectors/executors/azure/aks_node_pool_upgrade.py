@@ -82,14 +82,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         }
 
     def _upgrade():
-        from azure.mgmt.containerservice.models import AgentPool
         client = _get_aks_client(creds)
         existing = client.agent_pools.get(resource_group, cluster_name, pool_name)
         existing.orchestrator_version = target_version
-        poller = client.agent_pools.begin_create_or_update(
+        client.agent_pools.begin_create_or_update(
             resource_group, cluster_name, pool_name, existing
         )
-        poller.wait(timeout=60)
 
     await _run(_upgrade)
     logger.info("aks_node_pool_upgrade: upgrade to %s initiated for pool %s", target_version, pool_name)
@@ -121,10 +119,9 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         client = _get_aks_client(creds)
         existing = client.agent_pools.get(resource_group, cluster_name, pool_name)
         existing.orchestrator_version = previous_version
-        poller = client.agent_pools.begin_create_or_update(
+        client.agent_pools.begin_create_or_update(
             resource_group, cluster_name, pool_name, existing
         )
-        poller.wait(timeout=60)
 
     await _run(_downgrade)
     logger.info("aks_node_pool_upgrade rollback: reverting pool %s to %s", pool_name, previous_version)
