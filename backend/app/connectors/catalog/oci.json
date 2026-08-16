@@ -111,6 +111,23 @@
       "executor": "oci.oci_account_baseline_monitoring",
       "rollback_strategy": "executor",
       "estimated_duration_seconds": 300
+    },
+    {
+      "action_id": "oci_dns_dnssec_enable",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Enable OCI DNS DNSSEC",
+      "description": "Enable DNSSEC signing on an OCI DNS managed zone. OCI auto-manages keys. Rollback: disable signing.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "zone_id", "type": "string", "required": true, "description": "OCI DNS zone OCID or name"},
+        {"name": "dry_run", "type": "boolean", "required": false, "description": "If true, validate only — do not enable DNSSEC"}
+      ],
+      "executor": "oci.oci_dns_dnssec_enable",
+      "estimated_duration_seconds": 120,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
