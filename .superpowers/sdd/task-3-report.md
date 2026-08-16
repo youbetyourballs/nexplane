@@ -1,3 +1,25 @@
+# Task 3: BIND DNS DNSSEC executor (cross-cloud DNSSEC parity project)
+
+## Status: DONE
+
+## Commits
+- `f4b41bf` — feat: add bind_dns_dnssec_sign_zone executor and catalog entry
+
+## Test Summary
+2/2 passed in 0.26s (`backend/app/tests/executors/test_bind_dns_dnssec_sign_zone.py`)
+- test_signs_zone: PASSED
+- test_rollback_restores_unsigned_zone: PASSED
+
+## Files Created/Modified
+- `backend/app/connectors/executors/bind_dns/bind_dns_dnssec_sign_zone.py` — DNSSEC signing executor: KSK/ZSK generation, zone signing, named.conf update, rndc reload, full rollback
+- `backend/app/tests/executors/test_bind_dns_dnssec_sign_zone.py` — 2 unit tests covering signing and rollback scenarios
+- `backend/app/connectors/catalog/bind_dns.json` — appended bind_dns_dnssec_sign_zone action entry
+
+## Concerns
+None.
+
+---
+
 # Task 3 Report: Container Image Transfer Executor
 
 ## Status: DONE
@@ -93,3 +115,21 @@ cd backend && python -m pytest tests/unit/test_container_image_transfer.py -v
 
 ### Test Output
 12/12 passed in 5.31s
+
+---
+
+## Fix Pass — bind_dns_dnssec_sign_zone.py — 2026-08-16
+
+### Commit
+`d2d7985` — fix: bind_dns_dnssec_sign_zone — sanitize key names, drop invalid -b flag for ECDSAP256SHA256
+
+### Changes Made
+
+1. **Finding 1 — Shell injection via unsanitized ksk_name/zsk_name:** Key names parsed from `dnssec-keygen` output were interpolated directly into the `dnssec-signzone` command without sanitization. Fixed by parsing raw output, then applying `re.sub(r"[^A-Za-z0-9._+\-]", "", raw_name)` to both `ksk_name` and `zsk_name` before use in shell commands.
+
+2. **Finding 2 — Invalid `-b 256` flag for ECDSAP256SHA256:** The `-b` (key size) flag is not valid with ECDSAP256SHA256 (fixed 256-bit curves). Removed `-b 256` from both KSK and ZSK `dnssec-keygen` invocations:
+   - KSK: `dnssec-keygen -a ECDSAP256SHA256 -n ZONE -f KSK {zone}`
+   - ZSK: `dnssec-keygen -a ECDSAP256SHA256 -n ZONE {zone}`
+
+### Test Results
+2/2 passed in 0.19s (`backend/app/tests/executors/test_bind_dns_dnssec_sign_zone.py`)

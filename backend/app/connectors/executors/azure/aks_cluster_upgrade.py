@@ -38,7 +38,9 @@ def _get_aks_client(creds: dict):
 
 def _parse_minor(version: str) -> int:
     parts = version.split(".")
-    return int(parts[1]) if len(parts) >= 2 else 0
+    if len(parts) < 2:
+        raise ValueError(f"Cannot parse minor version from: {version!r}")
+    return int(parts[1])
 
 
 async def _wait_for_upgrade(creds: dict, resource_group: str, cluster_name: str, target_version: str) -> str:
@@ -98,7 +100,6 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         )
 
     def _upgrade():
-        from azure.mgmt.containerservice.models import ManagedCluster
         client = _get_aks_client(creds)
         existing = client.managed_clusters.get(resource_group, cluster_name)
         existing.kubernetes_version = target_version

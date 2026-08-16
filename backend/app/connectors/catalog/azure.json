@@ -220,6 +220,7 @@
     },
     {
       "action_id": "aks_cluster_upgrade",
+      "generic_action": "aks_cluster_upgrade",
       "action_type": "change",
       "domain": "core",
       "execution_tier": 2,
@@ -232,6 +233,7 @@
         {"name": "target_version", "type": "string", "required": true, "description": "Target Kubernetes version (e.g. '1.28.5'). Must be exactly one minor version higher than current."}
       ],
       "executor": "azure.aks_cluster_upgrade",
+      "rollback_strategy": "executor",
       "estimated_duration_seconds": 900,
       "smoke_verified": false,
       "read_only": false

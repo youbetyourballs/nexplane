@@ -20,8 +20,10 @@ async def test_already_at_version(connector):
     mock_cluster.kubernetes_version = "1.28.5"
     mock_cluster.provisioning_state = "Succeeded"
 
-    with patch("app.connectors.executors.azure.aks_cluster_upgrade._run") as mock_run:
-        mock_run.return_value = mock_cluster
+    async def fake_run(fn):
+        return mock_cluster
+
+    with patch("app.connectors.executors.azure.aks_cluster_upgrade._run", side_effect=fake_run):
         from app.connectors.executors.azure.aks_cluster_upgrade import execute
         result = await execute(
             {"resource_group": "rg1", "cluster_name": "my-cluster", "target_version": "1.28.5"},
