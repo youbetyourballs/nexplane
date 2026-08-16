@@ -21,7 +21,12 @@ from app.connectors.executors.oci.oci_container_instances_deploy import execute 
 
 
 @pytest.mark.smoke
-@pytest.mark.skipif(not os.getenv("SMOKE_CLOUD_RUN_SERVICE"), reason="SMOKE_CLOUD_RUN_SERVICE not set")
+@pytest.mark.skipif(
+    not os.getenv("SMOKE_CLOUD_RUN_SERVICE")
+    or not os.getenv("SMOKE_CLOUD_RUN_REGION")
+    or not os.getenv("SMOKE_CLOUD_RUN_IMAGE"),
+    reason="SMOKE_CLOUD_RUN_* env vars not set",
+)
 async def test_cloud_run_deploy_and_rollback(live_gcp_connector):
     params = {
         "service_name": os.environ["SMOKE_CLOUD_RUN_SERVICE"],
@@ -36,7 +41,12 @@ async def test_cloud_run_deploy_and_rollback(live_gcp_connector):
 
 
 @pytest.mark.smoke
-@pytest.mark.skipif(not os.getenv("SMOKE_AZURE_CA_APP"), reason="SMOKE_AZURE_CA_APP not set")
+@pytest.mark.skipif(
+    not os.getenv("SMOKE_AZURE_CA_RG")
+    or not os.getenv("SMOKE_AZURE_CA_APP")
+    or not os.getenv("SMOKE_AZURE_CA_IMAGE"),
+    reason="SMOKE_AZURE_CA_* env vars not set",
+)
 async def test_azure_container_apps_deploy_and_rollback(live_azure_connector):
     params = {
         "resource_group": os.environ["SMOKE_AZURE_CA_RG"],
@@ -50,7 +60,12 @@ async def test_azure_container_apps_deploy_and_rollback(live_azure_connector):
 
 
 @pytest.mark.smoke
-@pytest.mark.skipif(not os.getenv("SMOKE_OCI_CI_INSTANCE_ID"), reason="SMOKE_OCI_CI_INSTANCE_ID not set")
+@pytest.mark.skipif(
+    not os.getenv("SMOKE_OCI_CI_COMPARTMENT")
+    or not os.getenv("SMOKE_OCI_CI_INSTANCE_ID")
+    or not os.getenv("SMOKE_OCI_CI_IMAGE"),
+    reason="SMOKE_OCI_CI_* env vars not set",
+)
 async def test_oci_container_instances_deploy_and_rollback(live_oci_connector):
     params = {
         "compartment_id": os.environ["SMOKE_OCI_CI_COMPARTMENT"],
