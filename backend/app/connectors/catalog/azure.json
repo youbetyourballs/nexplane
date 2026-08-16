@@ -258,6 +258,27 @@
       "estimated_duration_seconds": 1200,
       "smoke_verified": false,
       "read_only": false
+    },
+    {
+      "action_id": "azure_container_apps_deploy",
+      "generic_action": "azure_container_apps_deploy",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Deploy Azure Container App",
+      "description": "Deploy a new container image to an Azure Container App. Revision-based; rollback redeploys the previous image.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "resource_group", "type": "string", "required": true, "description": "Azure resource group"},
+        {"name": "app_name", "type": "string", "required": true, "description": "Container App name"},
+        {"name": "image", "type": "string", "required": true, "description": "Container image to deploy (e.g. 'myregistry.azurecr.io/app:v2')"}
+      ],
+      "executor": "azure.azure_container_apps_deploy",
+      "rollback_strategy": "executor",
+      "rollback_action": "azure_container_apps_deploy",
+      "estimated_duration_seconds": 180,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
