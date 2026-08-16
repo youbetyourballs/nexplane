@@ -84,3 +84,33 @@ async def live_bind_connector():
         "port": int(os.getenv("SMOKE_BIND_PORT", "22")),
     }
     return connector
+
+
+@pytest_asyncio.fixture
+async def live_azure_connector():
+    """Load live Azure connector credentials from environment or database.
+
+    Requires: SMOKE_AKS_CLUSTER (to indicate Azure is configured), plus the platform
+    must have Azure credentials set up. The actual credentials (tenant_id, client_id,
+    client_secret, subscription_id) are loaded from env vars or platform database.
+    """
+    # Check for required env vars
+    if not os.getenv("SMOKE_AKS_CLUSTER"):
+        pytest.skip("SMOKE_AKS_CLUSTER not set — live Azure connector unavailable")
+
+    connector = MagicMock()
+
+    # Azure credentials: expect these to be set in the environment
+    # In practice, these come from platform database or CI env vars
+    connector.credentials = {
+        "tenant_id": os.getenv("AZURE_TENANT_ID", ""),
+        "client_id": os.getenv("AZURE_CLIENT_ID", ""),
+        "client_secret": os.getenv("AZURE_CLIENT_SECRET", ""),
+        "subscription_id": os.getenv("AZURE_SUBSCRIPTION_ID", ""),
+    }
+
+    # Validate that credentials are available
+    if not all(connector.credentials.values()):
+        pytest.skip("Azure credentials not fully configured (AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_SUBSCRIPTION_ID)")
+
+    return connector
