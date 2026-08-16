@@ -320,6 +320,49 @@
       "estimated_duration_seconds": 60,
       "smoke_verified": false,
       "read_only": false
+    },
+    {
+      "action_id": "azure_cache_redis_upgrade",
+      "generic_action": "azure_cache_redis_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade Azure Cache for Redis Version",
+      "description": "Upgrade an Azure Cache for Redis instance to a new Redis version. Rollback: partial — downgrades not supported.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "resource_group", "type": "string", "required": true, "description": "Azure resource group"},
+        {"name": "cache_name", "type": "string", "required": true, "description": "Azure Cache for Redis name"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target Redis version (e.g. '7')"}
+      ],
+      "executor": "azure.azure_cache_redis_upgrade",
+      "rollback_strategy": "executor",
+      "rollback_action": "azure_cache_redis_upgrade",
+      "estimated_duration_seconds": 1200,
+      "smoke_verified": false,
+      "read_only": false
+    },
+    {
+      "action_id": "azure_database_upgrade",
+      "generic_action": "azure_database_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade Azure Database Flexible Server",
+      "description": "Upgrade an Azure PostgreSQL or MySQL flexible server to a new engine version. Rollback: partial — version downgrades not supported.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "resource_group", "type": "string", "required": true, "description": "Azure resource group"},
+        {"name": "server_name", "type": "string", "required": true, "description": "Flexible server name"},
+        {"name": "engine", "type": "string", "required": true, "description": "'postgresql' or 'mysql'"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target version (e.g. '15' for PostgreSQL, '8.0.35' for MySQL)"}
+      ],
+      "executor": "azure.azure_database_upgrade",
+      "rollback_strategy": "executor",
+      "rollback_action": "azure_database_upgrade",
+      "estimated_duration_seconds": 1800,
+      "smoke_verified": false,
+      "read_only": false
     }
   ]
 }
