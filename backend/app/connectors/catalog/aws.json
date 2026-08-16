@@ -2517,6 +2517,27 @@
       "estimated_duration_seconds": 1800,
       "read_only": false,
       "smoke_verified": false
+    },
+    {
+      "action_id": "documentdb_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade DocumentDB Cluster Version",
+      "description": "Upgrade an AWS DocumentDB cluster to a new engine version. Rollback: partial — restore from automated cluster snapshot.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "db_cluster_identifier", "type": "string", "required": true, "description": "DocumentDB cluster identifier"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target engine version (e.g. '5.0.0')"},
+        {"name": "apply_immediately", "type": "boolean", "required": false, "description": "Apply immediately (default: true)"}
+      ],
+      "executor": "aws.documentdb_upgrade",
+      "rollback_strategy": "executor",
+      "rollback_action": "documentdb_upgrade",
+      "generic_action": "documentdb_upgrade",
+      "estimated_duration_seconds": 1800,
+      "read_only": false,
+      "smoke_verified": false
     }
   ]
 }
