@@ -113,6 +113,28 @@
       "estimated_duration_seconds": 300
     },
     {
+      "action_id": "oci_container_instances_deploy",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Deploy OCI Container Instance",
+      "description": "Deploy a new container image to OCI by replacing the existing container instance. Brief unavailability during swap. Rollback recreates the prior instance (partial — unavailability gap applies).",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "compartment_id", "type": "string", "required": true, "description": "OCI compartment OCID"},
+        {"name": "instance_id", "type": "string", "required": true, "description": "Existing container instance OCID to replace"},
+        {"name": "image", "type": "string", "required": true, "description": "New container image URL"},
+        {"name": "display_name", "type": "string", "required": false, "description": "Display name for the new instance"}
+      ],
+      "executor": "oci.oci_container_instances_deploy",
+      "rollback_strategy": "executor",
+      "rollback_action": "oci_container_instances_deploy",
+      "generic_action": "oci_container_instances_deploy",
+      "estimated_duration_seconds": 180,
+      "smoke_verified": false,
+      "read_only": false
+    },
+    {
       "action_id": "oci_dns_dnssec_enable",
       "action_type": "change",
       "domain": "core",
