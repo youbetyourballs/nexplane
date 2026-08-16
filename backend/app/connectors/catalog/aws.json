@@ -2455,6 +2455,26 @@
       "estimated_duration_seconds": 300,
       "blast_radius_hint": "dns_change",
       "smoke_verified": true
+    },
+    {
+      "action_id": "elasticache_redis_upgrade",
+      "action_type": "change",
+      "domain": "core",
+      "execution_tier": 2,
+      "display_name": "Upgrade ElastiCache Redis Version",
+      "description": "Upgrade an ElastiCache Redis replication group to a new engine version. Rollback is partial — downgrades are not supported; roll back by restoring from automated snapshot.",
+      "applicable_asset_types": ["cloud_account"],
+      "parameters": [
+        {"name": "replication_group_id", "type": "string", "required": true, "description": "ElastiCache replication group ID"},
+        {"name": "target_version", "type": "string", "required": true, "description": "Target Redis engine version (e.g. '7.1')"}
+      ],
+      "executor": "aws.elasticache_redis_upgrade",
+      "rollback_strategy": "executor",
+      "rollback_action": "elasticache_redis_upgrade",
+      "generic_action": "elasticache_redis_upgrade",
+      "estimated_duration_seconds": 1200,
+      "read_only": false,
+      "smoke_verified": false
     }
   ]
 }
