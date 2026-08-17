@@ -73,6 +73,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             DBClusterIdentifier=cluster_id,
             EngineVersion=target_version,
             ApplyImmediately=apply_immediately,
+            AllowMajorVersionUpgrade=True,
         )
 
     await _run(_modify)
