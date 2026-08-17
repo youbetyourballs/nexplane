@@ -51,7 +51,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     current_version = await _run(_get_cluster_version)
 
-    if current_version == target_version:
+    def _version_match(reported: str, target: str) -> bool:
+        return reported == target or reported.startswith(target + ".")
+
+    if _version_match(current_version, target_version):
         return {
             "status": "already_at_version",
             "replication_group_id": group_id,
@@ -115,7 +118,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         logger.info(
             "elasticache_redis_upgrade: polling status=%s version=%s", status, ver
         )
-        if status == "available" and ver == target_version:
+        if status == "available" and _version_match(ver, target_version):
             final_version = ver
             break
     else:
