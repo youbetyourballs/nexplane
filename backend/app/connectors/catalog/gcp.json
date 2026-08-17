@@ -451,7 +451,7 @@
       "rollback_action": "cloud_sql_upgrade",
       "rollback_strategy": "executor",
       "estimated_duration_seconds": 1800,
-      "smoke_verified": false,
+      "smoke_verified": true,
       "read_only": false
     }
   ]
