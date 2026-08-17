@@ -56,8 +56,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         from app.connectors.executors.gcp._client import get_credentials
         credentials = get_credentials(creds)
         client = redis_v1.CloudRedisClient(credentials=credentials)
-        op = client.upgrade_instance(name=full_name, redis_version=target_version)
-        op.result(timeout=60)
+        client.upgrade_instance(name=full_name, redis_version=target_version)
 
     await _run(_upgrade)
     logger.info("memorystore_redis_upgrade: upgrade to %s initiated for %s", target_version, full_name)
