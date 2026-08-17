@@ -261,7 +261,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 # ---------------------------------------------------------------------------
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
-    zone_id = parameters["zone_id"]
+    zone_id = execution_result.get("zone_id") or parameters["zone_id"]
     ksk_name = execution_result.get("ksk_name", parameters.get("ksk_name", "nexplane-ksk"))
     kms_key_arn = execution_result.get("kms_key_arn", "")
     kms_key_created = execution_result.get("kms_key_created_by_nexplane", False)
