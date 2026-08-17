@@ -7,6 +7,11 @@ ROLLBACK_CAPABILITY = "full"
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
+    if "action" not in parameters:
+        parameters = {
+            "action": "set_default_action",
+            "default_action": {"inbound": "Block", "outbound": "Allow"},
+        }
     result = await _dispatch.dispatch_agent_job(
         command="configure_windows_firewall",
         parameters=parameters,

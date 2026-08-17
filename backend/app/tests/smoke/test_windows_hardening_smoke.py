@@ -193,10 +193,37 @@ async def test_wdac_audit_and_rollback():
 
 # ── wdac_enforce ──────────────────────────────────────────────────────────────
 
+_WDAC_AUDIT_POLICY_XML = """<?xml version="1.0" encoding="utf-8"?>
+<SiPolicy xmlns="urn:schemas-microsoft-com:sipolicy">
+  <VersionEx>10.0.0.0</VersionEx>
+  <PolicyTypeID>{A244370E-44C9-4C06-B551-F6016E563076}</PolicyTypeID>
+  <PlatformID>{2E07F7E4-194C-4D20-B96C-134C44A9F1A5}</PlatformID>
+  <Rules>
+    <Rule><Option>Enabled:Audit Mode</Option></Rule>
+    <Rule><Option>Enabled:Advanced Boot Options Menu</Option></Rule>
+    <Rule><Option>Enabled:Unsigned System Integrity Policy</Option></Rule>
+  </Rules>
+  <EKUs/>
+  <FileRules/>
+  <Signers/>
+  <SigningScenarios>
+    <SigningScenario Value="131" ID="ID_SIGNINGSCENARIO_DRIVERS" FriendlyName="Drivers">
+      <ProductSigners/>
+    </SigningScenario>
+    <SigningScenario Value="12" ID="ID_SIGNINGSCENARIO_WINDOWS" FriendlyName="User Mode">
+      <ProductSigners/>
+    </SigningScenario>
+  </SigningScenarios>
+  <UpdatePolicySigners/>
+  <CiSigners/>
+  <HvciOptions>0</HvciOptions>
+</SiPolicy>"""
+
+
 async def test_wdac_enforce_and_rollback():
     from app.connectors.executors.nexplane_agent.wdac_enforce import execute, rollback
 
-    result = await execute({}, _ASSET_IDS, connector=None)
+    result = await execute({"policy_xml": _WDAC_AUDIT_POLICY_XML}, _ASSET_IDS, connector=None)
     _assert_job_ok(result, "wdac_enforce")
 
     rb = await rollback({}, result, connector=None)
@@ -241,6 +268,7 @@ async def test_asr_enforce_and_rollback():
 # Skipped: requires Sysmon64.exe pre-installed at C:\Windows\Sysmon64.exe
 # and must be downloaded separately (not bundled with the agent).
 
+@pytest.mark.skip(reason="Sysmon64.exe must be pre-installed at C:\\Windows\\Sysmon64.exe")
 async def test_sysmon_deploy_and_rollback():
     from app.connectors.executors.nexplane_agent.sysmon_deploy import execute, rollback
 
