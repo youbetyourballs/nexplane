@@ -2516,7 +2516,7 @@
       "generic_action": "rds_mysql_upgrade",
       "estimated_duration_seconds": 1800,
       "read_only": false,
-      "smoke_verified": false
+      "smoke_verified": true
     },
     {
       "action_id": "documentdb_upgrade",
