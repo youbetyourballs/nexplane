@@ -2474,7 +2474,7 @@
       "generic_action": "elasticache_redis_upgrade",
       "estimated_duration_seconds": 1200,
       "read_only": false,
-      "smoke_verified": false
+      "smoke_verified": true
     },
     {
       "action_id": "rds_postgres_upgrade",
