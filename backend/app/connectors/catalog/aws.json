@@ -2495,7 +2495,7 @@
       "generic_action": "rds_postgres_upgrade",
       "estimated_duration_seconds": 1800,
       "read_only": false,
-      "smoke_verified": false
+      "smoke_verified": true
     },
     {
       "action_id": "rds_mysql_upgrade",
