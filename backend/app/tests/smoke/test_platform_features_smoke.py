@@ -96,7 +96,19 @@ async def test_runbook_create_trigger_abort():
         assert persisted is not None
         assert persisted.status in ("aborted", "failed", "waiting_human")
 
-        # Cleanup
+        # Cleanup — delete executions first; FK cascade tries SET NULL which violates NOT NULL
+        from app.models.runbook import RunbookStepResult
+        await db.execute(
+            delete(RunbookStepResult).where(
+                RunbookStepResult.execution_id == uuid.UUID(str(exc_id))
+            )
+        )
+        await db.execute(
+            delete(RunbookExecution).where(
+                RunbookExecution.id == uuid.UUID(str(exc_id))
+            )
+        )
+        await db.commit()
         await svc.delete_runbook(str(rb_id), _ORG_ID)
 
 
