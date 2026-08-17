@@ -371,7 +371,7 @@
       "rollback_action": "cloud_run_deploy",
       "rollback_strategy": "executor",
       "estimated_duration_seconds": 120,
-      "smoke_verified": false,
+      "smoke_verified": true,
       "read_only": false
     },
     {
@@ -393,7 +393,7 @@
       "rollback_strategy": "executor",
       "generic_action": "gcp_artifact_registry_create",
       "estimated_duration_seconds": 30,
-      "smoke_verified": false,
+      "smoke_verified": true,
       "read_only": false
     },
     {
