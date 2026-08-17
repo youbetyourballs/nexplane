@@ -3,6 +3,7 @@
 package winharden
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -27,7 +28,10 @@ func regExport(key string) (string, error) {
 		return "", fmt.Errorf("reg export %s: %s: %w", key, out, err)
 	}
 	data, err := os.ReadFile(tmp.Name())
-	return string(data), err
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // regImport restores a registry snapshot.
@@ -37,7 +41,12 @@ func regImport(regContent string) (map[string]any, error) {
 		return nil, err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(regContent); err != nil {
+	decoded, err := base64.StdEncoding.DecodeString(regContent)
+	if err != nil {
+		// fallback: treat as raw content (for backwards compatibility)
+		decoded = []byte(regContent)
+	}
+	if _, err := tmp.Write(decoded); err != nil {
 		return nil, err
 	}
 	tmp.Close()
@@ -87,7 +96,8 @@ gpupdate /force | Out-Null`, passwordAgeDays, passwordLength)
 func lapsRollbackOS(params map[string]any) (map[string]any, error) {
 	snapshot, ok := params["snapshot"].(string)
 	if !ok || snapshot == "" {
-		return nil, fmt.Errorf("snapshot is required for rollback")
+		runPS(`Remove-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd" -Recurse -Force -ErrorAction SilentlyContinue`) //nolint:errcheck
+		return map[string]any{"rolled_back": true, "note": "laps key removed"}, nil
 	}
 	return regImport(snapshot)
 }
@@ -348,10 +358,11 @@ func winfirewallExecuteOS(params map[string]any) (map[string]any, error) {
 	}
 	snapshotPath := tmp.Name()
 	tmp.Close()
+	os.Remove(snapshotPath) // netsh export will not overwrite an existing file
 	defer os.Remove(snapshotPath)
-	runPS(fmt.Sprintf(`netsh advfirewall export "%s"`, snapshotPath)) //nolint:errcheck
+	exec.Command("netsh", "advfirewall", "export", snapshotPath).CombinedOutput() //nolint:errcheck
 	snapshotData, _ := os.ReadFile(snapshotPath)
-	snapshot := string(snapshotData)
+	snapshot := base64.StdEncoding.EncodeToString(snapshotData)
 
 	rule, _ := params["rule"].(map[string]any)
 	switch action {
@@ -390,6 +401,14 @@ func winfirewallExecuteOS(params map[string]any) (map[string]any, error) {
 }
 
 func winfirewallRollbackOS(params map[string]any) (map[string]any, error) {
+	if action, _ := params["action"].(string); action == "remove_rule" {
+		rule, _ := params["rule"].(map[string]any)
+		name, _ := rule["name"].(string)
+		if name != "" {
+			runPS(fmt.Sprintf(`Remove-NetFirewallRule -DisplayName "%s" -ErrorAction SilentlyContinue`, name)) //nolint:errcheck
+			return map[string]any{"rolled_back": true}, nil
+		}
+	}
 	snapshot, ok := params["snapshot"].(string)
 	if !ok || snapshot == "" {
 		return nil, fmt.Errorf("snapshot is required for rollback")
@@ -401,7 +420,7 @@ func winfirewallRollbackOS(params map[string]any) (map[string]any, error) {
 	defer os.Remove(tmp.Name())
 	tmp.WriteString(snapshot)
 	tmp.Close()
-	if out, err := runPS(fmt.Sprintf(`netsh advfirewall import "%s"`, tmp.Name())); err != nil {
+	if out, err := exec.Command("netsh", "advfirewall", "import", tmp.Name()).CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("restoring firewall: %s: %w", out, err)
 	}
 	return map[string]any{"rolled_back": true}, nil

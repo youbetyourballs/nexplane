@@ -939,7 +939,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.configure_laps",
       "generic_action": "configure_laps",
-      "action_id": "configure_laps"
+      "action_id": "configure_laps",
+      "smoke_verified": true
     },
     {
       "description": "Enable VBS-based Credential Guard to protect credential material in LSASS. Requires reboot.",
@@ -971,7 +972,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.enable_credential_guard",
       "generic_action": "enable_credential_guard",
-      "action_id": "enable_credential_guard"
+      "action_id": "enable_credential_guard",
+      "smoke_verified": true
     },
     {
       "description": "Enforce PowerShell Constrained Language Mode via registry key.",
@@ -999,7 +1001,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.enforce_powershell_clm",
       "generic_action": "enforce_powershell_clm",
-      "action_id": "enforce_powershell_clm"
+      "action_id": "enforce_powershell_clm",
+      "smoke_verified": true
     },
     {
       "description": "Deploy AppLocker application allowlist policies. Defaults to AuditOnly mode before enforcing.",
@@ -1030,7 +1033,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.deploy_applocker_policy",
       "generic_action": "deploy_applocker_policy",
-      "action_id": "deploy_applocker_policy"
+      "action_id": "deploy_applocker_policy",
+      "smoke_verified": true
     },
     {
       "description": "Disable SMBv1, require signing, disable guest access.",
@@ -1065,7 +1069,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.harden_smb",
       "generic_action": "harden_smb",
-      "action_id": "harden_smb"
+      "action_id": "harden_smb",
+      "smoke_verified": true
     },
     {
       "description": "Enable BitLocker full disk encryption. Recovery key returned in result - store securely.",
@@ -1144,7 +1149,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.configure_windows_firewall",
       "generic_action": "configure_windows_firewall",
-      "action_id": "configure_windows_firewall"
+      "action_id": "configure_windows_firewall",
+      "smoke_verified": true
     },
     {
       "description": "Disable SSL/TLS 1.0/1.1, enforce TLS 1.2/1.3 via SCHANNEL registry. Requires reboot.",
@@ -1175,7 +1181,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.harden_tls_protocols",
       "generic_action": "harden_tls_protocols",
-      "action_id": "harden_tls_protocols"
+      "action_id": "harden_tls_protocols",
+      "smoke_verified": true
     },
     {
       "description": "Require NLA, set encryption level, configure idle/disconnect timeout.",
@@ -1208,7 +1215,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.harden_rdp",
       "generic_action": "harden_rdp",
-      "action_id": "harden_rdp"
+      "action_id": "harden_rdp",
+      "smoke_verified": true
     },
     {
       "description": "Apply CIS/STIG auditpol settings for logon, object access, privilege use, process creation.",
@@ -1231,7 +1239,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.configure_windows_audit_policy",
       "generic_action": "configure_windows_audit_policy",
-      "action_id": "configure_windows_audit_policy"
+      "action_id": "configure_windows_audit_policy",
+      "smoke_verified": true
     },
     {
       "applicable_asset_types": [
@@ -1272,7 +1281,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.harden_registry",
       "generic_action": "harden_registry",
-      "action_id": "harden_registry"
+      "action_id": "harden_registry",
+      "smoke_verified": true
     },
     {
       "action_id": "manage_tls_certificates",

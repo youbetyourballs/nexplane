@@ -21,6 +21,7 @@ const wdacAuditModeXML = `<?xml version="1.0" encoding="utf-8"?>
   <Rules>
     <Rule><Option>Enabled:Audit Mode</Option></Rule>
     <Rule><Option>Enabled:Advanced Boot Options Menu</Option></Rule>
+    <Rule><Option>Enabled:Unsigned System Integrity Policy</Option></Rule>
   </Rules>
   <EKUs/>
   <FileRules/>
