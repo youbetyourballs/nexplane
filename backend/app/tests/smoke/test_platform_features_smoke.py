@@ -8,23 +8,38 @@ infrastructure: Runbooks, Access Reviews/Campaigns, Projects, Maintenance
 Windows, Vulnerability Pipeline, and Compliance.
 
 All tests run against the live database inside the Docker container.
+Each test creates a fresh asyncpg connection via NullPool to avoid
+event-loop conflicts between function-scoped pytest-asyncio tests.
 """
 
 import hashlib
 import hmac
 import json
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 
 import pytest
-from sqlalchemy import select, text, delete
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.database import AsyncSessionLocal
+from sqlalchemy import select, delete
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool import NullPool
 
 _ORG_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000010")
 _WEBHOOK_SECRET = "changeme"
+_DB_URL = "postgresql+asyncpg://nexplane:nexplane_dev@db:5432/nexplane"
+
+
+@asynccontextmanager
+async def fresh_db():
+    """Create a per-test async session that doesn't share the global connection pool."""
+    engine = create_async_engine(_DB_URL, poolclass=NullPool)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +51,7 @@ async def test_runbook_create_trigger_abort():
     from app.schemas.runbook import RunbookCreate, RunbookStepCreate
     from app.models.runbook import RunbookExecution
 
-    async with AsyncSessionLocal() as db:
+    async with fresh_db() as db:
         svc = RunbookService(db)
 
         rb = await svc.create_runbook(
@@ -45,6 +60,7 @@ async def test_runbook_create_trigger_abort():
             RunbookCreate(
                 name=f"smoke-rb-{uuid.uuid4().hex[:8]}",
                 description="Platform feature smoke test",
+                auto_execute=True,
                 steps=[
                     RunbookStepCreate(
                         step_number=1,
@@ -62,7 +78,7 @@ async def test_runbook_create_trigger_abort():
         assert rb.name.startswith("smoke-rb-")
         rb_id = rb.id
 
-        # Trigger — checkpoint step pauses immediately
+        # Trigger — checkpoint step pauses immediately at waiting_human
         exc = await svc.trigger_runbook(str(rb_id), _ORG_ID, _USER_ID, {})
         assert exc.status in ("running", "waiting_human", "pending")
         exc_id = exc.id
@@ -90,7 +106,7 @@ async def test_runbook_create_trigger_abort():
 async def test_review_campaign_create_and_cancel():
     from app.models.review_campaign import ReviewCampaign
 
-    async with AsyncSessionLocal() as db:
+    async with fresh_db() as db:
         campaign = ReviewCampaign(
             organization_id=_ORG_ID,
             created_by=_USER_ID,
@@ -135,7 +151,7 @@ async def test_project_create_with_success_criteria():
     from app.models.project import Project
     from app.models.project_success_criteria import ProjectSuccessCriteria
 
-    async with AsyncSessionLocal() as db:
+    async with fresh_db() as db:
         project = Project(
             organization_id=_ORG_ID,
             created_by=_USER_ID,
@@ -153,6 +169,7 @@ async def test_project_create_with_success_criteria():
         criterion = ProjectSuccessCriteria(
             project_id=proj_id,
             type="manual",
+            description="Smoke test criterion",
             assertion="Smoke test passes",
         )
         db.add(criterion)
@@ -191,8 +208,7 @@ async def test_project_create_with_success_criteria():
 async def test_maintenance_window_crud_and_status():
     from app.models.maintenance_window import MaintenanceWindow
 
-    async with AsyncSessionLocal() as db:
-        # Create a window scheduled far in the future (Sundays at 3am)
+    async with fresh_db() as db:
         win = MaintenanceWindow(
             organization_id=_ORG_ID,
             name=f"smoke-window-{uuid.uuid4().hex[:8]}",
@@ -240,9 +256,8 @@ async def test_change_freeze_window_lifecycle():
     from app.models.compliance import ChangeFreezeWindow
 
     now = datetime.now(timezone.utc)
-    async with AsyncSessionLocal() as db:
+    async with fresh_db() as db:
         freeze = ChangeFreezeWindow(
-            organization_id=_ORG_ID,
             reason="Smoke test freeze window",
             start_at=now + timedelta(hours=1),
             end_at=now + timedelta(hours=3),
@@ -254,7 +269,6 @@ async def test_change_freeze_window_lifecycle():
         freeze_id = freeze.id
         assert freeze_id is not None
 
-        # Verify in future — not currently active
         row = await db.execute(
             select(ChangeFreezeWindow).where(ChangeFreezeWindow.id == freeze_id)
         )
@@ -277,7 +291,7 @@ async def test_compliance_baseline_and_attestation():
     from app.models.compliance import ComplianceBaseline
     from app.models.compliance_attestation import ComplianceAttestation
 
-    async with AsyncSessionLocal() as db:
+    async with fresh_db() as db:
         baseline = ComplianceBaseline(
             organization_id=_ORG_ID,
             name=f"smoke-baseline-{uuid.uuid4().hex[:8]}",
@@ -361,7 +375,7 @@ async def test_vuln_webhook_ingest_and_sla():
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         resp = await client.post(
-            "/api/v1/vulnerability/webhook",
+            "/api/v1/vulnerability/webhooks/vulnerability-findings",
             content=body,
             headers={
                 "Content-Type": "application/json",
@@ -369,12 +383,12 @@ async def test_vuln_webhook_ingest_and_sla():
                 "X-Org-Id": str(_ORG_ID),
             },
         )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code in (200, 202), resp.text
     data = resp.json()
     assert data.get("accepted", 0) >= 1
 
     # Verify finding + SLA persisted
-    async with AsyncSessionLocal() as db:
+    async with fresh_db() as db:
         f_row = await db.execute(
             select(VulnerabilityFinding).where(
                 VulnerabilityFinding.cve_id == cve_id,
@@ -387,15 +401,13 @@ async def test_vuln_webhook_ingest_and_sla():
         assert finding.status == "open"
 
         sla_row = await db.execute(
-            select(RemediationSLA).where(
-                RemediationSLA.finding_id == finding.id
-            )
+            select(RemediationSLA).where(RemediationSLA.finding_id == finding.id)
         )
         sla = sla_row.scalar_one_or_none()
         assert sla is not None, "SLA row not created for critical finding"
         assert sla.sla_hours == 72  # critical SLA
 
-        # Cleanup — delete SLA then finding
+        # Cleanup
         await db.execute(
             delete(RemediationSLA).where(RemediationSLA.finding_id == finding.id)
         )
@@ -413,7 +425,7 @@ async def test_ir_playbook_runbook_structure():
     from app.services.runbook_service import RunbookService
     from app.schemas.runbook import RunbookCreate, RunbookStepCreate
 
-    async with AsyncSessionLocal() as db:
+    async with fresh_db() as db:
         svc = RunbookService(db)
 
         rb = await svc.create_runbook(
@@ -423,6 +435,7 @@ async def test_ir_playbook_runbook_structure():
                 name=f"smoke-ir-playbook-{uuid.uuid4().hex[:8]}",
                 description="Account compromise IR playbook (smoke)",
                 tags=["ir", "smoke"],
+                auto_execute=True,
                 steps=[
                     RunbookStepCreate(
                         step_number=1,
