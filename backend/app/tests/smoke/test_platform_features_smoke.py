@@ -83,13 +83,13 @@ async def test_runbook_create_trigger_abort():
         assert exc.status in ("running", "waiting_human", "pending")
         exc_id = exc.id
 
-        # Abort
-        aborted = await svc.abort_execution(exc_id, _ORG_ID)
+        # Abort — str() required: exc.id is asyncpg UUID, not Python uuid.UUID
+        aborted = await svc.abort_execution(str(exc_id), _ORG_ID)
         assert aborted.status == "aborted"
 
         # Verify execution record persisted
         row = await db.execute(
-            select(RunbookExecution).where(RunbookExecution.id == exc_id)
+            select(RunbookExecution).where(RunbookExecution.id == uuid.UUID(str(exc_id)))
         )
         persisted = row.scalar_one_or_none()
         assert persisted is not None
@@ -353,9 +353,10 @@ async def test_vuln_webhook_ingest_and_sla():
 
     cve_id = f"CVE-2024-SMOKE-{uuid.uuid4().hex[:6].upper()}"
     payload = {
+        "scanner": "trivy",
+        "organization_id": str(_ORG_ID),
         "findings": [
             {
-                "scanner": "trivy",
                 "finding_type": "cve",
                 "severity": "critical",
                 "cve_id": cve_id,
@@ -364,7 +365,7 @@ async def test_vuln_webhook_ingest_and_sla():
                 "affected_version": "1.0.0",
                 "fixed_version": "1.0.1",
             }
-        ]
+        ],
     }
     body = json.dumps(payload).encode()
     sig = "sha256=" + hmac.new(
