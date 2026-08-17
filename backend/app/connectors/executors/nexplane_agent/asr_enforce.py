@@ -21,7 +21,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     asset_ids = execution_result.get("_asset_ids") or []
     return await _dispatch.dispatch_agent_job(
         command="asr_enforce",
-        parameters={"action": "restore"},
+        parameters={"rollback": True, "rule_names": execution_result.get("rules_enforced", [])},
         asset_ids=asset_ids,
         timeout_seconds=60,
     )

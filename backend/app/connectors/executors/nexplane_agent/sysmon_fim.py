@@ -21,7 +21,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     asset_ids = execution_result.get("_asset_ids") or []
     return await _dispatch.dispatch_agent_job(
         command="sysmon_fim",
-        parameters={"action": "restore"},
+        parameters={"rollback": True},
         asset_ids=asset_ids,
         timeout_seconds=60,
     )

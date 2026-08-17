@@ -21,7 +21,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     asset_ids = execution_result.get("_asset_ids") or []
     return await _dispatch.dispatch_agent_job(
         command="enable_credential_guard",
-        parameters={"action": "restore", "snapshot_id": execution_result.get("snapshot_id", "")},
+        parameters={"rollback": True, "snapshot": execution_result.get("snapshot", ""), "uefi_lock": execution_result.get("uefi_lock", False)},
         asset_ids=asset_ids,
         timeout_seconds=60,
     )
