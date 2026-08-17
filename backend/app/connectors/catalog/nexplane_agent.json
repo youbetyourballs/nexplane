@@ -296,7 +296,8 @@
         "lockout_duration_seconds applies to all accounts; ensure break-glass access exists"
       ],
       "generic_action": "configure_pam",
-      "action_id": "configure_pam"
+      "action_id": "configure_pam",
+      "smoke_verified": true
     },
     {
       "display_name": "Harden SSH Configuration",
@@ -321,7 +322,8 @@
         "Changing SSH port requires updating external firewall rules before reloading"
       ],
       "generic_action": "harden_ssh",
-      "action_id": "harden_ssh"
+      "action_id": "harden_ssh",
+      "smoke_verified": true
     },
     {
       "display_name": "Audit Users and Groups",
@@ -691,7 +693,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.apply_sysctl_hardening",
       "generic_action": "apply_sysctl_hardening",
-      "action_id": "apply_sysctl_hardening"
+      "action_id": "apply_sysctl_hardening",
+      "smoke_verified": true
     },
     {
       "display_name": "Configure Host Firewall",
@@ -741,7 +744,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.blacklist_kernel_modules",
       "generic_action": "blacklist_kernel_modules",
-      "action_id": "blacklist_kernel_modules"
+      "action_id": "blacklist_kernel_modules",
+      "smoke_verified": true
     },
     {
       "display_name": "Harden Mount Options",
@@ -762,7 +766,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.harden_mount_options",
       "generic_action": "harden_mount_options",
-      "action_id": "harden_mount_options"
+      "action_id": "harden_mount_options",
+      "smoke_verified": true
     },
     {
       "display_name": "Deploy Auditd Rules",
@@ -788,7 +793,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.deploy_auditd_rules",
       "generic_action": "deploy_auditd_rules",
-      "action_id": "deploy_auditd_rules"
+      "action_id": "deploy_auditd_rules",
+      "smoke_verified": true
     },
     {
       "display_name": "Setup File Integrity Monitoring",
@@ -810,7 +816,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.setup_file_integrity_monitoring",
       "generic_action": "setup_file_integrity_monitoring",
-      "action_id": "setup_file_integrity_monitoring"
+      "action_id": "setup_file_integrity_monitoring",
+      "smoke_verified": true
     },
     {
       "display_name": "Audit OS Security Posture",

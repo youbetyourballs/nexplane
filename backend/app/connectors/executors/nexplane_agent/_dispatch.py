@@ -78,7 +78,7 @@ async def dispatch_agent_job(
         # HMAC byte stream is identical on both sides (critical for profiles like
         # AppArmor whose profile_text contains "<tunables/global>").
         job_id = uuid.uuid4()
-        canonical_params = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
+        canonical_params = json.dumps(parameters, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         canonical_params = (
             canonical_params
             .replace("<", "\\u003c")
