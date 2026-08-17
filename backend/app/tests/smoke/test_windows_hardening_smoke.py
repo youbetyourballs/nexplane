@@ -118,7 +118,13 @@ async def test_harden_smb_and_rollback():
 async def test_configure_windows_firewall_and_rollback():
     from app.connectors.executors.nexplane_agent.configure_windows_firewall import execute, rollback
 
-    result = await execute({}, _ASSET_IDS, connector=None)
+    # Use add_rule (not set_default_action inbound=Block) so a rollback failure
+    # doesn't leave the instance unreachable.
+    result = await execute(
+        {"action": "add_rule", "rule": {"name": "nexplane-smoke-test", "direction": "Inbound", "protocol": "TCP", "local_port": "19999", "action_type": "Allow"}},
+        _ASSET_IDS,
+        connector=None,
+    )
     _assert_job_ok(result, "configure_windows_firewall")
     assert result.get("snapshot") is not None, f"No snapshot in result: {result}"
 
