@@ -53,13 +53,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     def _upgrade():
         from google.cloud import redis_v1
-        from google.protobuf import field_mask_pb2
         from app.connectors.executors.gcp._client import get_credentials
         credentials = get_credentials(creds)
         client = redis_v1.CloudRedisClient(credentials=credentials)
-        updated = redis_v1.Instance(name=full_name, redis_version=target_version)
-        mask = field_mask_pb2.FieldMask(paths=["redis_version"])
-        op = client.update_instance(update_mask=mask, instance=updated)
+        op = client.upgrade_instance(name=full_name, redis_version=target_version)
         op.result(timeout=60)
 
     await _run(_upgrade)
