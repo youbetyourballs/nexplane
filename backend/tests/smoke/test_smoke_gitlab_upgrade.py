@@ -201,9 +201,9 @@ def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
     log(f"  Patching GitLab NGINX listen address via SSM on {instance_id}")
     ssm_c = _boto3_client("ssm", aws_creds)
 
-    # Wait for SSM agent to accept commands (up to 3 min)
+    # Wait for SSM agent to accept commands (up to 6 min -- GitLab instance is heavy at boot)
     ssm_ready = False
-    deadline_ssm = time.time() + 180
+    deadline_ssm = time.time() + 360
     while time.time() < deadline_ssm:
         time.sleep(10)
         try:
@@ -225,7 +225,7 @@ def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
 
     if not ssm_ready:
         ec2.terminate_instances(InstanceIds=[instance_id])
-        pytest.fail(f"SSM agent never ready on {instance_id} within 3 min")
+        pytest.fail(f"SSM agent never ready on {instance_id} within 6 min")
 
     # Patch listen directive in the compiled NGINX config and restart NGINX.
     nginx_cfg = "/var/opt/gitlab/nginx/conf/gitlab-http.conf"
