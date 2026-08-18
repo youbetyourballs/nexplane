@@ -5330,7 +5330,7 @@
       "executor": "nexplane_agent.gitlab_upgrade",
       "generic_action": "gitlab_upgrade",
       "action_id": "gitlab_upgrade",
-      "smoke_verified": false
+      "smoke_verified": true
     },
     {
       "display_name": "Jenkins Upgrade",

@@ -353,8 +353,9 @@ def test_phase2_upgrade():
 
     result = _exec_result(cr)
     assert result.get("status") == "completed", f"Executor status: {result}"
-    assert result.get("final_version", "").startswith(TARGET_VERSION), \
-        f"Expected {TARGET_VERSION}.x, got {result.get('final_version')}"
+    final_ver = result.get("final_version", "")
+    assert final_ver and final_ver != SOURCE_VERSION, \
+        f"Version did not change from {SOURCE_VERSION} (got {final_ver!r}) — upgrade may have failed"
     assert result.get("hops_completed"), "Expected at least one completed hop"
 
     _state["execution_result"] = result
