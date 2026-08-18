@@ -89,7 +89,9 @@ def _build_gitlab_ami(aws_creds) -> tuple:
         # installs and writes the sentinel even on a broken install.
         b"#!/bin/bash\n"
         b"set -e\n"
-        b"yum install -y curl policycoreutils openssh-server openssh-clients postfix\n"
+        # AL2023 ships curl-minimal which conflicts with the full curl package.
+        # --allowerasing allows yum to replace curl-minimal with curl.
+        b"yum install -y --allowerasing curl policycoreutils openssh-server openssh-clients postfix\n"
         b"systemctl enable sshd && systemctl start sshd\n"
         b"systemctl enable postfix && systemctl start postfix\n"
         b"curl -sS https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.rpm.sh | bash\n"
