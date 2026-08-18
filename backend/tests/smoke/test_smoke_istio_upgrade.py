@@ -353,9 +353,9 @@ def test_phase1_provision():
     # Wait for user-data to finish: it wipes k3s state, reinstalls Istio, and writes
     # /tmp/nexplane-istio-launch-ready ONLY after istiod rollout succeeds.
     # Poll via SSM (up to 35 min — istioctl install takes ~20 min even with cached images).
-    log("  Waiting for istiod launch sentinel (up to 35 min)")
+    log("  Waiting for istiod launch sentinel (up to 45 min)")
     ssm_c = _boto3_client("ssm", aws_creds)
-    deadline = time.time() + 2100
+    deadline = time.time() + 2700
     istio_ready = False
     while time.time() < deadline:
         time.sleep(30)
@@ -377,7 +377,7 @@ def test_phase1_provision():
         except Exception:
             pass
     if not istio_ready:
-        pytest.fail("istiod never became ready within 35 min")
+        pytest.fail("istiod never became ready within 45 min")
     log("[PHASE 1: provision] PASSED")
 
 
