@@ -243,26 +243,33 @@ def _launch_from_ami(ec2, aws_creds, ami_id) -> tuple:
         InstanceType="t3.xlarge",
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
-        # Don't wipe TLS — k3s always includes 127.0.0.1 as a SAN.
-        # Patch kubeconfig server URL to 127.0.0.1 so kubectl works regardless of
-        # instance IP, avoiding the 15+ min PKI regen that wiping server/tls triggers.
+        # k3s embedded etcd bakes node identity into AMI state. On a new instance
+        # the identity doesn't match so k3s refuses to start. Wipe server state so
+        # k3s re-initializes fresh; containerd image cache survives the wipe so
+        # k3s+Istio come back up in ~2-3 min instead of 15+.
         UserData=(
             "#!/bin/bash\n"
-            # k3s may already be started by systemd on boot (it's enabled in the AMI).
-            # Wait for the kubeconfig first; if it doesn't appear, force a restart.
+            "systemctl stop k3s 2>/dev/null || true\n"
+            "sleep 2\n"
+            # Wipe etcd/identity state; containerd image cache at /var/lib/rancher/k3s/data survives
+            "rm -rf /var/lib/rancher/k3s/server /var/lib/rancher/k3s/agent\n"
+            "systemctl reset-failed k3s 2>/dev/null || true\n"
+            "systemctl start k3s\n"
+            # Wait up to 10 min for kubeconfig then patch server URL to 127.0.0.1
             "for i in $(seq 1 120); do\n"
             "  if [ -f /etc/rancher/k3s/k3s.yaml ]; then\n"
             "    sed -i 's|server: https://.*:6443|server: https://127.0.0.1:6443|' /etc/rancher/k3s/k3s.yaml\n"
             "    break\n"
             "  fi\n"
-            "  if [ $i -eq 12 ]; then\n"
-            "    systemctl reset-failed k3s 2>/dev/null; systemctl restart k3s 2>/dev/null || true\n"
-            "  fi\n"
-            "  if [ $i -eq 60 ]; then\n"
-            "    K3S_RESOLV_CONF=/etc/resolv.conf systemctl restart k3s 2>/dev/null || true\n"
-            "  fi\n"
             "  sleep 5\n"
             "done\n"
+            # Reinstall Istio 1.20 using pre-installed istioctl (images cached in containerd)
+            "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\n"
+            "ISTIOCTL=/usr/local/bin/istioctl\n"
+            "if [ -f $ISTIOCTL ]; then\n"
+            "  $ISTIOCTL install --set profile=minimal -y 2>&1 | tail -5\n"
+            "  kubectl rollout status deployment/istiod -n istio-system --timeout=300s 2>&1 || true\n"
+            "fi\n"
         ),
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-istio-upgrade"},
@@ -335,6 +342,34 @@ def test_phase1_provision():
     install_nexplane_agent_on_instance(
         instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=600
     )
+
+    # Wait for k3s + Istio 1.20 to be healthy before phase 2 starts.
+    # user-data wipes k3s state and reinstalls Istio; this can take 5-10 min.
+    log("  Waiting for istiod to be ready (up to 12 min)")
+    ssm_c = _boto3_client("ssm", aws_creds)
+    deadline = time.time() + 720
+    istio_ready = False
+    while time.time() < deadline:
+        time.sleep(20)
+        try:
+            resp = ssm_c.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [
+                    "KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout status deployment/istiod "
+                    "-n istio-system --timeout=10s 2>&1 | grep -q 'successfully rolled out' && echo ISTIO_READY"
+                ]},
+            )
+            cmd_id = resp["Command"]["CommandId"]
+            time.sleep(12)
+            out = ssm_c.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+            if "ISTIO_READY" in out.get("StandardOutputContent", ""):
+                istio_ready = True
+                break
+        except Exception:
+            pass
+    if not istio_ready:
+        pytest.fail("istiod never became ready within 12 min")
     log("[PHASE 1: provision] PASSED")
 
 
