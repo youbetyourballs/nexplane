@@ -5147,7 +5147,7 @@
       "executor": "nexplane_agent.istio_control_plane_upgrade",
       "generic_action": "istio_control_plane_upgrade",
       "action_id": "istio_control_plane_upgrade",
-      "smoke_verified": false
+      "smoke_verified": true
     },
     {
       "display_name": "Kong API Gateway Upgrade",
