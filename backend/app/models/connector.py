@@ -89,6 +89,7 @@ class ConnectorType(str, enum.Enum):
     laps = "laps"
     # DNS
     bind_dns = "bind_dns"
+    godaddy = "godaddy"
     # SaaS
     slack = "slack"
     jfrog = "jfrog"

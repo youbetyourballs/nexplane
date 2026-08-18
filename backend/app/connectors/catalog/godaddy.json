@@ -1,0 +1,109 @@
+{
+  "connector_type": "godaddy",
+  "display_name": "GoDaddy",
+  "credential_fields": [
+    {
+      "name": "personal_access_token",
+      "label": "Personal Access Token",
+      "type": "password",
+      "required": true,
+      "placeholder": "gd_pat_...",
+      "description": "GoDaddy Personal Access Token (generated at developer.godaddy.com)"
+    },
+    {
+      "name": "customer_id",
+      "label": "Customer ID",
+      "type": "string",
+      "required": false,
+      "placeholder": "77689215",
+      "description": "GoDaddy account / shopper ID (optional, used for reseller contexts)"
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "discover_dns_records",
+      "generic_action": "discover_dns_records",
+      "action_type": "ingest",
+      "execution_tier": 1,
+      "display_name": "Discover DNS Records",
+      "description": "Fetch DNS records for a GoDaddy-managed domain.",
+      "applicable_asset_types": ["dns_zone"],
+      "parameters": [
+        {
+          "name": "domain",
+          "type": "string",
+          "required": true,
+          "description": "Domain name (e.g. nexplane.ai)"
+        },
+        {
+          "name": "record_type",
+          "type": "string",
+          "required": false,
+          "description": "Filter by record type (A, AAAA, CNAME, MX, TXT, NS, SRV). Omit for all types."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Filter by record name (e.g. @ or www). Requires record_type."
+        }
+      ],
+      "executor": "godaddy.discover_dns_records",
+      "rollback_action": null,
+      "estimated_duration_seconds": 5,
+      "blast_radius_hint": "read_only",
+      "smoke_verified": false
+    },
+    {
+      "action_id": "update_dns_record",
+      "generic_action": "update_dns_record",
+      "action_type": "change",
+      "execution_tier": 1,
+      "display_name": "Update DNS Record",
+      "description": "Create or update a DNS record for a GoDaddy-managed domain. Snapshots the current value for rollback.",
+      "applicable_asset_types": ["dns_zone"],
+      "parameters": [
+        {
+          "name": "domain",
+          "type": "string",
+          "required": true,
+          "description": "Domain name (e.g. nexplane.ai)"
+        },
+        {
+          "name": "record_type",
+          "type": "string",
+          "required": true,
+          "description": "Record type: A, AAAA, CNAME, MX, TXT, NS, SRV"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Record name (@ for root, or subdomain like www)"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "required": true,
+          "description": "Record value (IP address, hostname, TXT string, etc.)"
+        },
+        {
+          "name": "ttl",
+          "type": "integer",
+          "required": false,
+          "default": 600,
+          "description": "TTL in seconds (minimum 600 for GoDaddy)"
+        }
+      ],
+      "executor": "godaddy.update_dns_record",
+      "rollback_action": "update_dns_record",
+      "estimated_duration_seconds": 10,
+      "blast_radius_hint": "dns_propagation_delay",
+      "safety_notes": [
+        "DNS changes propagate globally and may affect live traffic.",
+        "Previous record value is snapshotted for full rollback."
+      ],
+      "smoke_verified": false
+    }
+  ]
+}
