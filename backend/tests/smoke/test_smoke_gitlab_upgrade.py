@@ -195,68 +195,12 @@ def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    # AMI built with EXTERNAL_URL=http://localhost so NGINX binds to 127.0.0.1 by default.
-    # Fix via SSM: edit the compiled NGINX listen directive and restart NGINX only (~5s).
-    # This is far faster than gitlab-ctl reconfigure (~15 min).
-    log(f"  Patching GitLab NGINX listen address via SSM on {instance_id}")
-    ssm_c = _boto3_client("ssm", aws_creds)
-
-    # Wait for SSM agent to accept commands (up to 10 min -- GitLab instance is memory-heavy at boot)
-    ssm_ready = False
-    deadline_ssm = time.time() + 600
-    while time.time() < deadline_ssm:
-        time.sleep(10)
-        try:
-            r = ssm_c.send_command(
-                InstanceIds=[instance_id],
-                DocumentName="AWS-RunShellScript",
-                Parameters={"commands": ["echo SSM_READY"]},
-                TimeoutSeconds=10,
-            )
-            time.sleep(4)
-            out = ssm_c.get_command_invocation(
-                CommandId=r["Command"]["CommandId"], InstanceId=instance_id
-            )
-            if out.get("Status") == "Success":
-                ssm_ready = True
-                break
-        except Exception:
-            pass
-
-    if not ssm_ready:
-        ec2.terminate_instances(InstanceIds=[instance_id])
-        pytest.fail(f"SSM agent never ready on {instance_id} within 10 min")
-
-    # Patch listen directive in the compiled NGINX config and restart NGINX.
-    nginx_cfg = "/var/opt/gitlab/nginx/conf/gitlab-http.conf"
-    patch_cmd = ssm_c.send_command(
-        InstanceIds=[instance_id],
-        DocumentName="AWS-RunShellScript",
-        Parameters={"commands": [
-            f"sed -i 's/listen 127.0.0.1:80;/listen 0.0.0.0:80;/g' {nginx_cfg}",
-            f"sed -i 's/listen \\[::1\\]:80;/listen [::]:80;/g' {nginx_cfg}",
-            "gitlab-ctl restart nginx",
-            "echo NGINX_PATCHED",
-        ]},
-        TimeoutSeconds=60,
-    )
-    patch_id = patch_cmd["Command"]["CommandId"]
-    for _ in range(12):
-        time.sleep(5)
-        try:
-            out = ssm_c.get_command_invocation(CommandId=patch_id, InstanceId=instance_id)
-            if out.get("Status") in ("Success", "Failed", "TimedOut"):
-                if "NGINX_PATCHED" not in out.get("StandardOutputContent", ""):
-                    log(f"  Warning: NGINX patch cmd output: {out.get('StandardOutputContent','')[:200]}", ok=False)
-                break
-        except Exception:
-            pass
-
-    # Wait for GitLab port 80 (NGINX restart takes ~5s)
-    log(f"  Waiting for GitLab port 80 on {private_ip} (up to 5 min)")
-    deadline = time.time() + 300
+    # AMI has nginx['listen_addresses'] = ['0.0.0.0'] baked in (added during build).
+    # Port 80 opens once gitlab-runsvdir and NGINX services start (~5-10 min on t3.xlarge).
+    log(f"  Waiting for GitLab port 80 on {private_ip} (up to 20 min)")
+    deadline = time.time() + 1200
     while time.time() < deadline:
-        time.sleep(10)
+        time.sleep(15)
         try:
             s = socket.create_connection((private_ip, 80), timeout=5)
             s.close()
@@ -266,7 +210,7 @@ def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
             pass
 
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"GitLab never reachable on {private_ip}:80 after NGINX patch")
+    pytest.fail(f"GitLab never reachable on {private_ip}:80 within 20 min")
 
 
 def _register_asset(private_ip, run_id) -> tuple:
