@@ -4636,7 +4636,8 @@
       "applicable_asset_types": [
         "server"
       ],
-      "generic_action": "mongodb_rs_upgrade"
+      "generic_action": "mongodb_rs_upgrade",
+      "smoke_verified": true
     },
     {
       "display_name": "CockroachDB Cluster Upgrade",
@@ -4693,7 +4694,8 @@
       "applicable_asset_types": [
         "server"
       ],
-      "generic_action": "cockroachdb_cluster_upgrade"
+      "generic_action": "cockroachdb_cluster_upgrade",
+      "smoke_verified": true
     },
     {
       "display_name": "etcd Cluster Upgrade",
@@ -4744,7 +4746,8 @@
       "applicable_asset_types": [
         "server"
       ],
-      "generic_action": "etcd_upgrade"
+      "generic_action": "etcd_upgrade",
+      "smoke_verified": true
     },
     {
       "display_name": "MinIO Distributed Upgrade",
@@ -4789,7 +4792,8 @@
       "applicable_asset_types": [
         "server"
       ],
-      "generic_action": "minio_distributed_upgrade"
+      "generic_action": "minio_distributed_upgrade",
+      "smoke_verified": true
     },
     {
       "display_name": "Ceph Cluster Upgrade",
@@ -4851,7 +4855,8 @@
       "applicable_asset_types": [
         "server"
       ],
-      "generic_action": "ceph_cluster_upgrade"
+      "generic_action": "ceph_cluster_upgrade",
+      "smoke_verified": true
     },
     {
       "display_name": "Keycloak Major Upgrade",
@@ -4983,7 +4988,7 @@
       "estimated_duration_seconds": 1800,
       "blast_radius_hint": "freeipa_kerberos_ldap_unavailable_during_upgrade",
       "rollback_strategy": "executor",
-      "smoke_verified": false,
+      "smoke_verified": true,
       "safety_notes": [
         "ipa-backup taken before upgrade on master and each replica",
         "Replicas upgraded before master \u2014 quorum maintained",
@@ -5032,7 +5037,7 @@
       "estimated_duration_seconds": 120,
       "blast_radius_hint": "slapd_brief_restart_on_rollback",
       "rollback_strategy": "executor",
-      "smoke_verified": false,
+      "smoke_verified": true,
       "safety_notes": [
         "slapcat config + data backup before apply",
         "Schema validated in temp dir via slapadd before live apply",
@@ -5382,7 +5387,7 @@
       "executor": "nexplane_agent.jenkins_upgrade",
       "generic_action": "jenkins_upgrade",
       "action_id": "jenkins_upgrade",
-      "smoke_verified": false
+      "smoke_verified": true
     }
   ]
 }
