@@ -188,7 +188,7 @@
       "rollback_action": "oci_adb_upgrade",
       "generic_action": "oci_adb_upgrade",
       "estimated_duration_seconds": 1200,
-      "smoke_verified": false,
+      "smoke_verified": true,
       "read_only": false
     },
     {
