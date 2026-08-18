@@ -128,7 +128,10 @@ kubectl rollout status deployment/istiod -n istio-system --timeout=300s
 # Ensure k3s starts on next boot (for launches from AMI)
 systemctl enable k3s
 
-echo ISTIO_READY
+# Sentinel file — only created after ALL above steps complete.
+# DO NOT use cloud-init-output.log grep: cloud-init logs the script
+# source before executing, so any string in the script appears early.
+touch /tmp/nexplane-istio-smoke-ready
 """).decode()
 
 
@@ -174,8 +177,10 @@ def _build_k3s_istio_ami(ec2, ssm, aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    # Poll for ISTIO_READY via SSM
-    log(f"  Polling cloud-init for ISTIO_READY on {instance_id} (up to 30 min)")
+    # Poll for sentinel file via SSM — file is only created after ALL install steps complete.
+    # Do NOT grep cloud-init-output.log: cloud-init logs the script source before running it,
+    # so any string in the script appears in the log immediately (false positive).
+    log(f"  Polling sentinel file for install completion on {instance_id} (up to 30 min)")
     ssm_client = boto3.client(
         "ssm",
         aws_access_key_id=aws_creds.get("access_key_id"),
@@ -191,14 +196,14 @@ def _build_k3s_istio_ami(ec2, ssm, aws_creds) -> tuple:
                 InstanceIds=[instance_id],
                 DocumentName="AWS-RunShellScript",
                 Parameters={"commands": [
-                    "grep -c ISTIO_READY /var/log/cloud-init-output.log 2>/dev/null || echo 0"
+                    "test -f /tmp/nexplane-istio-smoke-ready && echo SENTINEL_OK || echo SENTINEL_MISSING"
                 ]},
                 TimeoutSeconds=30,
             )
             cmd_id = resp2["Command"]["CommandId"]
             time.sleep(5)
             inv = ssm_client.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
-            if inv.get("Status") == "Success" and inv.get("StandardOutputContent", "").strip() not in ("", "0"):
+            if inv.get("Status") == "Success" and "SENTINEL_OK" in inv.get("StandardOutputContent", ""):
                 ready = True
                 break
         except Exception:
@@ -206,7 +211,7 @@ def _build_k3s_istio_ami(ec2, ssm, aws_creds) -> tuple:
 
     if not ready:
         ec2.terminate_instances(InstanceIds=[instance_id])
-        pytest.fail(f"ISTIO_READY never appeared in cloud-init log on {instance_id}")
+        pytest.fail(f"Istio install sentinel never appeared on {instance_id} within 30 min")
 
     log(f"  ISTIO_READY confirmed on {instance_id} / {private_ip}")
 
