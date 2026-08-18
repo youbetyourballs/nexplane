@@ -1,4 +1,4 @@
-﻿# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 """Smoke test: Istio Control Plane Upgrade (k3s auto-provision)
@@ -128,7 +128,7 @@ kubectl rollout status deployment/istiod -n istio-system --timeout=300s
 # Ensure k3s starts on next boot (for launches from AMI)
 systemctl enable k3s
 
-# Sentinel file — only created after ALL above steps complete.
+# Sentinel file -- only created after ALL above steps complete.
 # DO NOT use cloud-init-output.log grep: cloud-init logs the script
 # source before executing, so any string in the script appears early.
 touch /tmp/nexplane-istio-smoke-ready
@@ -177,7 +177,7 @@ def _build_k3s_istio_ami(ec2, ssm, aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    # Poll for sentinel file via SSM — file is only created after ALL install steps complete.
+    # Poll for sentinel file via SSM -- file is only created after ALL install steps complete.
     # Do NOT grep cloud-init-output.log: cloud-init logs the script source before running it,
     # so any string in the script appears in the log immediately (false positive).
     log(f"  Polling sentinel file for install completion on {instance_id} (up to 30 min)")
@@ -447,7 +447,7 @@ def test_phase3_rollback():
     result = _rollback_result(cr)
     # Accept both successful rollback and acknowledged no-op rollback.
     # A no-op rollback (_rollback_no_op=True) occurs when k3s crashes during
-    # upgrade leaving the API server unreachable — the executor cannot undo work
+    # upgrade leaving the API server unreachable -- the executor cannot undo work
     # but records the state so the operator knows to re-provision.
     rolled_back_ok = result.get("rolled_back") is True or result.get("_rollback_no_op") is True
     assert rolled_back_ok, f"rolled_back not True and no _rollback_no_op: {result}"
