@@ -156,30 +156,34 @@ def _build_gitlab_ami(aws_creds) -> tuple:
         ec2.terminate_instances(InstanceIds=[instance_id])
         pytest.fail(f"GitLab install never completed on {instance_id} within 75 min")
 
-    log(f"  GitLab sentinel confirmed; checking port 80 on {private_ip}")
-    for _ in range(30):
-        time.sleep(10)
-        try:
-            s = socket.create_connection((private_ip, 80), timeout=5)
-            s.close()
-            log(f"  GitLab port 80 open on {private_ip}")
-            return instance_id, ec2, None
-        except OSError:
-            pass
-    ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"GitLab sentinel OK but port 80 never opened on {private_ip}")
+    # AMI build uses EXTERNAL_URL=http://localhost, so GitLab binds to 127.0.0.1 only.
+    # Port-80 check here would always fail. Sentinel confirms install is complete -- that's enough.
+    log(f"  GitLab install confirmed on build instance {instance_id}")
+    return instance_id, ec2, None
 
 
 def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
     """Launch a GitLab instance from a pre-built AMI. Returns (instance_id, private_ip)."""
+    import base64 as _b64
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
+
+    # AMI was built with EXTERNAL_URL=http://localhost (binds to 127.0.0.1).
+    # Reconfigure with the actual private IP so GitLab listens on all interfaces.
+    user_data = _b64.b64encode(
+        b"#!/bin/bash\n"
+        b"PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)\n"
+        b"sed -i \"s|external_url.*|external_url 'http://$PRIVATE_IP'|\" /etc/gitlab/gitlab.rb\n"
+        b"gitlab-ctl reconfigure\n"
+        b"gitlab-ctl start\n"
+    ).decode()
 
     kwargs = dict(
         ImageId=ami_id,
         InstanceType=INSTANCE_TYPE,
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
+        UserData=user_data,
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-gitlab-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-gitlab-upgrade"},
@@ -198,9 +202,9 @@ def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    # Wait for GitLab port 80
-    log(f"  Waiting for GitLab port 80 on {private_ip} (up to 15 min)")
-    deadline = time.time() + 900
+    # Wait for GitLab port 80 (reconfigure takes ~5 min on first launch)
+    log(f"  Waiting for GitLab port 80 on {private_ip} (up to 20 min)")
+    deadline = time.time() + 1200
     while time.time() < deadline:
         time.sleep(15)
         try:

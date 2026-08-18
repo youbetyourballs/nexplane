@@ -349,10 +349,10 @@ def test_phase1_provision():
     )
 
     # Wait for k3s + Istio 1.20 to be healthy before phase 2 starts.
-    # user-data wipes k3s state and reinstalls Istio; this can take 5-10 min.
-    log("  Waiting for istiod to be ready (up to 12 min)")
+    # user-data wipes k3s state and reinstalls Istio; istioctl install takes ~15 min.
+    log("  Waiting for istiod to be ready (up to 25 min)")
     ssm_c = _boto3_client("ssm", aws_creds)
-    deadline = time.time() + 720
+    deadline = time.time() + 1500
     istio_ready = False
     while time.time() < deadline:
         time.sleep(20)
@@ -374,7 +374,7 @@ def test_phase1_provision():
         except Exception:
             pass
     if not istio_ready:
-        pytest.fail("istiod never became ready within 12 min")
+        pytest.fail("istiod never became ready within 25 min")
     log("[PHASE 1: provision] PASSED")
 
 
