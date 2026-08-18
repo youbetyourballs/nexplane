@@ -84,7 +84,11 @@ def _build_gitlab_ami(aws_creds) -> tuple:
     import base64
 
     user_data = base64.b64encode(
+        # set -e: exit immediately on any error so the sentinel is NEVER written
+        # unless ALL steps succeed. Without this, bash continues past failed yum
+        # installs and writes the sentinel even on a broken install.
         b"#!/bin/bash\n"
+        b"set -e\n"
         b"yum install -y curl policycoreutils openssh-server openssh-clients postfix\n"
         b"systemctl enable sshd && systemctl start sshd\n"
         b"systemctl enable postfix && systemctl start postfix\n"
