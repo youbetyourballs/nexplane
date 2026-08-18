@@ -116,9 +116,9 @@ _USERDATA = base64.b64encode(b"""#!/bin/bash
 curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644 --disable=traefik
 sleep 30
 
-# Install Istio 1.20
+# Install Istio 1.20 (installer extracts to ./istio-<ver>/ relative to CWD which is / for cloud-init)
 curl -sfL https://istio.io/downloadIstio | ISTIO_VERSION=1.20.3 TARGET_ARCH=x86_64 sh -
-cp /root/istio-1.20.3/bin/istioctl /usr/local/bin/istioctl
+cp /istio-1.20.3/bin/istioctl /usr/local/bin/istioctl
 
 # Install Istio 1.20 on the cluster
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
@@ -270,8 +270,10 @@ def _launch_from_ami(ec2, aws_creds, ami_id) -> tuple:
             "done\n"
             # Reinstall Istio 1.20 using pre-installed istioctl (images cached in containerd)
             "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\n"
-            "ISTIOCTL=/usr/local/bin/istioctl\n"
-            "if [ -f $ISTIOCTL ]; then\n"
+            # Search common paths -- the AMI build copies to /usr/local/bin but may land
+            # at /istio-<ver>/bin/istioctl if the cp step used the wrong source path.
+            "ISTIOCTL=$(find /usr/local/bin /istio-*/bin -name istioctl -type f 2>/dev/null | head -1)\n"
+            "if [ -n \"$ISTIOCTL\" ]; then\n"
             "  $ISTIOCTL install --set profile=minimal -y 2>&1 | tail -5\n"
             # Write sentinel as soon as istioctl install returns. kubectl rollout status can
             # block indefinitely even when istiod is running; phase 1 does its own SSM check.
