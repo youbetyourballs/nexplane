@@ -91,7 +91,12 @@ def _build_gitlab_ami(aws_creds) -> tuple:
         b"curl -sS https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.rpm.sh | bash\n"
         b'EXTERNAL_URL="http://localhost" GITLAB_ROOT_PASSWORD="SmokeGitLab1234!" yum install -y gitlab-ce-16.0.10\n'
         b"gitlab-ctl reconfigure\n"
-        # Sentinel: only written after ALL steps complete. Do NOT use cloud-init log grep —
+        # Bake in listen_addresses so NGINX binds to 0.0.0.0 on every launch from this AMI.
+        # EXTERNAL_URL=localhost makes NGINX default to 127.0.0.1; this override is required
+        # so the platform can reach GitLab when launching a test instance from the cached AMI.
+        b"echo \"nginx['listen_addresses'] = ['0.0.0.0']\" >> /etc/gitlab/gitlab.rb\n"
+        b"gitlab-ctl reconfigure\n"
+        # Sentinel: only written after ALL steps complete. Do NOT use cloud-init log grep --
         # cloud-init logs script source before executing, causing false-positive detection.
         b"touch /tmp/nexplane-gitlab-smoke-ready\n"
     ).decode()
@@ -164,26 +169,14 @@ def _build_gitlab_ami(aws_creds) -> tuple:
 
 def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
     """Launch a GitLab instance from a pre-built AMI. Returns (instance_id, private_ip)."""
-    import base64 as _b64
     subnet_id = aws_creds.get("smoke_subnet_id") or aws_creds.get("subnet_id")
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
-
-    # AMI was built with EXTERNAL_URL=http://localhost (binds to 127.0.0.1).
-    # Reconfigure with the actual private IP so GitLab listens on all interfaces.
-    user_data = _b64.b64encode(
-        b"#!/bin/bash\n"
-        b"PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)\n"
-        b"sed -i \"s|external_url.*|external_url 'http://$PRIVATE_IP'|\" /etc/gitlab/gitlab.rb\n"
-        b"gitlab-ctl reconfigure\n"
-        b"gitlab-ctl start\n"
-    ).decode()
 
     kwargs = dict(
         ImageId=ami_id,
         InstanceType=INSTANCE_TYPE,
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
-        UserData=user_data,
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
             {"Key": "Name",             "Value": "nexplane-smoke-gitlab-upgrade"},
             {"Key": "nexplane-purpose", "Value": "smoke-gitlab-upgrade"},
@@ -202,9 +195,9 @@ def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    # Wait for GitLab port 80 (reconfigure takes ~5 min on first launch)
-    log(f"  Waiting for GitLab port 80 on {private_ip} (up to 20 min)")
-    deadline = time.time() + 1200
+    # AMI has nginx['listen_addresses'] = ['0.0.0.0'] baked in; port 80 opens once gitlab-runsvdir starts.
+    log(f"  Waiting for GitLab port 80 on {private_ip} (up to 15 min)")
+    deadline = time.time() + 900
     while time.time() < deadline:
         time.sleep(15)
         try:
