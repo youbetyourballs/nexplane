@@ -10,8 +10,10 @@ GD_BASE = "https://api.godaddy.com"
 
 def gd_headers(creds: dict) -> dict:
     token = creds.get("personal_access_token") or creds.get("api_token", "")
+    # PATs (gd_pat_...) use Bearer; legacy API key+secret pairs use sso-key {key}:{secret}
+    auth_value = f"Bearer {token}" if token.startswith("gd_pat_") else f"sso-key {token}"
     headers = {
-        "Authorization": f"sso-key {token}",
+        "Authorization": auth_value,
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
