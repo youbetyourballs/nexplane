@@ -248,15 +248,18 @@ def _launch_from_ami(ec2, aws_creds, ami_id) -> tuple:
         # instance IP, avoiding the 15+ min PKI regen that wiping server/tls triggers.
         UserData=(
             "#!/bin/bash\n"
-            "systemctl stop k3s 2>/dev/null || true\n"
-            "sleep 3\n"
-            "systemctl reset-failed k3s 2>/dev/null || true\n"
-            "systemctl enable k3s 2>/dev/null || true\n"
-            "systemctl start k3s\n"
-            "for i in $(seq 1 60); do\n"
+            # k3s may already be started by systemd on boot (it's enabled in the AMI).
+            # Wait for the kubeconfig first; if it doesn't appear, force a restart.
+            "for i in $(seq 1 120); do\n"
             "  if [ -f /etc/rancher/k3s/k3s.yaml ]; then\n"
             "    sed -i 's|server: https://.*:6443|server: https://127.0.0.1:6443|' /etc/rancher/k3s/k3s.yaml\n"
             "    break\n"
+            "  fi\n"
+            "  if [ $i -eq 12 ]; then\n"
+            "    systemctl reset-failed k3s 2>/dev/null; systemctl restart k3s 2>/dev/null || true\n"
+            "  fi\n"
+            "  if [ $i -eq 60 ]; then\n"
+            "    K3S_RESOLV_CONF=/etc/resolv.conf systemctl restart k3s 2>/dev/null || true\n"
             "  fi\n"
             "  sleep 5\n"
             "done\n"

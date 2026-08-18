@@ -122,9 +122,9 @@ def _build_gitlab_ami(aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    # Poll port 80 for up to 25 minutes (1500s)
-    log(f"  Waiting for GitLab port 80 on {private_ip} (up to 25 min)")
-    deadline = time.time() + 1500
+    # Poll port 80 for up to 45 minutes (2700s) — GitLab CE yum+reconfigure is slow
+    log(f"  Waiting for GitLab port 80 on {private_ip} (up to 45 min)")
+    deadline = time.time() + 2700
     while time.time() < deadline:
         time.sleep(20)
         try:
@@ -136,7 +136,7 @@ def _build_gitlab_ami(aws_creds) -> tuple:
             pass
 
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"GitLab never reachable on {private_ip}:80 within 25 min")
+    pytest.fail(f"GitLab never reachable on {private_ip}:80 within 45 min")
 
 
 def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
