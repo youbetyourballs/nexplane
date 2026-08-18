@@ -196,9 +196,11 @@ def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
     # AMI has nginx['listen_addresses'] = ['0.0.0.0'] baked in (added during build).
-    # Port 80 opens once gitlab-runsvdir and NGINX services start (~5-10 min on t3.xlarge).
-    log(f"  Waiting for GitLab port 80 on {private_ip} (up to 20 min)")
-    deadline = time.time() + 1200
+    # Port 80 opens once gitlab-runsvdir and NGINX services start.
+    # On t3.xlarge, 20+ GitLab services restart from AMI snapshot simultaneously;
+    # PostgreSQL must initialize before NGINX is healthy -- allow 35 min.
+    log(f"  Waiting for GitLab port 80 on {private_ip} (up to 35 min)")
+    deadline = time.time() + 2100
     while time.time() < deadline:
         time.sleep(15)
         try:
@@ -210,7 +212,7 @@ def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
             pass
 
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"GitLab never reachable on {private_ip}:80 within 20 min")
+    pytest.fail(f"GitLab never reachable on {private_ip}:80 within 35 min")
 
 
 def _register_asset(private_ip, run_id) -> tuple:
