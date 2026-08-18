@@ -1285,6 +1285,118 @@
       "smoke_verified": true
     },
     {
+      "description": "Audit WDAC policy enforcement readiness: runs Windows Defender Application Control in audit mode and collects block events without enforcement.",
+      "execution_tier": 3,
+      "display_name": "WDAC Audit Mode",
+      "estimated_duration_seconds": 60,
+      "parameters": [
+        {
+          "name": "duration_seconds",
+          "type": "integer",
+          "required": false,
+          "default": 60,
+          "description": "How long to run audit mode before collecting events (seconds)."
+        }
+      ],
+      "rollback_action": "wdac_audit",
+      "applicable_asset_types": [
+        "server",
+        "workstation"
+      ],
+      "action_type": "read",
+      "executor": "nexplane_agent.wdac_audit",
+      "generic_action": "wdac_audit",
+      "action_id": "wdac_audit",
+      "smoke_verified": true
+    },
+    {
+      "description": "Deploy a Windows Defender Application Control policy in enforce mode. Blocks unsigned/non-allowlisted code from running.",
+      "execution_tier": 4,
+      "safety_notes": [
+        "Enforce mode can block legitimate software if the policy does not allowlist it \u2014 test in audit mode first.",
+        "Rollback removes the deployed policy binary; requires reboot to take effect."
+      ],
+      "display_name": "WDAC Enforce Policy",
+      "estimated_duration_seconds": 30,
+      "parameters": [
+        {
+          "name": "policy_xml",
+          "type": "string",
+          "required": true,
+          "description": "WDAC SiPolicy XML content to compile and deploy."
+        }
+      ],
+      "rollback_action": "wdac_enforce",
+      "applicable_asset_types": [
+        "server",
+        "workstation"
+      ],
+      "action_type": "change",
+      "executor": "nexplane_agent.wdac_enforce",
+      "generic_action": "wdac_enforce",
+      "action_id": "wdac_enforce",
+      "smoke_verified": true
+    },
+    {
+      "description": "Run Attack Surface Reduction rules in audit mode for a specified duration and report which rules would have fired.",
+      "execution_tier": 3,
+      "display_name": "ASR Audit Mode",
+      "estimated_duration_seconds": 60,
+      "parameters": [
+        {
+          "name": "duration_seconds",
+          "type": "integer",
+          "required": false,
+          "default": 60,
+          "description": "How long to observe ASR events before collecting results."
+        },
+        {
+          "name": "rule_names",
+          "type": "array",
+          "required": false,
+          "description": "Specific ASR rule names to audit (default: all supported rules)."
+        }
+      ],
+      "rollback_action": "asr_audit",
+      "applicable_asset_types": [
+        "server",
+        "workstation"
+      ],
+      "action_type": "read",
+      "executor": "nexplane_agent.asr_audit",
+      "generic_action": "asr_audit",
+      "action_id": "asr_audit",
+      "smoke_verified": true
+    },
+    {
+      "description": "Enable Microsoft Defender Attack Surface Reduction rules in enforce mode. Blocks credential theft, untrusted executables, and other attack vectors.",
+      "execution_tier": 4,
+      "safety_notes": [
+        "Some rules (e.g. block-office-child-process) can disrupt legitimate business applications \u2014 audit first.",
+        "Rollback sets affected rules back to disabled/audit mode."
+      ],
+      "display_name": "ASR Enforce Rules",
+      "estimated_duration_seconds": 30,
+      "parameters": [
+        {
+          "name": "rule_names",
+          "type": "array",
+          "required": true,
+          "description": "List of ASR rule names to enforce (e.g. block-credential-stealing, block-untrusted-executables-email)."
+        }
+      ],
+      "rollback_action": "asr_enforce",
+      "applicable_asset_types": [
+        "server",
+        "workstation"
+      ],
+      "action_type": "change",
+      "executor": "nexplane_agent.asr_enforce",
+      "generic_action": "asr_enforce",
+      "action_id": "asr_enforce",
+      "smoke_verified": true
+    },
+    {
       "action_id": "manage_tls_certificates",
       "generic_action": "manage_tls_certificates",
       "action_type": "change",
