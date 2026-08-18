@@ -91,6 +91,9 @@ def _build_gitlab_ami(aws_creds) -> tuple:
         b"curl -sS https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.rpm.sh | bash\n"
         b'EXTERNAL_URL="http://localhost" GITLAB_ROOT_PASSWORD="SmokeGitLab1234!" yum install -y gitlab-ce-16.0.10\n'
         b"gitlab-ctl reconfigure\n"
+        # Sentinel: only written after ALL steps complete. Do NOT use cloud-init log grep —
+        # cloud-init logs script source before executing, causing false-positive detection.
+        b"touch /tmp/nexplane-gitlab-smoke-ready\n"
     ).decode()
 
     ec2 = _boto3_client("ec2", aws_creds)
@@ -122,11 +125,40 @@ def _build_gitlab_ami(aws_creds) -> tuple:
     desc       = ec2.describe_instances(InstanceIds=[instance_id])
     private_ip = desc["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
 
-    # Poll port 80 for up to 45 minutes (2700s) — GitLab CE yum+reconfigure is slow
-    log(f"  Waiting for GitLab port 80 on {private_ip} (up to 45 min)")
-    deadline = time.time() + 2700
+    # Poll sentinel file via SSM (75 min) — yum install + gitlab-ctl reconfigure takes 45-60 min.
+    # Sentinel /tmp/nexplane-gitlab-smoke-ready is written AFTER reconfigure completes.
+    # Do NOT use cloud-init-output.log grep — cloud-init logs script source before executing.
+    log(f"  Waiting for GitLab install sentinel on {instance_id} (up to 75 min)")
+    ssm_c  = _boto3_client("ssm", aws_creds)
+    deadline = time.time() + 4500  # 75 min
+    ready    = False
     while time.time() < deadline:
-        time.sleep(20)
+        time.sleep(30)
+        try:
+            resp2  = ssm_c.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [
+                    "test -f /tmp/nexplane-gitlab-smoke-ready && echo SENTINEL_OK || echo SENTINEL_MISSING"
+                ]},
+                TimeoutSeconds=30,
+            )
+            cmd_id = resp2["Command"]["CommandId"]
+            time.sleep(5)
+            inv = ssm_c.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+            if inv.get("Status") == "Success" and "SENTINEL_OK" in inv.get("StandardOutputContent", ""):
+                ready = True
+                break
+        except Exception:
+            pass
+
+    if not ready:
+        ec2.terminate_instances(InstanceIds=[instance_id])
+        pytest.fail(f"GitLab install never completed on {instance_id} within 75 min")
+
+    log(f"  GitLab sentinel confirmed; checking port 80 on {private_ip}")
+    for _ in range(30):
+        time.sleep(10)
         try:
             s = socket.create_connection((private_ip, 80), timeout=5)
             s.close()
@@ -134,9 +166,8 @@ def _build_gitlab_ami(aws_creds) -> tuple:
             return instance_id, ec2, None
         except OSError:
             pass
-
     ec2.terminate_instances(InstanceIds=[instance_id])
-    pytest.fail(f"GitLab never reachable on {private_ip}:80 within 45 min")
+    pytest.fail(f"GitLab sentinel OK but port 80 never opened on {private_ip}")
 
 
 def _launch_gitlab(ec2, ami_id, aws_creds) -> tuple:
