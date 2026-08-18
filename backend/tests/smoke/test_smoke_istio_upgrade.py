@@ -352,10 +352,11 @@ def test_phase1_provision():
 
     # Step 1: Wait for user-data to finish istioctl install and write the sentinel.
     # Sentinel is written right after istioctl install returns (not gated by rollout status,
-    # which can block indefinitely). Poll up to 60 min.
-    log("  Waiting for istioctl install sentinel (up to 60 min)")
+    # which can block indefinitely). Poll up to 75 min (istioctl minimal install on k3s
+    # takes ~61 min; 75 min gives headroom without being wasteful).
+    log("  Waiting for istioctl install sentinel (up to 75 min)")
     ssm_c = _boto3_client("ssm", aws_creds)
-    deadline = time.time() + 3600
+    deadline = time.time() + 4500
     sentinel_found = False
     while time.time() < deadline:
         time.sleep(30)
@@ -366,18 +367,22 @@ def test_phase1_provision():
                 Parameters={"commands": [
                     "test -f /tmp/nexplane-istio-launch-ready && echo SENTINEL_OK || echo SENTINEL_MISSING"
                 ]},
-                TimeoutSeconds=30,
+                TimeoutSeconds=60,
             )
             cmd_id = resp["Command"]["CommandId"]
-            time.sleep(8)
-            out = ssm_c.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+            # Poll for command completion rather than fixed sleep (busy instance may be slow).
+            for _ in range(6):
+                time.sleep(5)
+                out = ssm_c.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+                if out.get("Status") not in ("InProgress", "Pending", "Delayed"):
+                    break
             if out.get("Status") == "Success" and "SENTINEL_OK" in out.get("StandardOutputContent", ""):
                 sentinel_found = True
                 break
         except Exception:
             pass
     if not sentinel_found:
-        pytest.fail("istioctl install never completed within 60 min")
+        pytest.fail("istioctl install never completed within 75 min")
 
     # Step 2: Verify istiod pod is actually running (up to 10 min after sentinel).
     log("  Verifying istiod is running (up to 10 min)")
