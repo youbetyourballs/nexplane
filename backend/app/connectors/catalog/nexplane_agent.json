@@ -5089,7 +5089,7 @@
       "estimated_duration_seconds": 600,
       "blast_radius_hint": "vault_leadership_change_during_stepdown",
       "rollback_strategy": "executor",
-      "smoke_verified": false,
+      "smoke_verified": true,
       "safety_notes": [
         "Raft snapshot saved before first node upgrade",
         "Standbys upgraded before active \u2014 quorum maintained throughout",
@@ -5278,7 +5278,7 @@
       "executor": "nexplane_agent.cert_manager_upgrade",
       "generic_action": "cert_manager_upgrade",
       "action_id": "cert_manager_upgrade",
-      "smoke_verified": false
+      "smoke_verified": true
     },
     {
       "display_name": "GitLab Major Version Upgrade",
