@@ -273,7 +273,9 @@ def _launch_from_ami(ec2, aws_creds, ami_id) -> tuple:
             "ISTIOCTL=/usr/local/bin/istioctl\n"
             "if [ -f $ISTIOCTL ]; then\n"
             "  $ISTIOCTL install --set profile=minimal -y 2>&1 | tail -5\n"
-            "  kubectl rollout status deployment/istiod -n istio-system --timeout=300s 2>&1 || true\n"
+            # Sentinel only written if rollout truly succeeds; phase 1 polls for this file.
+            "  kubectl rollout status deployment/istiod -n istio-system --timeout=1800s"
+            " && touch /tmp/nexplane-istio-launch-ready\n"
             "fi\n"
         ),
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
@@ -348,33 +350,34 @@ def test_phase1_provision():
         instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=600
     )
 
-    # Wait for k3s + Istio 1.20 to be healthy before phase 2 starts.
-    # user-data wipes k3s state and reinstalls Istio; istioctl install takes ~15 min.
-    log("  Waiting for istiod to be ready (up to 25 min)")
+    # Wait for user-data to finish: it wipes k3s state, reinstalls Istio, and writes
+    # /tmp/nexplane-istio-launch-ready ONLY after istiod rollout succeeds.
+    # Poll via SSM (up to 35 min — istioctl install takes ~20 min even with cached images).
+    log("  Waiting for istiod launch sentinel (up to 35 min)")
     ssm_c = _boto3_client("ssm", aws_creds)
-    deadline = time.time() + 1500
+    deadline = time.time() + 2100
     istio_ready = False
     while time.time() < deadline:
-        time.sleep(20)
+        time.sleep(30)
         try:
             resp = ssm_c.send_command(
                 InstanceIds=[instance_id],
                 DocumentName="AWS-RunShellScript",
                 Parameters={"commands": [
-                    "KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl rollout status deployment/istiod "
-                    "-n istio-system --timeout=10s 2>&1 | grep -q 'successfully rolled out' && echo ISTIO_READY"
+                    "test -f /tmp/nexplane-istio-launch-ready && echo SENTINEL_OK || echo SENTINEL_MISSING"
                 ]},
+                TimeoutSeconds=30,
             )
             cmd_id = resp["Command"]["CommandId"]
-            time.sleep(12)
+            time.sleep(8)
             out = ssm_c.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
-            if "ISTIO_READY" in out.get("StandardOutputContent", ""):
+            if out.get("Status") == "Success" and "SENTINEL_OK" in out.get("StandardOutputContent", ""):
                 istio_ready = True
                 break
         except Exception:
             pass
     if not istio_ready:
-        pytest.fail("istiod never became ready within 25 min")
+        pytest.fail("istiod never became ready within 35 min")
     log("[PHASE 1: provision] PASSED")
 
 

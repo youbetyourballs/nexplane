@@ -36,7 +36,7 @@ BASE_URL = os.environ.get("NEXPLANE_BASE_URL", "http://localhost:8000")
 EMAIL    = os.environ.get("NEXPLANE_EMAIL", "admin@acme.example")
 PASSWORD = os.environ.get("NEXPLANE_PASSWORD", "admin123")
 
-_AMI_SSM_KEY        = "/nexplane/smoke-amis/gitlab/16.0"
+_AMI_SSM_KEY        = "gitlab/16.0"
 SOURCE_VERSION      = "16.0"
 TARGET_VERSION      = "16.11"
 INSTANCE_TYPE       = "t3.xlarge"
