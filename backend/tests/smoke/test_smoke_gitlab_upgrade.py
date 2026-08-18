@@ -89,9 +89,9 @@ def _build_gitlab_ami(aws_creds) -> tuple:
         # installs and writes the sentinel even on a broken install.
         b"#!/bin/bash\n"
         b"set -e\n"
-        # AL2023 ships curl-minimal which conflicts with the full curl package.
-        # --allowerasing allows yum to replace curl-minimal with curl.
-        b"yum install -y --allowerasing curl policycoreutils openssh-server openssh-clients postfix\n"
+        # Amazon Linux 2 (RHEL 7 compatible) -- required because GitLab CE 16.x
+        # packages are only published for RHEL 7/8, not for AL2023 (RHEL 9).
+        b"yum install -y curl policycoreutils openssh-server openssh-clients postfix\n"
         b"systemctl enable sshd && systemctl start sshd\n"
         b"systemctl enable postfix && systemctl start postfix\n"
         b"curl -sS https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.rpm.sh | bash\n"
@@ -113,7 +113,7 @@ def _build_gitlab_ami(aws_creds) -> tuple:
     sg_id     = aws_creds.get("smoke_default_security_group_id") or "sg-06896669aadcf81ee"
 
     kwargs = dict(
-        ImageId="ami-0c101f26f147fa7fd",
+        ImageId="ami-0355fe804a20b1627",  # Amazon Linux 2 (AL2) -- GL CE 16.x not in AL2023 repos
         InstanceType=INSTANCE_TYPE,
         MinCount=1, MaxCount=1,
         IamInstanceProfile={"Name": _SSM_PROFILE},
