@@ -273,9 +273,9 @@ def _launch_from_ami(ec2, aws_creds, ami_id) -> tuple:
             "ISTIOCTL=/usr/local/bin/istioctl\n"
             "if [ -f $ISTIOCTL ]; then\n"
             "  $ISTIOCTL install --set profile=minimal -y 2>&1 | tail -5\n"
-            # Sentinel only written if rollout truly succeeds; phase 1 polls for this file.
-            "  kubectl rollout status deployment/istiod -n istio-system --timeout=1800s"
-            " && touch /tmp/nexplane-istio-launch-ready\n"
+            # Write sentinel as soon as istioctl install returns. kubectl rollout status can
+            # block indefinitely even when istiod is running; phase 1 does its own SSM check.
+            "  touch /tmp/nexplane-istio-launch-ready\n"
             "fi\n"
         ),
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
@@ -350,13 +350,13 @@ def test_phase1_provision():
         instance_id, asset_id, aws_creds, private_ip=private_ip, timeout_s=600
     )
 
-    # Wait for user-data to finish: it wipes k3s state, reinstalls Istio, and writes
-    # /tmp/nexplane-istio-launch-ready ONLY after istiod rollout succeeds.
-    # Poll via SSM (up to 35 min — istioctl install takes ~20 min even with cached images).
-    log("  Waiting for istiod launch sentinel (up to 55 min)")
+    # Step 1: Wait for user-data to finish istioctl install and write the sentinel.
+    # Sentinel is written right after istioctl install returns (not gated by rollout status,
+    # which can block indefinitely). Poll up to 60 min.
+    log("  Waiting for istioctl install sentinel (up to 60 min)")
     ssm_c = _boto3_client("ssm", aws_creds)
-    deadline = time.time() + 3300
-    istio_ready = False
+    deadline = time.time() + 3600
+    sentinel_found = False
     while time.time() < deadline:
         time.sleep(30)
         try:
@@ -372,12 +372,39 @@ def test_phase1_provision():
             time.sleep(8)
             out = ssm_c.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
             if out.get("Status") == "Success" and "SENTINEL_OK" in out.get("StandardOutputContent", ""):
-                istio_ready = True
+                sentinel_found = True
                 break
         except Exception:
             pass
-    if not istio_ready:
-        pytest.fail("istiod never became ready within 55 min")
+    if not sentinel_found:
+        pytest.fail("istioctl install never completed within 60 min")
+
+    # Step 2: Verify istiod pod is actually running (up to 10 min after sentinel).
+    log("  Verifying istiod is running (up to 10 min)")
+    istiod_ok = False
+    deadline2 = time.time() + 600
+    while time.time() < deadline2:
+        time.sleep(20)
+        try:
+            resp2 = ssm_c.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunShellScript",
+                Parameters={"commands": [
+                    "KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl get pods -n istio-system "
+                    "--field-selector=status.phase=Running 2>/dev/null | grep -q istiod && echo ISTIOD_RUNNING"
+                ]},
+                TimeoutSeconds=30,
+            )
+            cid2 = resp2["Command"]["CommandId"]
+            time.sleep(8)
+            out2 = ssm_c.get_command_invocation(CommandId=cid2, InstanceId=instance_id)
+            if out2.get("Status") == "Success" and "ISTIOD_RUNNING" in out2.get("StandardOutputContent", ""):
+                istiod_ok = True
+                break
+        except Exception:
+            pass
+    if not istiod_ok:
+        pytest.fail("istiod pod never reached Running state within 10 min of sentinel")
     log("[PHASE 1: provision] PASSED")
 
 
