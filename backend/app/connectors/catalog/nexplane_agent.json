@@ -4525,7 +4525,8 @@
       "applicable_asset_types": [
         "server"
       ],
-      "generic_action": "redis_cluster_migration"
+      "generic_action": "redis_cluster_migration",
+      "smoke_verified": true
     },
     {
       "display_name": "Cassandra Rolling Upgrade",
