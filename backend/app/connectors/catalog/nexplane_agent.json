@@ -5100,7 +5100,8 @@
       "applicable_asset_types": [
         "server"
       ],
-      "generic_action": "vault_cluster_upgrade"
+      "generic_action": "vault_cluster_upgrade",
+      "smoke_verified": true
     },
     {
       "display_name": "Istio Control Plane Upgrade",
