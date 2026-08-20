@@ -26,7 +26,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.estimate_image_size",
       "generic_action": "estimate_image_size",
-      "action_id": "estimate_image_size"
+      "action_id": "estimate_image_size",
+      "drift_surfaces": []
     },
     {
       "display_name": "Change IP Address",
@@ -122,7 +123,8 @@
         "Changing IP may temporarily disconnect the agent from the control plane"
       ],
       "generic_action": "change_ip",
-      "action_id": "change_ip"
+      "action_id": "change_ip",
+      "drift_surfaces": []
     },
     {
       "display_name": "Configure Syslog Forwarding",
@@ -159,7 +161,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.configure_syslog",
       "generic_action": "configure_syslog",
-      "action_id": "configure_syslog"
+      "action_id": "configure_syslog",
+      "drift_surfaces": []
     },
     {
       "display_name": "Virtualize Machine for Migration",
@@ -224,7 +227,8 @@
         "Run estimate_image_size first to verify sufficient disk space"
       ],
       "generic_action": "virtualize_for_migration",
-      "action_id": "virtualize_for_migration"
+      "action_id": "virtualize_for_migration",
+      "drift_surfaces": []
     },
     {
       "display_name": "Upload Image to Object Storage",
@@ -265,7 +269,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.upload_image",
       "generic_action": "upload_image",
-      "action_id": "upload_image"
+      "action_id": "upload_image",
+      "drift_surfaces": []
     },
     {
       "display_name": "Configure PAM Hardening",
@@ -297,7 +302,8 @@
       ],
       "generic_action": "configure_pam",
       "action_id": "configure_pam",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "display_name": "Harden SSH Configuration",
@@ -323,7 +329,11 @@
       ],
       "generic_action": "harden_ssh",
       "action_id": "harden_ssh",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": [
+        "ssh_config",
+        "firewall_rules"
+      ]
     },
     {
       "display_name": "Audit Users and Groups",
@@ -386,7 +396,8 @@
         "Installing an untrusted CA certificate compromises TLS security for all processes on this host"
       ],
       "generic_action": "manage_ca_certificates",
-      "action_id": "manage_ca_certificates"
+      "action_id": "manage_ca_certificates",
+      "drift_surfaces": []
     },
     {
       "display_name": "Configure NTP Time Sources",
@@ -422,7 +433,8 @@
         "NTP misconfiguration causes clock drift which invalidates audit log timestamps"
       ],
       "generic_action": "configure_ntp",
-      "action_id": "configure_ntp"
+      "action_id": "configure_ntp",
+      "drift_surfaces": []
     },
     {
       "display_name": "Configure SELinux",
@@ -454,7 +466,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.configure_selinux",
       "generic_action": "configure_selinux",
-      "action_id": "configure_selinux"
+      "action_id": "configure_selinux",
+      "drift_surfaces": []
     },
     {
       "display_name": "eBPF Network Soak",
@@ -481,7 +494,8 @@
           "type": "string",
           "required": false
         }
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "display_name": "eBPF LSM Soak",
@@ -508,7 +522,8 @@
           "type": "string",
           "required": false
         }
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "display_name": "Configure eBPF Network Policy",
@@ -535,7 +550,8 @@
           "type": "string",
           "required": false
         }
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "display_name": "Configure eBPF LSM Policy",
@@ -562,7 +578,8 @@
           "type": "string",
           "required": false
         }
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "display_name": "Promote eBPF Policy to Enforce",
@@ -589,7 +606,8 @@
           "type": "string",
           "required": true
         }
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "display_name": "Configure AppArmor",
@@ -620,7 +638,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.configure_apparmor",
       "generic_action": "configure_apparmor",
-      "action_id": "configure_apparmor"
+      "action_id": "configure_apparmor",
+      "drift_surfaces": []
     },
     {
       "display_name": "Configure Seccomp Filter",
@@ -646,7 +665,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.configure_seccomp",
       "generic_action": "configure_seccomp",
-      "action_id": "configure_seccomp"
+      "action_id": "configure_seccomp",
+      "drift_surfaces": []
     },
     {
       "display_name": "Seccomp Learn",
@@ -672,7 +692,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.seccomp_learn",
       "generic_action": "seccomp_learn",
-      "action_id": "seccomp_learn"
+      "action_id": "seccomp_learn",
+      "drift_surfaces": []
     },
     {
       "display_name": "Apply Sysctl Hardening",
@@ -694,7 +715,8 @@
       "executor": "nexplane_agent.apply_sysctl_hardening",
       "generic_action": "apply_sysctl_hardening",
       "action_id": "apply_sysctl_hardening",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "display_name": "Configure Host Firewall",
@@ -723,7 +745,10 @@
         "Incorrect firewall rules can lock out remote management access"
       ],
       "generic_action": "configure_host_firewall",
-      "action_id": "configure_host_firewall"
+      "action_id": "configure_host_firewall",
+      "drift_surfaces": [
+        "firewall_rules"
+      ]
     },
     {
       "display_name": "Blacklist Kernel Modules",
@@ -745,7 +770,8 @@
       "executor": "nexplane_agent.blacklist_kernel_modules",
       "generic_action": "blacklist_kernel_modules",
       "action_id": "blacklist_kernel_modules",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "display_name": "Harden Mount Options",
@@ -767,7 +793,8 @@
       "executor": "nexplane_agent.harden_mount_options",
       "generic_action": "harden_mount_options",
       "action_id": "harden_mount_options",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "display_name": "Deploy Auditd Rules",
@@ -794,7 +821,8 @@
       "executor": "nexplane_agent.deploy_auditd_rules",
       "generic_action": "deploy_auditd_rules",
       "action_id": "deploy_auditd_rules",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "display_name": "Setup File Integrity Monitoring",
@@ -817,7 +845,8 @@
       "executor": "nexplane_agent.setup_file_integrity_monitoring",
       "generic_action": "setup_file_integrity_monitoring",
       "action_id": "setup_file_integrity_monitoring",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "display_name": "Audit OS Security Posture",
@@ -865,7 +894,8 @@
         "Requires kernel 5.8+ and CAP_BPF capability"
       ],
       "generic_action": "deploy_ebpf_policy",
-      "action_id": "deploy_ebpf_policy"
+      "action_id": "deploy_ebpf_policy",
+      "drift_surfaces": []
     },
     {
       "display_name": "Configure eBPF Security Policy",
@@ -891,7 +921,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.configure_ebpf_security_policy",
       "generic_action": "configure_ebpf_security_policy",
-      "action_id": "configure_ebpf_security_policy"
+      "action_id": "configure_ebpf_security_policy",
+      "drift_surfaces": []
     },
     {
       "display_name": "Audit eBPF Posture",
@@ -940,7 +971,8 @@
       "executor": "nexplane_agent.configure_laps",
       "generic_action": "configure_laps",
       "action_id": "configure_laps",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "description": "Enable VBS-based Credential Guard to protect credential material in LSASS. Requires reboot.",
@@ -973,7 +1005,8 @@
       "executor": "nexplane_agent.enable_credential_guard",
       "generic_action": "enable_credential_guard",
       "action_id": "enable_credential_guard",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "description": "Enforce PowerShell Constrained Language Mode via registry key.",
@@ -1002,7 +1035,8 @@
       "executor": "nexplane_agent.enforce_powershell_clm",
       "generic_action": "enforce_powershell_clm",
       "action_id": "enforce_powershell_clm",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "description": "Deploy AppLocker application allowlist policies. Defaults to AuditOnly mode before enforcing.",
@@ -1034,7 +1068,8 @@
       "executor": "nexplane_agent.deploy_applocker_policy",
       "generic_action": "deploy_applocker_policy",
       "action_id": "deploy_applocker_policy",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "description": "Disable SMBv1, require signing, disable guest access.",
@@ -1070,7 +1105,8 @@
       "executor": "nexplane_agent.harden_smb",
       "generic_action": "harden_smb",
       "action_id": "harden_smb",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "description": "Enable BitLocker full disk encryption. Recovery key returned in result - store securely.",
@@ -1114,7 +1150,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.enable_bitlocker",
       "generic_action": "enable_bitlocker",
-      "action_id": "enable_bitlocker"
+      "action_id": "enable_bitlocker",
+      "drift_surfaces": []
     },
     {
       "description": "Add/remove firewall rules or set default inbound/outbound actions.",
@@ -1150,7 +1187,8 @@
       "executor": "nexplane_agent.configure_windows_firewall",
       "generic_action": "configure_windows_firewall",
       "action_id": "configure_windows_firewall",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "description": "Disable SSL/TLS 1.0/1.1, enforce TLS 1.2/1.3 via SCHANNEL registry. Requires reboot.",
@@ -1182,7 +1220,8 @@
       "executor": "nexplane_agent.harden_tls_protocols",
       "generic_action": "harden_tls_protocols",
       "action_id": "harden_tls_protocols",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "description": "Require NLA, set encryption level, configure idle/disconnect timeout.",
@@ -1216,7 +1255,8 @@
       "executor": "nexplane_agent.harden_rdp",
       "generic_action": "harden_rdp",
       "action_id": "harden_rdp",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "description": "Apply CIS/STIG auditpol settings for logon, object access, privilege use, process creation.",
@@ -1240,7 +1280,8 @@
       "executor": "nexplane_agent.configure_windows_audit_policy",
       "generic_action": "configure_windows_audit_policy",
       "action_id": "configure_windows_audit_policy",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "applicable_asset_types": [
@@ -1282,7 +1323,8 @@
       "executor": "nexplane_agent.harden_registry",
       "generic_action": "harden_registry",
       "action_id": "harden_registry",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "description": "Audit WDAC policy enforcement readiness: runs Windows Defender Application Control in audit mode and collects block events without enforcement.",
@@ -1335,7 +1377,8 @@
       "executor": "nexplane_agent.wdac_enforce",
       "generic_action": "wdac_enforce",
       "action_id": "wdac_enforce",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "description": "Run Attack Surface Reduction rules in audit mode for a specified duration and report which rules would have fired.",
@@ -1394,7 +1437,8 @@
       "executor": "nexplane_agent.asr_enforce",
       "generic_action": "asr_enforce",
       "action_id": "asr_enforce",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "action_id": "manage_tls_certificates",
@@ -1445,7 +1489,8 @@
       ],
       "executor": "nexplane_agent.manage_tls_certificates",
       "rollback_action": "manage_tls_certificates",
-      "estimated_duration_seconds": 60
+      "estimated_duration_seconds": 60,
+      "drift_surfaces": []
     },
     {
       "action_id": "configure_dns_resolver",
@@ -1478,7 +1523,8 @@
       ],
       "executor": "nexplane_agent.configure_dns_resolver",
       "rollback_action": "configure_dns_resolver",
-      "estimated_duration_seconds": 10
+      "estimated_duration_seconds": 10,
+      "drift_surfaces": []
     },
     {
       "action_id": "audit_software_inventory",
@@ -1572,7 +1618,8 @@
         "Always take a cloud snapshot before running",
         "dd-based rollback requires booting from rescue media",
         "dist upgrade is potentially destructive - test on non-production first"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "apply_linux_patches",
@@ -1619,7 +1666,8 @@
       "safety_notes": [
         "Use dry_run=true first to preview changes",
         "Reboot may be required after applying kernel or glibc patches"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "audit_linux_patch_status",
@@ -1682,7 +1730,8 @@
         "Use dry_run=true first to preview pending updates",
         "Reboot is often required; use defer_reboot=true to prevent automatic scheduling",
         "Rollback uninstalls the KB - not all KBs support uninstallation"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "audit_windows_patch_status",
@@ -1800,7 +1849,8 @@
         "Use dry_run=true to preview affected hosts before executing",
         "Set abort_error_threshold conservatively (0.1-0.2) for production fleets",
         "Ensure agents are reachable and not mid-reboot before starting a campaign"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "agent_scan_host_applications",
@@ -1822,7 +1872,8 @@
         }
       ],
       "executor": "nexplane_agent.app_discovery",
-      "estimated_duration_seconds": 30
+      "estimated_duration_seconds": 30,
+      "drift_surfaces": []
     },
     {
       "action_id": "agent_containerize_build",
@@ -1872,7 +1923,8 @@
         }
       ],
       "executor": "nexplane_agent.containerize_build",
-      "estimated_duration_seconds": 300
+      "estimated_duration_seconds": 300,
+      "drift_surfaces": []
     },
     {
       "action_id": "agent_containerize_auto",
@@ -1916,7 +1968,8 @@
         }
       ],
       "executor": "nexplane_agent.containerize_auto",
-      "estimated_duration_seconds": 900
+      "estimated_duration_seconds": 900,
+      "drift_surfaces": []
     },
     {
       "action_id": "agent_containerize_retire",
@@ -1943,7 +1996,8 @@
         }
       ],
       "executor": "nexplane_agent.containerize_retire",
-      "estimated_duration_seconds": 60
+      "estimated_duration_seconds": 60,
+      "drift_surfaces": []
     },
     {
       "action_id": "migrate_ip",
@@ -2048,7 +2102,8 @@
         "Changing IP may temporarily disconnect the agent from the control plane",
         "Use method=tailscale if Tailscale is deployed to eliminate connectivity risk",
         "DNS records are discovered automatically but v1 DNS update is not yet automated"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "apply_patches",
@@ -2107,7 +2162,8 @@
       "safety_notes": [
         "Use dry_run=true first to preview changes",
         "Reboot may be required after applying kernel or glibc patches"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "audit_patch_status",
@@ -2203,7 +2259,8 @@
       "estimated_duration_seconds": 120,
       "safety_notes": [
         "Skipping the snapshot removes the ability to auto-rollback after a failed upgrade"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "execute_os_upgrade",
@@ -2239,7 +2296,8 @@
         "This operation causes extended downtime (30-120 minutes typical)",
         "Ensure a pre-upgrade snapshot exists before running",
         "Config file migrations may require manual review after upgrade"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "verify_os_upgrade",
@@ -2314,7 +2372,8 @@
         }
       ],
       "executor": "nexplane_agent.os_upgrade",
-      "estimated_duration_seconds": 3600
+      "estimated_duration_seconds": 3600,
+      "drift_surfaces": []
     },
     {
       "action_id": "linux_parallel_upgrade",
@@ -2396,7 +2455,8 @@
         "EBS snapshot is taken of source before cutover; on-prem hosts skip snapshot",
         "Decommission is scheduled after decommission_after_hours; set to 0 for manual decommission only",
         "Rollback re-starts source and re-points traffic \u00e2\u20ac\u201d irreversible once source is terminated"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "windows_parallel_migration",
@@ -2463,7 +2523,8 @@
         "Robocopy transfers data over SMB (port 445) \u00e2\u20ac\u201d ensure security groups allow SMB between source and dest",
         "Decommission is scheduled after decommission_after_hours; set to 0 for manual decommission only",
         "Rollback re-points traffic to source \u00e2\u20ac\u201d irreversible once source is terminated"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "ip_campaign",
@@ -2525,7 +2586,8 @@
         "Use dry_run=true to preview the migration plan before executing",
         "Set abort_error_threshold conservatively (0.05-0.1) for production fleets",
         "Completed batches are not automatically rolled back \u00e2\u20ac\u201d operator initiates per-host recovery"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "display_name": "Emergency User Lockout",
@@ -2554,7 +2616,8 @@
       "generic_action": "emergency_user_lockout",
       "action_id": "emergency_user_lockout",
       "estimated_duration_seconds": 15,
-      "execution_tier": 3
+      "execution_tier": 3,
+      "drift_surfaces": []
     },
     {
       "display_name": "User Suspension",
@@ -2589,7 +2652,8 @@
       "generic_action": "user_suspension",
       "action_id": "user_suspension",
       "estimated_duration_seconds": 20,
-      "execution_tier": 3
+      "execution_tier": 3,
+      "drift_surfaces": []
     },
     {
       "display_name": "User Scope Reduction",
@@ -2620,7 +2684,8 @@
       "generic_action": "user_scope_reduction",
       "action_id": "user_scope_reduction",
       "estimated_duration_seconds": 15,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "display_name": "Enforce MFA",
@@ -2640,7 +2705,8 @@
       "generic_action": "enforce_mfa",
       "action_id": "enforce_mfa",
       "estimated_duration_seconds": 10,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "rotate_gcp_service_account_key",
@@ -2666,7 +2732,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.rotate_gcp_service_account_key",
       "estimated_duration_seconds": 15,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "rotate_vault_secret",
@@ -2697,7 +2764,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.rotate_vault_secret",
       "estimated_duration_seconds": 10,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "trivy_scan",
@@ -2728,7 +2796,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.trivy_scan",
       "estimated_duration_seconds": 300,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "lynis_audit",
@@ -2743,7 +2812,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.lynis_audit",
       "estimated_duration_seconds": 180,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "openscap_scan",
@@ -2764,7 +2834,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.openscap_scan",
       "estimated_duration_seconds": 300,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "authorized_keys_audit",
@@ -2779,7 +2850,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.authorized_keys_audit",
       "estimated_duration_seconds": 60,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "sudoers_audit",
@@ -2794,7 +2866,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.sudoers_audit",
       "estimated_duration_seconds": 60,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "suid_scan",
@@ -2809,7 +2882,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.suid_scan",
       "estimated_duration_seconds": 60,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "ssl_cert_inspect",
@@ -2824,7 +2898,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.ssl_cert_inspect",
       "estimated_duration_seconds": 60,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_filevault_status",
@@ -2854,7 +2929,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_filevault_enable",
       "estimated_duration_seconds": 60,
-      "execution_tier": 3
+      "execution_tier": 3,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_gatekeeper_status",
@@ -2884,7 +2960,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_gatekeeper_enable",
       "estimated_duration_seconds": 10,
-      "execution_tier": 3
+      "execution_tier": 3,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_gatekeeper_disable",
@@ -2899,7 +2976,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_gatekeeper_disable",
       "estimated_duration_seconds": 10,
-      "execution_tier": 3
+      "execution_tier": 3,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_softwareupdate_list",
@@ -2936,7 +3014,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_softwareupdate_install",
       "estimated_duration_seconds": 1800,
-      "execution_tier": 3
+      "execution_tier": 3,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_profiles_list",
@@ -3012,7 +3091,8 @@
         }
       ],
       "executor": "nexplane_agent.check_fleet_health",
-      "estimated_duration_seconds": 60
+      "estimated_duration_seconds": 60,
+      "drift_surfaces": []
     },
     {
       "action_id": "check_compliance",
@@ -3044,7 +3124,8 @@
         }
       ],
       "executor": "nexplane_agent.check_compliance",
-      "estimated_duration_seconds": 60
+      "estimated_duration_seconds": 60,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_defaults_write",
@@ -3084,7 +3165,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_defaults_write",
       "estimated_duration_seconds": 10,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_defaults_delete",
@@ -3112,7 +3194,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_defaults_delete",
       "estimated_duration_seconds": 10,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_santa_check",
@@ -3149,7 +3232,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_santa_install",
       "estimated_duration_seconds": 300,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_profiles_install",
@@ -3171,7 +3255,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_profiles_install",
       "estimated_duration_seconds": 30,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_profiles_remove",
@@ -3193,7 +3278,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_profiles_remove",
       "estimated_duration_seconds": 30,
-      "execution_tier": 3
+      "execution_tier": 3,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_homebrew_list",
@@ -3248,7 +3334,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_santa_rule_add",
       "estimated_duration_seconds": 10,
-      "execution_tier": 2
+      "execution_tier": 2,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_santa_rule_remove",
@@ -3276,7 +3363,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_santa_rule_remove",
       "estimated_duration_seconds": 10,
-      "execution_tier": 3
+      "execution_tier": 3,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_santa_rule_list",
@@ -3313,7 +3401,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_santa_mode_set",
       "estimated_duration_seconds": 15,
-      "execution_tier": 3
+      "execution_tier": 3,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_santa_sync_trigger",
@@ -3328,7 +3417,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.macos_santa_sync_trigger",
       "estimated_duration_seconds": 60,
-      "execution_tier": 1
+      "execution_tier": 1,
+      "drift_surfaces": []
     },
     {
       "action_id": "macos_santa_event_export",
@@ -3388,7 +3478,8 @@
       "rollback_action": "config_syslog",
       "executor": "nexplane_agent.config_syslog",
       "estimated_duration_seconds": 30,
-      "execution_tier": 1
+      "execution_tier": 1,
+      "drift_surfaces": []
     },
     {
       "action_id": "estimate_size",
@@ -3475,7 +3566,11 @@
       "executor": "nexplane_agent.harden_ssh",
       "rollback_action": "harden_ssh",
       "estimated_duration_seconds": 30,
-      "execution_tier": 1
+      "execution_tier": 1,
+      "drift_surfaces": [
+        "ssh_config",
+        "firewall_rules"
+      ]
     },
     {
       "action_id": "configure_ntp",
@@ -3498,7 +3593,8 @@
       "executor": "nexplane_agent.configure_ntp",
       "rollback_action": "configure_ntp",
       "estimated_duration_seconds": 30,
-      "execution_tier": 1
+      "execution_tier": 1,
+      "drift_surfaces": []
     },
     {
       "action_id": "collect_forensics",
@@ -3573,7 +3669,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.server_backup",
       "generic_action": "server_backup",
-      "action_id": "server_backup"
+      "action_id": "server_backup",
+      "drift_surfaces": []
     },
     {
       "display_name": "Server Snapshot",
@@ -3605,7 +3702,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.server_snapshot",
       "generic_action": "server_snapshot",
-      "action_id": "server_snapshot"
+      "action_id": "server_snapshot",
+      "drift_surfaces": []
     },
     {
       "display_name": "Full Forensic Capture",
@@ -3637,7 +3735,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.server_capture",
       "generic_action": "server_capture",
-      "action_id": "server_capture"
+      "action_id": "server_capture",
+      "drift_surfaces": []
     },
     {
       "display_name": "Restore Server",
@@ -3679,7 +3778,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.restore_server",
       "generic_action": "restore_server",
-      "action_id": "restore_server"
+      "action_id": "restore_server",
+      "drift_surfaces": []
     },
     {
       "display_name": "MGN Replication Status Check",
@@ -3709,7 +3809,8 @@
       "executor": "aws.backup_mgn_replication",
       "generic_action": "backup_mgn_replication",
       "action_id": "backup_mgn_replication",
-      "smoke_verified": false
+      "smoke_verified": false,
+      "drift_surfaces": []
     },
     {
       "display_name": "Scan Host for References",
@@ -3779,7 +3880,8 @@
       "action_type": "change",
       "executor": "nexplane_agent.update_config_file_reference",
       "generic_action": "update_config_file_reference",
-      "action_id": "update_config_file_reference"
+      "action_id": "update_config_file_reference",
+      "drift_surfaces": []
     },
     {
       "action_id": "db_major_version_upgrade",
@@ -3833,7 +3935,8 @@
       "rollback_strategy": "full",
       "safety_notes": [
         "Major version upgrades may involve schema changes that require application updates"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "elasticsearch_upgrade",
@@ -3907,7 +4010,8 @@
       "rollback_strategy": "full",
       "safety_notes": [
         "Elasticsearch 7.x to 8.x upgrade changes security defaults; verify xpack.security settings post-upgrade"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "opensearch_upgrade",
@@ -3981,7 +4085,8 @@
       "rollback_strategy": "full",
       "safety_notes": [
         "OpenSearch 1.x to 2.x upgrade changes security defaults; verify security plugin settings post-upgrade"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "rabbitmq_upgrade",
@@ -4055,7 +4160,8 @@
       "rollback_strategy": "full",
       "safety_notes": [
         "RabbitMQ 3.x to 4.x drops classic mirrored queues; ensure all queues are quorum or non-mirrored before upgrade"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "kafka_zk_to_kraft_bridge",
@@ -4127,7 +4233,8 @@
       "rollback_strategy": "full",
       "safety_notes": [
         "Ensure all consumers are connected before starting bridge phase"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "kafka_kraft_cutover",
@@ -4171,7 +4278,8 @@
       "rollback_strategy": "none",
       "safety_notes": [
         "IRREVERSIBLE \u00e2\u20ac\u201d complete Phase 1 first and verify all consumers before proceeding"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "k8s_cluster_upgrade",
@@ -4228,7 +4336,8 @@
       "rollback_strategy": "partial",
       "safety_notes": [
         "Control plane upgrade is irreversible \u2014 skip one minor version and etcd may corrupt"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "windows_os_upgrade",
@@ -4288,7 +4397,8 @@
         "Upgrade requires reboot \u2014 agent will be unavailable for up to 30 minutes",
         "Pre-upgrade EBS snapshot (EC2) or VSS shadow copy (on-prem) taken automatically before upgrade",
         "skip_snapshot=true is blocked on assets tagged environment: prod"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "java_runtime_upgrade",
@@ -4359,7 +4469,8 @@
       "rollback_strategy": "full",
       "safety_notes": [
         "Java 17 removes many deprecated APIs; run preflight service scan before upgrade"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "python_runtime_upgrade",
@@ -4426,7 +4537,8 @@
       "rollback_strategy": "full",
       "safety_notes": [
         "Python 3.x syntax changes may require code migration; test with syntax checker before upgrade"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "action_id": "ssh_ca_rotation",
@@ -4473,7 +4585,8 @@
       "safety_notes": [
         "Both old and new CA are trusted simultaneously during transition \u2014 no access disruption",
         "Rollback restores previous TrustedUserCAKeys and reloads sshd"
-      ]
+      ],
+      "drift_surfaces": []
     },
     {
       "display_name": "Redis Cluster Migration",
@@ -5100,8 +5213,7 @@
       "applicable_asset_types": [
         "server"
       ],
-      "generic_action": "vault_cluster_upgrade",
-      "smoke_verified": true
+      "generic_action": "vault_cluster_upgrade"
     },
     {
       "display_name": "Istio Control Plane Upgrade",
@@ -5149,7 +5261,8 @@
       "executor": "nexplane_agent.istio_control_plane_upgrade",
       "generic_action": "istio_control_plane_upgrade",
       "action_id": "istio_control_plane_upgrade",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "display_name": "Kong API Gateway Upgrade",
@@ -5237,7 +5350,8 @@
         "backup_path": "path to pg_dump backup file on the target host",
         "routes_count": "number of Kong routes present after upgrade (must be >= 1 to pass verification)",
         "verify_output": "raw curl output from Kong admin API version check"
-      }
+      },
+      "drift_surfaces": []
     },
     {
       "display_name": "cert-manager Upgrade",
@@ -5280,7 +5394,8 @@
       "executor": "nexplane_agent.cert_manager_upgrade",
       "generic_action": "cert_manager_upgrade",
       "action_id": "cert_manager_upgrade",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "display_name": "GitLab Major Version Upgrade",
@@ -5332,7 +5447,8 @@
       "executor": "nexplane_agent.gitlab_upgrade",
       "generic_action": "gitlab_upgrade",
       "action_id": "gitlab_upgrade",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
     },
     {
       "display_name": "Jenkins Upgrade",
@@ -5389,7 +5505,31 @@
       "executor": "nexplane_agent.jenkins_upgrade",
       "generic_action": "jenkins_upgrade",
       "action_id": "jenkins_upgrade",
-      "smoke_verified": true
+      "smoke_verified": true,
+      "drift_surfaces": []
+    },
+    {
+      "action_id": "restore_resource_state",
+      "display_name": "Restore Resource State",
+      "description": "Restore a monitored resource surface to its last anchored state following detected drift.",
+      "parameters": [
+        {
+          "name": "resource_state_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "drift_event_id",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "executor": "nexplane_agent.restore_resource_state",
+      "rollback_action": null,
+      "rollback_capability": "none",
+      "blast_radius_hint": "host_config_change",
+      "drift_surfaces": [],
+      "smoke_verified": false
     }
   ]
 }

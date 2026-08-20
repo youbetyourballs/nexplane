@@ -99,3 +99,29 @@ async def test_observe_host_surface_raises_on_failure():
         mock_dispatch.return_value = {"status": "failed", "error": "agent unreachable"}
         with pytest.raises(RuntimeError, match="agent unreachable"):
             await observe_host_surface(mock_db, asset_id, "ssh_config")
+
+
+import json
+import os
+
+def test_catalog_drift_surfaces_valid():
+    catalog_path = os.path.join(
+        os.path.dirname(__file__), "../../app/connectors/catalog/nexplane_agent.json"
+    )
+    with open(catalog_path) as f:
+        catalog = json.load(f)
+
+    all_surfaces = HOST_SURFACES | CLOUD_SURFACES
+    for entry in catalog.get("actions", []):
+        surfaces = entry.get("drift_surfaces", [])
+        assert isinstance(surfaces, list), f"{entry['action_id']}: drift_surfaces must be a list"
+        for s in surfaces:
+            assert s in all_surfaces, f"{entry['action_id']}: unknown surface '{s}'"
+
+    action_ids = [e["action_id"] for e in catalog.get("actions", [])]
+    assert "restore_resource_state" in action_ids, "restore_resource_state must be in catalog"
+
+    restore = next(e for e in catalog["actions"] if e["action_id"] == "restore_resource_state")
+    assert restore["rollback_capability"] == "none"
+    assert restore["smoke_verified"] == False
+    assert restore["drift_surfaces"] == []
