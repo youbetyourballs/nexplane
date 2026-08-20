@@ -17,6 +17,7 @@ import { IPMigrationWizard } from "../components/IPMigrationWizard";
 import { ContainerizationWizard } from "../components/ContainerizationWizard";
 import { MigrateDrawer } from "../components/MigrateDrawer";
 import { BackupTargetForm } from "../components/BackupTargetForm";
+import AssetDriftTab from "./AssetDriftTab";
 
 // Maps asset type → eligible change types with label + title/description templates
 interface QuickAction {
@@ -637,7 +638,7 @@ export function AssetDetail() {
   const [scanPkgsLoading, setScanPkgsLoading] = useState(false);
   const [scanPkgsError, setScanPkgsError] = useState<string | null>(null);
   const [pkgFilter, setPkgFilter] = useState("");
-  const [activeTab, setActiveTab] = useState<"overview" | "activity" | "tunnel">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "activity" | "tunnel" | "drift">("overview");
   const [showRollbackAllModal, setShowRollbackAllModal] = useState(false);
   const [rollbackAllLoading, setRollbackAllLoading] = useState(false);
   const [showBackupForm, setShowBackupForm] = useState(false);
@@ -894,6 +895,16 @@ export function AssetDetail() {
             Tunnel
           </button>
         )}
+        <button
+          onClick={() => setActiveTab("drift")}
+          className={`px-4 py-2 text-sm font-medium rounded-t-md border-b-2 transition-colors ${
+            activeTab === "drift"
+              ? "border-brand-600 text-brand-700 bg-brand-50"
+              : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          Drift
+        </button>
       </div>
 
       {/* Activity tab */}
@@ -1011,6 +1022,13 @@ export function AssetDetail() {
             <h2 className="text-sm font-semibold text-slate-900 mb-4">Tunnel Configuration</h2>
             <AgentTunnelManager agentId={agent.agent_id} />
           </div>
+        </div>
+      )}
+
+      {/* Drift tab */}
+      {activeTab === "drift" && (
+        <div className="bg-white border border-slate-200 rounded-lg">
+          <AssetDriftTab assetId={asset.id} />
         </div>
       )}
 

@@ -34,6 +34,7 @@ import { ImpactSimulationPage } from "../pages/ImpactSimulationPage";
 import { RecommendationsPage } from "../pages/RecommendationsPage";
 import { InfrastructureMemoryPage } from "../pages/InfrastructureMemoryPage";
 import { Customers } from "../pages/Customers";
+import DriftEventsPage from "../pages/DriftEventsPage";
 import { useAuth } from "../hooks/useAuth";
 
 export function AppRoutes() {
@@ -75,6 +76,7 @@ export function AppRoutes() {
         <Route path="/recommendations" element={<RecommendationsPage />} />
         <Route path="/infrastructure-memory" element={<InfrastructureMemoryPage />} />
         <Route path="/customers" element={<Customers />} />
+        <Route path="/drift" element={<DriftEventsPage />} />
       </Route>
     </Routes>
   );
