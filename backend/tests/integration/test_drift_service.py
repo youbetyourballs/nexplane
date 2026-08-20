@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
+import uuid
 import pytest
+from unittest.mock import AsyncMock, patch
 from app.models.drift import ResourceState, DriftPolicy, DriftEvent
 
 
@@ -65,8 +67,6 @@ def test_surface_severity_all_surfaces_covered():
         assert SURFACE_SEVERITY[s] in ("high", "medium", "low")
 
 
-import uuid
-from unittest.mock import AsyncMock, patch
 from app.services.drift_service import observe_host_surface
 
 

@@ -2,6 +2,7 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 import uuid
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -183,7 +184,6 @@ async def observe_cloud_surface(
         )["PolicyVersion"]
         return {"document": version["Document"], "version_id": policy["DefaultVersionId"]}
     elif surface_type == "aws_s3_bucket_policy":
-        import json
         s3 = connector.boto3_client("s3")
         bucket = str(asset_id)
         try:
