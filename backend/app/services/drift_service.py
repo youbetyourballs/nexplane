@@ -279,6 +279,9 @@ async def create_shadow_cr(
         f"Restore {drift_event.surface_type} on {asset_name} "
         f"(drift detected {drift_event.detected_at.strftime('%Y-%m-%d %H:%M')} UTC)"
     )
+    rs = await load_resource_state(db, drift_event.organization_id, drift_event.asset_id, drift_event.surface_type)
+    resource_state_id = str(rs.id) if rs else str(drift_event.asset_id)
+
     cr = ChangeRequest(
         organization_id=drift_event.organization_id,
         requester_id=requester_id,
@@ -286,7 +289,7 @@ async def create_shadow_cr(
         description="System-generated restore CR for detected drift.",
         change_type=ChangeType.restore_resource_state,
         desired_outcome={
-            "resource_state_id": str(drift_event.asset_id),
+            "resource_state_id": resource_state_id,
             "drift_event_id": str(drift_event.id),
         },
         target_asset_ids=[str(drift_event.asset_id)],

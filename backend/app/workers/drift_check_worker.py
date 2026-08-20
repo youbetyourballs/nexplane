@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 
 from app.database import AsyncSessionLocal
 from app.models.drift import DriftPolicy, DriftEvent, ResourceState
+from app.models.user import User
 from app.services.drift_service import (
     observe_surface,
     compute_diff,
@@ -147,8 +148,15 @@ async def _check_one(db, policy: DriftPolicy, asset_id: uuid.UUID, surface_type:
     db.add(event)
     await db.flush()  # get event.id
 
-    shadow_cr_id = await create_shadow_cr(db, event, asset_name)
-    event.shadow_cr_id = shadow_cr_id
+    user_id_result = await db.execute(
+        select(User.id).where(User.organization_id == policy.organization_id).order_by(User.id).limit(1)
+    )
+    requester_id = user_id_result.scalar_one_or_none()
+    if requester_id is None:
+        logger.warning("No users found in org %s; skipping shadow CR", policy.organization_id)
+    else:
+        shadow_cr_id = await create_shadow_cr(db, event, asset_name, requester_id=requester_id)
+        event.shadow_cr_id = shadow_cr_id
 
     logger.info(
         "drift: event created org=%s asset=%s surface=%s severity=%s shadow_cr=%s",

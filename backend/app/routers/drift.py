@@ -13,6 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.user import User
+from app.routers import current_user
 
 router = APIRouter(prefix="/drift", tags=["drift"])
 logger = logging.getLogger(__name__)
@@ -173,19 +175,26 @@ from sqlalchemy import select, update
 
 @router.get("/policies", response_model=list[DriftPolicyRead])
 async def list_drift_policies(
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(DriftPolicy).order_by(DriftPolicy.created_at.desc()))
+    result = await db.execute(
+        select(DriftPolicy)
+        .where(DriftPolicy.organization_id == user.organization_id)
+        .order_by(DriftPolicy.created_at.desc())
+    )
     return result.scalars().all()
 
 
 @router.post("/policies", response_model=DriftPolicyRead)
 async def create_drift_policy(
     body: DriftPolicyCreate,
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
     policy = DriftPolicy(
         **body.model_dump(),
+        organization_id=user.organization_id,
         auto_created=False,
         created_at=datetime.now(timezone.utc),
     )
@@ -210,8 +219,10 @@ async def create_drift_policy(
 
 
 @router.get("/policies/{policy_id}", response_model=DriftPolicyRead)
-async def get_drift_policy(policy_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(DriftPolicy).where(DriftPolicy.id == policy_id))
+async def get_drift_policy(policy_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(DriftPolicy).where(DriftPolicy.id == policy_id, DriftPolicy.organization_id == user.organization_id)
+    )
     policy = result.scalar_one_or_none()
     if policy is None:
         raise HTTPException(status_code=404, detail="DriftPolicy not found")
@@ -222,9 +233,12 @@ async def get_drift_policy(policy_id: uuid.UUID, db: AsyncSession = Depends(get_
 async def update_drift_policy(
     policy_id: uuid.UUID,
     body: DriftPolicyUpdate,
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(DriftPolicy).where(DriftPolicy.id == policy_id))
+    result = await db.execute(
+        select(DriftPolicy).where(DriftPolicy.id == policy_id, DriftPolicy.organization_id == user.organization_id)
+    )
     policy = result.scalar_one_or_none()
     if policy is None:
         raise HTTPException(status_code=404, detail="DriftPolicy not found")
@@ -237,8 +251,10 @@ async def update_drift_policy(
 
 
 @router.delete("/policies/{policy_id}", status_code=204)
-async def delete_drift_policy(policy_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(DriftPolicy).where(DriftPolicy.id == policy_id))
+async def delete_drift_policy(policy_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(DriftPolicy).where(DriftPolicy.id == policy_id, DriftPolicy.organization_id == user.organization_id)
+    )
     policy = result.scalar_one_or_none()
     if policy is None:
         raise HTTPException(status_code=404, detail="DriftPolicy not found")
@@ -256,9 +272,10 @@ async def list_drift_events(
     asset_id: Optional[uuid.UUID] = None,
     surface_type: Optional[str] = None,
     severity: Optional[str] = None,
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(DriftEvent).order_by(DriftEvent.detected_at.desc())
+    query = select(DriftEvent).where(DriftEvent.organization_id == user.organization_id).order_by(DriftEvent.detected_at.desc())
     if status:
         query = query.where(DriftEvent.status == status)
     if asset_id:
@@ -272,8 +289,10 @@ async def list_drift_events(
 
 
 @router.get("/events/{event_id}", response_model=DriftEventRead)
-async def get_drift_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(DriftEvent).where(DriftEvent.id == event_id))
+async def get_drift_event(event_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(DriftEvent).where(DriftEvent.id == event_id, DriftEvent.organization_id == user.organization_id)
+    )
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="DriftEvent not found")
@@ -284,9 +303,12 @@ async def get_drift_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db
 async def accept_drift_event(
     event_id: uuid.UUID,
     body: DriftEventAcceptBody,
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(DriftEvent).where(DriftEvent.id == event_id))
+    result = await db.execute(
+        select(DriftEvent).where(DriftEvent.id == event_id, DriftEvent.organization_id == user.organization_id)
+    )
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="DriftEvent not found")
@@ -327,9 +349,12 @@ async def accept_drift_event(
 async def attest_drift_event(
     event_id: uuid.UUID,
     body: DriftEventAttestBody,
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(DriftEvent).where(DriftEvent.id == event_id))
+    result = await db.execute(
+        select(DriftEvent).where(DriftEvent.id == event_id, DriftEvent.organization_id == user.organization_id)
+    )
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="DriftEvent not found")
@@ -347,8 +372,10 @@ async def attest_drift_event(
 
 
 @router.post("/events/{event_id}/dismiss", response_model=DriftEventRead)
-async def dismiss_drift_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(DriftEvent).where(DriftEvent.id == event_id))
+async def dismiss_drift_event(event_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(DriftEvent).where(DriftEvent.id == event_id, DriftEvent.organization_id == user.organization_id)
+    )
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="DriftEvent not found")
@@ -375,6 +402,7 @@ class DriftCheckRequest(BaseModel):
 @router.post("/check")
 async def manual_drift_check(
     body: DriftCheckRequest,
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Trigger an immediate drift check for a specific asset + surface. Used by smoke tests."""
@@ -384,6 +412,7 @@ async def manual_drift_check(
 
     policy_result = await db.execute(
         select(DriftPolicy).where(
+            DriftPolicy.organization_id == user.organization_id,
             DriftPolicy.scope_value == str(body.asset_id),
             DriftPolicy.scope_type == "asset",
             DriftPolicy.surface_types.contains([body.surface_type]),
