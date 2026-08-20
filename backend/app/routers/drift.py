@@ -155,3 +155,209 @@ async def receive_agent_event(
         )
 
     return {"received": True, "drift_event_id": None}
+
+
+# ── Additional imports for policy/event endpoints ───────────────────────────
+
+from typing import Optional
+from app.schemas.drift import (
+    DriftPolicyCreate, DriftPolicyRead, DriftPolicyUpdate,
+    DriftEventRead, DriftEventAcceptBody, DriftEventAttestBody,
+    ResourceStateRead, AssetDriftSummary,
+)
+from app.models.drift import ResourceState, DriftPolicy, DriftEvent
+from sqlalchemy import select, update
+
+
+# ── Drift Policies ──────────────────────────────────────────────────────────
+
+@router.get("/policies", response_model=list[DriftPolicyRead])
+async def list_drift_policies(
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(DriftPolicy).order_by(DriftPolicy.created_at.desc()))
+    return result.scalars().all()
+
+
+@router.post("/policies", response_model=DriftPolicyRead)
+async def create_drift_policy(
+    body: DriftPolicyCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    policy = DriftPolicy(
+        **body.model_dump(),
+        auto_created=False,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(policy)
+    await db.commit()
+    await db.refresh(policy)
+
+    # Immediately run initial observation to establish anchor
+    from app.services.drift_service import observe_surface, upsert_resource_state
+    for surface_type in policy.surface_types:
+        try:
+            asset_id = uuid.UUID(policy.scope_value)
+            observed = await observe_surface(db, policy.organization_id, asset_id, surface_type)
+            await upsert_resource_state(
+                db, policy.organization_id, asset_id, surface_type,
+                observed, source="initial_observation",
+            )
+        except Exception as exc:
+            logger.warning("create_drift_policy: initial observation failed surface=%s: %s", surface_type, exc)
+
+    return policy
+
+
+@router.get("/policies/{policy_id}", response_model=DriftPolicyRead)
+async def get_drift_policy(policy_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DriftPolicy).where(DriftPolicy.id == policy_id))
+    policy = result.scalar_one_or_none()
+    if policy is None:
+        raise HTTPException(status_code=404, detail="DriftPolicy not found")
+    return policy
+
+
+@router.patch("/policies/{policy_id}", response_model=DriftPolicyRead)
+async def update_drift_policy(
+    policy_id: uuid.UUID,
+    body: DriftPolicyUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(DriftPolicy).where(DriftPolicy.id == policy_id))
+    policy = result.scalar_one_or_none()
+    if policy is None:
+        raise HTTPException(status_code=404, detail="DriftPolicy not found")
+    update_data = body.model_dump(exclude_none=True)
+    for k, v in update_data.items():
+        setattr(policy, k, v)
+    await db.commit()
+    await db.refresh(policy)
+    return policy
+
+
+@router.delete("/policies/{policy_id}", status_code=204)
+async def delete_drift_policy(policy_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DriftPolicy).where(DriftPolicy.id == policy_id))
+    policy = result.scalar_one_or_none()
+    if policy is None:
+        raise HTTPException(status_code=404, detail="DriftPolicy not found")
+    if policy.auto_created:
+        raise HTTPException(status_code=409, detail="Auto-created policies cannot be deleted")
+    await db.delete(policy)
+    await db.commit()
+
+
+# ── Drift Events ────────────────────────────────────────────────────────────
+
+@router.get("/events", response_model=list[DriftEventRead])
+async def list_drift_events(
+    status: Optional[str] = None,
+    asset_id: Optional[uuid.UUID] = None,
+    surface_type: Optional[str] = None,
+    severity: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(DriftEvent).order_by(DriftEvent.detected_at.desc())
+    if status:
+        query = query.where(DriftEvent.status == status)
+    if asset_id:
+        query = query.where(DriftEvent.asset_id == asset_id)
+    if surface_type:
+        query = query.where(DriftEvent.surface_type == surface_type)
+    if severity:
+        query = query.where(DriftEvent.severity == severity)
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
+@router.get("/events/{event_id}", response_model=DriftEventRead)
+async def get_drift_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DriftEvent).where(DriftEvent.id == event_id))
+    event = result.scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=404, detail="DriftEvent not found")
+    return event
+
+
+@router.post("/events/{event_id}/accept", response_model=DriftEventRead)
+async def accept_drift_event(
+    event_id: uuid.UUID,
+    body: DriftEventAcceptBody,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(DriftEvent).where(DriftEvent.id == event_id))
+    event = result.scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=404, detail="DriftEvent not found")
+    if event.status != "open":
+        raise HTTPException(status_code=409, detail=f"Event is already {event.status}")
+
+    from app.services.drift_service import upsert_resource_state
+    now = datetime.now(timezone.utc)
+
+    await upsert_resource_state(
+        db=db,
+        org_id=event.organization_id,
+        asset_id=event.asset_id,
+        surface_type=event.surface_type,
+        state=event.observed_state,
+        source="accepted",
+        accepted_at=now,
+        acceptance_note=body.note,
+    )
+
+    if event.shadow_cr_id:
+        from app.models.change_request import ChangeRequest, ChangeRequestStatus
+        await db.execute(
+            update(ChangeRequest)
+            .where(ChangeRequest.id == event.shadow_cr_id)
+            .values(status=ChangeRequestStatus.failed)
+        )
+
+    event.status = "accepted"
+    event.resolved_at = now
+    event.resolution_note = body.note
+    await db.commit()
+    await db.refresh(event)
+    return event
+
+
+@router.post("/events/{event_id}/attest", response_model=DriftEventRead)
+async def attest_drift_event(
+    event_id: uuid.UUID,
+    body: DriftEventAttestBody,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(DriftEvent).where(DriftEvent.id == event_id))
+    event = result.scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=404, detail="DriftEvent not found")
+    if event.status != "open":
+        raise HTTPException(status_code=409, detail=f"Event is already {event.status}")
+
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    event.status = "attested"
+    event.resolved_at = now
+    event.resolution_note = body.note
+    event.attested_suppress_until = now + timedelta(days=body.snooze_days)
+    await db.commit()
+    await db.refresh(event)
+    return event
+
+
+@router.post("/events/{event_id}/dismiss", response_model=DriftEventRead)
+async def dismiss_drift_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DriftEvent).where(DriftEvent.id == event_id))
+    event = result.scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=404, detail="DriftEvent not found")
+    if event.status != "open":
+        raise HTTPException(status_code=409, detail=f"Event is already {event.status}")
+
+    event.status = "dismissed"
+    event.resolved_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(event)
+    return event

@@ -157,3 +157,14 @@ def test_restore_resource_state_executor_importable():
     )
     assert ROLLBACK_CAPABILITY == "none"
     assert callable(execute)
+
+
+def test_schemas_importable():
+    from app.schemas.drift import (
+        ResourceStateRead,
+        DriftPolicyCreate, DriftPolicyRead,
+        DriftEventRead,
+        DriftEventAcceptBody, DriftEventAttestBody,
+    )
+    assert ResourceStateRead.model_config.get("from_attributes")
+    assert DriftEventRead.model_config.get("from_attributes")

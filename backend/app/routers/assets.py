@@ -519,3 +519,30 @@ async def rollback_all(
         "failed_at": failed_at,
         "errors": errors,
     }
+
+
+# ---------------------------------------------------------------------------
+# Drift summary endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/{asset_id}/drift")
+async def get_asset_drift(asset_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    from app.schemas.drift import AssetDriftSummary
+    from app.models.drift import ResourceState, DriftEvent
+
+    rs_result = await db.execute(select(ResourceState).where(ResourceState.asset_id == asset_id))
+    resource_states = rs_result.scalars().all()
+
+    ev_result = await db.execute(
+        select(DriftEvent).where(
+            DriftEvent.asset_id == asset_id,
+            DriftEvent.status == "open",
+        )
+    )
+    open_events = ev_result.scalars().all()
+
+    return AssetDriftSummary(
+        asset_id=asset_id,
+        resource_states=resource_states,
+        open_events=open_events,
+    )
