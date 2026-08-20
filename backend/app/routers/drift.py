@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -336,7 +336,6 @@ async def attest_drift_event(
     if event.status != "open":
         raise HTTPException(status_code=409, detail=f"Event is already {event.status}")
 
-    from datetime import timedelta
     now = datetime.now(timezone.utc)
     event.status = "attested"
     event.resolved_at = now
