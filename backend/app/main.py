@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
     _escalation_scheduler.add_job(check_emergency_escalations, "interval", minutes=5)
     _escalation_scheduler.add_job(check_soak_timers, "interval", minutes=30)
     _escalation_scheduler.add_job(execute_scheduled_crs, "interval", minutes=1)
-    _escalation_scheduler.add_job(check_policy_drift, "interval", hours=24)
+    _escalation_scheduler.add_job(check_policy_drift, "interval", minutes=5, id="drift_check", replace_existing=True)
     _escalation_scheduler.add_job(check_credential_expiry, "cron", hour=6, minute=0)
     _escalation_scheduler.add_job(_poll_version, "interval", hours=6, id="version_poller", replace_existing=True, max_instances=1)
     async def _tick_runbooks_job():
