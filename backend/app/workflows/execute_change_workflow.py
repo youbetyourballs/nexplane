@@ -368,6 +368,13 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
             change_request_id=cr_id,
         )
         await activity_post_completion_discovery(cr_id)
+        # Fire drift anchor update — capture post-change surface state for drift monitoring
+        try:
+            from app.services.drift_service import on_cr_completed as _on_cr_completed
+            async with AsyncSessionLocal() as _drift_db:
+                await _on_cr_completed(cr_id, _drift_db)
+        except Exception as _drift_err:
+            logger.warning("drift on_cr_completed failed for CR %s: %s", cr_id, _drift_err)
         # Run post-change verification checks (advisory — failures are logged, not blocking)
         _vc_list = data.get("verification_checks") or []
         if _vc_list:

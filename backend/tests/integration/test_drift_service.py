@@ -3,7 +3,7 @@
 
 import uuid
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from app.models.drift import ResourceState, DriftPolicy, DriftEvent
 
 
@@ -125,3 +125,18 @@ def test_catalog_drift_surfaces_valid():
     assert restore["rollback_capability"] == "none"
     assert restore["smoke_verified"] == False
     assert restore["drift_surfaces"] == []
+
+
+@pytest.mark.asyncio
+async def test_on_cr_completed_skips_when_no_drift_surfaces():
+    """CR with no drift_surfaces in catalog should do nothing."""
+    from app.services.drift_service import on_cr_completed
+    mock_db = AsyncMock()
+
+    with patch("app.services.drift_service._load_catalog_entry") as mock_catalog:
+        mock_catalog.return_value = {"action_id": "some_cr", "drift_surfaces": []}
+        with patch("app.services.drift_service._load_cr") as mock_cr:
+            mock_cr.return_value = MagicMock(change_type="some_cr", target_asset_ids=[])
+            await on_cr_completed(uuid.uuid4(), mock_db)
+
+    mock_db.execute.assert_not_called()

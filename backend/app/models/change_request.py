@@ -631,6 +631,8 @@ class ChangeType(str, enum.Enum):
     cert_manager_upgrade = "cert_manager_upgrade"
     gitlab_upgrade = "gitlab_upgrade"
     jenkins_upgrade = "jenkins_upgrade"
+    # Drift detection — system-generated restore CR
+    restore_resource_state = "restore_resource_state"
 
 
 class RiskLevel(str, enum.Enum):

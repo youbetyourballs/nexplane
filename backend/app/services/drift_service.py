@@ -7,11 +7,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.drift import ResourceState, DriftPolicy, DriftEvent
+from app.models.change_request import ChangeRequest, ChangeRequestStatus, ChangeType, RiskLevel
 from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 
 logger = logging.getLogger(__name__)
@@ -210,3 +211,142 @@ async def observe_surface(
         return await observe_cloud_surface(db, org_id, asset_id, surface_type, connector)
     else:
         raise ValueError(f"Unknown surface type: {surface_type}")
+
+
+async def _load_cr(db: AsyncSession, cr_id: uuid.UUID) -> Optional[ChangeRequest]:
+    result = await db.execute(select(ChangeRequest).where(ChangeRequest.id == cr_id))
+    return result.scalar_one_or_none()
+
+
+def _load_catalog_entry(action_id: str) -> dict:
+    import os
+    catalog_path = os.path.join(
+        os.path.dirname(__file__), "../connectors/catalog/nexplane_agent.json"
+    )
+    with open(catalog_path) as f:
+        import json as _json
+        catalog = _json.load(f)
+    for entry in catalog.get("actions", []):
+        if entry["action_id"] == action_id:
+            return entry
+    return {}
+
+
+async def ensure_drift_policy(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    asset_id: uuid.UUID,
+    surface_type: str,
+    source_cr_id: uuid.UUID,
+) -> DriftPolicy:
+    result = await db.execute(
+        select(DriftPolicy).where(
+            DriftPolicy.organization_id == org_id,
+            DriftPolicy.scope_type == "asset",
+            DriftPolicy.scope_value == str(asset_id),
+            DriftPolicy.surface_types.contains([surface_type]),
+        )
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        return existing
+
+    policy = DriftPolicy(
+        organization_id=org_id,
+        name=f"auto:{surface_type}:{asset_id}",
+        scope_type="asset",
+        scope_value=str(asset_id),
+        surface_types=[surface_type],
+        poll_interval_seconds=3600,
+        auto_created=True,
+        enabled=True,
+        source_cr_id=source_cr_id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(policy)
+    await db.flush()
+    return policy
+
+
+async def create_shadow_cr(
+    db: AsyncSession,
+    drift_event: DriftEvent,
+    asset_name: str,
+    requester_id: uuid.UUID,
+) -> uuid.UUID:
+    """Create a DRAFT restore_resource_state CR linked to this drift event."""
+    title = (
+        f"Restore {drift_event.surface_type} on {asset_name} "
+        f"(drift detected {drift_event.detected_at.strftime('%Y-%m-%d %H:%M')} UTC)"
+    )
+    cr = ChangeRequest(
+        organization_id=drift_event.organization_id,
+        requester_id=requester_id,
+        title=title,
+        description="System-generated restore CR for detected drift.",
+        change_type=ChangeType.restore_resource_state,
+        desired_outcome={
+            "resource_state_id": str(drift_event.asset_id),
+            "drift_event_id": str(drift_event.id),
+        },
+        target_asset_ids=[str(drift_event.asset_id)],
+        status=ChangeRequestStatus.draft,
+        risk_level=RiskLevel.medium,
+    )
+    db.add(cr)
+    await db.flush()
+    return cr.id
+
+
+async def on_cr_completed(cr_id: uuid.UUID, db: AsyncSession) -> None:
+    cr = await _load_cr(db, cr_id)
+    if cr is None:
+        logger.warning("on_cr_completed: CR %s not found", cr_id)
+        return
+
+    catalog_entry = _load_catalog_entry(str(cr.change_type))
+    drift_surfaces = catalog_entry.get("drift_surfaces", [])
+    if not drift_surfaces:
+        return
+
+    target_asset_ids = cr.target_asset_ids or []
+
+    for asset_id_str in target_asset_ids:
+        asset_id = uuid.UUID(asset_id_str) if isinstance(asset_id_str, str) else asset_id_str
+        for surface_type in drift_surfaces:
+            try:
+                observed = await observe_surface(db, cr.organization_id, asset_id, surface_type)
+                await upsert_resource_state(
+                    db=db,
+                    org_id=cr.organization_id,
+                    asset_id=asset_id,
+                    surface_type=surface_type,
+                    state=observed,
+                    source="cr_execution",
+                    source_cr_id=cr_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "on_cr_completed: observation failed for asset=%s surface=%s cr=%s: %s",
+                    asset_id, surface_type, cr_id, exc,
+                )
+                # Do not blank the anchor — preserve existing state
+
+            await ensure_drift_policy(db, cr.organization_id, asset_id, surface_type, cr_id)
+
+            # Close any open drift events for this surface — CR resolved them
+            await db.execute(
+                update(DriftEvent)
+                .where(
+                    DriftEvent.organization_id == cr.organization_id,
+                    DriftEvent.asset_id == asset_id,
+                    DriftEvent.surface_type == surface_type,
+                    DriftEvent.status == "open",
+                )
+                .values(
+                    status="dismissed",
+                    resolved_at=datetime.now(timezone.utc),
+                    resolution_note=f"resolved by CR {cr_id}",
+                )
+            )
+    await db.commit()
