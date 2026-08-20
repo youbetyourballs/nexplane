@@ -5213,7 +5213,8 @@
       "applicable_asset_types": [
         "server"
       ],
-      "generic_action": "vault_cluster_upgrade"
+      "generic_action": "vault_cluster_upgrade",
+      "drift_surfaces": []
     },
     {
       "display_name": "Istio Control Plane Upgrade",
