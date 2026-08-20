@@ -11,7 +11,6 @@ def test_models_importable():
     assert DriftEvent.__tablename__ == "drift_events"
 
 
-import pytest
 from app.services.drift_service import (
     compute_diff, normalize_state, SURFACE_SEVERITY,
     HOST_SURFACES, CLOUD_SURFACES,
