@@ -361,3 +361,39 @@ async def dismiss_drift_event(event_id: uuid.UUID, db: AsyncSession = Depends(ge
     await db.commit()
     await db.refresh(event)
     return event
+
+
+# ── Manual Drift Check Trigger ──────────────────────────────────────────────
+
+from pydantic import BaseModel
+
+
+class DriftCheckRequest(BaseModel):
+    asset_id: uuid.UUID
+    surface_type: str
+
+
+@router.post("/check")
+async def manual_drift_check(
+    body: DriftCheckRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger an immediate drift check for a specific asset + surface. Used by smoke tests."""
+    from sqlalchemy import select
+    from app.models.drift import DriftPolicy
+    from app.workers.drift_check_worker import _check_one
+
+    policy_result = await db.execute(
+        select(DriftPolicy).where(
+            DriftPolicy.scope_value == str(body.asset_id),
+            DriftPolicy.scope_type == "asset",
+            DriftPolicy.surface_types.contains([body.surface_type]),
+        )
+    )
+    policy = policy_result.scalars().first()
+    if policy is None:
+        raise HTTPException(status_code=404, detail="No DriftPolicy found for this asset + surface_type")
+
+    await _check_one(db, policy, body.asset_id, body.surface_type, datetime.now(timezone.utc))
+    await db.commit()
+    return {"checked": True}
