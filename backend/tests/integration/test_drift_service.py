@@ -149,3 +149,11 @@ async def test_drift_worker_creates_event_on_diff():
     # This is an integration-level test — verify the function is importable and callable
     # Full behavioral test is in the smoke phases
     assert callable(check_policy_drift)
+
+
+def test_restore_resource_state_executor_importable():
+    from app.connectors.executors.nexplane_agent.restore_resource_state import (
+        ROLLBACK_CAPABILITY, execute
+    )
+    assert ROLLBACK_CAPABILITY == "none"
+    assert callable(execute)

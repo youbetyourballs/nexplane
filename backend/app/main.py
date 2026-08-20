@@ -66,6 +66,7 @@ from app.routers.metrics import router as metrics_router
 from app.routers.tunnel_metrics import router as tunnel_metrics_router
 from app.routers.scan_exceptions import router as scan_exceptions_router
 from app.services.pre_state_store import PreStateStore
+from app.routers.drift import router as drift_router
 
 _escalation_scheduler: AsyncIOScheduler | None = None
 _socks_server = None  # app.tunnel.socks.SocksServer, started when TUNNEL_SOCKS_ENABLED
@@ -261,6 +262,7 @@ app.include_router(asset_timeline_router)
 app.include_router(asset_graph_router)
 app.include_router(policy_generate_router)
 app.include_router(drift_alerts_router)
+app.include_router(drift_router)
 app.include_router(onboarding_router)
 app.include_router(credential_discovery_router)
 app.include_router(smoke_test_runs_router)
