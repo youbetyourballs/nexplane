@@ -17,10 +17,6 @@ from app.database import get_db
 router = APIRouter(prefix="/drift", tags=["drift"])
 logger = logging.getLogger(__name__)
 
-# Sentinel requester_id used when a drift event is created by an agent callback
-# (no human user in the loop — the CR is auto-drafted and awaits human approval).
-_AGENT_REQUESTER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-
 
 async def _verify_agent_hmac(request: Request, db: AsyncSession) -> str:
     """Verify HMAC-SHA256 signature from agent. Returns asset_id on success."""
@@ -81,6 +77,7 @@ async def receive_agent_event(
     from sqlalchemy import select
     from app.models.asset import Asset
     from app.models.drift import DriftPolicy, DriftEvent
+    from app.models.user import User
     from app.services.drift_service import (
         observe_surface,
         compute_diff,
@@ -130,8 +127,20 @@ async def receive_agent_event(
                     )
                     db.add(event)
                     await db.flush()
+
+                    # Query a real user from the org for shadow CR requester_id
+                    user_result = await db.execute(
+                        select(User.id).where(User.organization_id == org_id).order_by(User.id).limit(1)
+                    )
+                    requester_id = user_result.scalar_one_or_none()
+
+                    if requester_id is None:
+                        logger.warning("No users found in org %s; skipping shadow CR creation", org_id)
+                        await db.commit()
+                        return {"received": True, "drift_event_id": str(event.id)}
+
                     shadow_cr_id = await create_shadow_cr(
-                        db, event, asset.name, requester_id=_AGENT_REQUESTER_ID
+                        db, event, asset.name, requester_id=requester_id
                     )
                     event.shadow_cr_id = shadow_cr_id
                     await db.commit()
