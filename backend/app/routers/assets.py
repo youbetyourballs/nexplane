@@ -18,6 +18,7 @@ from app.models.change_request import ChangeRequest, ChangeRequestStatus, Change
 from app.models.user import User
 from app.routers import current_user
 from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate, BulkTagOperation, ConnectorSummary, AssetConnectorAdd
+from app.schemas.drift import AssetDriftSummary
 from app.services.audit_service import record_event
 from app.services.planning_engine import generate_plan
 from app.services.safety_engine import score_change_request
@@ -525,7 +526,7 @@ async def rollback_all(
 # Drift summary endpoint
 # ---------------------------------------------------------------------------
 
-@router.get("/{asset_id}/drift")
+@router.get("/{asset_id}/drift", response_model=AssetDriftSummary)
 async def get_asset_drift(asset_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     from app.schemas.drift import AssetDriftSummary
     from app.models.drift import ResourceState, DriftEvent

@@ -312,7 +312,7 @@ async def accept_drift_event(
         await db.execute(
             update(ChangeRequest)
             .where(ChangeRequest.id == event.shadow_cr_id)
-            .values(status=ChangeRequestStatus.failed)
+            .values(status=ChangeRequestStatus.cancelled)
         )
 
     event.status = "accepted"

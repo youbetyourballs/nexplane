@@ -665,6 +665,7 @@ class ChangeRequestStatus(str, enum.Enum):
     rollback_failed = "rollback_failed"
     manual_recovery_required = "manual_recovery_required"
     rejected = "rejected"
+    cancelled = "cancelled"
     # Fleet operations
     queued_for_maintenance = "queued_for_maintenance"
     preflight_running = "preflight_running"
