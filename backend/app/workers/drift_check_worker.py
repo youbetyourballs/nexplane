@@ -152,6 +152,7 @@ async def _check_one(db, policy: DriftPolicy, asset_id: uuid.UUID, surface_type:
         select(User.id).where(User.organization_id == policy.organization_id).order_by(User.id).limit(1)
     )
     requester_id = user_id_result.scalar_one_or_none()
+    shadow_cr_id = None
     if requester_id is None:
         logger.warning("No users found in org %s; skipping shadow CR", policy.organization_id)
     else:
