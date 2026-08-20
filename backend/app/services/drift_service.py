@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.drift import ResourceState, DriftPolicy, DriftEvent
+from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 
 logger = logging.getLogger(__name__)
 
@@ -136,3 +137,76 @@ async def load_resource_state(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def observe_host_surface(
+    db: AsyncSession,
+    asset_id: uuid.UUID,
+    surface_type: str,
+) -> dict:
+    result = await dispatch_agent_job(
+        command="capture_drift_state",
+        parameters={"surface_type": surface_type},
+        asset_ids=[str(asset_id)],
+        timeout_seconds=60,
+    )
+    if result.get("status") != "success":
+        raise RuntimeError(result.get("error", f"agent observation failed for {surface_type}"))
+    return result["state"]
+
+
+async def observe_cloud_surface(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    asset_id: uuid.UUID,
+    surface_type: str,
+    connector,
+) -> dict:
+    """Dispatch connector API call based on surface_type. connector is the org's active connector."""
+    if surface_type == "aws_security_group":
+        ec2 = connector.boto3_client("ec2")
+        sg_id = str(asset_id)
+        response = ec2.describe_security_groups(GroupIds=[sg_id])
+        sg = response["SecurityGroups"][0]
+        return {
+            "ingress": sg.get("IpPermissions", []),
+            "egress": sg.get("IpPermissionsEgress", []),
+            "tags": sg.get("Tags", []),
+        }
+    elif surface_type == "aws_iam_policy":
+        iam = connector.boto3_client("iam")
+        policy_arn = str(asset_id)
+        policy = iam.get_policy(PolicyArn=policy_arn)["Policy"]
+        version = iam.get_policy_version(
+            PolicyArn=policy_arn,
+            VersionId=policy["DefaultVersionId"],
+        )["PolicyVersion"]
+        return {"document": version["Document"], "version_id": policy["DefaultVersionId"]}
+    elif surface_type == "aws_s3_bucket_policy":
+        import json
+        s3 = connector.boto3_client("s3")
+        bucket = str(asset_id)
+        try:
+            policy_str = s3.get_bucket_policy(Bucket=bucket)["Policy"]
+            return {"policy": json.loads(policy_str)}
+        except s3.exceptions.NoSuchBucketPolicy:
+            return {"policy": None}
+    else:
+        raise ValueError(f"Unsupported cloud surface type: {surface_type}")
+
+
+async def observe_surface(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    asset_id: uuid.UUID,
+    surface_type: str,
+    connector=None,
+) -> dict:
+    if surface_type in HOST_SURFACES:
+        return await observe_host_surface(db, asset_id, surface_type)
+    elif surface_type in CLOUD_SURFACES:
+        if connector is None:
+            raise ValueError(f"connector required for cloud surface {surface_type}")
+        return await observe_cloud_surface(db, org_id, asset_id, surface_type, connector)
+    else:
+        raise ValueError(f"Unknown surface type: {surface_type}")

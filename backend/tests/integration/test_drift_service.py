@@ -63,3 +63,39 @@ def test_surface_severity_all_surfaces_covered():
     for s in all_surfaces:
         assert s in SURFACE_SEVERITY, f"Missing severity for {s}"
         assert SURFACE_SEVERITY[s] in ("high", "medium", "low")
+
+
+import uuid
+from unittest.mock import AsyncMock, patch
+from app.services.drift_service import observe_host_surface
+
+
+@pytest.mark.asyncio
+async def test_observe_host_surface_dispatches_agent_job():
+    mock_db = AsyncMock()
+    asset_id = uuid.UUID("1a7051be-7110-4a21-9cdf-b023231cdff8")
+
+    mock_result = {"state": {"PermitRootLogin": "no", "Port": "22"}, "status": "success"}
+
+    with patch("app.services.drift_service.dispatch_agent_job", new_callable=AsyncMock) as mock_dispatch:
+        mock_dispatch.return_value = mock_result
+        result = await observe_host_surface(mock_db, asset_id, "ssh_config")
+
+    mock_dispatch.assert_called_once_with(
+        command="capture_drift_state",
+        parameters={"surface_type": "ssh_config"},
+        asset_ids=[str(asset_id)],
+        timeout_seconds=60,
+    )
+    assert result == {"PermitRootLogin": "no", "Port": "22"}
+
+
+@pytest.mark.asyncio
+async def test_observe_host_surface_raises_on_failure():
+    mock_db = AsyncMock()
+    asset_id = uuid.UUID("1a7051be-7110-4a21-9cdf-b023231cdff8")
+
+    with patch("app.services.drift_service.dispatch_agent_job", new_callable=AsyncMock) as mock_dispatch:
+        mock_dispatch.return_value = {"status": "failed", "error": "agent unreachable"}
+        with pytest.raises(RuntimeError, match="agent unreachable"):
+            await observe_host_surface(mock_db, asset_id, "ssh_config")
