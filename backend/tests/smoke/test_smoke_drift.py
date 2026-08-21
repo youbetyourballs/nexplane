@@ -147,7 +147,7 @@ def test_drift_detect(api):
             command="write_file",
             parameters={
                 "path": "/etc/ssh/sshd_config",
-                "append_line": "PermitEmptyPasswords no",
+                "append_line": "MaxAuthTries 10",
             },
             asset_ids=[asset_id],
             timeout_seconds=30,
