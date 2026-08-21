@@ -350,7 +350,7 @@
       "executor": "nexplane_agent.restore_drift_state",
       "generic_action": "restore_drift_state",
       "action_id": "restore_drift_state",
-      "smoke_verified": false
+      "smoke_verified": true
     },
     {
       "display_name": "Audit Users and Groups",
