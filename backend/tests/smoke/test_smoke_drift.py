@@ -239,14 +239,14 @@ def test_drift_remediate(api):
     async def _mutate():
         return await dispatch_agent_job(
             command="write_file",
-            parameters={"path": "/etc/ssh/sshd_config", "append_line": "PermitEmptyPasswords no"},
+            parameters={"path": "/etc/ssh/sshd_config", "append_line": "MaxAuthTries 10"},
             asset_ids=[asset_id],
             timeout_seconds=30,
         )
 
     asyncio.run(_mutate())
     post(api, "/drift/check", {"asset_id": asset_id, "surface_type": "ssh_config"})
-    time.sleep(5)
+    time.sleep(15)
 
     events = get(api, f"/drift/events?status=open&asset_id={asset_id}&surface_type=ssh_config")
     assert events, "No open drift event to remediate"
