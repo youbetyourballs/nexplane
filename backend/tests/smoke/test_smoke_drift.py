@@ -276,9 +276,13 @@ def test_drift_remediate(api):
     print(f"  Shadow CR executed: {shadow_cr_id}")
     time.sleep(5)
 
-    # Verify DriftEvent closed
-    ev = get(api, f"/drift/events/{event_id}")
-    assert ev["status"] == "dismissed", f"Event should be dismissed after CR execution, got {ev['status']}"
+    # Verify DriftEvent closed - poll up to 30s for on_cr_completed to finish committing
+    for _ in range(6):
+        ev = get(api, f"/drift/events/{event_id}")
+        if ev["status"] == "dismissed":
+            break
+        time.sleep(5)
+    assert ev["status"] == "dismissed", f"Event should be dismissed after CR execution, got {ev['status']} (event_id={event_id})"
 
     # Verify ResourceState updated
     drift_data = get(api, f"/assets/{asset_id}/drift")
