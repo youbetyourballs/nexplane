@@ -141,13 +141,13 @@ def test_drift_detect(api):
     import asyncio
 
     async def _mutate():
-        # Use a real SSH directive (not a comment — captureSSHConfig skips comment lines).
-        # PermitEmptyPasswords is not normally in sshd_config so it will appear as an added key.
+        # Use LogLevel VERBOSE — not set by harden_ssh, so it won't be in the anchor.
+        # captureSSHConfig skips comment lines, so this must be an uncommented directive.
         return await dispatch_agent_job(
             command="write_file",
             parameters={
                 "path": "/etc/ssh/sshd_config",
-                "append_line": "MaxAuthTries 10",
+                "append_line": "LogLevel VERBOSE",
             },
             asset_ids=[asset_id],
             timeout_seconds=30,
@@ -237,9 +237,10 @@ def test_drift_remediate(api):
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
 
     async def _mutate():
+        # Use LogLevel DEBUG — differs from accepted anchor (LogLevel VERBOSE from DRIFT_ACCEPT).
         return await dispatch_agent_job(
             command="write_file",
-            parameters={"path": "/etc/ssh/sshd_config", "append_line": "MaxAuthTries 8"},
+            parameters={"path": "/etc/ssh/sshd_config", "append_line": "LogLevel DEBUG"},
             asset_ids=[asset_id],
             timeout_seconds=30,
         )
