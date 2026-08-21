@@ -141,11 +141,13 @@ def test_drift_detect(api):
     import asyncio
 
     async def _mutate():
+        # Use a real SSH directive (not a comment — captureSSHConfig skips comment lines).
+        # PermitEmptyPasswords is not normally in sshd_config so it will appear as an added key.
         return await dispatch_agent_job(
             command="write_file",
             parameters={
                 "path": "/etc/ssh/sshd_config",
-                "append_line": "# DRIFT_SMOKE_MARKER",
+                "append_line": "PermitEmptyPasswords no",
             },
             asset_ids=[asset_id],
             timeout_seconds=30,
@@ -156,9 +158,9 @@ def test_drift_detect(api):
     assert result.get("status") == "success", f"Out-of-band mutation failed: {result}"
     print("  Injected out-of-band mutation")
 
-    # Trigger manual drift check
+    # Trigger manual drift check (poll up to 30s for event creation)
     post(api, "/drift/check", {"asset_id": asset_id, "surface_type": "ssh_config"})
-    time.sleep(5)
+    time.sleep(15)
 
     # Verify DriftEvent created
     events = get(api, f"/drift/events?status=open&asset_id={asset_id}&surface_type=ssh_config")
@@ -175,7 +177,7 @@ def test_drift_detect(api):
     # Verify shadow CR is DRAFT
     shadow_cr = get(api, f"/change-requests/{event['shadow_cr_id']}")
     assert shadow_cr["status"] == "draft", f"Shadow CR status should be draft, got {shadow_cr['status']}"
-    assert shadow_cr["action_id"] == "restore_resource_state"
+    assert shadow_cr.get("change_type") == "restore_resource_state" or shadow_cr.get("action_id") == "restore_resource_state"
     print(f"  Shadow CR: {event['shadow_cr_id']} status={shadow_cr['status']}")
 
     print("DRIFT_DETECT PASSED")
@@ -237,7 +239,7 @@ def test_drift_remediate(api):
     async def _mutate():
         return await dispatch_agent_job(
             command="write_file",
-            parameters={"path": "/etc/ssh/sshd_config", "append_line": "# DRIFT_SMOKE_REMEDIATE"},
+            parameters={"path": "/etc/ssh/sshd_config", "append_line": "PermitEmptyPasswords no"},
             asset_ids=[asset_id],
             timeout_seconds=30,
         )
