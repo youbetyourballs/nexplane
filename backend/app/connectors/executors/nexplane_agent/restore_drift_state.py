@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
-ROLLBACK_CAPABILITY = "manual"
+ROLLBACK_CAPABILITY = "full"
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
