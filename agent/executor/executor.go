@@ -37,6 +37,7 @@ import (
 	"nexplane-agent/commands/rsyncpush"
 	"nexplane-agent/commands/runcommand"
 	"nexplane-agent/commands/appupgrade"
+	"nexplane-agent/commands/drift"
 )
 
 // Result is the outcome of a command execution.
@@ -262,6 +263,10 @@ var commands = map[string]CommandFunc{
 	"app_preflight_kafka_cutover": appupgrade.KafkaCutoverPreflightExecute,
 	"app_upgrade_kafka_cutover":   appupgrade.KafkaCutoverExecute,
 	"app_rollback_kafka_cutover":  appupgrade.KafkaCutoverRollbackAttemptExecute,
+	// Drift detection
+	"capture_drift_state": drift.CaptureDriftStateExecute,
+	"restore_drift_state": drift.RestoreDriftStateExecute,
+	"write_file":          drift.WriteFileExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
