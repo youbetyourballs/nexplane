@@ -307,6 +307,44 @@ async def on_cr_completed(cr_id: uuid.UUID, db: AsyncSession) -> None:
         logger.warning("on_cr_completed: CR %s not found", cr_id)
         return
 
+    # Shadow CRs for drift remediation: dismiss the linked drift event and re-anchor.
+    from app.models.change_request import ChangeType
+    if cr.change_type == ChangeType.restore_resource_state:
+        now = datetime.now(timezone.utc)
+        desired = cr.desired_outcome or {}
+        drift_event_id = desired.get("drift_event_id")
+        resource_state_id = desired.get("resource_state_id")
+        if drift_event_id:
+            await db.execute(
+                update(DriftEvent)
+                .where(DriftEvent.id == uuid.UUID(str(drift_event_id)))
+                .values(status="dismissed", resolved_at=now, resolution_note=f"resolved by CR {cr_id}")
+            )
+        if resource_state_id:
+            rs_result = await db.execute(
+                select(ResourceState).where(ResourceState.id == uuid.UUID(str(resource_state_id)))
+            )
+            rs = rs_result.scalar_one_or_none()
+            if rs:
+                target_asset_ids = cr.target_asset_ids or []
+                for asset_id_str in target_asset_ids:
+                    asset_id = uuid.UUID(asset_id_str) if isinstance(asset_id_str, str) else asset_id_str
+                    try:
+                        observed = await observe_surface(db, cr.organization_id, asset_id, rs.surface_type)
+                        await upsert_resource_state(
+                            db=db,
+                            org_id=cr.organization_id,
+                            asset_id=asset_id,
+                            surface_type=rs.surface_type,
+                            state=observed,
+                            source="cr_execution",
+                            source_cr_id=cr_id,
+                        )
+                    except Exception as exc:
+                        logger.warning("on_cr_completed: restore re-anchor failed for %s: %s", rs.surface_type, exc)
+        await db.commit()
+        return
+
     catalog_entry = _load_catalog_entry(cr.change_type.value)
     drift_surfaces = catalog_entry.get("drift_surfaces", [])
     if not drift_surfaces:
