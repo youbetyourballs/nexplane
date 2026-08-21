@@ -239,7 +239,7 @@ def test_drift_remediate(api):
     async def _mutate():
         return await dispatch_agent_job(
             command="write_file",
-            parameters={"path": "/etc/ssh/sshd_config", "append_line": "MaxAuthTries 10"},
+            parameters={"path": "/etc/ssh/sshd_config", "append_line": "MaxAuthTries 8"},
             asset_ids=[asset_id],
             timeout_seconds=30,
         )
