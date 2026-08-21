@@ -307,7 +307,7 @@ async def on_cr_completed(cr_id: uuid.UUID, db: AsyncSession) -> None:
         logger.warning("on_cr_completed: CR %s not found", cr_id)
         return
 
-    catalog_entry = _load_catalog_entry(str(cr.change_type))
+    catalog_entry = _load_catalog_entry(cr.change_type.value)
     drift_surfaces = catalog_entry.get("drift_surfaces", [])
     if not drift_surfaces:
         return

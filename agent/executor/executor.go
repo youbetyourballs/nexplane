@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	"log"
 	"runtime"
 
 	"nexplane-agent/commands/changip"
@@ -379,11 +380,19 @@ func Dispatch(command string, params map[string]any, rollback bool, previousResu
 	} else {
 		fn, ok = commands[command]
 		if !ok {
+			log.Printf("DEBUG Dispatch: command %q not found in map (size=%d)", command, len(commands))
 			return Result{Status: "failed", Error: fmt.Sprintf("unknown command %q", command)}
 		}
+		log.Printf("DEBUG Dispatch: found fn for %q fn-is-nil=%v", command, fn == nil)
 	}
 
+	if fn == nil {
+		log.Printf("DEBUG Dispatch: fn is nil for %q", command)
+		return Result{Status: "failed", Error: fmt.Sprintf("nil handler for command %q", command)}
+	}
+	log.Printf("DEBUG Dispatch: calling fn for %q", command)
 	data, err := fn(params)
+	log.Printf("DEBUG Dispatch: fn returned for %q err=%v", command, err)
 	if err != nil {
 		return Result{Status: "failed", Data: data, Error: err.Error()}
 	}

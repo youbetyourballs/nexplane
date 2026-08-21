@@ -13,13 +13,23 @@ func writeFile(params map[string]any) (map[string]any, error) {
 	if !ok || path == "" {
 		return nil, fmt.Errorf("path is required")
 	}
-	content, _ := params["content"].(string)
 
 	mode := os.FileMode(0644)
 	if m, ok := params["mode"].(float64); ok {
 		mode = os.FileMode(int(m))
 	}
 
+	// append_line: read existing content and append a line
+	if appendLine, ok := params["append_line"].(string); ok {
+		existing, _ := os.ReadFile(path)
+		content := string(existing) + appendLine + "\n"
+		if err := os.WriteFile(path, []byte(content), mode); err != nil {
+			return nil, fmt.Errorf("appending to %s: %w", path, err)
+		}
+		return map[string]any{"status": "success", "path": path, "bytes": len(content)}, nil
+	}
+
+	content, _ := params["content"].(string)
 	if err := os.WriteFile(path, []byte(content), mode); err != nil {
 		return nil, fmt.Errorf("writing %s: %w", path, err)
 	}

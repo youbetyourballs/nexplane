@@ -75,22 +75,19 @@ def test_drift_anchor(api):
     # Create CR
     cr = post(api, "/change-requests", {
         "title": "SSH Hardening (drift smoke anchor)",
-        "action_id": "ssh_hardening",
-        "change_type": "ssh_hardening",
+        "change_type": "harden_ssh",
         "parameters": {"ensure_permit_root_login": "no"},
         "target_asset_ids": [asset_id],
+        "desired_outcome": {"permit_root_login": "no"},
     })
     cr_id = cr["id"]
     print(f"  Created CR {cr_id}")
 
-    # Plan
+    # Plan → submit for approval → approve → execute
     post(api, f"/change-requests/{cr_id}/plan")
     time.sleep(3)
-
-    # Approve
-    post(api, f"/change-requests/{cr_id}/approve")
-
-    # Execute
+    post(api, f"/change-requests/{cr_id}/submit-for-approval")
+    post(api, f"/change-requests/{cr_id}/approve", {"decision": "approved", "comment": "drift smoke"})
     post(api, f"/change-requests/{cr_id}/execute")
 
     # Wait for CR to complete (up to 90s)
@@ -104,13 +101,16 @@ def test_drift_anchor(api):
     else:
         pytest.fail("CR did not complete within 90s")
 
-    # Wait for on_cr_completed hook to run (async)
-    time.sleep(5)
-
-    # Verify ResourceState was written
-    drift_data = get(api, f"/assets/{asset_id}/drift")
-    rs_surfaces = [rs["surface_type"] for rs in drift_data["resource_states"]]
-    assert "ssh_config" in rs_surfaces, f"ssh_config ResourceState not found; got {rs_surfaces}"
+    # Wait for on_cr_completed to dispatch and complete agent jobs (ssh_config + firewall_rules,
+    # each ~10s due to agent poll interval). Poll up to 60s.
+    for _ in range(12):
+        time.sleep(5)
+        drift_data = get(api, f"/assets/{asset_id}/drift")
+        rs_surfaces = [rs["surface_type"] for rs in drift_data["resource_states"]]
+        if "ssh_config" in rs_surfaces:
+            break
+    else:
+        pytest.fail(f"ssh_config ResourceState not found within 60s; got {rs_surfaces}")
 
     ssh_rs = next(rs for rs in drift_data["resource_states"] if rs["surface_type"] == "ssh_config")
     assert ssh_rs["source"] == "cr_execution", f"Expected cr_execution, got {ssh_rs['source']}"
@@ -257,7 +257,8 @@ def test_drift_remediate(api):
     # Full CR lifecycle on shadow CR
     post(api, f"/change-requests/{shadow_cr_id}/plan")
     time.sleep(3)
-    post(api, f"/change-requests/{shadow_cr_id}/approve")
+    post(api, f"/change-requests/{shadow_cr_id}/submit-for-approval")
+    post(api, f"/change-requests/{shadow_cr_id}/approve", {"decision": "approved", "comment": "drift smoke remediate"})
     post(api, f"/change-requests/{shadow_cr_id}/execute")
 
     for _ in range(24):
