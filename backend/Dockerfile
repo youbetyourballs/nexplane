@@ -70,4 +70,7 @@ RUN curl -fsSL https://github.com/smallstep/cli/releases/download/v0.30.6/step_l
     && rm -rf /tmp/step.tar.gz /tmp/step_0.30.6 \
     && chmod +x /usr/local/bin/step
 
+# Install smoke step-ca root CA cert so executor can issue certs without bootstrap at runtime
+COPY backend/config/step-ca/root_ca.crt /etc/step/certs/root_ca.crt
+
 EXPOSE 8000
