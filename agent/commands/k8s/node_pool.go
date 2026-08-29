@@ -236,6 +236,20 @@ func NodePoolRollbackExecute(params map[string]any) (map[string]any, error) {
 		if execErr != nil {
 			return nil, fmt.Errorf("aws eks rollback nodegroup: %s", out)
 		}
+		// Poll until nodegroup is ACTIVE
+		deadline := time.Now().Add(30 * time.Minute)
+		for time.Now().Before(deadline) {
+			statusOut, _ := exec.Command("aws", "eks", "describe-nodegroup",
+				"--cluster-name", clusterName,
+				"--nodegroup-name", poolName,
+				"--region", region,
+				"--query", "nodegroup.status",
+				"--output", "text").CombinedOutput()
+			if strings.TrimSpace(string(statusOut)) == "ACTIVE" {
+				break
+			}
+			time.Sleep(30 * time.Second)
+		}
 		return map[string]any{
 			"rolled_back": true, "pool_name": poolName,
 			"restored_to": targetImage,
@@ -281,7 +295,15 @@ func NodePoolRollbackExecute(params map[string]any) (map[string]any, error) {
 		}, nil
 
 	default: // kubeadm — uncordon any cordoned nodes (version downgrade not possible)
-		nodesOut, _ := kube(kubeconfigPath, "get", "nodes", "--output=jsonpath={.items[*].metadata.name}")
+		labelSelector := "nexplane.io/node-pool=" + poolName
+		nodesOut, _ := kube(kubeconfigPath, "get", "nodes", "-l", labelSelector,
+			"--output=jsonpath={.items[*].metadata.name}")
+		if strings.TrimSpace(nodesOut) == "" {
+			// Fallback: all non-control-plane nodes
+			nodesOut, _ = kube(kubeconfigPath, "get", "nodes",
+				"--selector=!node-role.kubernetes.io/control-plane",
+				"--output=jsonpath={.items[*].metadata.name}")
+		}
 		for _, nodeName := range strings.Fields(nodesOut) {
 			kube(kubeconfigPath, "uncordon", nodeName) //nolint:errcheck
 		}
