@@ -1,6 +1,6 @@
 .PHONY: build build-linux build-windows build-darwin test clean
 
-VERSION ?= 0.1.0
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.4.6")
 LDFLAGS=-ldflags "-X main.Version=$(VERSION)"
 
 GOENV_LINUX_AMD64=GOOS=linux GOARCH=amd64

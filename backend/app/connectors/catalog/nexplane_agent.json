@@ -3827,6 +3827,7 @@
       "generic_action": "backup_mgn_replication",
       "action_id": "backup_mgn_replication",
       "smoke_verified": false,
+      "experimental": true,
       "drift_surfaces": []
     },
     {
@@ -5542,12 +5543,12 @@
           "required": true
         }
       ],
-      "executor": "nexplane_agent.restore_resource_state",
+      "executor": "nexplane_agent.restore_drift_state",
       "rollback_action": null,
       "rollback_capability": "none",
       "blast_radius_hint": "host_config_change",
       "drift_surfaces": [],
-      "smoke_verified": false
+      "smoke_verified": true
     }
   ]
 }
