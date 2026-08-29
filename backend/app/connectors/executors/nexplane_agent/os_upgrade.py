@@ -31,6 +31,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     skip_snapshot = bool(parameters.get("skip_snapshot", False))
     target_version = parameters.get("target_version", "")
     snapshot_only = bool(parameters.get("snapshot_only", False))
+    upgrade_path = parameters.get("path", "inplace")  # "inplace" or "containerize"
+    upgrade_type = parameters.get("upgrade_type", "")  # "security", "packages", or "dist"
 
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job
     from app.database import AsyncSessionLocal
@@ -110,6 +112,8 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
             parameters={
                 "target_version": target_version,
                 "snapshot_id": snapshot_id or "",
+                "path": upgrade_path,
+                "upgrade_type": upgrade_type,
             },
             asset_ids=[asset_id],
             timeout_seconds=7200,  # 2 hours — OS upgrades take time
