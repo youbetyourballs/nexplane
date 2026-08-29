@@ -38,6 +38,7 @@ import (
 	"nexplane-agent/commands/runcommand"
 	"nexplane-agent/commands/appupgrade"
 	"nexplane-agent/commands/drift"
+	"nexplane-agent/commands/k8s"
 )
 
 // Result is the outcome of a command execution.
@@ -267,6 +268,11 @@ var commands = map[string]CommandFunc{
 	"capture_drift_state": drift.CaptureDriftStateExecute,
 	"restore_drift_state": drift.RestoreDriftStateExecute,
 	"write_file":          drift.WriteFileExecute,
+	// Kubernetes cluster upgrade (Spec k8s)
+	"preflight_k8s_upgrade":     k8s.PreflightExecute,
+	"upgrade_k8s_control_plane": k8s.ControlPlaneUpgradeExecute,
+	"upgrade_k8s_node_pool":     k8s.NodePoolUpgradeExecute,
+	"verify_k8s_cluster_health": k8s.ClusterHealthExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
@@ -350,6 +356,8 @@ var rollbacks = map[string]CommandFunc{
 	"santa_rule_remove":  macos.SantaRuleRemoveRollback,
 	"santa_mode_set":     macos.SantaModeSetRollback,
 	"santa_install":      macos.SantaInstallRollback,
+	// Kubernetes rollbacks
+	"rollback_k8s_node_pool": k8s.NodePoolRollbackExecute,
 	// Credential rotation rollback
 	"rotate_ssh_keys":        credrotation.SSHKeyRollback,
 	"rotate_db_creds":        credrotation.DBRotateRollback,

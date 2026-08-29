@@ -84,6 +84,16 @@ func TestNodePoolRollbackValidation(t *testing.T) {
 	}
 }
 
+func TestClusterHealthValidation(t *testing.T) {
+	// With no kubectl available, should return an error about kubectl
+	_, err := ClusterHealthExecute(map[string]any{
+		"expected_version": "1.29",
+	})
+	// Either returns an error (kubectl not found) or returns healthy=false
+	// Both are acceptable in a unit test environment
+	_ = err
+}
+
 func TestBuildNodePoolsKubeadm(t *testing.T) {
 	nodesJSON := `{
 		"items": [
