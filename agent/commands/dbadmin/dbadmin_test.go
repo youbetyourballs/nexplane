@@ -3,6 +3,7 @@ package dbadmin_test
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -298,6 +299,24 @@ func TestMySQLDeprovisionUser_DropsUser(t *testing.T) {
 	}
 	if result.Fields["pre_drop_grants"] == "" {
 		t.Error("expected pre_drop_grants to be captured")
+	}
+}
+
+func TestDbUpgradePostgresInPlaceValidation(t *testing.T) {
+	// Missing source_version → error
+	_, err := dbadmin.DbUpgradePostgresInPlaceExecute(map[string]any{
+		"target_version": "16",
+	})
+	if err == nil || !strings.Contains(err.Error(), "source_version") {
+		t.Errorf("expected source_version error, got: %v", err)
+	}
+
+	// Missing target_version → error
+	_, err = dbadmin.DbUpgradePostgresInPlaceExecute(map[string]any{
+		"source_version": "14",
+	})
+	if err == nil || !strings.Contains(err.Error(), "target_version") {
+		t.Errorf("expected target_version error, got: %v", err)
 	}
 }
 

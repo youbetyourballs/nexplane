@@ -1,4 +1,4 @@
-package executor
+﻿package executor
 
 import (
 	"fmt"
@@ -149,7 +149,8 @@ var commands = map[string]CommandFunc{
 	"db_preflight": dbadmin.DbPreflightExecute,
 	"db_upgrade_postgres_dump_restore": dbadmin.DbUpgradePostgresDumpRestoreExecute,
 	"db_version_query": dbadmin.DbVersionQueryExecute,
-	"db_upgrade_mysql": dbadmin.DbUpgradeMysqlExecute,
+	"db_upgrade_mysql":             dbadmin.DbUpgradeMysqlExecute,
+	"db_upgrade_postgres_in_place": dbadmin.DbUpgradePostgresInPlaceExecute,
 	"db_upgrade_mongo_fcv_hop": dbadmin.DbUpgradeMongoFcvHopExecute,
 	"db_upgrade_mongo_dump_restore": dbadmin.DbUpgradeMongoDbDumpRestoreExecute,
 	"db_dump_to_s3": dbadmin.DbDumpToS3Execute,
@@ -400,3 +401,4 @@ func Dispatch(command string, params map[string]any, rollback bool, previousResu
 	}
 	return Result{Status: "completed", Data: data}
 }
+
