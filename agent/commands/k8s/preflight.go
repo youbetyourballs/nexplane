@@ -32,12 +32,12 @@ func PreflightExecute(params map[string]any) (map[string]any, error) {
 		clusterType = detectClusterType(kubeconfigPath)
 	}
 
-	// Get current server version
-	versionJSON, err := kube(kubeconfigPath, "version", "--output=json")
-	if err != nil {
-		return nil, fmt.Errorf("kubectl version failed: %s", versionJSON)
-	}
+	// Get current server version — kubectl version exits non-zero when client/server differ; ignore that.
+	versionJSON, _ := kube(kubeconfigPath, "version", "--output=json")
 	currentVersion := parseServerVersion(versionJSON)
+	if currentVersion == "unknown" {
+		return nil, fmt.Errorf("kubectl version failed — server unreachable or output not JSON: %s", versionJSON)
+	}
 
 	// Enforce +1 minor skew
 	if skewErr := validateVersionSkew(currentVersion, targetVersion); skewErr != nil {
@@ -46,13 +46,15 @@ func PreflightExecute(params map[string]any) (map[string]any, error) {
 			"reason":          skewErr.Error(),
 			"current_version": currentVersion,
 			"target_version":  targetVersion,
+			"node_pools":      []map[string]any{},
+			"warnings":        []string{},
 		}, nil
 	}
 
-	// List nodes → node pools
-	nodesJSON, err := kube(kubeconfigPath, "get", "nodes", "--output=json")
-	if err != nil {
-		return nil, fmt.Errorf("kubectl get nodes: %s", nodesJSON)
+	// List nodes → node pools — ignore non-zero exit (e.g. warnings on stderr); only fail if output is empty.
+	nodesJSON, _ := kube(kubeconfigPath, "get", "nodes", "--output=json")
+	if nodesJSON == "" {
+		return nil, fmt.Errorf("kubectl get nodes returned empty output — cluster unreachable?")
 	}
 	nodePools := buildNodePools(nodesJSON, clusterType)
 

@@ -171,7 +171,9 @@ func buildNodePools(nodesJSON, clusterType string) []map[string]any {
 			}
 		}
 		poolNodes[pool] = append(poolNodes[pool], n.Metadata.Name)
-		poolVersion[pool] = n.Status.NodeInfo.KubeletVersion
+		if _, seen := poolVersion[pool]; !seen {
+			poolVersion[pool] = n.Status.NodeInfo.KubeletVersion
+		}
 	}
 
 	result := make([]map[string]any, 0, len(poolNodes))
