@@ -191,7 +191,15 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
         )[0] or ""
     )
     if not asset_id:
-        return {"rolled_back": False, "reason": "No asset_id available for rollback"}
+        return {
+            "_rollback_no_op": True,
+            "rolled_back": False,
+            "reason": "No asset_id available for rollback",
+            "data_loss_warning": (
+                "Rollback could not be attempted — no target asset identified. "
+                "Verify Istio state manually and re-provision if needed."
+            ),
+        }
 
     p = _resolve_params(parameters)
     source_version = p["source_version"] or execution_result.get("source_version", "")

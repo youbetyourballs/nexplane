@@ -63,4 +63,11 @@ COPY --from=agent-builder /agent/dist/ /opt/nexplane-downloads/
 
 RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
+# Install step CLI (smallstep) for certificate rotation executor
+RUN curl -fsSL https://github.com/smallstep/cli/releases/download/v0.30.6/step_linux_0.30.6_amd64.tar.gz -o /tmp/step.tar.gz \
+    && tar -xzf /tmp/step.tar.gz -C /tmp \
+    && mv /tmp/step_0.30.6/bin/step /usr/local/bin/ \
+    && rm -rf /tmp/step.tar.gz /tmp/step_0.30.6 \
+    && chmod +x /usr/local/bin/step
+
 EXPOSE 8000
