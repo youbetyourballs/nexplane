@@ -65,6 +65,25 @@ func TestControlPlaneUpgradeValidation(t *testing.T) {
 	}
 }
 
+func TestNodePoolUpgradeValidation(t *testing.T) {
+	_, err := NodePoolUpgradeExecute(map[string]any{
+		"cluster_type": "kubeadm",
+	})
+	if err == nil || !strings.Contains(err.Error(), "target_version") {
+		t.Errorf("expected target_version error, got: %v", err)
+	}
+}
+
+func TestNodePoolRollbackValidation(t *testing.T) {
+	_, err := NodePoolRollbackExecute(map[string]any{
+		"cluster_type": "kubeadm",
+		"pool_name":    "workers",
+	})
+	if err == nil || !strings.Contains(err.Error(), "target_image") {
+		t.Errorf("expected target_image error, got: %v", err)
+	}
+}
+
 func TestBuildNodePoolsKubeadm(t *testing.T) {
 	nodesJSON := `{
 		"items": [
