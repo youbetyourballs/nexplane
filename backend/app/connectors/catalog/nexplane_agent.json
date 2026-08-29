@@ -1628,7 +1628,7 @@
           "required": false
         }
       ],
-      "executor": "nexplane_agent.upgrade_linux_instance",
+      "executor": "nexplane_agent.os_upgrade",
       "rollback_action": "upgrade_linux_instance",
       "estimated_duration_seconds": 300,
       "safety_notes": [
