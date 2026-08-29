@@ -4,6 +4,7 @@
 package k8s
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -51,6 +52,16 @@ func TestDetectClusterType(t *testing.T) {
 		if got != c.want {
 			t.Errorf("clusterTypeFromURL(%q) = %q, want %q", c.serverURL, got, c.want)
 		}
+	}
+}
+
+func TestControlPlaneUpgradeValidation(t *testing.T) {
+	// target_version required
+	_, err := ControlPlaneUpgradeExecute(map[string]any{
+		"cluster_type": "kubeadm",
+	})
+	if err == nil || !strings.Contains(err.Error(), "target_version") {
+		t.Errorf("expected target_version error, got: %v", err)
 	}
 }
 
