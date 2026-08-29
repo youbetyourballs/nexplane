@@ -2390,6 +2390,7 @@
       ],
       "executor": "nexplane_agent.os_upgrade",
       "estimated_duration_seconds": 3600,
+      "smoke_verified": true,
       "drift_surfaces": []
     },
     {
