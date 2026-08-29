@@ -388,3 +388,36 @@ class TestOsUpgradeSmoke:
             f"Sentinel still present after rollback — EBS restore did not work: {sentinel_after!r}"
         )
         log(f"{PHASE}: SNAPSHOT_AND_ROLLBACK passed — sentinel gone after EBS restore")
+
+    def test_os_upgrade_execute(self):
+        """Phase OS_UPGRADE_EXECUTE — run security patches end-to-end on the throwaway EC2.
+
+        Uses skip_snapshot=True (snapshot already verified in prior phase) and
+        upgrade_type=security (applies security patches, not dist upgrade).
+        After execute completes, checks that the CR result contains previous_os and
+        the upgrade command ran without error. If a kernel patch was applied the
+        instance reboots; the executor's verify phase handles the 60s wait.
+        """
+        cr = _run_cr(
+            self.client,
+            "[smoke] os_upgrade execute — security patches",
+            "agent_os_upgrade",
+            {
+                "skip_snapshot": True,
+                "upgrade_type": "security",
+            },
+            asset_ids=[self.agent_asset_id],
+            timeout=900,  # 15 min — includes potential reboot wait
+        )
+        result = _step_result(cr)
+        assert result.get("status") == "completed", (
+            f"Expected status=completed, got: {result}"
+        )
+        # previous_os is populated by os_upgrade.py from preflight
+        assert result.get("previous_os") or result.get("new_os"), (
+            f"Expected OS version info in result, got: {result}"
+        )
+        log(f"{PHASE}: EXECUTE passed — "
+            f"previous_os={result.get('previous_os')} "
+            f"new_os={result.get('new_os')} "
+            f"snapshot_id={result.get('snapshot_id')}")
