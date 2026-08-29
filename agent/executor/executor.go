@@ -357,6 +357,8 @@ var rollbacks = map[string]CommandFunc{
 	"santa_rule_remove":  macos.SantaRuleRemoveRollback,
 	"santa_mode_set":     macos.SantaModeSetRollback,
 	"santa_install":      macos.SantaInstallRollback,
+	// Database upgrade rollbacks
+	"rollback_db_upgrade_postgres_in_place": dbadmin.DbUpgradePostgresInPlaceRollbackExecute,
 	// Kubernetes rollbacks
 	"rollback_k8s_node_pool": k8s.NodePoolRollbackExecute,
 	// Credential rotation rollback

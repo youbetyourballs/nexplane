@@ -5550,6 +5550,54 @@
       "blast_radius_hint": "host_config_change",
       "drift_surfaces": [],
       "smoke_verified": true
+    },
+    {
+      "action_id": "db_upgrade_postgres_in_place",
+      "display_name": "Postgres In-Place Major Version Upgrade",
+      "description": "Upgrades a Postgres cluster to a new major version using pg_upgrade --link (hard-link mode). The old cluster is left stopped and renamed to main_old; the new cluster runs on the original port. Rollback is possible only if the new cluster has not written data.",
+      "parameters": [
+        {
+          "name": "source_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target_version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "old_data_dir",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "new_data_dir",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "old_bin_dir",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "new_bin_dir",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "db_service",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "executor": "nexplane_agent.db_upgrade_postgres_in_place",
+      "rollback_action": "rollback_db_upgrade_postgres_in_place",
+      "rollback_capability": "best_effort",
+      "blast_radius_hint": "database_downtime",
+      "drift_surfaces": [],
+      "smoke_verified": false
     }
   ]
 }

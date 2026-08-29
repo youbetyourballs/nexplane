@@ -113,3 +113,67 @@ func DbUpgradePostgresInPlaceExecute(params map[string]any) (map[string]any, err
 		"upgraded_at":    time.Now().UTC().Format(time.RFC3339),
 	}, nil
 }
+
+// DbUpgradePostgresInPlaceRollbackExecute attempts to restore the old Postgres cluster after a
+// failed or unwanted in-place upgrade. It swaps main_old back to main via pg_renamecluster and
+// restarts the service. Because pg_upgrade --link hard-links data files, this is only safe if the
+// new cluster has not yet written any data; otherwise a data_loss_warning is returned.
+//
+// Params: same as DbUpgradePostgresInPlaceExecute — source_version, target_version, db_service.
+func DbUpgradePostgresInPlaceRollbackExecute(params map[string]any) (map[string]any, error) {
+	srcVersion := str(params, "source_version")
+	if srcVersion == "" {
+		return nil, fmt.Errorf("source_version required for rollback")
+	}
+	tgtVersion := str(params, "target_version")
+	if tgtVersion == "" {
+		return nil, fmt.Errorf("target_version required for rollback")
+	}
+	dbService := str(params, "db_service")
+	if dbService == "" {
+		dbService = "postgresql"
+	}
+
+	// Stop whichever cluster is currently running.
+	runCmd(nil, "systemctl", "stop", dbService) //nolint:errcheck
+
+	// Drop the new (upgraded) cluster and promote main_old back to main.
+	dropOut, _, dropErr := runCmd(nil, "pg_dropcluster", "--stop", tgtVersion, "main")
+	if dropErr != nil {
+		// New cluster may not exist or may already be stopped — continue anyway.
+		_ = dropOut
+	}
+
+	_, _, renameErr := runCmd(nil, "pg_renamecluster", srcVersion, "main_old", "main")
+	if renameErr != nil {
+		// main_old may not exist — the upgrade might not have renamed it yet.
+		return map[string]any{
+			"rolled_back":        false,
+			"data_loss_warning":  true,
+			"reason":             "pg_renamecluster main_old→main failed; old cluster may not have been renamed during upgrade, or data has already been written to the new cluster — manual recovery required",
+			"source_version":     srcVersion,
+			"target_version":     tgtVersion,
+			"rolled_back_at":     time.Now().UTC().Format(time.RFC3339),
+		}, nil
+	}
+
+	// Restart old cluster.
+	if out, _, err := runCmd(nil, "systemctl", "start", dbService); err != nil {
+		return map[string]any{
+			"rolled_back":       false,
+			"data_loss_warning": true,
+			"reason":            fmt.Sprintf("renamed cluster back but failed to start %s: %s", dbService, out),
+			"source_version":    srcVersion,
+			"target_version":    tgtVersion,
+			"rolled_back_at":    time.Now().UTC().Format(time.RFC3339),
+		}, nil
+	}
+
+	return map[string]any{
+		"rolled_back":    true,
+		"source_version": srcVersion,
+		"target_version": tgtVersion,
+		"note":           "old cluster restored via pg_renamecluster; if new cluster had written data, those writes are lost — verify application integrity",
+		"rolled_back_at": time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}

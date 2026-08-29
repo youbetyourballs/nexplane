@@ -75,8 +75,8 @@ func ClusterHealthExecute(params map[string]any) (map[string]any, error) {
 	podsJSON, _ := kube(kubeconfigPath, "get", "pods", "-n", "kube-system", "--output=json")
 	unhealthyPods := scanUnhealthyPods(podsJSON)
 
-	// Version match check
-	versionOK := expectedVersion == "" || strings.HasPrefix(actualVersion, strings.TrimPrefix(expectedVersion, "v"))
+	// Version match check — compare minor versions so patch-level differences don't cause false negatives.
+	versionOK := expectedVersion == "" || extractMinor(actualVersion) == extractMinor(expectedVersion)
 
 	healthy := nodesReady == nodesTotal && len(unhealthyPods) == 0 && versionOK
 
