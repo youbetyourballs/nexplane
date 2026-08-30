@@ -81,9 +81,9 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
 
     # Pre-change snapshot if requested
     if data.get("snapshot_before") and data.get("change_type") not in ("create_ebs_snapshot", "agent_appdiscovery"):
+        _snap_ids = []
         try:
             from app.connectors.executors.aws.create_ebs_snapshot import execute as _snap_execute
-            _snap_ids = []
             for _asset_id in (data.get("target_asset_ids") or []):
                 _snap_result = await _snap_execute(
                     {
@@ -99,7 +99,11 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
                     logger.info(f"Pre-change snapshot {_sid} created for asset {_asset_id}")
                 else:
                     logger.warning(f"Pre-change snapshot mocked for asset {_asset_id} — no AWS credentials resolved")
-            if _snap_ids:
+        except Exception as _snap_err:
+            logger.warning(f"Pre-change snapshot failed (non-blocking): {_snap_err}")
+
+        if _snap_ids:
+            try:
                 await write_audit_event(
                     organization_id=org_id,
                     event_type="snapshot.pre_change",
@@ -107,8 +111,8 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
                     actor_id=actor_id,
                     change_request_id=cr_id,
                 )
-        except Exception as _snap_err:
-            logger.warning(f"Pre-change snapshot failed (non-blocking): {_snap_err}")
+            except Exception as _audit_err:
+                logger.warning(f"Pre-change snapshot audit write failed (non-blocking): {_audit_err}")
 
     # Step 3: Execute change via mock connector
     await write_audit_event(
