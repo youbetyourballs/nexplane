@@ -13,6 +13,12 @@ def _get_ec2_client(creds: dict):
     return get_boto3_client(creds, "ec2")
 
 
+async def _get_aws_creds_for_snapshot(connector, organization_id=None) -> dict:
+    """Resolve AWS credentials: from connector first, then from DB."""
+    from app.connectors.executors.nexplane_agent._snapshot_helpers import _get_aws_creds
+    return await _get_aws_creds(connector, organization_id=organization_id)
+
+
 async def _real_execute(creds: dict, parameters: dict) -> dict:
     ec2 = _get_ec2_client(creds)
     loop = asyncio.get_event_loop()
@@ -35,7 +41,7 @@ async def _real_execute(creds: dict, parameters: dict) -> dict:
     if not volume_id:
         return {"action": "create_ebs_snapshot", "skipped": True, "reason": "no volume_id available"}
 
-    name = parameters.get("backup_name", "nexplane-backup")
+    name = parameters.get("backup_name", parameters.get("description", "nexplane-backup"))
     retention = int(parameters.get("retention_days", 30))
 
     def _call():
@@ -63,7 +69,8 @@ async def _real_execute(creds: dict, parameters: dict) -> dict:
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
-    creds = getattr(connector, "credentials", {})
+    organization_id = parameters.get("organization_id")
+    creds = await _get_aws_creds_for_snapshot(connector, organization_id=organization_id)
     if not creds:
         return {
             "action":      "create_ebs_snapshot",

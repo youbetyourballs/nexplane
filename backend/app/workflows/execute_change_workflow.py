@@ -83,12 +83,30 @@ async def execute_change_workflow(input: WorkflowInput) -> None:
     if data.get("snapshot_before") and data.get("change_type") not in ("create_ebs_snapshot", "agent_appdiscovery"):
         try:
             from app.connectors.executors.aws.create_ebs_snapshot import execute as _snap_execute
+            _snap_ids = []
             for _asset_id in (data.get("target_asset_ids") or []):
                 _snap_result = await _snap_execute(
-                    {"description": f"pre-change-{cr_id[:8]}", "wait_for_completion": False},
+                    {
+                        "description": f"pre-change-{cr_id[:8]}",
+                        "wait_for_completion": False,
+                        "organization_id": org_id,
+                    },
                     [_asset_id], None,
                 )
-                logger.info(f"Pre-change snapshot: {_snap_result.get('snapshot_id')} for asset {_asset_id}")
+                _sid = _snap_result.get("snapshot_id")
+                if _sid and not _snap_result.get("mock"):
+                    _snap_ids.append({"asset_id": _asset_id, "snapshot_id": _sid})
+                    logger.info(f"Pre-change snapshot {_sid} created for asset {_asset_id}")
+                else:
+                    logger.warning(f"Pre-change snapshot mocked for asset {_asset_id} — no AWS credentials resolved")
+            if _snap_ids:
+                await write_audit_event(
+                    organization_id=org_id,
+                    event_type="snapshot.pre_change",
+                    event_payload={"snapshots": _snap_ids, "cr_id": cr_id},
+                    actor_id=actor_id,
+                    change_request_id=cr_id,
+                )
         except Exception as _snap_err:
             logger.warning(f"Pre-change snapshot failed (non-blocking): {_snap_err}")
 
