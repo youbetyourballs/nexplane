@@ -2740,6 +2740,7 @@
       "executor": "nexplane_agent.enforce_mfa",
       "generic_action": "enforce_mfa",
       "action_id": "enforce_mfa",
+      "rollback_action": "enforce_mfa",
       "estimated_duration_seconds": 10,
       "execution_tier": 2,
       "drift_surfaces": []
