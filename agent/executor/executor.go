@@ -39,6 +39,7 @@ import (
 	"nexplane-agent/commands/appupgrade"
 	"nexplane-agent/commands/drift"
 	"nexplane-agent/commands/k8s"
+	"nexplane-agent/commands/kernelupgrade"
 )
 
 // Result is the outcome of a command execution.
@@ -361,6 +362,12 @@ var rollbacks = map[string]CommandFunc{
 	"rollback_db_upgrade_postgres_in_place": dbadmin.DbUpgradePostgresInPlaceRollbackExecute,
 	// Kubernetes rollbacks
 	"rollback_k8s_node_pool": k8s.NodePoolRollbackExecute,
+	// Kernel upgrade
+	"preflight_kernel_upgrade":            kernelupgrade.PreflightExecute,
+	"execute_kernel_upgrade":              kernelupgrade.ExecuteExecute,
+	"verify_kernel_upgrade":               kernelupgrade.VerifyExecute,
+	"verify_services_post_kernel_upgrade": kernelupgrade.VerifyServicesExecute,
+	"rollback_kernel_upgrade":             kernelupgrade.RollbackExecute,
 	// Credential rotation rollback
 	"rotate_ssh_keys":        credrotation.SSHKeyRollback,
 	"rotate_db_creds":        credrotation.DBRotateRollback,
