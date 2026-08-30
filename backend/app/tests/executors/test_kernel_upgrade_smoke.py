@@ -39,26 +39,26 @@ pytestmark = pytest.mark.skipif(
 _PHASE2_RESULT = {}  # filled by test_phase2_execute_upgrade
 
 
-@pytest.fixture(scope="module")
-def connector():
-    """Load the real AWS connector from the platform database."""
-    import asyncio
+@pytest.fixture(scope="function")
+async def connector():
+    """Load the real AWS connector from the platform database.
+
+    Uses function scope + async to share the test's event loop, avoiding
+    the asyncpg 'Future attached to a different loop' error that occurs
+    when asyncio.run() creates and closes a separate event loop for the fixture.
+    """
     from app.database import AsyncSessionLocal
     from app.models.connector import Connector
-    from app.services.secret_backend_factory import get_secret_backend
     from sqlalchemy import select
 
-    async def _load():
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                select(Connector).where(Connector.connector_type == "aws").limit(1)
-            )
-            c = result.scalar_one_or_none()
-            if not c:
-                raise RuntimeError("No AWS connector found in platform — add one before running smoke")
-            return c
-
-    return asyncio.run(_load())
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Connector).where(Connector.connector_type == "aws").limit(1)
+        )
+        c = result.scalar_one_or_none()
+        if not c:
+            raise RuntimeError("No AWS connector found in platform — add one before running smoke")
+        return c
 
 
 @pytest.mark.asyncio
