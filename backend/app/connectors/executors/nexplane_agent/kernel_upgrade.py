@@ -74,18 +74,16 @@ async def _resolve_instance_id(asset_id: str) -> tuple:
 
 
 async def _wait_for_agent(asset_id: str, timeout_s: int = _REREGISTER_TIMEOUT_S, seen_before=None) -> bool:
-    """Poll Asset.last_seen_at in the DB until the agent re-registers (fresh heartbeat) or timeout expires.
-
-    The agent updates last_seen_at when it re-registers after reboot.
+    """Poll AgentRegistration.last_seen until the agent re-registers after reboot.
 
     Args:
-        seen_before: If provided, only return True when last_seen_at is strictly newer than this
+        seen_before: If provided, only return True when last_seen is strictly newer than this
                      timestamp (guards against a pre-reboot heartbeat passing the check).
                      If None, falls back to a 120-second freshness check (backward compat for tests).
     Returns True if agent came back online, False on timeout.
     """
     from app.database import AsyncSessionLocal
-    from app.models.asset import Asset
+    from app.models.agent import AgentRegistration
     from sqlalchemy import select
     import uuid as _uuid
 
@@ -94,15 +92,17 @@ async def _wait_for_agent(asset_id: str, timeout_s: int = _REREGISTER_TIMEOUT_S,
         try:
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
-                    select(Asset).where(Asset.id == _uuid.UUID(str(asset_id)))
+                    select(AgentRegistration).where(
+                        AgentRegistration.asset_id == _uuid.UUID(str(asset_id))
+                    ).order_by(AgentRegistration.last_seen.desc()).limit(1)
                 )
-                asset = result.scalar_one_or_none()
-                if asset and getattr(asset, "last_seen_at", None):
+                reg = result.scalar_one_or_none()
+                if reg and reg.last_seen:
                     if seen_before is not None:
-                        if asset.last_seen_at > seen_before:
+                        if reg.last_seen > seen_before:
                             return True
                     else:
-                        age = datetime.now(timezone.utc) - asset.last_seen_at
+                        age = datetime.now(timezone.utc) - reg.last_seen
                         if age.total_seconds() < 120:
                             return True
         except Exception as e:
@@ -230,14 +230,18 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     pre_reboot_seen = None
     try:
         from app.database import AsyncSessionLocal
-        from app.models.asset import Asset
+        from app.models.agent import AgentRegistration
         from sqlalchemy import select
         import uuid as _uuid
         async with AsyncSessionLocal() as db:
-            res = await db.execute(select(Asset).where(Asset.id == _uuid.UUID(str(asset_id))))
-            _a = res.scalar_one_or_none()
-            if _a:
-                pre_reboot_seen = getattr(_a, "last_seen_at", None)
+            res = await db.execute(
+                select(AgentRegistration).where(
+                    AgentRegistration.asset_id == _uuid.UUID(str(asset_id))
+                ).order_by(AgentRegistration.last_seen.desc()).limit(1)
+            )
+            _reg = res.scalar_one_or_none()
+            if _reg:
+                pre_reboot_seen = _reg.last_seen
     except Exception:
         pass
 
