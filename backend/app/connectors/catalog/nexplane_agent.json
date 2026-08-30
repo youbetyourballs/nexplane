@@ -339,13 +339,27 @@
       "display_name": "Restore Drift State",
       "description": "Restore a monitored surface (ssh_config, sudoers, firewall_rules, etc.) to a previously captured baseline state. Used by system-generated shadow CRs.",
       "parameters": [
-        {"name": "resource_state_id", "type": "string", "required": true},
-        {"name": "surface_type", "type": "string", "required": false},
-        {"name": "drift_event_id", "type": "string", "required": false}
+        {
+          "name": "resource_state_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "surface_type",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "drift_event_id",
+          "type": "string",
+          "required": false
+        }
       ],
       "execution_tier": 3,
       "estimated_duration_seconds": 30,
-      "applicable_asset_types": ["server"],
+      "applicable_asset_types": [
+        "server"
+      ],
       "action_type": "change",
       "executor": "nexplane_agent.restore_drift_state",
       "generic_action": "restore_drift_state",
@@ -1872,7 +1886,7 @@
     {
       "action_id": "agent_scan_host_applications",
       "generic_action": "agent_scan_host_applications",
-      "action_type": "change",
+      "action_type": "read",
       "execution_tier": 3,
       "display_name": "Scan Host Applications",
       "description": "Discover applications running on the host (systemd services, listening ports, non-package binaries)",
@@ -2815,7 +2829,7 @@
           "required": false
         }
       ],
-      "action_type": "change",
+      "action_type": "read",
       "executor": "nexplane_agent.trivy_scan",
       "estimated_duration_seconds": 300,
       "execution_tier": 2,
@@ -2831,7 +2845,7 @@
         "ec2_instance"
       ],
       "parameters": [],
-      "action_type": "change",
+      "action_type": "read",
       "executor": "nexplane_agent.lynis_audit",
       "estimated_duration_seconds": 180,
       "execution_tier": 2,
@@ -2853,7 +2867,7 @@
           "required": false
         }
       ],
-      "action_type": "change",
+      "action_type": "read",
       "executor": "nexplane_agent.openscap_scan",
       "estimated_duration_seconds": 300,
       "execution_tier": 2,
@@ -2869,7 +2883,7 @@
         "ec2_instance"
       ],
       "parameters": [],
-      "action_type": "change",
+      "action_type": "read",
       "executor": "nexplane_agent.authorized_keys_audit",
       "estimated_duration_seconds": 60,
       "execution_tier": 2,
@@ -2885,7 +2899,7 @@
         "ec2_instance"
       ],
       "parameters": [],
-      "action_type": "change",
+      "action_type": "read",
       "executor": "nexplane_agent.sudoers_audit",
       "estimated_duration_seconds": 60,
       "execution_tier": 2,
@@ -2901,7 +2915,7 @@
         "ec2_instance"
       ],
       "parameters": [],
-      "action_type": "change",
+      "action_type": "read",
       "executor": "nexplane_agent.suid_scan",
       "estimated_duration_seconds": 60,
       "execution_tier": 2,
@@ -2917,7 +2931,7 @@
         "ec2_instance"
       ],
       "parameters": [],
-      "action_type": "change",
+      "action_type": "read",
       "executor": "nexplane_agent.ssl_cert_inspect",
       "estimated_duration_seconds": 60,
       "execution_tier": 2,
@@ -3087,7 +3101,7 @@
     {
       "action_id": "check_fleet_health",
       "generic_action": "check_fleet_health",
-      "action_type": "change",
+      "action_type": "read",
       "execution_tier": 3,
       "display_name": "Check Fleet Health",
       "description": "Dispatches a health check to each agent in the asset set; falls back to inventory metadata if agents are unreachable within 60s",
@@ -3119,7 +3133,7 @@
     {
       "action_id": "check_compliance",
       "generic_action": "check_compliance",
-      "action_type": "change",
+      "action_type": "read",
       "execution_tier": 3,
       "display_name": "Check Compliance",
       "description": "Dispatches a compliance check to each agent in the asset set for the specified framework; falls back to last inventory scan results if agents are unreachable",
