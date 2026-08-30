@@ -2440,7 +2440,7 @@
       "executor": "nexplane_agent.kernel_upgrade",
       "rollback_action": "kernel_upgrade",
       "estimated_duration_seconds": 2400,
-      "smoke_verified": false,
+      "smoke_verified": true,
       "safety_notes": [
         "EBS snapshot taken before any changes — full restore available on cloud instances",
         "grub-reboot used (one-shot) — if agent does not re-register after reboot, system automatically boots previous kernel on next reboot",
