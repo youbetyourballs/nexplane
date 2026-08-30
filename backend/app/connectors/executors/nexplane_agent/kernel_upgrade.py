@@ -73,17 +73,21 @@ async def _resolve_instance_id(asset_id: str) -> tuple:
     return None, None
 
 
-async def _wait_for_agent(asset_id: str, timeout_s: int = _REREGISTER_TIMEOUT_S) -> bool:
+async def _wait_for_agent(asset_id: str, timeout_s: int = _REREGISTER_TIMEOUT_S, seen_before=None) -> bool:
     """Poll Asset.last_seen_at in the DB until the agent re-registers (fresh heartbeat) or timeout expires.
 
     The agent updates last_seen_at when it re-registers after reboot.
+
+    Args:
+        seen_before: If provided, only return True when last_seen_at is strictly newer than this
+                     timestamp (guards against a pre-reboot heartbeat passing the check).
+                     If None, falls back to a 120-second freshness check (backward compat for tests).
     Returns True if agent came back online, False on timeout.
     """
     from app.database import AsyncSessionLocal
     from app.models.asset import Asset
     from sqlalchemy import select
     import uuid as _uuid
-    from datetime import timedelta
 
     deadline = asyncio.get_running_loop().time() + timeout_s
     while asyncio.get_running_loop().time() < deadline:
@@ -94,9 +98,13 @@ async def _wait_for_agent(asset_id: str, timeout_s: int = _REREGISTER_TIMEOUT_S)
                 )
                 asset = result.scalar_one_or_none()
                 if asset and getattr(asset, "last_seen_at", None):
-                    age = datetime.now(timezone.utc) - asset.last_seen_at
-                    if age.total_seconds() < 120:
-                        return True
+                    if seen_before is not None:
+                        if asset.last_seen_at > seen_before:
+                            return True
+                    else:
+                        age = datetime.now(timezone.utc) - asset.last_seen_at
+                        if age.total_seconds() < 120:
+                            return True
         except Exception as e:
             logger.debug("Heartbeat poll error (non-fatal): %s", e)
         await asyncio.sleep(_REREGISTER_POLL_S)
@@ -203,9 +211,36 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     )
     previous_kernel = exec_result.get("previous_kernel", pf.get("current_kernel", ""))
 
+    if exec_result.get("error") or exec_result.get("status") == "error":
+        return {
+            "status": "failed",
+            "phase": "execute_kernel_upgrade",
+            "reason": exec_result.get("error") or exec_result.get("message", "kernel install failed"),
+            "target_kernel": target_kernel,
+            "previous_kernel": pf.get("current_kernel", ""),
+            "snapshot_id": snap_result.get("snapshot_id"),
+            "asset_id": asset_id,
+        }
+
     # ------------------------------------------------------------------
     # Step 4: Trigger reboot (grub-reboot already armed as one-shot)
+    # Capture current last_seen_at as baseline so the heartbeat check
+    # requires a strictly newer timestamp (guards against pre-reboot heartbeat)
     # ------------------------------------------------------------------
+    pre_reboot_seen = None
+    try:
+        from app.database import AsyncSessionLocal
+        from app.models.asset import Asset
+        from sqlalchemy import select
+        import uuid as _uuid
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(select(Asset).where(Asset.id == _uuid.UUID(str(asset_id))))
+            _a = res.scalar_one_or_none()
+            if _a:
+                pre_reboot_seen = getattr(_a, "last_seen_at", None)
+    except Exception:
+        pass
+
     logger.info("Triggering reboot on %s", asset_id)
     await dispatch_agent_job(
         command="reboot",
@@ -218,7 +253,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     # Step 5: Wait for agent re-registration (up to 30 minutes)
     # ------------------------------------------------------------------
     logger.info("Waiting for agent re-registration on %s (up to %ds)", asset_id, _REREGISTER_TIMEOUT_S)
-    came_back = await _wait_for_agent(asset_id, timeout_s=_REREGISTER_TIMEOUT_S)
+    came_back = await _wait_for_agent(asset_id, timeout_s=_REREGISTER_TIMEOUT_S, seen_before=pre_reboot_seen)
     if not came_back:
         return {
             "status": "failed",

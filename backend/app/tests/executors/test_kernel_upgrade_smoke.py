@@ -36,6 +36,8 @@ pytestmark = pytest.mark.skipif(
     reason="Set SMOKE_KERNEL_ASSET_ID and SMOKE_TARGET_KERNEL to run live smoke test",
 )
 
+_PHASE2_RESULT = {}  # filled by test_phase2_execute_upgrade
+
 
 @pytest.fixture(scope="module")
 def connector():
@@ -56,7 +58,7 @@ def connector():
                 raise RuntimeError("No AWS connector found in platform — add one before running smoke")
             return c
 
-    return asyncio.get_event_loop().run_until_complete(_load())
+    return asyncio.run(_load())
 
 
 @pytest.mark.asyncio
@@ -88,6 +90,7 @@ async def test_phase2_execute_upgrade(connector):
     assert result["new_kernel"], "new_kernel missing from result"
     assert result["snapshot_id"], "snapshot_id missing — EBS snapshot was not taken"
     assert result.get("services_verified") is True, f"Service health check failed: {result}"
+    _PHASE2_RESULT.update(result)
     with open("/tmp/smoke_kernel_upgrade.log", "a") as f:
         f.write(f"Phase 2 PASS: upgrade completed, new_kernel={result['new_kernel']}, snap={result['snapshot_id']}, services_verified={result.get('services_verified')}\n")
 
@@ -96,12 +99,21 @@ async def test_phase2_execute_upgrade(connector):
 async def test_phase3_rollback(connector):
     """Phase 3: rollback to previous kernel via GRUB fallback."""
     from app.connectors.executors.nexplane_agent.kernel_upgrade import rollback
-    # Simulate what execute() would have recorded
+    # Use EBS restore path (primary production path) when Phase 2 captured a snapshot,
+    # otherwise fall back to GRUB-only path.
     execution_result = {
         "asset_id": ASSET_ID,
         "previous_kernel": ROLLBACK_KERNEL,
-        # No snapshot_id — forces GRUB fallback path for this test
     }
+    if _PHASE2_RESULT.get("snapshot_id"):
+        execution_result.update({
+            "snapshot_id": _PHASE2_RESULT["snapshot_id"],
+            "instance_id": _PHASE2_RESULT.get("instance_id"),
+            "root_volume_id": _PHASE2_RESULT.get("root_volume_id"),
+            "root_device_name": _PHASE2_RESULT.get("root_device_name"),
+            "availability_zone": _PHASE2_RESULT.get("availability_zone"),
+            "region": _PHASE2_RESULT.get("region"),
+        })
     result = await rollback({}, execution_result, connector)
     logger.info("Rollback result: %s", result)
     assert result["rolled_back"] is True, f"Rollback failed: {result}"

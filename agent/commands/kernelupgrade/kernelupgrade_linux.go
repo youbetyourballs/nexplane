@@ -9,9 +9,13 @@ import (
 	"bufio"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var validSvcName = regexp.MustCompile(`^[a-zA-Z0-9._@\-]+\.service$`)
+var validCtrName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -104,6 +108,9 @@ func dkmsModules() []string {
 // On Debian/Ubuntu: grub-reboot "entry"
 // On RHEL/Rocky: grub2-reboot "entry"
 func grubReboot(entry string) error {
+	if strings.HasPrefix(entry, "--") {
+		return fmt.Errorf("GRUB entry %q starts with '--' which would be interpreted as a flag", entry)
+	}
 	for _, bin := range []string{"grub-reboot", "grub2-reboot"} {
 		if path, err := exec.LookPath(bin); err == nil && path != "" {
 			out, err := exec.Command(bin, entry).CombinedOutput()
@@ -119,6 +126,9 @@ func grubReboot(entry string) error {
 // grubSetDefault makes the given entry the permanent default kernel.
 // Use ONLY for rollback — never for the new kernel (use grubReboot for that).
 func grubSetDefault(entry string) error {
+	if strings.HasPrefix(entry, "--") {
+		return fmt.Errorf("GRUB entry %q starts with '--' which would be interpreted as a flag", entry)
+	}
 	for _, bin := range []string{"grub-set-default", "grub2-set-default"} {
 		if path, err := exec.LookPath(bin); err == nil && path != "" {
 			out, err := exec.Command(bin, entry).CombinedOutput()
@@ -422,6 +432,10 @@ func verifyServicesOS(params map[string]any) (map[string]any, error) {
 
 	failedServices := []string{}
 	for _, svc := range expectedServices {
+		if !validSvcName.MatchString(svc) {
+			failedServices = append(failedServices, svc+" (invalid service name)")
+			continue
+		}
 		if err := exec.Command("systemctl", "is-active", "--quiet", svc).Run(); err != nil {
 			if restartFailed {
 				exec.Command("systemctl", "start", svc).Run()
@@ -437,6 +451,10 @@ func verifyServicesOS(params map[string]any) (map[string]any, error) {
 	failedContainers := []string{}
 	if _, err := exec.LookPath("docker"); err == nil {
 		for _, ctr := range expectedContainers {
+			if !validCtrName.MatchString(ctr) {
+				failedContainers = append(failedContainers, ctr+" (invalid container name)")
+				continue
+			}
 			out, err := exec.Command("docker", "inspect", "--format={{.State.Running}}", ctr).Output()
 			if err != nil || strings.TrimSpace(string(out)) != "true" {
 				if restartFailed {
