@@ -1,29 +1,18 @@
-﻿# Task 3 Report — K8s Node Pool Upgrade + Rollback Commands
+# Task 3 Report: Catalog Entry + Smoke Test
 
-## Status: COMPLETE
+**Status:** COMPLETE
 
-## Files Changed
-- Created: `agent/commands/k8s/node_pool.go`
-- Modified: `agent/commands/k8s/k8s_test.go` (added 2 validation tests)
+## Commits Made
 
-## Tests
-All 7 tests pass (0.679s):
-- TestExtractMinor
-- TestValidateVersionSkew
-- TestDetectClusterType
-- TestControlPlaneUpgradeValidation
-- TestNodePoolUpgradeValidation (new)
-- TestNodePoolRollbackValidation (new)
-- TestBuildNodePoolsKubeadm
+- `720908a` — feat: add kernel_upgrade catalog entry and smoke test (smoke_verified=false pending live run)
+  - `backend/app/connectors/catalog/nexplane_agent.json` — kernel_upgrade action added after agent_os_upgrade
+  - `backend/app/tests/executors/test_kernel_upgrade_smoke.py` — new file, 3 phases
 
-## Functions Exported
-- `NodePoolUpgradeExecute(params map[string]any) (map[string]any, error)` — supports kubeadm, eks, gke, aks
-- `NodePoolRollbackExecute(params map[string]any) (map[string]any, error)` — supports kubeadm (uncordon), eks, gke, aks
+## Test Summary
 
-## Fix Summary (2026-08-29)
-
-Two bugs were patched in `NodePoolRollbackExecute`: (1) The EKS rollback case called `update-nodegroup-version` then returned immediately without waiting for the nodegroup to become ACTIVE, leaving callers with no signal that rollback completed — a 30-minute poll loop identical to the upgrade path was added after the exec command; (2) The kubeadm default case issued `kubectl get nodes` with no selector, which would uncordon every node in the cluster including control-plane nodes and nodes belonging to other pools — this was replaced with the same label-first / control-plane-exclusion fallback pattern already used by the upgrade path, scoping uncordon to only the target pool's nodes. Both fixes are covered by the existing test suite; all 7 tests pass after the changes (build time 0.780s).
+Unit tests: **6 passed** (test_kernel_upgrade.py, unchanged). Smoke test: **3 skipped** when SMOKE_KERNEL_ASSET_ID not set (correct guard behavior).
 
 ## Concerns
-- The brief's `upgradeKubeadmNodes` drain logic had a slice indexing bug (`drainArgs[len([]string{...}):]`) that would panic at runtime. Fixed by passing drain args directly to `kube()` without the slice-offset trick.
-- kubeadm rollback is a no-op for version downgrade (uncordon only) — documented in the function comment and response payload.
+
+- SCP subsystem issue on this host requires `-O` flag (legacy SCP protocol). Standard `scp` fails with "subsystem request failed"; `-O` works fine.
+- `smoke_verified` remains `false` — must flip to `true` only after live smoke run completes (requires a registered AL2023 EC2 asset with nexplane agent installed and SMOKE_KERNEL_ASSET_ID set).
