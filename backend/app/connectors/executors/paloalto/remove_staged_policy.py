@@ -2,7 +2,7 @@
 # Copyright (C) 2024-2026 Nexplane, Inc.
 
 import asyncio
-import xml.etree.ElementTree as ET
+import re
 from datetime import datetime, timezone
 
 
@@ -20,8 +20,10 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not policy_name:
         return {"status": "error", "error": "policy_name required"}
 
+    if not re.match(r"^[A-Za-z0-9_\-. ]+$", policy_name):
+        return {"status": "error", "error": "policy_name contains invalid characters", "action": "remove_staged_policy", "removed": False}
+
     commit = bool(parameters.get("commit", True))
-    loop = asyncio.get_event_loop()
 
     def _remove():
         fw = _get_firewall(creds)
@@ -34,7 +36,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return True
 
     try:
-        await loop.run_in_executor(None, _remove)
+        await asyncio.get_running_loop().run_in_executor(None, _remove)
         return {
             "action": "remove_staged_policy",
             "policy_name": policy_name,

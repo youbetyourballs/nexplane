@@ -29,10 +29,18 @@ class TestAnalyzeFlows:
         c = MagicMock()
         c.credentials = {}
         result = await execute({}, ["asset-1"], c)
-        assert result.get("status") == "error" or "error" in result
+        assert result.get("status") == "error"
 
 
 class TestValidateStaged:
+    @pytest.mark.asyncio
+    async def test_validate_staged_no_credentials(self):
+        from app.connectors.executors.paloalto.validate_staged import execute
+        c = MagicMock()
+        c.credentials = {}
+        result = await execute({}, ["a"], c)
+        assert result.get("status") == "error"
+
     @pytest.mark.asyncio
     async def test_returns_false_when_blocking_rule_found(self):
         mock_fw = MagicMock()
@@ -60,6 +68,14 @@ class TestValidateStaged:
 
 
 class TestRemoveStagedPolicy:
+    @pytest.mark.asyncio
+    async def test_remove_staged_policy_no_credentials(self):
+        from app.connectors.executors.paloalto.remove_staged_policy import execute
+        c = MagicMock()
+        c.credentials = {}
+        result = await execute({}, ["a"], c)
+        assert result.get("status") == "error"
+
     @pytest.mark.asyncio
     async def test_calls_delete_on_firewall_not_fake(self):
         mock_fw = MagicMock()

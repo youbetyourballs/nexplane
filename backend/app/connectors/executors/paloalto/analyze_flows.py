@@ -16,7 +16,6 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     if not creds.get("hostname"):
         return {"status": "error", "error": "PaloAlto connector missing hostname credential"}
 
-    loop = asyncio.get_event_loop()
     query = parameters.get("log_query", "")
 
     def _query_logs():
@@ -29,7 +28,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return count
 
     try:
-        count = await loop.run_in_executor(None, _query_logs)
+        count = await asyncio.get_running_loop().run_in_executor(None, _query_logs)
         return {
             "action": "analyze_flows",
             "flows_analyzed": count,

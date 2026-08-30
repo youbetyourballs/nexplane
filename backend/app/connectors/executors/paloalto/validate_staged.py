@@ -37,7 +37,6 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
     source_zone = parameters.get("source_zone", "trust")
     destination_zone = parameters.get("destination_zone", "untrust")
-    loop = asyncio.get_event_loop()
 
     def _validate():
         fw = _get_firewall(creds)
@@ -45,7 +44,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return blocked, rule_name
 
     try:
-        blocked, blocking_rule = await loop.run_in_executor(None, _validate)
+        blocked, blocking_rule = await asyncio.get_running_loop().run_in_executor(None, _validate)
         return {
             "action": "validate_staged",
             "source_zone": source_zone,
