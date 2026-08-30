@@ -275,6 +275,12 @@ var commands = map[string]CommandFunc{
 	"upgrade_k8s_control_plane": k8s.ControlPlaneUpgradeExecute,
 	"upgrade_k8s_node_pool":     k8s.NodePoolUpgradeExecute,
 	"verify_k8s_cluster_health": k8s.ClusterHealthExecute,
+	// Kernel upgrade
+	"preflight_kernel_upgrade":            kernelupgrade.PreflightExecute,
+	"execute_kernel_upgrade":              kernelupgrade.ExecuteExecute,
+	"verify_kernel_upgrade":               kernelupgrade.VerifyExecute,
+	"verify_services_post_kernel_upgrade": kernelupgrade.VerifyServicesExecute,
+	"rollback_kernel_upgrade":             kernelupgrade.RollbackExecute,
 }
 
 var rollbacks = map[string]CommandFunc{
