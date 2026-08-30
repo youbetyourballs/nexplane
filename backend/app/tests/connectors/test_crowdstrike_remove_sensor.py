@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2024-2026 Nexplane, Inc.
+
 # SMOKE: requires live CrowdStrike tenant
 import pytest
 from unittest.mock import MagicMock, patch
@@ -52,3 +55,11 @@ async def test_no_credentials_returns_error():
     from app.connectors.executors.crowdstrike.remove_sensor import execute
     result = await execute({}, ["asset-1"], c)
     assert result.get("status") == "error"
+
+
+@pytest.mark.asyncio
+async def test_empty_hostname_returns_error():
+    from app.connectors.executors.crowdstrike.remove_sensor import execute
+    result = await execute({"hostname": ""}, ["asset-1"], _make_connector())
+    assert result.get("status") == "error"
+    assert "hostname parameter required" in result.get("error", "")

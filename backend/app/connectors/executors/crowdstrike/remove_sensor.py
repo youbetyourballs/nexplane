@@ -19,6 +19,9 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     loop = asyncio.get_running_loop()
 
     def _remove():
+        if not hostname or hostname.strip() == "":
+            return {"status": "error", "error": "hostname parameter required to scope device removal"}
+
         hosts = _get_hosts_api(creds)
 
         # Find device_ids by hostname filter
