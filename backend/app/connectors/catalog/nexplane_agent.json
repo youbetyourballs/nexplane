@@ -2409,6 +2409,48 @@
       "drift_surfaces": []
     },
     {
+      "action_id": "kernel_upgrade",
+      "generic_action": "kernel_upgrade",
+      "action_type": "change",
+      "execution_tier": 4,
+      "display_name": "Linux Kernel Upgrade",
+      "description": "Safely upgrades the Linux kernel to a specific target version. Runs preflight checks (disk space, DKMS modules, installed kernels, running services/containers as baseline), takes an EBS snapshot, installs the new kernel package, uses grub-reboot for one-shot next-boot selection (automatic fallback if anything fails), reboots, waits for agent re-registration, verifies the running kernel version, verifies application services and Docker containers are healthy on the new kernel. If services fail to recover after restart attempts, auto-rolls back. Rolls back via EBS snapshot restore (cloud) or GRUB default reset (bare-metal).",
+      "applicable_asset_types": ["server"],
+      "parameters": [
+        {
+          "name": "target_kernel",
+          "type": "string",
+          "required": true,
+          "description": "Target kernel version to install. For apt: e.g. '6.1.0-21-generic'. For dnf/yum: e.g. '6.1.0-21.21.amzn2.x86_64'."
+        },
+        {
+          "name": "skip_snapshot",
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "Skip pre-upgrade EBS snapshot. Only use on non-cloud instances or when a recent snapshot already exists."
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
+      ],
+      "executor": "nexplane_agent.kernel_upgrade",
+      "rollback_action": "kernel_upgrade",
+      "estimated_duration_seconds": 2400,
+      "smoke_verified": false,
+      "safety_notes": [
+        "EBS snapshot taken before any changes — full restore available on cloud instances",
+        "grub-reboot used (one-shot) — if agent does not re-register after reboot, system automatically boots previous kernel on next reboot",
+        "Application services (systemd) and Docker containers checked post-reboot — auto-rollback if health check fails after restart attempts",
+        "DKMS modules may require manual rebuild if the new kernel does not support them",
+        "skip_snapshot=true is not recommended on production systems"
+      ],
+      "drift_surfaces": []
+    },
+    {
       "action_id": "linux_parallel_upgrade",
       "generic_action": "linux_parallel_upgrade",
       "action_type": "change",
