@@ -21,7 +21,7 @@ async def _get_aws_creds_for_snapshot(connector, organization_id=None) -> dict:
 
 async def _real_execute(creds: dict, parameters: dict) -> dict:
     ec2 = _get_ec2_client(creds)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     volume_id = parameters.get("volume_id", "")
 
     # If no volume_id but instance_id provided, look up the root volume

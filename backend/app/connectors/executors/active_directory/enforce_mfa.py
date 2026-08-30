@@ -29,8 +29,8 @@ async def _run_ps_async(session, script: str):
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     creds = getattr(connector, "credentials", {}) or {}
-    if not creds.get("hostname") and not creds.get("winrm_hostname"):
-        return {"status": "error", "error": "AD connector missing hostname credential"}
+    if not creds.get("winrm_hostname"):
+        return {"status": "error", "error": "AD connector missing winrm_hostname credential"}
 
     username = parameters.get("username", "").strip()
     if not username:
@@ -68,8 +68,8 @@ Write-Output (ConvertTo-Json @{{success=$true; uac_before=$uacBefore; uac_after=
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     creds = getattr(connector, "credentials", {}) or {}
-    if not creds.get("hostname") and not creds.get("winrm_hostname"):
-        return {"rolled_back": False, "reason": "AD connector missing hostname credential"}
+    if not creds.get("winrm_hostname"):
+        return {"rolled_back": False, "reason": "AD connector missing winrm_hostname credential"}
 
     username = execution_result.get("username") or parameters.get("username", "")
     uac_before = execution_result.get("uac_before")

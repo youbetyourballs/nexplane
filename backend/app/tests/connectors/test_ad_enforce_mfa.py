@@ -6,7 +6,9 @@ from unittest.mock import MagicMock, patch
 def _make_connector(creds=None):
     c = MagicMock()
     c.credentials = creds or {
-        "hostname": "10.0.1.10", "username": "Administrator", "password": "Password1!",
+        "winrm_hostname": "10.0.1.10",
+        "winrm_username": "Administrator",
+        "winrm_password": "Password1!",
         "domain": "corp.example.com",
     }
     return c
