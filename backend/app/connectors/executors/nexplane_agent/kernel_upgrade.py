@@ -74,23 +74,32 @@ async def _resolve_instance_id(asset_id: str) -> tuple:
 
 
 async def _wait_for_agent(asset_id: str, timeout_s: int = _REREGISTER_TIMEOUT_S) -> bool:
-    """Poll until the asset's agent sends a heartbeat or timeout expires.
+    """Poll Asset.last_seen_at in the DB until the agent re-registers (fresh heartbeat) or timeout expires.
 
-    Uses dispatch_agent_job health_check (mirrors _poll_agent_reconnect in windows_os_upgrade).
+    The agent updates last_seen_at when it re-registers after reboot.
     Returns True if agent came back online, False on timeout.
     """
-    deadline = asyncio.get_event_loop().time() + timeout_s
-    while asyncio.get_event_loop().time() < deadline:
+    from app.database import AsyncSessionLocal
+    from app.models.asset import Asset
+    from sqlalchemy import select
+    import uuid as _uuid
+    from datetime import timedelta
+
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while asyncio.get_running_loop().time() < deadline:
         try:
-            await dispatch_agent_job(
-                command="health_check",
-                parameters={},
-                asset_ids=[asset_id],
-                timeout_seconds=20,
-            )
-            return True
-        except Exception:
-            await asyncio.sleep(_REREGISTER_POLL_S)
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(Asset).where(Asset.id == _uuid.UUID(str(asset_id)))
+                )
+                asset = result.scalar_one_or_none()
+                if asset and getattr(asset, "last_seen_at", None):
+                    age = datetime.now(timezone.utc) - asset.last_seen_at
+                    if age.total_seconds() < 120:
+                        return True
+        except Exception as e:
+            logger.debug("Heartbeat poll error (non-fatal): %s", e)
+        await asyncio.sleep(_REREGISTER_POLL_S)
     return False
 
 
