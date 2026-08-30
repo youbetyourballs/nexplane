@@ -2389,6 +2389,7 @@
         }
       ],
       "executor": "nexplane_agent.os_upgrade",
+      "rollback_action": "agent_os_upgrade",
       "estimated_duration_seconds": 3600,
       "smoke_verified": true,
       "drift_surfaces": []
@@ -2631,6 +2632,7 @@
       ],
       "action_type": "change",
       "executor": "nexplane_agent.emergency_user_lockout",
+      "rollback_action": "emergency_user_lockout",
       "generic_action": "emergency_user_lockout",
       "action_id": "emergency_user_lockout",
       "estimated_duration_seconds": 15,
@@ -2667,6 +2669,7 @@
       ],
       "action_type": "change",
       "executor": "nexplane_agent.user_suspension",
+      "rollback_action": "user_suspension",
       "generic_action": "user_suspension",
       "action_id": "user_suspension",
       "estimated_duration_seconds": 20,
@@ -2699,6 +2702,7 @@
       ],
       "action_type": "change",
       "executor": "nexplane_agent.user_scope_reduction",
+      "rollback_action": "user_scope_reduction",
       "generic_action": "user_scope_reduction",
       "action_id": "user_scope_reduction",
       "estimated_duration_seconds": 15,
@@ -3915,6 +3919,7 @@
       "estimated_duration_seconds": 3600,
       "execution_tier": 4,
       "executor": "nexplane_agent.db_major_version_upgrade",
+      "rollback_action": "db_major_version_upgrade",
       "generic_action": "db_major_version_upgrade",
       "parameters": [
         {
@@ -3969,6 +3974,7 @@
       "estimated_duration_seconds": 1800,
       "execution_tier": 4,
       "executor": "nexplane_agent.elasticsearch_upgrade",
+      "rollback_action": "elasticsearch_upgrade",
       "generic_action": "elasticsearch_upgrade",
       "parameters": [
         {
@@ -4044,6 +4050,7 @@
       "estimated_duration_seconds": 1800,
       "execution_tier": 4,
       "executor": "nexplane_agent.opensearch_upgrade",
+      "rollback_action": "opensearch_upgrade",
       "generic_action": "opensearch_upgrade",
       "parameters": [
         {
@@ -4119,6 +4126,7 @@
       "estimated_duration_seconds": 900,
       "execution_tier": 4,
       "executor": "nexplane_agent.rabbitmq_upgrade",
+      "rollback_action": "rabbitmq_upgrade",
       "generic_action": "rabbitmq_upgrade",
       "parameters": [
         {
@@ -4371,6 +4379,7 @@
       "estimated_duration_seconds": 4500,
       "execution_tier": 4,
       "executor": "nexplane_agent.windows_os_upgrade",
+      "rollback_action": "windows_os_upgrade",
       "generic_action": "windows_os_upgrade",
       "rollback_capability": "full",
       "parameters": [
@@ -4431,6 +4440,7 @@
       "estimated_duration_seconds": 600,
       "execution_tier": 4,
       "executor": "nexplane_agent.java_runtime_upgrade",
+      "rollback_action": "java_runtime_upgrade",
       "generic_action": "java_runtime_upgrade",
       "parameters": [
         {
@@ -4503,6 +4513,7 @@
       "estimated_duration_seconds": 600,
       "execution_tier": 4,
       "executor": "nexplane_agent.python_runtime_upgrade",
+      "rollback_action": "python_runtime_upgrade",
       "generic_action": "python_runtime_upgrade",
       "parameters": [
         {
