@@ -245,13 +245,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     except Exception:
         pass
 
-    logger.info("Triggering reboot on %s", asset_id)
-    await dispatch_agent_job(
-        command="reboot",
-        parameters={"graceful_delay_seconds": 60},
-        asset_ids=[asset_id],
-        timeout_seconds=90,
-    )
+    logger.info("execute_kernel_upgrade dispatched — reboot scheduled by agent (+1 min), waiting for re-registration")
 
     # ------------------------------------------------------------------
     # Step 5: Wait for agent re-registration (up to 30 minutes)

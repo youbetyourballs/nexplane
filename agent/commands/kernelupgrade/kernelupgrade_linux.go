@@ -366,12 +366,19 @@ func executeOS(params map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("grub-reboot: %w", err)
 	}
 
+	// Trigger the actual reboot now that GRUB is armed.
+	// shutdown -r +1 gives the agent 60s to flush its response before the OS goes down.
+	out, err := exec.Command("shutdown", "-r", "+1", "Nexplane kernel upgrade reboot").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("shutdown -r: %w\n%s", err, out)
+	}
+
 	return map[string]any{
-		"kernel_installed": targetKernel,
-		"previous_kernel":  previousKernel,
-		"grub_entry":       entry,
-		"reboot_armed":     true, // grub-reboot set; caller must now trigger actual reboot
-		"installed_at":     time.Now().UTC().Format(time.RFC3339),
+		"kernel_installed":  targetKernel,
+		"previous_kernel":   previousKernel,
+		"grub_entry":        entry,
+		"reboot_scheduled":  true,
+		"installed_at":      time.Now().UTC().Format(time.RFC3339),
 	}, nil
 }
 
