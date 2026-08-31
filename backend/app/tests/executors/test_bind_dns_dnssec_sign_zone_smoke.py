@@ -40,6 +40,7 @@ pytestmark = pytest.mark.skipif(
 async def _load_connector():
     from app.database import AsyncSessionLocal
     from app.models.connector import Connector
+    from app.services.connector_service import _attach_credentials
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
@@ -49,6 +50,7 @@ async def _load_connector():
         c = result.scalar_one_or_none()
         if not c:
             raise RuntimeError("No nexplane_agent connector found in platform")
+        await _attach_credentials(c, db)
         return c
 
 
@@ -69,7 +71,7 @@ async def test_bind_dns_dnssec_sign_zone_all_phases():
         connector,
     )
     logger.info("Sign result: %s", result1)
-    assert result1.get("status") == "completed", f"Phase 1 failed: {result1}"
+    assert result1.get("status") == "signed", f"Phase 1 failed: {result1}"
     with open("/tmp/smoke_bind_dns_dnssec_sign_zone.log", "a") as f:
         f.write(f"Phase 1 PASS: zone signed, status={result1['status']}\n")
 

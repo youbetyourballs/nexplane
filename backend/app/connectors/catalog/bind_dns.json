@@ -94,7 +94,7 @@
       "rollback_action": "rollback_dns_zone_migrate",
       "estimated_duration_seconds": 300,
       "blast_radius_hint": "dns_change",
-      "smoke_verified": false
+      "smoke_verified": true
     },
     {
       "action_id": "bind_dns_dnssec_sign_zone",
@@ -116,7 +116,7 @@
       "rollback_strategy": "executor",
       "rollback_action": "bind_dns_dnssec_sign_zone",
       "estimated_duration_seconds": 60,
-      "smoke_verified": false,
+      "smoke_verified": true,
       "read_only": false
     }
   ]

@@ -40,7 +40,7 @@ async def _run(shell_cmd: str, asset_ids: list, timeout_seconds: int = 120) -> d
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job as _dispatch
     return await _dispatch(
         command="run_command",
-        parameters={"command": shell_cmd, "timeout": float(timeout_seconds)},
+        parameters={"command": shell_cmd, "timeout": int(timeout_seconds)},
         asset_ids=asset_ids,
         timeout_seconds=timeout_seconds + 30,
     )
@@ -80,11 +80,12 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
     zsk_name = re.sub(r"[^A-Za-z0-9._+\-]", "", raw_zsk_name)
     logger.info("bind_dns_dnssec_sign_zone: ZSK generated: %s", zsk_name)
 
-    # 4. Sign the zone
+    # 4. Sign the zone — use -K to auto-discover keys; append public keys to zone so DNSKEY RRs exist at apex
+    append_keys_cmd = f"cat {key_dir}/{ksk_name}.key {key_dir}/{zsk_name}.key >> {zone_file}"
+    _check(await _run(append_keys_cmd, asset_ids), "append DNSKEY to zone")
     sign_cmd = (
-        f"cd {key_dir} && dnssec-signzone -A -3 $(head -c 500 /dev/urandom | sha1sum | cut -b 1-16) "
-        f"-N INCREMENT -o {zone} -t -d {key_dir} {zone_file} "
-        f"{key_dir}/{ksk_name}.key {key_dir}/{zsk_name}.key"
+        f"dnssec-signzone -A -3 $(head -c 500 /dev/urandom | sha1sum | cut -b 1-16) "
+        f"-N INCREMENT -o {zone} -t -K {key_dir} {zone_file}"
     )
     r = await _run(sign_cmd, asset_ids, timeout_seconds=300)
     _check(r, "dnssec-signzone")
