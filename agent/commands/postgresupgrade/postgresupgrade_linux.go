@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 func str(params map[string]any, key string) string {
@@ -160,6 +161,8 @@ func executePG(params map[string]any) (map[string]any, error) {
 	// Only start the target cluster. Do NOT call `systemctl start postgresql` which would
 	// also start the old cluster (making pgVersion() report the old version).
 	runCmd("systemctl", "start", fmt.Sprintf("postgresql@%s-main", targetVersion))
+	// Give the cluster a moment to reach "online" status before querying the version.
+	time.Sleep(5 * time.Second)
 
 	newVersion, _ := pgVersion()
 	return map[string]any{
