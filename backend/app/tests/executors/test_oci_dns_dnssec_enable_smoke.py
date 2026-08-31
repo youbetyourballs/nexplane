@@ -67,7 +67,7 @@ async def test_oci_dns_dnssec_enable_all_phases():
         connector,
     )
     logger.info("Enable result: %s", result1)
-    assert result1.get("status") == "completed", f"Phase 1 failed: {result1}"
+    assert result1.get("status") == "enabled", f"Phase 1 failed: {result1}"
     with open("/tmp/smoke_oci_dns_dnssec_enable.log", "a") as f:
         f.write(f"Phase 1 PASS: DNSSEC enabled for {ZONE_NAME}\n")
 
@@ -75,7 +75,7 @@ async def test_oci_dns_dnssec_enable_all_phases():
     # Phase 2: Rollback (disable DNSSEC)
     # ------------------------------------------------------------------
     logger.info("=== Phase 2: Rollback (disable DNSSEC) ===")
-    result2 = await rollback({}, result1, connector)
+    result2 = await rollback({"zone_id": ZONE_ID}, result1, connector)
     logger.info("Rollback result: %s", result2)
     assert result2["rolled_back"] is True, f"Phase 2 failed: {result2}"
     with open("/tmp/smoke_oci_dns_dnssec_enable.log", "a") as f:
