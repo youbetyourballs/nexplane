@@ -103,7 +103,7 @@
         "DNS changes propagate globally and may affect live traffic.",
         "Previous record value is snapshotted for full rollback."
       ],
-      "smoke_verified": false
+      "smoke_verified": true
     }
   ]
 }
