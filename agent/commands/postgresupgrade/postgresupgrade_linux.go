@@ -38,7 +38,7 @@ func pgVersion() (string, error) {
 		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 		for _, line := range lines {
 			fields := strings.Fields(line)
-			if len(fields) >= 3 && fields[2] == "online" {
+			if len(fields) >= 4 && fields[3] == "online" {
 				return fields[0], nil
 			}
 		}
