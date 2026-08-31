@@ -5665,7 +5665,7 @@
       "rollback_capability": "best_effort",
       "blast_radius_hint": "database_downtime",
       "drift_surfaces": [],
-      "smoke_verified": false
+      "smoke_verified": true
     }
   ]
 }

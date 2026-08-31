@@ -177,7 +177,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
 
     # Strategy 2: pg_upgrade rollback (bare-metal) — rollback.sh if link mode, else restart old cluster
     logger.info("db_upgrade_postgres_in_place rollback: running rollback_postgres_upgrade on agent")
-    target_version = execute_result.get("target_version", "") or ""
+    target_version = execution_result.get("target_version", "") or ""
     rollback_result = await dispatch_agent_job(
         "rollback_postgres_upgrade",
         {"previous_version": previous_version, "target_version": target_version},
