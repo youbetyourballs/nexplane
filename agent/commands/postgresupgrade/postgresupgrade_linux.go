@@ -134,13 +134,25 @@ func executePG(params map[string]any) (map[string]any, error) {
 
 	// pg_upgrade is not in the postgres user's PATH; use the full path from newBinDir.
 	// Run from /tmp so the postgres user has write access (needed for pg_upgrade log files).
+	// On Debian/Ubuntu, postgresql.conf lives in /etc/postgresql/{version}/main/, not in the
+	// data directory. Pass -o/-O so pg_upgrade's internal pg_ctl can find the config files.
 	pgUpgradeBin := newBinDir + "/pg_upgrade"
-	out, err := runCmdDir("/tmp", "sudo", "-u", "postgres", pgUpgradeBin,
+	oldConf := fmt.Sprintf("/etc/postgresql/%s/main/postgresql.conf", currentVersion)
+	newConf := fmt.Sprintf("/etc/postgresql/%s/main/postgresql.conf", targetVersion)
+	pgUpgradeArgs := []string{"-u", "postgres", pgUpgradeBin,
 		"-b", oldBinDir,
 		"-B", newBinDir,
 		"-d", oldDataDir,
 		"-D", newDataDir,
-	)
+	}
+	// Only pass config file options if the Debian-style config directory exists.
+	if _, err2 := exec.Command("test", "-f", oldConf).CombinedOutput(); err2 == nil {
+		pgUpgradeArgs = append(pgUpgradeArgs,
+			"-o", fmt.Sprintf("-c config_file=%s", oldConf),
+			"-O", fmt.Sprintf("-c config_file=%s", newConf),
+		)
+	}
+	out, err := runCmdDir("/tmp", "sudo", append([]string{}, pgUpgradeArgs...)...)
 	if err != nil {
 		return nil, fmt.Errorf("pg_upgrade failed: %v\nOutput: %s", err, out)
 	}
