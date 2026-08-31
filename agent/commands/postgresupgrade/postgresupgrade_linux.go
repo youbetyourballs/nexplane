@@ -200,6 +200,7 @@ func verifyPG(params map[string]any) (map[string]any, error) {
 
 func rollbackPG(params map[string]any) (map[string]any, error) {
 	previousVersion := str(params, "previous_version")
+	targetVersion := str(params, "target_version")
 	if previousVersion == "" {
 		return map[string]any{
 			"rolled_back": false,
@@ -207,21 +208,42 @@ func rollbackPG(params map[string]any) (map[string]any, error) {
 		}, nil
 	}
 
-	out, err := runCmd("sudo", "-u", "postgres", "bash", "./rollback.sh")
-	if err != nil {
-		out, err = runCmd("sudo", "-u", "postgres", "bash",
-			fmt.Sprintf("/var/lib/postgresql/rollback.sh"))
-		if err != nil {
-			return map[string]any{
-				"rolled_back": false,
-				"reason":      fmt.Sprintf("rollback.sh not found or failed: %v, output: %s", err, out),
-			}, nil
+	// First try pg_upgrade's rollback.sh (only created in hard-link mode).
+	for _, script := range []string{"/var/lib/postgresql/rollback.sh", "/tmp/rollback.sh"} {
+		if _, testErr := exec.Command("test", "-f", script).CombinedOutput(); testErr == nil {
+			out, err := runCmd("sudo", "-u", "postgres", "bash", script)
+			if err == nil {
+				if targetVersion != "" {
+					runCmd("systemctl", "stop", fmt.Sprintf("postgresql@%s-main", targetVersion))
+				}
+				runCmd("systemctl", "start", fmt.Sprintf("postgresql@%s-main", previousVersion))
+				return map[string]any{
+					"rolled_back":      true,
+					"previous_version": previousVersion,
+					"method":           "rollback_sh",
+					"rollback_output":  out,
+				}, nil
+			}
 		}
 	}
 
+	// No rollback.sh (copy mode): pg_upgrade left old data dir intact, so just switch clusters.
+	if targetVersion != "" {
+		runCmd("systemctl", "stop", fmt.Sprintf("postgresql@%s-main", targetVersion))
+		runCmd("systemctl", "stop", "postgresql")
+	}
+	_, startErr := runCmd("systemctl", "start", fmt.Sprintf("postgresql@%s-main", previousVersion))
+	if startErr != nil {
+		return map[string]any{
+			"rolled_back": false,
+			"reason":      fmt.Sprintf("failed to restart old cluster: %v", startErr),
+		}, nil
+	}
+	restoredVersion, _ := pgVersion()
 	return map[string]any{
-		"rolled_back":      true,
-		"previous_version": previousVersion,
-		"rollback_output":  out,
+		"rolled_back":       true,
+		"previous_version":  previousVersion,
+		"restored_version":  restoredVersion,
+		"method":            "restart_old_cluster",
 	}, nil
 }
