@@ -21,22 +21,39 @@ func runCmd(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+func runCmdDir(dir, name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
 func pgVersion() (string, error) {
-	out, err := exec.Command("psql", "--version").Output()
-	if err == nil {
-		parts := strings.Fields(strings.TrimSpace(string(out)))
-		if len(parts) >= 3 {
-			return parts[2], nil
-		}
-	}
-	out, err = exec.Command("pg_lsclusters", "--no-header").Output()
+	// Prefer pg_lsclusters: returns the OLDEST running cluster (the one to upgrade from).
+	// On systems with multiple PG versions installed, psql --version returns the latest,
+	// which is wrong when the running cluster is an older version.
+	out, err := exec.Command("pg_lsclusters", "--no-header").Output()
 	if err == nil {
 		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		if len(lines) > 0 {
+		for _, line := range lines {
+			fields := strings.Fields(line)
+			if len(fields) >= 3 && fields[2] == "online" {
+				return fields[0], nil
+			}
+		}
+		// Fall back to first line if no online cluster
+		if len(lines) > 0 && lines[0] != "" {
 			fields := strings.Fields(lines[0])
 			if len(fields) > 0 {
 				return fields[0], nil
 			}
+		}
+	}
+	out, err = exec.Command("psql", "--version").Output()
+	if err == nil {
+		parts := strings.Fields(strings.TrimSpace(string(out)))
+		if len(parts) >= 3 {
+			return parts[2], nil
 		}
 	}
 	return "unknown", nil
@@ -51,7 +68,15 @@ func preflightPG(params map[string]any) (map[string]any, error) {
 
 	pgUpgradePath, err := exec.LookPath("pg_upgrade")
 	if err != nil {
-		pgUpgradePath = ""
+		// pg_upgrade lives under /usr/lib/postgresql/{version}/bin/ on Debian/Ubuntu.
+		// Check the common system location directly.
+		for _, v := range []string{targetVersion, currentVersion} {
+			candidate := fmt.Sprintf("/usr/lib/postgresql/%s/bin/pg_upgrade", v)
+			if _, statErr := exec.Command("test", "-f", candidate).CombinedOutput(); statErr == nil {
+				pgUpgradePath = candidate
+				break
+			}
+		}
 	}
 
 	oldDataDir := str(params, "old_data_dir")
@@ -107,7 +132,10 @@ func executePG(params map[string]any) (map[string]any, error) {
 	runCmd("systemctl", "stop", fmt.Sprintf("postgresql@%s-main", currentVersion))
 	runCmd("systemctl", "stop", "postgresql")
 
-	out, err := runCmd("sudo", "-u", "postgres", "pg_upgrade",
+	// pg_upgrade is not in the postgres user's PATH; use the full path from newBinDir.
+	// Run from /tmp so the postgres user has write access (needed for pg_upgrade log files).
+	pgUpgradeBin := newBinDir + "/pg_upgrade"
+	out, err := runCmdDir("/tmp", "sudo", "-u", "postgres", pgUpgradeBin,
 		"-b", oldBinDir,
 		"-B", newBinDir,
 		"-d", oldDataDir,
