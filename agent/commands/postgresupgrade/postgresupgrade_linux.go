@@ -152,13 +152,20 @@ func executePG(params map[string]any) (map[string]any, error) {
 			"-O", fmt.Sprintf("-c config_file=%s", newConf),
 		)
 	}
+	// -k uses hard links instead of copying data — faster and creates rollback.sh in CWD (/tmp).
+	pgUpgradeArgs = append(pgUpgradeArgs, "-k")
 	out, err := runCmdDir("/tmp", "sudo", append([]string{}, pgUpgradeArgs...)...)
 	if err != nil {
 		return nil, fmt.Errorf("pg_upgrade failed: %v\nOutput: %s", err, out)
 	}
+	// Move rollback.sh (created in /tmp by pg_upgrade -k) to a stable location the rollback
+	// executor can find, owned by postgres so it can be invoked as that user.
+	runCmd("mv", "/tmp/rollback.sh", "/var/lib/postgresql/rollback.sh")
+	runCmd("chown", "postgres:postgres", "/var/lib/postgresql/rollback.sh")
 
+	// Only start the target cluster. Do NOT call `systemctl start postgresql` which would
+	// also start the old cluster (making pgVersion() report the old version).
 	runCmd("systemctl", "start", fmt.Sprintf("postgresql@%s-main", targetVersion))
-	runCmd("systemctl", "start", "postgresql")
 
 	newVersion, _ := pgVersion()
 	return map[string]any{
