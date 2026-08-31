@@ -3884,11 +3884,11 @@
       "applicable_asset_types": [
         "server"
       ],
-      "action_type": "change",
+      "action_type": "discovery",
       "executor": "aws.backup_mgn_replication",
       "generic_action": "backup_mgn_replication",
       "action_id": "backup_mgn_replication",
-      "smoke_verified": false,
+      "smoke_verified": true,
       "experimental": true,
       "drift_surfaces": []
     },

@@ -316,7 +316,8 @@
         {"name": "tier", "type": "string", "required": false, "default": "STANDARD", "description": "SCC tier: STANDARD or PREMIUM"}
       ],
       "executor": "gcp.enable_security_command_center",
-      "rollback_action": null,
+      "rollback_action": "enable_security_command_center",
+      "rollback_capability": "irreversible",
       "estimated_duration_seconds": 30,
       "blast_radius_hint": "org_policy",
       "smoke_verified": false

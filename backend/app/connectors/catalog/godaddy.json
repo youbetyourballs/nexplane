@@ -23,7 +23,7 @@
     {
       "action_id": "discover_dns_records",
       "generic_action": "discover_dns_records",
-      "action_type": "ingest",
+      "action_type": "discovery",
       "execution_tier": 1,
       "display_name": "Discover DNS Records",
       "description": "Fetch DNS records for a GoDaddy-managed domain.",
@@ -52,7 +52,7 @@
       "rollback_action": null,
       "estimated_duration_seconds": 5,
       "blast_radius_hint": "read_only",
-      "smoke_verified": false
+      "smoke_verified": true
     },
     {
       "action_id": "update_dns_record",
