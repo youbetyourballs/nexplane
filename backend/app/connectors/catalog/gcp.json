@@ -333,7 +333,8 @@
       "parameters": [],
       "executor": "gcp.gcp_account_baseline_monitoring",
       "rollback_strategy": "executor",
-      "estimated_duration_seconds": 300
+      "estimated_duration_seconds": 300,
+      "smoke_verified": true
     },
     {
       "action_id": "gcp_cloud_dns_dnssec_enable",
