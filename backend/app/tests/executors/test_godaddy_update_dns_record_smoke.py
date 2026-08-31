@@ -47,6 +47,8 @@ async def _load_connector():
         c = result.scalar_one_or_none()
         if not c:
             raise RuntimeError("No GoDaddy connector found in platform — add one before running smoke")
+        from app.services.connector_service import _attach_credentials
+        await _attach_credentials(c, db)
         return c
 
 
