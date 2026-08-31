@@ -15,11 +15,16 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
 
 async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     """Restore original NS records and TTL from backup captured during dns_zone_migrate."""
-    creds = connector.credentials if hasattr(connector, "credentials") else {}
-    zone = execution_result.get("zone")
+    creds = getattr(connector, "credentials", {})
+    rollback_data = execution_result.get("rollback_data", {})
+    # zone_name lives inside rollback_data (from dns_zone_migrate) or top-level
+    zone = (
+        execution_result.get("zone")
+        or rollback_data.get("zone_name")
+        or execution_result.get("summary", {}).get("zone_name")
+    )
     server = execution_result.get("server") or creds.get("server")
     port = execution_result.get("port") or creds.get("port", 53)
-    rollback_data = execution_result.get("rollback_data", {})
 
     if not zone or not server or not rollback_data:
         return {

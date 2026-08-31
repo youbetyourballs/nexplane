@@ -4,15 +4,14 @@
 """
 Live smoke test for bind_dns/dns_zone_migrate executor + rollback_dns_zone_migrate rollback.
 
-Requires: Same BIND EC2 used for bind_dns_dnssec_sign_zone smoke (Task 3).
+Requires: BIND9 EC2 with TSIG key configured, and a bind_dns connector in the platform
+pointing to the BIND9 server.
 
 Set env vars:
-  SMOKE_BIND_ASSET_ID=<asset-uuid>
-  SMOKE_BIND_ZONE=example.com
-  SMOKE_BIND_SERVER=<bind-server-ip>  (optional — uses TSIG from connector creds)
+  SMOKE_BIND_ZONE=smoke.nexplane.internal
 
 Run:
-  SMOKE_BIND_ASSET_ID=... SMOKE_BIND_ZONE=example.com SMOKE_BIND_SERVER=... \
+  SMOKE_BIND_ZONE=smoke.nexplane.internal \
   pytest app/tests/executors/test_bind_dns_zone_migrate_smoke.py -v -s
 
 ALL_DONE marker written to /tmp/smoke_dns_zone_migrate.log when complete.
@@ -26,28 +25,28 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-ASSET_ID = os.environ.get("SMOKE_BIND_ASSET_ID", "")
 ZONE = os.environ.get("SMOKE_BIND_ZONE", "")
-SERVER = os.environ.get("SMOKE_BIND_SERVER", "127.0.0.1")
 
 pytestmark = pytest.mark.skipif(
-    not ASSET_ID or not ZONE,
-    reason="Set SMOKE_BIND_ASSET_ID and SMOKE_BIND_ZONE to run live smoke test",
+    not ZONE,
+    reason="Set SMOKE_BIND_ZONE to run live smoke test",
 )
 
 
 async def _load_connector():
     from app.database import AsyncSessionLocal
     from app.models.connector import Connector
+    from app.services.connector_service import _attach_credentials
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(Connector).where(Connector.connector_type == "nexplane_agent").limit(1)
+            select(Connector).where(Connector.connector_type == "bind_dns").limit(1)
         )
         c = result.scalar_one_or_none()
         if not c:
-            raise RuntimeError("No nexplane_agent connector found in platform")
+            raise RuntimeError("No bind_dns connector found in platform")
+        await _attach_credentials(c, db)
         return c
 
 
@@ -64,18 +63,19 @@ async def test_dns_zone_migrate_all_phases():
     logger.info("=== Phase 1: Lower TTL + switch NS ===")
     result1 = await execute(
         {
-            "zone": ZONE,
-            "new_ns": ["ns1.smoke-target.example.", "ns2.smoke-target.example."],
-            "new_ttl": 60,
-            "server": SERVER,
+            "source_zone": ZONE,
+            "target_nameservers": ["ns1.smoke-target.example.", "ns2.smoke-target.example."],
+            "ttl_lower_value": 60,
+            "propagation_wait_seconds": 0,
+            "verify_resolvers": [],
         },
-        [ASSET_ID],
+        [],
         connector,
     )
     logger.info("Migrate result: %s", result1)
-    assert result1.get("status") == "completed", f"Phase 1 failed: {result1}"
+    assert result1.get("rollback_data"), f"Phase 1 failed — no rollback_data: {result1}"
     with open("/tmp/smoke_dns_zone_migrate.log", "a") as f:
-        f.write(f"Phase 1 PASS: zone migrated, status={result1['status']}\n")
+        f.write(f"Phase 1 PASS: zone migrated\n")
 
     # ------------------------------------------------------------------
     # Phase 2: Rollback (restore original NS + TTL)

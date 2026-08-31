@@ -3,8 +3,8 @@
 
 """BIND DNS DNSSEC sign zone executor.
 
-Signs a BIND zone using dnssec-keygen + dnssec-signzone via nexplane_agent.
-Steps run as agent jobs on the DNS server over SSH:
+Signs a BIND zone using dnssec-keygen + dnssec-signzone via nexplane_agent run_command.
+Steps run on the DNS server via agent job dispatch:
   1. Create key directory if absent
   2. Generate KSK (key signing key) with dnssec-keygen -f KSK
   3. Generate ZSK (zone signing key) with dnssec-keygen
@@ -36,15 +36,19 @@ def _validate_params(zone, zone_file_path, key_directory, named_conf_path):
             raise ValueError(f"{name} contains invalid characters: {path!r}")
 
 
-async def dispatch_agent_job(command: str, connector, timeout_seconds: int = 120) -> dict:
+async def _run(shell_cmd: str, asset_ids: list, timeout_seconds: int = 120) -> dict:
     from app.connectors.executors.nexplane_agent._dispatch import dispatch_agent_job as _dispatch
     return await _dispatch(
-        command=command,
-        parameters={},
-        asset_ids=[],
-        connector=connector,
-        timeout_seconds=timeout_seconds,
+        command="run_command",
+        parameters={"command": shell_cmd, "timeout": float(timeout_seconds)},
+        asset_ids=asset_ids,
+        timeout_seconds=timeout_seconds + 30,
     )
+
+
+def _check(r: dict, label: str):
+    if r.get("exit_code", 0) != 0:
+        raise RuntimeError(f"{label} failed (exit_code={r.get('exit_code')}): {r.get('output', '')}")
 
 
 async def execute(parameters: dict, asset_ids: list, connector) -> dict:
@@ -60,24 +64,18 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         return {"status": "dry_run", "zone": zone}
 
     # 1. Create key directory
-    r = await dispatch_agent_job(f"mkdir -p {key_dir} && chmod 700 {key_dir}", connector)
-    if r.get("status") != "success":
-        raise RuntimeError(f"Failed to create key directory: {r.get('output')}")
+    _check(await _run(f"mkdir -p {key_dir} && chmod 700 {key_dir}", asset_ids), "mkdir key_dir")
 
     # 2. Generate KSK
-    ksk_cmd = f"cd {key_dir} && dnssec-keygen -a ECDSAP256SHA256 -n ZONE -f KSK {zone}"
-    r = await dispatch_agent_job(ksk_cmd, connector)
-    if r.get("status") != "success":
-        raise RuntimeError(f"dnssec-keygen KSK failed: {r.get('output')}")
+    r = await _run(f"cd {key_dir} && dnssec-keygen -a ECDSAP256SHA256 -n ZONE -f KSK {zone}", asset_ids)
+    _check(r, "dnssec-keygen KSK")
     raw_ksk_name = r.get("output", "").strip().splitlines()[-1].strip()
     ksk_name = re.sub(r"[^A-Za-z0-9._+\-]", "", raw_ksk_name)
     logger.info("bind_dns_dnssec_sign_zone: KSK generated: %s", ksk_name)
 
     # 3. Generate ZSK
-    zsk_cmd = f"cd {key_dir} && dnssec-keygen -a ECDSAP256SHA256 -n ZONE {zone}"
-    r = await dispatch_agent_job(zsk_cmd, connector)
-    if r.get("status") != "success":
-        raise RuntimeError(f"dnssec-keygen ZSK failed: {r.get('output')}")
+    r = await _run(f"cd {key_dir} && dnssec-keygen -a ECDSAP256SHA256 -n ZONE {zone}", asset_ids)
+    _check(r, "dnssec-keygen ZSK")
     raw_zsk_name = r.get("output", "").strip().splitlines()[-1].strip()
     zsk_name = re.sub(r"[^A-Za-z0-9._+\-]", "", raw_zsk_name)
     logger.info("bind_dns_dnssec_sign_zone: ZSK generated: %s", zsk_name)
@@ -88,34 +86,24 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         f"-N INCREMENT -o {zone} -t -d {key_dir} {zone_file} "
         f"{key_dir}/{ksk_name}.key {key_dir}/{zsk_name}.key"
     )
-    r = await dispatch_agent_job(sign_cmd, connector, timeout_seconds=300)
-    if r.get("status") != "success":
-        raise RuntimeError(f"dnssec-signzone failed: {r.get('output')}")
+    r = await _run(sign_cmd, asset_ids, timeout_seconds=300)
+    _check(r, "dnssec-signzone")
     sign_output = r.get("output", "")
-
-    # Extract DS records from signzone output
     ds_records = [line.strip() for line in sign_output.splitlines() if " DS " in line]
 
     # 5. Update named.conf zone file pointer to signed file
-    sed_cmd = (
-        f"sed -i 's|file \"{zone_file}\"|file \"{signed_zone_file}\"|g' {named_conf}"
-    )
-    r = await dispatch_agent_job(sed_cmd, connector)
-    if r.get("status") != "success":
-        raise RuntimeError(f"Failed to update named.conf: {r.get('output')}")
+    sed_cmd = f"sed -i 's|file \"{zone_file}\"|file \"{signed_zone_file}\"|g' {named_conf}"
+    _check(await _run(sed_cmd, asset_ids), "update named.conf")
 
     # 6. Validate config
-    r = await dispatch_agent_job("named-checkconf", connector)
-    if r.get("status") != "success":
-        # Revert named.conf before raising
+    r = await _run("named-checkconf", asset_ids)
+    if r.get("exit_code", 0) != 0:
         revert_cmd = f"sed -i 's|file \"{signed_zone_file}\"|file \"{zone_file}\"|g' {named_conf}"
-        await dispatch_agent_job(revert_cmd, connector)
-        raise RuntimeError(f"named-checkconf failed after signing: {r.get('output')}")
+        await _run(revert_cmd, asset_ids)
+        raise RuntimeError(f"named-checkconf failed: {r.get('output', '')}")
 
     # 7. Reload named
-    r = await dispatch_agent_job("rndc reload", connector)
-    if r.get("status") != "success":
-        raise RuntimeError(f"rndc reload failed: {r.get('output')}")
+    _check(await _run("rndc reload", asset_ids), "rndc reload")
     logger.info("bind_dns_dnssec_sign_zone: zone %s signed and reloaded", zone)
 
     return {
@@ -129,6 +117,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         "ds_records": ds_records,
         "named_conf_path": named_conf,
         "signed_at": datetime.now(timezone.utc).isoformat(),
+        "_asset_ids": list(asset_ids),
     }
 
 
@@ -137,16 +126,15 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     zone_file = execution_result.get("zone_file_path", parameters.get("zone_file_path", ""))
     signed_zone_file = execution_result.get("signed_zone_file", zone_file + ".signed")
     named_conf = execution_result.get("named_conf_path", parameters.get("named_conf_path", "/etc/named.conf"))
+    asset_ids = execution_result.get("_asset_ids", [])
 
-    # Revert named.conf to original unsigned zone file
     revert_cmd = f"sed -i 's|file \"{signed_zone_file}\"|file \"{zone_file}\"|g' {named_conf}"
-    r = await dispatch_agent_job(revert_cmd, connector)
-    if r.get("status") != "success":
+    r = await _run(revert_cmd, asset_ids)
+    if r.get("exit_code", 0) != 0:
         logger.error("bind_dns_dnssec_sign_zone rollback: named.conf revert failed: %s", r.get("output"))
 
-    # Validate and reload
-    await dispatch_agent_job("named-checkconf", connector)
-    r = await dispatch_agent_job("rndc reload", connector)
+    await _run("named-checkconf", asset_ids)
+    await _run("rndc reload", asset_ids)
     logger.info("bind_dns_dnssec_sign_zone rollback: zone %s reverted to unsigned", zone)
 
     return {
