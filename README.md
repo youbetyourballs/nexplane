@@ -1,5 +1,7 @@
 # Nexplane — The control plane for infrastructure change
 
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
 Eliminate uncertainty before every infrastructure change.
 
 ---
@@ -73,13 +75,13 @@ The planning engine always selects the lowest available tier for each step given
 ## Key capabilities
 
 - **Asset inventory** — 70+ connectors across cloud, identity, network, endpoints, secrets, and observability
-- **Asset graph** — dependency relationships, blast radius traversal, owner lookup *(coming soon)*
-- **Impact simulation** — "what breaks if I change this?" before you execute *(coming soon)*
+- **Asset graph** — dependency relationships, blast radius traversal, owner lookup
+- **Impact simulation** — "what breaks if I change this?" before you execute
 - **AI-assisted planning** — Claude generates execution steps, prechecks, and rollback plans
 - **Approval gates** — role-based routing with human review; LLMs can propose but humans approve
 - **Rollback center** — every change ships with a rollback plan; execute rollback in one step
-- **Infrastructure memory** — "why does this exist?" provenance tracking for every asset and change *(coming soon)*
-- **Recommendation engine** — "what should I fix next?" prioritized suggestions *(coming soon)*
+- **Infrastructure memory** — "why does this exist?" provenance tracking for every asset and change
+- **Recommendation engine** — "what should I fix next?" prioritized suggestions
 - **MCP / LLM access** — full change lifecycle exposed via MCP for Claude and other LLM agents
 - **Full audit trail** — every change request, approval, execution, and rollback is permanently recorded
 
@@ -205,6 +207,19 @@ sudo docker compose -f /opt/nexplane/docker-compose.ami.yml up -d
 | Deployment | Docker Compose; Helm charts for Kubernetes |
 
 The agent uses outbound long-poll — no inbound ports required on managed hosts. This eliminates inbound attack surface on managed infrastructure and removes the need for firewall rule changes on the managed side.
+
+---
+
+## Contributing
+
+Nexplane is open source under AGPL-3.0. Contributions are welcome.
+
+- **Bug reports and feature requests** — open an issue on [GitHub](https://github.com/youbetyourballs/nexplane/issues)
+- **Pull requests** — fork the repo, make your change, open a PR against `master`
+- **New connectors** — see the connector catalog in `backend/app/connectors/catalog/` for the JSON schema; executors live in `backend/app/connectors/executors/`
+- **Questions** — [hello@nexplane.ai](mailto:hello@nexplane.ai)
+
+External contributors will be asked to sign a CLA before we merge.
 
 ---
 
