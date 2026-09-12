@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 *.egg-info/
 .env
+docker-compose.override.yml
 node_modules/
 dist/
 # One-off debug/provisioning scripts (not part of the codebase)

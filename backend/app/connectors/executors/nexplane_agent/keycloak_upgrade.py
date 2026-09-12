@@ -9,8 +9,15 @@ Supports Docker-based and native keycloak installs (auto-detected).
 ROLLBACK_CAPABILITY = "full"
 """
 import logging
+import secrets
+import string
 
 logger = logging.getLogger(__name__)
+
+
+def _random_password(length: int = 24) -> str:
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 ROLLBACK_CAPABILITY = "full"
 
@@ -80,6 +87,7 @@ async def execute(parameters: dict, asset_ids: list, connector) -> dict:
         }
 
     backup_path = "/tmp/nexplane-keycloak-backup.tar.gz"
+    kc_admin_password = _random_password()
 
     if in_docker:
         # Backup keycloak data from the running container
@@ -98,7 +106,7 @@ docker pull {target_image} 2>&1 || {{ echo PULL_FAILED; exit 0; }}
 docker run -d --name keycloak \\
   -p 8080:8080 \\
   -e KEYCLOAK_ADMIN=admin \\
-  -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \\
+  -e KEYCLOAK_ADMIN_PASSWORD={kc_admin_password} \\
   -e KC_HTTP_ENABLED=true \\
   -e KC_HOSTNAME_STRICT=false \\
   {target_image} \\
@@ -126,7 +134,7 @@ echo UPGRADE_DONE
         # Count realms via admin API (keycloak 24+ uses /realms path under /admin)
         realm_result = await _run(
             "curl -sf -X POST http://localhost:8080/realms/master/protocol/openid-connect/token "
-            "-d 'client_id=admin-cli&username=admin&password=SmokeAdmin1234!&grant_type=password' "
+            f"-d 'client_id=admin-cli&username=admin&password={kc_admin_password}&grant_type=password' "
             "2>/dev/null | python3 -c \"import sys,json; print(json.load(sys.stdin).get('access_token',''))\" "
             "2>/dev/null || echo ''",
             asset_id, timeout=30,
@@ -187,6 +195,7 @@ sleep 15; echo UPGRADE_DONE
             "realm_count": realm_count,
         },
         "asset_id": asset_id,
+        "kc_admin_password": kc_admin_password,
     }
 
 
@@ -195,6 +204,7 @@ async def rollback(parameters: dict, execution_result: dict, connector) -> dict:
     backup_path = execution_result.get("backup_path", "/tmp/nexplane-keycloak-backup.tar.gz")
     source_version = execution_result.get("source_version", "")
     in_docker = execution_result.get("in_docker", False)
+    kc_admin_password = execution_result.get("kc_admin_password") or _random_password()
     keycloak_home = (parameters.get("desired_outcome") or parameters).get("keycloak_home", "/opt/keycloak")
 
     logger.info(f"Keycloak rollback: restoring from {backup_path} on {asset_id} (docker={in_docker})")
@@ -209,7 +219,7 @@ docker load -i /opt/nexplane-keycloak-{source_version}-built.tar 2>/dev/null || 
 docker run -d --name keycloak \\
   -p 8080:8080 \\
   -e KEYCLOAK_ADMIN=admin \\
-  -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \\
+  -e KEYCLOAK_ADMIN_PASSWORD={kc_admin_password} \\
   -e KC_DB=dev-file \\
   -e KC_HTTP_ENABLED=true \\
   -e KC_HOSTNAME_STRICT=false \\
@@ -218,7 +228,7 @@ docker run -d --name keycloak \\
 docker run -d --name keycloak \\
   -p 8080:8080 \\
   -e KEYCLOAK_ADMIN=admin \\
-  -e KEYCLOAK_ADMIN_PASSWORD=SmokeAdmin1234! \\
+  -e KEYCLOAK_ADMIN_PASSWORD={kc_admin_password} \\
   -e KC_HTTP_ENABLED=true \\
   -e KC_HOSTNAME_STRICT=false \\
   quay.io/keycloak/keycloak:{source_version} \\
