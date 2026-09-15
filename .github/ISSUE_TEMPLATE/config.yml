@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & discussions
+    url: https://github.com/youbetyourballs/nexplane/discussions
+    about: Ask questions and discuss Nexplane here
+  - name: Security vulnerabilities
+    url: https://github.com/youbetyourballs/nexplane/security/advisories/new
+    about: Report security vulnerabilities privately
+  - name: Email
+    url: mailto:hello@nexplane.ai
+    about: General inquiries

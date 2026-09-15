@@ -138,7 +138,7 @@ docker compose up -d
 
 > ⚠️ The default Docker Compose config binds to localhost only. Never expose Nexplane to the public internet — use Tailscale or a site-to-site VPN for remote access.
 
-Default credentials (demo only): `admin@acme.example` / `admin123`
+Default credentials (demo only): `admin@nexplane.local` / `changeme`
 
 ---
 
@@ -146,9 +146,9 @@ Default credentials (demo only): `admin@acme.example` / `admin123`
 
 Nexplane publishes a public AMI to AWS us-east-1 with each release. Launch it directly from the EC2 console — no install script needed.
 
-**Latest AMI:** see [releases.nexplane.ai](https://releases.nexplane.ai) for the current AMI ID and region availability.
+**Latest AMI (v1.2.20):** `ami-041b6384d4cf78d7e` (us-east-1)
 
-[Launch in EC2 console](https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#LaunchInstanceWizard:)
+[Launch in EC2 console](https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#LaunchInstanceWizard:ami=ami-041b6384d4cf78d7e)
 
 ### Default credentials
 
