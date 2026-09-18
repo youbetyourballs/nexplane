@@ -4,6 +4,8 @@
 
 Eliminate uncertainty before every infrastructure change.
 
+![Nexplane Operations Dashboard](docs/nexplane-dashboard.png)
+
 ---
 
 ## The four questions Nexplane answers
