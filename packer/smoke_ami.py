@@ -27,9 +27,9 @@ EXPECTED_CONTAINERS = ("db", "backend", "webserver")
 # Each tuple: (email, password, expected_role)
 SEEDED_ACCOUNTS = [
     ("admin@nexplane.local",   "changeme",    "admin"),
-    ("operator@acme.example",  "operator123", "security_operator"),
-    ("approver@acme.example",  "approver123", "approver"),
-    ("auditor@acme.example",   "auditor123",  "auditor"),
+    ("operator@nexplane.local", "operator123", "security_operator"),
+    ("approver@nexplane.local", "approver123", "approver"),
+    ("auditor@nexplane.local",  "auditor123",  "auditor"),
 ]
 
 # All known frontend routes that must return 200 with text/html content type
