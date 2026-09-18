@@ -91,11 +91,11 @@ async def seed():
                  email=os.environ.get("ADMIN_EMAIL", "admin@nexplane.local"),
                  name="Alex Admin", role=UserRole.admin,
                  hashed_password=hash_password(os.environ.get("ADMIN_PASSWORD", "changeme"))),
-            User(id=USER_IDS["operator"], organization_id=ORG_ID, email="operator@acme.example",
+            User(id=USER_IDS["operator"], organization_id=ORG_ID, email="operator@nexplane.local",
                  name="Sam Operator", role=UserRole.security_operator, hashed_password=hash_password("operator123")),
-            User(id=USER_IDS["approver"], organization_id=ORG_ID, email="approver@acme.example",
+            User(id=USER_IDS["approver"], organization_id=ORG_ID, email="approver@nexplane.local",
                  name="Pat Approver", role=UserRole.approver, hashed_password=hash_password("approver123")),
-            User(id=USER_IDS["auditor"], organization_id=ORG_ID, email="auditor@acme.example",
+            User(id=USER_IDS["auditor"], organization_id=ORG_ID, email="auditor@nexplane.local",
                  name="Dana Auditor", role=UserRole.auditor, hashed_password=hash_password("auditor123")),
         ]
         db.add_all(users)
@@ -344,10 +344,10 @@ async def seed():
         await db.commit()
         print("Seed data created successfully.")
         print("\nDemo credentials:")
-        print(f"  {os.environ.get('ADMIN_EMAIL', 'admin@acme.example')}     / {os.environ.get('ADMIN_PASSWORD', 'admin123')}")
-        print("  operator@acme.example  / operator123")
-        print("  approver@acme.example  / approver123")
-        print("  auditor@acme.example   / auditor123")
+        print(f"  {os.environ.get('ADMIN_EMAIL', 'admin@nexplane.local')}  / {os.environ.get('ADMIN_PASSWORD', 'changeme')}")
+        print("  operator@nexplane.local  / operator123")
+        print("  approver@nexplane.local  / approver123")
+        print("  auditor@nexplane.local   / auditor123")
 
 
 async def seed_expansion():
