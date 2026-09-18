@@ -148,9 +148,9 @@ Default credentials (demo only): `admin@nexplane.local` / `changeme`
 
 Nexplane publishes a public AMI to AWS us-east-1 with each release. Launch it directly from the EC2 console — no install script needed.
 
-**Latest AMI (v1.2.20):** `ami-041b6384d4cf78d7e` (us-east-1)
+**Latest AMI (v1.2.22):** `ami-0c5042af135dcdf80` (us-east-1)
 
-[Launch in EC2 console](https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#LaunchInstanceWizard:ami=ami-041b6384d4cf78d7e)
+[Launch in EC2 console](https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#LaunchInstanceWizard:ami=ami-0c5042af135dcdf80)
 
 ### Default credentials
 
